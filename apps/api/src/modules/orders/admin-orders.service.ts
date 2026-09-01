@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Between, DataSource, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
@@ -11,6 +11,7 @@ import {
   OrderAssistantAssignedManuallyEvent,
 } from '../../common/events/order-assistant-assigned-manually.event';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
+import { resolveEffectiveMemberType } from './crew-member-type';
 import { CrewMemberType } from './dto/admin-crew-member.dto';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -18,17 +19,37 @@ import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-ev
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
-import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import {
+  TechnicianCapacityTier,
+  classifyTechnicianCapacity,
+  technicianCityCoverageCondition,
+  technicianServiceQualificationCondition,
+} from '../technicians/technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
+import { toOrderResponseDto } from './dto/order-response.dto';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
-import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { canTransition } from './order-state-machine';
+import {
+  REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+  REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+  loadRevisitPinState,
+} from './revisit-pin';
+import type { RevisitReleaseReason } from './entities/order.entity';
+import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../../common/events/order-rematch-requested.event';
+import { WalletsService } from '../payments/wallets.service';
+import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
+import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -71,6 +92,22 @@ export function formatEligibleTechniciansForAdmin(result: {
   };
 }
 
+/**
+ * ADR-0057 — نتيجة تعيين طاقم إداري بقت discriminated union بدل `Order` مباشرة: القدرة
+ * الاستيعابية MEANINGFUL/HEAVY بقت بتتحول لفرصة تحتاج قبول الشخص نفسه بدل إضافة فورية.
+ */
+export type CrewAssignOutcome =
+  | { status: 'assigned'; order: Order }
+  | { status: 'offer_sent'; opportunityId: string; capacityTier: TechnicianCapacityTier };
+
+/** شكل رد API لـ`CrewAssignOutcome` — `order` جزء فقط لو `status='assigned'` (نفس نمط toOrderResponseDto). */
+export function toCrewAssignResponseDto(outcome: CrewAssignOutcome) {
+  if (outcome.status === 'assigned') {
+    return { status: 'assigned' as const, order: toOrderResponseDto(outcome.order) };
+  }
+  return { status: 'offer_sent' as const, opportunity_id: outcome.opportunityId, capacity_tier: outcome.capacityTier };
+}
+
 /** ملخّص طاقم طلب واحد لصفحة القايمة (docs/08 §63.ب5). */
 export interface OrderCrewSummary {
   leaderTechnicianId: string | null;
@@ -99,6 +136,10 @@ export class AdminOrdersService {
     private readonly pricingEngineService: PricingEngineService,
     private readonly promoCodesService: PromoCodesService,
     private readonly settingsService: SettingsService,
+    private readonly walletsService: WalletsService,
+    private readonly workOpportunities: TechnicianWorkOpportunitiesService,
+    @Optional() private readonly earningsPolicyService?: EarningsPolicyService,
+    @Optional() private readonly orderFinancials: OrderFinancialFinalizationService = new OrderFinancialFinalizationService(),
   ) {}
 
   async list(
@@ -108,6 +149,7 @@ export class AdminOrdersService {
     const perPage = query.per_page ?? 20;
     const where: FindOptionsWhere<Order> = {};
     if (query.order_status) where.orderStatus = query.order_status;
+    if (query.order_type) where.orderType = query.order_type;
     // فلتر التكرار — IsNull/Not(IsNull) على recurring_template_id (العمود دايمًا زوجي مع
     // recurring_occurrence_at عبر CHECK constraint chk_orders_recurring_identity_pair).
     if (query.recurring === 'true') where.recurringTemplateId = Not(IsNull());
@@ -261,13 +303,36 @@ export class AdminOrdersService {
       participant_role: string;
       technician_level: string;
       share_weight: string;
+      calculation_method: 'weighted_pool' | 'assistant_level_wage' | 'earnings_policy_v2' | 'manual_override';
+      assistant_base_wage_cents: number | null;
+      assistant_level_multiplier: string | null;
+      assistant_target_cents: number | null;
       pool_cents: number;
       share_cents: number;
+      settlement_policy_version: 1 | 2;
+      calculation_algorithm_version: string | null;
+      technician_kind_snapshot: 'technician' | 'assistant' | null;
+      earning_role: 'technician' | 'assistant' | null;
+      level_weight_bps_snapshot: number | null;
+      assistant_ratio_bps_snapshot: number | null;
+      service_skill_snapshot: string | null;
+      service_skill_factor_bps_snapshot: number | null;
+      individual_adjustment_bps_snapshot: number | null;
+      order_adjustment_bps_snapshot: number | null;
+      effective_weight_units: string | null;
+      is_preview: boolean;
     }[]
   > {
-    return this.teamMembers.manager.query(
+    const settled = await this.teamMembers.manager.query(
       `SELECT oes.technician_id, u.full_name, oes.participant_role, oes.technician_level,
-              oes.share_weight, oes.pool_cents, oes.share_cents
+              oes.share_weight, oes.pool_cents, oes.share_cents, oes.calculation_method,
+              oes.assistant_base_wage_cents, oes.assistant_level_multiplier, oes.assistant_target_cents,
+              oes.settlement_policy_version, oes.calculation_algorithm_version,
+              oes.technician_kind_snapshot, oes.earning_role,
+              oes.level_weight_bps_snapshot, oes.assistant_ratio_bps_snapshot,
+              oes.service_skill_snapshot, oes.service_skill_factor_bps_snapshot,
+              oes.individual_adjustment_bps_snapshot, oes.order_adjustment_bps_snapshot,
+              oes.effective_weight_units, false AS is_preview
          FROM order_earning_shares oes
          JOIN technician_profiles tp ON tp.id = oes.technician_id
          JOIN users u ON u.id = tp.user_id
@@ -275,6 +340,46 @@ export class AdminOrdersService {
         ORDER BY oes.share_cents DESC`,
       [orderId],
     );
+    if (settled.length > 0) return settled;
+
+    const order = await this.findOrThrow(orderId);
+    if (order.settlementPolicyVersion !== 2 || !order.technicianId) return [];
+    if (!this.earningsPolicyService) throw new Error('EarningsPolicyService is required for a V2 admin preview');
+
+    const calculation = await this.earningsPolicyService.calculateOrder(order.id, order.totalAmountCents);
+    const ids = calculation.participantShares.map((share) => share.technicianId);
+    const names: Array<{ technician_id: string; full_name: string }> = await this.dataSource.query(
+      `SELECT tp.id AS technician_id, u.full_name
+         FROM technician_profiles tp JOIN users u ON u.id = tp.user_id
+        WHERE tp.id = ANY($1::uuid[])`,
+      [ids],
+    );
+    const namesById = new Map(names.map((row) => [row.technician_id, row.full_name]));
+    return calculation.participantShares.map((share) => ({
+      technician_id: share.technicianId,
+      full_name: namesById.get(share.technicianId) ?? share.technicianId,
+      participant_role: share.isLeader ? 'leader' : share.earningRole === 'assistant' ? 'assistant' : 'team_member',
+      technician_level: share.technicianLevel,
+      share_weight: (share.levelWeightBps / 10_000).toFixed(2),
+      calculation_method: 'earnings_policy_v2' as const,
+      assistant_base_wage_cents: null,
+      assistant_level_multiplier: null,
+      assistant_target_cents: null,
+      pool_cents: calculation.workerPoolCents,
+      share_cents: share.shareCents,
+      settlement_policy_version: 2 as const,
+      calculation_algorithm_version: calculation.calculationAlgorithmVersion,
+      technician_kind_snapshot: share.technicianKindSnapshot,
+      earning_role: share.earningRole,
+      level_weight_bps_snapshot: share.levelWeightBps,
+      assistant_ratio_bps_snapshot: share.assistantRatioBps,
+      service_skill_snapshot: share.serviceSkill,
+      service_skill_factor_bps_snapshot: share.serviceSkillFactorBps,
+      individual_adjustment_bps_snapshot: share.individualAdjustmentBps ?? 0,
+      order_adjustment_bps_snapshot: share.orderAdjustmentBps ?? 0,
+      effective_weight_units: share.effectiveWeightUnits,
+      is_preview: true,
+    }));
   }
 
   private async findOrThrow(orderId: string): Promise<Order> {
@@ -515,7 +620,225 @@ export class AdminOrdersService {
       order.bookingMode === BookingMode.TEAM,
       false,
     );
-    return formatEligibleTechniciansForAdmin(result);
+    const formatted = formatEligibleTechniciansForAdmin(result);
+    return { ...formatted, items: await this.attachAdminRoleMetadata(formatted.items) };
+  }
+
+  /**
+   * بيلحق `technicianKind`/`currentLevel` بصفوف قايمة إدارية (docs/08 §107 — رمز الدور جنب
+   * الاسم: FN فني / HF مساعد).
+   *
+   * استعلام إضافي صغير عمدًا بدل إضافة العمود لـ`TechnicianBookingListItem` نفسه: النوع ده
+   * بيتقدّم كمان لتطبيق العميل (`listForServiceBooking` هو نفس مصدر شاشة اختيار الفني)، وإضافة
+   * الدور هناك كانت هتسرّب تصنيف داخلي للعميل — والمالك طلب صراحة إن الرمز ده «مايبانش لحد غير
+   * للأدمن». المسار ده إداري بحت، فالإثراء بيحصل هنا بس.
+   */
+  private async attachAdminRoleMetadata<T extends { technicianId: string }>(
+    items: T[],
+  ): Promise<(T & { technicianKind: 'technician' | 'assistant'; currentLevel: string | null })[]> {
+    if (items.length === 0) return [];
+    const rows = await this.dataSource.query<
+      { id: string; technician_kind: 'technician' | 'assistant'; current_level: string }[]
+    >(`SELECT id, technician_kind, current_level FROM technician_profiles WHERE id = ANY($1::uuid[])`, [
+      items.map((item) => item.technicianId),
+    ]);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return items.map((item) => ({
+      ...item,
+      // الافتراضي 'technician' لو الصف اختفى بين الاستعلامين — الرمز عرض بس، ما ينفعش يكسّر القايمة.
+      technicianKind: byId.get(item.technicianId)?.technician_kind ?? 'technician',
+      currentLevel: byId.get(item.technicianId)?.current_level ?? null,
+    }));
+  }
+
+  /**
+   * مرشّحو **مفتّش المطابقة** (docs/08 §107) — مصدر منفصل تمامًا عن قايمة التعيين الإجباري فوق.
+   *
+   * بلاغ المالك كان «المساعدين مش ظاهرين في خانة ليه/ليه لأ». التشخيص الحي أثبت إن السبب مش
+   * فلترة دور (مفيش أي شرط `technician_kind` في شجرة الأهلية أصلاً) لكنه عيب تصميمي أعمق:
+   * الخانة دي كانت بتتغذّى من `listEligibleTechniciansForReassign()` اللي بيرجّع **المؤهّلين
+   * فقط** — يعني سؤال «ليه ده مش مختار؟» مستحيل تسأله، لأن أي حد إجابته «لأ» بيتشال من نفس
+   * القايمة اللي المفروض تختاره منها. (اللي كان بيخفي مساعدي المالك تحديدًا هو شرط
+   * `eligible_for_team_booking` على طلبات الاعتماد — نفس الشرط بيخفي الفني الجديد بالظبط.)
+   *
+   * فالقايمة دي عمدًا **بلا أي بوابة أهلية**: كل معتمد في **مدينة** نطاق الطلب (نفس حد المدينة
+   * بتاع ADR-0056، عشان القايمة تفضل معقولة الحجم بدل كل فني في البلد)، فني كان أو مساعد،
+   * ومعاه `is_eligible_now` عشان الواجهة تفرّق بصريًا. التفسير نفسه
+   * (`explainTechnicianForOrder`) شغال أصلاً لأي صف في `technician_profiles` بغض النظر عن الدور
+   * أو الأهلية — هو اللي بيرجّع الـchecks اللي بتقول «ليه لأ» بالنص.
+   */
+  async listExplainCandidates(orderId: string) {
+    const order = await this.findOrThrow(orderId);
+    if (!order.serviceZoneId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الطلب ده مالوش نطاق خدمة محدد — مفيش مطابقة ممكنة عليه أصلاً',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // المؤهّلون فعلاً دلوقتي — نفس مصدر التعيين الإجباري بالحرف، عشان العلامة اللي الواجهة
+    // بتعرضها تبقى متطابقة مع اللي الأدمن هيلاقيه في dropdown التعيين، مش تقدير موازي.
+    const eligible = await this.listEligibleTechniciansForReassign(orderId);
+    const eligibleIds = new Set(eligible.items.map((item) => item.technicianId));
+
+    const rows = await this.dataSource.query<
+      {
+        technician_id: string;
+        full_name: string;
+        technician_kind: 'technician' | 'assistant';
+        current_level: string;
+        has_location: boolean;
+      }[]
+    >(
+      `SELECT tp.id AS technician_id, u.full_name, tp.technician_kind, tp.current_level,
+              (tp.current_location IS NOT NULL) AS has_location
+       FROM technician_profiles tp
+       JOIN users u ON u.id = tp.user_id
+       WHERE tp.deleted_at IS NULL
+         AND tp.verification_status = 'approved'
+         AND ${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$1',
+         })}
+       ORDER BY tp.technician_kind ASC, u.full_name ASC
+       LIMIT 300`,
+      [order.serviceZoneId],
+    );
+
+    return {
+      items: rows.map((row) => ({
+        technicianId: row.technician_id,
+        fullName: row.full_name,
+        technicianKind: row.technician_kind,
+        currentLevel: row.current_level,
+        hasLocation: row.has_location,
+        isEligibleNow: eligibleIds.has(row.technician_id),
+      })),
+    };
+  }
+
+  /**
+   * ADR-0051 (docs/08 §96) — تحرير إعادة زيارة مثبّتة للتوزيع العام + الخصم على الفني الأصلي.
+   *
+   * **الحارس الحاسم (نص المالك بالحرف): «لازم يكون الفني الطلب مش عنده… طالما الطلب عنده موجود،
+   * خلاص مش هناخد أي action»** — الشرط ده مشتقّ من مصادر الحقيقة الفعلية (`order_assignments`
+   * المرفوضة، `technician_order_cancellations`، أو عدّت مهلة الرد)، مش من عمود حالة يدوي ممكن
+   * يتلغبط. لو الفني لسه شايل الطلب فعلاً، الطلب بيترفض بوضوح ومفيش أي خصم.
+   *
+   * **الخصم = نصيبه الفعلي من الطلب الأصلي**، مقروء من `order_earning_shares` (نفس مصدر الحقيقة
+   * بتاع كشف المستحقات والمحفظة) — مش إجمالي الطلب (ده عقوبة مخترعة، الفني ما خدش الإجمالي أصلاً)
+   * ومش مبلغ يدوي من الأدمن. الشركة بتتحمّل تكلفة إعادة الزيارة الجديدة، والفني بيرجّع اللي خده.
+   *
+   * `revisit_released_at` هو الحارس ضد التكرار: التحرير (والخصم معاه) مستحيل يحصل مرتين.
+   */
+  async releaseRevisit(
+    adminUserId: string,
+    orderId: string,
+    meta?: AuditActorMeta,
+  ): Promise<{ order: Order; reason: RevisitReleaseReason; chargebackCents: number }> {
+    const windowHours = await this.settingsService.getNumber(
+      REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+      REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+    );
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.ORDR_001, 'الطلب مش موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.revisitPinnedTechnicianId === null) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش إعادة زيارة مثبّتة على فني', HttpStatus.CONFLICT);
+      }
+      if (order.revisitReleasedAt !== null) {
+        throw new ApiException(ErrorCode.VAL_001, 'إعادة الزيارة دي اتحررت قبل كده', HttpStatus.CONFLICT);
+      }
+
+      const pinState = await loadRevisitPinState(manager, order, windowHours);
+      if (!pinState.exhausted) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الفني الأصلي لسه الطلب عنده — مينفعش تحرير ولا خصم قبل ما يرفض/يلغي أو تعدي مهلة الرد',
+          HttpStatus.CONFLICT,
+        );
+      }
+      const reason: RevisitReleaseReason = pinState.reason === 'refused' ? 'refused' : 'no_response';
+      const technicianId = pinState.technicianId!;
+
+      // نصيبه الفعلي من الطلب الأصلي — order_earning_shares أولاً (الطلبات الطاقمية والفردية
+      // الحديثة)، وbackfill لـtechnician_earning_cents للطلبات القديمة اللي اتقفلت قبل نظام الحصص.
+      const [share] = await manager.query<Array<{ chargeback_cents: string | null }>>(
+        `SELECT COALESCE(
+                  (SELECT oes.share_cents FROM order_earning_shares oes
+                    WHERE oes.order_id = parent.id AND oes.technician_id = $2 AND oes.deleted_at IS NULL),
+                  parent.technician_earning_cents,
+                  0
+                ) AS chargeback_cents
+           FROM orders parent WHERE parent.id = $1`,
+        [order.parentOrderId, technicianId],
+      );
+      const chargebackCents = Math.max(0, Number(share?.chargeback_cents ?? 0));
+
+      const now = new Date();
+      order.revisitReleasedAt = now;
+      order.revisitReleaseReason = reason;
+      // التفضيل الناعم بيتشال كمان — لولا كده، أول جولة بعد التحرير كانت هتحاول نفس الفني تاني.
+      order.requestedTechnicianId = null;
+      await manager.save(order);
+
+      if (chargebackCents > 0) {
+        const technician = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+        const technicianWallet = await this.walletsService.getOrCreateWallet(
+          technician.userId,
+          WalletOwnerType.TECHNICIAN,
+          manager,
+        );
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: technicianWallet.id,
+            toWalletId: platformWallet.id,
+            amountCents: chargebackCents,
+            transactionType: WalletTxType.PENALTY,
+            // المرجع هو **الطلب الأصلي** مش إعادة الزيارة — الفلوس اللي بترجع هي فلوس الشغلانة
+            // الأصلية، فالقيد لازم يبان في كشف الطلب ده هو.
+            referenceType: 'order',
+            referenceId: order.parentOrderId ?? order.id,
+            descriptionAr: `استرداد أرباح طلب ${order.orderNumber} — إعادة زيارة تحت الضمان اتحرّرت لفني تاني`,
+            performedByUserId: adminUserId,
+            // خصم بيعمله النظام على أرباح اتصرفت خلاص — الرصيد ممكن يبقى سالب (دَين على الفني)،
+            // زي عمولة الكاش بالظبط. TechnicianDebtService بيتابع الدَين ده من نفس الدفتر.
+            allowNegativeBalance: true,
+          },
+          manager,
+        );
+      }
+
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.revisit_released',
+          entityType: 'order',
+          entityId: order.id,
+          oldValues: { revisit_pinned_technician_id: technicianId, revisit_released_at: null },
+          newValues: { revisit_released_at: now.toISOString(), revisit_release_reason: reason, chargeback_cents: chargebackCents },
+          meta,
+        },
+        manager,
+      );
+
+      return { order, reason, chargebackCents };
+    });
+
+    // التوزيع العادي بيبتدي بعد ما الـtransaction تثبت — الطلب بقى بلا تثبيت فبيمشي في المسار
+    // العادي بالظبط (نفس فلوس الطلب الأصلي، الشركة متحمّلة التكلفة).
+    this.events.emit(ORDER_REMATCH_REQUESTED_EVENT, new OrderRematchRequestedEvent(result.order.id));
+    return result;
   }
 
   async reassign(
@@ -663,9 +986,11 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
       }
 
-      const previousTotal = order.totalAmountCents;
-      order.totalAmountCents = newTotalAmountCents;
-      await manager.save(order);
+      const financialChange = await this.orderFinancials.replaceUncommittedPrice(
+        manager,
+        order,
+        newTotalAmountCents,
+      );
       await this.auditLog.record(
         {
           actorUserId: adminUserId,
@@ -673,8 +998,15 @@ export class AdminOrdersService {
           action: 'order.price_adjusted_by_admin',
           entityType: 'order',
           entityId: order.id,
-          oldValues: { total_amount_cents: previousTotal },
-          newValues: { total_amount_cents: newTotalAmountCents, reason },
+          oldValues: {
+            total_amount_cents: financialChange.previousTotalCents,
+            commissionable_base_cents: financialChange.previousCommissionableBaseCents,
+          },
+          newValues: {
+            total_amount_cents: financialChange.newTotalCents,
+            commissionable_base_cents: financialChange.newCommissionableBaseCents,
+            reason,
+          },
           meta,
         },
         manager,
@@ -686,13 +1018,102 @@ export class AdminOrdersService {
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008، يمتد ADR-0007 §7 اللي أجّل
   // الحل ده صراحة). فعل نادر تشغيلي — بلا قفل pessimistic_write زي AssistantMatchingService.accept()
   // (راجع تبرير ADR-0008 §2: سباق بين أدمنين اتنين نادر ومقبول، مش مسار مالي حرج).
+  /**
+   * ADR-0057 — كانت القايمة دي بلا أي فحص سكدول/قدرة استيعابية خالص، حتى لفني حاظر اليوم ده
+   * بنفسه (BLOCKED). دلوقتي بترجّع `capacity_tier` لكل مرشّح وتستبعد BLOCKED وأي حد عنده تعارض
+   * زمني فعلي — نفس منطق `OrderTeamService.listRecruitCandidates()` بالحرف.
+   */
+  async listEligibleAssistants(orderId: string): Promise<
+    Array<{
+      technician_id: string;
+      full_name: string;
+      technician_code: string;
+      current_level: string;
+      distance_km: string | null;
+      capacity_tier: TechnicianCapacityTier;
+    }>
+  > {
+    const order = await this.findOrThrow(orderId);
+    if (!order.serviceZoneId) return [];
+    const rows = await this.dataSource.query<
+      { technician_id: string; full_name: string; technician_code: string; current_level: string; distance_km: string | null }[]
+    >(
+      `SELECT tp.id AS technician_id, u.full_name, tp.technician_code,
+              tp.current_level, ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
+       FROM technician_profiles tp
+       JOIN users u ON u.id = tp.user_id
+       JOIN services svc ON svc.id = $2
+       JOIN addresses a ON a.id = $4
+       LEFT JOIN technician_services ts
+         ON ts.technician_id = tp.id AND ts.service_id = svc.id
+        AND ts.is_active = true AND ts.verification_status = 'approved'
+       WHERE tp.technician_kind = 'assistant'
+         AND tp.verification_status = 'approved'
+         AND tp.deleted_at IS NULL
+         AND tp.current_location IS NOT NULL
+         AND tp.id <> COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+         AND ${technicianServiceQualificationCondition({
+           technicianIdExpr: 'tp.id',
+           serviceIdExpr: 'svc.id',
+           categoryIdExpr: 'svc.category_id',
+           directServiceAlias: 'ts',
+         })}
+         AND ${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$1',
+         })}
+         AND NOT EXISTS (
+           SELECT 1 FROM order_team_members otm
+           WHERE otm.order_id = $5 AND otm.technician_id = tp.id
+         )
+       ORDER BY distance_km ASC NULLS LAST,
+                CASE tp.current_level
+                  WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
+                  WHEN 'verified' THEN 1 ELSE 0
+                END DESC,
+                tp.average_rating DESC`,
+      [order.serviceZoneId, order.serviceId, order.technicianId, order.addressId, order.id],
+    );
+
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const serviceDurationMinutes = service?.estimated_duration_minutes ?? 60;
+    const withCapacity = await Promise.all(
+      rows.map(async (row) => {
+        const scheduleAvailable = await this.assignmentGuard.isScheduleAvailable(this.dataSource.manager, row.technician_id, order);
+        if (!scheduleAvailable) return null;
+        const capacity_tier = await classifyTechnicianCapacity(this.dataSource, {
+          technicianId: row.technician_id,
+          scheduledAt: order.scheduledAt,
+          excludeOrderId: order.id,
+          serviceDurationMinutes,
+          fullDayThresholdMinutes: fullDayJobMinutes,
+        });
+        return { ...row, capacity_tier };
+      }),
+    );
+    return withCapacity.filter(
+      (row): row is (typeof rows)[number] & { capacity_tier: TechnicianCapacityTier } => row !== null && row.capacity_tier !== 'BLOCKED',
+    );
+  }
+
   async assignAssistant(
     adminUserId: string,
     orderId: string,
     technicianProfileId: string,
     meta?: AuditActorMeta,
-  ): Promise<Order> {
+  ): Promise<CrewAssignOutcome> {
     const order = await this.findOrThrow(orderId);
+    if (order.orderType === OrderType.REVISIT) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+        HttpStatus.CONFLICT,
+      );
+    }
     if (!order.requiredAssistants || order.requiredAssistants <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
     }
@@ -709,6 +1130,36 @@ export class AdminOrdersService {
     if (order.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
     }
+    const [scope] = await this.dataSource.query<{
+      correct_kind: boolean;
+      approved_specialty: boolean;
+      same_city: boolean;
+    }[]>(
+      `SELECT
+         (tp.technician_kind = 'assistant') AS correct_kind,
+         (${technicianServiceQualificationCondition({
+           technicianIdExpr: 'tp.id',
+           serviceIdExpr: 'svc.id',
+           categoryIdExpr: 'svc.category_id',
+         })}) AS approved_specialty,
+         (${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$3',
+         })}) AS same_city
+       FROM technician_profiles tp
+       JOIN services svc ON svc.id = $2
+       WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
+      [technician.id, order.serviceId, order.serviceZoneId],
+    );
+    if (!scope?.correct_kind) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش مسجل حاليًا كمساعد', HttpStatus.CONFLICT);
+    }
+    if (!scope.approved_specialty) {
+      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
+    }
+    if (!scope.same_city) {
+      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
+    }
     const alreadyAssistant = await this.teamMembers.findOne({
       where: { orderId, technicianId: technician.id, memberType: ASSISTANT_MEMBER_TYPE },
     });
@@ -716,9 +1167,12 @@ export class AdminOrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده معيّن كمساعد على الطلب ده بالفعل', HttpStatus.CONFLICT);
     }
 
-    // docs/08 §35، ADR-0021 §5 — نفس فحص BLOCKED الحقيقي المستخدم في validateCrewCandidateOrThrow
-    // (قاعدة صلبة غير قابلة للتجاوز حتى إداريًا)، مسجّل هنا مباشرة (مش عبر الدالة المشتركة) لأن
-    // فحوصات assignAssistant الأخرى (عدد الأماكن، شغل "مساعد" تحديدًا) مختلفة عن addCrewMember.
+    // ADR-0057 — كان هنا فحص BLOCKED بس، بحجة إن "التعيين الإداري قرار واعٍ". المالك صحّح ده
+    // صراحة: نفس قاعدة `recruitMember()` بالحرف لازم تتطبق هنا — تعارض زمني صريح = رفض قاطع،
+    // MEANINGFUL/HEAVY = فرصة تحتاج قبول الشخص نفسه (مش تحميل صامت حتى لو الفاعل أدمن)، BLOCKED
+    // = رفض تمامًا. صفر استثناء لكون الفاعل أدمن.
+    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
+
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
@@ -733,6 +1187,10 @@ export class AdminOrdersService {
     });
     if (capacityTier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
+    }
+
+    if (capacityTier !== 'LIGHT') {
+      return this.offerCrewOpportunityInsteadOfSilentLoad(orderId, order, technician.id, capacityTier, 'assistant');
     }
 
     await this.teamMembers.save(
@@ -764,7 +1222,30 @@ export class AdminOrdersService {
       meta,
     });
 
-    return order;
+    return { status: 'assigned', order };
+  }
+
+  /**
+   * ADR-0057 — نقطة مشتركة لتحويل تعيين إداري لفرصة تحتاج قبول، بدل تحميل صامت، لما القدرة
+   * الاستيعابية MEANINGFUL/HEAVY. نفس آلية `OrderTeamService.recruitMember()` بالحرف
+   * (`technician_work_opportunities`, context=`crew_recruit`) — نقطة قبول واحدة
+   * (`acceptCrewOpportunity`) بغض النظر مين عرض الفرصة، قائد أو أدمن.
+   */
+  private async offerCrewOpportunityInsteadOfSilentLoad(
+    orderId: string,
+    order: Order,
+    technicianId: string,
+    tier: TechnicianCapacityTier,
+    role: 'technician' | 'assistant',
+  ): Promise<CrewAssignOutcome> {
+    const opportunity = await this.workOpportunities.offerIfNotExists(this.dataSource.manager, orderId, technicianId, tier, 'crew_recruit', role);
+    if (opportunity.created) {
+      this.events.emit(
+        WORK_OPPORTUNITY_OFFERED_EVENT,
+        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier, order.scheduledAt),
+      );
+    }
+    return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
   }
 
   // ── إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) ────────────────────────
@@ -774,11 +1255,9 @@ export class AdminOrdersService {
   // زي orders.assign_assistant، مش قرار super_admin بس.
 
   /**
-   * docs/08 §35، ADR-0021 §5 — بَقّة حقيقية اتصلحت: كانت بتفحص اعتماد/عضوية بس، صفر وعي بـ
-   * classifyTechnicianCapacity() (نفس الفحص اللي §35.1 صلّحه لمسار القائد الذاتي). BLOCKED
-   * (حظر يوم صريح من الفني نفسه) قاعدة حقيقية غير قابلة للتجاوز حتى من الأدمن ("hard business
-   * restriction" — طلب المالك صراحة). MEANINGFUL/HEAVY مش استبعاد — الأدمن بيقرر بوعي كامل،
-   * بس التصنيف بيتسجّل في الـaudit (شفافية، مش تحميل صامت).
+   * ADR-0057 — كانت BLOCKED بس المرفوضة، وMEANINGFUL/HEAVY بتعدّي بحجة "الأدمن بيقرر بوعي".
+   * المالك صحّح الاستثناء ده صراحة: نفس قاعدة `recruitMember()` بالحرف، صفر فرق لكون الفاعل
+   * أدمن. `assertScheduleAvailable` هنا حارس صارم زيه بالظبط في المسار الذاتي.
    */
   private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<TechnicianCapacityTier> {
     if (order.bookingMode !== BookingMode.TEAM) {
@@ -795,6 +1274,8 @@ export class AdminOrdersService {
     if (alreadyMember) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
+
+    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
 
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
@@ -827,13 +1308,36 @@ export class AdminOrdersService {
     roleLabel: string,
     memberType: CrewMemberType = 'team_member',
     meta?: AuditActorMeta,
-  ): Promise<Order> {
+  ): Promise<CrewAssignOutcome> {
     const order = await this.findOrThrow(orderId);
     const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
+    // ADR-0050 — حتى الأدمن ما يقدرش يضيف مساعد بنصيب عضو فريق كامل: الدور صفة على الشخص،
+    // والنسبة بتتبعه. لو الأدمن عايز يديه نصيب كامل، الطريق الصح إنه يرقّيه لفني في بروفايله.
+    const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+    const effectiveMemberType = resolveEffectiveMemberType(memberType, candidateProfile.technicianKind);
+    if (order.orderType === OrderType.REVISIT && effectiveMemberType === ASSISTANT_MEMBER_TYPE) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+        HttpStatus.CONFLICT,
+      );
+    }
 
     const existingCount = await this.teamMembers.count({ where: { orderId } });
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
       throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
+    }
+
+    // ADR-0057 — زي assignAssistant بالحرف: LIGHT بس هو اللي بيتضاف فورًا، MEANINGFUL/HEAVY
+    // بتتحول لفرصة تحتاج قبول الشخص نفسه.
+    if (capacityTier !== 'LIGHT') {
+      return this.offerCrewOpportunityInsteadOfSilentLoad(
+        orderId,
+        order,
+        technicianId,
+        capacityTier,
+        effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician',
+      );
     }
 
     // Script 4 Part Q — سباق حقيقي ممكن: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي
@@ -842,7 +1346,14 @@ export class AdminOrdersService {
     // هنا بس بنحوّل خطأ الداتابيز الخام لنفس رسالة 409 الواضحة اللي الفحص العادي بيرجّعها.
     try {
       await this.teamMembers.save(
-        this.teamMembers.create({ orderId, technicianId, roleLabel, memberType, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+        this.teamMembers.create({
+          orderId,
+          technicianId,
+          roleLabel,
+          memberType: effectiveMemberType,
+          addedByTechnicianId: null,
+          addedByAdminUserId: adminUserId,
+        }),
       );
     } catch (err) {
       if (this.isUniqueViolation(err)) {
@@ -861,7 +1372,7 @@ export class AdminOrdersService {
       newValues: { technician_id: technicianId, role_label: roleLabel, member_type: memberType, capacity_tier: capacityTier },
       meta,
     });
-    return order;
+    return { status: 'assigned', order };
   }
 
   /** إزالة عضو طاقم — سبب إلزامي (Script 4 §38-41: "require appropriate state, reason, authorization"). */

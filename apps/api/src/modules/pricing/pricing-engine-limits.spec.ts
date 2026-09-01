@@ -193,6 +193,22 @@ describe('Price Engine — حدود العمق/التعقيد والتحقق م�
     ).rejects.toThrow(/hours_missing.*مش من ضمن حقول الخدمة النشطة|مطلوب لحساب السعر|غير موجودة/);
   });
 
+  it('حقل رفع الصور لا يمكن استخدامه داخل الحسابات', async () => {
+    await q(
+      `INSERT INTO service_pricing_fields
+         (service_id, field_key, label_ar, field_type, is_required, min_files, max_files)
+       VALUES ($1, 'problem_photos', 'صور المشكلة', 'image_upload', true, 1, 5)`,
+      [ids.service],
+    );
+    await expect(
+      rulesService.upsert(ids.adminUser, ids.service, {
+        rule_type: PricingRuleType.FORMULA,
+        rule_key: 'final_price',
+        payload: { price_cents: { type: 'field_ref', field_key: 'problem_photos' } },
+      }),
+    ).rejects.toThrow(/حقل الصور.*لا يمكن استخدامه داخل الحسابات/);
+  });
+
   it('constant_ref لثابت مش ساري: يترفض — والثابت الموجود يمرّ', async () => {
     await seedField('hours');
     await expect(

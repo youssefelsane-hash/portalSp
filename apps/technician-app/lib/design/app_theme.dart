@@ -38,12 +38,18 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData light() {
-    final colorScheme = ColorScheme.fromSeed(seedColor: AppColors.primary, brightness: Brightness.light);
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
+      brightness: Brightness.light,
+    );
     return _base(colorScheme);
   }
 
   static ThemeData dark() {
-    final colorScheme = ColorScheme.fromSeed(seedColor: AppColors.primaryDark, brightness: Brightness.dark);
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.primaryDark,
+      brightness: Brightness.dark,
+    );
     return _base(colorScheme);
   }
 
@@ -51,16 +57,20 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: colorScheme.brightness == Brightness.light ? const Color(0xFFF7F8FA) : null,
+      scaffoldBackgroundColor: colorScheme.brightness == Brightness.light
+          ? const Color(0xFFF7F8FA)
+          : null,
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(18),
           side: BorderSide(color: colorScheme.outlineVariant),
         ),
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: colorScheme.brightness == Brightness.light ? Colors.white : null,
+        backgroundColor: colorScheme.brightness == Brightness.light
+            ? Colors.white
+            : null,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 1,
@@ -68,14 +78,36 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         filled: true,
-        fillColor: colorScheme.brightness == Brightness.light ? Colors.white : colorScheme.surfaceContainerHighest,
+        fillColor: colorScheme.brightness == Brightness.light
+            ? Colors.white
+            : colorScheme.surfaceContainerHighest,
+      ),
+      dividerTheme: DividerThemeData(
+        color: colorScheme.outlineVariant,
+        thickness: 1,
       ),
     );
   }
@@ -83,8 +115,14 @@ class AppTheme {
 
 /// ألوان دلالية جاهزة حسب الثيم الحالي (فاتح/غامق) — استخدمها بدل تكرار Color(0xFF...) في كل شاشة.
 extension SemanticColors on BuildContext {
-  Color get successColor => Theme.of(this).brightness == Brightness.light ? AppColors.success : AppColors.successDark;
-  Color get warningColor => Theme.of(this).brightness == Brightness.light ? AppColors.warning : AppColors.warningDark;
-  Color get infoColor => Theme.of(this).brightness == Brightness.light ? AppColors.info : AppColors.infoDark;
+  Color get successColor => Theme.of(this).brightness == Brightness.light
+      ? AppColors.success
+      : AppColors.successDark;
+  Color get warningColor => Theme.of(this).brightness == Brightness.light
+      ? AppColors.warning
+      : AppColors.warningDark;
+  Color get infoColor => Theme.of(this).brightness == Brightness.light
+      ? AppColors.info
+      : AppColors.infoDark;
   Color get dangerColor => Theme.of(this).colorScheme.error;
 }

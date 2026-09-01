@@ -46,7 +46,12 @@ class _KpiScreenState extends State<KpiScreen> {
   Future<void> _load() async {
     try {
       final summary = await _repository.fetchSummary();
-      if (mounted) setState(() => _summary = summary);
+      if (mounted) {
+        setState(() {
+          _summary = summary;
+          _error = null;
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
@@ -62,7 +67,9 @@ class _KpiScreenState extends State<KpiScreen> {
       child: Scaffold(
         appBar: AppBar(title: const Text('الأداء الشهري')),
         body: summary == null
-            ? (_error != null ? Center(child: Text(_error!)) : const Center(child: CircularProgressIndicator()))
+            ? (_error != null
+                  ? Center(child: Text(_error!))
+                  : const Center(child: CircularProgressIndicator()))
             : RefreshIndicator(
                 onRefresh: _load,
                 child: ListView(
@@ -74,21 +81,35 @@ class _KpiScreenState extends State<KpiScreen> {
                         child: EmptyState(
                           icon: Icons.insights_outlined,
                           title: 'لسه مفيش تقييم أداء شهري متاح',
-                          description: 'استنى نهاية الشهر',
+                          description:
+                              'هيظهر هنا بعد ما الإدارة تحسب وتراجع تقرير الشهر',
                         ),
                       )
                     else ...[
-                      _LatestCard(snapshot: summary.latest!, formatEgp: _formatEgp),
+                      _LatestCard(
+                        snapshot: summary.latest!,
+                        formatEgp: _formatEgp,
+                      ),
                       const SizedBox(height: 20),
-                      Text('سجل الشهور السابقة', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'سجل الشهور السابقة',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       for (final snapshot in summary.history.skip(1))
                         Card(
                           child: ListTile(
-                            title: Text('${_monthNamesAr[snapshot.periodMonth]} ${snapshot.periodYear}'),
-                            subtitle: Text(kpiStatusLabelsAr[snapshot.status] ?? snapshot.status),
+                            title: Text(
+                              '${_monthNamesAr[snapshot.periodMonth]} ${snapshot.periodYear}',
+                            ),
+                            subtitle: Text(
+                              kpiStatusLabelsAr[snapshot.status] ??
+                                  snapshot.status,
+                            ),
                             trailing: Text(
-                              snapshot.approvedBonusCents != null ? _formatEgp(snapshot.approvedBonusCents!) : '—',
+                              snapshot.approvedBonusCents != null
+                                  ? _formatEgp(snapshot.approvedBonusCents!)
+                                  : '—',
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
                           ),
@@ -127,7 +148,9 @@ class _LatestCard extends StatelessWidget {
                 children: [
                   Text(
                     snapshot.overallScore?.toStringAsFixed(0) ?? '—',
-                    style: Theme.of(context).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const Text('الدرجة الكلية من 100'),
                 ],
@@ -137,29 +160,49 @@ class _LatestCard extends StatelessWidget {
             if (!snapshot.isEligible && snapshot.ineligibilityReason != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(snapshot.ineligibilityReason!, style: const TextStyle(color: Colors.orange)),
+                child: Text(
+                  snapshot.ineligibilityReason!,
+                  style: const TextStyle(color: Colors.orange),
+                ),
               ),
+            // docs/08 §108-H — تسمية+قيمة بلا Expanded/Flexible كانت ممكن تفيض لو التسمية
+            // (مفتاح مش موجود في الخريطة، أو نص حالة أطول) طالت على شاشة ضيقة.
             for (final entry in dimensions.entries)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(kpiDimensionLabelsAr[entry.key] ?? entry.key),
-                    Text('${entry.value}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Expanded(
+                      child: Text(kpiDimensionLabelsAr[entry.key] ?? entry.key, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${entry.value}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ],
                 ),
               ),
             const Divider(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('الحالة: ${kpiStatusLabelsAr[snapshot.status] ?? snapshot.status}'),
+                Expanded(
+                  child: Text(
+                    'الحالة: ${kpiStatusLabelsAr[snapshot.status] ?? snapshot.status}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Text(
                   snapshot.approvedBonusCents != null
                       ? formatEgp(snapshot.approvedBonusCents!)
-                      : (snapshot.suggestedBonusCents != null ? '~${formatEgp(snapshot.suggestedBonusCents!)}' : '—'),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      : (snapshot.suggestedBonusCents != null
+                            ? '~${formatEgp(snapshot.suggestedBonusCents!)}'
+                            : '—'),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
@@ -174,7 +217,10 @@ class _LatestCard extends StatelessWidget {
             if (snapshot.rejectedReason != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text(snapshot.rejectedReason!, style: Theme.of(context).textTheme.bodySmall),
+                child: Text(
+                  snapshot.rejectedReason!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
           ],
         ),

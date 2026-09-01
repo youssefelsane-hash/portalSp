@@ -8,7 +8,7 @@ import { ServiceDto, PricingFieldDto, PriceEstimateDto } from '@/lib/api-types';
 import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
-import { createOrder, formatEgp } from '@/lib/orders';
+import { createOrder, formatEgp, uploadPricingFieldImage, uploadProblemImage } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
@@ -77,11 +77,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
   const [preciseTime, setPreciseTime] = useState('');
   const [durationHours, setDurationHours] = useState('');
+  const [pricingQuantity, setPricingQuantity] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
   const [postpaidPolicies, setPostpaidPolicies] = useState<ApplicablePaymentPolicyDto[]>([]);
   const [problemDescription, setProblemDescription] = useState('');
+  const [problemImages, setProblemImages] = useState<Array<{ id: string; previewUrl: string }>>([]);
+  const [uploadingProblemImages, setUploadingProblemImages] = useState(false);
+  const [problemImageError, setProblemImageError] = useState<string | null>(null);
+  const [requestRemoteQuote, setRequestRemoteQuote] = useState(false);
   const [promoCode, setPromoCode] = useState('');
 
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[] | null>(null);
@@ -137,9 +142,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!service || service.pricing_model !== 'formula') return;
-    const requiredFilled = (pricingFields ?? [])
-      .filter((f) => f.is_required)
-      .every((f) => debouncedFieldValues[f.field_key] !== undefined && debouncedFieldValues[f.field_key] !== '');
+    const requiredFilled = (pricingFields ?? []).every((field) => {
+      const value = debouncedFieldValues[field.field_key];
+      if (field.field_type === 'image_upload') {
+        const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
+        return count >= (field.min_files ?? (field.is_required ? 1 : 0));
+      }
+      return !field.is_required || (value !== undefined && value !== '');
+    });
     // فلاج تحميل معياري لـfetch effect (نمط React الرسمي لمزامنة نتيجة API مع تغيّر dependencies) —
     // مش derived state بديل عن useMemo، فعلاً استدعاء شبكة async.
     if (!requiredFilled) {
@@ -156,13 +166,28 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!service || service.pricing_model === 'formula') return;
+    const quantityBased = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
+    const parsedQuantity = Number(pricingQuantity);
+    if (quantityBased && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
+      setEstimate(null);
+      return;
+    }
+    const parsedDuration = Number(durationHours);
+    if (service.pricing_model === 'hourly' && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
+      setEstimate(null);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEstimating(true);
-    estimatePrice(id, { bookingMode })
+    estimatePrice(id, {
+      bookingMode,
+      pricingQuantity: quantityBased ? parsedQuantity : undefined,
+      durationHours: service.pricing_model === 'hourly' ? parsedDuration : undefined,
+    })
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [id, service, bookingMode]);
+  }, [id, service, bookingMode, pricingQuantity, durationHours]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -197,7 +222,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
-    if (technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
+    if (!requestRemoteQuote && technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -206,24 +231,31 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         {
           service_id: service.id,
           address_id: selectedAddressId,
-          booking_mode: bookingMode,
-          requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
+          booking_mode: requestRemoteQuote ? 'individual' : bookingMode,
+          requested_technician_id:
+            !requestRemoteQuote && technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
+          problem_image_ids: problemImages.map((image) => image.id),
+          request_remote_quote: requestRemoteQuote || undefined,
           // التاريخ بيتبعت دايمًا دلوقتي (ADR-0048) — هو مدخل الاشتقاق نفسه في الباك-إند.
           scheduled_at: computeScheduledAt(scheduledDate),
           scheduled_at_range_end:
             scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
           duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
-          repeat_frequency: repeatFrequency,
+          pricing_quantity:
+            service.pricing_model === 'per_unit' || service.pricing_model === 'monthly'
+              ? Number(pricingQuantity)
+              : undefined,
+          repeat_frequency: requestRemoteQuote ? undefined : repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
-          promo_code: promoCode || undefined,
+          promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
           field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
-          payment_method: paymentMethod === 'card' ? 'card' : undefined,
+          payment_method: !requestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
         },
         orderIdempotencyKey,
       );
       setSubmitted(true);
-      if (paymentMethod === 'card') {
+      if (!requestRemoteQuote && paymentMethod === 'card') {
         const cardResult = await payWithCard(authedFetch, order.id);
         window.location.href = cardResult.redirect_url;
         return;
@@ -271,6 +303,25 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // **الميعاد بقى الخطوة الأولى دايمًا (ADR-0048)** — قبل كده كان بيتخطى لو العميل اختار
   // "طوارئ"؛ الاختيار ده اتشال، والاستعجال نفسه بقى **نتيجة** اختيار النهارده.
   const needsSchedule = service.allows_scheduling;
+  const isQuantityPricing = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
+  const quantityUnit = service.unit_name_ar || (service.pricing_model === 'monthly' ? 'الشهور' : 'الوحدات');
+  const parsedPricingQuantity = Number(pricingQuantity);
+  const quantityValid = !isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0);
+  const pricingFieldsValid =
+    service.pricing_model !== 'formula' ||
+    (pricingFields ?? []).every((field) => {
+      const value = fieldValues[field.field_key];
+      if (field.field_type === 'image_upload') {
+        const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
+        return count >= (field.min_files ?? (field.is_required ? 1 : 0));
+      }
+      return !field.is_required || (value !== undefined && value !== '');
+    });
+  const priceReady =
+    service.pricing_model === 'inspection_then_quote' ||
+    (technicianChoiceMode === 'manual' && !!technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
+    estimate !== null;
+  const remoteQuoteValid = !requestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
@@ -278,7 +329,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
     (!needsPreciseTime || !!preciseTime) &&
     (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
-    (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
+    quantityValid &&
+    pricingFieldsValid &&
+    priceReady &&
+    remoteQuoteValid &&
+    (requestRemoteQuote || technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
     allRequiredAccepted &&
     !submitting &&
     !submitted;
@@ -323,7 +378,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             <input
               type="date"
               value={scheduledDate}
-              onChange={(e) => setScheduledDate(e.target.value)}
+              onChange={(e) => {
+                setScheduledDate(e.target.value);
+                if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
+              }}
               className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
             />
           ) : (
@@ -331,7 +389,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               <input
                 type="date"
                 value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
+                onChange={(e) => {
+                  setScheduledDate(e.target.value);
+                  if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
+                }}
                 className="rounded-lg border border-border bg-surface px-4 py-2"
               />
               <span className="text-sm text-muted">لحد</span>
@@ -397,9 +458,37 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                   field={field}
                   value={fieldValues[field.field_key]}
                   onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
+                  onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
                 />
               ))}
           </div>
+        </section>
+      )}
+
+      {isQuantityPricing && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="font-semibold">
+            {service.pricing_model === 'monthly' ? 'مدة الاشتراك بالشهور' : 'الكمية المطلوبة'}
+          </h2>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-sm text-muted">عدد {quantityUnit}</span>
+            <input
+              type="number"
+              inputMode={service.quantity_precision > 0 ? 'decimal' : 'numeric'}
+              min={service.quantity_min ?? 1}
+              max={service.quantity_max ?? undefined}
+              step={service.quantity_step ?? (service.quantity_precision > 0 ? 10 ** -service.quantity_precision : 1)}
+              value={pricingQuantity}
+              onChange={(e) => setPricingQuantity(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
+              placeholder={service.pricing_model === 'monthly' ? 'مثال: 3 شهور' : undefined}
+            />
+          </label>
+          <p className="mt-2 text-sm text-muted">
+            {service.pricing_model === 'monthly'
+              ? 'الإجمالي = السعر الشهري × عدد الشهور، ويظهر لك قبل تأكيد الطلب.'
+              : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب.'}
+          </p>
         </section>
       )}
 
@@ -463,7 +552,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         )}
       </section>
 
-      {selectedAddressId && (
+      {selectedAddressId && !requestRemoteQuote && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -522,7 +611,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
+      {!requestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
@@ -564,18 +653,106 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         />
       </section>
 
-      <section className="mt-6">
-        <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
-        <input
-          value={promoCode}
-          onChange={(e) => setPromoCode(e.target.value)}
-          maxLength={24}
-          dir="ltr"
-          className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
-        />
+      <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+        <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
+        <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
+        {problemImages.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {problemImages.map((image, index) => (
+              <div key={image.id} className="relative h-24 w-24 overflow-hidden rounded-xl bg-surface-variant">
+                {/* eslint-disable-next-line @next/next/no-img-element -- معاينة محلية للصورة قبل إنشاء الطلب */}
+                <img src={image.previewUrl} alt={`صورة المشكلة ${index + 1}`} className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  aria-label="حذف الصورة"
+                  onClick={() => {
+                    setProblemImages((current) => current.filter((item) => item.id !== image.id));
+                    if (problemImages.length === 1) setRequestRemoteQuote(false);
+                  }}
+                  className="absolute end-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-sm text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label
+          className={`mt-3 inline-flex cursor-pointer items-center rounded-lg border border-border px-4 py-2 text-sm hover:border-primary ${
+            uploadingProblemImages || problemImages.length >= 10 ? 'pointer-events-none opacity-50' : ''
+          }`}
+        >
+          {uploadingProblemImages ? 'جاري رفع الصور...' : 'إضافة صور'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="sr-only"
+            disabled={uploadingProblemImages || problemImages.length >= 10}
+            onChange={async (event) => {
+              const files = Array.from(event.target.files ?? []).slice(0, 10 - problemImages.length);
+              if (files.length === 0) return;
+              setUploadingProblemImages(true);
+              setProblemImageError(null);
+              try {
+                for (const file of files) {
+                  const uploaded = await uploadProblemImage(authedFetch, service.id, file);
+                  setProblemImages((current) => [
+                    ...current,
+                    { id: uploaded.id, previewUrl: URL.createObjectURL(file) },
+                  ]);
+                }
+              } catch (uploadError) {
+                setProblemImageError(uploadError instanceof Error ? uploadError.message : 'رفع الصورة فشل، حاول تاني');
+              } finally {
+                setUploadingProblemImages(false);
+                event.target.value = '';
+              }
+            }}
+          />
+        </label>
+        <span className="ms-3 text-xs text-muted">{problemImages.length}/10</span>
+        {problemImageError && <p className="mt-2 text-sm text-danger">{problemImageError}</p>}
+
+        {service.pricing_model === 'inspection_then_quote' && (
+          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+            <input
+              type="checkbox"
+              checked={requestRemoteQuote}
+              disabled={problemImages.length === 0 || isSameDayBooking}
+              onChange={(event) => setRequestRemoteQuote(event.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-medium text-primary">خلّي الإدارة تحدد السعر من الصور</span>
+              <span className="mt-1 block text-sm text-muted">
+                الإدارة هتبعت السعر، وإنت تقبله أو ترفضه قبل ما الطلب يروح لأي فني.
+              </span>
+              {problemImages.length === 0 && (
+                <span className="mt-1 block text-xs text-danger">ارفع صورة واحدة على الأقل لتفعيل الاختيار.</span>
+              )}
+              {isSameDayBooking && (
+                <span className="mt-1 block text-xs text-danger">التسعير بالصور مش متاح لطلب نفس اليوم.</span>
+              )}
+            </span>
+          </label>
+        )}
       </section>
 
-      {paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
+      {!requestRemoteQuote && (
+        <section className="mt-6">
+          <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
+          <input
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value)}
+            maxLength={24}
+            dir="ltr"
+            className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
+          />
+        </section>
+      )}
+
+      {!requestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex gap-2">
@@ -631,15 +808,29 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       <section className="mt-8 rounded-xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between">
-          <span className="text-muted">السعر المتوقع</span>
+          <span className="text-muted">{requestRemoteQuote ? 'السعر' : 'السعر المتوقع'}</span>
           <span className="text-xl font-bold text-primary">
-            {estimating ? '...' : totalCents !== null ? formatEgp(totalCents) : 'يتحدد بعد المعاينة'}
+            {requestRemoteQuote
+              ? 'الإدارة هتحدده من الصور'
+              : estimating
+                ? '...'
+                : totalCents !== null
+                  ? formatEgp(totalCents)
+                  : 'يتحدد بعد المعاينة'}
           </span>
         </div>
-        {service.pricing_model === 'inspection_then_quote' && (
+        {service.pricing_model === 'inspection_then_quote' && !requestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
+        )}
+        {technicianChoiceMode === 'auto' && service.pricing_model !== 'inspection_then_quote' && (
+          <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
+            <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
+            <p className="text-muted">
+              قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.
+            </p>
+          </div>
         )}
       </section>
 
@@ -660,12 +851,84 @@ function DynamicPricingField({
   field,
   value,
   onChange,
+  onUpload,
 }: {
   field: PricingFieldDto;
   value: string | number | boolean | undefined;
   onChange: (value: string | number | boolean) => void;
+  onUpload: (file: File) => Promise<{ id: string; file_url: string }>;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const label = `${field.label_ar}${field.is_required ? ' *' : ''}${field.unit_ar ? ` (${field.unit_ar})` : ''}`;
+
+  if (field.field_type === 'image_upload') {
+    const ids = typeof value === 'string' ? value.split(',').filter(Boolean) : [];
+    const minimum = field.min_files ?? (field.is_required ? 1 : 0);
+    const maximum = field.max_files ?? 5;
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <p className="font-medium">{label}</p>
+        <p className={`mt-1 text-sm ${ids.length >= minimum ? 'text-muted' : 'text-danger'}`}>
+          {minimum > 0 ? `ارفع من ${minimum} إلى ${maximum} صور` : `حتى ${maximum} صور`} ({ids.length}/{maximum})
+        </p>
+        {ids.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {ids.map((id, index) => (
+              <div key={id} className="relative h-20 w-20 overflow-hidden rounded-xl bg-surface-variant">
+                {previews[id] ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- معاينة محلية قبل إنشاء الطلب
+                  <img src={previews[id]} alt={`صورة ${index + 1}`} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full items-center justify-center text-xs text-muted">صورة {index + 1}</span>
+                )}
+                <button
+                  type="button"
+                  aria-label="حذف الصورة"
+                  onClick={() => onChange(ids.filter((candidate) => candidate !== id).join(','))}
+                  className="absolute end-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-sm text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className={`mt-3 inline-flex cursor-pointer items-center rounded-lg border px-4 py-2 text-sm ${uploading || ids.length >= maximum ? 'pointer-events-none opacity-50' : 'hover:border-primary'}`}>
+          {uploading ? 'جاري رفع الصور...' : 'اختار صور'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="sr-only"
+            disabled={uploading || ids.length >= maximum}
+            onChange={async (event) => {
+              const files = Array.from(event.target.files ?? []).slice(0, maximum - ids.length);
+              if (files.length === 0) return;
+              setUploading(true);
+              setUploadError(null);
+              const nextIds = [...ids];
+              try {
+                for (const file of files) {
+                  const uploaded = await onUpload(file);
+                  nextIds.push(uploaded.id);
+                  setPreviews((current) => ({ ...current, [uploaded.id]: URL.createObjectURL(file) }));
+                  onChange(nextIds.join(','));
+                }
+              } catch (error) {
+                setUploadError(error instanceof Error ? error.message : 'رفع الصورة فشل، حاول مرة ثانية');
+              } finally {
+                setUploading(false);
+                event.target.value = '';
+              }
+            }}
+          />
+        </label>
+        {uploadError && <p className="mt-2 text-sm text-danger">{uploadError}</p>}
+      </div>
+    );
+  }
 
   if (field.field_type === 'dropdown' && field.options) {
     return (

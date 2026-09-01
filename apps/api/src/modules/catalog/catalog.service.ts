@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { buildPricingContext, PricingContext } from '../pricing/pricing-context';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -61,6 +62,7 @@ export interface DurationEstimate {
 
 export interface DurationEstimateWithInternalCost extends DurationEstimate {
   internal_labor_cost_cents: number;
+  assistant_daily_wage_cents: number | null;
 }
 
 @Injectable()
@@ -192,6 +194,53 @@ export class CatalogService {
     return ids.map((id) => byId.get(id)).filter((c): c is ServiceCategory => c !== undefined);
   }
 
+  /**
+   * الخدمات النهائية الأكثر طلبًا، لا أقسامها العامة. الصفحة الرئيسية تستخدم هذه القائمة
+   * لعرض «تصليح حنفية» مثلًا بدل «سباكة»، ثم تفتح مسار حجز الخدمة مباشرة.
+   */
+  async findMostRequestedServices(limit = 8): Promise<Service[]> {
+    const windowDays = await this.settingsService.getNumber('catalog.most_requested_window_days', 90);
+    const safeWindow = Math.max(7, Math.min(365, Math.floor(windowDays)));
+
+    const rows = await this.services.manager.query<{ service_id: string }[]>(
+      `SELECT s.id AS service_id, COUNT(*) AS orders_count
+         FROM orders o
+         JOIN services s ON s.id = o.service_id
+         JOIN service_categories sc ON sc.id = s.category_id
+        WHERE o.created_at >= now() - ($1 || ' days')::interval
+          AND o.deleted_at IS NULL
+          AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician',
+                                     'cancelled_by_system', 'expired', 'draft')
+          AND s.is_active = true AND s.deleted_at IS NULL
+          AND sc.is_active = true AND sc.deleted_at IS NULL
+        GROUP BY s.id
+        ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
+        LIMIT $2`,
+      [safeWindow, limit],
+    );
+
+    const rankedIds = rows.map((row) => row.service_id);
+    const ids = rankedIds.length > 0
+      ? rankedIds
+      : (
+          await this.services.manager.query<{ service_id: string }[]>(
+            `SELECT s.id AS service_id
+               FROM services s
+               JOIN service_categories sc ON sc.id = s.category_id
+              WHERE s.is_active = true AND s.deleted_at IS NULL
+                AND sc.is_active = true AND sc.deleted_at IS NULL
+              ORDER BY sc.display_order ASC, s.display_order ASC, s.created_at ASC
+              LIMIT $1`,
+            [limit],
+          )
+        ).map((row) => row.service_id);
+
+    if (ids.length === 0) return [];
+    const services = await this.services.find({ where: { id: In(ids), isActive: true } });
+    const byId = new Map(services.map((service) => [service.id, service]));
+    return ids.map((id) => byId.get(id)).filter((service): service is Service => service !== undefined);
+  }
+
   findServices(categoryId?: string, bookingMode?: BookingModeFilter): Promise<Service[]> {
     const bookingModeFilter =
       bookingMode === 'individual'
@@ -302,88 +351,83 @@ export class CatalogService {
     // حجز الشركة مالوش مستوى فني أصلاً (§62.2)، فالخانة دي فاضية والمعامل بياخدها. تركيب
     // الاتنين كان هيبقى تحصيل مزدوج على نفس المعنى. append-only زي كل الباراميترات فوق.
     companyPriceMultiplier?: number,
+    pricingContextInput?: PricingContext,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
-    const quantityMultiplier =
-      service.pricingModel === PricingModel.HOURLY && durationHours
-        ? durationHours
-        : service.pricingModel === PricingModel.PER_UNIT && pricingQuantity
-          ? pricingQuantity
-          : 1;
-
-    // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
-    // التسعير (مفيش تركيب مع zone override — المعادلة نفسها مسؤولة عن عوامل السعر اللي العميل
-    // حددها في الفورم الديناميكي). كانت فجوة موثّقة صراحة: كان بيتفادى استدعاء PricingEngineService
-    // خالص ويستخدم service.basePriceCents (صفر لأي خدمة formula) — اتقفلت.
-    //
-    // **بَقّة حقيقية اتلقطت واتصلحت (مراجعة مستخدم دقيقة)**: level_price_multiplier كان مقفول
-    // على 1 هنا دايمًا، حتى لو technicianLevel اتبعت فعليًا (من estimate-duration/preview/create
-    // بعد ما فني معروف) — يعني قرار "كل فني بيظهر بسعره النهائي حسب رتبته" (docs/08) كان مطبّق
-    // على كل نماذج التسعير إلا formula بالتحديد. الإصلاح: نفس بحث service_level_pricing
-    // المستخدم في باقي الفروع تحت، والمضاعف بيتطبّق على ناتج المعادلة (result.priceCents) بعد
-    // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
-    if (service.pricingModel === PricingModel.FORMULA) {
-      const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
-      const formulaLevelMultiplier =
-        companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
-      // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد مضاعف المستوى وقبل
-      // رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
-      let clampedTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
-      if (result.minPriceCents !== null && clampedTotalCents < result.minPriceCents) {
-        clampedTotalCents = result.minPriceCents;
-      }
-      if (result.maxPriceCents !== null && clampedTotalCents > result.maxPriceCents) {
-        clampedTotalCents = result.maxPriceCents;
-      }
-      const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
-        ? await Promise.all([
-            this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
-            this.settingsService.getNumber('emergency.sla_minutes', EMERGENCY_SLA_MINUTES_FALLBACK),
-          ])
-        : [0, null];
-      return {
-        base_price_cents: result.priceCents,
-        inspection_fee_cents: service.inspectionFeeCents,
-        surge_multiplier: 1,
-        level_price_multiplier: formulaLevelMultiplier,
-        estimated_total_cents: clampedTotalCents,
-        emergency_surcharge_cents: Math.round((clampedTotalCents * emergencySurchargePercentage) / 100),
-        emergency_sla_minutes: emergencySlaMinutes,
-        min_price_cents: result.minPriceCents,
-        max_price_cents: result.maxPriceCents,
-        pricing_evaluation_id: result.evaluationId,
-        estimated_duration_days: result.estimatedDurationDays,
-        required_technicians: result.requiredTechnicians,
-        required_assistants: result.requiredAssistants,
-        suitable_for_emergency: result.suitableForEmergency,
-      };
+    const pricingContext = pricingContextInput ?? buildPricingContext({
+      quantity: pricingQuantity,
+      durationHours,
+      serviceFieldValues: fieldValues,
+      zoneId,
+      isEmergency,
+      technicianLevel,
+    });
+    if (service.pricingModel === PricingModel.HOURLY && pricingContext.durationHours === null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي محسوبة بالساعة — لازم تحدد المدة أو وقت البداية والنهاية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (
+      (service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) &&
+      pricingContext.quantity === null
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        service.pricingModel === PricingModel.MONTHLY
+          ? 'الخدمة دي محسوبة بوحدات شهرية — لازم تحدد عدد الوحدات'
+          : 'الخدمة دي محسوبة بالوحدة — لازم تحدد الكمية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (pricingContext.quantity !== null &&
+        (service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY)) {
+      this.assertQuantityConstraints(service, pricingContext.quantity);
     }
 
-    // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — كان enum value ميت تمامًا (بيقع في مسار
-    // fixed تحت: سعر تقديري كامل + رسم معاينة فوقه). الحجز الحقيقي هنا رسم المعاينة بس —
-    // الفني يحدد السعر الفعلي بعد المعاينة (InspectionQuoteService.submitInitialQuote()).
-    if (service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE) {
-      return {
-        base_price_cents: 0,
-        inspection_fee_cents: service.inspectionFeeCents,
-        surge_multiplier: 1,
-        level_price_multiplier: 1,
-        estimated_total_cents: 0,
-        emergency_surcharge_cents: 0,
-        emergency_sla_minutes: null,
-        min_price_cents: null,
-        max_price_cents: null,
-        pricing_evaluation_id: null,
-        estimated_duration_days: null,
-      };
+    // docs/08 §108-G — بَقّة حقيقية اتكشفت: تسعير المناطق (service_zone_pricing) كان بيتحقق
+    // بس **جوّه** فرع الأسعار الثابتة/بالساعة/بالوحدة، بعد return مبكر لخدمات formula (السطر
+    // تحت). يعني أي خدمة formula (المحرك الديناميكي، §1 — أهم حاجة في المشروع) كانت زون
+    // برايسينج ليها **صفر تأثير خالص**، مهما اتظبطت من الأدمن — مش "نسب غلط" (زي البَقّة اللي
+    // 594346e صلحها جزئيًا جوّه الفرع القديم)، دي "معدومة التأثير" بالكامل. الاستعلام اتنقل
+    // هنا عشان يتقرا **مرة واحدة** ويتستخدم في الفرعين (formula وغيره)، بدل تكرار.
+    const now = new Date();
+    const zoneOverride = zoneId
+      ? await this.zonePricing
+          .createQueryBuilder('p')
+          .where('p.service_id = :serviceId', { serviceId })
+          .andWhere('p.service_zone_id = :zoneId', { zoneId })
+          .andWhere('p.is_active = true')
+          .andWhere('p.valid_from <= :now', { now })
+          .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
+          .orderBy('p.valid_from', 'DESC')
+          .getOne()
+      : null;
+
+    const result = service.pricingModel === PricingModel.FORMULA
+      ? await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {}, undefined, pricingContext)
+      : this.pricingEngineService.evaluatePreset(
+          service.pricingModel,
+          service.basePriceCents,
+          pricingContext,
+          service.minPriceCents,
+          service.maxPriceCents,
+        );
+
+    if (
+      zoneOverride?.pricingMode === ZonePricingMode.OVERRIDE &&
+      (service.pricingModel === PricingModel.FORMULA || service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE)
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الاستبدال المطلق لسعر المنطقة غير مدعوم لهذا النوع من التسعير — استخدم نسبة مئوية',
+        HttpStatus.CONFLICT,
+      );
     }
 
-    const levelMultiplier =
-      companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
-
-    // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد
-    // من migration 0007 الأولى، بيتفعّل هنا. منفصلة عن commission.emergency_adjustment_percentage
-    // (عمولة داخلية بين المنصة والفني) — دي رسوم على العميل نفسه، معروضة قبل التأكيد.
+    const levelMultiplier = companyPriceMultiplier ??
+      (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
     const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
       ? await Promise.all([
           this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
@@ -391,62 +435,87 @@ export class CatalogService {
         ])
       : [0, null];
 
-    if (zoneId) {
-      // تاريخ سريان (docs/06 §3.10) — ممكن يكون فيه أكتر من صف لنفس (خدمة، منطقة) بمدى سريان
-      // مختلف (تخطيط سعر مستقبلي)؛ الساري فعليًا هو الصف اللي validFrom <= الآن < validUntil
-      // (أو validUntil=NULL). valid_from/valid_until كانت أعمدة خامدة من أول يوم (migration
-      // 0006) — أول استخدام حقيقي هنا.
-      const now = new Date();
-      const override = await this.zonePricing
-        .createQueryBuilder('p')
-        .where('p.service_id = :serviceId', { serviceId })
-        .andWhere('p.service_zone_id = :zoneId', { zoneId })
-        .andWhere('p.is_active = true')
-        .andWhere('p.valid_from <= :now', { now })
-        .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
-        .orderBy('p.valid_from', 'DESC')
-        .getOne();
-      if (override) {
-        // docs/08 §36.22-23، ADR-0024 — percentage: نسبة مئوية فوق السعر الأساسي الحالي للخدمة،
-        // بتتحدّث تلقائيًا مع أي تغيير في base_price_cents. override: رقم مطلق زي القديم بالحرف.
-        const overrideUnitCents =
-          override.pricingMode === ZonePricingMode.PERCENTAGE
-            ? Math.round(service.basePriceCents * (1 + Number(override.modifierPercentage) / 100))
-            : override.priceCents!;
-        const effectiveBaseCents = Math.round(overrideUnitCents * quantityMultiplier);
-        const surge = Number(override.surgeMultiplier);
-        const estimatedTotalCents = Math.round(effectiveBaseCents * surge * levelMultiplier);
-        return {
-          base_price_cents: effectiveBaseCents,
-          inspection_fee_cents: override.inspectionFeeCents,
-          surge_multiplier: surge,
-          level_price_multiplier: levelMultiplier,
-          estimated_total_cents: estimatedTotalCents,
-          emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
-          emergency_sla_minutes: emergencySlaMinutes,
-          min_price_cents: null,
-          max_price_cents: null,
-          pricing_evaluation_id: null,
-          estimated_duration_days: null,
-        };
+    let zoneAdjustedBaseCents = result.priceCents;
+    let surgeMultiplier = 1;
+    let inspectionFeeCents = service.inspectionFeeCents;
+    if (zoneOverride) {
+      inspectionFeeCents = zoneOverride.inspectionFeeCents;
+      if (zoneOverride.pricingMode === ZonePricingMode.PERCENTAGE) {
+        zoneAdjustedBaseCents = Math.round(result.priceCents * (1 + Number(zoneOverride.modifierPercentage) / 100));
+      } else {
+        const units = service.pricingModel === PricingModel.HOURLY
+          ? pricingContext.durationHours!
+          : service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
+            ? pricingContext.quantity!
+            : 1;
+        zoneAdjustedBaseCents = Math.round(zoneOverride.priceCents! * units);
+        surgeMultiplier = Number(zoneOverride.surgeMultiplier);
       }
     }
 
-    const baseCents = Math.round(service.basePriceCents * quantityMultiplier);
-    const estimatedTotalCents = Math.round(baseCents * levelMultiplier);
+    let estimatedTotalCents = Math.round(zoneAdjustedBaseCents * surgeMultiplier * levelMultiplier);
+    const effectiveMinPrice = [service.minPriceCents, result.minPriceCents]
+      .filter((value): value is number => value !== null)
+      .reduce<number | null>((maximum, value) => maximum === null ? value : Math.max(maximum, value), null);
+    const effectiveMaxPrice = [service.maxPriceCents, result.maxPriceCents]
+      .filter((value): value is number => value !== null)
+      .reduce<number | null>((minimum, value) => minimum === null ? value : Math.min(minimum, value), null);
+    if (effectiveMinPrice !== null && effectiveMaxPrice !== null && effectiveMinPrice > effectiveMaxPrice) {
+      throw new ApiException(ErrorCode.VAL_001, 'حدود سعر الخدمة متعارضة وتحتاج مراجعة من الإدارة', HttpStatus.CONFLICT);
+    }
+    if (effectiveMinPrice !== null) estimatedTotalCents = Math.max(estimatedTotalCents, effectiveMinPrice);
+    if (effectiveMaxPrice !== null) estimatedTotalCents = Math.min(estimatedTotalCents, effectiveMaxPrice);
+
+    const emergencyBaseCents = estimatedTotalCents + inspectionFeeCents;
     return {
-      base_price_cents: baseCents,
-      inspection_fee_cents: service.inspectionFeeCents,
-      surge_multiplier: 1,
+      base_price_cents: zoneAdjustedBaseCents,
+      inspection_fee_cents: inspectionFeeCents,
+      surge_multiplier: surgeMultiplier,
       level_price_multiplier: levelMultiplier,
       estimated_total_cents: estimatedTotalCents,
-      emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
+      emergency_surcharge_cents: Math.round((emergencyBaseCents * emergencySurchargePercentage) / 100),
       emergency_sla_minutes: emergencySlaMinutes,
-      min_price_cents: null,
-      max_price_cents: null,
-      pricing_evaluation_id: null,
-      estimated_duration_days: null,
+      min_price_cents: effectiveMinPrice,
+      max_price_cents: effectiveMaxPrice,
+      pricing_evaluation_id: result.evaluationId,
+      estimated_duration_days: result.estimatedDurationDays,
+      required_technicians: result.requiredTechnicians,
+      required_assistants: result.requiredAssistants,
+      suitable_for_emergency: result.suitableForEmergency,
     };
+  }
+
+  private assertQuantityConstraints(service: Service, quantity: number): void {
+    const min = service.quantityMin === null ? null : Number(service.quantityMin);
+    const max = service.quantityMax === null ? null : Number(service.quantityMax);
+    const step = service.quantityStep === null ? null : Number(service.quantityStep);
+    if (min !== null && quantity < min) {
+      throw new ApiException(ErrorCode.VAL_001, `أقل كمية للخدمة هي ${min}`, HttpStatus.BAD_REQUEST);
+    }
+    if (max !== null && quantity > max) {
+      throw new ApiException(ErrorCode.VAL_001, `أكبر كمية للخدمة هي ${max}`, HttpStatus.BAD_REQUEST);
+    }
+
+    const precisionScale = 10 ** service.quantityPrecision;
+    if (Math.abs(quantity * precisionScale - Math.round(quantity * precisionScale)) > 1e-7) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        service.quantityPrecision === 0
+          ? 'الكمية لازم تكون رقمًا صحيحًا بدون كسور'
+          : `الكمية تسمح بحد أقصى ${service.quantityPrecision} رقم بعد العلامة`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (step !== null) {
+      const offset = (quantity - (min ?? 0)) / step;
+      if (Math.abs(offset - Math.round(offset)) > 1e-7) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `الكمية لازم تزيد بخطوات ${step}${min === null ? '' : ` بداية من ${min}`}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
   }
 
   // محرك الإنتاجية (docs/06 §3.3-§3.6، docs/07 الجزء ج) — المدة = المساحة/الوحدات المطلوبة ÷
@@ -498,6 +567,7 @@ export class CatalogService {
       assigned_technicians: technicians,
       assigned_assistants: assistants,
       internal_labor_cost_cents: internalLaborCostCents,
+      assistant_daily_wage_cents: row.assistantDailyWageCents,
     };
   }
 }

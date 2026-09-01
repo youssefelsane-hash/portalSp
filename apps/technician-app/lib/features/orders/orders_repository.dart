@@ -60,6 +60,15 @@ class OrdersRepository {
     return data == null ? null : Order.fromJson(data);
   }
 
+  // المصدر الجديد للشاشة الرئيسية: النظام يسمح بأكثر من شغل جارٍ في بعض السيناريوهات
+  // (مثل طلب طوارئ بجانب طلب قائم)، لذلك لازم نعرضهم كلهم بدل اختيار واحد وإخفاء الباقي.
+  Future<List<Order>> fetchActiveOrders() async {
+    final items = await authRepository.authedRequestList(
+      '/technician/orders/active-orders',
+    );
+    return items.map(Order.fromJson).toList();
+  }
+
   // "الشغل المؤكّد قدامي" (docs/08 §165) — طلبات مجدولة مستقبلية اتأكّدت تلقائيًا (بلا قرار
   // قبول/رفض من الفني — الفرق الجوهري بين طلب مجدول بعيد وطلب قريب في fetchAvailable() فوق).
   Future<List<Order>> fetchUpcomingConfirmed() async {
@@ -182,10 +191,16 @@ class OrdersRepository {
 
   // طاقم الطلب (docs/08 §5) — كانت فجوة موثّقة صراحة (Script 7 Phase 13/14): الباك-إند عنده
   // GET .../team-members جاهزة ومؤمّنة بالفعل (ownership check ضد IDOR) بس التطبيق ما كانش
-  // بيستخدمها خالص. بس لطلبات booking_mode='team'.
+  // بيستخدمها خالص. طلبات 'team'، وكمان الشغلانة الفردية اللي فيها مساعد اختياري (ADR-0052).
   Future<List<TeamMember>> fetchTeamMembers(String orderId) async {
     final items = await authRepository.authedRequestList('/technician/orders/$orderId/team-members');
     return items.map(TeamMember.fromJson).toList();
+  }
+
+  // شيل عضو من طاقم الطلب — القائد بس (فحص الملكية في الباك-إند). ADR-0052: ده اللي بيخلي
+  // المساعد الاختياري **اختياري فعلاً** — الفني يقدر يتراجع، مش قرار نهائي بضغطة واحدة.
+  Future<void> removeTeamMember(String orderId, String memberId) async {
+    await authRepository.authedRequest('DELETE', '/technician/orders/$orderId/team-members/$memberId');
   }
 
   // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من

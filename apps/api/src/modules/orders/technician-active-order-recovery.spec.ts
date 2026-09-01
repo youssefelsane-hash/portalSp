@@ -163,6 +163,38 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
     expect(active!.orderStatus).toBe(OrderStatus.TECHNICIAN_ON_WAY);
   });
 
+  it('findActiveOrdersForTechnician() بترجّع كل الطلبات الجارية المتزامنة بدل ما تخفي واحد منهم', async () => {
+    const [secondActive] = await dataSource.query(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+         order_status, payment_status, total_amount_cents, scheduled_at, placed_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'in_progress','pending',10000, NULL, now(), now() + interval '1 minute')
+       RETURNING id`,
+      [
+        `TESTTAR-ACT2-${runId}`.slice(0, 24),
+        ids.customerProfile,
+        ids.service,
+        ids.address,
+        ids.zone,
+        ids.technicianProfile,
+      ],
+    );
+
+    try {
+      const active = await service.findActiveOrdersForTechnician(ids.technicianUser);
+      expect(active.map((order) => order.id)).toEqual([
+        secondActive.id,
+        ids.asapOrder,
+      ]);
+
+      // النسخ القديمة تفضل شغالة بنفس عقد object/null، وتاخد أول طلب حسب نفس ترتيب المصدر.
+      expect((await service.findActiveForTechnician(ids.technicianUser))?.id).toBe(
+        secondActive.id,
+      );
+    } finally {
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [secondActive.id]);
+    }
+  });
+
   it('findUpcomingConfirmedForTechnician() بترجّع الطلب المجدول المؤكّد مستقبلاً بس، مش الطلب الشغال دلوقتي', async () => {
     const upcoming = await service.findUpcomingConfirmedForTechnician(ids.technicianUser);
     expect(upcoming).toHaveLength(1);
@@ -205,6 +237,7 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
     const active = await service.findActiveForTechnician(ids.technicianUser);
     expect(active).not.toBeNull();
     expect(active!.id).toBe(ids.futureOrder);
+    expect(await service.findUpcomingConfirmedForTechnician(ids.technicianUser)).toHaveLength(0);
   });
 
   // الحالة اللي كانت بتضيع تمامًا قبل الإصلاح: يوم الشغلانة عدّى والفني لسه ما بدأش — مكانتش

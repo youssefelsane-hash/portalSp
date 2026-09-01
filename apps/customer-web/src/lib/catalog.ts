@@ -8,6 +8,8 @@ export const fetchCategories = () => apiFetchList<ServiceCategoryDto>('/service-
 export const fetchServices = (categoryId?: string) =>
   apiFetchList<ServiceDto>(`/services${categoryId ? `?category_id=${categoryId}` : ''}`);
 
+export const fetchMostRequestedServices = () => apiFetchList<ServiceDto>('/services/most-requested');
+
 export const fetchService = (id: string) => apiFetch<ServiceDto>(`/services/${id}`, null);
 
 export const searchServices = (q: string) => {
@@ -20,11 +22,19 @@ export const fetchPricingFields = (serviceId: string) => apiFetchList<PricingFie
 
 export const estimatePrice = (
   serviceId: string,
-  params: { zoneId?: string; bookingMode?: string; fieldValues?: Record<string, string | number | boolean> },
+  params: {
+    zoneId?: string;
+    bookingMode?: string;
+    fieldValues?: Record<string, string | number | boolean>;
+    pricingQuantity?: number;
+    durationHours?: number;
+  },
 ) => {
   const query = new URLSearchParams();
   if (params.zoneId) query.set('zone_id', params.zoneId);
   if (params.bookingMode) query.set('booking_mode', params.bookingMode);
   if (params.fieldValues) query.set('field_values', JSON.stringify(params.fieldValues));
+  if (params.pricingQuantity !== undefined) query.set('pricing_quantity', String(params.pricingQuantity));
+  if (params.durationHours !== undefined) query.set('duration_hours', String(params.durationHours));
   return apiFetch<PriceEstimateDto>(`/services/${serviceId}/estimate?${query.toString()}`, null, { method: 'POST' });
 };

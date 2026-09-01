@@ -1,4 +1,24 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { MAX_BRANDING_FILE_SIZE_BYTES } from '../branding/branding-file-validator';
+import { CategoryMediaSlotParamDto } from './dto/category-media-slot-param.dto';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -69,6 +89,43 @@ export class AdminCatalogController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toAdminServiceCategoryResponseDto(await this.adminCatalogService.updateCategory(admin.sub, id, dto, audit));
+  }
+
+  /**
+   * رفع/استبدال صورة فئة (docs/08 §98، بلاغ مالك) — الفجوة الحقيقية اللي كانت بتخلّي الصورة
+   * "تتحط مرة واحدة بس": الحقول كانت روابط نصية ومفيش أي مكان في المنصة يرفع صورة فئة أصلاً.
+   * نفس فحوصات ملف البراندنج بالحرف (MIME + magic bytes + حجم + أبعاد، مفيش SVG).
+   */
+  @Post('service-categories/:id/media/:slot')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('catalog.manage')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_BRANDING_FILE_SIZE_BYTES } }))
+  async uploadCategoryMedia(
+    @CurrentUser() admin: JwtPayload,
+    @Param() params: CategoryMediaSlotParamDto,
+    @UploadedFile() file: Express.Multer.File,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    if (!file) {
+      throw new BadRequestException('لازم ترفع ملف');
+    }
+    return toAdminServiceCategoryResponseDto(
+      await this.adminCatalogService.uploadCategoryMedia(admin.sub, params.id, params.slot, file, audit),
+    );
+  }
+
+  /** مسح صورة فئة (docs/08 §98) — كانت مستحيلة عبر PATCH (خانة فاضية = مفتاح محذوف من الـJSON). */
+  @Delete('service-categories/:id/media/:slot')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('catalog.manage')
+  async clearCategoryMedia(
+    @CurrentUser() admin: JwtPayload,
+    @Param() params: CategoryMediaSlotParamDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toAdminServiceCategoryResponseDto(
+      await this.adminCatalogService.clearCategoryMedia(admin.sub, params.id, params.slot, audit),
+    );
   }
 
   @Delete('service-categories/:id')

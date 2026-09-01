@@ -103,16 +103,18 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
     );
     ids.service = svc.id;
 
-    const makeTechnician = async (label: string) => {
+    const makeTechnician = async (label: string, kind: 'technician' | 'assistant' = 'technician') => {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`,
         [`+201${label}${runId}`.slice(0, 14), `فني اختبار ${label} ${runId}`],
       );
       const [profile] = await q(
         `INSERT INTO technician_profiles
-           (user_id, technician_code, current_level, verification_status, is_available, is_on_duty)
-         VALUES ($1,$2,'new','approved',true,true) RETURNING id`,
-        [user.id, `TST${label}${runId}`.slice(0, 20)],
+           (user_id, technician_code, current_level, verification_status, is_available, is_on_duty,
+            technician_kind, current_location)
+         VALUES ($1,$2,'new','approved',true,true,$3,
+                 ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+        [user.id, `TST${label}${runId}`.slice(0, 20), kind],
       );
       return { userId: user.id as string, profileId: profile.id as string };
     };
@@ -120,12 +122,24 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
     const main = await makeTechnician('M');
     ids.mainTechnicianUser = main.userId;
     ids.mainTechnicianProfile = main.profileId;
-    const assistA = await makeTechnician('C');
+    const assistA = await makeTechnician('C', 'assistant');
     ids.assistantAUser = assistA.userId;
     ids.assistantAProfile = assistA.profileId;
-    const assistB = await makeTechnician('D');
+    const assistB = await makeTechnician('D', 'assistant');
     ids.assistantBUser = assistB.userId;
     ids.assistantBProfile = assistB.profileId;
+
+    for (const assistantId of [ids.assistantAProfile, ids.assistantBProfile]) {
+      await q(
+        `INSERT INTO technician_services (technician_id,service_id,verification_status,is_active)
+         VALUES ($1,$2,'approved',true)`,
+        [assistantId, ids.service],
+      );
+      await q(`INSERT INTO technician_zones (technician_id,service_zone_id,is_active) VALUES ($1,$2,true)`, [
+        assistantId,
+        ids.zone,
+      ]);
+    }
 
     const [customerUser] = await q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
@@ -172,6 +186,8 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+    await q(`DELETE FROM technician_zones WHERE technician_id IN ($1,$2)`, [ids.assistantAProfile, ids.assistantBProfile]);
+    await q(`DELETE FROM technician_services WHERE technician_id IN ($1,$2)`, [ids.assistantAProfile, ids.assistantBProfile]);
     await q(`DELETE FROM technician_profiles WHERE id IN ($1,$2,$3)`, [
       ids.mainTechnicianProfile,
       ids.assistantAProfile,

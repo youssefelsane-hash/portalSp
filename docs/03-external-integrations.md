@@ -9,6 +9,12 @@
 = الميزة المرتبطة بيها بترجع لسلوك آمن افتراضي (log-only للإشعارات، تخزين محلي، رفض واضح للدفع
 بالبطاقة) — النظام كله بيفضل شغال من غيرها، بس الميزة دي بس مش متفعّلة.
 
+**⚠️ استثناء الوحيد من القاعدة دي — `SETTINGS_ENCRYPTION_KEY`/`PII_ENCRYPTION_KEY` (§9 تحت)**: دول
+مش "ميزة اختيارية بترجع لسلوك آمن افتراضي" — لو فاضيين، أي محاولة فني يحفظ رقمه القومي (شاشة
+"استكمال بيانات الحساب") بترجع خطأ `مفتاح تشفير بيانات الهوية غير مُعدّ` (503) **عمدًا**، عشان
+الكود يرفض يخزّن رقم قومي من غير تشفير بدل ما يسيب البيانة عارية. ده مش بَقّة — ده fail-fast مقصود
+(ADR-0045). لازم يتظبط قبل أي اختبار حي لمسار تسجيل/اعتماد الفنيين.
+
 **بَقّة حقيقية اتلقطت واتصلحت (2026-08-11، أول تشغيل حي للسيرفر في سيشن صُنّاع)**: `cp .env.example
 .env` بالظبط زي ما الملف بيقول — كل قيم التكامل الاختيارية (Paymob/FawryPay/S3/FCM/Twilio/SMTP)
 كانت `KEY=` (سلسلة فاضية، مش غير موجودة خالص). `env.validation.ts`'s Joi schema كانت
@@ -352,25 +358,39 @@ SMTP_FROM_EMAIL=<بريد المرسل، لازم يكون verified عند أغ�
 3. من **APIs & Services → Credentials → Create Credentials → API Key**: هتاخد المفتاح. **مهم
    أمنياً**: قيّده (Restrict key) بـ Android package name / iOS bundle id بتاعك، وبالـ APIs
    اللي فعّلتها بس فوق — مفتاح من غير قيود ممكن يتستخدم من أي حد لقاه.
+4. **المفاتيح القديمة اللي كانت مكتوبة صراحةً في الكود اتسرّبت في تاريخ git بالفعل (بوابة P0-2 في
+   `docs/23`، اتقفلت 2026-08-29) — لازم تتدوّر (Rotate) من Google Cloud Console الأول، إخفاؤها من
+   الكود الحالي مايلغيش إنها ظهرت في نسخ قديمة من التاريخ.** المفتاح الجديد هو اللي تحطه تحت.
 
-### مكان القيمة
+### مكان القيمة — 3 مفاتيح منفصلة (Android / iOS / Web)، كل واحد في ملف **غير متتبَّع في git**
 
-**مفتاحين منفصلين مستحسن** (واحد Android مقيّد بالـ package name، واحد iOS مقيّد بالـ bundle
-id) — أو نفس المفتاح لو مقيّد صح بالاتنين:
+من بعد بوابة P0-2 (docs/23)، مفيش أي مفتاح مكتوب صراحةً في ملفات متتبَّعة — كل منصة بتقرا
+مفتاحها من ملف local خارج git، وغيابه = **الخريطة بتفضل معطّلة بهدوء (فاضية/رمادية) بدل ما
+تشحن مفتاح مسرّب أو تكسر التطبيق**. لو الخريطة ظهرت فاضية فجأة بعد ما كانت شغالة، السبب الأرجح
+هو بالظبط ده — حد عمل build جديد من غير ما ينسخ المفتاح للملف الـlocal بتاعه.
 
-- `apps/customer-app/android/app/src/main/AndroidManifest.xml` — داخل `<application>`:
-  ```xml
-  <meta-data
-      android:name="com.google.android.geo.API_KEY"
-      android:value="YOUR_GOOGLE_MAPS_API_KEY" />
+- **Android**: `apps/customer-app/android/maps.properties` (انسخه من
+  `apps/customer-app/android/maps.properties.example` كقالب):
   ```
-  استبدل `YOUR_GOOGLE_MAPS_API_KEY` بالمفتاح الحقيقي.
-
-- `apps/customer-app/ios/Runner/AppDelegate.swift`:
-  ```swift
-  GMSServices.provideAPIKey("YOUR_GOOGLE_MAPS_API_KEY")
+  googleMapsApiKey=YOUR_ANDROID_KEY
   ```
-  استبدل `YOUR_GOOGLE_MAPS_API_KEY` بالمفتاح الحقيقي.
+  بيتقرا في `android/app/build.gradle.kts` ويتحقن في `AndroidManifest.xml` عبر
+  `manifestPlaceholders["googleMapsApiKey"]` — مفيش تعديل يدوي في الـManifest نفسه.
+
+- **iOS**: `apps/customer-app/ios/Flutter/Local.xcconfig` (انسخه من
+  `apps/customer-app/ios/Flutter/Local.xcconfig.example` كقالب):
+  ```
+  GOOGLE_MAPS_API_KEY = YOUR_IOS_KEY
+  ```
+  `Debug.xcconfig`/`Release.xcconfig` بيعملهم `#include? "Local.xcconfig"` (اختياري — البناء
+  مايفشلش لو الملف مش موجود)، والقيمة بتوصل لـ`Info.plist`'s `GoogleMapsApiKey` عبر
+  `$(GOOGLE_MAPS_API_KEY)`، و`AppDelegate.swift` بيقراها من هناك وقت الإقلاع.
+
+- **Web**: مفتاح تالت منفصل (مقيّد بالدومينات المسموحة، مش package/bundle id) — بيتحقن وقت
+  الـdeploy، مش ملف local: استبدل `__GOOGLE_MAPS_WEB_API_KEY__` في
+  `apps/customer-app/web/index.html` بالمفتاح الحقيقي في خطوة البناء/النشر (مثلاً `sed` في
+  CI قبل `flutter build web`). من غير الاستبدال، سكربت الخريطة مش بيتحمّل خالص عمدًا (بدل ما
+  يحمّل بمفتاح placeholder غلط ويرمي أخطاء غامضة في الـconsole).
 
 ### apps/customer-app — نسخة الويب (Flutter Web) — كانت فجوة حقيقية، اتقفلت (2026-08-19)
 
@@ -400,9 +420,15 @@ Android/iOS بس — لازم **Maps JavaScript API** تتفعّل ليه هي �
 ### التأكد إنها اشتغلت
 
 بعد ملء المفتاح، شغّل `apps/customer-app` على جهاز/إيموليتور حقيقي (**البيئة دي مفيهاش واحد —
-فجوة موثّقة قديمة، مش جديدة**)، افتح شاشة "تتبّع الفني لحظياً" لطلب نشط — المفروض تشوف خريطة
-حقيقية بتايلز، مش شاشة رمادية فاضية أو رسالة خطأ. لو الخريطة رمادية/فاضية غالباً المفتاح مش صحيح
-أو الـ API مش مفعّلة في Google Cloud Console.
+فجوة موثّقة قديمة، مش جديدة**)، افتح شاشة "تتبّع الفني لحظياً" لطلب نشط أو شاشة "حدد موقعك على
+الخريطة" (`address_map_picker_screen.dart`) — المفروض تشوف خريطة حقيقية بتايلز، مش شاشة
+بيضا/رمادية فاضية (بس فيها الـpin) أو رسالة خطأ. لو الخريطة فاضية، بالترتيب الأرجح:
+
+1. **ملف المفتاح الـlocal مش موجود أصلاً على الجهاز/الـCI اللي عمل الـbuild**
+   (`android/maps.properties` أو `ios/Flutter/Local.xcconfig` — دول غير متتبَّعين في git عمدًا،
+   بوابة P0-2 في `docs/23`، فأي build جديد من جهاز/CI ماعملش نسخ الملف هيشحن بمفتاح فاضي بصمت).
+2. المفتاح نفسه غلط أو اتلغى/اتقيّد بخطأ من Google Cloud Console.
+3. الـ API (Maps SDK for Android/iOS) مش مفعّلة على المشروع في Google Cloud Console.
 
 ---
 
@@ -552,14 +578,62 @@ cd apps/customer-app && flutter build appbundle --release
 
 ---
 
+## 9. مفاتيح التشفير الداخلية — `SETTINGS_ENCRYPTION_KEY` / `PII_ENCRYPTION_KEY` (⚠️ مطلوبين، مش اختياريين)
+
+على عكس كل حاجة فوق (تكاملات خارجية بترجع سلوك آمن افتراضي لو فاضية)، المفتاحين دول أسرار
+**داخلية** للمشروع نفسه، ولازم يتظبطوا **قبل** أي اختبار حي لمسارات بتلمس بيانات حساسة — من
+غيرهم المسارات دي بترفض تعمل حاجة خالص (503 `مفتاح تشفير بيانات الهوية غير مُعدّ`)، مش تتجاهل
+الخطوة بأمان.
+
+- **`SETTINGS_ENCRYPTION_KEY`** — بيشفّر أسرار Paymob المخزّنة من لوحة الإدارة (§1 فوق). **مطلوب
+  إجباريًا** لو `NODE_ENV=staging` أو `production` (الكود بيرفض يشتغل من غيره أصلاً — راجع
+  `apps/api/src/config/env.validation.ts`).
+- **`PII_ENCRYPTION_KEY`** — بيشفّر الرقم القومي للفني (ADR-0045، شاشة "استكمال بيانات الحساب" في
+  `apps/technician-app`). لو مش متظبط، الكود بيرجع تلقائيًا لـ`SETTINGS_ENCRYPTION_KEY` — يعني لو
+  ضبطت الأول بس مش التاني، المسار ده بيشتغل برضه. **لو الاتنين فاضيين** (الحالة الأكتر شيوعًا في
+  بيئة `NODE_ENV=development` لسه ما اتظبطتش فيها `.env` كامل)، أي محاولة فني يحفظ رقمه القومي
+  بترجع 503 فورًا (`common/crypto/pii-crypto.util.ts` → `keyMaterial()`) — ده **مقصود** (fail-fast
+  بدل تخزين بيانة حساسة من غير تشفير)، مش بَقّة.
+
+### مكان القيمة
+
+في `apps/api/.env` (نسخة من `.env.example`):
+```
+SETTINGS_ENCRYPTION_KEY=<قيمة عشوائية 32+ حرف>
+PII_ENCRYPTION_KEY=<قيمة عشوائية 32+ حرف، أو سيبها فاضية عشان ترجع لـSETTINGS_ENCRYPTION_KEY>
+```
+ولّد قيمة عشوائية آمنة بأي أداة، مثلاً:
+```bash
+openssl rand -base64 32
+```
+
+### ⚠️ تحذير — تغيير المفتاح بعد التشغيل كسر دايم
+
+مفيش key rotation دلوقتي (فجوة موثّقة في `docs/08-pricing-engine-and-platform-vision.md` §74).
+تغيير `PII_ENCRYPTION_KEY` بعد ما فنيين حقيقيين سجّلوا أرقامهم القومية بيبطّل فك تشفير كل القيم
+القديمة **وكل الهاشات المستخدمة للتحقق من التفرّد** (منع تسجيل نفس الرقم مرتين). اتعامل مع المفتاح
+ده زي كلمة سر قاعدة بيانات: يتحدد مرة واحدة، يتوثّق في مكان آمن، وما يتغيّرش من غير خطة migration
+واضحة.
+
+### التأكد إنها اشتغلت
+
+بعد ضبط المفتاح وإعادة تشغيل السيرفر، من `apps/technician-app` → "استكمال بيانات الحساب" → اكتب
+رقم قومي صحيح (14 رقم) واضغط "حفظ الرقم القومي" — المفروض يرجع نجاح بدل رسالة "مفتاح تشفير بيانات
+الهوية غير مُعدّ".
+
+---
+
 ## ملخص سريع — كل الـ env vars في مكان واحد
 
 انسخ `apps/api/.env.example` لـ `apps/api/.env` واملأ اللي عايزه بس (الباقي فاضي = القناة دي
-log-only/معطّلة بأمان، مش هتكسر حاجة):
+log-only/معطّلة بأمان، مش هتكسر حاجة) — **ما عدا الاتنين الأولانيين تحت، دول مطلوبين (§9)**:
 
 ```bash
-# Paymob (§1)
+# ⚠️ مطلوبين (§9) — من غيرهم تسجيل الفنيين وأسرار Paymob بترفض تعمل حاجة، مش "معطّلة بأمان"
 SETTINGS_ENCRYPTION_KEY=
+PII_ENCRYPTION_KEY=
+
+# Paymob (§1)
 PAYMOB_API_KEY=
 PAYMOB_SECRET_KEY=
 PAYMOB_PUBLIC_KEY=

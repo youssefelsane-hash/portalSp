@@ -47,6 +47,9 @@ export class RecurringOrderTemplate {
   @Column({ name: 'duration_hours', type: 'integer', nullable: true })
   durationHours: number | null;
 
+  @Column({ name: 'duration_minutes', type: 'integer', nullable: true })
+  durationMinutes: number | null;
+
   @Column({ name: 'scheduled_end_at', type: 'timestamptz', nullable: true })
   scheduledEndAt: Date | null;
 

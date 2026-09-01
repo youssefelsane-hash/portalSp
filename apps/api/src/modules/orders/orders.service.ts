@@ -31,6 +31,7 @@ import { TechnicianCompany } from '../technicians/entities/technician-company.en
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
 import { CancellationReasonsService } from './cancellation-reasons.service';
@@ -58,7 +59,7 @@ import {
   OrderStatus,
   OrderType,
 } from './entities/order.entity';
-import { PricingFieldOption } from '../pricing/entities/service-pricing-field.entity';
+import { PricingFieldOption, PricingFieldType } from '../pricing/entities/service-pricing-field.entity';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
@@ -69,6 +70,7 @@ import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entit
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
@@ -180,6 +182,68 @@ export class OrdersService {
     return plan;
   }
 
+  private async claimProblemImages(
+    manager: EntityManager,
+    customerId: string,
+    customerUserId: string,
+    serviceId: string,
+    imageIds: string[] | undefined,
+    orderId: string,
+  ): Promise<void> {
+    const ids = imageIds ?? [];
+    if (ids.length === 0) return;
+
+    const uploads = await manager.query<
+      {
+        id: string;
+        customer_id: string;
+        service_id: string;
+        storage_key: string;
+        file_url: string;
+        file_size_bytes: number;
+        expires_at: Date;
+        claimed_order_id: string | null;
+      }[]
+    >(
+      `SELECT id, customer_id, service_id, storage_key, file_url, file_size_bytes,
+              expires_at, claimed_order_id
+         FROM order_problem_image_uploads
+        WHERE id = ANY($1::uuid[])
+        FOR UPDATE`,
+      [ids],
+    );
+    const byId = new Map(uploads.map((upload) => [upload.id, upload]));
+    for (const id of ids) {
+      const upload = byId.get(id);
+      if (!upload || upload.customer_id !== customerId || upload.service_id !== serviceId) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة لا تخص حسابك أو هذه الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (upload.claimed_order_id && upload.claimed_order_id !== orderId) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة مرتبطة بطلب آخر', HttpStatus.BAD_REQUEST);
+      }
+      if (!upload.claimed_order_id && new Date(upload.expires_at).getTime() <= Date.now()) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة انتهت صلاحيتها — ارفعها مرة ثانية', HttpStatus.BAD_REQUEST);
+      }
+
+      await manager.query(
+        `INSERT INTO order_media
+           (order_id, uploaded_by_user_id, media_type, file_url, storage_key,
+            file_size_bytes, caption, problem_image_upload_id)
+         VALUES ($1, $2, 'problem_photo', $3, $4, $5, 'صورة المشكلة من العميل', $6)
+         ON CONFLICT (order_id, problem_image_upload_id)
+           WHERE problem_image_upload_id IS NOT NULL DO NOTHING`,
+        [orderId, customerUserId, upload.file_url, upload.storage_key, upload.file_size_bytes, id],
+      );
+      await manager.query(
+        `UPDATE order_problem_image_uploads
+            SET claimed_order_id = COALESCE(claimed_order_id, $2),
+                claimed_at = COALESCE(claimed_at, now())
+          WHERE id = $1`,
+        [id, orderId],
+      );
+    }
+  }
+
   private optionalWarrantyPrice(plan: OptionalWarrantySelection | null, serviceTotalCents: number): number {
     if (!plan) return 0;
     return plan.pricing_model === 'fixed'
@@ -246,9 +310,16 @@ export class OrdersService {
     if (entries.length === 0) return null;
     try {
       const fields = await manager.query<
-        { field_key: string; label_ar: string; unit_ar: string | null; options: PricingFieldOption[] | null; display_order: number }[]
+        {
+          field_key: string;
+          field_type: string;
+          label_ar: string;
+          unit_ar: string | null;
+          options: PricingFieldOption[] | null;
+          display_order: number;
+        }[]
       >(
-        `SELECT field_key, label_ar, unit_ar, options, display_order
+        `SELECT field_key, field_type, label_ar, unit_ar, options, display_order
            FROM service_pricing_fields
           WHERE service_id = $1 AND deleted_at IS NULL`,
         [serviceId],
@@ -260,7 +331,16 @@ export class OrdersService {
           // قيمة dropdown/multi_select بتيجي كـkey مش نص — بنحلّها للتسمية العربية اللي العميل
           // شافها فعلًا، وإلا الأدمن هيقرا كود زي `type_b` ومش هيفهم منه حاجة.
           const option = field?.options?.find((o) => o.value === String(rawValue));
-          const value = option ? option.label_ar : typeof rawValue === 'boolean' ? (rawValue ? 'نعم' : 'لأ') : String(rawValue);
+          const value =
+            field?.field_type === PricingFieldType.IMAGE_UPLOAD
+              ? `${this.parsePricingFieldImageIds(rawValue).length} صورة مرفوعة`
+              : option
+                ? option.label_ar
+                : typeof rawValue === 'boolean'
+                  ? rawValue
+                    ? 'نعم'
+                    : 'لأ'
+                  : String(rawValue);
           return {
             key,
             // حقل اتمسح من الخدمة بعد كده (أو مفيش صف ليه أصلاً) بيتعرض بمفتاحه بدل ما يختفي.
@@ -276,6 +356,130 @@ export class OrdersService {
     } catch (err) {
       this.logger.warn(`فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الطلب بيكمل عادي: ${String(err)}`);
       return null;
+    }
+  }
+
+  private parsePricingFieldImageIds(value: unknown): string[] {
+    if (typeof value !== 'string') return [];
+    return [...new Set(value.split(',').map((id) => id.trim()).filter(Boolean))];
+  }
+
+  private async validatePricingFieldImages(
+    manager: EntityManager,
+    customerId: string,
+    customerUserId: string,
+    serviceId: string,
+    fieldValues: Record<string, string | number | boolean> | undefined,
+    orderId?: string,
+  ): Promise<void> {
+    const fields = await manager.query<
+      {
+        id: string;
+        field_key: string;
+        label_ar: string;
+        is_required: boolean;
+        min_files: number;
+        max_files: number;
+      }[]
+    >(
+      `SELECT id, field_key, label_ar, is_required, min_files, max_files
+         FROM service_pricing_fields
+        WHERE service_id = $1
+          AND field_type = 'image_upload'
+          AND is_active = true
+          AND deleted_at IS NULL
+        ORDER BY display_order, created_at`,
+      [serviceId],
+    );
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    for (const field of fields) {
+      const ids = this.parsePricingFieldImageIds(fieldValues?.[field.field_key]);
+      const minimum = Number(field.min_files ?? (field.is_required ? 1 : 0));
+      const maximum = Number(field.max_files ?? 5);
+      if (ids.length < minimum) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `حقل "${field.label_ar}" محتاج ${minimum} صورة على الأقل`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (ids.length > maximum) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `حقل "${field.label_ar}" يسمح بحد أقصى ${maximum} صور`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (ids.length === 0) continue;
+      if (ids.some((id) => !uuidPattern.test(id))) {
+        throw new ApiException(ErrorCode.VAL_001, `صور حقل "${field.label_ar}" غير صالحة`, HttpStatus.BAD_REQUEST);
+      }
+
+      const uploads = await manager.query<
+        {
+          id: string;
+          customer_id: string;
+          service_id: string;
+          field_id: string;
+          storage_key: string;
+          file_url: string;
+          file_size_bytes: number;
+          expires_at: Date;
+          claimed_order_id: string | null;
+        }[]
+      >(
+        `SELECT id, customer_id, service_id, field_id, storage_key, file_url,
+                file_size_bytes, expires_at, claimed_order_id
+           FROM pricing_field_uploads
+          WHERE id = ANY($1::uuid[])
+          ${orderId ? 'FOR UPDATE' : ''}`,
+        [ids],
+      );
+      const byId = new Map(uploads.map((upload) => [upload.id, upload]));
+      for (const id of ids) {
+        const upload = byId.get(id);
+        if (
+          !upload ||
+          upload.customer_id !== customerId ||
+          upload.service_id !== serviceId ||
+          upload.field_id !== field.id
+        ) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            `إحدى صور حقل "${field.label_ar}" لا تخص حسابك أو هذه الخدمة`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (!upload.claimed_order_id && new Date(upload.expires_at).getTime() <= Date.now()) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            `إحدى صور حقل "${field.label_ar}" انتهت صلاحيتها — ارفعها مرة ثانية`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      }
+
+      if (!orderId) continue;
+      for (const id of ids) {
+        const upload = byId.get(id)!;
+        await manager.query(
+          `INSERT INTO order_media
+             (order_id, uploaded_by_user_id, media_type, file_url, storage_key,
+              file_size_bytes, caption, pricing_field_upload_id)
+           VALUES ($1, $2, 'problem_photo', $3, $4, $5, $6, $7)
+           ON CONFLICT (order_id, pricing_field_upload_id)
+             WHERE pricing_field_upload_id IS NOT NULL DO NOTHING`,
+          [orderId, customerUserId, upload.file_url, upload.storage_key, upload.file_size_bytes, field.label_ar, id],
+        );
+        await manager.query(
+          `UPDATE pricing_field_uploads
+              SET claimed_order_id = COALESCE(claimed_order_id, $2),
+                  claimed_at = COALESCE(claimed_at, now())
+            WHERE id = $1`,
+          [id, orderId],
+        );
+      }
     }
   }
 
@@ -307,6 +511,30 @@ export class OrdersService {
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
+
+    // إعادة الزيارة تحت الضمان (docs/08 §7/§108-F) — بَقّة حقيقية اتلقطت: شاشة إعادة الزيارة
+    // (order_detail_screen.dart's _requestRevisit) بتبعت original_order_id بس بلا أي field_values
+    // — العميل مش بيعيد تحديد نطاق الشغل، هو بس بيطلب إصلاح نفس الشغل اللي اتعمل. من غيرها،
+    // catalogService.estimate() تحت كان بيرفض بـ`الحقل "<اسم الحقل، غالبًا سؤال منتهي بـ؟>"
+    // مطلوب` — لحقل العميل مش شايفه أصلاً في شاشة إعادة الزيارة، رغم إن السعر الناتج كله هيتشال
+    // فورًا تحت (estimatedPriceCents: originalOrder ? 0 : ...، إعادة الزيارة مجانية بالكامل).
+    // الحل: نورّث القيم الخام من تقييم التسعير الحقيقي المرتبط بالطلب الأصلي
+    // (service_pricing_evaluations، findEvaluationForOrder — نفس المصدر اللي docs/08 §35
+    // بيستخدمه للأدمن)، مش من customerInputs (snapshot عرض بالعربي بس، مش قيم خام قابلة لإعادة
+    // التقييم).
+    // مقصور على formula عمدًا — أي موديل تسعير تاني (fixed/hourly/...) مفيهوش
+    // service_pricing_evaluations أصلاً ولا بيطلب field_values في validateAndNormalizeFieldValues()،
+    // فاستعلام إضافي هنا كان هيبقى صفر فايدة على أغلب الخدمات.
+    if (
+      service.pricingModel === PricingModel.FORMULA &&
+      dto.original_order_id &&
+      (!dto.field_values || Object.keys(dto.field_values).length === 0)
+    ) {
+      const evaluation = await this.pricingEngineService.findEvaluationForOrder(dto.original_order_id);
+      if (evaluation) {
+        dto.field_values = evaluation.fieldValues as Record<string, string | number | boolean>;
+      }
+    }
 
     // **وضع الحجز بقى مشتق مش مختار (ADR-0048، docs/08 §85)** — `dto.booking_mode` متجاهَل تمامًا
     // هنا. الاشتقاق نفسه محتاج حاجتين لسه مش جاهزين في النقطة دي: اليوم النهائي (بعد حل النطاق
@@ -468,7 +696,11 @@ export class OrdersService {
     // ساعي إضافي وقت التوزيع التلقائي نفسه مؤجّل عمدًا (فجوة موثّقة، مش سهو).
     const preciseScheduleTechnicianId = scheduleSlot?.technicianId ?? requestedTechnicianProfile?.id ?? null;
     if (service.requiresPreciseSchedule && preciseScheduleTechnicianId && dto.scheduled_at && dto.duration_hours) {
-      await this.assertNoPreciseScheduleConflict(preciseScheduleTechnicianId, new Date(dto.scheduled_at), dto.duration_hours);
+      await this.assertNoPreciseScheduleConflict(
+        preciseScheduleTechnicianId,
+        new Date(dto.scheduled_at),
+        dto.duration_hours * 60,
+      );
     }
 
     // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
@@ -513,7 +745,12 @@ export class OrdersService {
     //
     // **السلوت المحجوز بيلغي الاستعجال** حتى لو في نفس اليوم: فني بعينه التزم بوقت محدد، وده
     // تعيين مؤكّد مش بث طوارئ. تحويله لطوارئ كان هيلغي التزامه ويبثّه لناس تانية.
-    const urgent = !scheduleSlot && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    // A recurring occurrence was commercially scheduled when the customer created the
+    // plan. Materialising it on the visit day must not turn it into a new same-day
+    // emergency or add an emergency fee merely because a worker ran late.
+    const urgent = !recurringIdentity
+      && !scheduleSlot
+      && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
     if (urgent && !canAcceptSameDay(service)) {
       // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
       // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).
@@ -536,6 +773,19 @@ export class OrdersService {
     // مصدر مستقل (technician_profiles.pricing_tier) عشان الفصل الكامل عن currentLevel التشغيلي.
     const knownTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: resolvedScheduledAtIso,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      zoneId: zone.id,
+      isEmergency: urgent,
+      technicianLevel: knownTechnicianLevel,
+      addonIds: dto.addon_ids,
+      recurringMetadata: dto.repeat_frequency ? { frequency: dto.repeat_frequency } : undefined,
+    });
+
     const estimate = await this.catalogService.estimate(
       service.id,
       zone.id,
@@ -545,11 +795,12 @@ export class OrdersService {
       urgent,
       dto.field_values,
       knownTechnicianPricingTier,
-      dto.duration_hours,
+      pricingContext.durationHours ?? undefined,
       dto.pricing_quantity,
       // ADR-0042 — حجز شركة بيتسعّر بمعاملها هي بدل مضاعف المستوى (اللي بيبقى غير معروف أصلاً
       // في حجز الشركة). نفس القيمة اللي العميل شافها في المقارنة قبل ما يختار.
       requestedCompany ? Number(requestedCompany.priceMultiplier) : undefined,
+      pricingContext,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -655,6 +906,37 @@ export class OrdersService {
       );
     }
 
+    const remoteQuoteRequested = dto.request_remote_quote === true;
+    if (remoteQuoteRequested) {
+      if (service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'طلب تسعير الإدارة بالصور متاح فقط للخدمات من نوع معاينة ثم سعر',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!dto.problem_image_ids?.length) {
+        throw new ApiException(ErrorCode.VAL_001, 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر', HttpStatus.BAD_REQUEST);
+      }
+      if (originalOrder || bookingMode === BookingMode.EMERGENCY || dto.repeat_frequency) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'تسعير الصور متاح للطلب العادي فقط، وليس للطوارئ أو إعادة الزيارة أو الحجز المتكرر',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.payment_method) {
+        throw new ApiException(ErrorCode.VAL_001, 'الدفع يتم بعد ما الإدارة تحدد السعر وتوافق عليه', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الإضافات والخصومات والضمان الإضافي تتحدد بعد اعتماد السعر، مش مع طلب التسعير بالصور',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
     // "كرّر الحجز ده" (migration 0176) — بوابة الدخول للقالب المتكرر المُنشأ من مسار الحجز
     // العادي. نفس فلسفة كل بوابات القدرة فوق: رفض واضح وقت الطلب بدل حالة نصف جاهزة.
     // التكرار معناه "نفس الحجز ده يتكرر" فمحتاج موعد فعلي محدد + خدمة مفعّل فيها التكرار +
@@ -736,7 +1018,39 @@ export class OrdersService {
     // بتتوزّع فورًا بغض النظر عن dto.payment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
     // إجمالي الطلب صفر لأي سبب تاني (خصم كامل مثلاً) — دفع كارت/InstaPay بمبلغ صفر مالوش معنى.
     // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
-    const requestedPrepayMethod = originalOrder ? undefined : dto.payment_method;
+    const requestedPrepayMethod = originalOrder || remoteQuoteRequested ? undefined : dto.payment_method;
+
+    // Earnings Engine V2 is an explicit cutover for new orders only. The fixed amount is copied
+    // onto the order now, so later catalog edits can never rewrite historical money.
+    const earningsV2Enabled = await this.settingsService.getBoolean('earnings.v2_cutover_enabled', false);
+    const settlementPolicyVersion: 1 | 2 = earningsV2Enabled ? 2 : 1;
+    const platformCommissionCentsSnapshot =
+      settlementPolicyVersion === 2 ? (originalOrder ? 0 : service.platformCommissionCents) : null;
+    if (settlementPolicyVersion === 2 && platformCommissionCentsSnapshot == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة غير جاهزة للتسوية الجديدة: حدد عمولة المنصة الثابتة أولاً',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const initialOrderTotalCents = originalOrder || remoteQuoteRequested
+      ? 0
+      : estimate.estimated_total_cents +
+        estimate.inspection_fee_cents +
+        estimate.emergency_surcharge_cents +
+        addonsTotalCents;
+    if (
+      settlementPolicyVersion === 2 &&
+      initialOrderTotalCents > 0 &&
+      Number(platformCommissionCentsSnapshot) > initialOrderTotalCents
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'عمولة المنصة الثابتة أكبر من إجمالي الطلب؛ راجع إعداد الخدمة قبل الحجز',
+        HttpStatus.CONFLICT,
+      );
+    }
 
     let createdOrder: Order;
     try {
@@ -746,6 +1060,9 @@ export class OrdersService {
       >("SELECT next_human_readable_number('ORD')");
 
       const now = new Date();
+      // طلب الضمان بيتعرض على الفني الأصلي فورًا من خلال revisit pin، لكن التنفيذ نفسه مش
+      // طوارئ لحظية. السيرفر هو مصدر الحقيقة للموعد حتى لو عميل قديم ما بعتش scheduled_at.
+      const revisitScheduledAt = originalOrder ? defaultRevisitScheduledAt(now) : null;
       const order = manager.create(Order, {
         orderNumber,
         customerId: customerProfile.id,
@@ -761,10 +1078,16 @@ export class OrdersService {
             : (dto.order_type ?? OrderType.STANDARD),
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
-        orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        orderStatus: remoteQuoteRequested ? OrderStatus.AWAITING_ADMIN_QUOTE : OrderStatus.SEARCHING_TECHNICIAN,
         // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — الاتنين بيسجّلوا
         // duration_hours، اتفحصت فوق إنها موجودة/ممنوعة حسب الوضع الفعّال للخدمة.
-        durationHours: service.requiresPreciseSchedule || service.requiresHoursOnly ? (dto.duration_hours ?? null) : null,
+        durationMinutes: pricingContext.durationMinutes,
+        durationHours:
+          (service.requiresPreciseSchedule || service.requiresHoursOnly) &&
+          pricingContext.durationHours !== null &&
+          Number.isInteger(pricingContext.durationHours)
+            ? pricingContext.durationHours
+            : null,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         // docs/08 §71 (طلب مالك) — إجابات الفورم الديناميكي كانت بتتخزن في
@@ -775,11 +1098,13 @@ export class OrdersService {
         // (تاريخ/وقت السلوت نفسه اللي الفني أعلن عنه، UTC مباشرة زي باقي أوقات المشروع).
         // resolvedScheduledAtIso = dto.scheduled_at الحر، أو أقرب يوم متاح فعليًا داخل النطاق
         // المرن لو dto.scheduled_at_range_end اتبعت (docs/08 §32.3).
-        scheduledAt: scheduleSlot
-          ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
-          : resolvedScheduledAtIso
-            ? new Date(resolvedScheduledAtIso)
-            : null,
+        scheduledAt: revisitScheduledAt
+          ? revisitScheduledAt
+          : scheduleSlot
+            ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
+            : resolvedScheduledAtIso
+              ? new Date(resolvedScheduledAtIso)
+              : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
         scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
         projectId: dto.project_id ?? null,
@@ -793,6 +1118,11 @@ export class OrdersService {
           : scheduleSlot
             ? scheduleSlot.technicianId
             : (dto.requested_technician_id ?? null),
+        // ADR-0051 (docs/08 §96) — إعادة الزيارة مسؤولية مش تفضيل: الفني اللي شغله رجع عليه هو
+        // اللي يصلّحه. requestedTechnicianId فوق تفضيل بيتجاهَل بأمان لو مش متاح؛ العمود ده
+        // التزام حصري بلا fallback. بيتحط بس لو الطلب الأصلي كان له فني فعلاً.
+        revisitPinnedTechnicianId: originalOrder?.technicianId ?? null,
+        revisitPinnedAt: originalOrder?.technicianId ? now : null,
         parentOrderId: originalOrder ? originalOrder.id : null,
         buildingId: building ? building.id : null,
         warrantyPlanId: optionalWarranty?.id ?? null,
@@ -800,14 +1130,17 @@ export class OrdersService {
         warrantyPlanSnapshot: optionalWarranty ? { ...optionalWarranty } : null,
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
-        estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
-        inspectionFeeCents: originalOrder ? 0 : estimate.inspection_fee_cents,
+        estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
+        initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
+        inspectionFeeCents: originalOrder || remoteQuoteRequested ? 0 : estimate.inspection_fee_cents,
         // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد،
         // بيتفعّل هنا. صفر لأي طلب مش طوارئ أو إعادة زيارة (مجانية بالكامل أصلاً).
-        surgeAmountCents: originalOrder ? 0 : estimate.emergency_surcharge_cents,
-        totalAmountCents: originalOrder
+        surgeAmountCents: originalOrder || remoteQuoteRequested ? 0 : estimate.emergency_surcharge_cents,
+        totalAmountCents: originalOrder || remoteQuoteRequested
           ? 0
           : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents,
+        settlementPolicyVersion,
+        platformCommissionCentsSnapshot,
         // لسه UNPAID عمداً حتى لو صفر جنيه — لازم يعدّي بنفس دورة الدفع العادية (collectCash/
         // payWithWallet → settleAndComplete) عشان الطلب يتقفل صح ويوصل COMPLETED، مش يعلق في
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
@@ -817,15 +1150,25 @@ export class OrdersService {
         createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,
-        requiredTechnicians: durationEstimate?.assigned_technicians ?? formulaCrewTechnicians,
-        requiredAssistants: durationEstimate?.assigned_assistants ?? formulaCrewAssistants,
+        requiredTechnicians: originalOrder ? 1 : (durationEstimate?.assigned_technicians ?? formulaCrewTechnicians),
+        requiredAssistants: originalOrder ? 0 : (durationEstimate?.assigned_assistants ?? formulaCrewAssistants),
         estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
+        assistantDailyWageCentsSnapshot: originalOrder ? null : (durationEstimate?.assistant_daily_wage_cents ?? null),
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
-        pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
+        pricingQuantity:
+          service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
+            ? String(dto.pricing_quantity)
+            : null,
         idempotencyKey: idempotencyKey ?? null,
       });
       await manager.save(order);
+
+      // إعادة الزيارة ترث صور الطلب الأصلي ولا تطلب رفعًا جديدًا من العميل.
+      if (!originalOrder) {
+        await this.validatePricingFieldImages(manager, customerProfile.id, userId, service.id, dto.field_values, order.id);
+      }
+      await this.claimProblemImages(manager, customerProfile.id, userId, service.id, dto.problem_image_ids, order.id);
 
       // حجز السلوت ذرّي جوّه نفس الـtransaction بتاعة إنشاء الطلب — لو حد تاني حجزه في نفس
       // اللحظة (سباق حقيقي بين طلبين)، الطلب كله بيترول باك مش يتعمل بلا سلوت فعلي بيشاور عليه.
@@ -899,6 +1242,22 @@ export class OrdersService {
         await manager.save(order);
       }
 
+      // V2 settles a fixed platform amount exactly once. Promotions/building discounts are applied
+      // after the initial estimate, so validate the final payable total as well. Failing inside the
+      // transaction rolls back the order and any promo usage instead of creating an impossible
+      // settlement that would only fail after the work is complete.
+      if (
+        settlementPolicyVersion === 2 &&
+        !remoteQuoteRequested &&
+        Number(platformCommissionCentsSnapshot) > order.totalAmountCents
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الإجمالي بعد الخصم أقل من عمولة المنصة الثابتة؛ راجع إعداد الخدمة أو الخصم',
+          HttpStatus.CONFLICT,
+        );
+      }
+
       // وعاء العمولة (ADR-0037 + ADR-0038، docs/08 §60.1/§61.2) — بيتحسب بعد الضمان عشان
       // `warrantyPriceCents` يبقى متسجّل (السياسة ممكن تدخّله). **مش** بيتقصّ عند الإجمالي:
       // الخصم بتتحمّله المنصة بالكامل والفني بياخد مستحقه من السعر الأصلي (ADR-0038). بيتخزّن كـsnapshot
@@ -909,12 +1268,12 @@ export class OrdersService {
       const commissionBasePolicy = await this.commissionBaseService.getPolicy();
       order.commissionableBaseCents = computeCommissionableBase(
         {
-          basePriceCents: originalOrder ? 0 : estimate.base_price_cents,
+          basePriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.base_price_cents,
           levelPriceMultiplier: originalOrder ? 1 : estimate.level_price_multiplier,
-          estimatedTotalCents: originalOrder ? 0 : estimate.estimated_total_cents,
+          estimatedTotalCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
           inspectionFeeCents: order.inspectionFeeCents,
           emergencySurchargeCents: order.surgeAmountCents,
-          addonsTotalCents: originalOrder ? 0 : addonsTotalCents,
+          addonsTotalCents: originalOrder || remoteQuoteRequested ? 0 : addonsTotalCents,
           discountCents: order.discountAmountCents,
           warrantyPriceCents: order.warrantyPriceCents,
           // فوايد/رسوم التقسيط مش بتتحمّل على الطلب وقت الإنشاء (خطة التقسيط بتتعمل بعد كده،
@@ -929,7 +1288,7 @@ export class OrdersService {
       // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot مبلغ الإيداع بعد كل الخصومات
       // (نفس سبب ترتيب requiresPrepay تحت بالحرف: النسبة بتتحسب على الإجمالي النهائي مش الخام).
       // إعادة الزيارة (originalOrder) وأي إجمالي صفر مستثنيان — مفيش إيداع لمبلغ صفر أصلاً.
-      if (!originalOrder && service.depositRequired && order.totalAmountCents > 0) {
+      if (!originalOrder && !remoteQuoteRequested && service.depositRequired && order.totalAmountCents > 0) {
         order.depositAmountCents = Math.round((order.totalAmountCents * Number(service.depositPercentage)) / 100);
         await manager.save(order);
       }
@@ -1143,6 +1502,13 @@ export class OrdersService {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    await this.validatePricingFieldImages(
+      this.dataSource.manager,
+      customerProfile.id,
+      userId,
+      service.id,
+      dto.field_values,
+    );
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
@@ -1179,6 +1545,18 @@ export class OrdersService {
       ? await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id)
       : null;
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: dto.scheduled_at,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      zoneId: zone.id,
+      isEmergency: urgent,
+      technicianLevel: previewTechnicianLevel,
+      addonIds: dto.addon_ids,
+    });
+
     const estimate = await this.catalogService.estimate(
       service.id,
       zone.id,
@@ -1186,9 +1564,10 @@ export class OrdersService {
       urgent,
       dto.field_values,
       previewTechnicianPricingTier,
-      dto.duration_hours,
+      pricingContext.durationHours ?? undefined,
       dto.pricing_quantity,
       previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
+      pricingContext,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -1413,15 +1792,15 @@ export class OrdersService {
    * القديمة (اتلغت مع بنية الشغالة المنفصلة، ADR-0031) بس معمّمة على `orders.technician_id` لأي
    * فني عادي بدل جدول حجوزات منفصل. مقصورة على `orders` بس — الفني هنا فني عادي، مفيش جدول تاني.
    */
-  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationHours: number): Promise<void> {
-    const endsAt = new Date(startsAt.getTime() + durationHours * 3_600_000);
+  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationMinutes: number): Promise<void> {
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
     const [conflict] = await this.dataSource.query<{ order_number: string }[]>(
       `SELECT order_number FROM orders
        WHERE technician_id = $1
          AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
-         AND scheduled_at IS NOT NULL AND duration_hours IS NOT NULL
+         AND scheduled_at IS NOT NULL AND COALESCE(duration_minutes, duration_hours * 60) IS NOT NULL
          AND scheduled_at < $3
-         AND (scheduled_at + (duration_hours || ' hours')::interval) > $2
+         AND (scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval) > $2
        LIMIT 1`,
       [technicianId, startsAt, endsAt],
     );
@@ -1435,17 +1814,22 @@ export class OrdersService {
   }
 
   private assertPricingQuantity(pricingModel: PricingModel, quantity?: number): void {
-    if (pricingModel === PricingModel.PER_UNIT && quantity == null) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    const quantityBased = pricingModel === PricingModel.PER_UNIT || pricingModel === PricingModel.MONTHLY;
+    if (quantityBased && quantity == null) {
+      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الوحدات المطلوبة لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
-    if (pricingModel !== PricingModel.PER_UNIT && quantity != null) {
-      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    if (!quantityBased && quantity != null) {
+      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدات', HttpStatus.BAD_REQUEST);
     }
   }
 
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
-    return this.rescheduleCore(order, { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at }, {
+    return this.rescheduleCore(order, {
+      newSlotId: dto.new_slot_id,
+      newScheduledAt: dto.new_scheduled_at,
+      newScheduledEndAt: dto.new_scheduled_end_at,
+    }, {
       userId,
       role: 'customer',
       changeSource: OrderChangeSource.CUSTOMER,
@@ -1687,7 +2071,7 @@ export class OrdersService {
   async rescheduleByAdmin(
     adminUserId: string,
     orderId: string,
-    target: { newSlotId?: string; newScheduledAt?: string },
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
     reason: string,
     meta?: AuditActorMeta,
   ): Promise<Order> {
@@ -1708,8 +2092,15 @@ export class OrdersService {
       action: 'order.rescheduled_by_admin',
       entityType: 'order',
       entityId: orderId,
-      oldValues: { scheduled_at: previousScheduledAt?.toISOString() ?? null },
-      newValues: { scheduled_at: updated.scheduledAt?.toISOString() ?? null, reason },
+      oldValues: {
+        scheduled_at: previousScheduledAt?.toISOString() ?? null,
+        scheduled_end_at: order.scheduledEndAt?.toISOString() ?? null,
+      },
+      newValues: {
+        scheduled_at: updated.scheduledAt?.toISOString() ?? null,
+        scheduled_end_at: updated.scheduledEndAt?.toISOString() ?? null,
+        reason,
+      },
       meta,
     });
     return updated;
@@ -1805,7 +2196,7 @@ export class OrdersService {
    */
   private async rescheduleCore(
     order: Order,
-    target: { newSlotId?: string; newScheduledAt?: string },
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
     actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
   ): Promise<Order> {
     const orderId = order.id;
@@ -1813,6 +2204,13 @@ export class OrdersService {
       throw new ApiException(
         ErrorCode.VAL_001,
         'لازم تبعت الموعد الجديد (new_scheduled_at) أو سلوت محدد (new_slot_id) — واحد بس مش الاتنين',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (target.newScheduledEndAt != null && target.newScheduledAt == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الموعد النهائي الجديد يتطلب إرسال موعد البداية الجديد معه',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -1846,7 +2244,7 @@ export class OrdersService {
 
     const previousScheduledAt = order.scheduledAt;
     const customer = actor.role === 'admin' ? await this.customerProfiles.findByProfileIdOrThrow(order.customerId) : null;
-    await this.dataSource.transaction(async (manager) => {
+    const updatedOrder = await this.dataSource.transaction(async (manager) => {
       // كل مسارات إعادة الجدولة تمسك قفل الطلب أولاً ثم السلوت، لمنع deadlock مع موافقة
       // العميل على اقتراح الفني التي تستخدم نفس الترتيب.
       const fresh = await manager
@@ -1856,8 +2254,16 @@ export class OrdersService {
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       this.assertReschedulable(fresh);
+      const interval = this.resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
 
       if (newSlot) {
+        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+            HttpStatus.CONFLICT,
+          );
+        }
         const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
         if (!booked) {
           throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
@@ -1878,6 +2284,15 @@ export class OrdersService {
             HttpStatus.CONFLICT,
           );
         }
+        if (interval.durationMinutes != null) {
+          await this.assertNoRescheduleIntervalConflict(
+            manager,
+            fresh.technicianId!,
+            newScheduledAt,
+            interval.scheduledEndAt ?? new Date(newScheduledAt.getTime() + interval.durationMinutes * 60_000),
+            orderId,
+          );
+        }
         await manager
           .createQueryBuilder()
           .update(TechnicianScheduleSlot)
@@ -1887,6 +2302,11 @@ export class OrdersService {
       }
 
       fresh.scheduledAt = newScheduledAt;
+      fresh.scheduledEndAt = interval.scheduledEndAt;
+      fresh.durationMinutes = interval.durationMinutes;
+      fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+        ? interval.durationMinutes / 60
+        : null;
       await manager.save(fresh);
       await manager.save(
         manager.create(OrderStatusHistory, {
@@ -1916,16 +2336,16 @@ export class OrdersService {
           deepLink: `/orders/${orderId}`,
         });
       }
+      return fresh;
     });
 
-    order.scheduledAt = newScheduledAt;
     this.events.emit(
       ORDER_RESCHEDULED_EVENT,
       new OrderRescheduledEvent(
-        order.id,
-        order.orderNumber,
-        order.technicianId!,
-        order.customerId,
+        updatedOrder.id,
+        updatedOrder.orderNumber,
+        updatedOrder.technicianId!,
+        updatedOrder.customerId,
         previousScheduledAt,
         newScheduledAt,
         actor.role === 'admin' ? 'admin' : 'customer',
@@ -1933,7 +2353,7 @@ export class OrdersService {
         customer !== null,
       ),
     );
-    return order;
+    return updatedOrder;
   }
 
   private assertReschedulable(order: Order): void {
@@ -1951,6 +2371,76 @@ export class OrdersService {
 
   private slotStart(slot: TechnicianScheduleSlot): Date {
     return new Date(`${slot.slotDate}T${slot.startTime}Z`);
+  }
+
+  private slotEnd(slot: TechnicianScheduleSlot): Date {
+    return new Date(`${slot.slotDate}T${slot.endTime}Z`);
+  }
+
+  private resolveRescheduledInterval(
+    order: Order,
+    newScheduledAt: Date,
+    explicitEndIso?: string,
+  ): { scheduledEndAt: Date | null; durationMinutes: number | null } {
+    if (explicitEndIso != null && order.scheduledEndAt == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'تحديد نهاية جديدة متاح فقط للطلبات التي لها بداية ونهاية أصلًا',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    let scheduledEndAt: Date | null = null;
+    if (explicitEndIso != null) {
+      scheduledEndAt = new Date(explicitEndIso);
+      if (Number.isNaN(scheduledEndAt.getTime())) {
+        throw new ApiException(ErrorCode.VAL_001, 'الموعد النهائي الجديد مش تاريخ صالح', HttpStatus.BAD_REQUEST);
+      }
+    } else if (order.scheduledAt && order.scheduledEndAt) {
+      const previousDurationMs = order.scheduledEndAt.getTime() - order.scheduledAt.getTime();
+      scheduledEndAt = new Date(newScheduledAt.getTime() + previousDurationMs);
+    }
+
+    const durationMinutes = scheduledEndAt
+      ? (scheduledEndAt.getTime() - newScheduledAt.getTime()) / 60_000
+      : (order.durationMinutes ?? (order.durationHours == null ? null : Number(order.durationHours) * 60));
+    if (durationMinutes != null && (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525_600)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مدة الموعد الجديد لازم تكون عدد دقائق صحيحًا وموجبًا وفي حدود سنة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return { scheduledEndAt, durationMinutes };
+  }
+
+  private async assertNoRescheduleIntervalConflict(
+    manager: EntityManager,
+    technicianId: string,
+    startsAt: Date,
+    endsAt: Date,
+    excludedOrderId: string,
+  ): Promise<void> {
+    const [conflict] = await manager.query<{ order_number: string }[]>(
+      `SELECT order_number FROM orders
+       WHERE technician_id = $1 AND id <> $4
+         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
+         AND scheduled_at IS NOT NULL
+         AND scheduled_at < $3
+         AND COALESCE(
+               scheduled_end_at,
+               scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval
+             ) > $2
+       LIMIT 1`,
+      [technicianId, startsAt, endsAt, excludedOrderId],
+    );
+    if (conflict) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده عنده طلب آخر (${conflict.order_number}) متعارض مع الفترة الجديدة`,
+        HttpStatus.CONFLICT,
+      );
+    }
   }
 
   private async rescheduleLockedOrder(
@@ -1992,11 +2482,24 @@ export class OrdersService {
 
     const previousScheduledAt = order.scheduledAt;
     const newScheduledAt = this.slotStart(newSlot);
+    const interval = this.resolveRescheduledInterval(order, newScheduledAt);
+    if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'السلوت المقترح أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+        HttpStatus.CONFLICT,
+      );
+    }
     const booked = await this.scheduleService.rescheduleSlot(order.id, newSlot.id, manager);
     if (!booked) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
     }
     order.scheduledAt = newScheduledAt;
+    order.scheduledEndAt = interval.scheduledEndAt;
+    order.durationMinutes = interval.durationMinutes;
+    order.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+      ? interval.durationMinutes / 60
+      : null;
     await manager.save(order);
     await manager.save(
       manager.create(OrderStatusHistory, {
@@ -2601,22 +3104,31 @@ export class OrdersService {
   // معناها فعليًا شغال دلوقتي أو ASAP، مش "مؤكّد ومستني يوم مستقبلي".
   /**
    * تضييق تاني (docs/08 §56 بند 4، بلاغ مالك 2026-08-25): "الشغل الحالي" لازم يكون **الشغلانة
-   * اللي شغّالة فعلاً** بس، واحدة. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
+   * اللي شغّالة فعلاً** بس. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
    * `accepted` معاده وصل "نشط" — يعني لو الفني عنده شغل النهاردة مقبول وشغل متأخر من إمبارح،
    * `findOne` كان بيرجّع واحد منهم بالعشوائي (`updatedAt DESC`) والتاني **بيختفي من الشاشة
    * تمامًا** (مش في `upcoming` كمان لأنها كانت `MoreThan(now)`). دلوقتي "حالي" = الفني متحرّك
    * فعليًا (`ENGAGED_TECHNICIAN_ORDER_STATUSES`، نفس تعريف "منشغل جسديًا" اللي محرك الأهلية
    * بيستخدمه بالحرف) أو طلب ASAP (بالتعريف دلوقتي حالاً). الباقي بيتوزّع على "قدامك"/"متأخر".
    */
-  async findActiveForTechnician(userId: string): Promise<Order | null> {
+  async findActiveOrdersForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders.findOne({
+    return this.orders.find({
       where: [
         { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
         { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
       ],
       order: { updatedAt: 'DESC' },
     });
+  }
+
+  /**
+   * توافق خلفي للنسخ القديمة من تطبيق الفني: المسار القديم بيرجّع طلب واحد فقط. المصدر الحقيقي
+   * بقى القائمة فوق، عشان الطلبات المتزامنة ما تختفيش من النسخ الجديدة.
+   */
+  async findActiveForTechnician(userId: string): Promise<Order | null> {
+    const orders = await this.findActiveOrdersForTechnician(userId);
+    return orders[0] ?? null;
   }
 
   /**
@@ -2660,7 +3172,9 @@ export class OrdersService {
     return this.orders
       .createQueryBuilder('o')
       .where('o.technician_id = :technicianId', { technicianId: profile.id })
-      .andWhere('o.order_status IN (:...statuses)', { statuses: ACTIVE_TECHNICIAN_ORDER_STATUSES })
+      // بمجرد ما الفني يبدأ التحرك، الطلب ينتقل لقسم "الشغل الحالي" حتى لو كان مجدولًا؛ إبقاؤه
+      // هنا كان يعرض نفس الطلب مرتين. القادم المؤكد هو المقبول الذي لم يبدأ تنفيذه فقط.
+      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
       .andWhere('o.scheduled_at IS NOT NULL')
       .andWhere(`${OrdersService.CAIRO_DAY_EXPR} >= ${OrdersService.CAIRO_TODAY_EXPR}`)
       .orderBy('o.scheduled_at', 'ASC')
@@ -2905,15 +3419,28 @@ export class OrdersService {
       }
       const previousStatus = order.orderStatus;
       const previousScheduledAt = order.scheduledAt;
-      const newScheduledAt = new Date(`${newSlot.slotDate}T${newSlot.startTime}Z`);
+      const newScheduledAt = this.slotStart(newSlot);
       await this.dataSource.transaction(async (manager) => {
         const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+        const interval = this.resolveRescheduledInterval(fresh, newScheduledAt);
+        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+            HttpStatus.CONFLICT,
+          );
+        }
         const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
         if (!booked) {
           throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
         }
         fresh.orderStatus = OrderStatus.ACCEPTED;
         fresh.scheduledAt = newScheduledAt;
+        fresh.scheduledEndAt = interval.scheduledEndAt;
+        fresh.durationMinutes = interval.durationMinutes;
+        fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+          ? interval.durationMinutes / 60
+          : null;
         await manager.save(fresh);
         await manager.save(
           manager.create(OrderStatusHistory, {

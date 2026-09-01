@@ -13,6 +13,7 @@ import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity'
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { REFUND_RESOLVED_EVENT } from '../../common/events/refund-resolved.event';
 
 // اختبار حي ضد Postgres حقيقي — بند 6/§20.7 من تدقيق التسوية المالية: عميل بيلغي بنفسه (مش
 // النظام) طلب مدفوع مسبقًا إلكترونيًا (كارت/InstaPay، ADR-0013) قبل ما فني يتعيّن أو بعده قبل
@@ -25,6 +26,7 @@ import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 describe('OrdersService.cancel() — استرداد تلقائي لطلب مدفوع مسبقًا اتلغى من العميل نفسه (docs/08 §20.7)', () => {
   let dataSource: DataSource;
   let service: OrdersService;
+  let paymentEvents: { emit: jest.Mock };
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -142,6 +144,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     );
     ids.address = address.id;
 
+    paymentEvents = { emit: jest.fn() };
     const paymentsService = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
@@ -158,7 +161,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       {} as never, // loyaltyService
       {} as never, // settingsService
       { record: async () => undefined } as never, // auditLog
-      { emit: () => undefined } as never, // events
+      paymentEvents as never,
       { getProvider: () => makeFakeProvider() } as never, // paymentProviders
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
@@ -234,6 +237,16 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const [refundRow] = await dataSource.query(`SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1`, [orderId]);
     expect(refundRow.amount_cents).toBe(30000);
     expect(refundRow.refund_status).toBe('completed');
+    expect(paymentEvents.emit).toHaveBeenCalledWith(
+      REFUND_RESOLVED_EVENT,
+      expect.objectContaining({
+        orderId,
+        customerProfileId: ids.customerProfile,
+        amountCents: 30000,
+        status: 'completed',
+        method: 'original_method',
+      }),
+    );
   });
 
   it('العميل يلغي طلب مدفوع (كارت) بعد تعيين فني بس قبل بدء الشغل (ACCEPTED) — يترد تلقائيًا برضه (صفر تسوية أرباح فني تحتاج عكس، لسه ما بدأش شغل)', async () => {

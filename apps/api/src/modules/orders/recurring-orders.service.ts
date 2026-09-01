@@ -15,6 +15,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PricingModel } from '../catalog/entities/service.entity';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
@@ -27,6 +28,7 @@ import { OrdersService } from './orders.service';
 const SWEEP_INTERVAL_MS = 60_000;
 const SWEEP_BATCH_SIZE = 25;
 const CLAIM_LEASE_MS = 5 * 60_000;
+const MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK = 96;
 
 // docs/08 §19 بند 20 — عدد محاولات إعادة توليد نفس الموعد (كل محاولة = دورة sweep، فحوالي 3
 // دقايق إجمالاً) قبل ما نستسلم ونعتبره "dead letter" — كافي لفشل مؤقت (DB/شبكة) يتعافى لوحده،
@@ -163,10 +165,10 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
-    if (service.pricingModel === PricingModel.PER_UNIT && dto.pricing_quantity == null) {
+    if ((service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) && dto.pricing_quantity == null) {
       throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
     }
-    if (service.pricingModel !== PricingModel.PER_UNIT && dto.pricing_quantity != null) {
+    if (service.pricingModel !== PricingModel.PER_UNIT && service.pricingModel !== PricingModel.MONTHLY && dto.pricing_quantity != null) {
       throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
     }
 
@@ -212,6 +214,16 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'أول موعد تنفيذ لازم يكون في المستقبل', HttpStatus.BAD_REQUEST);
     }
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: startsAt,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      bookingMode: dto.booking_mode,
+      recurringMetadata: { frequency: dto.frequency },
+    });
+
     const template = this.templates.create({
       customerId: customerProfile.id,
       serviceId: dto.service_id,
@@ -221,8 +233,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
-      pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
+      pricingQuantity:
+        service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
+          ? String(dto.pricing_quantity)
+          : null,
       durationHours: dto.duration_hours ?? null,
+      durationMinutes: pricingContext.durationMinutes,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
       problemDescription: dto.problem_description ?? null,
       paymentMethod: dto.payment_method ?? null,
@@ -328,11 +344,32 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async materializeDueOccurrences(limit: number, templateIds?: string[]): Promise<void> {
+    const [{ lead_hours: rawLeadHours } = { lead_hours: MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK }] =
+      await this.templates.manager.query<{ lead_hours: number }[]>(
+        `SELECT COALESCE(
+           (SELECT CASE
+              WHEN jsonb_typeof(value) = 'number' THEN (value #>> '{}')::numeric
+              WHEN jsonb_typeof(value) = 'string'
+                AND (value #>> '{}') ~ '^[0-9]+([.][0-9]+)?$'
+                THEN (value #>> '{}')::numeric
+              ELSE NULL
+            END
+            FROM settings
+            WHERE key = 'recurring.materialization_lead_time_hours'),
+           $1::numeric
+         )::float AS lead_hours`,
+        [MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK],
+      );
+    const parsedLeadHours = Number(rawLeadHours);
+    const leadHours = Number.isFinite(parsedLeadHours)
+      ? Math.max(0, Math.min(24 * 365, parsedLeadHours))
+      : MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK;
     await this.templates.manager.query(
       `WITH due AS (
          SELECT id, next_run_at
          FROM recurring_order_templates
-         WHERE is_active = true AND deleted_at IS NULL AND next_run_at <= now()
+         WHERE is_active = true AND deleted_at IS NULL
+           AND next_run_at <= now() + ($3::double precision * interval '1 hour')
            AND ($2::uuid[] IS NULL OR id = ANY($2))
          ORDER BY next_run_at, id
          LIMIT $1
@@ -341,7 +378,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
        INSERT INTO recurring_order_occurrences (template_id, scheduled_for)
        SELECT id, next_run_at FROM due
        ON CONFLICT (template_id, scheduled_for) DO NOTHING`,
-      [limit, templateIds ?? null],
+      [limit, templateIds ?? null, leadHours],
     );
   }
 
@@ -465,14 +502,23 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requested_technician_id: template.requestedTechnicianId ?? undefined,
       requested_technician_company_id: template.requestedTechnicianCompanyId ?? undefined,
       problem_description: template.problemDescription ?? undefined,
+      // occurrence.scheduledFor هو الموعد التجاري الحقيقي، مش metadata فقط. بدونه كان الطلب
+      // المتكرر يتحول إلى ASAP ويأخذ رسوم/مطابقة نفس اليوم بالخطأ.
+      scheduled_at: occurrence.scheduledFor.toISOString(),
       // مدخلات التسعير/التوقيت المحفوظة مع القالب (migration 0176) — **مدخلات مش سعر**: القيمة
       // الفعلية بيتحسبها محرك التسعير الحي جوّه OrdersService.create() وقت التوليد بالظبط، فتغيير
       // أسعار/قواعد الخدمة بيأثر على الطلبات الجديدة بس، والطلبات المتولّدة فعلاً بتحتفظ بـsnapshot
       // سعرها العادي زي أي طلب.
       field_values: template.fieldValues ?? undefined,
       pricing_quantity: template.pricingQuantity == null ? undefined : Number(template.pricingQuantity),
-      duration_hours: template.durationHours ?? undefined,
-      scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : undefined,
+      duration_hours:
+        template.durationMinutes == null
+          ? (template.durationHours ?? undefined)
+          : template.durationMinutes / 60,
+      scheduled_end_at:
+        template.scheduledEndAt && template.durationMinutes != null
+          ? new Date(occurrence.scheduledFor.getTime() + template.durationMinutes * 60_000).toISOString()
+          : undefined,
       // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،
       // فكل طلب متولّد من قالب متكرر كان non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء
       // القالب. لو الطلب المتولّد بقى PENDING_PAYMENT، sweepPendingPayment() (docs/08 §19 بند

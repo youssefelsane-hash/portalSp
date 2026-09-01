@@ -35,7 +35,11 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
+  /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
+  duration_minutes: number | null;
   estimated_price_cents: number | null;
+  initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
+  initial_quote_note: string | null;
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
   surge_amount_cents: number;
@@ -73,6 +77,13 @@ export interface OrderResponseDto {
   warranty_expires_at: string | null;
   /** موجود بس لو الطلب "إعادة زيارة" (order_type=revisit) — بيشاور على الطلب الأصلي (عمود parent_order_id داخليًا). */
   original_order_id: string | null;
+
+  // ADR-0051 (docs/08 §96) — حالة تثبيت إعادة الزيارة على الفني الأصلي. الأدمن محتاج يشوف إن
+  // الطلب إعادة زيارة **ورايح لمين** بالظبط، وهل اتحرّر للتوزيع العام ولا لسه.
+  revisit_pinned_technician_id: string | null;
+  revisit_pinned_at: string | null;
+  revisit_released_at: string | null;
+  revisit_release_reason: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
   /** موجود بس لو الطلب اتولّد تلقائيًا من خطة حجز متكرر (migration 0124) — بيشاور على الخطة
@@ -164,7 +175,10 @@ export function toOrderResponseDto(
     customer_inputs: order.customerInputs ?? null,
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
+    duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
     estimated_price_cents: order.estimatedPriceCents,
+    initial_quote_source: order.initialQuoteSource,
+    initial_quote_note: order.initialQuoteNote,
     inspection_fee_cents: order.inspectionFeeCents,
     surge_amount_cents: order.surgeAmountCents,
     level_premium_cents: order.levelPremiumCents,
@@ -188,6 +202,10 @@ export function toOrderResponseDto(
     created_at: order.createdAt.toISOString(),
     warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
     original_order_id: order.parentOrderId,
+    revisit_pinned_technician_id: order.revisitPinnedTechnicianId,
+    revisit_pinned_at: order.revisitPinnedAt ? order.revisitPinnedAt.toISOString() : null,
+    revisit_released_at: order.revisitReleasedAt ? order.revisitReleasedAt.toISOString() : null,
+    revisit_release_reason: order.revisitReleaseReason,
     building_id: order.buildingId,
     recurring_template_id: order.recurringTemplateId,
     recurring_occurrence_at: order.recurringOccurrenceAt ? order.recurringOccurrenceAt.toISOString() : null,
@@ -219,18 +237,25 @@ export function toOrderResponseDto(
 }
 
 /**
- * نسخة الفني من عقد الطلب (docs/08 §60.2، طلب مالك صريح).
+ * نسخة الفني من عقد الطلب (docs/08 §60.2، طلب مالك صريح — مُحدَّثة بقاعدة §108-B).
  *
- * **القاعدة**: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
- * أي حاجة اتدفعت أونلاين بتوصله كواقعة («مدفوع») من غير رقم، لأن الرقم فيه نصيب الشركة والضمان
- * والرسوم ودي مش شغله. ومفيش أي تفصيل لتكوين السعر (سعر تقديري/معاينة/طوارئ/خصم/ضمان/إيداع) —
- * «هو بيبان عادي جدًا المبلغ … والشركة بتتصرف».
+ * **القاعدة الأصلية**: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه
+ * هو. أي حاجة اتدفعت أونلاين بتوصله كواقعة («مدفوع») من غير رقم، لأن الرقم فيه نصيب الشركة
+ * والضمان والرسوم ودي مش شغله. ومفيش أي تفصيل لتكوين السعر (سعر تقديري/معاينة/طوارئ/خصم/ضمان/
+ * إيداع) — «هو بيبان عادي جدًا المبلغ … والشركة بتتصرف».
+ *
+ * **قاعدة §108-B (بلاغ مالك صريح لاحق، فرض من أساسه)** — الشفافية المالية للطاقم:
+ * - كاش بالكامل أو أونلاين بالكامل → **محدّش** يشوف الإجمالي (`total_amount_cents`)، كل واحد
+ *   يشوف نصيبه بس. (الاستثناء القديم اللي كان بيظهّر الإجمالي وقت الكاش الكامل اتشال —
+ *   `cash_to_collect_cents` بيغطي نفس الاحتياج للقائد/الوحيد أصلًا من غير ما نسمّي الحقل حرفيًا
+ *   "إجمالي".)
+ * - عربون أونلاين (والباقي كاش) → **القائد فقط (أو الفني الوحيد لو مفيش طاقم)** يشوف
+ *   `cash_to_collect_cents` الحقيقي؛ أي عضو تاني في الطاقم بياخد صفر هنا (مش شغله يحصّل حاجة)
+ *   — الفلترة بتتم في `PaymentsService.getTechnicianMoneyView()`، مش هنا ولا في التطبيق.
  *
  * الإخفاء بيتم هنا في الباك-إند عمدًا: لو سيبنا الأرقام تخرج واعتمدنا على التطبيق إنه ما يعرضهاش،
- * أي حد يفتح الـAPI بتوكن فني يقراها. الحقول دي **ما بتخرجش على السلك** أصلًا.
- *
- * `total_amount_cents` استثناء مشروط: لما مفيش أي دفع أونلاين، الإجمالي = الكاش اللي هيحصّله
- * بالظبط، فإخفاؤه مالوش معنى («لو كله كاش فالكل بيبان» — نص المالك).
+ * أي حد يفتح الـAPI بتوكن فني يقراها. الحقول دي **ما بتخرجش على السلك** أصلًا — `total_amount_
+ * cents` بقى مش موجود خالص في نسخة الفني (مش استثناء مشروط زي الأول).
  */
 export interface TechnicianOrderResponseDto
   extends Omit<
@@ -251,8 +276,11 @@ export interface TechnicianOrderResponseDto
     | 'installment_outstanding_cents'
     | 'amount_due_to_technician_cents'
   > {
-  /** الكاش المطلوب تحصيله من العميل دلوقتي. بيفضل ظاهر دايمًا — الفني محتاجه. */
+  /** المطلوب تحصيله من العميل كاش. صفر لأي عضو طاقم مش القائد (docs/08 §108-B) — القائد
+   * (أو الفني الوحيد لو مفيش طاقم) بس اللي بيشوف الرقم الحقيقي، هو اللي فعليًا بيحصّله. */
   cash_to_collect_cents: number;
+  /** الكاش الذي حصّله الفني بالفعل واتسجل في تسوية الطلب. صفر لأي عضو طاقم مش القائد (نفس السبب). */
+  cash_collected_cents: number;
   /** نصيب الفني من الطلب (بعد نسبة الشركة). ظاهر دايمًا، بلا شرح لتكوينه. */
   my_earning_cents: number;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
@@ -263,14 +291,13 @@ export interface TechnicianOrderResponseDto
   earning_pending: boolean;
   /** الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040). */
   is_crew_share: boolean;
-  /** الإجمالي — موجود بس لما مفيش أي دفع أونلاين (وقتها هو نفسه الكاش المطلوب تحصيله). */
-  total_amount_cents?: number;
 }
 
 export function toTechnicianOrderResponseDto(
   base: OrderResponseDto,
   money: {
     cashToCollectCents: number;
+    cashCollectedCents?: number;
     myEarningCents: number;
     hasOnlinePayment: boolean;
     fullyPaidOnline: boolean;
@@ -279,7 +306,7 @@ export function toTechnicianOrderResponseDto(
   },
 ): TechnicianOrderResponseDto {
   const {
-    total_amount_cents,
+    total_amount_cents: _totalAmount,
     estimated_price_cents: _estimated,
     inspection_fee_cents: _inspection,
     surge_amount_cents: _surge,
@@ -300,12 +327,15 @@ export function toTechnicianOrderResponseDto(
   return {
     ...visible,
     cash_to_collect_cents: money.cashToCollectCents,
+    cash_collected_cents: money.cashCollectedCents ?? 0,
     my_earning_cents: money.myEarningCents,
     // docs/08 §64.ب — «لسه ما اتحددش» غير «صفر». التطبيق بيكتب نص مختلف تمامًا للحالتين.
     earning_pending: money.earningPending ?? false,
     is_crew_share: money.isCrewShare ?? false,
     has_online_payment: money.hasOnlinePayment,
     fully_paid_online: money.fullyPaidOnline,
-    ...(money.hasOnlinePayment ? {} : { total_amount_cents }),
+    // docs/08 §108-B — total_amount_cents بقى مخفي دايمًا لنسخة الفني، بلا استثناء الكاش الكامل
+    // القديم. `cash_to_collect_cents` فوق بيغطي نفس احتياج القائد/الوحيد من غير ما يسمّي الرقم
+    // "إجمالي الطلب" حرفيًا لعضو طاقم ممكن ميكونش المفروض يشوفه.
   };
 }

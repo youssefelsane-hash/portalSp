@@ -61,6 +61,7 @@ describe('CatalogService.findMostRequestedCategories (docs/08 §77-E2)', () => {
     service = Object.create(CatalogService.prototype) as CatalogService;
     Object.assign(service, {
       categories: dataSource.getRepository(ServiceCategory),
+      services: dataSource.getRepository(Service),
       settingsService: { getNumber: async (_k: string, fallback: number) => fallback },
     });
 
@@ -109,6 +110,15 @@ describe('CatalogService.findMostRequestedCategories (docs/08 §77-E2)', () => {
     expect(order.indexOf(ids.hot)).toBeGreaterThanOrEqual(0);
     expect(order.indexOf(ids.cold)).toBeGreaterThanOrEqual(0);
     expect(order.indexOf(ids.hot)).toBeLessThan(order.indexOf(ids.cold));
+  });
+
+  it('الأكثر طلبًا للخدمات يرجع الشغلانة نفسها لا القسم العام', async () => {
+    const result = await service.findMostRequestedServices(200);
+    const order = result.map((item) => item.id);
+    expect(order).toContain(ids.hotSvc);
+    expect(order).toContain(ids.coldSvc);
+    expect(order).not.toContain(ids.hot);
+    expect(order.indexOf(ids.hotSvc)).toBeLessThan(order.indexOf(ids.coldSvc));
   });
 
   // ده جوهر البند: فئة مميّزة يدويًا بلا أي طلبات مش «الأكثر طلبًا».

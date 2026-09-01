@@ -3,12 +3,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { BadgeDollarSign, CheckCircle2, ClipboardList, WalletCards } from 'lucide-react';
 import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { ProfileSummary } from '@/components/profile-summary';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -237,12 +239,12 @@ export default function CustomerDetailPage() {
     );
   }
 
+  const completionRate = detail.total_orders_count > 0
+    ? Math.round((detail.completed_orders_count / detail.total_orders_count) * 100)
+    : 0;
+
   return (
     <AppShell>
-      <Button variant="ghost" size="sm" className="mb-4" onClick={goBack}>
-        رجوع للقايمة
-      </Button>
-
       <PageHeader
         title={
           <>
@@ -255,9 +257,52 @@ export default function CustomerDetailPage() {
             {detail.is_high_risk && <Badge variant="outline">عالي المخاطر</Badge>}
           </>
         }
+        description={
+          <span>
+            ملف العميل التشغيلي والمالي <span dir="ltr">{detail.phone_number}</span>
+          </span>
+        }
+        actions={
+          <Button variant="outline" onClick={goBack}>
+            رجوع للقايمة
+          </Button>
+        }
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      <ProfileSummary
+        items={[
+          {
+            label: 'إجمالي الطلبات',
+            value: detail.total_orders_count,
+            hint: `${detail.completed_orders_count} مكتملة · ${detail.cancelled_orders_count} ملغاة`,
+            icon: ClipboardList,
+            tone: 'primary',
+          },
+          {
+            label: 'نسبة الإكمال',
+            value: `${completionRate}%`,
+            hint: detail.total_orders_count ? 'من كل طلبات العميل' : 'لا توجد طلبات بعد',
+            icon: CheckCircle2,
+            tone: 'success',
+          },
+          {
+            label: 'إجمالي الإنفاق',
+            value: formatEgp(detail.total_spent_cents),
+            hint: `الفئة: ${TIER_LABELS[detail.customer_tier]}`,
+            icon: BadgeDollarSign,
+            tone: 'warning',
+          },
+          {
+            label: 'رصيد المحفظة',
+            value: wallet ? formatEgp(wallet.wallet.balance_cents) : '…',
+            hint: `${detail.loyalty_points_balance} نقطة ولاء`,
+            icon: WalletCards,
+            tone: wallet && wallet.wallet.balance_cents < 0 ? 'warning' : 'neutral',
+          },
+        ]}
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

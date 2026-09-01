@@ -1,6 +1,31 @@
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 /**
+ * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
+ * ما جابش إن هو شغول». التشخيص الحي كشف السبب الجذري: كل استعلامات التعارض/القدرة الاستيعابية
+ * تحت كانت بتفحص `orders.technician_id = X` بس — يعني **التزام الشخص كقائد طلب**. الشخص لما
+ * يكون عضو طاقم (مساعد أو فني إضافي، `order_team_members`) على طلب حد تاني، التزامه ده **غير
+ * مرئي تمامًا** لكل محرك الجدولة/القدرة الاستيعابية، لأنه مش `orders.technician_id` أصلاً. ده
+ * كان بيخلي أي مساعد (اللي بطبيعته دايمًا عضو طاقم مش قائد) شفاف تمامًا لفحص التعارض — بالظبط
+ * سيناريو المالك.
+ *
+ * الدالة دي بترجّع FROM-source بديل لـ`orders X`: كل الطلبات اللي الشخص ملتزم بيها فعليًا، سواء
+ * قائد (`orders.technician_id`) أو عضو طاقم (`order_team_members.technician_id`)، بـUNION (مش
+ * UNION ALL — لو ظهر نفس الطلب من المصدرين بالغلط، صف واحد بس مايتضاعفش التأثير). العمود
+ * `${alias}.id`/`.deleted_at`/`.order_status`/... كلهم بيفضلوا شغالين زي ما هما لأن `SELECT
+ * ${alias}.*` بترجع كل أعمدة `orders` الحقيقية بلا استثناء.
+ */
+function technicianCommittedOrdersSource(technicianIdExpr: string, alias: string): string {
+  return `(
+        SELECT ${alias}.* FROM orders ${alias} WHERE ${alias}.technician_id = ${technicianIdExpr}
+        UNION
+        SELECT ${alias}.* FROM orders ${alias}
+        JOIN order_team_members ${alias}_otm ON ${alias}_otm.order_id = ${alias}.id
+        WHERE ${alias}_otm.technician_id = ${technicianIdExpr}
+      ) ${alias}`;
+}
+
+/**
  * شرط SQL موحّد لتوافر الفني وقت طلب معيّن — المصدر الوحيد المستخدم حرفيًا في الأماكن الثلاثة
  * اللي بتسأل نفس السؤال ("الفني ده يقدر ياخد الطلب ده فعليًا؟"): matching.service.ts (التوزيع
  * الفعلي)، technicians.service.ts (قايمة اختيار العميل اليدوي)، وtechnician-assignment-guard
@@ -140,8 +165,8 @@ function activeOrderConflictExistsExpr(opts: {
       (
         ${isEmergencyParam}::boolean IS TRUE
         AND EXISTS (
-          SELECT 1 FROM orders bo
-          WHERE bo.technician_id = ${technicianIdExpr} AND bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'bo')}
+          WHERE bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
             AND bo.order_status = ANY(${engagedStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
         )
       )
@@ -153,9 +178,9 @@ function activeOrderConflictExistsExpr(opts: {
       (
         ${isEmergencyParam}::boolean IS NOT TRUE
         AND EXISTS (
-          SELECT 1 FROM orders co
+          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'co')}
           JOIN services cs ON cs.id = co.service_id
-          WHERE co.technician_id = ${technicianIdExpr} AND co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+          WHERE co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
             AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
             AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
                 = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
@@ -166,10 +191,10 @@ function activeOrderConflictExistsExpr(opts: {
                 ${scheduledAtParam}::timestamptz IS NOT NULL
                 AND (${preciseDurationHoursExpr}) IS NOT NULL
                 AND co.scheduled_at IS NOT NULL
-                AND co.duration_hours IS NOT NULL
+                AND COALESCE(co.duration_minutes, co.duration_hours * 60) IS NOT NULL
                 AND co.scheduled_at < ${scheduledAtParam}::timestamptz
                     + ((${preciseDurationHoursExpr}) || ' hours')::interval
-                AND co.scheduled_at + (co.duration_hours || ' hours')::interval
+                AND co.scheduled_at + (COALESCE(co.duration_minutes, co.duration_hours * 60) || ' minutes')::interval
                     > ${scheduledAtParam}::timestamptz
               )
               OR
@@ -179,7 +204,7 @@ function activeOrderConflictExistsExpr(opts: {
                 AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
               )
               OR COALESCE(co.estimated_duration_days, 0) >= 1
-              OR COALESCE(co.duration_hours, 0) * 60 >= ${fullDayThresholdMinutesParam}::int
+              OR COALESCE(co.duration_minutes, co.duration_hours * 60, 0) >= ${fullDayThresholdMinutesParam}::int
               OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
               OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
             )
@@ -278,9 +303,9 @@ export async function classifyTechnicianCapacity(
       LIMIT 1
     ),
     heavy AS (
-      SELECT 1 FROM orders co
+      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}
       JOIN services cs ON cs.id = co.service_id, target
-      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+      WHERE co.id IS DISTINCT FROM $3::uuid
         AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
         AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
         AND (
@@ -295,8 +320,8 @@ export async function classifyTechnicianCapacity(
       LIMIT 1
     ),
     meaningful AS (
-      SELECT 1 FROM orders co, target
-      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}, target
+      WHERE co.id IS DISTINCT FROM $3::uuid
         AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
         AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
       LIMIT 1
@@ -375,8 +400,8 @@ export async function describeTechnicianCapacity(
   >(
     `SELECT o.order_number, o.estimated_duration_days, o.order_status,
             TO_CHAR((COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM-DD') AS scheduled_at_date
-     FROM orders o
-     WHERE o.technician_id = $1 AND o.deleted_at IS NULL
+     FROM ${technicianCommittedOrdersSource('$1', 'o')}
+     WHERE o.deleted_at IS NULL
        AND o.order_status = ANY($3::order_status[])
        AND (COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = $2::date
      ORDER BY COALESCE(o.estimated_duration_days, 0) DESC
@@ -424,7 +449,7 @@ export async function describeTechnicianCapacity(
  * بقى خطر حقيقي: تطبيقه على تمنية من تسعة معناه إن الفني المحجوب يفضل بيوصله الشغل من المسار
  * المنسي، **والأدمن شايف في الواجهة إنه محجوب** — تسريب صامت أسوأ من عدم بناء الميزة أصلاً.
  *
- * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض:
+ * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض، لنفس الشخص سواء شغال في الطلب كفني أو مساعد:
  *  1. **مؤهّل**: صف خدمة مباشر معتمد، أو اعتماد الفئة كلها.
  *  2. **مش محجوب**: مفيش صف في `technician_excluded_services` للفني/الخدمة دول.
  */
@@ -441,6 +466,13 @@ export function technicianServiceQualificationCondition(opts: {
    */
   directServiceAlias?: string;
 }): string {
+  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
+  const notExcluded = `NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )`;
+
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
     : `EXISTS (
@@ -460,11 +492,53 @@ export function technicianServiceQualificationCondition(opts: {
               AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
           )
         )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. قائمة حجب: غياب الصف = مسموح، فالشرط
-        -- ده مالوش أي أثر لحد ما الأدمن يحجب فعلاً.
-        AND NOT EXISTS (
-          SELECT 1 FROM technician_excluded_services tes
-          WHERE tes.technician_id = ${opts.technicianIdExpr}
-            AND tes.service_id = ${opts.serviceIdExpr}
+        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
+        AND ${notExcluded}`;
+}
+
+/**
+ * هل الشخص مخدوم له نفس **مدينة** نطاق الطلب؟
+ *
+ * المساعد يقدر يتحرك بين كل نطاقات المدينة الواحدة حتى لو الأدمن عيّن له نطاقًا واحدًا فقط،
+ * لكن لا يتسرّب من مدينة لمدينة (القاهرة لا تظهر لطلب الإسكندرية). المسافة تظل عامل ترتيب بعد
+ * هذا الحاجز، وليست بديلًا عنه. الدالة مشتركة بين العرض التلقائي، المساعد الشخصي، الضم اليدوي
+ * وحارس التنفيذ حتى لا تختلف القائمة عن قرار الحفظ الفعلي.
+ */
+export function technicianCityCoverageCondition(opts: {
+  technicianIdExpr: string;
+  requestedServiceZoneIdExpr: string;
+}): string {
+  return `EXISTS (
+          SELECT 1
+          FROM technician_zones city_tz
+          JOIN service_zones technician_zone ON technician_zone.id = city_tz.service_zone_id
+          JOIN service_zones requested_zone ON requested_zone.id = ${opts.requestedServiceZoneIdExpr}
+          WHERE city_tz.technician_id = ${opts.technicianIdExpr}
+            AND city_tz.is_active = true
+            AND city_tz.deleted_at IS NULL
+            AND technician_zone.is_active = true
+            AND technician_zone.deleted_at IS NULL
+            AND requested_zone.is_active = true
+            AND requested_zone.deleted_at IS NULL
+            AND technician_zone.city_id = requested_zone.city_id
         )`;
+}
+
+/**
+ * فلترة على **دور الشخص** — فني كامل ولا مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر).
+ *
+ * **ليه helper منفصل مش شرط جوّه `technicianServiceQualificationCondition`؟** الدالة دي مشتركة
+ * بين مسارات الفني **والمساعد** الاتنين (بث مجمع المساعدين بيستخدمها بالحرف) — حقن شرط "مش مساعد"
+ * جواها كان هيمنع المساعدين من إنهم يبقوا مساعدين، يعني يكسر الميزة نفسها. الفصل ده مقصود، ونفس
+ * شكل `technicianAvailabilityCondition` المُعامَل بالفعل فوق.
+ *
+ * - `'technician'` → مسارات القيادة/التوزيع/اختيار العميل: **المساعدين مستبعدين**.
+ * - `'assistant'` → مجمع المساعدين وضم مساعد لطاقم: **الفنيين مستبعدين** (الاتجاه العكسي).
+ */
+export function technicianKindCondition(opts: {
+  /** تعبير SQL لمعرّف صف الفني، مثلاً `tp` أو `member` (الـalias مش الـid — بنقرا العمود منه). */
+  technicianAlias: string;
+  kind: 'technician' | 'assistant';
+}): string {
+  return `${opts.technicianAlias}.technician_kind = '${opts.kind}'`;
 }

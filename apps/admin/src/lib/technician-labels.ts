@@ -63,3 +63,33 @@ export const NEXT_VERIFICATION_STEP: Partial<Record<TechnicianVerificationStatus
   under_review: { endpoint: 'schedule-interview', label: 'جدولة مقابلة' },
   interview_scheduled: { endpoint: 'mark-test-passed', label: 'تسجيل نجاح الاختبار' },
 };
+
+// ── رمز الدور (docs/08 §107، طلب مالك مباشر) ───────────────────────────────────
+// «جنب كل اسم يبقى فيه رمز مميز — فني FN، مساعد HF — الرمز ده مايبانش لحد غير للأدمن.»
+//
+// الرمز مقصور على `apps/admin` بحكم المكان: مفيش أي endpoint عام بيرجّع `technician_kind`
+// أصلاً (الإثراء بيحصل في المسار الإداري بس — راجع `attachAdminRoleMetadata()` في
+// admin-orders.service.ts والتعليق اللي جنبها)، فمفيش أي طريق يوصل الرمز ده للعميل أو للفني.
+export type TechnicianKindCode = 'technician' | 'assistant';
+
+export const TECHNICIAN_KIND_LABELS: Record<TechnicianKindCode, string> = {
+  technician: 'فني',
+  assistant: 'مساعد',
+};
+
+/** FN = فني · HF = مساعد (اختصار المالك بالحرف). */
+export const TECHNICIAN_KIND_CODES: Record<TechnicianKindCode, string> = {
+  technician: 'FN',
+  assistant: 'HF',
+};
+
+export function technicianKindBadgeClass(kind: TechnicianKindCode): string {
+  return kind === 'assistant'
+    ? 'border-transparent bg-warning-bg text-warning'
+    : 'border-transparent bg-info-bg text-info';
+}
+
+/** نص جاهز لـ`<option>` — العناصر دي نص خام، مش ممكن تستقبل مكوّن Badge. */
+export function technicianKindOptionPrefix(kind: TechnicianKindCode): string {
+  return `[${TECHNICIAN_KIND_CODES[kind]}]`;
+}

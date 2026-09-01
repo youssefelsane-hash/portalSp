@@ -45,17 +45,45 @@ export class TechnicianProgressionCalculationService {
   ): Promise<ProgressionRawMetrics> {
     const [ordersRow] = await this.dataSource.query(
       `
+      WITH participation AS (
+        SELECT o.id, o.order_status,
+               o.platform_commission_cents - COALESCE((
+                 SELECT SUM(rsr.reversal_cents)
+                   FROM refund_settlement_reversals rsr
+                  WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+               ), 0) AS net_platform_commission_cents,
+               o.technician_earning_cents,
+               COALESCE(oes.share_cents, o.technician_earning_cents) AS my_share_cents
+        FROM orders o
+        LEFT JOIN order_earning_shares oes
+          ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+        WHERE o.deleted_at IS NULL
+          AND (oes.technician_id = $1 OR (
+            o.technician_id = $1 AND NOT EXISTS (
+              SELECT 1 FROM order_earning_shares any_share
+              WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+            )
+          ))
+      )
       SELECT
         COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
-        COALESCE(SUM(platform_commission_cents) FILTER (WHERE order_status = 'completed'), 0) AS platform_revenue_cents
-      FROM orders
-      WHERE technician_id = $1 AND deleted_at IS NULL
+        COALESCE(SUM(
+          CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
+            THEN ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents)
+            ELSE 0 END
+        ), 0) AS platform_revenue_cents
+      FROM participation
       `,
       [technicianProfileId],
     );
 
     const [acceptedRow] = await this.dataSource.query(
-      `SELECT COUNT(*) AS accepted_orders_count FROM order_assignments WHERE technician_id = $1 AND assignment_status = 'accepted'`,
+      `SELECT COUNT(DISTINCT order_id) AS accepted_orders_count
+         FROM (
+           SELECT order_id FROM order_assignments WHERE technician_id = $1 AND assignment_status = 'accepted'
+           UNION
+           SELECT order_id FROM order_earning_shares WHERE technician_id = $1 AND deleted_at IS NULL
+         ) accepted_participation`,
       [technicianProfileId],
     );
 

@@ -50,6 +50,7 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 
 /**
  * الدورة الكاملة حي ضد Postgres حقيقي: خطة متكررة → sweep → طلب **عادي** حقيقي عبر
@@ -180,7 +181,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      {} as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -402,6 +403,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     expect(order.total_amount_cents).toBe(30000);
     expect(order.recurring_template_id).toBe(ids.template);
     expect(order.recurring_occurrence_at).not.toBeNull();
+    expect(new Date(order.scheduled_at).getTime()).toBe(new Date(order.recurring_occurrence_at!).getTime());
 
     const [template] = await q(
       `SELECT next_run_at, last_generated_order_id, consecutive_failure_count FROM recurring_order_templates WHERE id = $1`,

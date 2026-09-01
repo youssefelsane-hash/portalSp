@@ -3,6 +3,10 @@ export interface TechnicianLevelConfigResponseDto {
   display_name_ar: string;
   commission_adjustment_percentage: number;
   order_priority_weight: number;
+  crew_share_weight: number;
+  assistant_earning_multiplier: number;
+  earning_weight_bps: number;
+  assistant_ratio_bps: number;
   decision_limit_cents: number | null;
   can_lead_team: boolean;
   eligible_for_team_booking: boolean;
@@ -11,7 +15,6 @@ export interface TechnicianLevelConfigResponseDto {
 
 export interface UpdateTechnicianLevelConfigBody {
   display_name_ar?: string;
-  commission_adjustment_percentage?: number;
   order_priority_weight?: number;
   decision_limit_cents?: number | null;
   can_lead_team?: boolean;

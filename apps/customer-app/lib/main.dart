@@ -4,6 +4,7 @@ import 'core/api_config.dart';
 import 'core/auth_repository.dart';
 import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
+import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/shell/customer_shell.dart';
 import 'features/notifications/floating_notification_alert.dart';
@@ -24,6 +25,10 @@ class BaytakApp extends StatelessWidget {
         title: 'أسطى',
         debugShowCheckedModeBanner: false,
         navigatorKey: rootNavigatorKey,
+        // docs/08 §108-E — بيخلي الزرار العايم للإشعارات يختفي مؤقتًا لما أي dialog/bottom-sheet
+        // يفتح، بدل ما يتغطى فوقها أو يغطّي زرار "موافق" بتاعتها. راجع
+        // NotificationAlertPopupObserver في floating_notification_alert.dart.
+        navigatorObservers: [NotificationAlertPopupObserver()],
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
@@ -31,12 +36,15 @@ class BaytakApp extends StatelessWidget {
           final auth = context.watch<AuthRepository>();
           return Stack(
             children: [
-              child ?? const SizedBox.shrink(),
+              DesktopAppFrame(child: child ?? const SizedBox.shrink()),
               if (auth.isAuthenticated && !auth.biometricUnlockPending)
-                // الغلاف Host مش تفصيلة — هو اللي بيوفّر `Overlay` للويدجت دي، لأن مكانها هنا
-                // (جنب `child` جوّه `MaterialApp.builder`) **بره الـNavigator** فمفيش Overlay
-                // فوقها. راجع FloatingNotificationAlertHost وdocs/08 §59.
-                const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlertHost()),
+                // الزر يظل فوق كل الصفحات، لكنه بلا Overlay أو Hero مستقلين حتى لا يتعارض
+                // مع دورة حياة Navigator عند فتح شاشة جديدة.
+                const PositionedDirectional(
+                  end: 16,
+                  bottom: 88,
+                  child: FloatingNotificationAlertHost(),
+                ),
             ],
           );
         },

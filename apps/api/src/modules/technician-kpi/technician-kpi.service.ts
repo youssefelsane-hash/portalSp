@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -158,9 +158,15 @@ export class TechnicianKpiService {
 
   async getTechnicianSummary(
     technicianId: string,
+    visibleOnly = false,
   ): Promise<{ latest: TechnicianKpiSnapshot | null; history: TechnicianKpiSnapshot[] }> {
     const history = await this.snapshots.find({
-      where: { technicianId },
+      where: visibleOnly
+        ? {
+            technicianId,
+            status: In([KpiSnapshotStatus.APPROVED, KpiSnapshotStatus.PAID, KpiSnapshotStatus.REJECTED]),
+          }
+        : { technicianId },
       order: { periodYear: 'DESC', periodMonth: 'DESC' },
       take: 12,
     });

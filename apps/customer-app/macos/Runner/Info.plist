@@ -26,6 +26,8 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>نستخدم موقعك لاختيار عنوان الخدمة والخدمات المتاحة حولك.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

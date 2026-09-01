@@ -28,6 +28,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
   };
   const settingsValues = new Map<string, unknown>();
   const sentNotifications: { userId: string; titleAr: string; bodyAr: string }[] = [];
+  const originalCampaignStates: Array<{ id: string; is_active: boolean }> = [];
 
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
@@ -102,6 +103,11 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
     ids.address = address.id;
 
     // حملات خاصة بالاختبار — مستقلة عن المزروعة في migration 0207 عشان النتايج تبقى حتمية.
+    // بنحفظ الحالة الأصلية بدل ما نفعّل كل الحملات عمياني في التنظيف؛ الاختبار لازم ما يغيّرش
+    // قرار أدمن موجود في قاعدة التطوير المحلية.
+    originalCampaignStates.push(
+      ...(await q(`SELECT id, is_active FROM notification_campaigns WHERE deleted_at IS NULL`)),
+    );
     await q(`UPDATE notification_campaigns SET is_active = false WHERE deleted_at IS NULL`);
     const [promo] = await q(
       `INSERT INTO notification_campaigns (campaign_type, name, title_template_ar, body_template_ar, cooldown_days, priority)
@@ -162,10 +168,14 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      // الحملات المزروعة اترجعت زي ما كانت — الاختبار عطّلها مؤقتًا بس.
-      await q(`UPDATE notification_campaigns SET is_active = true WHERE deleted_at IS NULL`);
     } finally {
-      if (dataSource?.isInitialized) await dataSource.destroy();
+      try {
+        for (const campaign of originalCampaignStates) {
+          await q(`UPDATE notification_campaigns SET is_active = $2 WHERE id = $1`, [campaign.id, campaign.is_active]);
+        }
+      } finally {
+        if (dataSource?.isInitialized) await dataSource.destroy();
+      }
     }
   });
 
@@ -195,8 +205,18 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
     const mine = sentNotifications.filter((n) => n.userId === ids.customerUser);
     expect(mine).toHaveLength(1);
-    // اسم الخدمة الحقيقي في النص — مش placeholder ولا نص عام.
-    expect(mine[0].titleAr).toContain(`تسليك مواسير ${runId}`);
+    const [loggedService] = await q(
+      `SELECT service.name_ar, service.is_promotable, service.is_active, service.deleted_at
+         FROM notification_campaign_sends send
+         JOIN services service ON service.id = send.service_id
+        WHERE send.user_id = $1
+        ORDER BY send.sent_at DESC
+        LIMIT 1`,
+      [ids.customerUser],
+    );
+    // اسم الخدمة اللي اختيرت عشوائيًا فعلًا ظاهر في النص — مش placeholder ولا نص عام.
+    expect(loggedService).toMatchObject({ is_promotable: true, is_active: true, deleted_at: null });
+    expect(mine[0].titleAr).toContain(loggedService.name_ar);
     // الخدمة اللي مش is_promotable ما تظهرش أبدًا («ممكن تبقى خدمة إحنا ما نظفناهاش»).
     expect(mine[0].bodyAr).not.toContain('خدمة مش جاهزة');
   });
@@ -339,11 +359,21 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
     await service.sweep();
 
     const rows = await q(
-      `SELECT campaign_id, service_id FROM notification_campaign_sends WHERE user_id = $1`,
+      `SELECT send.campaign_id, send.service_id, service.is_promotable, service.is_active, service.deleted_at
+         FROM notification_campaign_sends send
+         JOIN services service ON service.id = send.service_id
+        WHERE send.user_id = $1`,
       [ids.customerUser],
     );
     expect(rows.length).toBeGreaterThanOrEqual(1);
-    // الخدمة اللي اتعلن عنها متسجّلة — من غيرها سؤال "أنهي خدمة بتجيب طلبات؟" مالوش إجابة.
-    expect(rows[0].service_id).toBe(ids.servicePromotable);
+    // الخدمة بتتختار عشوائيًا من كل الكاتالوج الحقيقي، فالمهم إن السجل احتفظ بالخدمة اللي اتبعتت
+    // فعلًا وإنها قابلة للإعلان — مش إنها fixture بعينها.
+    expect(rows[0]).toMatchObject({
+      campaign_id: ids.campaignPromo,
+      is_promotable: true,
+      is_active: true,
+      deleted_at: null,
+    });
+    expect(rows[0].service_id).toEqual(expect.any(String));
   });
 });

@@ -1,0 +1,7 @@
+# مفتاح خرائط Google لتطبيق العميل (Android) — بوابة P0-2 في docs/23.
+#
+# انسخ الملف ده لـ`maps.properties` (غير متتبَّع في git) وحط فيه المفتاح الحقيقي.
+# المفتاح لازم يكون **مقيَّد**: package ID = com.baytak.customer_app، بصمة توقيع Play،
+# وMaps SDK for Android بس. من غير الملف ده الخريطة مش هتحمّل — وده مقصود:
+# أفضل من مفتاح مسرّب شغّال.
+googleMapsApiKey=

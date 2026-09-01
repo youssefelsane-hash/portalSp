@@ -94,12 +94,18 @@ export interface ServiceDto {
   // بانر الخدمة (docs/08 §83 جزء ج) — موجود في رد الباك-إند من زمان (ServiceResponseDto)، مش
   // موصول هنا خالص قبل كده — الفجوة كانت في الـDTO نفسه مش في العرض.
   icon_url: string | null;
-  pricing_model: 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
+  featured_icon_url: string | null;
+  featured_name_ar: string | null;
+  pricing_model: 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote' | 'formula';
   base_price_cents: number;
   inspection_fee_cents: number;
   min_price_cents: number | null;
   max_price_cents: number | null;
   unit_name_ar: string | null;
+  quantity_min: number | null;
+  quantity_max: number | null;
+  quantity_step: number | null;
+  quantity_precision: number;
   estimated_duration_minutes: number | null;
   warranty_days: number;
   requires_photos: boolean;
@@ -138,6 +144,8 @@ export interface PricingFieldDto {
   options: PricingFieldOptionDto[] | null;
   min_value: number | null;
   max_value: number | null;
+  min_files: number | null;
+  max_files: number | null;
 }
 
 export interface PriceEstimateDto {

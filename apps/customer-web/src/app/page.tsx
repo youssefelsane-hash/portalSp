@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { fetchCategories } from '@/lib/catalog';
+import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
 import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
-import { HomepageTipDto, ServiceCategoryDto, SupportContactDto } from '@/lib/api-types';
+import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
@@ -22,9 +22,15 @@ import { HomepageTipDto, ServiceCategoryDto, SupportContactDto } from '@/lib/api
 // فضلت **fallback** بس لحد ما الأدمن يرفع صورة — تدرّجات لونية بهوية العلامة + نمط نقطي خفيف
 // عشان الخلفية متبقاش مسطّحة، بتدور كل 6 ثواني زي الأول بالظبط.
 const HERO_SLIDES = [
-  { background: 'linear-gradient(135deg, #1c3a6e 0%, #2f5aa6 55%, #4d78c4 100%)' },
-  { background: 'linear-gradient(135deg, #0f1115 0%, #22314f 45%, #2f5aa6 100%)' },
-  { background: 'linear-gradient(135deg, #2f5aa6 0%, #4d78c4 50%, #7fa6e0 100%)' },
+  {
+    background: 'linear-gradient(135deg, #1c3a6e 0%, #2f5aa6 55%, #4d78c4 100%)',
+  },
+  {
+    background: 'linear-gradient(135deg, #0f1115 0%, #22314f 45%, #2f5aa6 100%)',
+  },
+  {
+    background: 'linear-gradient(135deg, #2f5aa6 0%, #4d78c4 50%, #7fa6e0 100%)',
+  },
 ];
 
 const HERO_SLIDE_DURATION_MS = 6000;
@@ -38,7 +44,7 @@ const DEFAULT_SEARCH_CONTENT = {
 // نمط نقطي خفيف جدًا (data URI، صفر طلب شبكة إضافي) — نفس فلسفة placeholderSvgDataUri في
 // apps/api/src/modules/branding/branding-defaults.ts (أصل مضمّن في الكود، مش ملف خارجي).
 const HERO_PATTERN =
-  "url(\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuMiIgZmlsbD0iI2ZmZmZmZiIgZmlsbC1vcGFjaXR5PSIwLjA5Ii8+PC9zdmc+\")";
+  'url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuMiIgZmlsbD0iI2ZmZmZmZiIgZmlsbC1vcGFjaXR5PSIwLjA5Ii8+PC9zdmc+")';
 
 // قسم "نصايح مفيدة" أسفل الصفحة (طلب مالك صريح 2026-08-22، تصميم مرجعي: كارت "Popular cost
 // guides" في Angi.com) — **كان placeholder بصري بس** (محتوى ثابت في الكود، `HOME_TIPS` قديمًا) —
@@ -54,7 +60,9 @@ const TIP_FALLBACK_BACKGROUNDS = [
 
 export default function HomePage() {
   const router = useRouter();
+  const heroMediaRef = useRef<HTMLDivElement>(null);
   const [categories, setCategories] = useState<ServiceCategoryDto[] | null>(null);
+  const [mostRequested, setMostRequested] = useState<ServiceDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
@@ -69,6 +77,9 @@ export default function HomePage() {
     fetchCategories()
       .then(setCategories)
       .catch(() => setError('تعذّر تحميل الفئات — حاول تاني'));
+    fetchMostRequestedServices()
+      .then(setMostRequested)
+      .catch(() => {});
     // رسالة الثقة/الضمان ونصايح مفيدة ودعم العملاء — نص/بيانات إدارية بتتغيّر، صفر تأثير على باقي
     // الصفحة لو الجلب فشل (بيسيبوا فاضيين، الأقسام المعتمدة عليهم بتختفي بهدوء تحت).
     fetchHomepageContent()
@@ -98,7 +109,27 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [heroBackgroundUrl, heroImages.length]);
 
-  const featured = categories?.filter((c) => c.is_featured) ?? [];
+  useEffect(() => {
+    const media = heroMediaRef.current;
+    if (!media || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let frame = 0;
+    const updateParallax = () => {
+      frame = 0;
+      const offset = Math.min(window.scrollY, 260) * -0.09;
+      media.style.transform = `translate3d(0, ${offset}px, 0) scale(1.14)`;
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateParallax);
+    };
+    updateParallax();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  const featured = mostRequested;
   const effectiveHeroImages = heroImages.length > 0 ? heroImages : heroBackgroundUrl ? [heroBackgroundUrl] : [];
 
   function submitSearch(e: React.FormEvent) {
@@ -109,51 +140,64 @@ export default function HomePage() {
   return (
     <div>
       <section className="relative isolate overflow-hidden">
-        <div aria-hidden className="absolute inset-0">
-          {effectiveHeroImages.length > 0 ? (
-            effectiveHeroImages.map((url, index) => (
-              // eslint-disable-next-line @next/next/no-img-element -- admin-managed local/S3/CDN URL
-              <img
-                key={url}
-                src={url}
-                alt=""
-                className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
-                style={{ opacity: index === activeSlide ? 1 : 0 }}
-                onError={() => {
-                  if (heroImages.length > 0) setHeroImages((current) => current.filter((item) => item !== url));
-                  else setHeroBackgroundUrl(null);
-                  setActiveSlide(0);
-                }}
-              />
-            ))
-          ) : (
-            HERO_SLIDES.map((slide, i) => (
-              <div
-                key={i}
-                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-                style={{ background: slide.background, backgroundImage: `${HERO_PATTERN}, ${slide.background}`, opacity: i === activeSlide ? 1 : 0 }}
-              />
-            ))
-          )}
+        <div aria-hidden className="absolute inset-0 bg-[#111820]">
+          <div
+            ref={heroMediaRef}
+            className="absolute inset-[-7%] origin-center will-change-transform"
+            style={{ transform: 'translate3d(0, 0, 0) scale(1.14)' }}
+          >
+          {effectiveHeroImages.length > 0
+            ? effectiveHeroImages.map((url, index) => (
+                // eslint-disable-next-line @next/next/no-img-element -- admin-managed local/S3/CDN URL
+                <img
+                  key={url}
+                  src={url}
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
+                  style={{ opacity: index === activeSlide ? 1 : 0 }}
+                  onError={() => {
+                    if (heroImages.length > 0) setHeroImages((current) => current.filter((item) => item !== url));
+                    else setHeroBackgroundUrl(null);
+                    setActiveSlide(0);
+                  }}
+                />
+              ))
+            : HERO_SLIDES.map((slide, i) => (
+                <div
+                  key={i}
+                  className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                  style={{
+                    background: slide.background,
+                    backgroundImage: `${HERO_PATTERN}, ${slide.background}`,
+                    opacity: i === activeSlide ? 1 : 0,
+                  }}
+                />
+              ))}
+          </div>
           {/* تدرّج غامق أسفل الصورة لضمان وضوح النص/الفورم فوقها، سواء صورة حقيقية أو تدرّج fallback */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/20 to-black/5" />
         </div>
 
-        <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
-          <div className="mx-auto max-w-xl rounded-2xl bg-black/35 p-6 text-center text-white shadow-xl backdrop-blur-sm sm:p-8">
-            <p className="text-sm font-medium text-white/80">{searchContent.eyebrow}</p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{searchContent.title}</h1>
-            <p className="mt-2 text-sm text-white/80 sm:text-base">{searchContent.description}</p>
+        <div className="relative mx-auto max-w-5xl px-4 py-14 sm:py-20">
+          <div className="mx-auto max-w-2xl text-center text-white [text-shadow:0_2px_18px_rgb(0_0_0/0.45)]">
+            <p className="mx-auto inline-flex rounded-full border border-white/25 bg-black/20 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-sm">
+              {searchContent.eyebrow}
+            </p>
+            <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-4xl">{searchContent.title}</h1>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-white/85 sm:text-base">{searchContent.description}</p>
 
-            <form onSubmit={submitSearch} className="mx-auto mt-5 max-w-md transition-[max-width] duration-300 ease-out focus-within:max-w-xl">
-              <div className="flex items-center gap-1 rounded-full bg-surface/95 p-1.5 shadow-md transition-all duration-300 focus-within:rounded-2xl focus-within:bg-surface focus-within:shadow-xl">
+            <form onSubmit={submitSearch} className="mx-auto mt-4 max-w-lg transition-transform duration-300 ease-out focus-within:scale-[1.015]">
+              <div className="flex items-center gap-1 rounded-full border border-white/70 bg-surface/95 p-1 shadow-[0_12px_35px_rgb(0_0_0/0.24)] backdrop-blur-md transition-shadow duration-300 focus-within:shadow-[0_16px_45px_rgb(0_0_0/0.32)]">
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={searchContent.placeholder}
-                  className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground outline-none sm:text-base"
+                  className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground outline-none placeholder:text-muted sm:text-[15px]"
                 />
-                <button type="submit" className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.03] hover:opacity-90">
+                <button
+                  type="submit"
+                  className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform hover:scale-[1.03] hover:opacity-90"
+                >
                   بحث
                 </button>
               </div>
@@ -167,12 +211,7 @@ export default function HomePage() {
           {trustMessage && (
             <p className="mt-6 flex items-center justify-center gap-2 text-center text-sm font-medium text-white drop-shadow-md sm:text-base">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0" aria-hidden>
-                <path
-                  d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinejoin="round"
-                />
+                <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
                 <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               {trustMessage}
@@ -181,10 +220,7 @@ export default function HomePage() {
           {effectiveHeroImages.length > 1 && (
             <div className="mt-5 flex justify-center gap-2" aria-label="صور الواجهة الرئيسية">
               {effectiveHeroImages.map((url, index) => (
-                <span
-                  key={url}
-                  className={`h-2 rounded-full bg-white transition-all ${index === activeSlide ? 'w-7' : 'w-2 opacity-55'}`}
-                />
+                <span key={url} className={`h-2 rounded-full bg-white transition-all ${index === activeSlide ? 'w-7' : 'w-2 opacity-55'}`} />
               ))}
             </div>
           )}
@@ -196,21 +232,21 @@ export default function HomePage() {
           <div className="mt-10">
             <h2 className="mb-4 text-lg font-semibold">الأكثر طلبًا</h2>
             <div className="flex flex-wrap gap-x-6 gap-y-4">
-              {featured.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/categories/${c.id}`}
-                  className="group flex w-20 flex-col items-center gap-2 text-center"
-                >
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-surface-variant transition-colors group-hover:bg-primary/10">
-                    {c.icon_url ? (
+              {featured.map((service) => (
+                <Link key={service.id} href={`/services/${service.id}`} className="group flex w-20 flex-col items-center gap-2 text-center">
+                  <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-transparent transition-transform duration-200 group-hover:scale-105">
+                    {service.featured_icon_url || service.icon_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.icon_url} alt="" className="h-8 w-8 object-contain" />
+                      <img src={service.featured_icon_url || service.icon_url || ''} alt="" className="h-full w-full object-contain" />
                     ) : (
-                      <span className="text-lg font-semibold text-primary">{c.name_ar.charAt(0)}</span>
+                      <span className="flex h-full w-full items-center justify-center rounded-full bg-primary/10 text-lg font-semibold text-primary">
+                        {(service.featured_name_ar || service.name_ar).charAt(0)}
+                      </span>
                     )}
                   </span>
-                  <span className="text-xs font-medium leading-tight text-foreground group-hover:text-primary">{c.name_ar}</span>
+                  <span className="text-xs font-medium leading-tight text-foreground group-hover:text-primary">
+                    {service.featured_name_ar || service.name_ar}
+                  </span>
                 </Link>
               ))}
             </div>
@@ -258,7 +294,12 @@ export default function HomePage() {
                     // eslint-disable-next-line @next/next/no-img-element -- رابط خارجي حر بيحطه الأدمن، مش أصل static معروف وقت البناء
                     <img src={tip.image_url} alt={tip.title} className="h-32 w-full object-cover" />
                   ) : (
-                    <div className="h-32 w-full" style={{ background: TIP_FALLBACK_BACKGROUNDS[i % TIP_FALLBACK_BACKGROUNDS.length] }} />
+                    <div
+                      className="h-32 w-full"
+                      style={{
+                        background: TIP_FALLBACK_BACKGROUNDS[i % TIP_FALLBACK_BACKGROUNDS.length],
+                      }}
+                    />
                   )}
                   <div className="p-4">
                     <h3 className="font-semibold">{tip.title}</h3>

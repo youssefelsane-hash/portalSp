@@ -1,16 +1,10 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class UpdateTechnicianLevelConfigDto {
   @IsOptional()
   @IsString()
   @MaxLength(60)
   display_name_ar?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(-100)
-  @Max(100)
-  commission_adjustment_percentage?: number;
 
   @IsOptional()
   @IsInt()

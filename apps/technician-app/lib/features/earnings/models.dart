@@ -15,12 +15,12 @@ class Wallet {
   });
 
   factory Wallet.fromJson(Map<String, dynamic> json) => Wallet(
-        balanceCents: json['balance_cents'] as int,
-        pendingBalanceCents: json['pending_balance_cents'] as int,
-        totalEarnedCents: json['total_earned_cents'] as int,
-        totalWithdrawnCents: json['total_withdrawn_cents'] as int,
-        isFrozen: json['is_frozen'] as bool,
-      );
+    balanceCents: json['balance_cents'] as int,
+    pendingBalanceCents: json['pending_balance_cents'] as int,
+    totalEarnedCents: json['total_earned_cents'] as int,
+    totalWithdrawnCents: json['total_withdrawn_cents'] as int,
+    isFrozen: json['is_frozen'] as bool,
+  );
 }
 
 class WalletTransaction {
@@ -42,7 +42,8 @@ class WalletTransaction {
     required this.createdAt,
   });
 
-  factory WalletTransaction.fromJson(Map<String, dynamic> json) => WalletTransaction(
+  factory WalletTransaction.fromJson(Map<String, dynamic> json) =>
+      WalletTransaction(
         id: json['id'] as String,
         direction: json['direction'] as String,
         transactionType: json['transaction_type'] as String,
@@ -75,15 +76,15 @@ class Payout {
   });
 
   factory Payout.fromJson(Map<String, dynamic> json) => Payout(
-        id: json['id'] as String,
-        payoutNumber: json['payout_number'] as String,
-        amountCents: json['amount_cents'] as int,
-        netAmountCents: json['net_amount_cents'] as int,
-        payoutMethod: json['payout_method'] as String,
-        payoutStatus: json['payout_status'] as String,
-        requestedAt: json['requested_at'] as String,
-        completedAt: json['completed_at'] as String?,
-      );
+    id: json['id'] as String,
+    payoutNumber: json['payout_number'] as String,
+    amountCents: json['amount_cents'] as int,
+    netAmountCents: json['net_amount_cents'] as int,
+    payoutMethod: json['payout_method'] as String,
+    payoutStatus: json['payout_status'] as String,
+    requestedAt: json['requested_at'] as String,
+    completedAt: json['completed_at'] as String?,
+  );
 }
 
 const Map<String, String> payoutStatusLabelsAr = {
@@ -108,16 +109,16 @@ class StatementJob {
   final String orderNumber;
   final String? serviceNameAr;
   final String closedAt;
-  final int originalPriceCents;
-  final int additionalWorkCents;
-  final int levelPremiumCents;
-  final int customerDiscountCents;
-  final int customerPaidCents;
-  final int commissionableBaseCents;
-  final double commissionRatePercentage;
-  final int platformCommissionCents;
-  /// **دايمًا صفر** — بيتعرض صراحةً عشان الفني يشوف بعينه إن الكوبون ما اتخصمش منه.
-  final int discountBorneByTechnicianCents;
+
+  /// دورك في الشغلانة دي — 'leader' لطلب فردي أو لو إنت قائد الفريق، أو 'team_member'/'assistant'
+  /// لو كنت عضو مساند بس (§90.1).
+  final String participantRole;
+
+  /// لو الطلب اتسترد، الجزء اللي اتخصم فعليًا من حصتك رجوعًا للمنصة (§90.1). كل فرد بيتحمل
+  /// عكس حصته الأصلية فقط، سواء كان قائدًا أو عضو فريق أو مساعدًا.
+  final int refundReversalCents;
+  final int grossTechnicianEarningCents;
+  final int cashCollectedCents;
   final int netTechnicianDueCents;
 
   StatementJob({
@@ -125,65 +126,46 @@ class StatementJob {
     required this.orderNumber,
     required this.serviceNameAr,
     required this.closedAt,
-    required this.originalPriceCents,
-    required this.additionalWorkCents,
-    required this.levelPremiumCents,
-    required this.customerDiscountCents,
-    required this.customerPaidCents,
-    required this.commissionableBaseCents,
-    required this.commissionRatePercentage,
-    required this.platformCommissionCents,
-    required this.discountBorneByTechnicianCents,
+    required this.participantRole,
+    required this.refundReversalCents,
+    required this.grossTechnicianEarningCents,
+    required this.cashCollectedCents,
     required this.netTechnicianDueCents,
   });
 
   factory StatementJob.fromJson(Map<String, dynamic> json) => StatementJob(
-        orderId: json['orderId'] as String,
-        orderNumber: json['orderNumber'] as String,
-        serviceNameAr: json['serviceNameAr'] as String?,
-        closedAt: json['closedAt'] as String,
-        originalPriceCents: json['originalPriceCents'] as int? ?? 0,
-        additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
-        levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
-        customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
-        customerPaidCents: json['customerPaidCents'] as int? ?? 0,
-        commissionableBaseCents: json['commissionableBaseCents'] as int? ?? 0,
-        commissionRatePercentage: (json['commissionRatePercentage'] as num?)?.toDouble() ?? 0,
-        platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
-        discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
-        netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
-      );
+    orderId: json['orderId'] as String,
+    orderNumber: json['orderNumber'] as String,
+    serviceNameAr: json['serviceNameAr'] as String?,
+    closedAt: json['closedAt'] as String,
+    participantRole: json['participantRole'] as String? ?? 'leader',
+    refundReversalCents: json['refundReversalCents'] as int? ?? 0,
+    grossTechnicianEarningCents:
+        json['grossTechnicianEarningCents'] as int? ?? 0,
+    cashCollectedCents: json['cashCollectedCents'] as int? ?? 0,
+    netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
+  );
 }
 
 class StatementTotals {
-  final int originalPriceCents;
-  final int additionalWorkCents;
-  final int levelPremiumCents;
-  final int customerDiscountCents;
-  final int customerPaidCents;
-  final int platformCommissionCents;
-  final int discountBorneByTechnicianCents;
+  final int refundReversalCents;
+  final int grossTechnicianEarningCents;
+  final int cashCollectedCents;
   final int netTechnicianDueCents;
 
   StatementTotals({
-    required this.originalPriceCents,
-    required this.additionalWorkCents,
-    required this.levelPremiumCents,
-    required this.customerDiscountCents,
-    required this.customerPaidCents,
-    required this.platformCommissionCents,
-    required this.discountBorneByTechnicianCents,
+    required this.refundReversalCents,
+    required this.grossTechnicianEarningCents,
+    required this.cashCollectedCents,
     required this.netTechnicianDueCents,
   });
 
-  factory StatementTotals.fromJson(Map<String, dynamic> json) => StatementTotals(
-        originalPriceCents: json['originalPriceCents'] as int? ?? 0,
-        additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
-        levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
-        customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
-        customerPaidCents: json['customerPaidCents'] as int? ?? 0,
-        platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
-        discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
+  factory StatementTotals.fromJson(Map<String, dynamic> json) =>
+      StatementTotals(
+        refundReversalCents: json['refundReversalCents'] as int? ?? 0,
+        grossTechnicianEarningCents:
+            json['grossTechnicianEarningCents'] as int? ?? 0,
+        cashCollectedCents: json['cashCollectedCents'] as int? ?? 0,
         netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
       );
 }
@@ -208,13 +190,16 @@ class MonthlyStatement {
     required this.jobs,
   });
 
-  factory MonthlyStatement.fromJson(Map<String, dynamic> json) => MonthlyStatement(
+  factory MonthlyStatement.fromJson(Map<String, dynamic> json) =>
+      MonthlyStatement(
         month: json['month'] as String,
         monthStart: json['monthStart'] as String,
         monthEnd: json['monthEnd'] as String,
         isCurrentMonth: json['isCurrentMonth'] as bool? ?? false,
         jobsCount: json['jobsCount'] as int? ?? 0,
-        totals: StatementTotals.fromJson(json['totals'] as Map<String, dynamic>? ?? {}),
+        totals: StatementTotals.fromJson(
+          json['totals'] as Map<String, dynamic>? ?? {},
+        ),
         jobs: ((json['jobs'] as List<dynamic>?) ?? [])
             .map((j) => StatementJob.fromJson(j as Map<String, dynamic>))
             .toList(),

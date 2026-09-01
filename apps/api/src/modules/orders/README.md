@@ -11,7 +11,7 @@
 - `POST /orders/:id/cancel`: بيتحقق إن الحالة الحالية لسه قابلة للإلغاء من العميل (قبل ما الفني يوصل)، وبيرفض أي محاولة إلغاء تانية على طلب اتلغى قبل كده.
 - `GET /orders`, `GET /orders/:id`: للعميل صاحب الطلب بس.
 - **`TechnicianOrderExecutionController`** (S5) — دورة عمل الفني بعد القبول: `POST /technician/orders/:id/depart|arrive|start|complete`، كل واحدة بتتحقق إن الطلب فعلاً بتاع الفني ده (`order.technicianId`) وإن الانتقال مسموح في الـ state machine قبل ما تسجّله، وبتحدّث عمود التوقيت المناسب (`technician_departed_at`... إلخ). **`GET /technician/orders/:id`** (كانت فجوة موثّقة في `apps/technician-app/README.md`، اتقفلت) — قراءة حالة طلب واحد، عشان الفني يقدر يسترجع مكانه في الدورة لو التطبيق اتقفل في النص.
-- **`GET /technician/orders/active` — كانت فجوة موثّقة في `apps/technician-app/README.md`، اتقفلت**: بيرجّع أقرب طلب للفني الحالي في حالة نشطة (`accepted`/`technician_on_way`/`technician_arrived`/`in_progress`/`awaiting_quote_approval` — `ACTIVE_TECHNICIAN_ORDER_STATUSES` في `order-state-machine.ts`) أو `null` لو مفيش. انتظار قرار العميل على الشغل الإضافي لا يحرر الفني: الطلب وصل له مباشرة من `in_progress` ويرجع لها، والفني ما زال مالك الشغل. الفرق عن `GET /technician/orders/:id`: ده مش محتاج الفني يعرف الـ `id` مقدماً — التطبيق بيناديه لحظة الفتح عشان يقرر يفتح شاشة تنفيذ مباشرة (`OrdersService.findActiveForTechnician`).
+- **`GET /technician/orders/active-orders` — المصدر الحالي لشاشة الفني**: بيرجّع كل طلبات الفني الجارية الآن مرتبة بالأحدث تحديثًا، بدل افتراض طلب واحد وإخفاء الباقي عند وجود طوارئ/أعمال قصيرة متزامنة. `GET /technician/orders/active` ما زال يرجّع أول طلب أو `null` للتوافق مع نسخ التطبيق القديمة، لكنه يفوّض لنفس المصدر الجمعي. الطلب المجدول المقبول الذي لم يبدأ يبقى في `upcoming-confirmed`؛ بمجرد تحرك الفني ينتقل إلى `active-orders` ولا يتكرر في القسمين.
 - **بَقّة routing حقيقية خطيرة اتلقطت واتصلحت وقت بناء `GET /technician/orders/active`**: `MatchingModule` كان بيستورد `OrdersModule` بالكامل من غير أي سبب DI حقيقي (تفاصيل كاملة في `../matching/README.md`) — ده كان بيفرض ترتيب تحميل خلّى `GET /technician/orders/:id` (هنا) يتسجّل في Express **قبل** `GET /technician/orders/available` (في `matching`)، فـ NestJS كان بيطابق `:id` الأول ويرفض `"available"` كـ UUID غلط (`ParseUUIDPipe`). يعني **كل الفنيين مكانوش قادرين يشوفوا الطلبات المتاحة خالص** — بَقّة إنتاجية حقيقية، اتقدّمت من كوميت سابق في نفس الجلسة دي واتلقطت لما اختبار حي جديد فشل بـ"العرض ده مبقاش متاح" رغم الطلب سليم. اتصلحت بشيلين الاستيراد الزايد من `matching.module.ts` وترتيب `MatchingModule` قبل `OrdersModule` في `app.module.ts` (تعليق كامل في الملفين نفسهم).
 - **رفع الصور (`order_media`)**: `POST /technician/orders/:id/media` (multipart, حقل `file` + `media_type`) و `GET /technician/orders/:id/media` (فني بس، `@Roles(TECHNICIAN)`) و **`GET /admin/orders/:id/media`** — الأدمن، نفس `OrderMediaService.listForOrder()` بس بصلاحية مختلفة. التخزين وراه واجهة `StorageService` (`common/storage/`) — كانت `LocalDiskStorageService` بس (تطوير)، دلوقتي `S3StorageService` حقيقي متاح جنبها (presigned URLs، `STORAGE_PROVIDER=s3` — تفاصيل كاملة في `common/storage/README.md`)، التبديل بـ env var واحد من غير أي تعديل كود.
 - **`GET /orders/:id/media` (عميل، جديد — كانت فجوة موثّقة صراحة ضمن تقييم متقدم `docs/08` §9)**: كان فيه endpoint للأدمن وللفني بس مش للعميل صاحب الطلب — يعني العميل مكانش يقدر يشوف صور "قبل/بعد" طلبه أصلاً عشان يختار منها وقت التقييم المتقدم (`after_photo_media_ids` في `CreateRatingDto`). ownership check عبر `findOneOwnedOrThrow(user.sub, id)` قبل أي إرجاع — `404` لغير صاحب الطلب، نفس نمط بقية endpoints العميل. اتأكد حياً: عميل صاحب طلب فعلي بصور "بعد التنفيذ" شافها صح، عميل تاني ملوش علاقة بالطلب جاله `404`.
@@ -168,7 +168,7 @@
 **اكتشاف قبل أي كود**: `orders.warranty_expires_at` و`orders.parent_order_id` **موجودين بالفعل من migration 0007 الأولى** — نفس فئة "أعمدة راكدة" اتكشفت أكتر من مرة في السيشن ده (`customer_profiles.total_orders_count`، `technician_services.completed_count`، إلخ). **مفيش عمود جديد اتضاف في `orders` خالص** — بس تفعيل الموجود + `order_type` قيمة جديدة (`revisit`, migration `0061`).
 
 - **`warranty_expires_at` بيتحسب فعليًا** في `PaymentsService.settleAndComplete()` (نقطة التسوية الوحيدة اللي الطلب بيوصل فيها `COMPLETED`) = `الآن + services.warranty_days` أيام — بس لو `warranty_days > 0`، وإلا بيفضل `null` (مش تاريخ في الماضي مضلّل). `computeSettlement()` بترجع `warrantyDays` كمان دلوقتي (كانت بترجّع بيانات العمولة بس) — نفس استعلام `catalogService.findServiceOrThrow()` الموجود أصلاً، صفر استعلام إضافي.
-- **"إعادة زيارة"** — `POST /orders` بقى ياخد `original_order_id` اختياري (بيتترجم داخليًا لعمود `parent_order_id` الموجود، الاسم في الـ API أوضح دلالياً للعميل). لازم: بتاعة نفس العميل، `order_status=completed`، **نفس `service_id` ونفس `address_id` بالظبط**، و`warranty_expires_at` لسه في المستقبل — أي واحدة من دول غلط بترمي `400`/`404` واضح. `order_type` بيتفرض `revisit` تلقائيًا (بيتجاهل `dto.order_type`)، و`requested_technician_id` بيتفرض لنفس فني الطلب الأصلي (تفضيل مش ضمان، نفس فلسفة "إعادة الحجز" فوق). **مجانية بالكامل** (`estimated/inspection/total = 0`) — كود خصم أو إضافات كتالوج مع إعادة زيارة بيترفضوا بوضوح (`400`) بدل ما يتقبلوا ويعملوا حسابات غريبة على إجمالي صفر.
+- **"إعادة زيارة"** — `POST /orders` بقى ياخد `original_order_id` اختياري (بيتترجم داخليًا لعمود `parent_order_id` الموجود، الاسم في الـ API أوضح دلالياً للعميل). لازم: بتاعة نفس العميل، `order_status=completed`، **نفس `service_id` ونفس `address_id` بالظبط**، و`warranty_expires_at` لسه في المستقبل — أي واحدة من دول غلط بترمي `400`/`404` واضح. `order_type` بيتفرض `revisit` تلقائيًا (بيتجاهل `dto.order_type`)، و`requested_technician_id` بيتفرض لنفس فني الطلب الأصلي. الطلب بيتعرض على الفني الأصلي فورًا كطلب حصري، لكن `scheduled_at` بيتفرض من السيرفر بعد 3 أيام من الإنشاء عشان يقدر يرتب جدوله، والعميل بيتبلّغ إن نافذة الزيارة من 3 أيام لأسبوع. **مجانية بالكامل** (`estimated/inspection/total = 0`) — كود خصم أو إضافات كتالوج مع إعادة زيارة بيترفضوا بوضوح (`400`) بدل ما يتقبلوا ويعملوا حسابات غريبة على إجمالي صفر.
 - **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي — `payWithWallet` كانت هترفض أي طلب مجاني بالكامل**: `WalletsService.doubleEntry()` بترفض أي `amountCents <= 0` بتصميمها (حماية من قيود محفظة فاضية). لطلب `total_amount_cents=0` (إعادة زيارة)، ده كان معناه "الطلب اتقفل شغل (`work_completed`) بس مفيش طريقة يوصل `COMPLETED` خالص" — عالق للأبد لأن أي محاولة دفع (حتى لمبلغ صفر) كانت بترمي استثناء قبل ما توصل `settleAndComplete()`. اتصلحت بحماية نداء `doubleEntry` في `payWithWallet` بـ`if (lockedOrder.totalAmountCents > 0)` — لسه بيسجّل `Payment` وينادي `settleAndComplete()` عادي، بس من غير محاولة تحويل صفر جنيه. `collectCash` مكانتش متأثرة أصلاً (مفيش `doubleEntry` في مسارها المباشر، وتحويل أرباح الفني في `settleAndComplete` نفسه محمي بـ`if (technicianEarningCents > 0)` من زمان).
 - **اتعمله اختبار حي كامل**: خدمة تجريبية `warranty_days=7`، طلب حقيقي اتنفّذ كامل (depart→arrive→start→complete→collect-cash) → `order_status=completed`, `warranty_expires_at` = بعد 7 أيام بالظبط. طلب "إعادة زيارة" حقيقي بنفس الخدمة/العنوان → `order_type=revisit`, `total_amount_cents=0`, `original_order_id` صح، و`requested_technician_id` (اتأكد من الداتابيز مباشرة) اتفرض لنفس الفني الأصلي تلقائيًا. محاولات رفض: عنوان مختلف اترفض، طلب أصلي وهمي اترفض `404`، طلب أصلي لسه مش مكتمل اترفض، كود خصم مع إعادة زيارة اترفض، وبعد ما ضمان الطلب الأصلي اتخلّى (`warranty_expires_at` في الماضي) الطلب الجديد اترفض بوضوح. إعادة الزيارة نفسها اتنفّذت كاملة ودُفعت **بالمحفظة (0 جنيه بالظبط)** — اتأكد الإصلاح شغال: وصلت `COMPLETED` بدل ما تعلق في `work_completed`.
 
@@ -1568,3 +1568,117 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 اختبارات: `booking-mode-resolver.spec.ts` (15/15، فيها حالات حدود اليوم 00:30/22:30 بتوقيت القاهرة)
 و`order-emergency-scheduled-at.spec.ts` (4/4 حي، فيها حالة المالك بالحرف: `booking_mode=team` مع
 حجز النهارده → الناتج طوارئ).
+
+## إعادة الزيارة مربوطة بالفني الأصلي (ADR-0051، docs/08 §96، migration 0220)
+
+بلاغ المالك: «إعادة الزيارة بتتوزّع عشوائي على الناس». السبب الجذري كان إن إنشاء إعادة الزيارة
+بيحط `requested_technician_id` وبس — وده **تفضيل موثّق إنه بيتجاهَل بأمان** (شوف `matching/README.md`)،
+مش التزام. الحل: عمود منفصل باسم مختلف عمدًا.
+
+- `revisit_pinned_technician_id` / `revisit_pinned_at` — بيتحطوا وقت الإنشاء لو الطلب الأصلي كان
+  له فني فعلاً. طول ما التثبيت قايم ومتحرّرش، `dispatchNextRound()` بتعرض على الفني ده **لوحده،
+  بلا أي fallback**.
+- `revisit_released_at` / `revisit_release_reason` — تحرير الأدمن (`refused` / `no_response` /
+  `admin`). `revisit_released_at` كمان **حارس الخصم**: التحرير والخصم مستحيل يتكرروا.
+
+### `revisit-pin.ts` — ليه دوال خالصة بلا DI
+
+`MatchingModule` مابيستوردش `OrdersModule` **عن قصد** (تعليق مفصّل في `matching.module.ts` —
+الاستيراد كان بيقلب ترتيب تسجيل المسارات ويكسر `GET /technician/orders/available`). فالمنطق
+المشترك بين المطابقة وإدارة الأدمن عايش في وحدة محايدة، مش في service محقون.
+
+`loadRevisitPinState()` بتحسب "الفني خلاص مبقاش عنده الطلب" من **مصادر الحقيقة الموجودة** —
+`order_assignments` بحالة `rejected`، صف في `technician_order_cancellations`، أو عدّت المهلة —
+مش من عمود حالة يدوي يقدر يتعارض مع السجلات الفعلية.
+
+### `releaseRevisit()` — الحارس والخصم
+
+الحارس الحاسم (نص المالك): «طالما الطلب عنده موجود، خلاص مش هناخد أي action». التحرير بيترفض
+بـ409 ومفيش أي قيد مالي طول ما `pinState.exhausted === false`.
+
+قيمة الخصم = **نصيب الفني الفعلي من الطلب الأصلي**، من `order_earning_shares.share_cents` (نفس
+مصدر الحقيقة بتاع كشف المستحقات والمحفظة، §90.1)، وbackfill لـ`technician_earning_cents` للطلبات
+الفردية القديمة. مش إجمالي الطلب — الفني ما خدش الإجمالي أصلاً (عمولة + قسمة طاقم). القيد قيد
+محفظة واحد `penalty` **مرجعه الطلب الأصلي** مش إعادة الزيارة، بـ`allowNegativeBalance` (خصم على
+أرباح اتصرفت خلاص، زي عمولة الكاش بالظبط — `TechnicianDebtService` بيتابع الدَين من نفس الدفتر).
+
+### فجوة موثّقة صراحة
+
+إعادات الزيارة اللي اتعملت **قبل** migration 0220 مالهاش `revisit_pinned_*` وهتفضل بالسلوك
+القديم لحد ما تتقفل. مفيش تحويل بأثر رجعي — مقصود.
+
+## المساعد الاختياري في الشغلانة الفردية (ADR-0052، docs/08 §97)
+
+طلب المالك: «لو الشغلانة عدد أفرادها واحد… أحيانًا الصنايعي بيحب ياخد معاه مساعد… لو هو مش عايز
+يضيف مساعد خلاص مش مهم».
+
+- **الأهلية مشتقّة** — `isSoloJob(order)` = `requiredTechnicians <= 1 && requiredAssistants === 0`.
+  مفيش عمود جديد: عمود زي `allows_optional_assistant` كان هيبقى مصدر حقيقة تاني لنفس السؤال لازم
+  يتزامن يدويًا مع `required_technicians`، وأول ما يختلفوا الاتنين يبقوا غلط.
+- **الاختياري مش نقص أبدًا** — `required_assistants` بيفضل صفر، فـ`missingAssistants = 0`،
+  `crewComplete = true`، ومفيش تصعيد (`CrewShortageEscalationService`) ولا بند في مركز
+  الاستثناءات ولا كارت أحمر في تطبيق الفني. الخانة الاختيارية عايشة في حقلين **جداد منفصلين**:
+  `optionalAssistantSlots` و`optionalAssistantsAdded`.
+- **`assertCrewSlotOpen()` هو الحارس الوحيد** لسؤال "فيه خانة مفتوحة؟" — مشترك بين قايمة
+  المرشّحين والتجنيد الفعلي عشان الاتنين مايفترقوش أبدًا. ضم **فني** لسه محصور في طلبات "اعتماد"
+  بالحرف؛ اللي اتفتح هو ضم **مساعد** بس.
+- **الفلوس: صفر كود جديد.** `CrewEarningsService.resolveParticipants()` بيقرا `order_team_members`
+  لأي طلب مهما كان `booking_mode`، و`settleAndComplete()` بتنادي `recordShares()` لكل طلب بلا
+  استثناء. الالتزام ده متغطّى في `optional-assistant-solo-job.spec.ts` من الطلب الفردي لحد صفوف
+  `order_earning_shares` الفعلية — مش بادعاء.
+- `getCrewComposition()` **مابتسألش الإعدادات لطلب مش فردي** — بتتنادى في مسح التصعيد الدوري،
+  فالنداء المتوفّر مقصود.
+
+### فجوة موثّقة صراحة
+
+المساعد الاختياري لازم يكون مؤهّل للخدمة أو لفئتها (نفس شرط المساعد الإجباري بالحرف). التأهيل
+بالفئة بيغطّي الحالة العملية، لكن مساعد بلا أي تأهيل مسجّل مش هيظهر في القايمة.
+
+## §107 — قايمتان مختلفتان عمدًا: التعيين الإجباري مقابل مفتّش المطابقة (بلاغ مالك، 2026-08-30)
+
+**البلاغ**: «المساعدين مش بيظهروا في خانة ليه/ليه لأ… ما بيظهرش غير الفنيين بس».
+
+**التشخيص الحي** (probe على Postgres حقيقي، أربع حسابات متطابقة والفرق بس الدور والمستوى):
+
+| | فني جديد | فني محترف | مساعد جديد | مساعد محترف |
+|---|---|---|---|---|
+| طلب فردي | ✅ | ✅ | ✅ | ✅ |
+| طلب اعتماد (team) | ❌ | ✅ | ❌ | ✅ |
+
+يعني **مفيش أي فلترة على الدور** في شجرة الأهلية (`technicianServiceQualificationCondition()`
+مالهاش أي شرط `technician_kind`). اللي كان بيخفي مساعدي المالك هو `eligible_for_team_booking`
+(محترف فأعلى) على طلبات الاعتماد — نفس الشرط بيخفي **الفني الجديد** بالظبط، فالمعاملة متساوية؛
+المالك شافها كتمييز لأن مساعدينه كلهم `new`.
+
+**العيب الحقيقي كان أعمق**: خانة «ليه/ليه لأ» كانت بتتغذّى من `GET :id/eligible-technicians`
+(المؤهّلون فقط). يعني سؤال «ليه ده مش مختار؟» **مستحيل يتسأل**: أي حد إجابته «لأ» بيتشال من نفس
+القايمة اللي المفروض تختاره منها.
+
+### القايمتان دلوقتي
+
+| | `:id/eligible-technicians` | `:id/explain-candidates` |
+|---|---|---|
+| الغرض | التعيين الإجباري / إعادة التعيين | تشخيص بس |
+| الفلترة | أهلية كاملة (`listForServiceBooking`) | **مفيش** — كل معتمد في مدينة الطلب |
+| الصلاحية | `orders.reassign` | أي أدمن (زي `matching-funnel`) |
+| بيرجّع الدور | ✅ `technicianKind` | ✅ `technician_kind` + `is_eligible_now` |
+
+قايمة التعيين بتفضل مقيّدة بالمؤهّلين عمدًا — مش تمييز، ده منع للأدمن إنه يختار حد
+`assertCoreEligibility()` هيرفضه بـ409 وقت التنفيذ.
+
+### تناقض حقيقي اتلقط حي واتصلح في نفس الشغل
+
+`explainTechnicianForOrder()` كانت بترجّع **«مؤهّل بالكامل»** لشخص مستواه `verified` على طلب
+اعتماد، بينما قايمة التعيين مش بتعرضه والتنفيذ بيرفضه. السبب: شرط `eligible_for_team_booking`
+كان مفروضًا في مساري التنفيذ الاتنين (`listForServiceBooking(isTeamBooking=true)` و
+`assertCoreEligibility()`) وناقص من قايمة الـ`checks` بس — فالمفتّش كان بيدّي إجابة غلط بثقة.
+اتضاف كـ`team_leader_ok`، وبيتفحص بس لما `booking_mode = 'team'` (أي وضع تاني بيعدّي `true` زي
+التنفيذ بالظبط). التغطية: `matching-explainability.spec.ts` (الحالتين) +
+`admin-explain-candidates.spec.ts` (٥ اختبارات).
+
+### رمز الدور (FN/HF) — إداري بحت
+
+`attachAdminRoleMetadata()` بيلحق `technicianKind`/`currentLevel` بصفوف القايمة الإدارية
+باستعلام إضافي صغير، **مش** بإضافة العمود لـ`TechnicianBookingListItem`: النوع ده بيتقدّم كمان
+لشاشة اختيار الفني في تطبيق العميل، وإضافة الدور هناك كانت هتسرّب تصنيف داخلي للعميل. تدقيق
+فعلي: `technician_kind` مابيخرجش من الـAPI غير على مسارات `admin/*` بس.

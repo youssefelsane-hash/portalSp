@@ -8,7 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 // مصمّم يمثّل أكبر عدد ممكن من الأبعاد الغنية سوا (identity/categories/zones/team role/current
 // job/blocked date/open opportunity/cancellation/complaint/wallet/payout) عشان نتأكد إن التجميعة
 // كلها بتتحسب صح من نفس المصادر الحقيقية.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('AdminTechnician360Service — بروفايل فني 360° (docs/08 §35.11)', () => {
   let dataSource: DataSource;

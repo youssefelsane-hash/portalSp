@@ -15,6 +15,8 @@ export interface AdminTechnicianResponseDto {
   years_of_experience: number;
   current_level: string;
   pricing_tier: string;
+  /** ADR-0050 — 'technician' أو 'assistant'. المساعد ما يظهرش في أي قايمة فنيين وما يقودش طلب. */
+  technician_kind: string;
   quality_score: number;
   average_rating: number;
   total_ratings_count: number;
@@ -51,6 +53,7 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
     years_of_experience: profile.yearsOfExperience,
     current_level: profile.currentLevel,
     pricing_tier: profile.pricingTier,
+    technician_kind: profile.technicianKind,
     quality_score: Number(profile.qualityScore),
     average_rating: Number(profile.averageRating),
     total_ratings_count: profile.totalRatingsCount,

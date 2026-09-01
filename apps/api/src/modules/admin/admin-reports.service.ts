@@ -36,6 +36,21 @@ export interface DashboardStats {
   average_rating: number | null;
   users: { total: number; new_today: number; by_user_type: Record<string, number> };
   financial: { pending_payouts_count: number; pending_payouts_amount_cents: number };
+  attention: {
+    overdue_orders: number;
+    crew_shortages: number;
+    pending_kpi_reviews: number;
+    pending_refunds: number;
+    open_warranty_claims: number;
+    disputed_orders: number;
+  };
+  trend_7_days: {
+    date: string;
+    orders_count: number;
+    completed_count: number;
+    revenue_cents: number;
+    platform_commission_cents: number;
+  }[];
 }
 
 export interface RevenuePeriodRow {
@@ -116,8 +131,10 @@ export class AdminReportsService {
   ) {}
 
   async dashboardStats(): Promise<DashboardStats> {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const [{ start_of_today: startOfToday }] = await this.dataSource.query<{ start_of_today: Date }[]>(
+      `SELECT date_trunc('day', now() AT TIME ZONE 'Africa/Cairo')
+              AT TIME ZONE 'Africa/Cairo' AS start_of_today`,
+    );
 
     const [
       ordersTodayTotal,
@@ -134,6 +151,8 @@ export class AdminReportsService {
       usersNewToday,
       usersByTypeRows,
       pendingPayoutsRow,
+      attentionRows,
+      trendRows,
     ] = await Promise.all([
       this.orders.count({ where: { placedAt: MoreThanOrEqual(startOfToday) } }),
       this.orders.count({ where: { placedAt: MoreThanOrEqual(startOfToday), orderStatus: OrderStatus.COMPLETED } }),
@@ -152,8 +171,20 @@ export class AdminReportsService {
       this.orders
         .createQueryBuilder('o')
         .select('COALESCE(SUM(o.total_amount_cents), 0)', 'revenue')
-        .addSelect('COALESCE(SUM(o.platform_commission_cents), 0)', 'commission')
-        .where('o.payment_status = :paid', { paid: OrderPaymentStatus.PAID })
+        .addSelect(
+          `COALESCE(SUM(o.platform_commission_cents - COALESCE((
+            SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+            WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+          ), 0)), 0)`,
+          'commission',
+        )
+        .where('o.payment_status IN (:...settledStatuses)', {
+          settledStatuses: [
+            OrderPaymentStatus.PAID,
+            OrderPaymentStatus.PARTIALLY_REFUNDED,
+            OrderPaymentStatus.REFUNDED,
+          ],
+        })
         .andWhere('o.paid_at >= :startOfToday', { startOfToday })
         .getRawOne<{ revenue: string; commission: string }>(),
       this.users.count(),
@@ -170,7 +201,81 @@ export class AdminReportsService {
         .addSelect('COALESCE(SUM(p.amount_cents), 0)', 'amount')
         .where('p.payout_status = :status', { status: PayoutStatus.UNDER_REVIEW })
         .getRawOne<{ count: string; amount: string }>(),
+      this.dataSource.query<
+        {
+          overdue_orders: string;
+          crew_shortages: string;
+          pending_kpi_reviews: string;
+          pending_refunds: string;
+          open_warranty_claims: string;
+          disputed_orders: string;
+        }[]
+      >(
+        `SELECT
+           (SELECT COUNT(*) FROM orders
+             WHERE deleted_at IS NULL AND scheduled_at < now()
+               AND order_status IN ('accepted', 'technician_on_way', 'technician_arrived')) AS overdue_orders,
+           (SELECT COUNT(*) FROM orders
+             WHERE deleted_at IS NULL AND crew_shortage_escalated_at IS NOT NULL
+               AND order_status = ANY($1::order_status[])) AS crew_shortages,
+           (SELECT COUNT(*) FROM technician_kpi_snapshots WHERE status = 'calculated') AS pending_kpi_reviews,
+           (SELECT COUNT(*) FROM refunds WHERE refund_status IN ('pending', 'approved', 'processing')) AS pending_refunds,
+           (SELECT COUNT(*) FROM warranty_claims
+             WHERE status NOT IN ('resolved', 'closed', 'rejected')) AS open_warranty_claims,
+           (SELECT COUNT(*) FROM orders
+             WHERE deleted_at IS NULL AND order_status = 'disputed') AS disputed_orders`,
+        [ACTIVE_ORDER_STATUSES],
+      ),
+      this.dataSource.query<
+        {
+          date: string;
+          orders_count: string;
+          completed_count: string;
+          revenue_cents: string;
+          platform_commission_cents: string;
+        }[]
+      >(
+        `WITH days AS (
+           SELECT generate_series(
+             (now() AT TIME ZONE 'Africa/Cairo')::date - 6,
+             (now() AT TIME ZONE 'Africa/Cairo')::date,
+             interval '1 day'
+           )::date AS day
+         ), order_totals AS (
+           SELECT (placed_at AT TIME ZONE 'Africa/Cairo')::date AS day,
+                  COUNT(*) AS orders_count,
+                  COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_count
+           FROM orders
+           WHERE deleted_at IS NULL
+             AND placed_at >= ((now() AT TIME ZONE 'Africa/Cairo')::date - 6)::timestamp AT TIME ZONE 'Africa/Cairo'
+           GROUP BY 1
+         ), finance_totals AS (
+           SELECT (paid_at AT TIME ZONE 'Africa/Cairo')::date AS day,
+                  COALESCE(SUM(total_amount_cents), 0) AS revenue_cents,
+                  COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                    SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                    WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+                  ), 0)), 0) AS platform_commission_cents
+           FROM orders o
+           WHERE o.deleted_at IS NULL
+             AND o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+             AND o.paid_at IS NOT NULL
+             AND o.paid_at >= ((now() AT TIME ZONE 'Africa/Cairo')::date - 6)::timestamp AT TIME ZONE 'Africa/Cairo'
+           GROUP BY 1
+         )
+         SELECT to_char(days.day, 'YYYY-MM-DD') AS date,
+                COALESCE(order_totals.orders_count, 0) AS orders_count,
+                COALESCE(order_totals.completed_count, 0) AS completed_count,
+                COALESCE(finance_totals.revenue_cents, 0) AS revenue_cents,
+                COALESCE(finance_totals.platform_commission_cents, 0) AS platform_commission_cents
+         FROM days
+         LEFT JOIN order_totals USING (day)
+         LEFT JOIN finance_totals USING (day)
+         ORDER BY days.day`,
+      ),
     ]);
+
+    const attention = attentionRows[0];
 
     return {
       orders_today: {
@@ -197,6 +302,21 @@ export class AdminReportsService {
         pending_payouts_count: Number(pendingPayoutsRow?.count ?? 0),
         pending_payouts_amount_cents: Number(pendingPayoutsRow?.amount ?? 0),
       },
+      attention: {
+        overdue_orders: Number(attention?.overdue_orders ?? 0),
+        crew_shortages: Number(attention?.crew_shortages ?? 0),
+        pending_kpi_reviews: Number(attention?.pending_kpi_reviews ?? 0),
+        pending_refunds: Number(attention?.pending_refunds ?? 0),
+        open_warranty_claims: Number(attention?.open_warranty_claims ?? 0),
+        disputed_orders: Number(attention?.disputed_orders ?? 0),
+      },
+      trend_7_days: trendRows.map((row) => ({
+        date: row.date,
+        orders_count: Number(row.orders_count),
+        completed_count: Number(row.completed_count),
+        revenue_cents: Number(row.revenue_cents),
+        platform_commission_cents: Number(row.platform_commission_cents),
+      })),
     };
   }
 
@@ -204,13 +324,20 @@ export class AdminReportsService {
     const rows = await this.dataSource.query<
       { period_start: Date; orders_count: string; total_amount_cents: string; platform_commission_cents: string; technician_earnings_cents: string }[]
     >(
-      `SELECT date_trunc($3, paid_at) AS period_start,
+      `SELECT date_trunc($3, o.paid_at) AS period_start,
               COUNT(*) AS orders_count,
-              COALESCE(SUM(total_amount_cents), 0) AS total_amount_cents,
-              COALESCE(SUM(platform_commission_cents), 0) AS platform_commission_cents,
-              COALESCE(SUM(technician_earning_cents), 0) AS technician_earnings_cents
-       FROM orders
-       WHERE payment_status = 'paid' AND paid_at BETWEEN $1 AND $2
+              COALESCE(SUM(o.total_amount_cents), 0) AS total_amount_cents,
+              COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+              ), 0)), 0) AS platform_commission_cents,
+              COALESCE(SUM(o.technician_earning_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'participant'
+              ), 0)), 0) AS technician_earnings_cents
+       FROM orders o
+       WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+         AND o.paid_at BETWEEN $1 AND $2
        GROUP BY period_start
        ORDER BY period_start ASC`,
       [query.from, query.to, query.group_by ?? 'day'],
@@ -329,8 +456,15 @@ export class AdminReportsService {
               sz.surge_multiplier,
               COUNT(o.id) AS orders_count,
               COUNT(o.id) FILTER (WHERE o.order_status = 'completed') AS completed_orders_count,
-              COALESCE(SUM(o.total_amount_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS revenue_cents,
-              COALESCE(SUM(o.platform_commission_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS platform_commission_cents,
+              COALESCE(SUM(o.total_amount_cents) FILTER (
+                WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+              ), 0) AS revenue_cents,
+              COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+              ), 0)) FILTER (
+                WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+              ), 0) AS platform_commission_cents,
               (SELECT COUNT(*) FROM technician_zones tz
                  JOIN technician_profiles tp ON tp.id = tz.technician_id
                 WHERE tz.service_zone_id = sz.id AND tz.is_active = true AND tz.deleted_at IS NULL

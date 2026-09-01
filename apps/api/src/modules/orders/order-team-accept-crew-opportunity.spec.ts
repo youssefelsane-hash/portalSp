@@ -19,7 +19,7 @@ import { SettingsService } from '../settings/settings.service';
 // recruitMember()/listRecruitCandidates() بس، صفر تغطية لـacceptCrewOpportunity() خالص. ده الفجوة
 // اللي §35.19 بيقفلها: إثبات حي إن (أ) منع تجاوز العدد المطلوب شغال فعلاً لو أكتر من فرصة اتقبلت
 // بالتوازي، و(ب) إعادة فحص القدرة الاستيعابية وقت القبول (مش وقت العرض) شغالة فعلاً.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('OrderTeamService.acceptCrewOpportunity() — أمان التزامن (docs/08 §35.19، سيناريو L)', () => {
   let dataSource: DataSource;

@@ -47,6 +47,15 @@ export class CreateServiceDto {
   @IsString()
   icon_url?: string;
 
+  @IsOptional()
+  @IsString()
+  featured_icon_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  featured_name_ar?: string | null;
+
   @IsEnum(PricingModel)
   pricing_model: PricingModel;
 
@@ -73,6 +82,27 @@ export class CreateServiceDto {
   @IsString()
   @MaxLength(40)
   unit_name_ar?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_min?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_max?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_step?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2)
+  quantity_precision?: number;
 
   @IsOptional()
   @IsInt()
@@ -173,12 +203,6 @@ export class CreateServiceDto {
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;
-
-  @IsOptional()
-  @IsNumber()
-  @IsPositive()
-  @Max(100)
-  commission_percentage?: number;
 
   @IsOptional()
   @IsInt()

@@ -36,7 +36,10 @@ class RatingResult {
 // overall_rating + comment بس، رغم إن الباك-إند بيدعم 5 أبعاد تقييم إضافية (اختيارية) وربط
 // صور "بعد التنفيذ" الموجودة بالفعل (after_photo_media_ids). afterPhotos ممكن تيجي فاضية
 // (طلب من غير صور مرفوعة) — القسم بيختفي وقتها بهدوء.
-Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> afterPhotos = const []}) {
+Future<RatingResult?> showRatingDialog(
+  BuildContext context, {
+  List<OrderMedia> afterPhotos = const [],
+}) async {
   int overall = 5;
   int? punctuality;
   int? quality;
@@ -52,30 +55,63 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
     void Function(int?) onChanged,
     StateSetter setState,
   ) {
-    return Row(
-      children: [
-        SizedBox(width: 110, child: Text(label, style: const TextStyle(fontSize: 13))),
-        ...List.generate(5, (index) {
-          final starValue = index + 1;
-          return InkWell(
-            onTap: () => setState(() => onChanged(value == starValue ? null : starValue)),
-            child: Icon(
-              value != null && starValue <= value ? Icons.star : Icons.star_border,
-              size: 20,
+    final stars = Wrap(
+      spacing: 0,
+      children: List.generate(5, (index) {
+        final starValue = index + 1;
+        return SizedBox.square(
+          dimension: 30,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+            onPressed: () => setState(
+              () => onChanged(value == starValue ? null : starValue),
+            ),
+            icon: Icon(
+              value != null && starValue <= value
+                  ? Icons.star
+                  : Icons.star_border,
+              size: 22,
               color: Colors.amber,
             ),
+          ),
+        );
+      }),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 290) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 13)),
+                stars,
+              ],
+            ),
           );
-        }),
-      ],
+        }
+        return Row(
+          children: [
+            Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
+            stars,
+          ],
+        );
+      },
     );
   }
 
-  return showDialog<RatingResult>(
+  final result = await showDialog<RatingResult>(
     context: context,
     builder: (context) => Directionality(
       textDirection: TextDirection.rtl,
       child: StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
           title: const Text('قيّم الطلب'),
           content: SizedBox(
             width: 360,
@@ -84,37 +120,78 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('التقييم العام', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  const Text(
+                    'التقييم العام',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Wrap(
+                    alignment: WrapAlignment.center,
                     children: List.generate(5, (index) {
                       final starValue = index + 1;
-                      return IconButton(
-                        icon: Icon(
-                          starValue <= overall ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
+                      return SizedBox.square(
+                        dimension: 40,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 40,
+                            height: 40,
+                          ),
+                          icon: Icon(
+                            starValue <= overall
+                                ? Icons.star
+                                : Icons.star_border,
+                            color: Colors.amber,
+                          ),
+                          onPressed: () => setState(() => overall = starValue),
                         ),
-                        onPressed: () => setState(() => overall = starValue),
                       );
                     }),
                   ),
                   const SizedBox(height: 8),
-                  const Text('تفاصيل إضافية (اختياري)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    'تفاصيل إضافية (اختياري)',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 4),
-                  starRow('الالتزام بالمواعيد', punctuality, (v) => punctuality = v, setState),
+                  starRow(
+                    'الالتزام بالمواعيد',
+                    punctuality,
+                    (v) => punctuality = v,
+                    setState,
+                  ),
                   starRow('جودة الشغل', quality, (v) => quality = v, setState),
-                  starRow('الاحترافية', professionalism, (v) => professionalism = v, setState),
-                  starRow('عدالة السعر', priceFairness, (v) => priceFairness = v, setState),
-                  starRow('النظافة', cleanliness, (v) => cleanliness = v, setState),
+                  starRow(
+                    'الاحترافية',
+                    professionalism,
+                    (v) => professionalism = v,
+                    setState,
+                  ),
+                  starRow(
+                    'عدالة السعر',
+                    priceFairness,
+                    (v) => priceFairness = v,
+                    setState,
+                  ),
+                  starRow(
+                    'النظافة',
+                    cleanliness,
+                    (v) => cleanliness = v,
+                    setState,
+                  ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: controller,
-                    decoration: const InputDecoration(labelText: 'تعليق (اختياري)'),
+                    decoration: const InputDecoration(
+                      labelText: 'تعليق (اختياري)',
+                    ),
                     maxLines: 3,
                   ),
                   if (afterPhotos.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    const Text('اختار صور تمثل الشغل النهائي (اختياري)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text(
+                      'اختار صور تمثل الشغل النهائي (اختياري)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 8),
                     SizedBox(
                       height: 90,
@@ -138,18 +215,27 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: selected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+                                  color: selected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Colors.transparent,
                                   width: 2,
                                 ),
                                 image: DecorationImage(
-                                  image: NetworkImage(_resolveMediaUrl(photo.fileUrl)),
+                                  image: NetworkImage(
+                                    _resolveMediaUrl(photo.fileUrl),
+                                  ),
                                   fit: BoxFit.cover,
                                 ),
                               ),
                               child: selected
                                   ? Align(
                                       alignment: Alignment.topLeft,
-                                      child: Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary),
+                                      child: Icon(
+                                        Icons.check_circle,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                      ),
                                     )
                                   : null,
                             ),
@@ -163,20 +249,34 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () {
+                // لازم نشيل الفوكس من حقل التعليق الأول — لو المستخدم كان لسه واقف
+                // فيه (شريط تحديد النص/الكيبورد لسه شغال)، إقفال الـdialog فورًا
+                // بيكسر فرضية Flutter الداخلية إن كل InheritedWidget dependents
+                // اتشالت قبل ما الشجرة تتفكك (assertion: '_dependents.isEmpty')
+                // وده اللي كان بيطلع شاشة حمرا ويعلّق الطلب. راجع docs/08 §108-C.
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop();
+              },
+              child: const Text('إلغاء'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(
-                RatingResult(
-                  overallRating: overall,
-                  punctualityRating: punctuality,
-                  qualityRating: quality,
-                  professionalismRating: professionalism,
-                  priceFairnessRating: priceFairness,
-                  cleanlinessRating: cleanliness,
-                  comment: controller.text.trim(),
-                  afterPhotoMediaIds: selectedPhotoIds.toList(),
-                ),
-              ),
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop(
+                  RatingResult(
+                    overallRating: overall,
+                    punctualityRating: punctuality,
+                    qualityRating: quality,
+                    professionalismRating: professionalism,
+                    priceFairnessRating: priceFairness,
+                    cleanlinessRating: cleanliness,
+                    comment: controller.text.trim(),
+                    afterPhotoMediaIds: selectedPhotoIds.toList(),
+                  ),
+                );
+              },
               child: const Text('إرسال'),
             ),
           ],
@@ -184,4 +284,6 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
       ),
     ),
   );
+  controller.dispose();
+  return result;
 }

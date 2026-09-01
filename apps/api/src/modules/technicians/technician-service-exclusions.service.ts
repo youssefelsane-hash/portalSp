@@ -40,6 +40,10 @@ export class TechnicianServiceExclusionsService {
    *
    * `technician_services` المباشرة داخلة كمان (`UNION`): الفني ممكن يكون معتمد في خدمة بعينها
    * برّه فئاته، ولازم الأدمن يقدر يحجبها زي أي حاجة تانية.
+   *
+   * مفيش استثناء للمساعد هنا: هو بيقدّم على تخصص وبيتعتمد فيه بنفس دورة الفني، وبالتالي شاشة
+   * الأدمن لازم تعرض له خدمات الاعتمادات الحقيقية فقط. عرض كل الكتالوج كان يوحي بأهلية غير
+   * موجودة ويكسر الجدار المطلوب بين السباكة والكهرباء وباقي التخصصات.
    */
   async listForTechnician(technicianId: string): Promise<TechnicianServicePermissionRow[]> {
     return this.dataSource.query<TechnicianServicePermissionRow[]>(

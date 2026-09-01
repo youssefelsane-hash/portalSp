@@ -19,7 +19,6 @@ import {
 // الوحيد).
 const UNSUPPORTED_FIELD_TYPES = new Set<PricingFieldType>([
   PricingFieldType.LOCATION,
-  PricingFieldType.IMAGE_UPLOAD,
   PricingFieldType.VIDEO_UPLOAD,
   PricingFieldType.VOICE_NOTE,
 ]);
@@ -68,6 +67,30 @@ export class PricingFieldsService {
     }
   }
 
+  private imageLimits(
+    fieldType: PricingFieldType,
+    isRequired: boolean,
+    minFiles: number | undefined,
+    maxFiles: number | undefined,
+  ): { minFiles: number | null; maxFiles: number | null } {
+    if (fieldType !== PricingFieldType.IMAGE_UPLOAD) {
+      if (minFiles !== undefined || maxFiles !== undefined) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحد الأدنى/الأقصى للملفات متاح فقط لحقل رفع الصور', HttpStatus.BAD_REQUEST);
+      }
+      return { minFiles: null, maxFiles: null };
+    }
+
+    const normalizedMin = minFiles ?? (isRequired ? 1 : 0);
+    const normalizedMax = maxFiles ?? 5;
+    if (normalizedMin < 0 || normalizedMax < 1 || normalizedMax > 10 || normalizedMin > normalizedMax) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد الصور لازم يكون بين 0 و10، والحد الأدنى مايزدش عن الأقصى', HttpStatus.BAD_REQUEST);
+    }
+    if (isRequired && normalizedMin < 1) {
+      throw new ApiException(ErrorCode.VAL_001, 'حقل الصور الإجباري لازم يطلب صورة واحدة على الأقل', HttpStatus.BAD_REQUEST);
+    }
+    return { minFiles: normalizedMin, maxFiles: normalizedMax };
+  }
+
   private async findOrThrow(id: string): Promise<ServicePricingField> {
     const field = await this.fields.findOne({ where: { id } });
     if (!field) {
@@ -83,6 +106,7 @@ export class PricingFieldsService {
     }
 
     this.assertSupportedIfRequired(dto.field_type, dto.is_required ?? true);
+    const limits = this.imageLimits(dto.field_type, dto.is_required ?? true, dto.min_files, dto.max_files);
 
     const field = this.fields.create({
       serviceId,
@@ -95,6 +119,8 @@ export class PricingFieldsService {
       options: dto.options ?? null,
       minValue: dto.min_value !== undefined ? String(dto.min_value) : null,
       maxValue: dto.max_value !== undefined ? String(dto.max_value) : null,
+      minFiles: limits.minFiles,
+      maxFiles: limits.maxFiles,
       defaultValue: dto.default_value ?? null,
     });
     await this.fields.save(field);
@@ -116,6 +142,14 @@ export class PricingFieldsService {
     const oldValues = { label_ar: field.labelAr, is_active: field.isActive };
 
     this.assertSupportedIfRequired(dto.field_type ?? field.fieldType, dto.is_required ?? field.isRequired);
+    const nextFieldType = dto.field_type ?? field.fieldType;
+    const nextRequired = dto.is_required ?? field.isRequired;
+    const limits = this.imageLimits(
+      nextFieldType,
+      nextRequired,
+      nextFieldType === PricingFieldType.IMAGE_UPLOAD ? (dto.min_files ?? field.minFiles ?? undefined) : dto.min_files,
+      nextFieldType === PricingFieldType.IMAGE_UPLOAD ? (dto.max_files ?? field.maxFiles ?? undefined) : dto.max_files,
+    );
 
     // حارس §14 — التعديلات دي بتغير هوية/صلاحية المرجع نفسه؛ label/display_order/is_required/unit/min/max/default مسموحين دايمًا
     const destructive =
@@ -144,6 +178,8 @@ export class PricingFieldsService {
     if (dto.options !== undefined) field.options = dto.options;
     if (dto.min_value !== undefined) field.minValue = String(dto.min_value);
     if (dto.max_value !== undefined) field.maxValue = String(dto.max_value);
+    field.minFiles = limits.minFiles;
+    field.maxFiles = limits.maxFiles;
     if (dto.default_value !== undefined) field.defaultValue = dto.default_value;
     if (dto.is_active !== undefined) field.isActive = dto.is_active;
     await this.fields.save(field);

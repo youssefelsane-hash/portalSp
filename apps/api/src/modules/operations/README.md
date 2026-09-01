@@ -329,3 +329,22 @@ partial indexes موجودة بالفعل بلا حاجة لمigration جديد�
 اختبار E2E بمتصفح واحد يمرّ على كل مركز العمليات مرة واحدة (تدفق كامل: فتح `/operations` → فلترة
 مصفوفة القوى العاملة → توسيع صف تغطية → معالجة استثناء → إعادة تعيين سريعة) خارج نطاق §36.14 —
 مؤجَّل لمرحلة تحقق منفصلة لو اتطلب.
+
+## بَقّة حقيقية اتلقطت بلقطة شاشة مالك — عمود "الطلب" فاضي في تبويب "تسليم الطلبات" (docs/08 §90)
+
+`GET /admin/operations/dispatch-delivery`: `AdminDispatchDeliveryService` كانت بترجّع
+`orderNumber`/`orderTechnicianCount` صح (تفاصيل §72 فوق)، والواجهة (`apps/admin`) وعقد الأنواع
+المشتركة (`packages/shared-types`'s `DispatchDeliveryItemDto`) كانوا بيقروا/بيعلنوا
+`order_number`/`order_technician_count` صح — لكن `AdminOperationsController.getDispatchDelivery()`
+بيعمل mapping يدوي صريح لكل حقل من camelCase للـsnake_case (نفس نمط باقي endpoints مركز
+العمليات)، **ونسي الحقلين دول بالذات**. النتيجة: الـJSON الفعلي كان بيوصل بلا `order_number`/
+`order_technician_count` خالص، فعمود "الطلب" في الجدول كان بيبان فاضي (undefined) و"اتبعت لـ_
+فني" من غير رقم — بالظبط زي ما ظهر في لقطة شاشة المالك.
+
+**ليه اختبار §72 القديم ما مسكش البَقّة**: `admin-dispatch-delivery.spec.ts` بيتحقق من الخدمة
+مباشرة (`service().getDeliveryObservability(...)`)، مش من الـcontroller — فأكّد إن الحساب صح
+لكن ما لمسش طبقة التحويل لـJSON خالص، وهي بالظبط المكان اللي البَقّة كانت فيه.
+
+**الإصلاح**: سطرين ناقصين في `admin-operations.controller.ts`'s mapping. اختبار حي جديد
+`admin-operations.controller.spec.ts` على مستوى الـcontroller نفسه — اتأكد إنه بيمسك الرجعة
+فعليًا (تجربة يدوية: رجّعت التعديل للخلف بـ`git stash`، الاختبار فشل بوضوح، رجّعت التعديل، عدّى).

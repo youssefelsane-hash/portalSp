@@ -14,7 +14,8 @@ import 'technicians_repository.dart';
 // دالة اختيار موحّدة (docs/08 §38): إما فني فرد (id, isCompany:false) أو شركة (id, isCompany:true).
 // الباراميتر التالت (ADR-0030 Slice D) بيحمل التاريخ الفعّال وقت الاختيار — ممكن يكون مختلف عن
 // requestedAt الأصلي لو العميل جرّب "احجزه في المعاد ده بدلاً" على كارت متعارض جدوليًا.
-typedef TechnicianOrCompanySelected = void Function(String id, bool isCompany, DateTime? effectiveRequestedAt);
+typedef TechnicianOrCompanySelected =
+    void Function(String id, bool isCompany, DateTime? effectiveRequestedAt);
 
 enum TechnicianSortOption { recommended, lowestPrice, highestRating }
 
@@ -22,15 +23,15 @@ extension on TechnicianSortOption {
   // ?sort= في GET /services/:id/technicians (Script 6 Part 8) — null (مش مبعوت خالص) يعني
   // recommended في الباك-إند، فمفيش قيمة صريحة ليها هنا.
   String? get apiValue => switch (this) {
-        TechnicianSortOption.recommended => null,
-        TechnicianSortOption.lowestPrice => 'lowest_price',
-        TechnicianSortOption.highestRating => 'highest_rating',
-      };
+    TechnicianSortOption.recommended => null,
+    TechnicianSortOption.lowestPrice => 'lowest_price',
+    TechnicianSortOption.highestRating => 'highest_rating',
+  };
   String get labelAr => switch (this) {
-        TechnicianSortOption.recommended => 'الأنسب',
-        TechnicianSortOption.lowestPrice => 'الأقل سعرًا',
-        TechnicianSortOption.highestRating => 'الأعلى تقييمًا',
-      };
+    TechnicianSortOption.recommended => 'الأنسب',
+    TechnicianSortOption.lowestPrice => 'الأقل سعرًا',
+    TechnicianSortOption.highestRating => 'الأعلى تقييمًا',
+  };
 }
 
 // Script 6 Part 6-8 — صفحة سوق مخصصة لمسار "اختار الفريق بنفسك"، منفصلة عن اختيار الوضع
@@ -64,10 +65,12 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
   });
 
   @override
-  State<TechnicianMarketplaceScreen> createState() => _TechnicianMarketplaceScreenState();
+  State<TechnicianMarketplaceScreen> createState() =>
+      _TechnicianMarketplaceScreenState();
 }
 
-class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScreen> {
+class _TechnicianMarketplaceScreenState
+    extends State<TechnicianMarketplaceScreen> {
   late final TechniciansRepository _repository;
   List<TechnicianBookingListItem>? _technicians;
   bool _loading = false;
@@ -126,7 +129,8 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
     _load();
   }
 
-  void _select(String id, bool isCompany) => widget.onSelect(id, isCompany, _effectiveRequestedAt);
+  void _select(String id, bool isCompany) =>
+      widget.onSelect(id, isCompany, _effectiveRequestedAt);
 
   @override
   Widget build(BuildContext context) {
@@ -146,12 +150,19 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
               Material(
                 color: Theme.of(context).colorScheme.secondaryContainer,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   child: Row(
                     children: [
                       const Icon(Icons.event_available_outlined, size: 18),
                       const SizedBox(width: 8),
-                      Expanded(child: Text('بتشوف الفنيين المتاحين في ${_formatDateTime(_effectiveRequestedAt!)}')),
+                      Expanded(
+                        child: Text(
+                          'بتشوف الفنيين المتاحين في ${_formatDateTime(_effectiveRequestedAt!)}',
+                        ),
+                      ),
                       TextButton(
                         onPressed: () {
                           setState(() {
@@ -179,7 +190,12 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                     value: _sort,
                     underline: const SizedBox.shrink(),
                     items: TechnicianSortOption.values
-                        .map((o) => DropdownMenuItem(value: o, child: Text(o.labelAr)))
+                        .map(
+                          (o) => DropdownMenuItem(
+                            value: o,
+                            child: Text(o.labelAr),
+                          ),
+                        )
                         .toList(),
                     onChanged: _onSortChanged,
                   ),
@@ -194,9 +210,16 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
   }
 
   Widget _buildBody() {
-    if (_loading) return const Padding(padding: EdgeInsets.all(16), child: LoadingList(itemCount: 4));
+    if (_loading)
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: LoadingList(itemCount: 4),
+      );
     if (_error != null) {
-      return Padding(padding: const EdgeInsets.all(16), child: Text(_error!, style: const TextStyle(color: Colors.red)));
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(_error!, style: const TextStyle(color: Colors.red)),
+      );
     }
     if ((_technicians ?? []).isEmpty) {
       return const Padding(
@@ -219,152 +242,185 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
     final conflicted = t.isScheduleConflicted;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      color: conflicted ? Theme.of(context).colorScheme.surfaceContainerHighest : null,
+      color: conflicted
+          ? Theme.of(context).colorScheme.surfaceContainerHighest
+          : null,
       child: Opacity(
         opacity: conflicted ? 0.7 : 1,
         child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                FallbackAvatar(imageUrl: t.avatarUrl, radius: 28),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(t.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          ),
-                          if (t.isVerified)
-                            const Padding(
-                              padding: EdgeInsetsDirectional.only(start: 4),
-                              child: TrustBadge(),
-                            ),
-                          Chip(
-                            label: Text(technicianLevelLabelsAr[t.technicianLevel] ?? t.technicianLevel),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ],
-                      ),
-                      if (conflicted)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 6,
-                            children: [
-                              Chip(
-                                avatar: const Icon(Icons.event_busy_outlined, size: 16),
-                                label: const Text('مش متاح للفترة دي'),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                backgroundColor: Theme.of(context).colorScheme.errorContainer,
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FallbackAvatar(imageUrl: t.avatarUrl, radius: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                t.fullName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
-                              if (t.unavailableReasonAr != null)
-                                Text(t.unavailableReasonAr!, style: const TextStyle(fontSize: 12)),
-                            ],
-                          ),
+                            ),
+                            if (t.isVerified)
+                              const Padding(
+                                padding: EdgeInsetsDirectional.only(start: 4),
+                                child: TrustBadge(),
+                              ),
+                            Chip(
+                              label: Text(
+                                technicianLevelLabelsAr[t.technicianLevel] ??
+                                    t.technicianLevel,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ],
                         ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          if (t.totalRatingsCount > 0) ...[
-                            const Icon(Icons.star, size: 14, color: Colors.amber),
-                            Text(' ${t.averageRating.toStringAsFixed(1)} (${t.totalRatingsCount})  '),
-                          ] else
-                            const Text('لسه من غير تقييم  '),
-                          Text('· ${t.completedOrdersCount} طلب مكتمل'),
-                        ],
+                        if (conflicted)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 6,
+                              children: [
+                                Chip(
+                                  avatar: const Icon(
+                                    Icons.event_busy_outlined,
+                                    size: 16,
+                                  ),
+                                  label: const Text('مش متاح للفترة دي'),
+                                  visualDensity: VisualDensity.compact,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).colorScheme.errorContainer,
+                                ),
+                                if (t.unavailableReasonAr != null)
+                                  Text(
+                                    t.unavailableReasonAr!,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 4),
+                        // docs/08 §108-H — بَقّة overflow منهجية: Row عادي من غير Expanded/Flexible
+                        // جنب Wrap مستخدمة لنفس نوع المحتوى فوق وتحت بالظبط. رقم الطلبات المكتملة
+                        // ممكن يكبر (فني قديم بآلاف الطلبات) ويفيض على شاشة ضيقة — Wrap بيلف
+                        // لسطر جديد بدل ما يفيض، بلا أي تعديل حسابي محتاج.
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (t.totalRatingsCount > 0) ...[
+                              const Icon(
+                                Icons.star,
+                                size: 14,
+                                color: Colors.amber,
+                              ),
+                              Text(
+                                ' ${t.averageRating.toStringAsFixed(1)} (${t.totalRatingsCount})  ',
+                              ),
+                            ] else
+                              const Text('لسه من غير تقييم  '),
+                            Text('· ${t.completedOrdersCount} طلب مكتمل'),
+                          ],
+                        ),
+                        if (t.distanceKm != null || t.avgArrivalMinutes != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Wrap(
+                              spacing: 4,
+                              children: [
+                                if (t.distanceKm != null) ...[
+                                  const Icon(
+                                    Icons.place_outlined,
+                                    size: 14,
+                                    color: Colors.grey,
+                                  ),
+                                  Text(
+                                    '${t.distanceKm!.toStringAsFixed(1)} كم',
+                                  ),
+                                ],
+                                if (t.avgArrivalMinutes != null) ...[
+                                  const Icon(
+                                    Icons.timer_outlined,
+                                    size: 14,
+                                    color: Colors.grey,
+                                  ),
+                                  Text('وصول متوقع ~${t.avgArrivalMinutes} د'),
+                                ],
+                              ],
+                            ),
+                          ),
+                        if (t.onTimeRatePercent != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              'التزام بالمواعيد: ${t.onTimeRatePercent}%',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TechnicianMarketplaceCardFooter(
+                priceLabel: t.finalPriceCents == null
+                    ? null
+                    : '${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                isPremium: (t.levelPriceMultiplier ?? 1) > 1,
+                actions: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            TechnicianProfileScreen(technicianId: t.id),
                       ),
-                      if (t.distanceKm != null || t.avgArrivalMinutes != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Wrap(
-                            spacing: 4,
-                            children: [
-                              if (t.distanceKm != null) ...[
-                                const Icon(Icons.place_outlined, size: 14, color: Colors.grey),
-                                Text('${t.distanceKm!.toStringAsFixed(1)} كم'),
-                              ],
-                              if (t.avgArrivalMinutes != null) ...[
-                                const Icon(Icons.timer_outlined, size: 14, color: Colors.grey),
-                                Text('وصول متوقع ~${t.avgArrivalMinutes} د'),
-                              ],
-                            ],
-                          ),
-                        ),
-                      if (t.onTimeRatePercent != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            'التزام بالمواعيد: ${t.onTimeRatePercent}%',
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                        ),
-                    ],
+                    ),
+                    child: const Text('البروفايل'),
+                  ),
+                  if (!conflicted)
+                    FilledButton(
+                      onPressed: () => _select(t.id, false),
+                      child: const Text('اختار'),
+                    )
+                  else if (t.availableAgainAt != null)
+                    FilledButton.tonal(
+                      onPressed: () => _tryNextAvailable(t.availableAgainAt!),
+                      child: Text(
+                        'جرّب ${_formatDateTime(t.availableAgainAt!)}',
+                      ),
+                    ),
+                ],
+              ),
+              if (conflicted && t.availableAgainAt == null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'معاد التوافر الجاي مش معروف دلوقتي',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (t.finalPriceCents != null)
-                  // docs/08 §60.3 (طلب مالك صريح) — الفني اللي مستواه بيزوّد السعر لازم يبان
-                  // جنبه إنه "مميّز"، عشان العميل يفهم الزيادة جاية منين بدل ما يحس إن السعر
-                  // مرمي عشوائي. الشارة بتتحسب من level_price_multiplier اللي الباك-إند بيرجّعه
-                  // أصلاً — مفيش أي حساب سعر في التطبيق (مصدر الحقيقة واحد).
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      if ((t.levelPriceMultiplier ?? 1) > 1) const _PremiumBadge(),
-                    ],
-                  )
-                else
-                  const SizedBox.shrink(),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    OutlinedButton(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => TechnicianProfileScreen(technicianId: t.id)),
-                      ),
-                      child: const Text('البروفايل'),
-                    ),
-                    if (!conflicted)
-                      FilledButton(
-                        onPressed: () => _select(t.id, false),
-                        child: const Text('اختار'),
-                      )
-                    else if (t.availableAgainAt != null)
-                      FilledButton.tonal(
-                        onPressed: () => _tryNextAvailable(t.availableAgainAt!),
-                        child: Text('جرّب ${_formatDateTime(t.availableAgainAt!)}'),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-            if (conflicted && t.availableAgainAt == null)
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text('معاد التوافر الجاي مش معروف دلوقتي', style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
     );
@@ -398,7 +454,10 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: scheme.primary.withValues(alpha: 0.45), width: 1.5),
+        side: BorderSide(
+          color: scheme.primary.withValues(alpha: 0.45),
+          width: 1.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -409,7 +468,11 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.apartment, size: 20, color: scheme.onPrimaryContainer),
+                Icon(
+                  Icons.apartment,
+                  size: 20,
+                  color: scheme.onPrimaryContainer,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -435,30 +498,48 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                   runSpacing: 6,
                   children: [
                     _CompanyTag(
-                      icon: registered ? Icons.business_center_outlined : Icons.groups_outlined,
+                      icon: registered
+                          ? Icons.business_center_outlined
+                          : Icons.groups_outlined,
                       // الفرق الحقيقي بين "شركة" و"فريق" في البيانات هو وجود سجل تجاري من عدمه
                       // (technician_companies.commercial_registration_number) — مش تسمية تجميلية.
                       label: registered ? 'شركة مسجّلة' : 'فريق عمل',
                       emphasized: true,
                     ),
-                    _CompanyTag(icon: Icons.engineering_outlined, label: '${c.staffCount ?? 0} فني'),
+                    _CompanyTag(
+                      icon: Icons.engineering_outlined,
+                      label: '${c.staffCount ?? 0} فني',
+                    ),
                     if ((c.branchCount ?? 0) > 0)
-                      _CompanyTag(icon: Icons.store_outlined, label: '${c.branchCount} فرع'),
+                      _CompanyTag(
+                        icon: Icons.store_outlined,
+                        label: '${c.branchCount} فرع',
+                      ),
                     if (c.completedOrdersCount > 0)
-                      _CompanyTag(icon: Icons.task_alt, label: '${c.completedOrdersCount} طلب مكتمل'),
+                      _CompanyTag(
+                        icon: Icons.task_alt,
+                        label: '${c.completedOrdersCount} طلب مكتمل',
+                      ),
                     if (c.totalRatingsCount > 0)
                       _CompanyTag(
                         icon: Icons.star,
-                        label: '${c.averageRating.toStringAsFixed(1)} (${c.totalRatingsCount})',
+                        label:
+                            '${c.averageRating.toStringAsFixed(1)} (${c.totalRatingsCount})',
                       ),
                     if (c.distanceKm != null)
-                      _CompanyTag(icon: Icons.place_outlined, label: '${c.distanceKm!.toStringAsFixed(1)} كم'),
+                      _CompanyTag(
+                        icon: Icons.place_outlined,
+                        label: '${c.distanceKm!.toStringAsFixed(1)} كم',
+                      ),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Text(
                   'فريق كامل بيقدر يغطّي الشغل الكبير، ومسؤولية الشغل على الشركة نفسها.',
-                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -468,13 +549,21 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                     // docs/08 §65.2 — «سعر الشركة من غير فرق مستوى» كانت تعليمات داخلية بتشرح
                     // لينا إحنا ليه الشركة مالهاش مضاعف مستوى (§62.2)، مش معلومة تخصّ العميل.
                     // العميل بيشوف السعر وخلاص.
-                    if (c.finalPriceCents != null)
-                      Text(
-                        '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      )
-                    else
-                      const SizedBox.shrink(),
+                    // docs/08 §108-H — Flexible هنا (مش مجرد Text) لأن السعر ممكن يطول (مبلغ
+                    // كبير)، والزرار جنبه لازم يفضل زرار كامل قابل للمس مش يتقصّ هو.
+                    Flexible(
+                      child: c.finalPriceCents != null
+                          ? Text(
+                              '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: () => _select(c.id, true),
                       child: const Text('اختار الشركة'),
@@ -490,9 +579,82 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
   }
 }
 
+/// Footer مرن لكارت الفني. الزر البديل في حالة التعارض يحتوي تاريخًا طويلًا، لذلك لا يجوز
+/// وضعه مع السعر في `Row` ثابت؛ على الشاشات الضيقة ينتقل لسطر مستقل بدل شريط overflow.
+class TechnicianMarketplaceCardFooter extends StatelessWidget {
+  const TechnicianMarketplaceCardFooter({
+    super.key,
+    required this.priceLabel,
+    required this.isPremium,
+    required this.actions,
+  });
+
+  final String? priceLabel;
+  final bool isPremium;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final price = priceLabel == null
+        ? const SizedBox.shrink()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                priceLabel!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              if (isPremium) const _PremiumBadge(),
+            ],
+          );
+    final actionWrap = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      children: actions,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 390) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Align(alignment: AlignmentDirectional.centerStart, child: price),
+              if (priceLabel != null) const SizedBox(height: 10),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: actionWrap,
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(child: price),
+            const SizedBox(width: 8),
+            Flexible(flex: 2, child: actionWrap),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// شارة إحصائية صغيرة داخل كارت الشركة (docs/08 §62.2).
 class _CompanyTag extends StatelessWidget {
-  const _CompanyTag({required this.icon, required this.label, this.emphasized = false});
+  const _CompanyTag({
+    required this.icon,
+    required this.label,
+    this.emphasized = false,
+  });
 
   final IconData icon;
   final String label;
@@ -515,7 +677,11 @@ class _CompanyTag extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: fg, fontWeight: emphasized ? FontWeight.w600 : FontWeight.normal),
+            style: TextStyle(
+              fontSize: 12,
+              color: fg,
+              fontWeight: emphasized ? FontWeight.w600 : FontWeight.normal,
+            ),
           ),
         ],
       ),
@@ -569,7 +735,11 @@ class _PremiumBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.diamond_outlined, size: 11, color: scheme.onTertiaryContainer),
+            Icon(
+              Icons.diamond_outlined,
+              size: 11,
+              color: scheme.onTertiaryContainer,
+            ),
             const SizedBox(width: 3),
             Text(
               'Premium',

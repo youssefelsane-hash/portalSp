@@ -9,7 +9,7 @@ import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 // بياخد الطلب ده؟" لازم يعتمد على نفس شروط MatchingService.findEligibleTechnicians() الحقيقية
 // بالحرف، صفر خوارزمية تشخيصية موازية. كل فني هنا مصمّم يفشل check واحد بالظبط عشان نتأكد إن
 // كل check بيتحسب صح ومستقل عن الباقي.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §35.7)', () => {
   let dataSource: DataSource;
@@ -235,6 +235,41 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     expect(result.rankInfo?.rank).toBe(1);
     expect(result.rankInfo?.totalEligible).toBeGreaterThanOrEqual(1);
     expect(typeof result.rankInfo?.rankScore).toBe('number');
+  });
+
+  // docs/08 §107 — تناقض حقيقي اتلقط حي: المفتّش كان بيقول «مؤهّل بالكامل» لشخص مستواه أقل من
+  // حد قيادة طلب الاعتماد، بينما قايمة التعيين الإجباري (listForServiceBooking(isTeamBooking))
+  // مش بتعرضه أصلاً وassertCoreEligibility() هترفضه بـ409 وقت التنفيذ. الشرط كان مفروضًا في
+  // مساري التنفيذ الاتنين وناقص من الـchecks بس، فالمفتّش كان بيدّي إجابة غلط بثقة.
+  it('طلب اعتماد + مستوى مش مؤهّل للقيادة — team_leader_ok=false، والمفتّش بيوافق قايمة التعيين (§107)', async () => {
+    const [teamOrder] = await q(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status,
+         total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES ($1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'team',2,2) RETURNING id`,
+      [`TESTEXPLD-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    // مستوى `verified` عمدًا: حد قراره (50000) بيكفي قيمة الطلب (30000) فالشرط التاني بيعدّي —
+    // يعني الفشل الوحيد الممكن هو حاجز القيادة نفسه، مش أي شرط تاني بالصدفة.
+    await q(`UPDATE technician_profiles SET current_level = 'verified' WHERE id = $1`, [ids.eligibleProfile]);
+    try {
+      const order = await dataSource.getRepository(Order).findOneByOrFail({ id: teamOrder.id });
+      const result = await service.explainTechnicianForOrder(order, ids.eligibleProfile);
+
+      expect(result.checks.find((c) => c.key === 'decision_limit_ok')?.passed).toBe(true);
+      expect(result.checks.find((c) => c.key === 'team_leader_ok')?.passed).toBe(false);
+      expect(result.eligible).toBe(false);
+      expect(result.reasonAr).toContain('قائد مهمة اعتماد');
+    } finally {
+      await q(`UPDATE technician_profiles SET current_level = 'professional' WHERE id = $1`, [ids.eligibleProfile]);
+      await q(`DELETE FROM orders WHERE id = $1`, [teamOrder.id]);
+    }
+  });
+
+  // نفس الشخص على طلب فردي لازم يعدّي — الشرط ده مخصوص بطلبات الاعتماد بس، زي التنفيذ بالظبط.
+  it('الطلب الفردي مش بيتفحص فيه حاجز القيادة خالص (§107)', async () => {
+    const order = await orderRow();
+    const result = await service.explainTechnicianForOrder(order, ids.eligibleProfile);
+    expect(result.checks.find((c) => c.key === 'team_leader_ok')?.passed).toBe(true);
   });
 
   it('rankInfo=null لفني مش ضمن المجمّع المؤهّل فعليًا (نطاق غلط)', async () => {

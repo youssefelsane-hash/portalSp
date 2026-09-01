@@ -358,6 +358,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  Future<void> _approveInitialQuote() async {
+    setState(() => _decidingQuote = true);
+    try {
+      final order = await _repository.approveInitialQuote(widget.orderId);
+      if (mounted) {
+        setState(() => _order = order);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              order.orderStatus == 'searching_technician'
+                  ? 'وافقت على السعر — بدأنا اختيار الفني المناسب'
+                  : 'وافقت على السعر — الفني يقدر يكمل الشغل',
+            ),
+          ),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _decidingQuote = false);
+    }
+  }
+
   Future<void> _cancel() async {
     final result = await _showCancelDialog();
     if (result == null) return; // العميل قفل الـ dialog من غير ما يأكّد
@@ -438,13 +461,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () {
+                  // راجع docs/08 §108-C — شيل الفوكس من حقل النص الحر قبل الإقفال
+                  // عشان نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا).
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop();
+                },
                 child: const Text('تراجع'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(
-                  _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
-                ),
+                onPressed: () {
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop(
+                    _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
+                  );
+                },
                 child: const Text('تأكيد الإلغاء'),
               ),
             ],
@@ -512,7 +543,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           title: const Text('طلب إعادة زيارة (ضمان)'),
-          content: const Text('هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل، لو نفس المشكلة رجعت تاني.'),
+          content: const Text(
+            'هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل. الفني هيتواصل معاك، '
+            'والزيارة هتكون خلال 3 أيام إلى أسبوع علشان يتنسق الموعد بشكل مناسب.',
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('تراجع')),
             FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('تأكيد الطلب')),
@@ -537,7 +571,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
         );
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('اتبعت طلب إعادة الزيارة بنجاح ✅')));
+            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة — الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع')));
       }
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
@@ -725,13 +759,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     padding: const EdgeInsets.all(16),
                     children: [
                       // "ادفع بالتقسيط" — بيظهر بس لو الخدمة عليها خطط متاحة
-                      InstallmentSection(
-                        key: ValueKey('inst_${order.id}'),
-                        auth: context.read<AuthRepository>(),
-                        orderId: order.id,
-                        serviceId: order.serviceId,
-                      ),
-                      const SizedBox(height: 8),
+                      if (order.orderStatus != 'awaiting_admin_quote' &&
+                          order.orderStatus != 'awaiting_initial_quote_approval') ...[
+                        InstallmentSection(
+                          key: ValueKey('inst_${order.id}'),
+                          auth: context.read<AuthRepository>(),
+                          orderId: order.id,
+                          serviceId: order.serviceId,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       // طمأنة أثناء الانتظار (docs/08 §77-B3، طلب مالك صريح) — فوق كل حاجة
                       // عشان دي أول سؤال في دماغ العميل وهو مستني.
                       if (_kAwaitingTechnicianStatuses.contains(order.orderStatus)) ...[
@@ -749,7 +786,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 style: Theme.of(context).textTheme.titleLarge,
                               ),
                               const SizedBox(height: 8),
-                              Text('السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}'),
+                              Text(
+                                order.orderStatus == 'awaiting_admin_quote'
+                                    ? 'السعر: الإدارة بتراجعه'
+                                    : order.orderStatus == 'awaiting_initial_quote_approval'
+                                        ? 'السعر المقترح: ${_formatEgp(order.estimatedPriceCents ?? 0)}'
+                                        : 'السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}',
+                              ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
                               // اتعيّن مستواه أعلى، الزيادة لازم تبان بسببها مكتوب، مش رقم
                               // بيتغيّر من غير تفسير. والسطر التاني تحتها مطمئن ومقصود يكون
@@ -765,11 +808,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     Icon(Icons.diamond_outlined,
                                         size: 14, color: Theme.of(context).colorScheme.tertiary),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
-                                      style: TextStyle(
-                                        color: Theme.of(context).colorScheme.tertiary,
-                                        fontWeight: FontWeight.w600,
+                                    // docs/08 §108-H — Text وحيدة في Row بلا Expanded كانت
+                                    // بتفيض أفقيًا على شاشة ضيقة/خط كبير بدل ما تلف لسطر تاني.
+                                    Expanded(
+                                      child: Text(
+                                        'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.tertiary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -809,7 +856,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'إعادة زيارة لطلب سابق — مجانية بالكامل',
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل. الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع.',
                                   style: TextStyle(color: Theme.of(context).colorScheme.primary),
                                 ),
                               ],
@@ -926,6 +973,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ],
                       if (order.technicianId != null) ...[
                         const SizedBox(height: 16),
+                        // طلب مالك صريح (docs/08 §93): العميل مش عارف إن الشات مفيد قبل الزيارة —
+                        // سطر بسيط بيوضّح إنه يقدر يشرح المشكلة ويبعت صور، عشان الفني يجهّز
+                        // العدة الصح ويجي جاهز بدل ما يكتشف على الطبيعة إنه ناقصه حاجة.
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.lightbulb_outline, size: 18, color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => ChatScreen(orderId: order.id)),
@@ -966,8 +1030,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                           child: member.avatarUrl == null ? const Icon(Icons.person, size: 16) : null,
                                         ),
                                         const SizedBox(width: 8),
-                                        Expanded(child: Text(member.fullName)),
-                                        Text(member.roleLabel, style: Theme.of(context).textTheme.bodySmall),
+                                        Expanded(child: Text(member.fullName, overflow: TextOverflow.ellipsis)),
+                                        const SizedBox(width: 6),
+                                        // docs/08 §108-H — roleLabel نص حر من الأدمن (لحد 100 حرف،
+                                        // apps/admin's crew_role_label input) — مش تسمية قصيرة
+                                        // ثابتة. Flexible بيخليه ينكمش بـ"..." بدل ما يفيض.
+                                        Flexible(
+                                          child: Text(
+                                            member.roleLabel,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -1102,6 +1176,76 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                         child: _decidingQuote
                                             ? const SizedBox(
                                                 width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                            : const Text('موافقة'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (order.orderStatus == 'awaiting_admin_quote') ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          child: const ListTile(
+                            leading: Icon(Icons.manage_search_outlined),
+                            title: Text('الإدارة بتراجع الصور'),
+                            subtitle: Text(
+                              'هنبعتلك السعر هنا وفي الإشعارات. مفيش فني هيتحرك قبل موافقتك.',
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (order.orderStatus == 'awaiting_initial_quote_approval') ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text('عرض السعر جاهز', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _formatEgp(order.estimatedPriceCents ?? 0),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  order.initialQuoteSource == 'admin_remote'
+                                      ? 'السعر اتحدد من الصور. بعد الموافقة هنبدأ اختيار الفني.'
+                                      : 'السعر اتحدد بعد المعاينة، راجعه قبل استمرار الشغل.',
+                                ),
+                                if (order.initialQuoteNote != null && order.initialQuoteNote!.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Text(order.initialQuoteNote!),
+                                ],
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _decidingQuote || _cancelling ? null : _cancel,
+                                        child: const Text('رفض وإلغاء الطلب'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: FilledButton(
+                                        onPressed: _decidingQuote ? null : _approveInitialQuote,
+                                        child: _decidingQuote
+                                            ? const SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: CircularProgressIndicator(strokeWidth: 2),
+                                              )
                                             : const Text('موافقة'),
                                       ),
                                     ),

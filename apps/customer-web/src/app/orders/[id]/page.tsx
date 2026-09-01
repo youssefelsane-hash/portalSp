@@ -19,6 +19,7 @@ import {
   OrderResponseDto,
   OrderItemDto,
   CancellationReasonDto,
+  approveInitialQuote,
 } from '@/lib/orders';
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
@@ -97,7 +98,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           <h1 className="text-xl font-bold">طلب #{order.order_number}</h1>
           <p className={`mt-1 font-medium ${isBad ? 'text-danger' : 'text-primary'}`}>{statusLabel}</p>
         </div>
-        <span className="text-lg font-bold">{formatEgp(order.total_amount_cents)}</span>
+        <span className="text-lg font-bold">
+          {order.order_status === 'awaiting_admin_quote'
+            ? 'السعر قيد المراجعة'
+            : order.order_status === 'awaiting_initial_quote_approval'
+              ? formatEgp(order.estimated_price_cents ?? 0)
+              : formatEgp(order.total_amount_cents)}
+        </span>
       </div>
 
       {!isBad && currentStepIndex >= 0 && (
@@ -148,8 +155,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <QuoteApprovalSection authedFetch={authedFetch} orderId={order.id} onResolved={refresh} />
       )}
 
+      {order.order_status === 'awaiting_admin_quote' && (
+        <section className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <h2 className="font-semibold text-primary">الإدارة بتراجع الصور</h2>
+          <p className="mt-1 text-sm text-muted">
+            هنحدد السعر من الصور ونبعتلك إشعار. الطلب مش هيروح لأي فني قبل ما تشوف السعر وتوافق عليه.
+          </p>
+        </section>
+      )}
+
+      {order.order_status === 'awaiting_initial_quote_approval' && (
+        <InitialQuoteApprovalSection authedFetch={authedFetch} order={order} onResolved={refresh} />
+      )}
+
       {/* التقسيط — لو الخدمة عليها خطط متاحة، العميل يقدر يقدّم طلب (مراجعة بشر بعدها) */}
-      <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
+      {!['awaiting_admin_quote', 'awaiting_initial_quote_approval'].includes(order.order_status) && (
+        <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
+      )}
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">
@@ -169,6 +191,74 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       <ChatSection authedFetch={authedFetch} orderId={order.id} accessToken={accessToken} />
     </div>
+  );
+}
+
+function InitialQuoteApprovalSection({
+  authedFetch,
+  order,
+  onResolved,
+}: {
+  authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
+  order: OrderResponseDto;
+  onResolved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isRemoteQuote = order.initial_quote_source === 'admin_remote';
+
+  async function resolve(action: 'approve' | 'reject') {
+    setBusy(true);
+    setError(null);
+    try {
+      if (action === 'approve') {
+        await approveInitialQuote(authedFetch, order.id);
+      } else {
+        await cancelOrder(authedFetch, order.id, { reason: 'العميل رفض السعر المقترح' });
+      }
+      onResolved();
+    } catch (resolveError) {
+      setError(resolveError instanceof ApiError ? resolveError.message : 'تعذّر تنفيذ الطلب، حاول تاني');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mt-4 rounded-xl border border-warning bg-warning/5 p-4">
+      <h2 className="font-semibold">السعر جاهز ومستني موافقتك</h2>
+      <p className="mt-1 text-sm text-muted">
+        {isRemoteQuote
+          ? 'الإدارة حددت السعر من الصور. بعد موافقتك هنبدأ اختيار أنسب فني.'
+          : 'الفني حدد السعر بعد المعاينة. راجعه قبل بدء الشغل.'}
+      </p>
+      {order.initial_quote_note && (
+        <p className="mt-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">{order.initial_quote_note}</p>
+      )}
+      <div className="mt-4 flex items-center justify-between rounded-lg bg-surface px-4 py-3">
+        <span className="text-sm text-muted">السعر المقترح</span>
+        <span className="text-xl font-bold text-primary">{formatEgp(order.estimated_price_cents ?? 0)}</span>
+      </div>
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => resolve('approve')}
+          className="flex-1 rounded-lg bg-primary py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          موافق على السعر
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => resolve('reject')}
+          className="flex-1 rounded-lg border border-border py-2 hover:bg-surface-variant disabled:opacity-50"
+        >
+          رفض السعر
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -410,10 +500,14 @@ function ChatSection({
 
   return (
     <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-1 flex items-center gap-2">
         <h2 className="font-semibold">الشات</h2>
         {live && <span className="h-2 w-2 rounded-full bg-success" title="متصل الآن" />}
       </div>
+      {/* طلب مالك صريح (docs/08 §93) — نفس السطر الموجود في تطبيق الموبايل بالحرف. */}
+      <p className="mb-3 text-xs text-muted">
+        اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.
+      </p>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {messages.length === 0 ? (
           <p className="text-sm text-muted">مفيش رسايل لسه</p>

@@ -78,6 +78,7 @@ interface EligibilityRow {
   matches_preferred_company: boolean;
   availability_ok: boolean;
   decision_limit_ok: boolean;
+  team_leader_ok: boolean;
   distance_km: string | null;
 }
 
@@ -145,7 +146,7 @@ export class MatchingExplainabilityService {
             activeStatusesParam: '$6',
             engagedStatusesParam: '$10',
             isEmergencyParam: '$11',
-            serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+            serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
             fullDayThresholdMinutesParam: '$12',
           })}
         ) AS availability_ok,
@@ -158,6 +159,15 @@ export class MatchingExplainabilityService {
           WHERE dlc.level = tp.current_level
             AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents >= $13::int)
         ) AS decision_limit_ok,
+        -- docs/08 §107 — الشرط ده كان **ناقص من قايمة الـchecks** رغم إنه مفروض فعليًا في
+        -- assertCoreEligibility() وفي listForServiceBooking(isTeamBooking=true). النتيجة كانت
+        -- تناقض حقيقي اتلقط حي: المفتّش بيقول «مؤهّل بالكامل» لشخص مستواه verified بينما
+        -- قايمة التعيين الإجباري مش بتعرضه أصلاً والتنفيذ هيرفضه بـ409. بيتفحص بس لما الطلب
+        -- طلب اعتماد فعلاً — أي وضع تاني بيعدّي true زي ما التنفيذ بيعمل بالظبط.
+        ($14::boolean IS NOT TRUE OR EXISTS (
+          SELECT 1 FROM technician_level_config tbc
+          WHERE tbc.level = tp.current_level AND tbc.eligible_for_team_booking = true
+        )) AS team_leader_ok,
         (ST_Distance(tp.current_location, a.location) / 1000.0)::text AS distance_km
       FROM technician_profiles tp
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -180,6 +190,7 @@ export class MatchingExplainabilityService {
         isEmergency,
         fullDayJobMinutes,
         order.totalAmountCents,
+        order.bookingMode === BookingMode.TEAM,
       ],
     );
 
@@ -192,11 +203,30 @@ export class MatchingExplainabilityService {
       { key: 'category_eligible', passed: row.category_eligible, labelAr: 'مؤهّل لفئة/خدمة الطلب' },
       { key: 'zone_eligible', passed: row.zone_eligible, labelAr: 'مفعّل في نطاق خدمة الطلب' },
       { key: 'has_location', passed: row.has_location, labelAr: 'عنده موقع GPS مسجّل حاليًا' },
-      { key: 'not_already_offered', passed: row.not_already_offered, labelAr: 'ماتعرضش عليه الطلب ده قبل كده' },
-      { key: 'matches_requested_technician', passed: row.matches_requested_technician, labelAr: 'يطابق الفني المطلوب (إعادة حجز، لو مطلوب)' },
+      {
+        key: 'not_already_offered',
+        passed: row.not_already_offered,
+        labelAr: row.not_already_offered
+          ? 'لم تُرسل نفس الفرصة لهذا الفني من قبل'
+          : 'سبق إرسال نفس الطلب لهذا الفني؛ لن نكرر الإشعار، ويمكن تجربة فني آخر',
+      },
+      {
+        key: 'matches_requested_technician',
+        passed: row.matches_requested_technician,
+        labelAr: row.matches_requested_technician
+          ? 'يطابق الفني المحدد للطلب، أو الطلب مفتوح لأي فني'
+          : 'الطلب مقيّد بفني آخر؛ أزل اختيار الفني المحدد لتشغيل المطابقة على الجميع',
+      },
       { key: 'matches_preferred_company', passed: row.matches_preferred_company, labelAr: 'يطابق الشركة/الفريق المطلوب (اعتماد، لو مطلوب)' },
       { key: 'availability_ok', passed: row.availability_ok, labelAr: 'متاح وقت الطلب (بلا تعارض جدول/حظر يوم)' },
       { key: 'decision_limit_ok', passed: row.decision_limit_ok, labelAr: 'حد قرار مستوى الفني يكفي قيمة الطلب' },
+      {
+        key: 'team_leader_ok',
+        passed: row.team_leader_ok,
+        labelAr: row.team_leader_ok
+          ? 'مستواه مؤهّل لقيادة الطلب (طلب اعتماد)'
+          : 'مستوى الشخص ده مش مؤهّل يبقى قائد مهمة اعتماد — يقدر ينضم للطاقم كعضو، مش يقوده',
+      },
     ];
 
     const firstFailure = checks.find((c) => !c.passed);

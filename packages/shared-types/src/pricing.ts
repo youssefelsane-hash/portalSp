@@ -34,6 +34,8 @@ export interface PricingFieldResponseDto {
   options: PricingFieldOption[] | null;
   min_value: number | null;
   max_value: number | null;
+  min_files: number | null;
+  max_files: number | null;
   // Script 6 Part 3/4 (migration 0138) — القيمة الافتراضية لو الحقل اختياري ومتلمسش. لحقول
   // checkbox اختيارية بلا default_value مُعدّ صراحة، القيمة هنا null بس الافتراض الضمني false.
   default_value: string | null;
@@ -51,6 +53,8 @@ export interface CreatePricingFieldBody {
   options?: PricingFieldOption[];
   min_value?: number;
   max_value?: number;
+  min_files?: number;
+  max_files?: number;
   default_value?: string;
 }
 

@@ -21,6 +21,12 @@ const SECRET_SETTING_KEYS = new Set([
 
 export const isSecretSettingKey = (key: string): boolean => SECRET_SETTING_KEYS.has(key);
 
+/** V1 settlement knobs are frozen once V2 starts creating orders. */
+export const isLegacyEarningsSettingKey = (key: string): boolean =>
+  key.startsWith('commission_base.') ||
+  /^commission\.(individual|team|emergency)_adjustment_percentage$/.test(key) ||
+  key === 'crew.assistant_share_ratio';
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -156,6 +162,14 @@ export class SettingsService {
   async update(adminUserId: string, key: string, value: unknown, meta?: AuditActorMeta): Promise<Setting> {
     const setting = await this.getOrThrow(key);
     this.assertValueMatchesType(setting, value);
+
+    if (isLegacyEarningsSettingKey(key) && (await this.getBoolean('earnings.v2_cutover_enabled', false))) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الإعداد ده خاص بتسوية V1 واتقفل بعد تشغيل محرك الأرباح V2؛ استخدم صفحة سياسة الأرباح',
+        HttpStatus.CONFLICT,
+      );
+    }
 
     const secret = isSecretSettingKey(key);
     if (secret && typeof value !== 'string') {

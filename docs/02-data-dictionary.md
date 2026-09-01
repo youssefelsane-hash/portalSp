@@ -295,6 +295,19 @@ day_of_week SMALLINT,       -- 0=الأحد ... 6=السبت
 start_time TIME, end_time TIME, is_active BOOLEAN
 ```
 
+### 4.8 `technician_internal_notes` (ملاحظات الإدارة الخاصة)
+
+```sql
+id              UUID        PK
+technician_id   UUID        FK → technician_profiles.id ON DELETE CASCADE
+author_user_id  UUID        FK → users.id
+note            TEXT        NOT NULL، بعد التشذيب من 1 إلى 2000 حرف
+created_at      TIMESTAMPTZ DEFAULT now()
+```
+
+السجل تراكمي ولا يستبدل الملاحظة السابقة، ويُقرأ ويُكتب فقط عبر مسارات الإدارة. لا يوجد له أي
+مسار في تطبيق العميل أو الفني، ويحتفظ باسم الكاتب ووقت كل إضافة للمراجعة الداخلية.
+
 ---
 
 ## 5. جداول الكتالوج والتسعير
@@ -407,6 +420,9 @@ promo_code_id               UUID          FK NULL
 
 -- الأوقات (تسلسل دورة الحياة)
 placed_at                   TIMESTAMPTZ   NULL
+next_matching_attempt_at    TIMESTAMPTZ   NULL                -- الدور التالي في recovery العادل
+last_matching_attempt_at    TIMESTAMPTZ   NULL
+matching_attempt_count      INTEGER       DEFAULT 0 CHECK >= 0 -- backoff متدرج، يُصفّر عند دخول البحث
 assigned_at                 TIMESTAMPTZ   NULL
 accepted_at                 TIMESTAMPTZ   NULL
 technician_departed_at      TIMESTAMPTZ   NULL

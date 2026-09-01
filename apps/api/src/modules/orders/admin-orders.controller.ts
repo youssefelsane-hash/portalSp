@@ -1,13 +1,16 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
-import { AdminOrdersService } from './admin-orders.service';
+import { AdminOrdersService, toCrewAssignResponseDto } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { AdminRescheduleOrderDto } from './dto/admin-reschedule-order.dto';
@@ -40,6 +43,8 @@ import { MatchingExplainabilityService } from '../matching/matching-explainabili
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { InspectionQuoteService } from './inspection-quote.service';
+import { SubmitAdminPhotoQuoteDto } from './dto/submit-admin-photo-quote.dto';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -58,6 +63,7 @@ export class AdminOrdersController {
     private readonly addressesService: AddressesService,
     private readonly customerProfilesService: CustomerProfilesService,
     private readonly catalogService: CatalogService,
+    private readonly inspectionQuoteService: InspectionQuoteService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -257,6 +263,26 @@ export class AdminOrdersController {
     return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
   }
 
+  @Post(':id/problem-images')
+  @RequirePermission('orders.adjust_price')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadProblemImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('caption') caption: string | undefined,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('لازم ترفع صورة');
+    assertFileSignatureMatches(file.buffer, file.mimetype, new Set(['image/jpeg', 'image/png', 'image/webp']));
+    const media = await this.orderMediaService.uploadProblemPhotoByAdmin(user.sub, id, file, caption);
+    return toOrderMediaResponseDto(media, this.storage);
+  }
+
   // نفس نمط listMedia فوق — الأدمن محتاج يشوف بنود عرض السعر (مقترحة/معتمدة) وقت مراجعة شكوى
   // أو دعم فني، تفاصيل كاملة في order-items.service.ts.
   @Get(':id/quote-items')
@@ -294,6 +320,24 @@ export class AdminOrdersController {
   @RequirePermission('orders.reassign')
   async listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminOrdersService.listEligibleTechniciansForReassign(id);
+  }
+
+  // مرشّحو مفتّش المطابقة (docs/08 §107) — قراءة/تشخيص بس، أي أدمن، نفس بوابة
+  // matching-funnel/explain-technician اللي بيغذّيهم. **مش** نفس قايمة eligible-technicians
+  // فوق: دي بتشمل غير المؤهّل عمدًا، لأن ده بالظبط اللي المفتّش موجود يفسّره.
+  @Get(':id/explain-candidates')
+  async listExplainCandidates(@Param('id', ParseUUIDPipe) id: string) {
+    const { items } = await this.adminOrdersService.listExplainCandidates(id);
+    return {
+      items: items.map((item) => ({
+        technician_id: item.technicianId,
+        full_name: item.fullName,
+        technician_kind: item.technicianKind,
+        current_level: item.currentLevel,
+        has_location: item.hasLocation,
+        is_eligible_now: item.isEligibleNow,
+      })),
+    };
   }
 
   // شفافية "ليه الطلب ده اتوزّع بالشكل ده" (docs/08 §34.4، ADR-0020 §W) — مين اتعرضله فرصة شغل
@@ -345,7 +389,11 @@ export class AdminOrdersController {
       await this.ordersService.rescheduleByAdmin(
         admin.sub,
         id,
-        { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at },
+        {
+          newSlotId: dto.new_slot_id,
+          newScheduledAt: dto.new_scheduled_at,
+          newScheduledEndAt: dto.new_scheduled_end_at,
+        },
         dto.reason,
         audit,
       ),
@@ -377,6 +425,24 @@ export class AdminOrdersController {
     );
   }
 
+  @Post(':id/photo-quote')
+  @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
+  async submitPhotoQuote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitAdminPhotoQuoteDto,
+  ) {
+    return toOrderResponseDto(
+      await this.inspectionQuoteService.submitAdminRemoteQuote(
+        admin.sub,
+        id,
+        dto.quoted_amount_cents,
+        dto.note,
+      ),
+    );
+  }
+
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — قرار مالي (رسوم + استرداد)، نفس مستوى حساسية
   // orders.adjust_price بالحرف (permission مخصوصة + step-up MFA، migration 0107).
   @Post(':id/resolve-failed-visit')
@@ -390,6 +456,25 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(await this.ordersService.resolveFailedVisit(admin.sub, id, dto, audit));
+  }
+
+  // تحرير إعادة زيارة مثبّتة على الفني الأصلي (ADR-0051، docs/08 §96) — قرار مالي (خصم أرباح
+  // اتصرفت من محفظة فني)، نفس مستوى حساسية orders.resolve_failed_visit بالحرف.
+  @Post(':id/release-revisit')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.release_revisit')
+  @RequireStepUp()
+  async releaseRevisit(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const result = await this.adminOrdersService.releaseRevisit(admin.sub, id, audit);
+    return {
+      order: toOrderResponseDto(result.order),
+      release_reason: result.reason,
+      chargeback_cents: result.chargebackCents,
+    };
   }
 
   // نزاع تسليم كاش (docs/08 §22 بند 13-14) — قرار مالي محتمل (confirm_received)، نفس مستوى حساسية
@@ -417,6 +502,12 @@ export class AdminOrdersController {
 
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية — ADR-0008 (يمتد ADR-0007 §7 اللي أجّل
   // الحل ده صراحة عن نطاقه الأول).
+  @Get(':id/eligible-assistants')
+  @RequirePermission('orders.assign_assistant')
+  async listEligibleAssistants(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminOrdersService.listEligibleAssistants(id);
+  }
+
   @Post(':id/assistants')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('orders.assign_assistant')
@@ -426,9 +517,9 @@ export class AdminOrdersController {
     @Body() dto: AssignAssistantDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(
-      await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit),
-    );
+    // ADR-0057 — الرد بقى discriminated union: `status: 'assigned'` (زي زمان) أو
+    // `status: 'offer_sent'` (المساعد عنده تعارض جدولة، اتبعتله طلب يحتاج قبوله بنفسه).
+    return toCrewAssignResponseDto(await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit));
   }
 
   // إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) — كانت فجوة موثّقة صراحة:
@@ -443,7 +534,7 @@ export class AdminOrdersController {
     @Body() dto: AddCrewMemberDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(
+    return toCrewAssignResponseDto(
       await this.adminOrdersService.addCrewMember(admin.sub, id, dto.technician_id, dto.role_label, dto.member_type, audit),
     );
   }

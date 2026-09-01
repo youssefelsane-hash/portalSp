@@ -70,5 +70,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- بوابة P0-2 في docs/23 — قيمة المفتاح بتيجي من xcconfig غير متتبَّع
+	     (GOOGLE_MAPS_API_KEY)، مش مكتوبة هنا. فاضية = الخرائط معطّلة، وده مقصود. -->
+	<key>GoogleMapsApiKey</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
 </dict>
 </plist>

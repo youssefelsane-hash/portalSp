@@ -1,0 +1,7 @@
+// مفتاح خرائط Google لتطبيق العميل (iOS) — بوابة P0-2 في docs/23.
+//
+// انسخ الملف ده لـ`Local.xcconfig` (غير متتبَّع في git) وحط فيه المفتاح الحقيقي.
+// المفتاح لازم يكون **مقيَّد**: iOS bundle ID = com.baytak.customerApp (راجع Runner target
+// الحقيقي لو الاسم اتغيّر)، وMaps SDK for iOS بس. من غير الملف ده الخريطة مش هتحمّل — وده
+// مقصود: أفضل من مفتاح مسرّب شغّال (راجع AppDelegate.swift).
+GOOGLE_MAPS_API_KEY =

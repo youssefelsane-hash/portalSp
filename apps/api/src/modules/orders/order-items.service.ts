@@ -14,6 +14,7 @@ import { AdditionalWorkProposalStatus, OrderItem } from './entities/order-item.e
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
 import { CommissionBaseService } from '../pricing/commission-base.service';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 // دورة عرض السعر أثناء التنفيذ (docs/02-data-dictionary.md §6.2/§6.4) — كانت فجوة موثّقة
 // صراحة في orders/README.md و catalog/README.md ("order_items لسه من غير، جزء من S7").
@@ -34,6 +35,7 @@ export class OrderItemsService {
     private readonly events: EventEmitter2,
     // ADR-0037 — آخر بند عمدًا عشان السبيكات اللي بتبني الخدمة بـpositional args تحتاج append واحد بس.
     private readonly commissionBaseService: CommissionBaseService,
+    private readonly orderFinancials: OrderFinancialFinalizationService,
   ) {}
 
   private async findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
@@ -203,7 +205,6 @@ export class OrderItemsService {
         { isCustomerApproved: true, approvedAt: now, proposalStatus: AdditionalWorkProposalStatus.APPROVED },
       );
 
-      order.totalAmountCents += addedCents;
       // ADR-0037 / docs/08 §60.1 — بند إضافي معتمد أثناء الشغل **شغل حقيقي بينفّذه الفني**
       // (طلب مالك صريح: "لو طلب زيادة أثناء الشغل، ده برضه بيعتبر ضمن الشغل")، فبيدخل وعاء
       // العمولة زي سعر الخدمة الأصلي بالظبط — مش زي الضمان أو فوايد التقسيط.
@@ -211,12 +212,12 @@ export class OrderItemsService {
       // بنقرا السياسة هنا مش وقت التسوية عشان نفس سبب الـsnapshot وقت الإنشاء: الوعاء لازم
       // يعكس السياسة السارية وقت ما الشغل اتعمل فعلاً. `null` = طلب قبل migration 0192،
       // بيفضل null (السلوك القديم: الوعاء = الإجمالي وقت التسوية).
-      if (order.commissionableBaseCents !== null) {
-        const policy = await this.commissionBaseService.getPolicy();
-        if (policy.includeAdditionalItems) {
-          order.commissionableBaseCents += addedCents;
-        }
-      }
+      const policy = await this.commissionBaseService.getPolicy();
+      await this.orderFinancials.increasePrice(manager, order, {
+        amountCents: addedCents,
+        source: 'additional_work',
+        includeInCommissionableBase: policy.includeAdditionalItems,
+      });
       order.orderStatus = OrderStatus.IN_PROGRESS;
       await manager.save(order);
 

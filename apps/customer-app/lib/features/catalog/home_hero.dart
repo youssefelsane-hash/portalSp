@@ -39,6 +39,7 @@ class HomeHero extends StatelessWidget {
     required this.content,
     required this.trustMessage,
     required this.onSearch,
+    this.scrollController,
   });
 
   final List<ImageProvider<Object>> images;
@@ -46,10 +47,10 @@ class HomeHero extends StatelessWidget {
   final HomepageSearchContent content;
   final String trustMessage;
   final ValueChanged<String> onSearch;
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context) {
-
     final effectiveImages = images;
     final gradientIndex = activeIndex % _kHeroGradients.length;
     return ConstrainedBox(
@@ -60,20 +61,38 @@ class HomeHero extends StatelessWidget {
         // الارتفاع يتبع المحتوى بدل ما المحتوى يتحشر في ارتفاع مفروض عليه ويعمل overflow.
         children: [
           Positioned.fill(
-            child: HeroImageCrossfade(
-              images: effectiveImages,
-              activeIndex: activeIndex,
-              fallback: AnimatedContainer(
-                // التدرّج بيتحرّك بس لما هو نفسه الخلفية المعروضة. لما فيه صور، هو مجرد شبكة
-                // أمان تحتها فمفيش داعي يستهلك فريمات في أنيميشن محدش شايفه.
-                duration: Duration(
-                  milliseconds: effectiveImages.isEmpty ? 1000 : 0,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: _kHeroGradients[gradientIndex],
+            child: ClipRect(
+              child: AnimatedBuilder(
+                animation: scrollController ?? const _IdleListenable(),
+                builder: (context, child) {
+                  final reduceMotion = MediaQuery.disableAnimationsOf(context);
+                  final offset = scrollController?.hasClients == true
+                      ? scrollController!.offset.clamp(0.0, 240.0)
+                      : 0.0;
+                  return Transform.translate(
+                    offset: Offset(0, reduceMotion ? 0 : -offset * 0.1),
+                    child: Transform.scale(
+                      scale: effectiveImages.isEmpty ? 1 : 1.14,
+                      child: child,
+                    ),
+                  );
+                },
+                child: HeroImageCrossfade(
+                  images: effectiveImages,
+                  activeIndex: activeIndex,
+                  fallback: AnimatedContainer(
+                    // التدرّج بيتحرّك بس لما هو نفسه الخلفية المعروضة. لما فيه صور، هو مجرد شبكة
+                    // أمان تحتها فمفيش داعي يستهلك فريمات في أنيميشن محدش شايفه.
+                    duration: Duration(
+                      milliseconds: effectiveImages.isEmpty ? 1000 : 0,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: _kHeroGradients[gradientIndex],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -97,7 +116,7 @@ class HomeHero extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 26, 20, 18),
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
             child: TweenAnimationBuilder<double>(
               tween: Tween(begin: 0, end: 1),
               duration: const Duration(milliseconds: 700),
@@ -126,7 +145,7 @@ class HomeHero extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 20,
+                      fontSize: 19,
                       fontWeight: FontWeight.bold,
                       height: 1.25,
                       shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
@@ -152,13 +171,10 @@ class HomeHero extends StatelessWidget {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  _HeroSearchField(
-                    content: content,
-                    onSearch: onSearch,
-                  ),
+                  const SizedBox(height: 10),
+                  _HeroSearchField(content: content, onSearch: onSearch),
                   if (trustMessage.isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -188,7 +204,7 @@ class HomeHero extends StatelessWidget {
                     ),
                   ],
                   if (effectiveImages.length > 1) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: List.generate(
@@ -216,6 +232,16 @@ class HomeHero extends StatelessWidget {
       ),
     );
   }
+}
+
+class _IdleListenable implements Listenable {
+  const _IdleListenable();
+
+  @override
+  void addListener(VoidCallback listener) {}
+
+  @override
+  void removeListener(VoidCallback listener) {}
 }
 
 // حقل البحث جوّه لوحة الـhero: مضغوط وهو خامل عشان الصورة تفضل ظاهرة، ويتمدد عند التركيز ويقبل
@@ -275,86 +301,84 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
     return Center(
       child: ConstrainedBox(
         // لجام للشاشات الكبيرة (تابلت/ديسكتوب) — من غيره الشريط بياخد عرض 1100px.
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: focused
-                  ? AppColors.primary.withValues(alpha: 0.75)
-                  : Colors.white.withValues(alpha: 0.85),
-              width: focused ? 1.5 : 1,
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: AnimatedScale(
+          scale: focused ? 1.015 : 1,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.97),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: focused
+                    ? AppColors.primary.withValues(alpha: 0.75)
+                    : Colors.white.withValues(alpha: 0.9),
+                width: focused ? 1.5 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: focused ? 0.22 : 0.14),
+                  blurRadius: focused ? 22 : 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: focused ? 0.2 : 0.14),
-                blurRadius: focused ? 20 : 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              const SizedBox(width: 10),
-              Icon(
-                Icons.search_rounded,
-                size: 20,
-                color: focused ? AppColors.primary : Colors.blueGrey.shade400,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  key: const ValueKey('homepage-hero-search'),
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  cursorColor: AppColors.primary,
-                  style: const TextStyle(
-                    color: Color(0xFF172033),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => _submit(),
-                  onTapOutside: (_) => _focusNode.unfocus(),
-                  // `kSelfPaintedFieldDecoration` (design/app_theme.dart) بيلغي `filled` الموروثة
-                  // من الثيم — من غيره الوضع الداكن بيرسم مستطيل غامق جوّه الكبسولة البيضا
-                  // (بَقّة مالك حقيقية، docs/08 §78-أ). وبيحطّ `isDense` + حشو صفر كمان:
-                  // الارتفاع بيطلع من الخط نفسه، فمفيش فرصة إن `InputDecorator` يتحشر في
-                  // مساحة أصغر من اللي محتاجها.
-                  decoration: kSelfPaintedFieldDecoration.copyWith(
-                    hintText: widget.content.placeholder,
-                    hintStyle: TextStyle(
-                      color: Colors.blueGrey.shade400,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
+            child: Row(
+              children: [
+                const SizedBox(width: 9),
+                Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: focused ? AppColors.primary : Colors.blueGrey.shade400,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('homepage-hero-search'),
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    cursorColor: AppColors.primary,
+                    style: const TextStyle(
+                      color: Color(0xFF172033),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _submit(),
+                    onTapOutside: (_) => _focusNode.unfocus(),
+                    decoration: kSelfPaintedFieldDecoration.copyWith(
+                      hintText: widget.content.placeholder,
+                      hintStyle: TextStyle(
+                        color: Colors.blueGrey.shade400,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              // زرار البحث ظاهر دايمًا — هو اللي بيدّي العنصر ارتفاعه الطبيعي (40 + 12 حشو
-              // = 52)، وفي نفس الوقت بيقول للعميل إن ده حقل بحث فعلاً مش مجرد نص.
-              SizedBox.square(
-                dimension: 40,
-                child: Material(
-                  color: AppColors.primary,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: _submit,
-                    child: const Icon(
-                      Icons.arrow_back_rounded,
-                      color: Colors.white,
-                      size: 20,
+                const SizedBox(width: 7),
+                SizedBox.square(
+                  dimension: 36,
+                  child: Material(
+                    color: AppColors.primary,
+                    shape: const CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: _submit,
+                      child: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

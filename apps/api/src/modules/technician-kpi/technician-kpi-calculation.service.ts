@@ -59,6 +59,12 @@ export class TechnicianKpiCalculationService {
       SELECT DISTINCT technician_id FROM (
         SELECT technician_id FROM orders WHERE technician_id IS NOT NULL AND work_completed_at >= $1 AND work_completed_at < $2 AND deleted_at IS NULL
         UNION
+        SELECT oes.technician_id
+          FROM order_earning_shares oes
+          JOIN orders o ON o.id = oes.order_id
+         WHERE o.work_completed_at >= $1 AND o.work_completed_at < $2
+           AND o.order_status = 'completed' AND o.deleted_at IS NULL AND oes.deleted_at IS NULL
+        UNION
         SELECT technician_id FROM order_assignments WHERE sent_at >= $1 AND sent_at < $2
       ) t
       `,
@@ -78,28 +84,59 @@ export class TechnicianKpiCalculationService {
 
     const [ordersRow] = await this.dataSource.query(
       `
+      WITH participation AS (
+        SELECT o.id, o.order_status,
+               o.platform_commission_cents - COALESCE((
+                 SELECT SUM(rsr.reversal_cents)
+                   FROM refund_settlement_reversals rsr
+                  WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+               ), 0) AS net_platform_commission_cents,
+               o.technician_earning_cents,
+               o.total_amount_cents, COALESCE(oes.share_cents, o.technician_earning_cents) AS my_share_cents
+          FROM orders o
+          LEFT JOIN order_earning_shares oes
+            ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+         WHERE o.work_completed_at >= $2 AND o.work_completed_at < $3 AND o.deleted_at IS NULL
+           AND (oes.technician_id = $1 OR (
+             o.technician_id = $1 AND NOT EXISTS (
+               SELECT 1 FROM order_earning_shares any_share
+                WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+             )
+           ))
+      )
       SELECT
         COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
-        COALESCE(SUM(platform_commission_cents) FILTER (WHERE order_status = 'completed'), 0) AS platform_revenue_cents,
-        COALESCE(SUM(total_amount_cents) FILTER (WHERE order_status = 'completed'), 0) AS order_value_cents
-      FROM orders
-      WHERE technician_id = $1 AND work_completed_at >= $2 AND work_completed_at < $3 AND deleted_at IS NULL
+        COALESCE(SUM(CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
+          THEN ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents)
+          ELSE 0 END), 0) AS platform_revenue_cents,
+        COALESCE(SUM(CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
+          THEN ROUND(total_amount_cents::numeric * my_share_cents / technician_earning_cents)
+          ELSE 0 END), 0) AS order_value_cents
+      FROM participation
       `,
       [technicianProfileId, start, end],
     );
 
     const [assignmentsRow] = await this.dataSource.query(
       `
+      WITH assignment_activity AS (
+        SELECT order_id, assignment_status::text AS assignment_status
+          FROM order_assignments
+         WHERE technician_id = $1 AND sent_at >= $2 AND sent_at < $3
+      ), crew_activity AS (
+        SELECT oes.order_id, 'accepted'::text AS assignment_status
+          FROM order_earning_shares oes
+          JOIN orders o ON o.id = oes.order_id
+         WHERE oes.technician_id = $1 AND oes.deleted_at IS NULL
+           AND o.work_completed_at >= $2 AND o.work_completed_at < $3
+           AND NOT EXISTS (SELECT 1 FROM assignment_activity aa WHERE aa.order_id = oes.order_id)
+      ), activity AS (
+        SELECT * FROM assignment_activity UNION ALL SELECT * FROM crew_activity
+      )
       SELECT
-        -- ADR-0018 §5 — بعد التصحيح، عرض اتحل لصالح فني تاني (سبق قبله) بيتحول لـ'cancelled'
-        -- بدل ما يستنى TIMEOUT (التايم آوت بقى مش بيتسجّل خالص لعروض حية — راجع
-        -- matching-round-expiry.processor.ts). 'timeout' متسيّبة في القايمة لتوافق بيانات
-        -- تاريخية قبل التصحيح، 'cancelled' اتضافت عشان "اتعرض عليه بس فني تاني سبقه" يفضل
-        -- محسوب في معدّل الاستجابة زي ما كان قبل كده بالظبط (مفيش تراجع في دقة الـKPI).
         COUNT(*) FILTER (WHERE assignment_status IN ('accepted', 'rejected', 'timeout', 'cancelled')) AS offered_orders_count,
         COUNT(*) FILTER (WHERE assignment_status = 'accepted') AS accepted_orders_count
-      FROM order_assignments
-      WHERE technician_id = $1 AND sent_at >= $2 AND sent_at < $3
+      FROM activity
       `,
       [technicianProfileId, start, end],
     );
@@ -115,7 +152,7 @@ export class TechnicianKpiCalculationService {
       SELECT
         AVG(r.overall_rating)::numeric(4,2) AS average_rating,
         COUNT(*) AS ratings_count,
-        COUNT(*) FILTER (WHERE r.overall_rating <= $4) AS negative_ratings_count,
+        COUNT(*) FILTER (WHERE r.overall_rating::numeric <= $4::numeric) AS negative_ratings_count,
         AVG(r.cleanliness_rating)::numeric(4,2) AS average_cleanliness_rating
       FROM ratings r
       JOIN technician_profiles tp ON tp.user_id = r.rated_user_id
@@ -154,15 +191,42 @@ export class TechnicianKpiCalculationService {
       [technicianProfileId, start, end],
     );
 
+    // الدخل هنا هو نصيب الشخص المسجل في `order_earning_shares` ناقص عكس الاسترداد الذي خرج
+    // فعليًا من محفظته. الاعتماد على ORDER_EARNING credits وحدها كان يسقط شغل الكاش بالكامل
+    // (القائد ماسك مستحقه خارج المحفظة) ويسقط أعضاء الطاقم من رقم الطلب الأصلي.
     const [earningsRow] = await this.dataSource.query(
       `
-      SELECT COALESCE(SUM(wt.amount_cents), 0) AS technician_earnings_cents
-      FROM wallet_transactions wt
-      JOIN wallets w ON w.id = wt.wallet_id
-      WHERE w.owner_user_id = $1 AND wt.transaction_type = 'order_earning' AND wt.direction = 'credit'
-        AND wt.is_reversed = false AND wt.created_at >= $2 AND wt.created_at < $3
+      WITH month_orders AS (
+        SELECT o.id, o.technician_earning_cents,
+               COALESCE(oes.share_cents, CASE WHEN o.technician_id = $1 THEN o.technician_earning_cents ELSE 0 END) AS my_share_cents
+        FROM orders o
+        LEFT JOIN order_earning_shares oes
+          ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+        WHERE (oes.technician_id = $1 OR (
+                 o.technician_id = $1 AND NOT EXISTS (
+                   SELECT 1 FROM order_earning_shares any_share
+                   WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+                 )
+               ))
+          AND o.order_status = 'completed' AND o.work_completed_at >= $3 AND o.work_completed_at < $4
+          AND o.deleted_at IS NULL
+      )
+      SELECT
+        GREATEST(0,
+          COALESCE((SELECT SUM(my_share_cents) FROM month_orders), 0)
+          - COALESCE((
+              SELECT SUM(wt.amount_cents)
+              FROM refunds r
+              JOIN month_orders mo ON mo.id = r.order_id
+              JOIN wallet_transactions wt
+                ON wt.reference_type = 'refund' AND wt.reference_id = r.id
+               AND wt.transaction_type = 'refund' AND wt.direction = 'debit'
+              JOIN wallets w ON w.id = wt.wallet_id
+              WHERE r.refund_status = 'completed' AND w.owner_user_id = $2
+            ), 0)
+        ) AS technician_earnings_cents
       `,
-      [technicianUserId, start, end],
+      [technicianProfileId, technicianUserId, start, end],
     );
 
     return {
@@ -190,15 +254,43 @@ export class TechnicianKpiCalculationService {
     const { start, end } = this.monthBounds(periodYear, periodMonth);
     const [row] = await this.dataSource.query(
       `
-      SELECT COALESCE(AVG(tech_totals.total), 0) AS avg_earnings
-      FROM (
-        SELECT w.owner_user_id, SUM(wt.amount_cents) AS total
-        FROM wallet_transactions wt
+      WITH month_orders AS (
+        SELECT o.id, o.technician_id, o.technician_earning_cents
+        FROM orders o
+        WHERE o.order_status = 'completed' AND o.work_completed_at >= $1 AND o.work_completed_at < $2
+          AND o.deleted_at IS NULL
+      ),
+      gross AS (
+        SELECT oes.technician_id, SUM(oes.share_cents)::bigint AS gross_cents
+        FROM month_orders mo
+        JOIN order_earning_shares oes ON oes.order_id = mo.id AND oes.deleted_at IS NULL
+        GROUP BY oes.technician_id
+        UNION ALL
+        SELECT mo.technician_id, SUM(mo.technician_earning_cents)::bigint
+        FROM month_orders mo
+        WHERE mo.technician_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM order_earning_shares oes WHERE oes.order_id = mo.id AND oes.deleted_at IS NULL
+          )
+        GROUP BY mo.technician_id
+      ),
+      gross_by_tech AS (
+        SELECT technician_id, SUM(gross_cents)::bigint AS gross_cents FROM gross GROUP BY technician_id
+      ),
+      reversals AS (
+        SELECT tp.id AS technician_id, SUM(wt.amount_cents)::bigint AS reversal_cents
+        FROM month_orders mo
+        JOIN refunds r ON r.order_id = mo.id AND r.refund_status = 'completed'
+        JOIN wallet_transactions wt
+          ON wt.reference_type = 'refund' AND wt.reference_id = r.id
+         AND wt.transaction_type = 'refund' AND wt.direction = 'debit'
         JOIN wallets w ON w.id = wt.wallet_id
-        WHERE wt.transaction_type = 'order_earning' AND wt.direction = 'credit' AND wt.is_reversed = false
-          AND wt.created_at >= $1 AND wt.created_at < $2
-        GROUP BY w.owner_user_id
-      ) tech_totals
+        JOIN technician_profiles tp ON tp.user_id = w.owner_user_id
+        GROUP BY tp.id
+      )
+      SELECT COALESCE(AVG(GREATEST(0, gross_by_tech.gross_cents - COALESCE(reversals.reversal_cents, 0))), 0) AS avg_earnings
+      FROM gross_by_tech
+      LEFT JOIN reversals ON reversals.technician_id = gross_by_tech.technician_id
       `,
       [start, end],
     );

@@ -108,6 +108,12 @@ export class AdminOperationsController {
           responded_at: r.respondedAt,
           expires_at: r.expiresAt,
           is_stale: r.isStale,
+          // بَقّة حقيقية اتلقطت بلقطة شاشة مالك (docs/08 §90): الخدمة والواجهة كانوا جاهزين من
+          // §72 (رقم الطلب + عدد الفنيين اللي اتبعتلهم)، لكن الـmapping هنا نسي الحقلين — يعني
+          // الـJSON كان بيوصل من غيرهم فعليًا، فعمود "الطلب" كان بيبان فاضي (order_number
+          // undefined) والعداد "اتبعت لـ فني" من غير رقم (order_technician_count undefined).
+          order_number: r.orderNumber,
+          order_technician_count: r.orderTechnicianCount,
         })),
         meta: result.feed.meta,
       },

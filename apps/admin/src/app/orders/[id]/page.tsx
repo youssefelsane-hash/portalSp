@@ -15,6 +15,7 @@ import type {
   OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
   TeamMemberResponseDto,
+  TechnicianCapacityTier,
   TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -57,6 +58,25 @@ interface ScheduleSlot {
 interface RescheduleOptionDto {
   date: string;
   available: boolean;
+}
+
+interface EligibleAssistantDto {
+  technician_id: string;
+  full_name: string;
+  technician_code: string;
+  current_level: string;
+  distance_km: string | null;
+  // docs/08 §108-A — كانت غايبة عن الواجهة رغم إن الباك-إند بيرجّعها من زمان (ADR-0057):
+  // بدونها الأدمن معندوش أي مؤشر قبل الاختيار إن الفني ده مشغول وهيتحوّل لعرض/فرصة بدل إضافة
+  // فورية.
+  capacity_tier: TechnicianCapacityTier;
+}
+
+// docs/08 §108-A — شكل رد assignAssistant/addCrewMember بعد ADR-0057: مش الطلب كامل زي الأول،
+// بقى discriminated union يوضّح هل الإضافة كانت فورية ولا اتحوّلت لفرصة تحتاج قبول الفني.
+interface CrewAssignResponseDto {
+  status: 'assigned' | 'offer_sent';
+  capacity_tier?: TechnicianCapacityTier;
 }
 
 // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3): GET/POST /admin/orders/:id/notes.
@@ -107,7 +127,14 @@ import {
   REFUND_STATUS_LABELS,
 } from '@/lib/payments-labels';
 import { COMPLAINT_STATUS_LABELS, complaintStatusTone } from '@/lib/support-labels';
-import { CAPACITY_TIER_LABELS, LEVEL_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
+import {
+  CAPACITY_TIER_LABELS,
+  LEVEL_LABELS,
+  capacityTierBadgeClass,
+  technicianKindOptionPrefix,
+  type TechnicianKindCode,
+} from '@/lib/technician-labels';
+import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -134,14 +161,34 @@ export default function OrderDetailPage() {
   // منطق الأهلية الحقيقي لهذا الطلب بالذات (خدمة/منطقة/موعد)، بديل عن approvedTechnicians العامة
   // فوق (لسه مستخدمة زي ما هي لإضافة/استبدال عضو فريق ومساعد — نطاق مختلف).
   const [eligibleReassignTechnicians, setEligibleReassignTechnicians] = useState<
-    { technicianId: string; fullName: string }[] | null
+    { technicianId: string; fullName: string; technicianKind: TechnicianKindCode }[] | null
+  >(null);
+  // docs/08 §107 — مفتّش المطابقة له مصدر مرشّحين **منفصل** عن قايمة التعيين فوق. القايمة دي
+  // بتشمل غير المؤهّل عمدًا: سؤال «ليه ده مش مختار؟» مستحيل يتسأل لو اللي إجابته «لأ» متشال من
+  // القايمة اللي بتختار منها (وده اللي كان بيخفي المساعدين الجداد خالص — بلاغ المالك).
+  const [explainCandidates, setExplainCandidates] = useState<
+    {
+      technicianId: string;
+      fullName: string;
+      technicianKind: TechnicianKindCode;
+      currentLevel: string | null;
+      isEligibleNow: boolean;
+    }[] | null
   >(null);
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
+  const [photoQuoteEgp, setPhotoQuoteEgp] = useState('');
+  const [photoQuoteNote, setPhotoQuoteNote] = useState('');
+  const [uploadingProblemImages, setUploadingProblemImages] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
+  const [eligibleAssistants, setEligibleAssistants] = useState<EligibleAssistantDto[] | null>(null);
+  // docs/08 §108-A — بعد ADR-0057، الإضافة ممكن تتحوّل لعرض/فرصة بدل إضافة فورية لو الفني مشغول
+  // (نفس منطق التجنيد الذاتي في apps/technician-app بالحرف). الأدمن كان بياخد نفس رسالة النجاح
+  // في الحالتين، بلا أي تمييز إن الفني اتضاف فعلاً ولا لسه مستني يقبل عرض.
+  const [crewAssignOutcome, setCrewAssignOutcome] = useState<{ message: string; isOffer: boolean } | null>(null);
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
@@ -324,12 +371,43 @@ export default function OrderDetailPage() {
       .catch(() => setApprovedTechnicians([]));
   }
 
+  function loadEligibleAssistants() {
+    authedFetch<EligibleAssistantDto[]>(`/admin/orders/${id}/eligible-assistants`)
+      .then(setEligibleAssistants)
+      .catch(() => setEligibleAssistants([]));
+  }
+
   function loadEligibleReassignTechnicians() {
-    authedFetch<{ zoneId: string; items: { technicianId: string; fullName: string }[] }>(
-      `/admin/orders/${id}/eligible-technicians`,
-    )
+    authedFetch<{
+      zoneId: string;
+      items: { technicianId: string; fullName: string; technicianKind: TechnicianKindCode }[];
+    }>(`/admin/orders/${id}/eligible-technicians`)
       .then(({ items }) => setEligibleReassignTechnicians(items))
       .catch(() => setEligibleReassignTechnicians([]));
+  }
+
+  function loadExplainCandidates() {
+    authedFetch<{
+      items: {
+        technician_id: string;
+        full_name: string;
+        technician_kind: TechnicianKindCode;
+        current_level: string | null;
+        is_eligible_now: boolean;
+      }[];
+    }>(`/admin/orders/${id}/explain-candidates`)
+      .then(({ items }) =>
+        setExplainCandidates(
+          items.map((item) => ({
+            technicianId: item.technician_id,
+            fullName: item.full_name,
+            technicianKind: item.technician_kind,
+            currentLevel: item.current_level,
+            isEligibleNow: item.is_eligible_now,
+          })),
+        ),
+      )
+      .catch(() => setExplainCandidates([]));
   }
 
   async function handleReassign(e: FormEvent) {
@@ -449,6 +527,54 @@ export default function OrderDetailPage() {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handlePhotoQuote(e: FormEvent) {
+    e.preventDefault();
+    const quotedAmountCents = Math.round(Number(photoQuoteEgp) * 100);
+    if (!Number.isFinite(quotedAmountCents) || quotedAmountCents < 1) {
+      setError('اكتب سعر صحيح أكبر من صفر');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/photo-quote`, {
+        method: 'POST',
+        body: JSON.stringify({
+          quoted_amount_cents: quotedAmountCents,
+          ...(photoQuoteNote.trim() ? { note: photoQuoteNote.trim() } : {}),
+        }),
+      });
+      setPhotoQuoteEgp('');
+      setPhotoQuoteNote('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إرسال عرض السعر');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAdminProblemImages(files: FileList | null) {
+    if (!files?.length) return;
+    setUploadingProblemImages(true);
+    setError(null);
+    try {
+      for (const file of Array.from(files).slice(0, 10)) {
+        const body = new FormData();
+        body.set('file', file);
+        const uploaded = await authedFetch<OrderMediaResponseDto>(`/admin/orders/${id}/problem-images`, {
+          method: 'POST',
+          body,
+        });
+        setMedia((current) => [...current, uploaded]);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر رفع صور المشكلة');
+    } finally {
+      setUploadingProblemImages(false);
     }
   }
 
@@ -582,11 +708,22 @@ export default function OrderDetailPage() {
     if (!assistantTechnicianId) return;
     setIsSaving(true);
     setError(null);
+    setCrewAssignOutcome(null);
     try {
-      await authedFetch(`/admin/orders/${id}/assistants`, {
+      const outcome = await authedFetch<CrewAssignResponseDto>(`/admin/orders/${id}/assistants`, {
         method: 'POST',
         body: JSON.stringify({ technician_id: assistantTechnicianId }),
       });
+      // docs/08 §108-A — نفس رسالة apps/technician-app's RecruitTeamScreen بالحرف: الأدمن لازم
+      // يعرف هل الإضافة فورية ولا اتحوّلت لعرض مستني قبول الفني، مش يفترض النجاح الصامت.
+      setCrewAssignOutcome(
+        outcome.status === 'offer_sent'
+          ? {
+              isOffer: true,
+              message: `عنده شغل النهاردة — اتبعتله فرصة اختيارية بدل إضافة فورية، مستني رده (${CAPACITY_TIER_LABELS[outcome.capacity_tier ?? 'MEANINGFUL']})`,
+            }
+          : { isOffer: false, message: 'اتضاف المساعد فورًا لطاقم الطلب' },
+      );
       setShowAssignAssistantForm(false);
       setAssistantTechnicianId('');
       load();
@@ -604,11 +741,20 @@ export default function OrderDetailPage() {
     if (!crewTechnicianId || !crewRoleLabel) return;
     setIsSaving(true);
     setError(null);
+    setCrewAssignOutcome(null);
     try {
-      await authedFetch(`/admin/orders/${id}/team-members`, {
+      const outcome = await authedFetch<CrewAssignResponseDto>(`/admin/orders/${id}/team-members`, {
         method: 'POST',
         body: JSON.stringify({ technician_id: crewTechnicianId, role_label: crewRoleLabel, member_type: crewMemberType }),
       });
+      setCrewAssignOutcome(
+        outcome.status === 'offer_sent'
+          ? {
+              isOffer: true,
+              message: `عنده شغل النهاردة — اتبعتله فرصة اختيارية بدل إضافة فورية، مستني رده (${CAPACITY_TIER_LABELS[outcome.capacity_tier ?? 'MEANINGFUL']})`,
+            }
+          : { isOffer: false, message: 'اتضاف الفني فورًا لطاقم الطلب' },
+      );
       setShowAddCrewForm(false);
       setCrewTechnicianId('');
       setCrewRoleLabel('');
@@ -766,6 +912,90 @@ export default function OrderDetailPage() {
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
+      {order.order_status === 'awaiting_admin_quote' && (
+        <Card className="mb-6 border-amber-300 bg-amber-50/60">
+          <CardHeader>
+            <CardTitle className="text-base">العميل مستني تسعير الصور</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 lg:grid-cols-[1.25fr_1fr]">
+            <div>
+              <p className="mb-3 text-sm text-muted-foreground">
+                راجع صور المشكلة وحدد السعر الكامل. الطلب لن يدخل المطابقة إلا بعد موافقة العميل.
+              </p>
+              {hasPermission('orders.adjust_price') && (
+                <label className="mb-3 inline-flex cursor-pointer items-center rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted/50">
+                  {uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور وصلت للإدارة'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    className="sr-only"
+                    disabled={uploadingProblemImages}
+                    onChange={(event) => {
+                      void handleAdminProblemImages(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              )}
+              {media.filter((item) => item.media_type === 'problem_photo').length === 0 ? (
+                <p className="text-sm text-destructive">لا توجد صور مشكلة صالحة على الطلب.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {media
+                    .filter((item) => item.media_type === 'problem_photo')
+                    .map((item) => (
+                      <a key={item.id} href={resolveMediaUrl(item.file_url)} target="_blank" rel="noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- صورة من تخزين الباك إند */}
+                        <img
+                          src={resolveMediaUrl(item.file_url)}
+                          alt="صورة المشكلة"
+                          className="aspect-square w-full rounded-xl border object-cover"
+                        />
+                      </a>
+                    ))}
+                </div>
+              )}
+            </div>
+            <form onSubmit={handlePhotoQuote} className="flex flex-col gap-3 rounded-xl border bg-background p-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="photo-quote-egp">السعر الكامل (ج.م.)</Label>
+                <Input
+                  id="photo-quote-egp"
+                  inputMode="decimal"
+                  value={photoQuoteEgp}
+                  onChange={(event) => setPhotoQuoteEgp(event.target.value)}
+                  placeholder="مثال: 850"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="photo-quote-note">ملاحظة للعميل (اختياري)</Label>
+                <Input
+                  id="photo-quote-note"
+                  value={photoQuoteNote}
+                  onChange={(event) => setPhotoQuoteNote(event.target.value)}
+                  placeholder="ما الذي يشمله السعر؟"
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={
+                  isSaving ||
+                  !hasPermission('orders.adjust_price') ||
+                  media.every((item) => item.media_type !== 'problem_photo')
+                }
+              >
+                {isSaving ? 'جاري الإرسال…' : 'إرسال السعر للعميل'}
+              </Button>
+              {!hasPermission('orders.adjust_price') && (
+                <p className="text-xs text-destructive">تحتاج صلاحية تعديل الأسعار لإرسال العرض.</p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
           المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
           (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
@@ -873,27 +1103,41 @@ export default function OrderDetailPage() {
           )}
 
           <div className="border-t pt-4">
-            <p className="mb-2 font-medium text-sm">ليه/ليه لأ فني محدد؟</p>
+            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
+            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
+                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
+            <p className="mb-2 text-xs text-muted-foreground">
+              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
+            </p>
             <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
-                  الفني
+                  الفني/المساعد
                 </Label>
                 <SelectNative
                   id="explain_technician"
                   value={explainTechnicianId}
                   onFocus={() => {
-                    if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
+                    if (!explainCandidates) loadExplainCandidates();
                   }}
                   onChange={(e) => setExplainTechnicianId(e.target.value)}
-                  className="min-w-[220px]"
+                  className="min-w-[280px]"
                 >
-                  <option value="">اختار فني</option>
-                  {eligibleReassignTechnicians?.map((tech) => (
-                    <option key={tech.technicianId} value={tech.technicianId}>
-                      {tech.fullName}
-                    </option>
-                  ))}
+                  <option value="">اختار فني أو مساعد</option>
+                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
+                    if (group.length === 0) return null;
+                    return (
+                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                        {group.map((candidate) => (
+                          <option key={candidate.technicianId} value={candidate.technicianId}>
+                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
+                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
                 </SelectNative>
               </div>
               <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
@@ -903,6 +1147,19 @@ export default function OrderDetailPage() {
             {explainError && <p className="mt-2 text-sm text-destructive">{explainError}</p>}
             {explanation && (
               <div className="mt-3 flex flex-col gap-2 text-sm">
+                {(() => {
+                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
+                  if (!subject) return null;
+                  return (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <TechnicianKindTag kind={subject.technicianKind} />
+                      <span>{subject.fullName}</span>
+                      {subject.currentLevel && (
+                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
+                      )}
+                    </p>
+                  );
+                })()}
                 <p className="font-medium">
                   <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
                     {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
@@ -1081,12 +1338,13 @@ export default function OrderDetailPage() {
               )}
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
-                  <Label htmlFor="technician_id">الفني الجديد</Label>
+                  <Label htmlFor="technician_id">الفني/المساعد الجديد</Label>
                   {!eligibleReassignTechnicians ? (
-                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المؤهلين لهذا الطلب…</p>
+                    <p className="text-sm text-muted-foreground">جاري تحميل المؤهلين لهذا الطلب…</p>
                   ) : eligibleReassignTechnicians.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      مفيش فنيين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي
+                      مفيش فنيين ولا مساعدين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي — استخدم مفتّش المطابقة فوق
+                      عشان تعرف سبب استبعاد كل واحد.
                     </p>
                   ) : (
                     <SelectNative
@@ -1096,13 +1354,24 @@ export default function OrderDetailPage() {
                       required
                     >
                       <option value="" disabled>
-                        اختار فني
+                        اختار فني أو مساعد
                       </option>
-                      {eligibleReassignTechnicians.map((tech) => (
-                        <option key={tech.technicianId} value={tech.technicianId}>
-                          {tech.fullName}
-                        </option>
-                      ))}
+                      {/* docs/08 §107 — القايمة دي بتفضل مقصورة على المؤهّلين فعلاً (مش تمييز
+                          ضد المساعد: نفس assertCoreEligibility() هيرفض أي حد غير مؤهّل بـ409
+                          وقت التنفيذ). الرمز جنب الاسم بيوضّح إن المساعد موجود فيها فعلاً. */}
+                      {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                        const group = eligibleReassignTechnicians.filter((t) => t.technicianKind === kind);
+                        if (group.length === 0) return null;
+                        return (
+                          <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                            {group.map((tech) => (
+                              <option key={tech.technicianId} value={tech.technicianId}>
+                                {technicianKindOptionPrefix(tech.technicianKind)} {tech.fullName}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </SelectNative>
                   )}
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
@@ -1475,8 +1744,14 @@ export default function OrderDetailPage() {
                 <div className="rounded-md border">
                   <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
                     <div>
-                      <p className="font-medium">توزيع مستحقات أفراد الطاقم</p>
-                      <p className="text-xs text-muted-foreground">بيانات داخلية للأدمن فقط</p>
+                      <p className="font-medium">
+                        {earningShares?.[0]?.is_preview ? 'معاينة توزيع المستحقات' : 'توزيع مستحقات أفراد الطاقم'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {earningShares?.[0]?.is_preview
+                          ? 'تقدير حي من نفس محرك التسوية، وقد يتغير قبل الإقفال'
+                          : 'Snapshot نهائي غير قابل للتغيير - بيانات داخلية للأدمن فقط'}
+                      </p>
                     </div>
                     {!!earningShares?.length && (
                       <div className="text-end">
@@ -1500,7 +1775,7 @@ export default function OrderDetailPage() {
                   )}
                   {!earningSharesError && earningShares?.length === 0 && (
                     <p className="p-3 text-muted-foreground">
-                      لم يتم إنشاء توزيع للطاقم حتى الآن. يظهر التوزيع بعد اعتماد مستحقات الشغل.
+                      لا يمكن إنشاء معاينة حتى يتم تعيين قائد للطلب.
                     </p>
                   )}
                   {!!earningShares?.length && (
@@ -1509,7 +1784,7 @@ export default function OrderDetailPage() {
                         <TableRow>
                           <TableHead>الفرد</TableHead>
                           <TableHead>الدور</TableHead>
-                          <TableHead>المستوى / الوزن</TableHead>
+                          <TableHead>المستوى / طريقة الحساب</TableHead>
                           <TableHead>المستحق</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1523,8 +1798,39 @@ export default function OrderDetailPage() {
                             </TableCell>
                             <TableCell>{EARNING_SHARE_ROLE_LABELS[share.participant_role]}</TableCell>
                             <TableCell>
-                              {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level} ·{' '}
-                              {Number(share.share_weight).toLocaleString('ar-EG')}
+                              <p>
+                                {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level}
+                              </p>
+                              {share.calculation_method === 'earnings_policy_v2' ? (
+                                <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                                  <p>
+                                    V2 · {share.earning_role === 'assistant' ? 'مساعد' : 'فني'} · مهارة{' '}
+                                    {share.service_skill_snapshot ?? 'قياسية'}
+                                  </p>
+                                  <p>
+                                    وزن المستوى {((share.level_weight_bps_snapshot ?? 10000) / 10000).toFixed(2)}
+                                    {share.earning_role === 'assistant' &&
+                                      ` × نسبة مساعد ${((share.assistant_ratio_bps_snapshot ?? 10000) / 100).toFixed(2)}%`}
+                                    {' × '}مهارة {((share.service_skill_factor_bps_snapshot ?? 10000) / 10000).toFixed(2)}
+                                  </p>
+                                  {(share.individual_adjustment_bps_snapshot !== 0 || share.order_adjustment_bps_snapshot !== 0) && (
+                                    <p>
+                                      تعديل فردي {((share.individual_adjustment_bps_snapshot ?? 0) / 100).toFixed(2)}% · طلب{' '}
+                                      {((share.order_adjustment_bps_snapshot ?? 0) / 100).toFixed(2)}%
+                                    </p>
+                                  )}
+                                </div>
+                              ) : share.calculation_method === 'assistant_level_wage' ? (
+                                <p className="text-xs text-muted-foreground">
+                                  أساس {formatEgp(share.assistant_base_wage_cents ?? 0)} ×{' '}
+                                  {Number(share.assistant_level_multiplier ?? 1).toLocaleString('ar-EG')} ={' '}
+                                  {formatEgp(share.assistant_target_cents ?? share.share_cents)}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  توزيع بالوزن {Number(share.share_weight).toLocaleString('ar-EG')}
+                                </p>
+                              )}
                             </TableCell>
                             <TableCell className="font-semibold">{formatEgp(share.share_cents)}</TableCell>
                           </TableRow>
@@ -1649,6 +1955,19 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {/* docs/08 §108-A — نتيجة آخر تعيين مساعد/عضو طاقم: فورًا ولا فرصة مستنية قبول. */}
+        {crewAssignOutcome && (
+          <div
+            className={
+              crewAssignOutcome.isOffer
+                ? 'rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning'
+                : 'rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success'
+            }
+          >
+            {crewAssignOutcome.message}
+          </div>
+        )}
+
         {/* تعيين مساعد يدوي بعد التصعيد (ADR-0008) — بيظهر بس لو الطلب أصلاً محتاج مساعدين. */}
         {!!order.required_assistants && order.required_assistants > 0 && (
           <Card>
@@ -1689,7 +2008,7 @@ export default function OrderDetailPage() {
                   className="w-fit"
                   onClick={() => {
                     setShowAssignAssistantForm((s) => !s);
-                    if (!approvedTechnicians) loadApprovedTechnicians();
+                    if (!eligibleAssistants) loadEligibleAssistants();
                   }}
                 >
                   عيّن مساعد يدويًا
@@ -1697,8 +2016,8 @@ export default function OrderDetailPage() {
                 {showAssignAssistantForm && (
                   <form onSubmit={handleAssignAssistant} className="flex flex-col gap-2">
                     <Label htmlFor="assistant_technician_id">الفني</Label>
-                    {!approvedTechnicians ? (
-                      <p className="text-sm text-muted-foreground">بيحمّل قايمة الفنيين…</p>
+                    {!eligibleAssistants ? (
+                      <p className="text-sm text-muted-foreground">بيحمّل المساعدين المؤهلين لنفس التخصص والمدينة…</p>
                     ) : (
                       <SelectNative
                         id="assistant_technician_id"
@@ -1709,9 +2028,13 @@ export default function OrderDetailPage() {
                         <option value="" disabled>
                           اختار فني
                         </option>
-                        {approvedTechnicians.map((tech) => (
-                          <option key={tech.id} value={tech.id}>
-                            {tech.full_name} ({tech.technician_code})
+                        {eligibleAssistants.map((assistant) => (
+                          <option key={assistant.technician_id} value={assistant.technician_id}>
+                            {assistant.full_name} ({assistant.technician_code})
+                            {assistant.distance_km !== null ? ` — ${Number(assistant.distance_km).toFixed(1)} كم` : ''}
+                            {/* docs/08 §108-A — <option> HTML مالوش أيقونات، فالتمييز نصي: أي فني
+                                مش LIGHT بيوضّح إنه هيتحوّل لعرض بدل إضافة فورية قبل ما الأدمن يختاره. */}
+                            {assistant.capacity_tier !== 'LIGHT' ? ` — ${CAPACITY_TIER_LABELS[assistant.capacity_tier]} (هيتبعتله عرض)` : ''}
                           </option>
                         ))}
                       </SelectNative>
@@ -2108,8 +2431,24 @@ export default function OrderDetailPage() {
         </Card>
 
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle className="text-base">صور الطلب</CardTitle>
+            {hasPermission('orders.adjust_price') && (
+              <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm font-normal hover:bg-muted/50">
+                {uploadingProblemImages ? 'جاري الرفع…' : 'إضافة صورة مشكلة'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  className="sr-only"
+                  disabled={uploadingProblemImages}
+                  onChange={(event) => {
+                    void handleAdminProblemImages(event.target.files);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+            )}
           </CardHeader>
           <CardContent>
             {media.length === 0 ? (

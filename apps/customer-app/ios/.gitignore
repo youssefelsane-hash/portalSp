@@ -19,6 +19,8 @@ Flutter/App.framework
 Flutter/Flutter.framework
 Flutter/Flutter.podspec
 Flutter/Generated.xcconfig
+# بوابة P0-2 في docs/23 — مفتاح خرائط Google، راجع Flutter/Local.xcconfig.example.
+Flutter/Local.xcconfig
 Flutter/ephemeral/
 Flutter/app.flx
 Flutter/app.zip

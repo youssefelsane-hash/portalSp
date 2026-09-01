@@ -11,6 +11,8 @@ export enum OrderStatus {
   TECHNICIAN_ARRIVED = 'technician_arrived',
   IN_PROGRESS = 'in_progress',
   AWAITING_QUOTE_APPROVAL = 'awaiting_quote_approval',
+  // العميل رفع صور وطلب من الإدارة تحديد السعر قبل إرسال أي فني.
+  AWAITING_ADMIN_QUOTE = 'awaiting_admin_quote',
   // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — مختلفة عن AWAITING_QUOTE_APPROVAL فوق عمدًا:
   // دي بتؤسس أول سعر لطلب لسه بلا سعر (pricing_model=inspection_then_quote)، مش بتضيف على سعر
   // موجود بالفعل. بتوصل من TECHNICIAN_ARRIVED بس (الفني عاين وحدد سعر).
@@ -29,6 +31,9 @@ export enum OrderStatus {
   // بس محتاج العميل يختار فني بديل بنفسه. راجع OrdersService.technicianCancel().
   AWAITING_TECHNICIAN_RESELECTION = 'awaiting_technician_reselection',
 }
+
+// ADR-0051 — أسباب تحرير إعادة زيارة مثبّتة (مطابقة لـchk_orders_revisit_release_reason).
+export type RevisitReleaseReason = 'refused' | 'no_response' | 'admin';
 
 export enum OrderType {
   STANDARD = 'standard',
@@ -169,6 +174,12 @@ export class Order {
   @Column({ name: 'estimated_price_cents', type: 'integer', nullable: true })
   estimatedPriceCents: number | null;
 
+  @Column({ name: 'initial_quote_source', type: 'varchar', length: 30, nullable: true })
+  initialQuoteSource: 'technician_onsite' | 'admin_remote' | null;
+
+  @Column({ name: 'initial_quote_note', type: 'varchar', length: 1000, nullable: true })
+  initialQuoteNote: string | null;
+
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;
 
@@ -192,6 +203,10 @@ export class Order {
   @Column({ name: 'duration_hours', type: 'smallint', nullable: true })
   durationHours: number | null;
 
+  /** المصدر الدقيق للمدة. duration_hours باقٍ مؤقتًا للتوافق مع الطلبات والعملاء القدماء. */
+  @Column({ name: 'duration_minutes', type: 'integer', nullable: true })
+  durationMinutes: number | null;
+
   // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
   // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده
   // (لو الأدمن غيّر الإعداد بعدين، الطلب القديم يفضل موضّح بالقيم اللي اتحسبت بيها وقتها).
@@ -206,6 +221,9 @@ export class Order {
 
   @Column({ name: 'estimated_duration_days', type: 'smallint', nullable: true })
   estimatedDurationDays: number | null;
+
+  @Column({ name: 'assistant_daily_wage_cents_snapshot', type: 'integer', nullable: true })
+  assistantDailyWageCentsSnapshot: number | null;
 
   // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — نفس فلسفة snapshot فوق:
   // الوحدات المطلوبة وقت الحجز (requested_units بتاعة CreateOrderDto)، مخزّنة هنا عشان تُستخدم
@@ -264,6 +282,21 @@ export class Order {
   @Column({ name: 'commissionable_base_cents', type: 'integer', nullable: true })
   commissionableBaseCents: number | null;
 
+  /** Explicit immutable settlement policy for this order. Existing orders remain V1. */
+  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 1 })
+  settlementPolicyVersion: 1 | 2;
+
+  /** Fixed V2 service commission captured when the order is created. */
+  @Column({ name: 'platform_commission_cents_snapshot', type: 'integer', nullable: true })
+  platformCommissionCentsSnapshot: number | null;
+
+  /** Final V2 pool distributed across every order participant. */
+  @Column({ name: 'worker_pool_cents', type: 'integer', nullable: true })
+  workerPoolCents: number | null;
+
+  @Column({ name: 'calculation_algorithm_version', type: 'varchar', length: 40, nullable: true })
+  calculationAlgorithmVersion: string | null;
+
   /** فرق سعر "الفني المميّز" (docs/08 §60.3، migration 0193) — بيتضاف بعد ما المطابقة التلقائية
    * تعيّن فني مستواه بيزوّد السعر. 0 لو الفني كان معروف وقت الحجز (الفرق داخل السعر أصلاً). */
   @Column({ name: 'level_premium_cents', type: 'integer', default: 0 })
@@ -271,6 +304,15 @@ export class Order {
 
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
+
+  @Column({ name: 'next_matching_attempt_at', type: 'timestamptz', nullable: true })
+  nextMatchingAttemptAt: Date | null;
+
+  @Column({ name: 'last_matching_attempt_at', type: 'timestamptz', nullable: true })
+  lastMatchingAttemptAt: Date | null;
+
+  @Column({ name: 'matching_attempt_count', type: 'integer', default: 0 })
+  matchingAttemptCount: number;
 
   @Column({ name: 'assigned_at', type: 'timestamptz', nullable: true })
   assignedAt: Date | null;
@@ -320,6 +362,21 @@ export class Order {
   // الـ API/DTOs بره الكلاس ده "original_order_id" (أوضح دلالياً للعميل).
   @Column({ name: 'parent_order_id', type: 'uuid', nullable: true })
   parentOrderId: string | null;
+
+  // ADR-0051 — تثبيت صارم لإعادة الزيارة على الفني الأصلي. مقصود إنه عمود منفصل عن
+  // requestedTechnicianId: ده التزام (مفيش fallback، مفيش بث لحد تاني)، وده تفضيل بيتجاهَل بأمان.
+  @Column({ name: 'revisit_pinned_technician_id', type: 'uuid', nullable: true })
+  revisitPinnedTechnicianId: string | null;
+
+  @Column({ name: 'revisit_pinned_at', type: 'timestamptz', nullable: true })
+  revisitPinnedAt: Date | null;
+
+  // حارس الخصم — طالما اتملى، التحرير (وخصم الفني معاه) حصل خلاص ومستحيل يتكرر.
+  @Column({ name: 'revisit_released_at', type: 'timestamptz', nullable: true })
+  revisitReleasedAt: Date | null;
+
+  @Column({ name: 'revisit_release_reason', type: 'varchar', length: 24, nullable: true })
+  revisitReleaseReason: RevisitReleaseReason | null;
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;

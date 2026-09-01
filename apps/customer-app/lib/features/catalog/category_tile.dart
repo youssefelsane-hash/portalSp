@@ -18,7 +18,7 @@ const double _kTileDecodeWidth = 116;
 /// بتحسب `childAspectRatio` والخانة نفسها يتفقوا على **نفس الرقم**.
 const double _kTileLabelFontSize = 14;
 const double _kTileLabelLineHeight = 1.25;
-const double _kTileLabelMaxLines = 2;
+const double _kTileLabelMaxLines = 3;
 const double _kTileLabelGap = 8;
 
 /// الارتفاع اللي لازم الشبكة تحجزه لاسم الفئة تحت الصورة.
@@ -32,7 +32,9 @@ const double _kTileLabelGap = 8;
 /// فالخط الأكبر بياخد مساحة أكبر زي ما المفروض.
 double categoryTileLabelHeight(BuildContext context) {
   final scaler = MediaQuery.textScalerOf(context);
-  return scaler.scale(_kTileLabelFontSize) * _kTileLabelLineHeight * _kTileLabelMaxLines +
+  return scaler.scale(_kTileLabelFontSize) *
+          _kTileLabelLineHeight *
+          _kTileLabelMaxLines +
       _kTileLabelGap;
 }
 
@@ -40,11 +42,11 @@ double categoryTileLabelHeight(BuildContext context) {
 ///
 /// **الفرق عن `CategoryCard`** (اللي لسه مستخدم في شاشة "كل الفئات" بعرض أوسع): هنا الاسم
 /// **مش** جوّه كارت وسط. ده مقصود ومأخوذ من المرجع اللي بعته المالك: الاسم برّه الصورة،
-/// محاذي للبداية، بخط صغير سميك. النتيجة إن العين بتقرا شبكة الصور كوحدة واحدة والأسماء
+/// متصنّر في منتصف الخانة، بخط صغير سميك. النتيجة إن العين بتقرا شبكة الصور كوحدة واحدة والأسماء
 /// كطبقة تانية — أهدى بصريًا بكتير من تسعة كروت كاملة بحدود وظلال.
 ///
-/// **سطرين للاسم**: أسماء الفئات العربية بتطول («تأسيس كهرباء كامل»)، وسطر واحد كان بيقصّها
-/// بنقط. سطرين بيستوعبوا الأغلبية، والارتفاع محجوز ثابت عشان صفوف الشبكة تفضل متساوية.
+/// **ثلاثة أسطر للاسم**: بتستوعب وصف فئة خاطف حتى حوالي ست كلمات، والارتفاع محجوز ثابت عشان
+/// صفوف الشبكة تفضل متساوية.
 class CategoryTile extends StatelessWidget {
   const CategoryTile({super.key, required this.category, required this.onTap});
 
@@ -58,7 +60,7 @@ class CategoryTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           NetworkImageBox(
@@ -74,6 +76,7 @@ class CategoryTile extends StatelessWidget {
           Flexible(
             child: Text(
               category.nameAr,
+              textAlign: TextAlign.center,
               maxLines: _kTileLabelMaxLines.toInt(),
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelLarge?.copyWith(

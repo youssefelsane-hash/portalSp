@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Length, Matches, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PricingFieldType } from '../entities/service-pricing-field.entity';
 
@@ -53,6 +53,18 @@ export class CreatePricingFieldDto {
   @IsOptional()
   @IsNumber()
   max_value?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  min_files?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  max_files?: number;
 
   // قيمة افتراضية اختيارية (Script 6 Part 3/4، migration 0138) — نص خام بيتفسّر حسب field_type
   // وقت الاستخدام (راجع PricingEngineService.resolveDefaultValue). لحقول CHECKBOX من غيرها،

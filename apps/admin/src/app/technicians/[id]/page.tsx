@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { BadgeCheck, BriefcaseBusiness, Star, WalletCards } from 'lucide-react';
 import type {
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
@@ -22,7 +23,10 @@ import { AppShell, useAdminBack } from '@/components/app-shell';
 import { NationalIdCard } from '@/components/technician-national-id-card';
 import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
 import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
+import { TechnicianInternalNotes } from '@/components/technician-internal-notes';
 import { PageHeader } from '@/components/page-header';
+import { TechnicianKindTag } from '@/components/technician-kind-tag';
+import { ProfileSummary } from '@/components/profile-summary';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
@@ -302,6 +306,18 @@ export default function TechnicianDetailPage() {
     );
   }
 
+  // دور الشخص — فني كامل ولا مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر). المساعد ما يظهرش
+  // في أي قايمة فنيين (توزيع/اختيار عميل/ضم فني لطاقم)، وما ياخدش طلب لوحده، وبياخد نسبة المساعد
+  // دايمًا في توزيع حصص الطاقم. قابل للتغيير في الاتجاهين — الترقية بتأثر على الشغل الجديد بس.
+  async function handleSetTechnicianKind(kind: 'technician' | 'assistant') {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/kind`, {
+        method: 'PATCH',
+        body: JSON.stringify({ kind }),
+      }),
+    );
+  }
+
   // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — مِنحة إدارية، **مش** نتيجة اعتماد الأوراق.
   // سحبها مبيمنعش الفني من الشغل، وبالعكس: اعتماد أوراقه مبياخدش العلامة تلقائيًا.
   async function handleSetTrustBadge(granted: boolean) {
@@ -495,10 +511,13 @@ export default function TechnicianDetailPage() {
       <PageHeader
         title={
           <>
+            {/* docs/08 §107 — نفس رمز الدور المستخدم في قايمة الفنيين والقوائم المنسدلة. */}
+            <TechnicianKindTag kind={detail.technician_kind === 'assistant' ? 'assistant' : 'technician'} />
             {detail.full_name}
             <Badge variant="outline">{VERIFICATION_STATUS_LABELS[detail.verification_status]}</Badge>
           </>
         }
+        description={`كود ${detail.technician_code} · ${detail.technician_kind === 'assistant' ? 'مساعد' : 'فني'} · ${LEVEL_LABELS[detail.current_level]}`}
         actions={
           <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
@@ -507,6 +526,39 @@ export default function TechnicianDetailPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      <ProfileSummary
+        items={[
+          {
+            label: 'الحالة التشغيلية',
+            value: detail.online ? 'متصل' : 'غير متصل',
+            hint: detail.has_current_location ? 'الموقع مسجّل وجاهز للتوزيع' : 'محتاج تحديث موقع GPS',
+            icon: BadgeCheck,
+            tone: detail.online && detail.has_current_location ? 'success' : 'warning',
+          },
+          {
+            label: 'متوسط التقييم',
+            value: detail.total_ratings_count ? detail.average_rating.toFixed(2) : '—',
+            hint: `${detail.total_ratings_count} تقييم`,
+            icon: Star,
+            tone: 'warning',
+          },
+          {
+            label: 'الشغل المكتمل',
+            value: detail.completed_orders_count,
+            hint: `${detail.cancelled_orders_count} طلب ملغي`,
+            icon: BriefcaseBusiness,
+            tone: 'primary',
+          },
+          {
+            label: 'رصيد المحفظة',
+            value: wallet ? formatEgp(wallet.wallet.balance_cents) : '…',
+            hint: wallet ? `محجوز للصرف ${formatEgp(wallet.wallet.reserved_balance_cents)}` : 'جاري تحميل الرصيد',
+            icon: WalletCards,
+            tone: wallet && wallet.wallet.balance_cents < 0 ? 'warning' : 'neutral',
+          },
+        ]}
+      />
 
       {/* الهوية الدائمة (ADR-0045، docs/08 §77-E1) — فوق كل حاجة عمدًا: ده الحقل اللي بيمنع
           فني متوقف يرجع بحساب جديد برقم موبايل تاني، والاعتماد نفسه ممنوع من غيره. */}
@@ -517,6 +569,10 @@ export default function TechnicianDetailPage() {
           canManage={hasPermission('technicians.manage')}
           onChanged={load}
         />
+      </div>
+
+      <div className="mb-6">
+        <TechnicianInternalNotes technicianId={id} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -627,6 +683,53 @@ export default function TechnicianDetailPage() {
               </Button>
             </CardFooter>
           </form>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">نوع الحساب — فني ولا مساعد</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            <div className="flex items-center gap-2">
+              {/* الدور + المستوى مع بعض — "مساعد محترف" / "فني كامل — مميّز" (طلب مالك: المساعد
+                  بياخد نفس مسار الترقية، فالمستوى لازم يبان جنب الدور مش بديل عنه). */}
+              {detail.technician_kind === 'assistant' ? (
+                <Badge variant="outline">مساعد {LEVEL_LABELS[detail.current_level]}</Badge>
+              ) : (
+                <Badge>فني كامل — {LEVEL_LABELS[detail.current_level]}</Badge>
+              )}
+            </div>
+            {/* ADR-0055 (تصحيح مالك) — النص ده كان بيقول إن المساعد "ما بيظهرش في أي قايمة
+                فنيين وما بياخدش طلب لوحده". القاعدة دي اتلغت، والنص اتظبط عشان مايفضلش يوصف
+                سلوك مابقاش موجود — أوصاف غلط في شاشة الأدمن بتخلي القرارات تتاخد على أساس فاهم غلط. */}
+            <p className="text-muted-foreground">
+              الدورين بياخدوا <strong>نفس المعاملة بالظبط</strong>: الاتنين بياخدوا طلبات لوحدهم، بيظهروا
+              للعملاء في قايمة الاختيار وفي الترتيب، بيتوزّعلهم شغل تلقائي، والأدمن يقدر يعيّنهم يدويًا.
+              <br />
+              <strong>الفرقان الوحيدان</strong>: (١) المساعد <strong>مؤهّل لكل الخدمات افتراضيًا</strong> من
+              غير اعتماد تخصص — والتحكم فيه من كارت «الشغلانات المسموح بيها» تحت. (٢) لما ينضم لطاقم
+              شغلانة فني تاني بياخد <strong>تسعيرة المساعد</strong> (أجر الخدمة × معامل مستواه)؛ ولما
+              يشيل طلب لوحده بياخد نصيب القائد كامل زي أي حد عمل الشغلانة كلها.
+            </p>
+            <p className="text-muted-foreground">
+              التغيير بيأثر على <strong>الشغل الجديد بس</strong> — حصص الشغلانات القديمة متسجّلة زي ما
+              اتحسبت وقتها ومش بتتغيّر بأثر رجعي.
+              <br />
+              <strong>المستوى مستقل عن الدور</strong>: المساعد بيترقّى (جديد → موثّق → محترف → مميّز) بنفس
+              معايير التقييم بالظبط زي الفني، والترقية بتزوّد نصيبه فعليًا وهو لسه مساعد.
+            </p>
+          </CardContent>
+          <CardFooter>
+            {detail.technician_kind === 'assistant' ? (
+              <Button size="sm" disabled={isSaving} onClick={() => handleSetTechnicianKind('technician')}>
+                رقّيه لفني كامل
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" disabled={isSaving} onClick={() => handleSetTechnicianKind('assistant')}>
+                خليه مساعد
+              </Button>
+            )}
+          </CardFooter>
         </Card>
 
         <Card>
@@ -1231,14 +1334,29 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="mb-4 text-sm text-muted-foreground">
-              الفني بياخد <strong>كل</strong> شغلانات تخصصاته المعتمدة افتراضيًا. لو فيه شغلانة
-              معيّنة مش عايزها توصله، احجبها من هنا — وهو مش هيتخطر بيه، بس الطلبات دي مش هتوصله
-              ومش هيظهر للعملاء عليها.
+              {detail.technician_kind === 'assistant' ? (
+                <>
+                  المساعد بياخد شغلانات <strong>تخصصاته المعتمدة فقط</strong> وبيشتغل فيها تحت
+                  إشراف الفني المسؤول. لو فيه شغلانة معيّنة داخل تخصصه مش مناسبة له، احجبها من هنا.
+                </>
+              ) : (
+                <>
+                  الفني بياخد <strong>كل</strong> شغلانات تخصصاته المعتمدة افتراضيًا. لو فيه شغلانة
+                  معيّنة مش عايزها توصله، احجبها من هنا — وهو مش هيتخطر بيه، بس الطلبات دي مش هتوصله
+                  ومش هيظهر للعملاء عليها.
+                </>
+              )}
             </p>
             {!servicePermissions ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : servicePermissions.length === 0 ? (
-              <EmptyState title="مفيش شغلانات — اعتمد تخصص للفني الأول" />
+              <EmptyState
+                title={
+                  detail.technician_kind === 'assistant'
+                    ? 'مفيش شغلانات — اعتمد تخصص للمساعد الأول'
+                    : 'مفيش شغلانات — اعتمد تخصص للفني الأول'
+                }
+              />
             ) : (
               <Table>
                 <TableHeader>

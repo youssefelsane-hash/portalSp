@@ -2,6 +2,24 @@
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
+import {
+  BadgeDollarSign,
+  CalendarCheck2,
+  CalendarClock,
+  CalendarDays,
+  CalendarRange,
+  Camera,
+  Clock3,
+  CreditCard,
+  Eye,
+  Hourglass,
+  Repeat2,
+  Siren,
+  UserRound,
+  UsersRound,
+  WalletCards,
+  type LucideIcon,
+} from 'lucide-react';
 import type {
   AdminServiceResponseDto,
   AdminServiceZoneResponseDto,
@@ -38,12 +56,14 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 import { PricingBuilder } from './pricing-builder';
 
 const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   fixed: 'ثابت',
   hourly: 'بالساعة',
   per_unit: 'بالوحدة',
+  monthly: 'شهري (عدد وحدات شهرية)',
   inspection_then_quote: 'كشف ثم عرض سعر',
   formula: 'معادلة ديناميكية',
 };
@@ -63,6 +83,39 @@ const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   senior: 'كبير',
   premium: 'مميّز',
 };
+
+function SchedulingModeChoice({
+  active,
+  title,
+  description,
+  icon: Icon,
+  onSelect,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={`flex min-h-32 items-start gap-3 rounded-xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-md ${
+        active ? 'border-primary bg-primary/[0.06] shadow-md ring-1 ring-primary/15' : 'border-border/80 bg-background/85'
+      }`}
+    >
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      <span>
+        <span className="block text-sm font-semibold text-foreground">{title}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
+      </span>
+    </button>
+  );
+}
 
 export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -91,9 +144,7 @@ export default function ServiceDetailPage() {
   const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('fixed');
   // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
   // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
-  const [schedulingMode, setSchedulingMode] = useState<
-    'none' | 'precise' | 'start_only' | 'hours_only' | 'start_and_end'
-  >('none');
+  const [schedulingMode, setSchedulingMode] = useState<'none' | 'precise' | 'start_only' | 'hours_only' | 'start_and_end'>('none');
 
   // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
   // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
@@ -128,20 +179,35 @@ export default function ServiceDetailPage() {
     authedFetch<AdminServiceResponseDto[]>('/admin/services')
       .then((all) => applyService(all.find((s) => s.id === id) ?? null))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الخدمة'));
-    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones).catch(() => setZones([]));
-    authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing).catch(() => setZonePricing([]));
-    authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing).catch(() => setLevelPricing([]));
+    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones')
+      .then(setZones)
+      .catch(() => setZones([]));
+    authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`)
+      .then(setZonePricing)
+      .catch(() => setZonePricing([]));
+    authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`)
+      .then(setLevelPricing)
+      .catch(() => setLevelPricing([]));
     authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`)
       .then(setPricingTierPricing)
       .catch(() => setPricingTierPricing([]));
-    authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons).catch(() => setAddons([]));
-    authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData).catch(() => setStandardData([]));
+    authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`)
+      .then(setAddons)
+      .catch(() => setAddons([]));
+    authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`)
+      .then(setStandardData)
+      .catch(() => setStandardData([]));
     loadPendingSuggestions();
   }
 
   function loadActuals(standardDataId: string) {
     authedFetch<ServiceProductivityActualResponseDto[]>(`/admin/services/standard-data/${standardDataId}/actuals`)
-      .then((rows) => setActualsByStandardData((prev) => ({ ...prev, [standardDataId]: rows })))
+      .then((rows) =>
+        setActualsByStandardData((prev) => ({
+          ...prev,
+          [standardDataId]: rows,
+        })),
+      )
       .catch(() => setActualsByStandardData((prev) => ({ ...prev, [standardDataId]: [] })));
   }
 
@@ -150,7 +216,6 @@ export default function ServiceDetailPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
-
 
   function zoneName(zoneId: string): string {
     const zone = zones?.find((z) => z.id === zoneId);
@@ -177,7 +242,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/${id}/zone-pricing`, { method: 'PUT', body: JSON.stringify(body) });
+      await authedFetch(`/admin/services/${id}/zone-pricing`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
       (e.target as HTMLFormElement).reset();
       setZpMode('override');
       authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
@@ -192,7 +260,9 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/zone-pricing/${pricingId}`, { method: 'DELETE' });
+      await authedFetch(`/admin/services/zone-pricing/${pricingId}`, {
+        method: 'DELETE',
+      });
       authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -211,7 +281,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/${id}/level-pricing`, { method: 'PUT', body: JSON.stringify(body) });
+      await authedFetch(`/admin/services/${id}/level-pricing`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
       (e.target as HTMLFormElement).reset();
       authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing);
     } catch (err) {
@@ -233,7 +306,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/${id}/pricing-tier-pricing`, { method: 'PUT', body: JSON.stringify(body) });
+      await authedFetch(`/admin/services/${id}/pricing-tier-pricing`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
       (e.target as HTMLFormElement).reset();
       authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`).then(setPricingTierPricing);
     } catch (err) {
@@ -253,7 +329,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/${id}/addons`, { method: 'POST', body: JSON.stringify(body) });
+      await authedFetch(`/admin/services/${id}/addons`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
       setShowNewAddon(false);
       authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons);
     } catch (err) {
@@ -267,7 +346,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/addons/${addon.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !addon.is_active }) });
+      await authedFetch(`/admin/services/addons/${addon.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: !addon.is_active }),
+      });
       authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -292,7 +374,10 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/${id}/standard-data`, { method: 'POST', body: JSON.stringify(body) });
+      await authedFetch(`/admin/services/${id}/standard-data`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
       setShowNewStandardData(false);
       authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
     } catch (err) {
@@ -322,7 +407,9 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/services/standard-data/${standardDataId}`, { method: 'DELETE' });
+      await authedFetch(`/admin/services/standard-data/${standardDataId}`, {
+        method: 'DELETE',
+      });
       authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -370,7 +457,9 @@ export default function ServiceDetailPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch('/admin/services/productivity-suggestions/generate', { method: 'POST' });
+      await authedFetch('/admin/services/productivity-suggestions/generate', {
+        method: 'POST',
+      });
       loadPendingSuggestions();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -400,28 +489,34 @@ export default function ServiceDetailPage() {
     const maxPrice = form.get('max_price') as string;
     const basePrice = form.get('base_price') as string;
     const inspectionFee = form.get('inspection_fee') as string;
-    const commission = form.get('commission_percentage') as string;
     const depositPercentage = form.get('deposit_percentage') as string;
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
     const minTechnicianLevel = form.get('min_technician_level') as string;
+    const quantityMin = form.get('quantity_min') as string;
+    const quantityMax = form.get('quantity_max') as string;
+    const quantityStep = form.get('quantity_step') as string;
     const body: UpdateServiceBody = {
       name_en: (form.get('name_en') as string) || undefined,
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
       full_description_ar: (form.get('full_description_ar') as string) || undefined,
       icon_url: (form.get('icon_url') as string) || undefined,
+      featured_icon_url: (form.get('featured_icon_url') as string) || null,
+      featured_name_ar: (form.get('featured_name_ar') as string) || null,
       pricing_model: form.get('pricing_model') as UpdateServiceBody['pricing_model'],
       // كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي لخدمة قائمة من غير SQL مباشر —
       // أدمن يعمل خدمة fixed بـ1000ج.م. وبعد أسبوع يحتاج يخليها 1200ج.م.، الواجهة ماكانتش بتوفر ده.
       base_price_cents: basePrice ? Math.round(Number(basePrice) * 100) : undefined,
       inspection_fee_cents: inspectionFee ? Math.round(Number(inspectionFee) * 100) : undefined,
       unit_name_ar: (form.get('unit_name_ar') as string) || undefined,
+      quantity_min: quantityMin ? Number(quantityMin) : null,
+      quantity_max: quantityMax ? Number(quantityMax) : null,
+      quantity_step: quantityStep ? Number(quantityStep) : null,
+      quantity_precision: Number(form.get('quantity_precision')),
       min_price_cents: minPrice ? Math.round(Number(minPrice) * 100) : undefined,
       max_price_cents: maxPrice ? Math.round(Number(maxPrice) * 100) : undefined,
       warranty_days: Number(form.get('warranty_days')),
-      estimated_duration_minutes: form.get('estimated_duration_minutes')
-        ? Number(form.get('estimated_duration_minutes'))
-        : undefined,
+      estimated_duration_minutes: form.get('estimated_duration_minutes') ? Number(form.get('estimated_duration_minutes')) : undefined,
       requires_photos: form.get('requires_photos') === 'on',
       allows_scheduling: form.get('allows_scheduling') === 'on',
       allows_emergency: form.get('allows_emergency') === 'on',
@@ -438,7 +533,6 @@ export default function ServiceDetailPage() {
       requires_hours_only: form.get('requires_hours_only') === 'on',
       requires_start_and_end: form.get('requires_start_and_end') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
-      commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
       search_keywords: (form.get('search_keywords') as string)
@@ -491,14 +585,59 @@ export default function ServiceDetailPage() {
                 مجرد تجميعها في أقسام واضحة بدل كتلة واحدة طويلة. صفر تغيير منطقي. */}
             <div className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-muted-foreground">المعلومات الأساسية</h3>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_name_en">الاسم بالإنجليزي</Label>
                   <Input id="svc_name_en" name="name_en" defaultValue={service.name_en ?? ''} dir="ltr" />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="svc_icon_url">رابط الأيقونة</Label>
-                  <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} dir="ltr" />
+                  <Label htmlFor="svc_icon_url">رابط صورة صفحة الخدمة</Label>
+                  <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} placeholder="https://.../service-banner.jpg" dir="ltr" />
+                  <p className="text-xs text-muted-foreground">صورة كبيرة لصفحة تفاصيل الخدمة ونتائج الكتالوج؛ لا تُستخدم كشعار الأكثر طلبًا.</p>
+                  {service.icon_url ? (
+                    <div className="mt-2 flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={service.icon_url} alt={`أيقونة ${service.name_ar}`} className="h-14 w-14 rounded-xl border bg-white object-contain p-1" />
+                      <span className="text-sm text-muted-foreground">معاينة صورة الخدمة الحالية</span>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-amber-700">لا توجد صورة لهذه الخدمة حاليًا.</p>
+                  )}
+                </div>
+              </div>
+              <div className="grid gap-3 rounded-md border bg-muted/30 p-3 md:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_featured_icon_url">رابط شعار الأكثر طلبًا</Label>
+                  <Input
+                    id="svc_featured_icon_url"
+                    name="featured_icon_url"
+                    defaultValue={service.featured_icon_url ?? ''}
+                    placeholder="https://.../small-logo.png"
+                    dir="ltr"
+                  />
+                  <p className="text-xs text-muted-foreground">شعار صغير مستقل، ويفضل مربعًا أو بخلفية شفافة.</p>
+                  {service.featured_icon_url && (
+                    <div className="mt-2 flex items-center gap-3 rounded-md border bg-background p-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={service.featured_icon_url}
+                        alt={`شعار ${service.name_ar}`}
+                        className="h-12 w-12 rounded-xl border bg-white object-contain p-1"
+                      />
+                      <span className="text-xs text-muted-foreground">معاينة شعار الأكثر طلبًا</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_featured_name_ar">الاسم المختصر في الأكثر طلبًا</Label>
+                  <Input
+                    id="svc_featured_name_ar"
+                    name="featured_name_ar"
+                    maxLength={60}
+                    defaultValue={service.featured_name_ar ?? ''}
+                    placeholder="مثال: تركيب سخان"
+                  />
+                  <p className="text-xs text-muted-foreground">لو تركته فارغًا سيظهر اسم الخدمة الأساسي تلقائيًا.</p>
                 </div>
               </div>
               <div className="flex flex-col gap-1">
@@ -518,69 +657,56 @@ export default function ServiceDetailPage() {
                   placeholder="مثال: سخان مياه, تسريب حوض, صرف مسدود"
                 />
                 <p className="text-sm text-muted-foreground">
-                  دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) —
-                  البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط لها كلماتها يدويًا هنا.
+                  دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) — البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط
+                  لها كلماتها يدويًا هنا.
                 </p>
               </div>
             </div>
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">التسعير</h3>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
-                <SelectNative
-                  id="svc_pricing_model"
-                  name="pricing_model"
-                  defaultValue={service.pricing_model}
-                  className="max-w-xs"
-                  onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
-                >
-                  {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </SelectNative>
-                {pricingModelLive === 'formula' && (
-                  <p className="text-sm text-muted-foreground">
-                    السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.
+            <CatalogConfigSection
+              title="التسعير والدفع"
+              description="السعر الأساسي وحدوده وسياسة تحصيل المبلغ من العميل في مكان واحد."
+              icon={BadgeDollarSign}
+              tone="amber"
+            >
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.8fr)]">
+                <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                  <Label htmlFor="svc_pricing_model">طريقة حساب السعر</Label>
+                  <SelectNative
+                    id="svc_pricing_model"
+                    name="pricing_model"
+                    defaultValue={service.pricing_model}
+                    className="mt-2"
+                    onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
+                  >
+                    {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </SelectNative>
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                    {pricingModelLive === 'formula'
+                      ? 'السعر يُحسب من الحقول والقواعد الموجودة في محرك التسعير الديناميكي بالأسفل.'
+                      : pricingModelLive === 'hourly'
+                        ? 'السعر الأساسي هو سعر الساعة الواحدة ويُضرب في عدد الساعات المختارة.'
+                        : pricingModelLive === 'inspection_then_quote'
+                          ? 'يُحصّل رسم الكشف أولًا، ثم يُرسل السعر النهائي للعميل بعد المعاينة.'
+                          : 'السعر الأساسي هو نقطة البداية، ويمكن تخصيصه حسب المنطقة أو فئة الفني.'}
                   </p>
-                )}
-                {pricingModelLive === 'hourly' && (
-                  <p className="text-sm text-muted-foreground">
-                    السعر الأساسي تحت هو <strong>سعر الساعة الواحدة</strong> — بيتضرب تلقائيًا في عدد الساعات
-                    اللي العميل بيختارها وقت الحجز (مش سعر إجمالي ثابت).
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                </div>
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
                       غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
-                  <Label htmlFor="svc_base_price">
-                    {pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}
-                  </Label>
-                  <Input
-                    id="svc_base_price"
-                    name="base_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    defaultValue={service.base_price_cents / 100}
-                  />
+                  <Label htmlFor="svc_base_price">{pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}</Label>
+                  <Input id="svc_base_price" name="base_price" type="number" min="0" step="0.01" defaultValue={service.base_price_cents / 100} />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_inspection_fee">رسوم الكشف (جنيه)</Label>
-                  <Input
-                    id="svc_inspection_fee"
-                    name="inspection_fee"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    defaultValue={service.inspection_fee_cents / 100}
-                  />
+                  <Input id="svc_inspection_fee" name="inspection_fee" type="number" min="0" step="0.01" defaultValue={service.inspection_fee_cents / 100} />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
@@ -609,16 +735,30 @@ export default function ServiceDetailPage() {
                   <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="svc_commission">نسبة عمولة المنصة %</Label>
-                  <Input
-                    id="svc_commission"
-                    name="commission_percentage"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    defaultValue={service.commission_percentage}
-                  />
+                  <Label htmlFor="svc_quantity_min">أقل كمية</Label>
+                  <Input id="svc_quantity_min" name="quantity_min" type="number" min="0.01" step="0.01" defaultValue={service.quantity_min ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_max">أكبر كمية</Label>
+                  <Input id="svc_quantity_max" name="quantity_max" type="number" min="0.01" step="0.01" defaultValue={service.quantity_max ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_step">خطوة الزيادة</Label>
+                  <Input id="svc_quantity_step" name="quantity_step" type="number" min="0.01" step="0.01" defaultValue={service.quantity_step ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_precision">دقة الكمية</Label>
+                  <SelectNative id="svc_quantity_precision" name="quantity_precision" defaultValue={String(service.quantity_precision)}>
+                    <option value="0">بدون كسور (قطع صحيحة)</option>
+                    <option value="1">رقم واحد بعد العلامة</option>
+                    <option value="2">رقمان بعد العلامة</option>
+                  </SelectNative>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label>سياسة مستحقات الخدمة</Label>
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                    عمولة V2 مبلغ ثابت وتُدار من مركز سياسة المستحقات فقط. نسبة V1 القديمة محفوظة للطلبات التاريخية.
+                  </div>
                 </div>
                 <div className="flex flex-col gap-1">
                   {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نسبة الإيداع من الإجمالي،
@@ -635,162 +775,170 @@ export default function ServiceDetailPage() {
                   />
                 </div>
               </div>
-              <div className="flex flex-wrap gap-4 text-sm">
-                {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
-                  يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
-                </label>
-                {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
-                  محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
-                </label>
               </div>
-            </div>
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">سياسة الدفع</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <CatalogToggle
+                    name="cash_allowed"
+                    title="السماح بالدفع كاش"
+                    description="عند إيقافه يجب على العميل الدفع إلكترونيًا أو عبر InstaPay قبل التنفيذ."
+                    icon={WalletCards}
+                    defaultChecked={service.cash_allowed}
+                  />
+                  <CatalogToggle
+                    name="deposit_required"
+                    title="طلب إيداع مقدم"
+                    description="يُحصّل الإيداع بالنسبة المحددة أعلاه، والباقي بعد إتمام الشغل."
+                    icon={CreditCard}
+                    defaultChecked={service.deposit_required}
+                  />
+                </div>
+              </div>
+            </CatalogConfigSection>
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">الحجز والجدولة</h3>
-              <div className="flex flex-wrap gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_scheduling" defaultChecked={service.allows_scheduling} />
-                  يسمح بالحجز المجدول
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
-                  يسمح بطلب طارئ
-                </label>
-                {/* هيكل الحجز الجديد — صُنّاع (docs/06 §1) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_individual" defaultChecked={service.allows_individual} />
-                  يسمح بوضع &quot;شغلانة سريعة&quot; (فرد)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
-                  يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
-                </label>
-                {/* قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) */}
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    name="allows_date_range_booking"
-                    defaultChecked={service.allows_date_range_booking}
-                  />
-                  يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
-                </label>
-                {/* قدرة "الحجز المتكرر" (migration 0176) — لو مفعّلة، العميل يقدر يختار أسبوعي/
-                    شهري وقت الحجز، وكل موعد بيتولّد طلب عادي كامل بنفس مسار الحجز العادي. */}
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    name="allows_recurring_booking"
-                    defaultChecked={service.allows_recurring_booking}
-                  />
-                  يسمح بالحجز المتكرر (أسبوعي/شهري — كل موعد بيولّد طلب عادي كامل بسعر اللحظة)
-                </label>
-                {/* سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) */}
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    name="show_unavailable_providers"
-                    defaultChecked={service.show_unavailable_providers}
-                  />
-                  يظهر الفنيين المتعارضين جدوليًا بحالة &quot;مش متاح للفترة دي&quot; بدل الإخفاء الكامل
-                </label>
-              </div>
+            <CatalogConfigSection
+              title="الحجز والجدولة"
+              description="حدد أين تظهر الخدمة، من ينفذها، ومدى المرونة المتاحة للعميل عند اختيار الموعد."
+              icon={CalendarClock}
+              tone="blue"
+            >
+              <div className="space-y-5">
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">توفر الخدمة</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CatalogToggle
+                      name="allows_scheduling"
+                      title="حجز مجدول"
+                      description="العميل يختار موعدًا مسبقًا بدل الطلب الفوري فقط."
+                      icon={CalendarCheck2}
+                      defaultChecked={service.allows_scheduling}
+                    />
+                    <CatalogToggle
+                      name="allows_emergency"
+                      title="طلب طارئ"
+                      description="يتيح طلب وصول عاجل ويطبق سياسة الطوارئ الخاصة بالخدمة."
+                      icon={Siren}
+                      defaultChecked={service.allows_emergency}
+                    />
+                  </div>
+                </div>
 
-              {/* أوضاع توقيت الخدمة (ADR-0032، طلب مالك صريح 2026-08-22) — تبادلية: وضع واحد بس
-                  فعّال لكل خدمة، اختيار واحد بيلغي الباقي أوتوماتيك. requires_precise_schedule
-                  (ADR-0031 Slice B) جزء من نفس المجموعة دلوقتي، صفر تغيير على معناها/سلوكها. */}
-              <div className="flex flex-col gap-2 rounded-md border p-3">
-                <p className="text-sm font-medium">أوضاع توقيت الخدمة (وضع واحد بس ممكن يتفعّل)</p>
-                <p className="text-xs text-muted-foreground">
-                  لو الخدمة بتتحجز بيوم كامل عادي من غير تفاصيل وقت إضافية (زي معظم الصيانة العادية) —
-                  سيب الأربعة دول كلهم فاضيين. اختار وضع بس لو الخدمة محتاجة تفاصيل وقت زيادة:
-                </p>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_precise_schedule"
-                    checked={schedulingMode === 'precise'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'precise' : 'none')}
-                  />
-                  <span>
-                    دقة وقت (بداية + مدة بالساعات مع بعض)
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: جليسة أطفال بالساعة، تنظيف بالساعة — العميل بيحدد امتى هيبدأ وقد إيه هيستمر مع بعض.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_start_time_only"
-                    checked={schedulingMode === 'start_only'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_only' : 'none')}
-                  />
-                  <span>
-                    وقت بداية بس (من غير مدة)
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: عقد شهري بيتحدد امتى يبدأ بس، من غير تحديد مدة أو نهاية وقت الحجز.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_hours_only"
-                    checked={schedulingMode === 'hours_only'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'hours_only' : 'none')}
-                  />
-                  <span>
-                    عدد ساعات بس (من غير وقت بداية محدد)
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: &quot;قد إيه محتاج تنظيف؟&quot; — العميل بيحدد عدد الساعات بس، من غير ميعاد وصول دقيق.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_start_and_end"
-                    checked={schedulingMode === 'start_and_end'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_and_end' : 'none')}
-                  />
-                  <span>
-                    تاريخ ووقت بداية + تاريخ ووقت نهاية
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: تنظيف شهري/إقامة بمدة محددة — العميل بيحدد بداية العقد ونهايته بالظبط.
-                    </span>
-                  </span>
-                </label>
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">طريقة التنفيذ</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CatalogToggle
+                      name="allows_individual"
+                      title="شغلانة سريعة"
+                      description="فني واحد ينفذ الطلب، مع إمكانية إضافة مساعد اختياري عند الحاجة."
+                      icon={UserRound}
+                      defaultChecked={service.allows_individual}
+                    />
+                    <CatalogToggle
+                      name="allows_team"
+                      title="اعتماد فريق أو شركة"
+                      description="للأعمال الكبيرة التي تحتاج قائدًا وفنيين أو شركة تنفيذ."
+                      icon={UsersRound}
+                      defaultChecked={service.allows_team}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">مرونة الحجز والعرض</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <CatalogToggle
+                      name="allows_date_range_booking"
+                      title="نطاق أيام مرن"
+                      description="العميل يحدد فترة أيام مناسبة بدل يوم واحد ثابت."
+                      icon={CalendarRange}
+                      defaultChecked={service.allows_date_range_booking}
+                    />
+                    <CatalogToggle
+                      name="allows_recurring_booking"
+                      title="حجز متكرر"
+                      description="أسبوعي أو شهري، وكل موعد يولّد طلبًا مستقلًا بسعر وقته."
+                      icon={Repeat2}
+                      defaultChecked={service.allows_recurring_booking}
+                    />
+                    <CatalogToggle
+                      name="show_unavailable_providers"
+                      title="إظهار غير المتاحين"
+                      description="يعرض الفني المتعارض مع توضيح حالته بدل إخفائه بالكامل."
+                      icon={Eye}
+                      defaultChecked={service.show_unavailable_providers}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">اختيار واحد فقط. الوضع الافتراضي مناسب لمعظم خدمات الصيانة اليومية.</p>
+                  </div>
+                  {schedulingMode === 'precise' && <input type="hidden" name="requires_precise_schedule" value="on" />}
+                  {schedulingMode === 'start_only' && <input type="hidden" name="requires_start_time_only" value="on" />}
+                  {schedulingMode === 'hours_only' && <input type="hidden" name="requires_hours_only" value="on" />}
+                  {schedulingMode === 'start_and_end' && <input type="hidden" name="requires_start_and_end" value="on" />}
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'none'}
+                      title="يوم كامل"
+                      description="موعد باليوم فقط، من غير ساعة أو مدة إضافية."
+                      icon={CalendarDays}
+                      onSelect={() => setSchedulingMode('none')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'precise'}
+                      title="بداية + مدة"
+                      description="وقت بداية محدد وعدد ساعات، مثل التنظيف بالساعة."
+                      icon={Clock3}
+                      onSelect={() => setSchedulingMode('precise')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'start_only'}
+                      title="وقت بداية فقط"
+                      description="بداية محددة من غير مدة أو وقت نهاية."
+                      icon={CalendarClock}
+                      onSelect={() => setSchedulingMode('start_only')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'hours_only'}
+                      title="عدد ساعات فقط"
+                      description="مدة مطلوبة من غير تحديد ساعة وصول دقيقة."
+                      icon={Hourglass}
+                      onSelect={() => setSchedulingMode('hours_only')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'start_and_end'}
+                      title="بداية ونهاية"
+                      description="تاريخ ووقت بداية ونهاية، مناسب للعقود والإقامات."
+                      icon={CalendarRange}
+                      onSelect={() => setSchedulingMode('start_and_end')}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            </CatalogConfigSection>
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">التنفيذ والتصنيف</h3>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <CatalogConfigSection
+              title="التنفيذ والتصنيف"
+              description="بيانات الضمان والمدة ومستوى الفني، بالإضافة إلى متطلبات توثيق الشغل."
+              icon={Camera}
+              tone="green"
+            >
+              <div className="grid grid-cols-1 gap-3 rounded-xl border border-emerald-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-5">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_warranty">أيام الضمان</Label>
                   <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_duration">المدة المتوقعة (دقيقة)</Label>
-                  <Input
-                    id="svc_duration"
-                    name="estimated_duration_minutes"
-                    type="number"
-                    min="1"
-                    defaultValue={service.estimated_duration_minutes ?? ''}
-                  />
+                  <Input id="svc_duration" name="estimated_duration_minutes" type="number" min="1" defaultValue={service.estimated_duration_minutes ?? ''} />
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_min_level">أقل مستوى فني مسموح</Label>
@@ -811,11 +959,16 @@ export default function ServiceDetailPage() {
                   <Input id="svc_launch_phase" name="launch_phase" type="number" min="1" defaultValue={service.launch_phase} />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="requires_photos" defaultChecked={service.requires_photos} />
-                محتاجة صور قبل/بعد
-              </label>
-            </div>
+              <div className="mt-4 max-w-xl">
+                <CatalogToggle
+                  name="requires_photos"
+                  title="توثيق بالصور قبل وبعد"
+                  description="يطلب من الفني رفع صور الحالة قبل التنفيذ وبعده لإتمام الطلب."
+                  icon={Camera}
+                  defaultChecked={service.requires_photos}
+                />
+              </div>
+            </CatalogConfigSection>
 
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
               حفظ تفاصيل الخدمة
@@ -843,16 +996,31 @@ export default function ServiceDetailPage() {
                 ))}
               </SelectNative>
               <Label htmlFor="zp_mode">طريقة التسعير</Label>
+              {/* docs/08 §108-G — عمدًا من غير `disabled`: عنصر <select disabled> ما بيتبعتش
+                  في FormData خالص، فكان هيرجّع 'override' الافتراضي وقت الحفظ (`form.get(...)
+                  || 'override'` في handleUpsertZonePricing) — عكس المقصود بالظبط. إخفاء
+                  الاختيار التاني كفاية إن القيمة المُرسلة تبقى 'percentage' دايمًا هنا. */}
               <SelectNative
                 id="zp_mode"
                 name="pricing_mode"
-                value={zpMode}
+                value={pricingModelLive === 'formula' ? 'percentage' : zpMode}
                 onChange={(e) => setZpMode(e.target.value as 'override' | 'percentage')}
               >
-                <option value="override">رقم مطلق (يستبدل السعر الأساسي بالكامل)</option>
+                {pricingModelLive !== 'formula' && (
+                  <option value="override">رقم مطلق (يستبدل السعر الأساسي بالكامل)</option>
+                )}
                 <option value="percentage">نسبة مئوية فوق السعر الأساسي (بتتحدّث تلقائيًا معاه)</option>
               </SelectNative>
-              {zpMode === 'override' ? (
+              {pricingModelLive === 'formula' && (
+                // docs/08 §108-G — رقم مطلق (override) مالوش معنى لخدمة formula (سعرها بيتحدد من
+                // فورم ديناميكي بقيم متغيّرة، مش رقم ثابت). النسبة المئوية بس هي اللي بتتطبّق —
+                // فوق **ناتج المعادلة نفسه**، مش فوق "السعر الأساسي" (مالوش استخدام حقيقي في formula).
+                <p className="text-xs text-muted-foreground">
+                  الخدمة دي معادلة ديناميكية — النسبة المئوية بس بتتطبّق (فوق ناتج المعادلة نفسه لكل حجز)،
+                  &quot;رقم مطلق&quot; مش متاح لها.
+                </p>
+              )}
+              {zpMode === 'override' && pricingModelLive !== 'formula' ? (
                 <>
                   <Label htmlFor="zp_price">السعر (جنيه)</Label>
                   <Input id="zp_price" name="price" type="number" min="0" step="0.01" required />
@@ -860,7 +1028,7 @@ export default function ServiceDetailPage() {
               ) : (
                 <>
                   <Label htmlFor="zp_modifier">النسبة المئوية (مثال: 15 لزيادة 15%, -10 لتخفيض 10%)</Label>
-                  <Input id="zp_modifier" name="modifier_percentage" type="number" step="0.01" required />
+                  <Input id="zp_modifier" name="modifier_percentage" type="number" min="-100" max="1000" step="0.01" required />
                 </>
               )}
               <Label htmlFor="zp_valid_from">تاريخ السريان (فاضي = فوري)</Label>
@@ -1145,7 +1313,8 @@ export default function ServiceDetailPage() {
                         <TableCell>{formatEgp(row.technician_daily_wage_cents)}</TableCell>
                         <TableCell>{row.assistant_daily_wage_cents !== null ? formatEgp(row.assistant_daily_wage_cents) : '—'}</TableCell>
                         <TableCell dir="ltr">
-                          {row.min_technicians} فني{row.min_assistants > 0 ? ` + ${row.min_assistants} مساعد` : ''}
+                          {row.min_technicians} فني
+                          {row.min_assistants > 0 ? ` + ${row.min_assistants} مساعد` : ''}
                         </TableCell>
                         <TableCell>
                           <button type="button" disabled={isSaving} onClick={() => toggleStandardDataActive(row)} className="cursor-pointer">
@@ -1166,8 +1335,7 @@ export default function ServiceDetailPage() {
                           <TableCell colSpan={8}>
                             <div className="rounded-md border p-3">
                               <p className="mb-2 text-sm font-medium">
-                                إنتاجية فعلية مسجّلة — تسجيل يدوي، أو تلقائي عند إكمال طلب حقيقي مربوط بالبيانات القياسية دي (المصدر
-                                في العمود تحت)
+                                إنتاجية فعلية مسجّلة — تسجيل يدوي، أو تلقائي عند إكمال طلب حقيقي مربوط بالبيانات القياسية دي (المصدر في العمود تحت)
                               </p>
                               {(pendingSuggestions ?? []).filter((s) => s.service_standard_data_id === row.id).length > 0 && (
                                 <div className="mb-3 flex flex-col gap-2">
@@ -1183,22 +1351,14 @@ export default function ServiceDetailPage() {
                                           <span dir="ltr">
                                             {s.current_productivity_per_day} ← {s.suggested_productivity_per_day}
                                           </span>{' '}
-                                          (عينة {s.sample_size} طلب، ثقة {(s.confidence_score * 100).toFixed(0)}%)
+                                          (عينة {s.sample_size} طلب، ثقة {(s.confidence_score * 100).toFixed(0)}
+                                          %)
                                         </div>
                                         <div className="flex gap-2">
-                                          <Button
-                                            size="sm"
-                                            disabled={isSaving}
-                                            onClick={() => handleReviewSuggestion(s.id, 'approve')}
-                                          >
+                                          <Button size="sm" disabled={isSaving} onClick={() => handleReviewSuggestion(s.id, 'approve')}>
                                             موافقة
                                           </Button>
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            disabled={isSaving}
-                                            onClick={() => handleReviewSuggestion(s.id, 'reject')}
-                                          >
+                                          <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => handleReviewSuggestion(s.id, 'reject')}>
                                             رفض
                                           </Button>
                                         </div>
@@ -1206,10 +1366,7 @@ export default function ServiceDetailPage() {
                                     ))}
                                 </div>
                               )}
-                              <form
-                                onSubmit={(e) => handleRecordActual(e, row.id)}
-                                className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5 sm:items-end"
-                              >
+                              <form onSubmit={(e) => handleRecordActual(e, row.id)} className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5 sm:items-end">
                                 <div className="flex flex-col gap-1">
                                   <Label htmlFor={`ra_units_${row.id}`}>الوحدات الفعلية</Label>
                                   <Input id={`ra_units_${row.id}`} name="actual_units" type="number" min="0.01" step="0.01" required />
@@ -1256,7 +1413,8 @@ export default function ServiceDetailPage() {
                                         <TableCell dir="ltr">{a.actual_units}</TableCell>
                                         <TableCell dir="ltr">{a.actual_days}</TableCell>
                                         <TableCell dir="ltr">
-                                          {a.actual_technicians} فني{a.actual_assistants > 0 ? ` + ${a.actual_assistants} مساعد` : ''}
+                                          {a.actual_technicians} فني
+                                          {a.actual_assistants > 0 ? ` + ${a.actual_assistants} مساعد` : ''}
                                         </TableCell>
                                         <TableCell dir="ltr">{a.computed_productivity_per_day.toFixed(2)}</TableCell>
                                         <TableCell>{a.source === 'system_auto' ? 'تلقائي (طلب حقيقي)' : 'يدوي'}</TableCell>

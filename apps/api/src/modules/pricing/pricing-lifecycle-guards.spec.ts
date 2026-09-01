@@ -231,6 +231,46 @@ describe('Price Engine — lifecycle guards + trace/explanation (PostgreSQL)', (
     await expect(rulesService.deactivate(ids.adminUser, lookup.id)).rejects.toMatchObject({ status: 409 });
   });
 
+  it('جدولة نسخ مستقبلية تربط predecessor وsuccessor وتحدّث نفس البداية بدون overlap', async () => {
+    const middleStart = new Date(Date.now() + 10 * 86_400_000);
+    const lastStart = new Date(Date.now() + 20 * 86_400_000);
+    await rulesService.upsert(ids.adminUser, ids.service, {
+      rule_type: PricingRuleType.CONSTANT,
+      rule_key: 'timeline_constant',
+      payload: { value: 100 },
+    });
+    await rulesService.upsert(ids.adminUser, ids.service, {
+      rule_type: PricingRuleType.CONSTANT,
+      rule_key: 'timeline_constant',
+      payload: { value: 300 },
+      valid_from: lastStart.toISOString(),
+    });
+    await rulesService.upsert(ids.adminUser, ids.service, {
+      rule_type: PricingRuleType.CONSTANT,
+      rule_key: 'timeline_constant',
+      payload: { value: 200 },
+      valid_from: middleStart.toISOString(),
+    });
+    await rulesService.upsert(ids.adminUser, ids.service, {
+      rule_type: PricingRuleType.CONSTANT,
+      rule_key: 'timeline_constant',
+      payload: { value: 250 },
+      valid_from: middleStart.toISOString(),
+    });
+
+    const timeline = await q<Array<{ payload: { value: number }; valid_from: Date; valid_until: Date | null }>>(
+      `SELECT payload, valid_from, valid_until
+       FROM service_pricing_rules
+       WHERE service_id=$1 AND rule_key='timeline_constant' AND is_active AND deleted_at IS NULL
+       ORDER BY valid_from`,
+      [ids.service],
+    );
+    expect(timeline).toHaveLength(3);
+    expect(timeline[0].valid_until).toEqual(middleStart);
+    expect(timeline[1]).toMatchObject({ payload: { value: 250 }, valid_until: lastStart });
+    expect(timeline[2].valid_until).toBeNull();
+  });
+
   it('find-usages بيرجّع مواضع الاستخدام بالمسارات (للواجهة)', async () => {
     const usages = await rulesService.findUsages(ids.service, { field_key: 'area_used' });
     expect(usages.matches.length).toBeGreaterThanOrEqual(2); // price_cents + estimated_duration_days

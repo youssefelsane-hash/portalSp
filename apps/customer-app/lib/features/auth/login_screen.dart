@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,7 @@ import '../../core/api_config.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
+import '../../design/adaptive_text_action.dart';
 import '../catalog/branding_repository.dart';
 
 /// شاشة الدخول/التسجيل.
@@ -51,8 +54,15 @@ class _LoginScreenState extends State<LoginScreen> {
   // نعرضله اقتراح مباشر يحوّله لمود التسجيل بنفس الرقم من غير ما يكتبه تاني.
   bool _suggestRegister = false;
 
+  /// §106 — «ابعت الكود تاني» بعدّاد تنازلي. قبل كده خطوة الكود مكانش فيها إعادة إرسال خالص:
+  /// أي كود بايظ/منتهي (والسيرفر بيلغي القديم أول ما يتصدر جديد) كان بيحوّل الشاشة لطريق
+  /// مسدود، والمخرج الوحيد «رقم الموبايل غلط؟ رجّع خطوة» — رسالة محدش هيدوس عليها والرقم صح.
+  int _resendSeconds = 0;
+  Timer? _resendTimer;
+
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _phoneController.dispose();
     _otpController.dispose();
     _fullNameController.dispose();
@@ -60,6 +70,50 @@ class _LoginScreenState extends State<LoginScreen> {
     _technicianReferralCodeController.dispose();
     _otpFocusNode.dispose();
     super.dispose();
+  }
+
+  /// مهلة بين طلبين — الباك-إند نفسه بيقفل عند ٥ طلبات/دقيقة (`@Throttle` على
+  /// `POST /auth/otp/request`)، فالعدّاد هنا بيمنع المستخدم يوصل للحظر أصلاً بدل ما يتفاجئ بيه.
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSeconds = 30);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _resendSeconds -= 1);
+      if (_resendSeconds <= 0) timer.cancel();
+    });
+  }
+
+  Future<void> _resendOtp() async {
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+      _suggestRegister = false;
+    });
+    try {
+      await context.read<AuthRepository>().requestOtp(
+        _phoneController.text.trim(),
+        purpose: _isRegisterMode ? 'register' : 'login',
+      );
+      if (!mounted) return;
+      // الكود القديم بقى ملغي فعليًا على السيرفر — لازم الخانة تتفضّى، وإلا المستخدم هيضغط
+      // «دخول» على كود ميت ويحرق محاولة من الخمسة بلا داعي.
+      _otpController.clear();
+      _startResendCooldown();
+      _otpFocusNode.requestFocus();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي'),
+        ),
+      );
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   Future<void> _requestOtp() async {
@@ -74,10 +128,11 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await context.read<AuthRepository>().requestOtp(
-            _phoneController.text.trim(),
-            purpose: _isRegisterMode ? 'register' : 'login',
-          );
+        _phoneController.text.trim(),
+        purpose: _isRegisterMode ? 'register' : 'login',
+      );
       setState(() => _otpSent = true);
+      _startResendCooldown();
       // بعد ما الإطار اللي بيبني حقل الكود يخلص — قبل كده الحقل لسه مش موجود في الشجرة.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _otpFocusNode.requestFocus();
@@ -106,24 +161,43 @@ class _LoginScreenState extends State<LoginScreen> {
           technicianReferralCode: _technicianReferralCodeController.text.trim(),
         );
       } else {
-        await auth.verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
+        await auth.verifyOtp(
+          _phoneController.text.trim(),
+          _otpController.text.trim(),
+        );
       }
       // في الوضع المشروط لازم نرجّع للرحلة اللي فتحتنا. في الوضع الجذري `_AuthGate` بيتكفّل.
       if (widget.isModal && mounted) Navigator.of(context).pop(true);
     } on ApiException catch (err) {
       // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
       final suggestRegister = !_isRegisterMode && err.statusCode == 404;
+      // الخانة بتتفضّى وتاخد التركيز تاني — الكود اللي اترفض مش هينفع تاني مهما اتبعت، وسيبانه
+      // مكتوب بيخلي `onChanged` (اللي بيبعت أوتوماتيك عند ٦ أرقام) عاجز يشتغل لحد ما المستخدم
+      // يمسح بنفسه، ودي كانت أسرع طريقة يستهلك بيها محاولاته الخمسة.
+      _otpController.clear();
       setState(() {
         _error = err.message;
         _suggestRegister = suggestRegister;
       });
+      if (!suggestRegister) _otpFocusNode.requestFocus();
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  void _switchToRegister() {
+  /// الرجوع لخطوة الرقم بيوقف العدّاد — تايمر دوري بيعمل rebuild كل ثانية لخطوة مش ظاهرة أصلاً.
+  void _backToPhoneStep() {
+    _resendTimer?.cancel();
     setState(() {
+      _otpSent = false;
+      _resendSeconds = 0;
+    });
+  }
+
+  void _switchToRegister() {
+    _resendTimer?.cancel();
+    setState(() {
+      _resendSeconds = 0;
       _isRegisterMode = true;
       _otpSent = false;
       _otpController.clear();
@@ -133,7 +207,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _toggleMode() {
+    _resendTimer?.cancel();
     setState(() {
+      _resendSeconds = 0;
       _isRegisterMode = !_isRegisterMode;
       _otpSent = false;
       _otpController.clear();
@@ -152,7 +228,9 @@ class _LoginScreenState extends State<LoginScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         // في الوضع المشروط بيبقى فيه زرار رجوع تلقائي — العميل لازم يقدر يرجع لتصفّحه.
-        appBar: widget.isModal ? AppBar(title: const Text('تسجيل الدخول')) : null,
+        appBar: widget.isModal
+            ? AppBar(title: const Text('تسجيل الدخول'))
+            : null,
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -167,9 +245,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (!widget.isModal) const SizedBox(height: 20),
                     Text(
                       widget.headline ??
-                          (_isRegisterMode ? 'اعمل حساب جديد' : 'أهلًا بيك في أسطى'),
+                          (_isRegisterMode
+                              ? 'اعمل حساب جديد'
+                              : 'أهلًا بيك في أسطى'),
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Text(
@@ -199,7 +281,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         keyboardType: TextInputType.phone,
                         textDirection: TextDirection.ltr,
                         textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _isSubmitting ? null : _requestOtp(),
+                        onSubmitted: (_) =>
+                            _isSubmitting ? null : _requestOtp(),
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
                           hintText: '+201001234567',
@@ -234,7 +317,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _otpController,
                         focusNode: _otpFocusNode,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         textDirection: TextDirection.ltr,
                         textAlign: TextAlign.center,
                         maxLength: 6,
@@ -256,10 +341,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           counterText: '',
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: _isSubmitting ? null : () => setState(() => _otpSent = false),
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        label: const Text('رقم الموبايل غلط؟ رجّع خطوة'),
+                      AdaptiveTextAction(
+                        key: const ValueKey('otp-resend'),
+                        onPressed: (_isSubmitting || _resendSeconds > 0)
+                            ? null
+                            : _resendOtp,
+                        icon: Icons.refresh_rounded,
+                        label: _resendSeconds > 0
+                            ? 'تقدر تطلب كود جديد بعد $_resendSeconds ثانية'
+                            : 'ما وصلكش الكود؟ ابعته تاني',
+                      ),
+                      AdaptiveTextAction(
+                        onPressed: _isSubmitting ? null : _backToPhoneStep,
+                        icon: Icons.edit_outlined,
+                        label: 'رقم الموبايل غلط؟ رجّع خطوة',
                       ),
                     ],
                     if (_error != null) ...[
@@ -272,14 +367,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                     if (_suggestRegister) ...[
                       const SizedBox(height: 4),
-                      TextButton(
+                      AdaptiveTextAction(
                         onPressed: _isSubmitting ? null : _switchToRegister,
-                        child: const Text('سجّل حساب جديد بنفس الرقم'),
+                        label: 'سجّل حساب جديد بنفس الرقم',
                       ),
                     ],
                     const SizedBox(height: 16),
                     FilledButton(
-                      onPressed: _isSubmitting ? null : (_otpSent ? _verifyOtp : _requestOtp),
+                      onPressed: _isSubmitting
+                          ? null
+                          : (_otpSent ? _verifyOtp : _requestOtp),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                       ),
@@ -287,7 +384,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : Text(
                               _otpSent
@@ -297,11 +397,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     if (!_otpSent) ...[
                       const SizedBox(height: 8),
-                      TextButton(
+                      AdaptiveTextAction(
                         onPressed: _isSubmitting ? null : _toggleMode,
-                        child: Text(
-                          _isRegisterMode ? 'عندك حساب؟ سجّل دخول' : 'مستخدم جديد؟ اعمل حساب',
-                        ),
+                        label: _isRegisterMode
+                            ? 'عندك حساب؟ سجّل دخول'
+                            : 'مستخدم جديد؟ اعمل حساب',
                       ),
                     ],
                   ],
@@ -349,7 +449,9 @@ class _BrandMarkState extends State<_BrandMark> {
     BrandingRepository()
         .fetchPrimaryLogo()
         .then((logo) {
-          if (!mounted || logo == null || logo.isDefault || logo.url.isEmpty) return;
+          if (!mounted || logo == null || logo.isDefault || logo.url.isEmpty) {
+            return;
+          }
           setState(() => _logoUrl = resolveApiAssetUrl(logo.url));
         })
         .catchError((_) {});

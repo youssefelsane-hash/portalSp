@@ -6,6 +6,7 @@ import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../../common/events/o
 import { CustomerProfilesService } from '../../customers/customer-profiles.service';
 import { Order } from '../../orders/entities/order.entity';
 import { NotificationsService } from '../notifications.service';
+import { NotificationRoutingService } from '../notification-routing.service';
 
 @Injectable()
 export class OrderCreatedNotificationListener {
@@ -15,6 +16,7 @@ export class OrderCreatedNotificationListener {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly notificationsService: NotificationsService,
+    private readonly routingService: NotificationRoutingService,
   ) {}
 
   @OnEvent(ORDER_CREATED_EVENT)
@@ -28,11 +30,25 @@ export class OrderCreatedNotificationListener {
         userId: customer.userId,
         notificationType: 'order_created',
         titleAr: 'طلبك اتسجّل بنجاح',
-        bodyAr: `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
+        bodyAr:
+          order.orderStatus === 'awaiting_admin_quote'
+            ? `طلب رقم ${order.orderNumber} — الإدارة بتراجع الصور وهتبعتلك السعر قبل اختيار الفني.`
+            : `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
         referenceType: 'order',
         referenceId: order.id,
         deepLink: `/orders/${order.id}`,
       });
+
+      if (order.orderStatus === 'awaiting_admin_quote') {
+        await this.routingService.routeToRole('order.photo_quote_requested', {
+          notificationType: 'order_photo_quote_requested',
+          titleAr: `طلب تسعير بالصور: ${order.orderNumber}`,
+          bodyAr: 'العميل رفع صور المشكلة ومستني الإدارة تحدد السعر قبل اختيار الفني.',
+          referenceType: 'order',
+          referenceId: order.id,
+          deepLink: `/admin/orders/${order.id}`,
+        });
+      }
     } catch (err) {
       this.logger.error(`فشل إشعار إنشاء الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
     }

@@ -192,7 +192,14 @@ export class AdminWarrantyClaimsController {
       }, manager);
       return toWarrantyClaimResponse(claim);
     });
-    this.events?.emit(WARRANTY_CLAIM_CHANGED_EVENT, { claimId: id, action: 'reviewed' });
+    this.events?.emit(WARRANTY_CLAIM_CHANGED_EVENT, {
+      claimId: id,
+      action: 'reviewed',
+      customerProfileId: reviewed.customer_id,
+      status: reviewed.status,
+      rejectionReason: reviewed.rejection_reason,
+      resolutionNotes: reviewed.resolution_notes,
+    });
     return reviewed;
   }
 }

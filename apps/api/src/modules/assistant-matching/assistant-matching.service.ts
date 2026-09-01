@@ -3,9 +3,13 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { technicianServiceQualificationCondition } from '../technicians/technician-eligibility.sql';
+import {
+  technicianCityCoverageCondition,
+  technicianKindCondition,
+  technicianServiceQualificationCondition,
+} from '../technicians/technician-eligibility.sql';
 import {
   ASSISTANT_MATCHING_ESCALATED_EVENT,
   AssistantMatchingEscalatedEvent,
@@ -72,12 +76,24 @@ export class AssistantMatchingService {
    * "بالاكتفاء بفحص 'مفيش طلب نشط' نفس دقة الفني القائد" — اتقفلت 2026-08-13، نفس منطق
    * matching.service.ts's findEligibleTechnicians() بالحرف، راجع التعليق هناك للتفاصيل الكاملة).
    */
-  private async isCandidateEligible(technicianId: string, order: Order): Promise<boolean> {
-    const [row] = await this.dataSource.query<{ eligible: boolean }[]>(
+  private async isCandidateEligible(technicianId: string, order: Order, manager?: EntityManager): Promise<boolean> {
+    const [row] = await (manager ?? this.dataSource).query<{ eligible: boolean }[]>(
       `
       SELECT (
         tp.verification_status = 'approved'
         AND tp.deleted_at IS NULL
+        -- ADR-0050 — الاتجاه العكسي: المسار ده بيدوّر على **مساعد**، فالفنيين مستبعدين منه.
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 's.id',
+          categoryIdExpr: 's.category_id',
+        })}
+        AND ${technicianCityCoverageCondition({
+          technicianIdExpr: 'tp.id',
+          requestedServiceZoneIdExpr: '$5',
+        })}
+        AND tp.current_location IS NOT NULL
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
           WHERE technician_id IS NOT NULL AND order_status = ANY($2::order_status[]) AND deleted_at IS NULL
@@ -101,7 +117,7 @@ export class AssistantMatchingService {
       FROM technician_profiles tp, services s
       WHERE tp.id = $1 AND s.id = $3
       `,
-      [technicianId, ACTIVE_TECHNICIAN_ORDER_STATUSES, order.serviceId, order.scheduledAt ?? null],
+      [technicianId, ACTIVE_TECHNICIAN_ORDER_STATUSES, order.serviceId, order.scheduledAt ?? null, order.serviceZoneId],
     );
     return row?.eligible === true;
   }
@@ -172,15 +188,24 @@ export class AssistantMatchingService {
       -- معتمدة" (شرط الـEXISTS تحت)، نفس القاعدة في matching.service.ts.
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
         AND ts.verification_status = 'approved'
-      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
+        -- ADR-0050 — الاتجاه العكسي: مجمع المساعدين بيضم المساعدين بس. قبل كده كان بيبث لأي فني
+        -- مؤهّل، فالفنيين الكاملين كانوا بياخدوا عروض مساعدة بنسبة أقل من نصيبهم العادي.
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
+        -- المساعد لازم يكون معتمدًا على الخدمة نفسها أو فئتها، بالضبط مثل الفني. ده يمنع مساعد
+        -- السباكة من استلام كهرباء لمجرد إن دوره في الطلب "مساعد".
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
           directServiceAlias: 'ts',
+        })}
+        -- نطاقات الأدمن تفتح المدينة كلها للمساعد، لا مدينة أخرى. المسافة تحت للترتيب فقط.
+        AND ${technicianCityCoverageCondition({
+          technicianIdExpr: 'tp.id',
+          requestedServiceZoneIdExpr: '$2',
         })}
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
@@ -206,7 +231,12 @@ export class AssistantMatchingService {
             AND tss.start_time < (($7::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
             AND tss.end_time > ($7::timestamptz)::time
         )
-      ORDER BY ST_Distance(tp.current_location, a.location) ASC
+      ORDER BY ST_Distance(tp.current_location, a.location) ASC,
+               CASE tp.current_level
+                 WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
+                 WHEN 'verified' THEN 1 ELSE 0
+               END DESC,
+               tp.average_rating DESC
       LIMIT $4
       `,
       [
@@ -249,7 +279,7 @@ export class AssistantMatchingService {
       if (offerId) {
         this.events.emit(
           ASSISTANT_OPPORTUNITY_OFFERED_EVENT,
-          new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id),
+          new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id, order.orderNumber),
         );
       }
     }
@@ -322,6 +352,12 @@ export class AssistantMatchingService {
         offer.respondedAt = new Date();
         await manager.save(offer);
         throw new ApiException(ErrorCode.ORDR_003, 'الأماكن المطلوبة اكتملت بالفعل — حد تاني كسب السباق', HttpStatus.CONFLICT);
+      }
+
+      // العرض ممكن يفضل مفتوح لثوانٍ بعد سحب اعتماد التخصص أو تغيير مناطق المساعد. إعادة الفحص
+      // تحت قفل الطلب تمنع قبول عرض قديم لم يعد صالحًا، وتخلي قرار القبول مطابقًا لقرار العرض.
+      if (!(await this.isCandidateEligible(profileId, order, manager))) {
+        throw new ApiException(ErrorCode.ORDR_003, 'لم تعد مؤهلًا لتخصص أو مدينة أو موعد الطلب ده', HttpStatus.CONFLICT);
       }
 
       const now = new Date();

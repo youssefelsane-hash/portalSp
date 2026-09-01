@@ -3,10 +3,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- عرض إشعارات push actionable (docs/08 §17.16) — POST_NOTIFICATIONS إجباري على Android 13+
          وإلا مفيش إشعار هيظهر خالص، بغض النظر عن FCM. VIBRATE لاهتزاز قناة عروض الطوارئ.
-         USE_FULL_SCREEN_INTENT لعرض عرض الطوارئ فوق قفل الشاشة زي مكالمة واردة. -->
+
+         USE_FULL_SCREEN_INTENT **اتشالت عمدًا** (بوابة P0-4 في docs/23): Google بيقصرها أساسًا
+         على تطبيقات المكالمات والمنبهات، وتطبيق توزيع شغل مش منهم — وجودها سبب رفض متكرر في
+         مراجعة المتجر. البديل المطبَّق: إشعار heads-up بأولوية قصوى وvisibility=public، بيبان
+         فوق شاشة القفل بمحتواه من غير ما يفتح الشاشة قسرًا. لو الأعمال قررت بعدين إنها محتاجة
+         الشاشة الكاملة فعلاً، لازم declaration مبرَّر مع الرفع + تعامل صريح مع رفض الصلاحية. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <!-- الدخول بالبصمة (docs/08 §17.22) — local_auth محتاجها عشان يفتح BiometricPrompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application
@@ -40,6 +44,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- docs/08 §108-E — بَقّة حقيقية: من غير القناة الافتراضية دي، أي إشعار FCM يوصل والتطبيق
+             في الخلفية/مقفول بلا channel_id صريح (أو بـchannel_id مش موجود على الجهاز) كان ممكن
+             ميتعرضش خالص بدل ما يظهر بلا صوت بس — Android بيرفض إشعار قناته مش موجودة، مايرجعش
+             لقناة افتراضية تلقائيًا من غير الإعلان الصريح ده. لازم تطابق قناة "تحديثات عامة"
+             المتعرّفة فعليًا في push_notification_service.dart (`general_updates`) — القناة
+             العامة، مش قنوات العروض actionable (دول بتتبنى محليًا من الكود مباشرة). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="general_updates" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -78,4 +78,10 @@ export class EstimateQueryDto {
   @IsNumber()
   @IsPositive()
   duration_hours?: number;
+
+  // خدمات per_unit/monthly: عدد الوحدات أو الشهور في المعاينة العامة، بنفس قيمة إنشاء الطلب.
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  pricing_quantity?: number;
 }

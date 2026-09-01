@@ -33,6 +33,12 @@ class CrewStatus {
   final int missingAssistants;
   final bool crewComplete;
 
+  /// ADR-0052 (docs/08 §97) — خانة المساعد الاختياري للشغلانة الفردية. **منفصلة تمامًا** عن
+  /// حقول النقص فوق: الاختياري عمره ما يبقى "نقص"، فمالوش أي علاقة بكارت "الطاقم مش مكتمل".
+  /// افتراضي صفر عشان أي نسخة API أقدم مش بتبعتهم تفضل شغّالة زي ما هي.
+  final int optionalAssistantsAdded;
+  final int optionalAssistantSlots;
+
   CrewStatus({
     required this.requiredTechnicians,
     required this.requiredAssistants,
@@ -41,6 +47,8 @@ class CrewStatus {
     required this.missingTechnicians,
     required this.missingAssistants,
     required this.crewComplete,
+    this.optionalAssistantsAdded = 0,
+    this.optionalAssistantSlots = 0,
   });
 
   factory CrewStatus.fromJson(Map<String, dynamic> json) => CrewStatus(
@@ -51,6 +59,8 @@ class CrewStatus {
         missingTechnicians: json['missingTechnicians'] as int,
         missingAssistants: json['missingAssistants'] as int,
         crewComplete: json['crewComplete'] as bool,
+        optionalAssistantsAdded: (json['optionalAssistantsAdded'] as int?) ?? 0,
+        optionalAssistantSlots: (json['optionalAssistantSlots'] as int?) ?? 0,
       );
 }
 
@@ -89,6 +99,8 @@ class Order {
   // القاعدة: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
   /** الكاش المطلوب تحصيله من العميل دلوقتي. */
   final int cashToCollectCents;
+  /** الكاش الذي تم تسجيل استلامه بالفعل لهذا الطلب. */
+  final int cashCollectedCents;
   /** نصيب الفني من الطلب (بعد نسبة الشركة) — بلا أي شرح لتكوينه. */
   final int myEarningCents;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
@@ -109,6 +121,9 @@ class Order {
   // الفني هنا رغم إن الشاشة محتاجاها لعرض "طاقم الطلب".
   final String bookingMode;
   final int? requiredTechnicians;
+  // ADR-0052 (docs/08 §97) — محتاجينه عشان الشاشة تعرف **من غير نداء زيادة** إن دي شغلانة فردية
+  // (فرد واحد + صفر مساعدين مطلوبين) فتجيب تفاصيلها الكاملة وتعرض خانة المساعد الاختياري.
+  final int? requiredAssistants;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
   // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — موجود بس لقائد الطلب على booking_mode='team'
@@ -134,6 +149,7 @@ class Order {
     required this.problemDescription,
     this.customerInputsLine = '',
     required this.cashToCollectCents,
+    this.cashCollectedCents = 0,
     required this.myEarningCents,
     required this.hasOnlinePayment,
     required this.fullyPaidOnline,
@@ -143,6 +159,7 @@ class Order {
     required this.paymentStatus,
     required this.bookingMode,
     this.requiredTechnicians,
+    this.requiredAssistants,
     this.address,
     this.scheduledAt,
     this.crewStatus,
@@ -160,6 +177,7 @@ class Order {
         problemDescription: json['problem_description'] as String?,
         customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
         cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
+        cashCollectedCents: json['cash_collected_cents'] as int? ?? 0,
         myEarningCents: json['my_earning_cents'] as int? ?? 0,
         hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
         fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
@@ -169,6 +187,7 @@ class Order {
         paymentStatus: json['payment_status'] as String,
         bookingMode: json['booking_mode'] as String? ?? 'individual',
         requiredTechnicians: json['required_technicians'] as int?,
+        requiredAssistants: json['required_assistants'] as int?,
         address: json['address'] != null
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
@@ -204,6 +223,9 @@ const Map<String, String?> nextTechnicianAction = {
   'technician_arrived': 'start',
   'in_progress': 'complete',
   'work_completed': 'collect_cash',
+  // الطلب المختلط (عربون/جزء أونلاين + باقي كاش) ينتقل إلى انتظار الدفع بعد انتهاء الشغل.
+  // السيرفر يسمح بتحصيل الكاش في الحالتين، فلا نخفي زر التحصيل بينما نظهر «لم أستلم الكاش».
+  'awaiting_payment': 'collect_cash',
 };
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts
@@ -253,4 +275,32 @@ String technicianEarningLabel({
   if (earningPending) return 'نصيبك: هيتحدد بعد تسعير الشغلانة';
   final amount = formatEgp(myEarningCents);
   return isCrewShare ? 'نصيبك من الطاقم: $amount' : 'نصيبك: $amount';
+}
+
+/// يفرّق بين مبلغ ما زال مطلوبًا، وكاش تم تحصيله بالفعل، وطلب لا يحتاج كاش أصلًا.
+///
+/// docs/08 §108-B — قاعدة صارمة جديدة: عضو الطاقم (مش القائد) بيوصله `cashToCollectCents=0`
+/// **دايمًا** (الباك-إند بيصفّرها له عمدًا، حتى لو فيه كاش حقيقي مطلوب من العميل هيحصّله
+/// القائد) — مش شغله يحصّل حاجة. من غير `isCrewShare` هنا كنا هنوقع في نفس الكذبة القديمة
+/// (docs/08 §64.ب) بس بشكل عكسي: "لا يوجد مبلغ كاش مطلوب من العميل" كانت هتبقى كدبة لعضو
+/// الطاقم (فيه فعلاً فلوس مطلوبة، بس مش هو اللي هيحصّلها). النص لعضو الطاقم بيتكلم عن **دوره
+/// هو** مش عن حالة الطلب المطلقة.
+String technicianCashStatusLabel({
+  required int cashToCollectCents,
+  required int cashCollectedCents,
+  required bool hasOnlinePayment,
+  required bool fullyPaidOnline,
+  required bool isCrewShare,
+  required String Function(int) formatEgp,
+}) {
+  if (cashToCollectCents > 0) {
+    return 'المطلوب تحصيله كاش: ${formatEgp(cashToCollectCents)}';
+  }
+  if (cashCollectedCents > 0) {
+    return 'تم تحصيل الكاش وتسجيله في التسوية: ${formatEgp(cashCollectedCents)}';
+  }
+  if (fullyPaidOnline) return 'مش مطلوب كاش — الطلب مدفوع أونلاين بالكامل';
+  if (hasOnlinePayment) return 'مش مطلوب كاش إضافي من العميل';
+  if (isCrewShare) return 'مفيش كاش عليك تحصّله من العميل — ده بيتحصّل عن طريق قائد الفريق';
+  return 'لا يوجد مبلغ كاش مطلوب من العميل';
 }

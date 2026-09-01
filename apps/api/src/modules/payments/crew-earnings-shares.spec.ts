@@ -12,7 +12,7 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
   let service: CrewEarningsService;
   const runId = Date.now().toString(36);
   const ids = {
-    cityId: '', customerUserId: '', customerId: '', addressId: '', serviceId: '', orderId: '',
+    cityId: '', customerUserId: '', customerId: '', addressId: '', serviceId: '', standardDataId: '', orderId: '',
     leaderUserId: '', leaderId: '', memberUserId: '', memberId: '', assistantUserId: '', assistantId: '',
   };
 
@@ -64,6 +64,14 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
       [category.id, `خدمة حصص ${runId}`, `share-service-${runId}`],
     );
     ids.serviceId = svc.id;
+    const [standardData] = await dataSource.query(
+      `INSERT INTO service_standard_data
+         (service_id, execution_type_ar, unit_ar, technician_daily_wage_cents,
+          assistant_daily_wage_cents, productivity_per_day, min_technicians, min_assistants)
+       VALUES ($1,'تنفيذ','يوم',50000,20000,1,1,1) RETURNING id`,
+      [ids.serviceId],
+    );
+    ids.standardDataId = standardData.id;
 
     const leader = await makeTech('L', 'team_leader');
     ids.leaderUserId = leader.userId; ids.leaderId = leader.techId;
@@ -74,9 +82,10 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
 
     const [order] = await dataSource.query(
       `INSERT INTO orders (order_number,customer_id,address_id,service_id,order_status,payment_method,
-                           total_amount_cents,technician_id,booking_mode)
-       VALUES ($1,$2,$3,$4,'work_completed','cash',100000,$5,'team') RETURNING id`,
-      [`ORD-SHARE-${runId}`, ids.customerId, ids.addressId, ids.serviceId, ids.leaderId],
+                           total_amount_cents,technician_id,booking_mode,standard_data_id,estimated_duration_days,
+                           assistant_daily_wage_cents_snapshot)
+       VALUES ($1,$2,$3,$4,'work_completed','cash',100000,$5,'team',$6,2,20000) RETURNING id`,
+      [`ORD-SHARE-${runId}`, ids.customerId, ids.addressId, ids.serviceId, ids.leaderId, ids.standardDataId],
     );
     ids.orderId = order.id;
 
@@ -102,6 +111,7 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [
       [ids.customerUserId, ids.leaderUserId, ids.memberUserId, ids.assistantUserId],
     ]);
+    await q(`DELETE FROM service_standard_data WHERE id = $1`, [ids.standardDataId]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.serviceId]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.cityId]);
     await dataSource.destroy();
@@ -122,6 +132,9 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     // `crew.assistant_share_ratio`. الخدمة هنا متركّبة من غير SettingsService فبتستخدم
     // الافتراضي 0.65، وده مقصود: الافتراضي لازم يبقى نفسه في الكود والـmigration.
     expect(assistant.shareWeight).toBeCloseTo(1.0 * DEFAULT_ASSISTANT_SHARE_RATIO);
+    expect(assistant.assistantBaseWageCents).toBe(40_000);
+    expect(assistant.assistantLevelMultiplier).toBeCloseTo(1);
+    expect(assistant.assistantTargetCents).toBe(40_000);
   });
 
   it('**الفجوة اللي اتقفلت**: كل مشارك بياخد حصة فعلية، والمجموع = الوعاء بالظبط', async () => {
@@ -133,10 +146,11 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     // قبل ADR-0040 كان القائد ياخد 85000 والاتنين التانيين صفر.
     expect(shares.every((s) => s.shareCents > 0)).toBe(true);
     expect(shares.reduce((sum, s) => sum + s.shareCents, 0)).toBe(POOL);
-    // الأعلى مستوى بياخد أكتر
+    // أجر المساعد: 20,000 يوميًا × يومين × مستوى جديد 1.00.
     const byRole = Object.fromEntries(shares.map((s) => [s.participantRole, s.shareCents]));
     expect(byRole.leader).toBeGreaterThan(byRole.team_member);
-    expect(byRole.team_member).toBeGreaterThan(byRole.assistant);
+    expect(byRole.assistant).toBe(40_000);
+    expect(shares.find((s) => s.participantRole === 'assistant')!.calculationMethod).toBe('assistant_level_wage');
   });
 
   it('الحصص بتتسجّل كـsnapshot بالمستوى والوزن وقت التنفيذ', async () => {
@@ -146,6 +160,11 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     expect(leaderRow.technicianLevel).toBe('team_leader');
     expect(Number(leaderRow.shareWeight)).toBeCloseTo(1.6);
     expect(leaderRow.poolCents).toBe(85_000);
+    const assistantRow = rows.find((r) => r.participantRole === 'assistant')!;
+    expect(assistantRow.calculationMethod).toBe('assistant_level_wage');
+    expect(assistantRow.assistantBaseWageCents).toBe(40_000);
+    expect(Number(assistantRow.assistantLevelMultiplier)).toBeCloseTo(1);
+    expect(assistantRow.assistantTargetCents).toBe(40_000);
   });
 
   it('ترقية الفني بعد كده ما بتغيّرش حصة قديمة (snapshot مش حساب حي)', async () => {
@@ -160,8 +179,11 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
 
   it('إعادة تنفيذ التسوية (retry) مابتضاعفش الصفوف', async () => {
     const order = await dataSource.getRepository(Order).findOneByOrFail({ id: ids.orderId });
-    await service.recordShares(dataSource.manager, order, 85_000);
+    const retried = await service.recordShares(dataSource.manager, order, 85_000);
     const rows = await dataSource.getRepository(OrderEarningShare).find({ where: { orderId: ids.orderId } });
     expect(rows).toHaveLength(3);
+    // المساعد اترقى بعد التسوية في الاختبار السابق، لكن retry لازم يرجع نفس snapshot القديم.
+    expect(retried.find((share) => share.participantRole === 'assistant')!.shareCents).toBe(40_000);
+    expect(retried.reduce((sum, share) => sum + share.shareCents, 0)).toBe(85_000);
   });
 });

@@ -1,6 +1,21 @@
-import { Body, Controller, Get, Headers, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
@@ -16,11 +31,15 @@ import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { OrderResponseDto, toOrderResponseDto } from './dto/order-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
+import { UploadPricingFieldImageDto } from './dto/upload-pricing-field-image.dto';
+import { UploadProblemImageDto } from './dto/upload-problem-image.dto';
 import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
+import { PricingFieldImagesService } from './pricing-field-images.service';
+import { ProblemImagesService } from './problem-images.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -34,10 +53,46 @@ export class OrdersController {
     private readonly inspectionQuoteService: InspectionQuoteService,
     private readonly orderTeamService: OrderTeamService,
     private readonly orderMediaService: OrderMediaService,
+    private readonly pricingFieldImagesService: PricingFieldImagesService,
+    private readonly problemImagesService: ProblemImagesService,
     private readonly addressesService: AddressesService,
     private readonly techniciansService: TechniciansService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
+
+  @Post('pricing-field-images')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadPricingFieldImage(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UploadPricingFieldImageDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('لازم ترفع صورة');
+    assertFileSignatureMatches(file.buffer, file.mimetype, new Set(['image/jpeg', 'image/png', 'image/webp']));
+    return this.pricingFieldImagesService.upload(user.sub, dto.service_id, dto.field_id, file);
+  }
+
+  @Post('problem-images')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadProblemImage(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UploadProblemImageDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('لازم ترفع صورة');
+    assertFileSignatureMatches(file.buffer, file.mimetype, new Set(['image/jpeg', 'image/png', 'image/webp']));
+    return this.problemImagesService.upload(user.sub, dto.service_id, file);
+  }
 
   @Get()
   async list(@CurrentUser() user: JwtPayload) {

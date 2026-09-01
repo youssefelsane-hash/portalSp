@@ -20,6 +20,39 @@ if (hasReleaseSigning) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// بوابة P0-3 في docs/23 — «إصدار المتجر يجب أن **يفشل** بدل أن ينتج نسخة Debug بصمت».
+//
+// الرجوع لتوقيع debug مقبول تمامًا لـ`flutter run --release` المحلي (assembleRelease)، لكنه
+// كارثة لو حصل على ناتج المتجر: نسخة موقّعة بمفتاح debug مرفوضة من Google Play، والأسوأ إن
+// الفشل ده مكانش بيبان غير وقت الرفع نفسه. الحارس ده بيفصل الحالتين بالظبط: بناء الـAAB
+// (`bundleRelease` = ناتج المتجر الوحيد) بيفشل فورًا وبرسالة واضحة، وباقي البناءات زي ما هي.
+gradle.taskGraph.whenReady {
+    val buildingStoreBundle = allTasks.any {
+        it.name.startsWith("bundle") && it.name.contains("Release")
+    }
+    if (buildingStoreBundle && !hasReleaseSigning) {
+        throw GradleException(
+            "مينفعش تبني App Bundle للمتجر بلا توقيع إصدار حقيقي. " +
+                "لازم android/key.properties يكون موجود (keyAlias/keyPassword/storeFile/storePassword). " +
+                "التفاصيل في docs/03-external-integrations.md § توقيع Android.",
+        )
+    }
+}
+
+// مفتاح خرائط Google (بوابة P0-2 في docs/23) — كان **مكتوب صراحةً في AndroidManifest.xml
+// ومتتبَّع في git**، يعني ظاهر لأي حد عنده وصول للمستودع أو لأي نسخة من تاريخه. بيتقرا دلوقتي
+// من `android/maps.properties` (غير متتبَّع، نفس فلسفة key.properties وgoogle-services.json).
+//
+// **المفتاح القديم لازم يتدوّر من Google Cloud** — إخفاؤه دلوقتي مايلغيش إنه اتسرّب بالفعل في
+// تاريخ git. والمفتاح الجديد لازم يتقيّد بالـpackage ID + بصمة توقيع Play وبـMaps SDK بس.
+val mapsPropertiesFile = rootProject.file("maps.properties")
+val mapsProperties = Properties()
+if (mapsPropertiesFile.exists()) {
+    mapsProperties.load(FileInputStream(mapsPropertiesFile))
+}
+// فاضي = الخريطة مش هتحمّل، وده مقصود: أفضل من مفتاح مسرّب شغّال.
+val googleMapsApiKey = (mapsProperties["googleMapsApiKey"] as String?) ?: ""
+
 android {
     namespace = "com.baytak.customer_app"
     // بَقّة CI حقيقية اتلقطت واتصلحت (2026-08-15): flutter.compileSdkVersion (36 حاليًا مع Flutter
@@ -44,6 +77,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["googleMapsApiKey"] = googleMapsApiKey
     }
 
     signingConfigs {
@@ -60,7 +94,8 @@ android {
     buildTypes {
         release {
             // لو key.properties موجود بيستخدم توقيع الإصدار الحقيقي، من غيره بيرجع لتوقيع
-            // debug عشان `flutter run --release` يفضل شغال من غير keystore حقيقي.
+            // debug عشان `flutter run --release` يفضل شغال من غير keystore حقيقي. ناتج المتجر
+            // (AAB) بيفشل صراحةً في الحالة دي — راجع حارس gradle.taskGraph فوق.
             signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {

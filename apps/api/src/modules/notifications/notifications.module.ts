@@ -60,9 +60,11 @@ import { TechnicianServiceVerificationNotificationListener } from './listeners/t
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
 import { WorkOpportunityOfferedNotificationListener } from './listeners/work-opportunity-offered-notification.listener';
 import { PreferredCrewNotificationListener } from './listeners/preferred-crew-notification.listener';
+import { RefundNotificationListener } from './listeners/refund-notification.listener';
 import { TechnicianAdminActionNotificationListener } from './listeners/technician-admin-action-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
+import { WarrantyClaimNotificationListener } from './listeners/warranty-claim-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
 import { NotificationTypeConfigService } from './notification-type-config.service';
 import { NotificationWorkflowReminderService } from './notification-workflow-reminder.service';
@@ -102,6 +104,8 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     SmtpEmailDispatcher,
     { provide: NOTIFICATION_DISPATCHER, useClass: CompositeNotificationDispatcher },
     WelcomeNotificationListener,
+    WarrantyClaimNotificationListener,
+    RefundNotificationListener,
     OrderCreatedNotificationListener,
     OrderAcceptedNotificationListener,
     OrderStatusNotificationListener,

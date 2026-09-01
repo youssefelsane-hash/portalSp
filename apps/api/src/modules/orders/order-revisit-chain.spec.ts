@@ -310,6 +310,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
   it('إعادة زيارة لخدمة وقت بدايتها إجباري لا تطلب موعدًا جديدًا وبتبقى مجانية بالكامل', async () => {
     await q(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.service]);
     const originalOrderId = await createCompletedOrder('standard', null);
+    const createdAfter = Date.now();
     const revisit = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,
@@ -318,6 +319,10 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     expect(revisit.orderType).toBe(OrderType.REVISIT);
     expect(revisit.totalAmountCents).toBe(0);
     expect(revisit.parentOrderId).toBe(originalOrderId);
+    expect(revisit.scheduledAt).not.toBeNull();
+    const expectedDelayMs = 3 * 24 * 60 * 60 * 1000;
+    expect(revisit.scheduledAt!.getTime()).toBeGreaterThanOrEqual(createdAfter + expectedDelayMs);
+    expect(revisit.scheduledAt!.getTime()).toBeLessThanOrEqual(Date.now() + expectedDelayMs);
   });
 
   it('إعادة زيارة لإعادة زيارة تانية (سلسلة) — بترفض بوضوح، مش خدمة مجانية بلا نهاية', async () => {

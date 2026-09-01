@@ -95,6 +95,7 @@ describe('TechnicianOrdersController accepted-order response', () => {
     expect(result.fully_paid_online).toBe(true);
     expect(result.customer_name).toBe('عميل تجريبي');
     expect(result.service_name_ar).toBe('تشطيب حمام');
-    expect(result.total_amount_cents).toBeUndefined();
+    // docs/08 §108-B — total_amount_cents اتشال من TechnicianOrderResponseDto خالص (مش موجود
+    // كنوع أصلًا دلوقتي)؛ التغطية الكاملة لعقد الفني المالي في technician-order-response.spec.ts.
   });
 });

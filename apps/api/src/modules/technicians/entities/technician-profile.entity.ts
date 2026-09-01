@@ -21,6 +21,22 @@ export enum TechnicianPricingTier {
   PREMIUM = 'premium',
 }
 
+/**
+ * دور الشخص نفسه — فني كامل ولا مساعد بس (ADR-0050، docs/08 §94، طلب مالك مباشر).
+ *
+ * **مش** مشتق من `currentLevel` ولا من أي حاجة تانية: المستوى بيقيس الجودة/الأقدمية وبيأثر على
+ * وزن الحصة والتسعير، والدور ده قرار إداري مختلف تمامًا (هل الشخص ده قادر ياخد شغلانة لوحده؟).
+ * فني ممتاز ممكن يشتغل مساعد في شغلانة، ومساعد ممكن مستواه يترفع وهو لسه مساعد.
+ *
+ * `ASSISTANT` معناه بالظبط: ما يظهرش في أي قايمة فنيين (توزيع تلقائي، اختيار العميل، ضم فني
+ * لطاقم)، وما يقودش طلب أبدًا (حارس التعيين بيرفض)، وبياخد نسبة المساعد **دايمًا** في توزيع
+ * الحصص مهما كان اللي ضمّه طلب إيه.
+ */
+export enum TechnicianKind {
+  TECHNICIAN = 'technician',
+  ASSISTANT = 'assistant',
+}
+
 export enum TechnicianVerificationStatus {
   PENDING = 'pending',
   DOCUMENTS_SUBMITTED = 'documents_submitted',
@@ -102,6 +118,17 @@ export class TechnicianProfile {
     default: TechnicianPricingTier.STANDARD,
   })
   pricingTier: TechnicianPricingTier;
+
+  // ADR-0050 — الافتراضي `TECHNICIAN` عشان كل فني موجود يفضل بالظبط زي ما هو، صفر تغيير سلوكي
+  // لحد ما الأدمن يغيّر حد صراحةً.
+  @Column({
+    name: 'technician_kind',
+    type: 'enum',
+    enum: TechnicianKind,
+    enumName: 'technician_kind',
+    default: TechnicianKind.TECHNICIAN,
+  })
+  technicianKind: TechnicianKind;
 
   @Column({ name: 'quality_score', type: 'numeric', precision: 5, scale: 2, default: 0 })
   qualityScore: string;

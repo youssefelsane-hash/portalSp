@@ -16,12 +16,13 @@ import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
 import 'category_tile.dart';
-import 'featured_category_item.dart';
+import 'featured_service_item.dart';
 import 'home_hero.dart';
 import 'home_header.dart';
 import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
 import 'models.dart';
+import 'catalog_navigation.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
 import '../projects/create_project_screen.dart';
@@ -67,14 +68,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final _scrollController = ScrollController();
   final _repository = CatalogRepository();
   final _homepageContentRepository = HomepageContentRepository();
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
-  /// «الأكثر طلبًا» من السيرفر (docs/08 §77-E2) — مستقل عن `_categories` لأن ترتيبه بالعدّ
-  /// مش بـ`display_order`، والسيرفر هو اللي بيحسبه.
-  List<ServiceCategory>? _mostRequested;
+
+  /// خدمات نهائية مثل «تصليح حنفية»، مرتبة بعدد الطلبات الفعلي لا حسب القسم العام.
+  List<CatalogService>? _mostRequested;
   String? _error;
   String _trustMessage = '';
   // معلومات الضمان الحقيقية من السيرفر (docs/08 §75-ج) — `null` لحد ما توصل، والشريط
@@ -129,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _slideTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -142,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
     // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
     try {
-      final mostRequested = await _repository.fetchMostRequestedCategories();
+      final mostRequested = await _repository.fetchMostRequestedServices();
       if (mounted) setState(() => _mostRequested = mostRequested);
     } catch (_) {
       // بهدوء — القسم تسويقي، مش وظيفي.
@@ -197,7 +200,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» بقى بيجي من السيرفر محسوبًا من عدد الطلبات الحقيقي (docs/08 §77-E2)
     // بدل فلترة محلية بـ`isFeatured`. الفرق مش تقني: العنوان كان بيقول «الأكثر طلبًا»
     // والمصدر «اللي الأدمن اختاره» — نفس فئة البَقّة اللي اتصلحت أكتر من مرة في §75/§76.
-    final featured = _mostRequested ?? const <ServiceCategory>[];
+    final featured = _mostRequested ?? const <CatalogService>[];
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -220,9 +223,15 @@ class _HomeScreenState extends State<HomeScreen> {
           // 96 مقصودة كسقف مش أكتر: على شاشة 360dp بيفضل ~170dp للعنوان بعد أيقونتين الأكشن —
           // العنوان (اللي هو أهم عنصر في الرأس بقرار §75-ب) بيفضل مقروء بدل ما يتقصّ.
           leadingWidth: 96,
-          leading: _brandingLogo != null && !_brandingLogo!.isDefault && _brandingLogo!.url.isNotEmpty
+          leading:
+              _brandingLogo != null &&
+                  !_brandingLogo!.isDefault &&
+                  _brandingLogo!.url.isNotEmpty
               ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                   child: Image.network(
                     _resolveHeroImageUrl(_brandingLogo!.url),
                     fit: BoxFit.contain,
@@ -236,29 +245,29 @@ class _HomeScreenState extends State<HomeScreen> {
             // الجرس بيتخفي للزائر (docs/08 §77-B1): `unreadCount()` بينادي endpoint محمي،
             // ومفيش حساب أصلاً يبقى ليه إشعارات. عرضه بصفر دايمًا كان هيبقى كذب صغير.
             if (context.watch<AuthRepository>().isAuthenticated)
-            Builder(
-              builder: (context) => FutureBuilder<int>(
-                future: NotificationsRepository(
-                  context.read<AuthRepository>(),
-                ).unreadCount(),
-                builder: (context, snapshot) {
-                  final unread = snapshot.data ?? 0;
-                  return IconButton(
-                    icon: Badge(
-                      isLabelVisible: unread > 0,
-                      label: Text('$unread'),
-                      child: const Icon(Icons.notifications_outlined),
-                    ),
-                    tooltip: 'الإشعارات',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen(),
+              Builder(
+                builder: (context) => FutureBuilder<int>(
+                  future: NotificationsRepository(
+                    context.read<AuthRepository>(),
+                  ).unreadCount(),
+                  builder: (context, snapshot) {
+                    final unread = snapshot.data ?? 0;
+                    return IconButton(
+                      icon: Badge(
+                        isLabelVisible: unread > 0,
+                        label: Text('$unread'),
+                        child: const Icon(Icons.notifications_outlined),
                       ),
-                    ),
-                  );
-                },
+                      tooltip: 'الإشعارات',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
@@ -271,6 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
         body: RefreshIndicator(
           onRefresh: _load,
           child: ListView(
+            controller: _scrollController,
             padding: EdgeInsets.zero,
             children: [
               HomeHero(
@@ -282,6 +292,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 activeIndex: _activeSlide,
                 content: _searchContent,
                 trustMessage: _trustMessage,
+                scrollController: _scrollController,
                 onSearch: _openSearch,
               ),
               Padding(
@@ -307,17 +318,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           scrollDirection: Axis.horizontal,
                           itemCount: featured.length,
                           separatorBuilder: (_, _) => const SizedBox(width: 14),
-                          itemBuilder: (context, index) =>
-                              FeaturedCategoryItem(
-                                category: featured[index],
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ServicesScreen(
-                                      category: featured[index],
-                                    ),
-                                  ),
-                                ),
-                              ),
+                          itemBuilder: (context, index) => FeaturedServiceItem(
+                            service: featured[index],
+                            onTap: () => navigateToServiceBooking(
+                              context,
+                              featured[index],
+                            ),
+                          ),
                         ),
                       ),
                       // كانت 24 — بلاغ مالك: «فيه مسافة كبيرة بين آخر كلمة موجودة وكل الفئات».
@@ -329,7 +336,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () async {
                         if (!await ensureSignedIn(
                           context,
-                          reason: 'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                          reason:
+                              'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
                           headline: 'ابدأ مشروعك',
                         )) {
                           return;
@@ -391,7 +399,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           const columns = 3;
                           const spacing = 12.0;
                           final tileWidth =
-                              (constraints.maxWidth - spacing * (columns - 1)) / columns;
+                              (constraints.maxWidth - spacing * (columns - 1)) /
+                              columns;
                           // الارتفاع المحجوز للاسم بيتحسب من مقياس خط المستخدم الفعلي —
                           // رقم ثابت هنا كان بيعمل overflow مع تكبير الخط (اتلقط بالاختبار).
                           final labelHeight = categoryTileLabelHeight(context);
@@ -400,11 +409,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: columns,
-                              mainAxisSpacing: 16,
-                              crossAxisSpacing: spacing,
-                              childAspectRatio: tileWidth / (tileWidth + labelHeight),
-                            ),
+                                  crossAxisCount: columns,
+                                  mainAxisSpacing: 16,
+                                  crossAxisSpacing: spacing,
+                                  childAspectRatio:
+                                      tileWidth / (tileWidth + labelHeight),
+                                ),
                             itemCount: _categories!.length,
                             itemBuilder: (context, index) {
                               final category = _categories![index];

@@ -25,6 +25,18 @@ export class TechnicianLevelConfig {
   @Column({ name: 'crew_share_weight', type: 'numeric', precision: 5, scale: 2, default: 1 })
   crewShareWeight: string;
 
+  // يطبّق على المساعد فقط: أجر الخدمة الأساسي × المعامل. نظام الفنيين يظل على crewShareWeight.
+  @Column({ name: 'assistant_earning_multiplier', type: 'numeric', precision: 5, scale: 2, default: 1 })
+  assistantEarningMultiplier: string;
+
+  /** V2 integer career-level earning weight. 10000 means 1.00. */
+  @Column({ name: 'earning_weight_bps', type: 'integer', default: 10_000 })
+  earningWeightBps: number;
+
+  /** V2 assistant weight relative to a technician at this level. 6500 means 65.00%. */
+  @Column({ name: 'assistant_ratio_bps', type: 'integer', default: 6_500 })
+  assistantRatioBps: number;
+
   @Column({ name: 'decision_limit_cents', type: 'integer', nullable: true })
   decisionLimitCents: number | null;
 

@@ -9,75 +9,140 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:customer_app/core/auth_repository.dart';
+import 'package:customer_app/core/deep_link_router.dart';
 import 'package:customer_app/features/notifications/floating_notification_alert.dart';
+import 'package:customer_app/features/shell/customer_shell.dart';
+import 'package:customer_app/features/warranty/warranties_screen.dart';
+
+class _SignedInAuth extends AuthRepository {
+  @override
+  bool get isAuthenticated => true;
+
+  @override
+  bool get isLoading => false;
+
+  @override
+  Future<List<Map<String, dynamic>>> authedRequestList(String path) async => [];
+
+  @override
+  Future<Map<String, dynamic>?> authedRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+  }) async {
+    if (path == '/notifications/unread-count') return {'unread_count': 3};
+    return <String, dynamic>{};
+  }
+}
+
+class _WarrantyClaimAuth extends _SignedInAuth {
+  String? submittedDescription;
+
+  @override
+  Future<List<Map<String, dynamic>>> authedRequestList(String path) async => [
+        {
+          'id': 'warranty-1',
+          'order_number': 'ORD-WARRANTY-1',
+          'name_ar': 'ضمان التنفيذ',
+          'expires_at': '2035-12-31T00:00:00.000Z',
+          'claims_used': 0,
+          'max_claims': 2,
+          'active_claim_id': null,
+          'claim_status': null,
+        },
+      ];
+
+  @override
+  Future<Map<String, dynamic>?> authedRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+  }) async {
+    if (path == '/notifications/unread-count') return {'unread_count': 3};
+    if (method == 'POST' && path == '/me/warranties/warranty-1/claims') {
+      submittedDescription = body?['defect_description'] as String?;
+    }
+    return <String, dynamic>{};
+  }
+}
 
 void main() {
-  testWidgets('الزرار العايم بيتبني بلا استثناء وهو بره الـNavigator (مفيش Overlay)', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        locale: const Locale('ar', 'EG'),
-        builder: (context, child) => Stack(
-          children: [
-            child ?? const SizedBox.shrink(),
-            // نفس تركيب main.dart بالحرف.
-            PositionedDirectional(
-              end: 16,
-              bottom: 88,
-              child: Semantics(
-                label: '3 إشعارات غير مقروءة',
-                button: true,
-                child: const FloatingActionButton.small(
-                  heroTag: 'global-unread-notifications',
-                  onPressed: null,
-                  child: Badge(
-                    label: Text('3'),
-                    child: Icon(Icons.mark_unread_chat_alt_outlined),
+  testWidgets(
+    'الزرار العايم بيتبني بلا استثناء وهو بره الـNavigator (مفيش Overlay)',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('ar', 'EG'),
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              // نفس تركيب main.dart بالحرف.
+              PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: Semantics(
+                  label: '3 إشعارات غير مقروءة',
+                  button: true,
+                  child: const FloatingActionButton.small(
+                    heroTag: 'global-unread-notifications',
+                    onPressed: null,
+                    child: Badge(
+                      label: Text('3'),
+                      child: Icon(Icons.mark_unread_chat_alt_outlined),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
+          home: const Scaffold(body: Text('شاشة بعد اللوجن')),
         ),
-        home: const Scaffold(body: Text('شاشة بعد اللوجن')),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    expect(tester.takeException(), isNull);
-    // ErrorWidget ما اترسمش — يعني مفيش شاشة حمرا.
-    expect(find.byType(ErrorWidget), findsNothing);
-    expect(find.byType(FloatingActionButton), findsOneWidget);
-  });
+      expect(tester.takeException(), isNull);
+      // ErrorWidget ما اترسمش — يعني مفيش شاشة حمرا.
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(find.byType(FloatingActionButton), findsOneWidget);
+    },
+  );
 
-  testWidgets('حارس: Tooltip في نفس المكان بيرمي — ده اللي كان بيعمل الشاشة الحمرا', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        locale: const Locale('ar', 'EG'),
-        builder: (context, child) => Stack(
-          children: [
-            child ?? const SizedBox.shrink(),
-            const PositionedDirectional(
-              end: 16,
-              bottom: 88,
-              child: FloatingActionButton.small(
-                heroTag: 'with-tooltip',
-                onPressed: null,
-                tooltip: 'رسائل وإشعارات جديدة',
-                child: Icon(Icons.mark_unread_chat_alt_outlined),
+  testWidgets(
+    'حارس: Tooltip في نفس المكان بيرمي — ده اللي كان بيعمل الشاشة الحمرا',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('ar', 'EG'),
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingActionButton.small(
+                  heroTag: 'with-tooltip',
+                  onPressed: null,
+                  tooltip: 'رسائل وإشعارات جديدة',
+                  child: Icon(Icons.mark_unread_chat_alt_outlined),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          home: const Scaffold(body: Text('شاشة بعد اللوجن')),
         ),
-        home: const Scaffold(body: Text('شاشة بعد اللوجن')),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    // بيوثّق السبب الجذري صراحة: أي حاجة محتاجة Overlay في المكان ده بترمي.
-    expect(tester.takeException().toString(), contains('Overlay'));
-  });
+      // بيوثّق السبب الجذري صراحة: أي حاجة محتاجة Overlay في المكان ده بترمي.
+      expect(tester.takeException().toString(), contains('Overlay'));
+    },
+  );
 
-  testWidgets('الغلاف Host بيوفّر Overlay فعلاً — الفئة كلها بقت مقفولة مش الـtooltip بس', (tester) async {
+  testWidgets('الغلاف Host لا ينشئ Overlay أو Hero مستقلين خارج الـNavigator', (
+    tester,
+  ) async {
     // AuthRepository محتاجة عشان الويدجت الحقيقية تتبني (بتقراها في initState) — مفيش init()
     // فمفيش أي نداء على secure storage أو الشبكة من الكونستركتور.
     await tester.pumpWidget(
@@ -88,8 +153,12 @@ void main() {
           builder: (context, child) => Stack(
             children: [
               child ?? const SizedBox.shrink(),
-              // نفس تركيب main.dart بالحرف بعد §59.
-              const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlertHost()),
+              // نفس تركيب main.dart بالحرف.
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingNotificationAlertHost(),
+              ),
             ],
           ),
           home: const Scaffold(body: Text('شاشة بعد اللوجن')),
@@ -101,11 +170,158 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byType(ErrorWidget), findsNothing);
 
-    // الإثبات المباشر: من جوّه شجرة الغلاف، `Overlay` موجود دلوقتي — يعني أي Tooltip/SnackBar
-    // /Dropdown يتضاف هنا بعدين هيلاقي جدّ صالح بدل ما يرمي ويرسم الشاشة الحمرا.
-    final hostContext = tester.element(find.byType(FloatingNotificationAlertHost));
-    expect(Overlay.maybeOf(hostContext), isNull, reason: 'الغلاف نفسه لسه بره أي Overlay');
+    // الزر خارج Navigator عمدًا، ولذلك لا يجوز إنشاء شجرة انتقال ثانية تحته.
+    final hostContext = tester.element(
+      find.byType(FloatingNotificationAlertHost),
+    );
+    expect(
+      Overlay.maybeOf(hostContext),
+      isNull,
+      reason: 'الغلاف نفسه لسه بره أي Overlay',
+    );
     final innerContext = tester.element(find.byType(FloatingNotificationAlert));
-    expect(Overlay.maybeOf(innerContext), isNotNull, reason: 'اللي جوّه الغلاف بقى تحت Overlay');
+    expect(
+      Overlay.maybeOf(innerContext),
+      isNull,
+      reason: 'الزر لا يحتاج Overlay محليًا',
+    );
+    final button = tester.widget<FloatingActionButton>(
+      find.byType(FloatingActionButton),
+    );
+    expect(
+      button.heroTag,
+      isNull,
+      reason: 'Hero خارج Navigator يعلّق اعتمادات الانتقال',
+    );
+  });
+
+  testWidgets('فتح ضماناتي مع زر الإشعارات العالمي لا يكسر شجرة Flutter', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: _SignedInAuth(),
+        child: MaterialApp(
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingNotificationAlertHost(),
+              ),
+            ],
+          ),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const WarrantiesScreen()),
+                  ),
+                  child: const Text('افتح ضماناتي'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('افتح ضماناتي'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.byType(WarrantiesScreen), findsOneWidget);
+    expect(find.text('لا توجد ضمانات مرتبطة بطلباتك حتى الآن'), findsOneWidget);
+  });
+
+  testWidgets('تبويب ضماناتي يفتح من الشريط السفلي مع بقاء الإشعارات', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: _SignedInAuth(),
+        child: MaterialApp(
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingNotificationAlertHost(),
+              ),
+            ],
+          ),
+          home: const CustomerShell(initialTab: CustomerTab.orders),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('ضماناتي'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.byType(WarrantiesScreen), findsOneWidget);
+    expect(find.text('لا توجد ضمانات مرتبطة بطلباتك حتى الآن'), findsOneWidget);
+  });
+
+  testWidgets('إرسال مطالبة ضمان يغلق الحوار بلا شاشة Flutter حمراء', (tester) async {
+    final auth = _WarrantyClaimAuth();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: auth,
+        child: MaterialApp(
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingNotificationAlertHost(),
+              ),
+            ],
+          ),
+          home: const WarrantiesScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('فتح مطالبة'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'ظهر شرخ جديد في نفس مكان الإصلاح');
+    await tester.tap(find.text('إرسال'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(auth.submittedDescription, 'ظهر شرخ جديد في نفس مكان الإصلاح');
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.text('تم فتح المطالبة ومراجعتها بدأت'), findsOneWidget);
+  });
+
+  testWidgets('الضغط على إشعار تحديث الضمان يفتح شاشة ضماناتي', (tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: _WarrantyClaimAuth(),
+        child: MaterialApp(
+          navigatorKey: rootNavigatorKey,
+          home: const Scaffold(body: Text('الرئيسية')),
+        ),
+      ),
+    );
+
+    handleDeepLink('/warranties');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(WarrantiesScreen), findsOneWidget);
+    expect(find.text('ضماناتي'), findsOneWidget);
   });
 }

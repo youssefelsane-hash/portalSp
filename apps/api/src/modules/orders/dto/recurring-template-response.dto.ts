@@ -16,6 +16,7 @@ export interface RecurringTemplateResponseDto {
   field_values: Record<string, string | number | boolean> | null;
   pricing_quantity: number | null;
   duration_hours: number | null;
+  duration_minutes: number | null;
   scheduled_end_at: string | null;
   next_run_at: string;
   last_generated_order_id: string | null;
@@ -42,6 +43,7 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     field_values: template.fieldValues,
     pricing_quantity: template.pricingQuantity == null ? null : Number(template.pricingQuantity),
     duration_hours: template.durationHours,
+    duration_minutes: template.durationMinutes ?? (template.durationHours == null ? null : template.durationHours * 60),
     scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : null,
     next_run_at: template.nextRunAt.toISOString(),
     last_generated_order_id: template.lastGeneratedOrderId,

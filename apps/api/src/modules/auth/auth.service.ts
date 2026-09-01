@@ -32,6 +32,7 @@ import { NotificationRoutingService } from '../notifications/notification-routin
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TokenPair {
   access_token: string;
@@ -49,6 +50,8 @@ export interface MfaRequiredResponse {
 export type LoginResult = TokenPair | MfaRequiredResponse;
 
 const OTP_CODE_LENGTH = 6;
+// §106 — كام كود ملغي بنراجعه عشان نقول للمستخدم «ده كود قديم» بدل «كود غلط».
+const SUPERSEDED_OTP_LOOKBACK = 3;
 const BCRYPT_SALT_ROUNDS = 10;
 const MFA_PENDING_TOKEN_TTL_MS = 5 * 60_000; // 5 دقايق — نفس مهلة تحدي WebAuthn (ADR-0011 §3)
 
@@ -120,8 +123,17 @@ export class AuthService {
     // الخام) بدل deny-list — أي قيمة NODE_ENV مستقبلية غير متوقعة بتقع في الجانب الآمن (مقنّع)
     // تلقائيًا بدل العكس.
     if (!isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
+      // §106 — البلاغ كان «الكود بيظهر في الترمينال بس بيترفض». السبب إن اللوج stream مالوش
+      // ذاكرة: بيطبع كل كود اتصدر في حياة العملية، والسيرفر بيقبل **آخر** صف غير مستهلك بس
+      // (`requestOtp` بيلغي اللي قبله فوق). فالسطر لازم يقول بنفسه إنه بيلغي اللي فاته وصالح
+      // لحد إمتى، بدل ما المطوّر يخمّن أنهي سطر لسه حي.
+      //
+      // الكود لازم يفضل **آخر توكن في السطر بعد `→`** — كل سكريبتات الاختبار الحي في المشروع
+      // (`apps/*/test_live/*.dart`) وauth.service.spec.ts بتستخرجه بـ`split('→').last`، فأي
+      // إضافة بتتحط قبل السهم مش بعده.
+      const validUntil = new Date(Date.now() + expiryMinutes * 60_000).toISOString().slice(11, 19);
       // eslint-disable-next-line no-console
-      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
     } else {
       const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
       this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
@@ -178,8 +190,15 @@ export class AuthService {
       .orderBy('otp.createdAt', 'DESC')
       .getOne();
 
+    // §106 — الرسالة كانت واحدة مبهمة لكل الأسباب («غير صحيح أو منتهي»)، فالمستخدم مكانش
+    // بيعرف هو يعيد الكتابة ولا يطلب كود جديد. الفصل هنا **مش** تسريب معلومة جديدة: كل
+    // الفروع دي بتتكلم عن رقم طلب كود بنفسه فعلاً، ومفيش فيها أي إشارة لوجود حساب من عدمه.
     if (!otp || otp.expiresAt.getTime() < Date.now()) {
-      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح أو منتهي', HttpStatus.BAD_REQUEST);
+      return new ApiException(
+        ErrorCode.AUTH_003,
+        'مفيش كود تحقق صالح للرقم ده (انتهت صلاحيته أو اتلغى بكود أحدث) — اضغط «ابعت الكود تاني»',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (otp.attemptsCount >= otp.maxAttempts) {
@@ -194,13 +213,65 @@ export class AuthService {
     if (!isMatch) {
       otp.attemptsCount += 1;
       await manager.save(otp);
-      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح', HttpStatus.BAD_REQUEST);
+
+      // §106 — ده جوهر بلاغ المالك. لما يضغط «ابعت كود» تاني، `requestOtp()` بيلغي الكود
+      // الأقدم، لكن سطره بيفضل مكتوب في الترمينال (وفي SMS المستخدم الحقيقي) بلا أي علامة إنه
+      // مات. فلو دخّل الكود الأقدم، رسالة «الكود غلط» تبقى صحيحة تقنيًا لكنها مضلّلة تمامًا —
+      // هو شايف الكود قدامه بعينه. لو الأرقام مطابقة لكود **اتلغى فعلاً**، بنقول له كده صراحة.
+      // مش تسريب: مفيش معلومة هنا غير عن كود اتبعت للرقم ده هو نفسه، ورصيد المحاولات اتخصم
+      // فوق زي أي محاولة غلط فعادي مفيش أي توسيع في مساحة التخمين.
+      if (await this.matchesSupersededCode(manager, phoneNumber, purpose, code, otp.id)) {
+        return new ApiException(
+          ErrorCode.AUTH_003,
+          'الكود ده اتلغى لما طلبت كود جديد — استخدم آخر كود وصلك',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // عدد المحاولات الفاضلة بيتعرض عمدًا — ده رصيد محاولات صاحب الكود نفسه، مش معلومة عن
+      // حساب حد تاني، ومن غيره المستخدم بيتفاجئ بالحظر (AUTH_004) بلا أي إنذار.
+      const remaining = Math.max(otp.maxAttempts - otp.attemptsCount, 0);
+      return new ApiException(
+        ErrorCode.AUTH_003,
+        remaining > 0
+          ? `كود التحقق غلط — فاضلك ${remaining} محاولة`
+          : 'كود التحقق غلط واستهلكت كل المحاولات — اطلب كود جديد',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     otp.isUsed = true;
     otp.usedAt = new Date();
     await manager.save(otp);
     return otp;
+  }
+
+  /**
+   * هل الأرقام دي بتطابق كود اتصدر للرقم/الغرض ده قبل كده واتلغى؟ (§106 — بس لتحسين الرسالة.)
+   *
+   * محدود بآخر `SUPERSEDED_OTP_LOOKBACK` صف عشان الفحص ده مايبقاش أثقل من التحقق نفسه: كل صف
+   * = عملية `bcrypt.compare` كاملة، وبيتنادى على مسار الفشل بس. الأحدث الأول لأنه الأرجح.
+   */
+  private async matchesSupersededCode(
+    manager: EntityManager,
+    phoneNumber: string,
+    purpose: OtpPurpose,
+    code: string,
+    excludeOtpId: string,
+  ): Promise<boolean> {
+    const superseded = await manager
+      .createQueryBuilder(OtpCode, 'otp')
+      .where('otp.phoneNumber = :phoneNumber', { phoneNumber })
+      .andWhere('otp.purpose = :purpose', { purpose })
+      .andWhere('otp.id != :excludeOtpId', { excludeOtpId })
+      .orderBy('otp.createdAt', 'DESC')
+      .limit(SUPERSEDED_OTP_LOOKBACK)
+      .getMany();
+
+    for (const candidate of superseded) {
+      if (await bcrypt.compare(code, candidate.codeHash)) return true;
+    }
+    return false;
   }
 
   // ── تسجيل / دخول ─────────────────────────────────────────────────────
@@ -588,8 +659,120 @@ export class AuthService {
         HttpStatus.CONFLICT,
       );
     }
+
+    // ADR-0053 — حارس تاني: مينفعش حد ينسحب في نص شغلانة شغالة. الطرف التاني (فني أو عميل)
+    // بيبقى واقف في نص عملية مالية مفتوحة، والطلب بيتحوّل لسجل بلا صاحب.
+    const [{ active_count: activeCount }] = await this.users.manager.query<Array<{ active_count: string }>>(
+      `SELECT COUNT(*)::text AS active_count
+         FROM orders o
+         LEFT JOIN customer_profiles cp ON cp.id = o.customer_id
+         LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
+        WHERE o.deleted_at IS NULL
+          AND o.order_status = ANY($2::order_status[])
+          AND (cp.user_id = $1 OR tp.user_id = $1)`,
+      [userId, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+    );
+    if (Number(activeCount) > 0) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مينفعش تحذف حسابك وعندك طلب لسه شغال — استنى الطلب يخلص الأول، أو كلّم الدعم',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     await this.revokeAllUserTokens(userId, 'account_deletion');
-    await this.users.update(userId, { isActive: false });
-    await this.users.softDelete(userId);
+    await this.anonymizeUserData(userId);
+  }
+
+  /**
+   * ADR-0053 (بوابة P0-1 في docs/23) — الحذف الحقيقي: إخفاء هوية فعلي، مش تعطيل صامت.
+   *
+   * **ليه مش `DELETE` صريح؟** `users.id` مرجوع إليه من عشرات الجداول، فيها سجلات مالية بتخص
+   * **أطراف تانية** (`orders`/`payments`/`wallet_transactions`)، ودفتر `wallet_transactions`
+   * نفسه ممنوع عليه `UPDATE`/`DELETE` على مستوى الداتابيز. حذف الصف كان هيكسر حسابات ناس تانية
+   * أو يمسح تاريخ مالي القانون بيفرض حفظه. الحل: الشخص يختفي، والدفتر يفضل متماسك بهوية مفصولة.
+   *
+   * كله في transaction واحدة — مفيش حساب نُصّه منضَّف لو أي خطوة فشلت.
+   */
+  private async anonymizeUserData(userId: string): Promise<void> {
+    await this.users.manager.transaction(async (manager) => {
+      // خطوة واحدة عمدًا: الفهارس الفريدة على users **جزئية** (WHERE deleted_at IS NULL). لو
+      // phone_number اتحط 'DELETED' قبل ما deleted_at يتسجّل، الصف بيفضل داخل الفهرس فتاني
+      // حساب يتحذف بيصطدم بالأول. الجملة الواحدة بتقفل النافذة دي تمامًا.
+      await manager.query(
+        `UPDATE users
+            SET full_name = 'مستخدم محذوف',
+                phone_number = 'DELETED',
+                email = NULL,
+                avatar_url = NULL,
+                avatar_storage_key = NULL,
+                password_hash = NULL,
+                last_login_ip = NULL,
+                referral_code = NULL,
+                metadata = '{}'::jsonb,
+                is_active = false,
+                deleted_at = now(),
+                updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [userId],
+      );
+
+      // العناوين: النص كله بيتنضّف، والإحداثيات **بتتخشّن** مش بتتشال (location عمود NOT NULL،
+      // والطلبات القديمة محتاجة تفضل مربوطة بمنطقة للتقارير). خانتين عشريتين ≈ 1.1 كم — النقطة
+      // بقت تقول "حي" مش "بيت"، وده الفرق اللي بيهم. الاحتفاظ بدقة المتر كان هيخلي كل الباقي
+      // بلا معنى: إحداثيات منزل بدقة متر هي بيانات شخصية مهما شِلنا أسماء.
+      await manager.query(
+        `UPDATE addresses
+            SET street_name = 'عنوان محذوف',
+                label = NULL,
+                building_number = NULL,
+                floor_number = NULL,
+                apartment_number = NULL,
+                landmark = NULL,
+                contact_name = NULL,
+                contact_phone = NULL,
+                delivery_notes = NULL,
+                location = ST_SetSRID(
+                  ST_MakePoint(
+                    ROUND(ST_X(location::geometry)::numeric, 2)::double precision,
+                    ROUND(ST_Y(location::geometry)::numeric, 2)::double precision
+                  ), 4326)::geography,
+                updated_at = now()
+          WHERE user_id = $1`,
+        [userId],
+      );
+
+      // أجهزة الإشعارات: حذف فعلي. مفيش أي سبب مالي أو قانوني للاحتفاظ بـFCM token لحد انسحب،
+      // والاحتفاظ بيه معناه إشعارات ممكن توصله بعد الحذف.
+      await manager.query(`DELETE FROM user_devices WHERE user_id = $1`, [userId]);
+
+      await manager.query(
+        `UPDATE payment_methods pm
+            SET is_revoked = true,
+                revoked_at = COALESCE(pm.revoked_at, now()),
+                provider_token = '',
+                masked_pan = NULL,
+                card_brand = NULL,
+                updated_at = now()
+           FROM customer_profiles cp
+          WHERE cp.id = pm.customer_id AND cp.user_id = $1`,
+        [userId],
+      );
+
+      // أخطر بيان شخصي في النظام — الرقم القومي المشفَّر، ومعاه المستندات المرفوعة.
+      await manager.query(
+        `UPDATE technician_profiles
+            SET national_id_encrypted = NULL, updated_at = now()
+          WHERE user_id = $1`,
+        [userId],
+      );
+      await manager.query(
+        `UPDATE technician_documents td
+            SET file_url = '', deleted_at = COALESCE(td.deleted_at, now()), updated_at = now()
+           FROM technician_profiles tp
+          WHERE tp.id = td.technician_id AND tp.user_id = $1`,
+        [userId],
+      );
+    });
   }
 }

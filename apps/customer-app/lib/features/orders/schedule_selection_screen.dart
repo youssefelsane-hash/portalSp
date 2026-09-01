@@ -28,12 +28,18 @@ class ScheduleChoice {
   // دقة الوقت (docs/08 §84 جزء ج) — مليانين بس لو requiresPreciseTime، وإلا null دايمًا.
   final TimeOfDay? preciseTime;
   final int? durationHours;
-  const ScheduleChoice(this.scheduledAt, {this.rangeEnd, this.preciseTime, this.durationHours});
+  const ScheduleChoice(
+    this.scheduledAt, {
+    this.rangeEnd,
+    this.preciseTime,
+    this.durationHours,
+  });
 }
 
 // بداية اليوم المحلي (Africa/Cairo، نفس منطقة العمل الوحيدة للمشروع) — نفس التاريخ اللي هيتعرض
 // للفني/الأدمن، بلا أي مكون وقت. `DateTime` المحلي هنا كافي (السيرفر بيحوّله UTC عند الإرسال).
-DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
+DateTime _startOfDay(DateTime date) =>
+    DateTime(date.year, date.month, date.day);
 
 // أقصى فرق بين بداية ونهاية النطاق المرن — matching orders.service.ts's اقتصادها بالحرف
 // (استعلام أهلية يومي متكرر بحد أقصى، مش نطاق مفتوح).
@@ -64,7 +70,8 @@ class ScheduleSelectionScreen extends StatefulWidget {
   });
 
   @override
-  State<ScheduleSelectionScreen> createState() => _ScheduleSelectionScreenState();
+  State<ScheduleSelectionScreen> createState() =>
+      _ScheduleSelectionScreenState();
 }
 
 class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
@@ -99,7 +106,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final data = await apiRequest('GET', '/booking-policy');
       if (!mounted) return;
-      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
+      setState(
+        () => _nearTermHours = (data?['near_term_request_hours'] as num?)
+            ?.toInt(),
+      );
     } catch (error) {
       debugPrint('فشل تحميل سياسة المواعيد: $error');
     }
@@ -112,7 +122,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   /// ساعة الجهاز غلط، أسوأ حاجة هتحصل إن التنبيه يظهر أو ما يظهرش، والسعر يفضل صح.
   bool _isToday(DateTime date) {
     final now = DateTime.now();
-    return date.year == now.year && date.month == now.month && date.day == now.day;
+    return date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
   }
 
   /// أول يوم مسموح في التقويم — بكرة لو الخدمة مابتتعملش في نفس اليوم (ADR-0048 §3).
@@ -121,28 +133,47 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return widget.allowsSameDay ? now : now.add(const Duration(days: 1));
   }
 
-  /// إخطار بسيط لما العميل يختار النهارده (docs/08 §87، تهذيب بطلب مالك صريح).
+  /// **تبسيط التنبيه (طلب مالك صريح، docs/08 §87)**: النسخة الأولى (docs/08 §85) كانت بألوان
+  /// حمرا/تحذيرية (أيقونة+عنوان بلون `error`، زرار تأكيد أحمر) وبتذكر نسبة الرسوم بالرقم صراحة
+  /// ("رسوم استعجال 20% فوق سعر الخدمة"). المالك اعتبرها "تخض" و"مش تحذير فعلي" — هي بس معلومة
+  /// عادية إن الطلب مستعجل. التصميم بقى محايد (بلا لون error خالص)، والنص مختصر لسطرين بسّ،
+  /// وسطر "الرسوم زيادة" بخط أصغر وباهت عمدًا بدل ما يكون جزء من النص الرئيسي أو فيه رقم.
   ///
-  /// **النسخة الأولى كانت تحذير أحمر بنسبة الرسوم — واتشالت بالكامل.** بلاغ المالك: «الكلام
-  /// زيادة شوية، وما يوضحش النسبة اللي بناخدها بالظبط… بشياكة كده وببساطة ومن غير ما تبقى
-  /// ملحوظة، عشان الناس تبتدي ما تخافش من الرسالة دي… بلاش الرسالة الحمراء اللي هي تخض دي، هو
-  /// مش تحذير».
-  ///
-  /// تلات قرارات مقصودة في النسخة دي:
-  ///  - **مفيش نسبة**. الرقم الدقيق بيتعرض في تفصيل السعر قبل التأكيد (اللي هو مكانه الصح)؛
-  ///    هنا بيخوّف بلا فايدة لأن العميل لسه مش شايف الإجمالي أصلاً.
-  ///  - **مفيش لون خطر ولا أيقونة تحذير**. ده مش تحذير، ده توضيح لنتيجة اختياره.
-  ///  - **سطر واحد**. أي كلام زيادة بيقرا كإنه اعتذار عن الرسوم.
+  /// **ده إخطار مش سؤال عن وضع الحجز.** العميل مابيختارش "طوارئ ولا عادي" — هو بيختار يوم،
+  /// والنتيجة بتتشرح له بصراحة مع فرصة يرجع يغيّر اليوم لو مش مستعجل.
   Future<bool> _confirmSameDayUrgency(BuildContext context) async {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          title: const Text('طلب النهارده'),
-          content: Text(
-            'طلب النهارده بيتنفّذ كخدمة مستعجلة، وعليه رسوم إضافية.',
-            style: Theme.of(dialogContext).textTheme.bodyMedium,
+          icon: Icon(Icons.bolt_outlined, color: scheme.primary, size: 28),
+          title: const Text('طلب النهارده', textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'هيوصلك الفني بسرعة النهارده.',
+                textAlign: TextAlign.center,
+                style: textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'هتتحسب رسوم بسيطة زيادة على السعر.',
+                textAlign: TextAlign.center,
+                style: textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'لو مش مستعجل، اختار يوم تاني والسعر يفضل عادي.',
+                textAlign: TextAlign.center,
+                style: textTheme.bodyMedium,
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -187,7 +218,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     final now = DateTime.now();
     final range = await showDateRangePicker(
       context: context,
-      initialDateRange: DateTimeRange(start: now.add(const Duration(days: 1)), end: now.add(const Duration(days: 4))),
+      initialDateRange: DateTimeRange(
+        start: now.add(const Duration(days: 1)),
+        end: now.add(const Duration(days: 4)),
+      ),
       firstDate: _firstSelectableDate,
       lastDate: now.add(const Duration(days: 90)),
       helpText: 'اختار نطاق الأيام اللي تناسبك',
@@ -215,7 +249,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   }
 
   Future<void> _pickTime(BuildContext context) async {
-    final picked = await showTimePicker(context: context, initialTime: _selectedTime ?? const TimeOfDay(hour: 10, minute: 0));
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime ?? const TimeOfDay(hour: 10, minute: 0),
+    );
     if (picked != null && mounted) setState(() => _selectedTime = picked);
   }
 
@@ -233,12 +270,18 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
 
   void _confirm() {
     if (!_canConfirm) return;
+    // راجع docs/08 §108-C — شيل الفوكس من حقل عدد الساعات قبل الإقفال عشان
+    // نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا) لو المستخدم
+    // لسه واقف في الحقل.
+    FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       ScheduleChoice(
         _selectedDate!,
         rangeEnd: _selectedRangeEnd,
         preciseTime: _selectedTime,
-        durationHours: widget.requiresDurationHours ? int.parse(_durationController.text.trim()) : null,
+        durationHours: widget.requiresDurationHours
+            ? int.parse(_durationController.text.trim())
+            : null,
       ),
     );
   }
@@ -249,70 +292,83 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: const Text('امتى تحب تنفّذ الشغل؟')),
-        body: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 8),
-              _ScheduleOptionCard(
-                icon: Icons.calendar_month_outlined,
-                title: 'اختار يوم محدد',
-                subtitle: _selectedDate != null && _selectedRangeEnd == null
-                    ? _formatDate(_selectedDate!)
-                    : 'حدد اليوم اللي يناسبك من الكالندر',
-                highlighted: true,
-                selected: _selectedDate != null && _selectedRangeEnd == null,
-                onTap: () => _pickSpecificDate(context),
-              ),
-              if (widget.allowsDateRangeBooking) ...[
-                const SizedBox(height: 12),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              20 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 8),
                 _ScheduleOptionCard(
-                  icon: Icons.event_repeat_outlined,
-                  title: 'مرن — اختار نطاق أيام',
-                  subtitle: _selectedRangeEnd != null
-                      ? '${_formatDate(_selectedDate!)} — ${_formatDate(_selectedRangeEnd!)}'
-                      : 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
-                  selected: _selectedRangeEnd != null,
-                  onTap: () => _pickFlexibleRange(context),
+                  icon: Icons.calendar_month_outlined,
+                  title: 'اختار يوم محدد',
+                  subtitle: _selectedDate != null && _selectedRangeEnd == null
+                      ? _formatDate(_selectedDate!)
+                      : 'حدد اليوم اللي يناسبك من الكالندر',
+                  highlighted: true,
+                  selected: _selectedDate != null && _selectedRangeEnd == null,
+                  onTap: () => _pickSpecificDate(context),
                 ),
-              ],
-              // خطوة الساعة (+عدد الساعات) — بتظهر بمجرد ما يختار العميل يوم، في نفس الشاشة دي
-              // مباشرة (docs/08 §84 جزء ج، طلب مالك صريح: "خلي حاجات الوقت كلها تظهر مع بعض").
-              if (widget.requiresPreciseTime && _selectedDate != null) ...[
-                const SizedBox(height: 12),
-                _ScheduleOptionCard(
-                  icon: Icons.schedule_outlined,
-                  title: 'الساعة',
-                  subtitle: _selectedTime != null ? _selectedTime!.format(context) : 'حدد وقت البداية',
-                  selected: _selectedTime != null,
-                  onTap: () => _pickTime(context),
-                ),
-                if (widget.requiresDurationHours) ...[
+                if (widget.allowsDateRangeBooking) ...[
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _durationController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                  _ScheduleOptionCard(
+                    icon: Icons.event_repeat_outlined,
+                    title: 'مرن — اختار نطاق أيام',
+                    subtitle: _selectedRangeEnd != null
+                        ? '${_formatDate(_selectedDate!)} — ${_formatDate(_selectedRangeEnd!)}'
+                        : 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                    selected: _selectedRangeEnd != null,
+                    onTap: () => _pickFlexibleRange(context),
                   ),
                 ],
-                const SizedBox(height: 20),
-                FilledButton(
-                  onPressed: _canConfirm ? _confirm : null,
-                  child: const Text('تأكيد الميعاد'),
-                ),
+                // خطوة الساعة (+عدد الساعات) — بتظهر بمجرد ما يختار العميل يوم، في نفس الشاشة دي
+                // مباشرة (docs/08 §84 جزء ج، طلب مالك صريح: "خلي حاجات الوقت كلها تظهر مع بعض").
+                if (widget.requiresPreciseTime && _selectedDate != null) ...[
+                  const SizedBox(height: 12),
+                  _ScheduleOptionCard(
+                    icon: Icons.schedule_outlined,
+                    title: 'الساعة',
+                    subtitle: _selectedTime != null
+                        ? _selectedTime!.format(context)
+                        : 'حدد وقت البداية',
+                    selected: _selectedTime != null,
+                    onTap: () => _pickTime(context),
+                  ),
+                  if (widget.requiresDurationHours) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _durationController,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: 'عدد الساعات المطلوبة',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: _canConfirm ? _confirm : null,
+                    child: const Text('تأكيد الميعاد'),
+                  ),
+                ],
+                // مكان التنبيه ده هنا مش في شاشة تأكيد الطلب (نقل مقصود، docs/08 §76-و، بلاغ
+                // مالك صريح): «الكاستمر بيختار المواعيد من برا، فيه صفحة خاصة بالمواعيد أصلاً…
+                // هنشيل دي من هنا ونحطها مع بتاعت اختار معادك». والمنطق يوافق: نصيحة عن
+                // استعجال الموعد قيمتها الوحيدة **وقت اختيار الموعد**؛ بعد ما العميل يختار
+                // ويوصل للدفع بتبقى مجرد نص بيزحم الشاشة.
+                if (_nearTermHours != null && _nearTermHours! > 0) ...[
+                  const SizedBox(height: 20),
+                  _BookingTimingNotice(nearTermHours: _nearTermHours!),
+                ],
               ],
-              // مكان التنبيه ده هنا مش في شاشة تأكيد الطلب (نقل مقصود، docs/08 §76-و، بلاغ
-              // مالك صريح): «الكاستمر بيختار المواعيد من برا، فيه صفحة خاصة بالمواعيد أصلاً…
-              // هنشيل دي من هنا ونحطها مع بتاعت اختار معادك». والمنطق يوافق: نصيحة عن
-              // استعجال الموعد قيمتها الوحيدة **وقت اختيار الموعد**؛ بعد ما العميل يختار
-              // ويوصل للدفع بتبقى مجرد نص بيزحم الشاشة.
-              if (_nearTermHours != null && _nearTermHours! > 0) ...[
-                const SizedBox(height: 20),
-                _BookingTimingNotice(nearTermHours: _nearTermHours!),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -341,7 +397,9 @@ class _ScheduleOptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
-      color: selected ? scheme.primaryContainer : (highlighted ? scheme.primaryContainer : null),
+      color: selected
+          ? scheme.primaryContainer
+          : (highlighted ? scheme.primaryContainer : null),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
@@ -349,7 +407,13 @@ class _ScheduleOptionCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Icon(icon, size: 32, color: selected || highlighted ? scheme.onPrimaryContainer : scheme.primary),
+              Icon(
+                icon,
+                size: 32,
+                color: selected || highlighted
+                    ? scheme.onPrimaryContainer
+                    : scheme.primary,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -357,7 +421,10 @@ class _ScheduleOptionCard extends StatelessWidget {
                   children: [
                     Text(title, style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -370,9 +437,9 @@ class _ScheduleOptionCard extends StatelessWidget {
   }
 }
 
-/// تنبيه سياسة المواعيد (docs/08 §61.3). نصّه مقصود يكون **مساعد مش تحذيري**: بيقول للعميل
-/// إيه أسرع طريق لو مستعجل، وبيطمّنه إن المواعيد الأبعد مش محتاجة انتظار — من غير ما يحسّسه
-/// إن الحجز العادي فيه مشكلة.
+/// تنبيه سياسة المواعيد (docs/08 §61.3، مختصر docs/08 §87 طلب مالك صريح) — كان فقرة كاملة
+/// ("محتاج الخدمة بسرعة؟ لو الموعد عاجل اختار خدمة طوارئ...")، المالك عايزها سطر واحد بسيط
+/// بالمعلومة الأساسية بس، بلا مقدمة/شرح إضافي.
 class _BookingTimingNotice extends StatelessWidget {
   const _BookingTimingNotice({required this.nearTermHours});
 
@@ -388,13 +455,12 @@ class _BookingTimingNotice extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, size: 18, color: scheme.onSurfaceVariant),
+          Icon(Icons.bolt_outlined, size: 20, color: scheme.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج موافقة الفني الأول.',
+              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج تأكيد الفني الأول.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

@@ -94,4 +94,34 @@ describe('توزيع مستحقات الطاقم بوزن المستوى (ADR-00
     expect(total(shares)).toBe(777_777);
     expect(shares.every((s) => s.shareCents >= 0)).toBe(true);
   });
+
+  it('أجر المساعد المحدد يتضرب في مستوى المساعد، والفنيون يقسمون المتبقي فقط', () => {
+    const shares = splitCrewEarnings(100_000, [
+      p('lead', 'leader', 1.6, 'team_leader'),
+      {
+        ...p('a1', 'assistant', 0.65, 'professional'),
+        assistantBaseWageCents: 20_000,
+        assistantLevelMultiplier: 1.25,
+        assistantTargetCents: 25_000,
+      },
+    ]);
+
+    expect(shares.find((share) => share.technicianId === 'a1')).toMatchObject({
+      shareCents: 25_000,
+      calculationMethod: 'assistant_level_wage',
+    });
+    expect(shares.find((share) => share.technicianId === 'lead')!.shareCents).toBe(75_000);
+    expect(total(shares)).toBe(100_000);
+  });
+
+  it('إعداد أجر مساعد أكبر من الوعاء يرجع للتوزيع النسبي الآمن بلا قرش مخلوق أو طرف بصفر', () => {
+    const shares = splitCrewEarnings(20_000, [
+      p('lead', 'leader', 1.6),
+      { ...p('a1', 'assistant', 0.65), assistantTargetCents: 30_000 },
+    ]);
+
+    expect(shares.every((share) => share.shareCents > 0)).toBe(true);
+    expect(shares.every((share) => share.calculationMethod === 'weighted_pool')).toBe(true);
+    expect(total(shares)).toBe(20_000);
+  });
 });

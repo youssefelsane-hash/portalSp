@@ -69,7 +69,7 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
   }
 
   Future<void> _openClaim(Map<String, dynamic> warranty) async {
-    final controller = TextEditingController();
+    String draft = '';
     String? validationError;
     final description = await showDialog<String>(
       context: context,
@@ -77,11 +77,11 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('فتح مطالبة ضمان'),
           content: TextField(
-            controller: controller,
             minLines: 3,
             maxLines: 6,
             maxLength: 1000,
-            onChanged: (_) {
+            onChanged: (value) {
+              draft = value;
               if (validationError != null) {
                 setDialogState(() => validationError = null);
               }
@@ -94,17 +94,24 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                // شيل الفوكس من حقل الوصف قبل الإقفال — تفادي Flutter assertion
+                // '_dependents.isEmpty' (شاشة حمرا) لو المستخدم لسه واقف في الحقل.
+                // راجع docs/08 §108-C وrating_dialog.dart لنفس الإصلاح.
+                FocusScope.of(context).unfocus();
+                Navigator.pop(context);
+              },
               child: const Text('إلغاء'),
             ),
             FilledButton(
               onPressed: () {
-                final value = controller.text.trim();
+                final value = draft.trim();
                 final error = validateWarrantyClaimDescription(value);
                 if (error != null) {
                   setDialogState(() => validationError = error);
                   return;
                 }
+                FocusScope.of(context).unfocus();
                 Navigator.pop(context, value);
               },
               child: const Text('إرسال'),
@@ -113,7 +120,6 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
         ),
       ),
     );
-    controller.dispose();
     if (description == null || !mounted) return;
     try {
       await WarrantyRepository(

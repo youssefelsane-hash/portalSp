@@ -8,6 +8,21 @@ export interface DashboardStats {
   average_rating: number | null;
   users: { total: number; new_today: number; by_user_type: Record<string, number> };
   financial: { pending_payouts_count: number; pending_payouts_amount_cents: number };
+  attention: {
+    overdue_orders: number;
+    crew_shortages: number;
+    pending_kpi_reviews: number;
+    pending_refunds: number;
+    open_warranty_claims: number;
+    disputed_orders: number;
+  };
+  trend_7_days: {
+    date: string;
+    orders_count: number;
+    completed_count: number;
+    revenue_cents: number;
+    platform_commission_cents: number;
+  }[];
 }
 
 // مطابق لـ RevenuePeriodRow/ZoneReportRow/TechnicianReportRow في admin-reports.service.ts

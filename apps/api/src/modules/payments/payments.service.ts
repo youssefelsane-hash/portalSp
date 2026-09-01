@@ -1,7 +1,7 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import {
@@ -11,6 +11,7 @@ import {
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
+import { REFUND_RESOLVED_EVENT, RefundResolvedEvent } from '../../common/events/refund-resolved.event';
 import { InstaPayPendingPaymentResponseDto } from './dto/payments-response.dto';
 import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
 import {
@@ -57,10 +58,16 @@ import {
 import { CrewEarningsService } from './crew-earnings.service';
 import { splitOrderRevenue } from '../pricing/commission-base';
 import { splitCrewEarnings } from './crew-earning-split';
+import { allocateCrewRefundReversal } from './crew-refund-allocation';
+import { EarningsPolicyService } from './earnings-policy.service';
+import { calculateEarningsV2, EarningsCalculationResult } from './earnings-calculator';
+import { allocateSettlementRefundReversal } from './settlement-refund-allocation';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
   cashToCollectCents: number;
+  /** صافي الكاش الذي سجّله الفني كمُحصّل بالفعل لهذا الطلب. */
+  cashCollectedCents: number;
   myEarningCents: number;
   hasOnlinePayment: boolean;
   fullyPaidOnline: boolean;
@@ -79,6 +86,12 @@ const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.
 const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
+/**
+ * نافذة منع فتح شحنة دفع بوابة مستقلة تانية لنفس الطلب (§90.2) — راجع التعليق الكامل في
+ * `payWithProvider()`. قصيرة كفاية إنها متمنعش عميل بدّل رأيه فعلاً من المحاولة بطريقة تانية،
+ * طويلة كفاية تغطي إدخال بيانات كارت طبيعي + إعادة فتح تطبيق بعد قفل مفاجئ.
+ */
+const RECENT_ACTIVE_PAYMENT_WINDOW_MS = 5 * 60 * 1000;
 
 type PaymentConfirmedEffects = {
   dispatchStarted: boolean;
@@ -93,6 +106,8 @@ export type OrderCollectionBreakdown = {
   totalAmountCents: number;
   paidAmountCents: number;
   directPaidAmountCents: number;
+  /** صافي الدفعات المباشرة غير الكاش — لا يشمل أقساط الخطة التي تغطيها المنصة. */
+  onlinePaidAmountCents: number;
   refundedAmountCents: number;
   financedOrderAmountCents: number;
   installmentOutstandingCents: number;
@@ -126,6 +141,7 @@ export class PaymentsService {
     // بتبني PaymentsService بـpositional args ما تتكسرش.
     @InjectRepository(Installment) private readonly installments: Repository<Installment>,
     private readonly crewEarningsService: CrewEarningsService,
+    @Optional() private readonly earningsPolicyService?: EarningsPolicyService,
   ) {}
 
   /** نفس isIdempotencyKeyViolation في orders.service — 23505 raw → استرجاع بدل 500. */
@@ -138,13 +154,70 @@ export class PaymentsService {
     );
   }
 
+  private emitRefundResolved(refund: Refund, order: Order): void {
+    if (refund.refundStatus !== RefundStatus.COMPLETED && refund.refundStatus !== RefundStatus.REJECTED) return;
+    const method: RefundResolvedEvent['method'] =
+      refund.refundMethod === RefundMethod.ORIGINAL_METHOD
+        ? 'original_method'
+        : refund.refundMethod === RefundMethod.WALLET_CREDIT
+          ? 'wallet_credit'
+          : 'cash';
+
+    this.events.emit(REFUND_RESOLVED_EVENT, {
+      refundId: refund.id,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      customerProfileId: order.customerId,
+      amountCents: refund.amountCents,
+      status: refund.refundStatus === RefundStatus.COMPLETED ? 'completed' : 'rejected',
+      method,
+    } satisfies RefundResolvedEvent);
+  }
+
+  private async reverseParticipantRefund(
+    manager: EntityManager,
+    technicianId: string,
+    reversalCents: number,
+    platformWalletId: string,
+    refundId: string,
+    orderNumber: string,
+  ): Promise<void> {
+    const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+    const technicianWallet = await this.walletsService.getOrCreateWallet(
+      technicianProfile.userId,
+      WalletOwnerType.TECHNICIAN,
+      manager,
+    );
+    await this.walletsService.doubleEntry(
+      {
+        fromWalletId: technicianWallet.id,
+        toWalletId: platformWalletId,
+        amountCents: reversalCents,
+        transactionType: WalletTxType.REFUND,
+        referenceType: 'refund',
+        referenceId: refundId,
+        descriptionAr: `عكس نصيبك من استرجاع طلب ${orderNumber}`,
+        allowNegativeBalance: true,
+      },
+      manager,
+    );
+  }
+
   /**
    * عمولة المنصة = عمولة الخدمة الأساسية + فرق مستوى الفني (سالب عادةً — مستوى أعلى يعني عمولة
    * منصة أقل، حافز جودة حقيقي). المجموع محدود بين 0 و100% دفاعياً حتى لو إعدادات المستوى غلط.
    */
   private async computeSettlement(
     order: Order,
-  ): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number; warrantyDays: number }> {
+    manager: EntityManager = this.dataSource.manager,
+    lockOrder = false,
+  ): Promise<{
+    platformCommissionCents: number;
+    technicianEarningCents: number;
+    commissionRateApplied: number | null;
+    warrantyDays: number;
+    v2Calculation: EarningsCalculationResult | null;
+  }> {
     // نفس بَقّة §64.أ بالظبط بس في مسار الفلوس: لو الخدمة اتوقفت (is_active=false) أو اتحذفت
     // بعد ما الطلب اتعمل، findServiceOrThrow() كانت هترمي 404 فالتسوية نفسها تفشل — يعني الفني
     // ما ياخدش فلوسه والطلب ما يقفلش، بسبب تغيير في الكتالوج ملوش أي علاقة بالطلب ده. نسبة
@@ -154,6 +227,26 @@ export class PaymentsService {
     if (!service) {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة', HttpStatus.NOT_FOUND);
     }
+
+    if (order.settlementPolicyVersion === 2) {
+      if (!this.earningsPolicyService) {
+        throw new Error('EarningsPolicyService is required to settle a V2 order');
+      }
+      const calculation = await this.earningsPolicyService.calculateOrder(
+        order.id,
+        order.totalAmountCents,
+        manager,
+        lockOrder,
+      );
+      return {
+        platformCommissionCents: calculation.platformCommissionCents,
+        technicianEarningCents: calculation.workerPoolCents,
+        commissionRateApplied: null,
+        warrantyDays: service.warrantyDays,
+        v2Calculation: calculation,
+      };
+    }
+
     let commissionRateApplied = Number(service.commissionPercentage);
 
     if (order.technicianId) {
@@ -188,7 +281,70 @@ export class PaymentsService {
       commissionableBaseCents,
       commissionRatePercentage: commissionRateApplied,
     });
-    return { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays: service.warrantyDays };
+    await this.recordV2ShadowComparison(
+      manager,
+      order,
+      service.platformCommissionCents,
+      platformCommissionCents,
+      technicianEarningCents,
+    );
+    return {
+      platformCommissionCents,
+      technicianEarningCents,
+      commissionRateApplied,
+      warrantyDays: service.warrantyDays,
+      v2Calculation: null,
+    };
+  }
+
+  private async recordV2ShadowComparison(
+    manager: EntityManager,
+    order: Order,
+    configuredFixedCommissionCents: number | null,
+    legacyPlatformCents: number,
+    legacyWorkerPoolCents: number,
+  ): Promise<void> {
+    if (
+      !this.earningsPolicyService ||
+      !order.technicianId ||
+      configuredFixedCommissionCents == null ||
+      configuredFixedCommissionCents > order.totalAmountCents ||
+      !(await this.settingsService.getBoolean('earnings.v2_shadow_enabled', true))
+    ) {
+      return;
+    }
+    try {
+      const participants = await this.earningsPolicyService.resolveParticipants(order.id, manager);
+      const comparison = calculateEarningsV2(order.totalAmountCents, configuredFixedCommissionCents, participants);
+      await manager.query(
+        `INSERT INTO earnings_shadow_comparisons
+          (order_id, legacy_platform_cents, legacy_worker_pool_cents, v2_platform_cents,
+           v2_worker_pool_cents, v2_participant_shares, absolute_delta_cents)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+         ON CONFLICT (order_id) DO NOTHING`,
+        [
+          order.id,
+          legacyPlatformCents,
+          legacyWorkerPoolCents,
+          comparison.platformCommissionCents,
+          comparison.workerPoolCents,
+          JSON.stringify(
+            comparison.participantShares.map((share) => ({
+              technician_id: share.technicianId,
+              earning_role: share.earningRole,
+              share_cents: share.shareCents,
+            })),
+          ),
+          Math.abs(comparison.platformCommissionCents - legacyPlatformCents),
+        ],
+      );
+    } catch (error) {
+      // Shadow mode must never block a valid V1 payment. Missing policy data remains visible as
+      // readiness debt and in logs, while the historical settlement completes unchanged.
+      this.logger.warn(
+        `V2 shadow comparison skipped for ${order.orderNumber}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**
@@ -219,7 +375,7 @@ export class PaymentsService {
     viewerTechnicianProfileId?: string | null,
   ): Promise<TechnicianMoneyView> {
     const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
-    const paidOnlineCents = breakdown.paidAmountCents + breakdown.financedOrderAmountCents;
+    const paidOnlineCents = breakdown.onlinePaidAmountCents + breakdown.financedOrderAmountCents;
     const poolCents = await this.previewTechnicianEarningCents(order);
 
     // بلاغ المالك (docs/08 §64.ب): «نصيبك 0 وده مش منطقي». مصدرها إن نصيب الفني بيتحسب من
@@ -239,26 +395,48 @@ export class PaymentsService {
     const viewerId = viewerTechnicianProfileId ?? order.technicianId;
     if (viewerId && order.technicianId && poolCents > 0) {
       const em = manager ?? this.dataSource.manager;
-      const participants = await this.crewEarningsService.resolveParticipants(em, order);
-      if (participants.length > 1) {
-        const shares = splitCrewEarnings(poolCents, participants);
-        const mine = shares.find((share) => share.technicianId === viewerId);
+      if (order.settlementPolicyVersion === 2 && this.earningsPolicyService) {
+        const calculation = await this.earningsPolicyService.calculateOrder(order.id, order.totalAmountCents, em);
+        const mine = calculation.participantShares.find((share) => share.technicianId === viewerId);
         if (mine) {
           myEarningCents = mine.shareCents;
-          isCrewShare = true;
+          isCrewShare = calculation.participantShares.length > 1;
+        }
+      } else {
+        const participants = await this.crewEarningsService.resolveParticipants(em, order);
+        if (participants.length > 1) {
+          const shares = splitCrewEarnings(poolCents, participants);
+          const mine = shares.find((share) => share.technicianId === viewerId);
+          if (mine) {
+            myEarningCents = mine.shareCents;
+            isCrewShare = true;
+          }
         }
       }
     }
+    // عضو الطاقم يشوف حصته فقط، وليس الكاش الذي مرّ في يد قائد الطلب.
+    const viewerIsLeaderOrSolo = viewerId === order.technicianId;
+    const cashCollectedCents = viewerIsLeaderOrSolo
+      ? Math.max(0, breakdown.directPaidAmountCents - breakdown.onlinePaidAmountCents)
+      : 0;
 
     return {
-      // اللي هيستلمه كاش من العميل — لازم يبان بالرقم، هو محتاجه عشان يعرف ياخد كام.
-      cashToCollectCents: breakdown.amountDueToTechnicianCents,
+      // docs/08 §108-B — قاعدة صارمة جديدة (بلاغ مالك صريح): بس القائد (أو الفني الوحيد لو
+      // مفيش طاقم) يشوف المبلغ المطلوب تحصيله من العميل — هو اللي فعليًا بيحصّله. أي عضو تاني
+      // في الطاقم يشوف نصيبه بس، مهما كانت طريقة الدفع؛ إظهار الرقم ده له كان بيسرّب صورة عن
+      // إجمالي الطلب من غير أي داعي فعلي (هو مش هيحصّل حاجة أصلاً).
+      cashToCollectCents: viewerIsLeaderOrSolo ? breakdown.amountDueToTechnicianCents : 0,
+      // الفرق بين كل الدفعات المباشرة والدفعات غير الكاش = صافي الكاش المسجل بعد أي استرداد.
+      // لازم يخرج كحقيقة مستقلة، لأن صفر "المتبقي" بعد التحصيل لا يعني "لم يستلم كاش".
+      cashCollectedCents,
       // نصيبه هو — لازم يبان برضه، بلا أي شرح لتكوينه.
       myEarningCents,
       // واقعة بلا رقم.
       hasOnlinePayment: paidOnlineCents > 0,
       // كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص.
-      fullyPaidOnline: paidOnlineCents > 0 && breakdown.amountDueToTechnicianCents === 0,
+      // لا نستخدم "المتبقي = صفر" هنا: بعد تحصيل باقي طلب مختلط كاش يصبح المتبقي صفرًا، لكنه
+      // لم يتحول بأثر رجعي إلى طلب مدفوع أونلاين بالكامل.
+      fullyPaidOnline: paidOnlineCents > 0 && paidOnlineCents >= breakdown.totalAmountCents,
       earningPending,
       isCrewShare,
     };
@@ -353,8 +531,10 @@ export class PaymentsService {
     const [money] = await runner.query<
       {
         direct_paid_cents: string;
+        online_paid_cents: string;
         installment_paid_cents: string;
         direct_refunded_cents: string;
+        online_refunded_cents: string;
         installment_refunded_cents: string;
       }[]
     >(
@@ -364,6 +544,11 @@ export class PaymentsService {
              AND p.payment_status IN ('succeeded','partially_refunded','refunded')
          ), 0)::text AS direct_paid_cents,
          COALESCE(SUM(p.amount_cents) FILTER (
+           WHERE p.installment_id IS NULL
+             AND p.payment_method <> 'cash'
+             AND p.payment_status IN ('succeeded','partially_refunded','refunded')
+         ), 0)::text AS online_paid_cents,
+         COALESCE(SUM(p.amount_cents) FILTER (
            WHERE p.installment_id IS NOT NULL
              AND p.payment_status IN ('succeeded','partially_refunded','refunded')
          ), 0)::text AS installment_paid_cents,
@@ -372,6 +557,12 @@ export class PaymentsService {
            JOIN payments rp ON rp.id = r.payment_id
            WHERE r.order_id = $1 AND r.refund_status = 'completed' AND rp.installment_id IS NULL
          ), 0)::text AS direct_refunded_cents,
+         COALESCE((
+           SELECT SUM(r.amount_cents) FROM refunds r
+           JOIN payments rp ON rp.id = r.payment_id
+           WHERE r.order_id = $1 AND r.refund_status = 'completed'
+             AND rp.installment_id IS NULL AND rp.payment_method <> 'cash'
+         ), 0)::text AS online_refunded_cents,
          COALESCE((
            SELECT SUM(r.amount_cents) FROM refunds r
            JOIN payments rp ON rp.id = r.payment_id
@@ -396,8 +587,10 @@ export class PaymentsService {
     );
 
     const directRefundedCents = Number(money?.direct_refunded_cents ?? 0);
+    const onlineRefundedCents = Number(money?.online_refunded_cents ?? 0);
     const installmentRefundedCents = Number(money?.installment_refunded_cents ?? 0);
     const directPaidAmountCents = Math.max(0, Number(money?.direct_paid_cents ?? 0) - directRefundedCents);
+    const onlinePaidAmountCents = Math.max(0, Number(money?.online_paid_cents ?? 0) - onlineRefundedCents);
     const installmentPaidAmountCents = Math.max(
       0,
       Number(money?.installment_paid_cents ?? financing?.paid_cents ?? 0) - installmentRefundedCents,
@@ -411,6 +604,7 @@ export class PaymentsService {
       totalAmountCents: order.totalAmountCents,
       paidAmountCents: directPaidAmountCents + installmentPaidAmountCents,
       directPaidAmountCents,
+      onlinePaidAmountCents,
       refundedAmountCents: directRefundedCents + installmentRefundedCents,
       financedOrderAmountCents,
       installmentOutstandingCents: financing
@@ -474,8 +668,8 @@ export class PaymentsService {
     changedByUserId: string,
     changedByRole: 'customer' | 'technician' | 'system',
   ): Promise<Order> {
-    const { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays } =
-      await this.computeSettlement(order);
+    const { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays, v2Calculation } =
+      await this.computeSettlement(order, manager, true);
 
     if (!canTransition(order.orderStatus, OrderStatus.COMPLETED)) {
       throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
@@ -487,7 +681,11 @@ export class PaymentsService {
     order.paymentMethod = paymentMethod;
     order.platformCommissionCents = platformCommissionCents;
     order.technicianEarningCents = technicianEarningCents;
-    order.commissionRateApplied = String(commissionRateApplied);
+    order.commissionRateApplied = commissionRateApplied === null ? null : String(commissionRateApplied);
+    if (v2Calculation) {
+      order.workerPoolCents = v2Calculation.workerPoolCents;
+      order.calculationAlgorithmVersion = v2Calculation.calculationAlgorithmVersion;
+    }
     order.paidAt = now;
     order.orderStatus = OrderStatus.COMPLETED;
     order.closedAt = now;
@@ -637,7 +835,9 @@ export class PaymentsService {
       //
       // الكاش بيمسكه القائد (هو اللي بيستلم من العميل)، فالمقاصّة مع الكاش بتفضل **على حصته هو
       // بس**؛ الأعضاء بياخدوا تحويل مباشر من المنصة لأنهم مش ماسكين حاجة.
-      const crewShares = await this.crewEarningsService.recordShares(manager, order, technicianEarningCents);
+      const crewShares = v2Calculation
+        ? await this.crewEarningsService.recordV2Shares(manager, order, v2Calculation)
+        : await this.crewEarningsService.recordShares(manager, order, technicianEarningCents);
       const leaderShareCents =
         crewShares.find((s) => s.participantRole === 'leader')?.shareCents ?? technicianEarningCents;
       const netMovementCents = leaderShareCents - cashHeldByTechnicianCents;
@@ -863,7 +1063,23 @@ export class PaymentsService {
       }
       return existing; // نفس الطلب بنفس المفتاح — عملية مكررة، رجّع نفس النتيجة من غير ما نعمل حاجة تانية
     }
+    try {
+      return await this.payWithWalletUnchecked(userId, orderId, idempotencyKey);
+    } catch (err) {
+      // §90.2 (طلب مالك مباشر — دفع مزدوج بضغطتين متزامنتين): الفحص فوق check-then-act خارج أي
+      // قفل، فضغطتين حقيقيتين متزامنتين (أو retry شبكة بينما المحاولة الأولى لسه واصلة) ممكن
+      // يعدّوا الفحص الاتنين ويوصلوا هنا بنفس المفتاح بالظبط. القيد الفريد على idempotency_key
+      // في الداتابيز بيمنع صف مكرر فعليًا، لكن من غيره كان بيرجّع 500 خام للخاسر بدل ما يرجّعله
+      // نفس نتيجة اللي كسب — فرق واضح بين "الدفع فشل" و"الدفع نجح من محاولة تانية بنفس اللحظة".
+      if (this.isUniqueViolation(err)) {
+        const winner = await this.payments.findOne({ where: { idempotencyKey } });
+        if (winner) return winner;
+      }
+      throw err;
+    }
+  }
 
+  private async payWithWalletUnchecked(userId: string, orderId: string, idempotencyKey: string): Promise<Payment> {
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     this.assertPayable(order);
 
@@ -992,6 +1208,32 @@ export class PaymentsService {
       throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    // §90.2 (طلب مالك مباشر — دفع مزدوج عند البوابة لو العميل قفل التطبيق فجأة وسط عملية دفع):
+    // idempotencyKey بيتولّد ويتخزّن في ذاكرة الشاشة بس، مش تخزين دائم — لو التطبيق اتقفل فجأة
+    // (أو الموبايل نفسه) والعميل رجع فتحه تاني وجرّب يدفع، هيتولّد مفتاح **جديد تمامًا**، فمفتاح
+    // idempotency القديم ما بيحميش من حاجة هنا. من غير الفحص ده، كان ممكن يتفتح شحنة مستقلة
+    // تانية عند البوابة الحقيقية (Paymob/Fawry) بينما الأولى لسه معلّقة — لو العميل كمّل الاتنين،
+    // تحصيل حقيقي مزدوج عند البوابة نفسها (الطلب في نظامنا محمي من settleAndComplete المزدوج
+    // بقفل الصف + assertPayable() في finalizeGatewayWebhook، لكن فلوس العميل عند البوابة مش
+    // بترجع تلقائي في الحالة دي). نافذة 5 دقايق بس — قصيرة كفاية إنها متمنعش عميل بدّل رأيه
+    // فعلاً (لغى الدفع وعايز طريقة تانية) من المحاولة تاني، طويلة كفاية تغطي إدخال بيانات كارت
+    // طبيعي + إعادة فتح تطبيق بعد قفل مفاجئ.
+    const recentActivePayment = await this.payments.findOne({
+      where: {
+        orderId,
+        paymentStatus: In([PaymentGatewayStatus.PENDING, PaymentGatewayStatus.PROCESSING]),
+        initiatedAt: MoreThan(new Date(Date.now() - RECENT_ACTIVE_PAYMENT_WINDOW_MS)),
+      },
+      order: { initiatedAt: 'DESC' },
+    });
+    if (recentActivePayment) {
+      throw new ApiException(
+        ErrorCode.PAY_003,
+        'فيه محاولة دفع سابقة لسه معلّقة لنفس الطلب من دقايق قليلة — استنى نتيجتها أو جرّب تاني بعد شوية',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     this.assertPayable(order);
     // المبلغ المستحق دلوقتي (ADR-0015) — راجع تعليق collectCash فوق لنفس المنطق بالحرف. صف
@@ -1012,7 +1254,24 @@ export class PaymentsService {
       paymentStatus: PaymentGatewayStatus.PENDING,
       idempotencyKey,
     });
-    await this.payments.save(payment);
+    try {
+      await this.payments.save(payment);
+    } catch (err) {
+      // نفس سباق payWithWallet: ضغطتين متزامنتين حقيقيتين ممكن يعدّوا فحص idempotencyKey فوق
+      // الاتنين بنفس اللحظة. القيد الفريد في الداتابيز بيمنع صف مكرر؛ بدل 500 خام للخاسر، نرجّع
+      // نتيجة اللي كسب.
+      if (this.isUniqueViolation(err)) {
+        const winner = await this.payments.findOne({ where: { idempotencyKey } });
+        if (winner) {
+          const cachedResult = (winner.gatewayResponse as { cached_result?: unknown } | null)?.cached_result;
+          if (cachedResult) {
+            return { payment: winner, result: cachedResult as import('./gateways/payment-provider.interface').CreatePaymentResult };
+          }
+          return { payment: winner, result: await this.initiateProviderCharge(winner, method) };
+        }
+      }
+      throw err;
+    }
 
     return { payment, result: await this.initiateProviderCharge(payment, method) };
   }
@@ -2500,7 +2759,7 @@ export class PaymentsService {
       return { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund };
     });
 
-    const { payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
+    const { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
 
     // المرحلة (ب) — برّه أي DB transaction تمامًا. صف الـrefund اتسجّل بالفعل PROCESSING فوق
     // قبل النداء ده، فحتى لو الـprocess وقع دلوقتي بعد نجاح فعلي عند البوابة، فحص existingRefund
@@ -2572,33 +2831,103 @@ export class PaymentsService {
         return lockedRefund;
       }
 
-      // عكس أرباح الفني يُوزَّع على إجمالي الطلب، لا على الدفعـة المحددة: دفعة العمل الإضافي
-      // قد تكون أصغر من قيمة الطلب، والقسمة على payment.amountCents كانت تعكس أرباح الطلب كله
-      // عند استرداد تلك الدفعة وحدها.
-      const technicianReversalCents = Math.round(
-        (lockedOrder.technicianEarningCents * amountCents) / lockedOrder.totalAmountCents,
-      );
-      if (technicianReversalCents > 0 && lockedOrder.technicianId) {
-        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(lockedOrder.technicianId);
-        const technicianWallet = await this.walletsService.getOrCreateWallet(
-          technicianProfile.userId,
-          WalletOwnerType.TECHNICIAN,
-        );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+      // الاسترداد بيتحمّله كل شخص أخذ نصيبًا من الطلب، مش قائد الطلب وحده. الحسبة مبنية على
+      // `order_earning_shares` نفسها (مصدر حقيقة التسوية)، وعلى إجمالي الاستردادات المكتملة قبل
+      // الصف الحالي. استخدام الإجمالي التراكمي يمنع انحراف التقريب مع عدة استردادات جزئية؛ عند
+      // اكتمال استرداد الطلب يكون مجموع ما رجع من كل فرد مساويًا لنصيبه الأصلي لآخر قرش.
+      if (
+        lockedOrder.totalAmountCents > 0 &&
+        (lockedOrder.settlementPolicyVersion === 2 ||
+          (lockedOrder.technicianEarningCents > 0 && lockedOrder.technicianId))
+      ) {
+        const previousRefundRows = await manager.find(Refund, {
+          where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+          select: ['amountCents'],
+        });
+        const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
+        const recordedShares = await this.crewEarningsService.listForOrder(manager, lockedOrder.id);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
-        await this.walletsService.doubleEntry(
-          {
-            fromWalletId: technicianWallet.id,
-            toWalletId: platformWallet.id,
-            amountCents: technicianReversalCents,
-            transactionType: WalletTxType.REFUND,
-            referenceType: 'refund',
-            referenceId: lockedRefund.id,
-            descriptionAr: `استرجاع أرباح طلب ${lockedOrder.orderNumber}`,
-            allowNegativeBalance: true, // ممكن الفني يكون صرف الفلوس دي بالفعل — الدين ده هيتسوّى في الصرف الجاي
-          },
-          manager,
-        );
+        if (lockedOrder.settlementPolicyVersion === 2) {
+          const reversals = allocateSettlementRefundReversal({
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: amountCents,
+            buckets: [
+              {
+                bucketType: 'platform',
+                technicianId: null,
+                originalCents: lockedOrder.platformCommissionCents,
+              },
+              ...recordedShares.map((share) => ({
+                bucketType: 'participant' as const,
+                technicianId: share.technicianId,
+                originalCents: share.shareCents,
+              })),
+            ],
+          });
+
+          for (const reversal of reversals) {
+            await manager.query(
+              `INSERT INTO refund_settlement_reversals
+                 (refund_id, order_id, bucket_type, technician_id, original_bucket_cents, reversal_cents)
+               VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT DO NOTHING`,
+              [
+                lockedRefund.id,
+                lockedOrder.id,
+                reversal.bucketType,
+                reversal.technicianId,
+                reversal.originalCents,
+                reversal.reversalCents,
+              ],
+            );
+            if (reversal.bucketType !== 'participant' || !reversal.technicianId || reversal.reversalCents <= 0) {
+              continue;
+            }
+            await this.reverseParticipantRefund(
+              manager,
+              reversal.technicianId,
+              reversal.reversalCents,
+              platformWallet.id,
+              lockedRefund.id,
+              lockedOrder.orderNumber,
+            );
+          }
+        } else {
+          const sourceShares =
+            recordedShares.length > 0
+              ? recordedShares.map((share) => ({
+                  technicianId: share.technicianId,
+                  participantRole: share.participantRole,
+                  shareCents: share.shareCents,
+                }))
+              : [
+                  {
+                    technicianId: lockedOrder.technicianId!,
+                    participantRole: 'leader' as const,
+                    shareCents: lockedOrder.technicianEarningCents,
+                  },
+                ];
+          const reversals = allocateCrewRefundReversal({
+            grossPoolCents: lockedOrder.technicianEarningCents,
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: amountCents,
+            shares: sourceShares,
+          });
+          for (const reversal of reversals) {
+            if (reversal.reversalCents <= 0) continue;
+            await this.reverseParticipantRefund(
+              manager,
+              reversal.technicianId,
+              reversal.reversalCents,
+              platformWallet.id,
+              lockedRefund.id,
+              lockedOrder.orderNumber,
+            );
+          }
+        }
       }
 
       // wallet credit فعلي للعميل بس لو مفيش استرداد حقيقي حصل عند البوابة (WALLET_CREDIT fallback).
@@ -2609,8 +2938,9 @@ export class PaymentsService {
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
           WalletOwnerType.CUSTOMER,
+          manager,
         );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         await this.walletsService.doubleEntry(
           {
@@ -2695,6 +3025,7 @@ export class PaymentsService {
       await recordRefundAudit();
       return lockedRefund;
     });
+    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 
@@ -2843,8 +3174,9 @@ export class PaymentsService {
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
           WalletOwnerType.CUSTOMER,
+          manager,
         );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         await this.walletsService.doubleEntry(
           {
@@ -2876,6 +3208,7 @@ export class PaymentsService {
       return refund;
     });
 
+    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -82,6 +84,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _selectedPaymentMethod;
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
+
   /// **حقل كود واحد بدل اتنين (docs/08 §77-B4، طلب مالك صريح)**: «موجود مكانين تدخل فيهم
   /// أكواد… ملهاش لازمة خالص يبقوا اتنين، هو واحد كفاية وندمج فيه الاتنين».
   ///
@@ -124,10 +127,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _codeError;
 
   /// الكود اللي هيتبعت كـ`promo_code` — فاضي إلا لو التحقق أثبت إنه كود خصم.
-  String get _promoCodeToSend => _resolvedCodeKind == 'promo' ? _codeController.text.trim() : '';
+  String get _promoCodeToSend =>
+      _resolvedCodeKind == 'promo' ? _codeController.text.trim() : '';
 
   /// الكود اللي هيتبعت كـ`building_code` — نفس المنطق بالظبط.
-  String get _buildingCodeToSend => _resolvedCodeKind == 'building' ? _codeController.text.trim() : '';
+  String get _buildingCodeToSend =>
+      _resolvedCodeKind == 'building' ? _codeController.text.trim() : '';
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
@@ -136,11 +141,51 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
   // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
   bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
-  bool get _isPerUnitPricing => widget.service.pricingModel == 'per_unit';
+  bool get _isQuantityPricing =>
+      widget.service.pricingModel == 'per_unit' ||
+      widget.service.pricingModel == 'monthly';
+  String get _quantityUnitLabel =>
+      widget.service.unitNameAr ??
+      (widget.service.pricingModel == 'monthly' ? 'الشهور' : 'الوحدات');
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
   final Map<String, dynamic> _fieldValues = {};
+  final List<({String id, Uint8List bytes})> _problemImages = [];
+  bool _uploadingProblemImages = false;
+  bool _requestRemoteQuote = false;
+
+  bool get _canRequestRemoteQuote =>
+      widget.service.pricingModel == 'inspection_then_quote' &&
+      widget.bookingMode != BookingMode.emergency;
+
+  Future<void> _pickProblemImages() async {
+    if (_uploadingProblemImages || _problemImages.length >= 10) return;
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 82,
+      limit: 10 - _problemImages.length,
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _uploadingProblemImages = true);
+    try {
+      for (final image in picked) {
+        final bytes = await image.readAsBytes();
+        final id = await _repository.uploadProblemImage(
+          serviceId: widget.service.id,
+          fileBytes: bytes,
+          filename: image.name,
+        );
+        if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
+      }
+    } on ApiException catch (err) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _uploadingProblemImages = false);
+    }
+  }
 
   // تفصيل السعر الحقيقي الكامل قبل التأكيد (docs/08 §1/§2) — كانت فجوة موثّقة صراحة: الشاشة
   // كانت بتعرض إما basePriceCents الثابت (بلا تعديل منطقة/طوارئ) أو سعر formula خام (بلا رسوم
@@ -210,7 +255,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (widget.requestedDurationHours != null) {
       _durationHoursController.text = widget.requestedDurationHours.toString();
     }
-    if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
+    if (widget.initialFieldValues != null)
+      _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
     if (_isFormulaPricing) {
       _loadPricingFields();
@@ -223,7 +269,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
   // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
-  bool get _requiresElectronicPayment => !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
+  bool get _requiresElectronicPayment =>
+      !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
 
   // "كرّر الحجز ده" (migration 0176) — الاختيار بيظهر بس لما التكرار ممكن فعلاً: خدمة مفعّل
   // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد). خدمات "عدد ساعات
@@ -236,9 +283,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (widget.service.requiresHoursOnly) return false;
     final DateTime? at = widget.service.requiresStartAndEnd
         ? _startAndEndStart
-        : (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly)
-            ? _combinedPreciseScheduledAt()
-            : _requestedAt;
+        : (widget.service.requiresPreciseSchedule ||
+              widget.service.requiresStartTimeOnly)
+        ? _combinedPreciseScheduledAt()
+        : _requestedAt;
     return at != null;
   }
 
@@ -249,7 +297,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   void _reconcilePaymentMethodSelection() {
     if (_selectedPaymentMethod != null &&
         (!_availablePaymentMethods.contains(_selectedPaymentMethod) ||
-            (_selectedPaymentMethod == 'installment' && (!_hasInstallmentPlans || _requiresElectronicPayment)))) {
+            (_selectedPaymentMethod == 'installment' &&
+                (!_hasInstallmentPlans || _requiresElectronicPayment)))) {
       _selectedPaymentMethod = null;
     }
     if (_requiresElectronicPayment && _selectedPaymentMethod == null) {
@@ -281,13 +330,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       // الضمان اختياري؛ فشله لا يخفي طرق الدفع.
     }
     try {
-      hasInstallmentPlans = await _repository.hasInstallmentPlans(widget.service.id);
+      hasInstallmentPlans = await _repository.hasInstallmentPlans(
+        widget.service.id,
+      );
     } catch (_) {
       // ستظهر طريقة التقسيط مع سبب عدم الجاهزية بدل اختفاء بقية القنوات.
     }
     if (!mounted) return;
     setState(() {
-      _paymentChannels = {for (final channel in channels) channel.method: channel};
+      _paymentChannels = {
+        for (final channel in channels) channel.method: channel,
+      };
       _optionalWarranties = warranties;
       _hasInstallmentPlans = hasInstallmentPlans;
       _checkoutOptionsError = channelError;
@@ -307,7 +360,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   Future<void> _loadStandardData() async {
     try {
-      final rows = await _catalogRepository.fetchStandardData(widget.service.id);
+      final rows = await _catalogRepository.fetchStandardData(
+        widget.service.id,
+      );
       if (mounted && rows.isNotEmpty) {
         setState(() {
           _standardDataRows = rows;
@@ -325,7 +380,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _durationError = null;
     });
     _durationDebounce?.cancel();
-    _durationDebounce = Timer(const Duration(milliseconds: 500), _refreshDurationEstimate);
+    _durationDebounce = Timer(
+      const Duration(milliseconds: 500),
+      _refreshDurationEstimate,
+    );
   }
 
   void _onPricingQuantityChanged(String _) {
@@ -352,7 +410,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (standardData == null || units == null || units <= 0) return;
     setState(() => _estimatingDuration = true);
     try {
-      final result = await _catalogRepository.estimateDuration(widget.service.id, standardData.id, units);
+      final result = await _catalogRepository.estimateDuration(
+        widget.service.id,
+        standardData.id,
+        units,
+      );
       if (mounted) setState(() => _durationEstimate = result);
     } on ApiException catch (err) {
       if (mounted) setState(() => _durationError = err.message);
@@ -364,7 +426,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _loadPricingFields() async {
     setState(() => _loadingPricingFields = true);
     try {
-      final fields = await _catalogRepository.fetchPricingFields(widget.service.id);
+      final fields = await _catalogRepository.fetchPricingFields(
+        widget.service.id,
+      );
       if (mounted) {
         setState(() {
           _pricingFields = fields;
@@ -375,7 +439,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           // الإصلاح: نفس الافتراض الضمني اللي الباك-إند بيطبّقه (resolveDefaultValue في
           // pricing-engine.service.ts) — false صريحة من أول ما الفورم يتحمّل، مش لما العميل يدوس.
           for (final field in fields) {
-            if (field.fieldType == 'checkbox' && !_fieldValues.containsKey(field.fieldKey)) {
+            if (field.fieldType == 'checkbox' &&
+                !_fieldValues.containsKey(field.fieldKey)) {
               _fieldValues[field.fieldKey] = false;
             }
           }
@@ -391,11 +456,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // كل حقول formula المطلوبة والمدعومة (راجع PricingField.isSupported) لازم تتملى قبل ما نقدر
   // نحسب سعر حقيقي — نفس التحقق اللي PricingEngineService.evaluate() بيعمله في الباك-إند بالظبط،
   // بس هنا عشان نقرر إمتى نستدعي evaluate-price بدل ما نبعت طلبات ناقصة تترفض كل مرة.
-  bool get _pricingFieldsComplete => _pricingFields
-      .where((f) => f.isRequired && f.isSupported)
-      .every((f) => _fieldValues[f.fieldKey] != null && _fieldValues[f.fieldKey] != '');
+  bool get _pricingFieldsComplete =>
+      _pricingFields.where((f) => f.isSupported).every((f) {
+        final value = _fieldValues[f.fieldKey];
+        if (f.fieldType == 'image_upload') {
+          final count = value is String
+              ? value.split(',').where((id) => id.trim().isNotEmpty).length
+              : 0;
+          return count >= (f.minFiles ?? (f.isRequired ? 1 : 0));
+        }
+        return !f.isRequired || (value != null && value != '');
+      });
 
-  bool get _hasUnsupportedRequiredField => _pricingFields.any((f) => f.isRequired && !f.isSupported);
+  bool get _hasUnsupportedRequiredField =>
+      _pricingFields.any((f) => f.isRequired && !f.isSupported);
 
   void _onFieldValueChanged(String fieldKey, dynamic value) {
     setState(() {
@@ -408,23 +482,33 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _previewError = null;
     });
     _priceDebounce?.cancel();
-    _priceDebounce = Timer(const Duration(milliseconds: 500), () => _refreshPreview());
+    _priceDebounce = Timer(
+      const Duration(milliseconds: 500),
+      () => _refreshPreview(),
+    );
   }
 
   // معاينة السعر الكامل — مصدر واحد (POST /orders/preview) لكل نماذج التسعير، بدل ما كل نموذج
   // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
   // الكود بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validateCode) — مش أوتوماتيك مع كل
   // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
-  Future<void> _refreshPreview({String? promoCode, String? buildingCode}) async {
+  Future<void> _refreshPreview({
+    String? promoCode,
+    String? buildingCode,
+  }) async {
     if (_selectedAddress == null) return;
     if (_isFormulaPricing && !_pricingFieldsComplete) return;
-    final pricingQuantity = num.tryParse(_pricingQuantityController.text.trim());
-    if (_isPerUnitPricing && (pricingQuantity == null || pricingQuantity <= 0)) {
+    final pricingQuantity = num.tryParse(
+      _pricingQuantityController.text.trim(),
+    );
+    if (_isQuantityPricing &&
+        (pricingQuantity == null || pricingQuantity <= 0)) {
       return;
     }
     final durationHours = int.tryParse(_durationHoursController.text.trim());
     if (widget.service.pricingModel == 'hourly' &&
-        (widget.service.requiresPreciseSchedule || widget.service.requiresHoursOnly) &&
+        (widget.service.requiresPreciseSchedule ||
+            widget.service.requiresHoursOnly) &&
         durationHours == null) {
       return;
     }
@@ -442,8 +526,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: promoCode,
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
-        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
-        durationHours: widget.service.pricingModel == 'hourly' ? durationHours : null,
+        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
+        durationHours: widget.service.pricingModel == 'hourly'
+            ? durationHours
+            : null,
         scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
       );
       if (mounted && generation == _previewRequestGeneration) {
@@ -453,9 +539,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         });
       }
     } on ApiException catch (err) {
-      if (mounted && generation == _previewRequestGeneration) setState(() => _previewError = err.message);
+      if (mounted && generation == _previewRequestGeneration)
+        setState(() => _previewError = err.message);
     } finally {
-      if (mounted && generation == _previewRequestGeneration) setState(() => _previewLoading = false);
+      if (mounted && generation == _previewRequestGeneration)
+        setState(() => _previewLoading = false);
     }
   }
 
@@ -472,7 +560,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   Future<void> _pickAddress() async {
     final address = await Navigator.of(context).push<Address>(
-      MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
+      MaterialPageRoute(
+        builder: (_) => const AddressesScreen(selectionMode: true),
+      ),
     );
     if (address != null) {
       setState(() {
@@ -492,7 +582,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       MaterialPageRoute(
         builder: (_) => ScheduleSelectionScreen(
           allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
-          requiresPreciseTime: widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly,
+          requiresPreciseTime:
+              widget.service.requiresPreciseSchedule ||
+              widget.service.requiresStartTimeOnly,
           requiresDurationHours: widget.service.requiresPreciseSchedule,
           // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
           // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
@@ -506,7 +598,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _requestedAt = choice.scheduledAt;
         _requestedAtRangeEnd = choice.rangeEnd;
         if (choice.preciseTime != null) _preciseTime = choice.preciseTime;
-        if (choice.durationHours != null) _durationHoursController.text = choice.durationHours.toString();
+        if (choice.durationHours != null)
+          _durationHoursController.text = choice.durationHours.toString();
       });
     }
   }
@@ -521,7 +614,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   }
 
   Future<void> _pickPreciseTime() async {
-    final picked = await showTimePicker(context: context, initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0));
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0),
+    );
     if (picked != null && mounted) setState(() => _preciseTime = picked);
   }
 
@@ -538,7 +634,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (date == null || !mounted) return null;
     final time = await showTimePicker(
       context: context,
-      initialTime: initial != null ? TimeOfDay.fromDateTime(initial) : const TimeOfDay(hour: 10, minute: 0),
+      initialTime: initial != null
+          ? TimeOfDay.fromDateTime(initial)
+          : const TimeOfDay(hour: 10, minute: 0),
     );
     if (time == null || !mounted) return null;
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
@@ -570,9 +668,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return 'مرن: ${two(at.day)}/${two(at.month)} — ${two(rangeEnd.day)}/${two(rangeEnd.month)}';
     }
     final today = DateTime.now();
-    final isToday = at.year == today.year && at.month == today.month && at.day == today.day;
+    final isToday =
+        at.year == today.year && at.month == today.month && at.day == today.day;
     final tomorrow = today.add(const Duration(days: 1));
-    final isTomorrow = at.year == tomorrow.year && at.month == tomorrow.month && at.day == tomorrow.day;
+    final isTomorrow =
+        at.year == tomorrow.year &&
+        at.month == tomorrow.month &&
+        at.day == tomorrow.day;
     if (isToday) return 'النهاردة';
     if (isTomorrow) return 'بكرة';
     final two = (int n) => n.toString().padLeft(2, '0');
@@ -606,7 +708,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     });
     final generation = ++_previewRequestGeneration;
 
-    Future<OrderPricePreview> attempt({required bool asBuilding}) => _repository.previewPrice(
+    Future<OrderPricePreview> attempt({required bool asBuilding}) =>
+        _repository.previewPrice(
           serviceId: widget.service.id,
           addressId: _selectedAddress!.id,
           bookingMode: widget.bookingMode,
@@ -617,9 +720,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           promoCode: asBuilding ? null : code,
           buildingCode: asBuilding ? code : null,
           warrantyPlanId: _selectedWarrantyPlanId,
-          pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
-          durationHours:
-              widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
+          pricingQuantity: _isQuantityPricing
+              ? num.tryParse(_pricingQuantityController.text.trim())
+              : null,
+          durationHours: widget.service.pricingModel == 'hourly'
+              ? int.tryParse(_durationHoursController.text.trim())
+              : null,
           scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
         );
 
@@ -658,28 +764,49 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     try {
       final idempotencyKey = _paymentsRepository.generateIdempotencyKey();
       if (method == 'card') {
-        final redirectUrl = await _paymentsRepository.payWithCard(orderId, idempotencyKey);
+        final redirectUrl = await _paymentsRepository.payWithCard(
+          orderId,
+          idempotencyKey,
+        );
         if (!mounted) return;
         await Navigator.of(context).push<bool>(
-          MaterialPageRoute(builder: (_) => CardPaymentScreen(orderId: orderId, redirectUrl: redirectUrl)),
+          MaterialPageRoute(
+            builder: (_) =>
+                CardPaymentScreen(orderId: orderId, redirectUrl: redirectUrl),
+          ),
         );
       } else if (method == 'instapay') {
-        final reference = await _paymentsRepository.payWithInstaPay(orderId, idempotencyKey);
+        final reference = await _paymentsRepository.payWithInstaPay(
+          orderId,
+          idempotencyKey,
+        );
         if (!mounted) return;
         await Navigator.of(context).push<bool>(
-          MaterialPageRoute(builder: (_) => InstaPayReferenceScreen(orderId: orderId, reference: reference)),
+          MaterialPageRoute(
+            builder: (_) =>
+                InstaPayReferenceScreen(orderId: orderId, reference: reference),
+          ),
         );
       } else if (method == 'fawry_reference') {
-        final reference = await _paymentsRepository.payWithFawryReference(orderId, idempotencyKey);
+        final reference = await _paymentsRepository.payWithFawryReference(
+          orderId,
+          idempotencyKey,
+        );
         if (!mounted) return;
         await Navigator.of(context).push<bool>(
-          MaterialPageRoute(builder: (_) => FawryReferenceScreen(orderId: orderId, reference: reference)),
+          MaterialPageRoute(
+            builder: (_) =>
+                FawryReferenceScreen(orderId: orderId, reference: reference),
+          ),
         );
       }
     } on ApiException catch (err) {
       // مش هيمنع الانتقال لـOrderDetailScreen — العميل يقدر يعيد المحاولة من هناك لو الأزرار
       // موجودة، أو الطلب هيتلغى تلقائيًا لو ماكملش خلال المهلة (راجع تعليق _submit فوق).
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }
 
@@ -707,23 +834,38 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     if (_isFormulaPricing) {
       if (_hasUnsupportedRequiredField) {
-        setState(() => _error = 'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه — كلم الدعم لإتمام الحجز');
+        setState(
+          () => _error =
+              'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه — كلم الدعم لإتمام الحجز',
+        );
         return;
       }
       if (!_pricingFieldsComplete) {
-        _failValidation('كمّل كل بيانات السعر المطلوبة الأول', _pricingFieldsSectionKey);
+        _failValidation(
+          'كمّل كل بيانات السعر المطلوبة الأول',
+          _pricingFieldsSectionKey,
+        );
         return;
       }
     }
-    final pricingQuantity = num.tryParse(_pricingQuantityController.text.trim());
-    if (_isPerUnitPricing && (pricingQuantity == null || pricingQuantity <= 0)) {
-      _failValidation('حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة', _unitsSectionKey);
+    final pricingQuantity = num.tryParse(
+      _pricingQuantityController.text.trim(),
+    );
+    if (_isQuantityPricing &&
+        (pricingQuantity == null || pricingQuantity <= 0)) {
+      _failValidation('حدد عدد $_quantityUnitLabel المطلوبة', _unitsSectionKey);
       return;
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
-    if (_pricePreview == null) {
+    if (!_requestRemoteQuote && _pricePreview == null) {
       setState(() => _error = 'استنى لحد ما السعر يتحسب');
+      return;
+    }
+    if (_requestRemoteQuote && _problemImages.isEmpty) {
+      setState(
+        () => _error = 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر',
+      );
       return;
     }
     // أوضاع التوقيت الثلاثة الجديدة (ADR-0032) — تحقق عميل واضح قبل ما نوصل لرسالة الباك-إند
@@ -734,7 +876,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         return;
       }
       if (!_startAndEndEnd!.isAfter(_startAndEndStart!)) {
-        _failValidation('وقت النهاية لازم يكون بعد وقت البداية', _scheduleSectionKey);
+        _failValidation(
+          'وقت النهاية لازم يكون بعد وقت البداية',
+          _scheduleSectionKey,
+        );
         return;
       }
     }
@@ -744,7 +889,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _failValidation('حدد عدد الساعات المطلوبة', _scheduleSectionKey);
       return;
     }
-    if (widget.scheduleSlotId == null && widget.service.requiresStartTimeOnly && _combinedPreciseScheduledAt() == null) {
+    if (widget.scheduleSlotId == null &&
+        widget.service.requiresStartTimeOnly &&
+        _combinedPreciseScheduledAt() == null) {
       _failValidation('حدد تاريخ ووقت بداية الخدمة', _scheduleSectionKey);
       return;
     }
@@ -765,38 +912,53 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         scheduledAt: widget.scheduleSlotId != null
             ? null
             : widget.service.requiresStartAndEnd
-                ? _startAndEndStart?.toUtc().toIso8601String()
-                : widget.service.requiresHoursOnly
-                    ? null
-                    : (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly
-                            ? _combinedPreciseScheduledAt()
-                            : _requestedAt)
-                        ?.toUtc()
-                        .toIso8601String(),
+            ? _startAndEndStart?.toUtc().toIso8601String()
+            : widget.service.requiresHoursOnly
+            ? null
+            : (widget.service.requiresPreciseSchedule ||
+                          widget.service.requiresStartTimeOnly
+                      ? _combinedPreciseScheduledAt()
+                      : _requestedAt)
+                  ?.toUtc()
+                  .toIso8601String(),
         // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد أو وضع
         // "بداية+نهاية"/"عدد ساعات بس" الجديدين (نفس منطق scheduledAt فوق بالحرف).
-        scheduledAtRangeEnd: widget.scheduleSlotId == null && !widget.service.requiresStartAndEnd && !widget.service.requiresHoursOnly
+        scheduledAtRangeEnd:
+            widget.scheduleSlotId == null &&
+                !widget.service.requiresStartAndEnd &&
+                !widget.service.requiresHoursOnly
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()
             : null,
-        durationHours: (widget.service.requiresPreciseSchedule || widget.service.requiresHoursOnly)
+        durationHours:
+            (widget.service.requiresPreciseSchedule ||
+                widget.service.requiresHoursOnly)
             ? int.tryParse(_durationHoursController.text.trim())
             : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true.
-        scheduledEndAt: widget.service.requiresStartAndEnd ? _startAndEndEnd?.toUtc().toIso8601String() : null,
+        scheduledEndAt: widget.service.requiresStartAndEnd
+            ? _startAndEndEnd?.toUtc().toIso8601String()
+            : null,
         problemDescription: _descriptionController.text.trim(),
-        promoCode: _promoCodeToSend,
-        buildingCode: _buildingCodeToSend,
-        addonIds: _selectedAddonIds.toList(),
+        promoCode: _requestRemoteQuote ? '' : _promoCodeToSend,
+        buildingCode: _requestRemoteQuote ? '' : _buildingCodeToSend,
+        addonIds: _requestRemoteQuote ? const [] : _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
+        problemImageIds: _problemImages.map((item) => item.id).toList(),
+        requestRemoteQuote: _requestRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
-        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
-        paymentMethod: _selectedPaymentMethod == 'installment' ? null : _selectedPaymentMethod,
-        warrantyPlanId: _selectedWarrantyPlanId,
+        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
+        paymentMethod:
+            _requestRemoteQuote || _selectedPaymentMethod == 'installment'
+            ? null
+            : _selectedPaymentMethod,
+        warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
-        repeatFrequency: _canRepeat ? _repeatFrequency : null,
+        repeatFrequency: _requestRemoteQuote
+            ? null
+            : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
@@ -804,12 +966,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       // فشل/إلغاء العميل لشاشة الدفع هنا مش نهاية العالم: الطلب فضل pending_payment،
       // sweepPendingPayment() في الباك-إند هيلغيه تلقائيًا لو العميل ماكملش خلال المهلة
       // (orders.payment_timeout_minutes) — مفيش طلب معلّق للأبد.
-      if (order.orderStatus == 'pending_payment' && _selectedPaymentMethod != null && _selectedPaymentMethod != 'installment') {
+      if (order.orderStatus == 'pending_payment' &&
+          _selectedPaymentMethod != null &&
+          _selectedPaymentMethod != 'installment') {
         await _startPrepayment(order.id, _selectedPaymentMethod!);
       }
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
+          MaterialPageRoute(
+            builder: (_) => OrderDetailScreen(orderId: order.id),
+          ),
         );
       }
     } on ApiException catch (err) {
@@ -821,17 +987,31 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
-  Widget _buildPriceLine(String label, String value, {bool bold = false, Color? color}) {
+  Widget _buildPriceLine(
+    String label,
+    String value, {
+    bool bold = false,
+    Color? color,
+  }) {
     final style = TextStyle(
       fontWeight: bold ? FontWeight.bold : FontWeight.normal,
       color: color,
       fontSize: bold ? 16 : 14,
     );
+    // docs/08 §108-H — بَقّة overflow منهجية: التسمية أحيانًا نص طويل (زي شرح فرق سعر الفني
+    // المميّز) وكانت من غير Expanded/Flexible خالص، فبتفيض لو المساحة ضاقت (شاشة صغيرة أو خط
+    // كبير). الرقم بيفضل زي ما هو (تقصيره مضلل لسعر)، والتسمية بس هي اللي بتنكمش بـ"...".
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text(value, style: style)],
+        children: [
+          Expanded(
+            child: Text(label, style: style, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Text(value, style: style),
+        ],
       ),
     );
   }
@@ -846,12 +1026,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   }) {
     final channel = _paymentChannels[method];
     final available = channel?.available == true && extraAllowed;
-    final reason = extraUnavailableReason ?? channel?.unavailableReason ??
-        (_checkoutOptionsError != null ? 'تعذر التحقق من جاهزية الطريقة' : 'جاري التحقق من الجاهزية');
+    final reason =
+        extraUnavailableReason ??
+        channel?.unavailableReason ??
+        (_checkoutOptionsError != null
+            ? 'تعذر التحقق من جاهزية الطريقة'
+            : 'جاري التحقق من الجاهزية');
     return RadioListTile<String?>(
       value: method,
       groupValue: _selectedPaymentMethod,
-      onChanged: available ? (value) => setState(() => _selectedPaymentMethod = value) : null,
+      onChanged: available
+          ? (value) => setState(() => _selectedPaymentMethod = value)
+          : null,
       secondary: Icon(icon),
       title: Text(title),
       subtitle: Text(available ? subtitle : reason),
@@ -862,7 +1048,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // واحد غامض"). نفس البنود بالحرف اللي POST /orders هيحسبها فعليًا لو اتبعتت نفس المدخلات.
   Widget _buildPriceBreakdown() {
     if (_selectedAddress == null) {
-      return const Text('اختار عنوان الأول عشان نعرضلك السعر الحقيقي (السعر بيختلف حسب المنطقة)');
+      return const Text(
+        'اختار عنوان الأول عشان نعرضلك السعر الحقيقي (السعر بيختلف حسب المنطقة)',
+      );
     }
     if (_isFormulaPricing && !_pricingFieldsComplete) {
       return const Text('كمّل بيانات السعر تحت عشان نحسبلك السعر');
@@ -870,7 +1058,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_previewLoading && _pricePreview == null) {
       return const Row(
         children: [
-          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
           SizedBox(width: 8),
           Text('بيتحسب السعر...'),
         ],
@@ -880,7 +1072,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return Text(_previewError!, style: const TextStyle(color: Colors.red));
     }
     final preview = _pricePreview;
-    if (preview == null) return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
+    if (preview == null)
+      return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -894,18 +1087,39 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-        if (preview.inspectionFeeCents > 0) _buildPriceLine('رسوم الفحص', _formatEgp(preview.inspectionFeeCents)),
+        if (preview.inspectionFeeCents > 0)
+          _buildPriceLine('رسوم الفحص', _formatEgp(preview.inspectionFeeCents)),
         if (preview.emergencySurchargeCents > 0)
-          _buildPriceLine('رسوم الطوارئ', '+${_formatEgp(preview.emergencySurchargeCents)}', color: Colors.orange),
+          _buildPriceLine(
+            'رسوم الطوارئ',
+            '+${_formatEgp(preview.emergencySurchargeCents)}',
+            color: Colors.orange,
+          ),
         if (preview.emergencySlaMinutes != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text('هيوصلك خلال ${preview.emergencySlaMinutes} دقيقة تقريبًا', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            child: Text(
+              'هيوصلك خلال ${preview.emergencySlaMinutes} دقيقة تقريبًا',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           ),
-        if (preview.addonsTotalCents > 0) _buildPriceLine('الإضافات', '+${_formatEgp(preview.addonsTotalCents)}'),
-        if (preview.discountCents > 0) _buildPriceLine('الخصم', '-${_formatEgp(preview.discountCents)}', color: Colors.green),
+        if (preview.addonsTotalCents > 0)
+          _buildPriceLine(
+            'الإضافات',
+            '+${_formatEgp(preview.addonsTotalCents)}',
+          ),
+        if (preview.discountCents > 0)
+          _buildPriceLine(
+            'الخصم',
+            '-${_formatEgp(preview.discountCents)}',
+            color: Colors.green,
+          ),
         if (preview.warrantyPriceCents > 0)
-          _buildPriceLine('الضمان الاختياري', '+${_formatEgp(preview.warrantyPriceCents)}', color: Colors.blue),
+          _buildPriceLine(
+            'الضمان الاختياري',
+            '+${_formatEgp(preview.warrantyPriceCents)}',
+            color: Colors.blue,
+          ),
         if (preview.estimatedDurationDays != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
@@ -915,7 +1129,47 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ),
         const Divider(height: 12),
-        _buildPriceLine('الإجمالي', _formatEgp(preview.totalAmountCents), bold: true),
+        _buildPriceLine(
+          'الإجمالي',
+          _formatEgp(preview.totalAmountCents),
+          bold: true,
+        ),
+        if (widget.requestedTechnicianId == null &&
+            widget.requestedTechnicianCompanyId == null &&
+            widget.scheduleSlotId == null)
+          Container(
+            margin: const EdgeInsets.only(top: 8, bottom: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.primaryContainer.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.workspace_premium_outlined,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'ده السعر الحالي قبل اختيار الفني. قد يزيد الإجمالي حسب مستوى الفني '
+                    'اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.',
+                    style: TextStyle(fontSize: 12.5, height: 1.45),
+                  ),
+                ),
+              ],
+            ),
+          ),
         // سياسة إيداع (ADR-0027) — كانت فجوة موثّقة صراحة: الرقم ده كان محسوب بالباك-إند من زمان
         // (PreviewOrderResponseDto.deposit_amount_cents) بلا أي عرض هنا، فالعميل كان يشوف إجمالي
         // الطلب بس من غير ما يعرف إن جزء بس هيتحصّل دلوقتي والباقي بعدين.
@@ -926,12 +1180,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             bold: true,
             color: Theme.of(context).colorScheme.primary,
           ),
-          _buildPriceLine('الباقي بعد ما الشغل يخلص', _formatEgp(preview.remainingAmountCents ?? 0)),
+          _buildPriceLine(
+            'الباقي بعد ما الشغل يخلص',
+            _formatEgp(preview.remainingAmountCents ?? 0),
+          ),
         ],
         if (_previewLoading)
           const Padding(
             padding: EdgeInsets.only(top: 4),
-            child: Text('بيتحدّث...', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            child: Text(
+              'بيتحدّث...',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
           ),
       ],
     );
@@ -944,7 +1204,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_standardDataRows.isEmpty) return const [];
     return [
       const SizedBox(height: 16),
-      Text('المدة المتوقعة (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+      Text(
+        'المدة المتوقعة (اختياري)',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
       const SizedBox(height: 8),
       Card(
         child: Padding(
@@ -957,9 +1220,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DropdownButtonFormField<ServiceStandardDataRow>(
                     initialValue: _selectedStandardData,
-                    decoration: const InputDecoration(labelText: 'نوع التنفيذ', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'نوع التنفيذ',
+                      border: OutlineInputBorder(),
+                    ),
                     items: _standardDataRows
-                        .map((row) => DropdownMenuItem(value: row, child: Text(row.executionTypeAr)))
+                        .map(
+                          (row) => DropdownMenuItem(
+                            value: row,
+                            child: Text(row.executionTypeAr),
+                          ),
+                        )
                         .toList(),
                     onChanged: (value) {
                       setState(() {
@@ -967,13 +1238,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         _durationEstimate = null;
                         _durationError = null;
                       });
-                      if (_requestedUnitsController.text.trim().isNotEmpty) _refreshDurationEstimate();
+                      if (_requestedUnitsController.text.trim().isNotEmpty)
+                        _refreshDurationEstimate();
                     },
                   ),
                 ),
               TextField(
                 controller: _requestedUnitsController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: InputDecoration(
                   labelText: 'الكمية (${_selectedStandardData?.unitAr ?? ''})',
                   border: const OutlineInputBorder(),
@@ -982,10 +1256,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
               if (_estimatingDuration) ...[
                 const SizedBox(height: 8),
-                const Text('بيتحسب...', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  'بيتحسب...',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               ] else if (_durationError != null) ...[
                 const SizedBox(height: 8),
-                Text(_durationError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                Text(
+                  _durationError!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
               ] else if (_durationEstimate != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -1000,7 +1280,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const SupportContactScreen(),
+                    ),
                   ),
                   icon: const Icon(Icons.help_outline, size: 18),
                   label: const Text('مش عارف تقيس؟ كلّمنا نساعدك'),
@@ -1026,10 +1308,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         Text(_pricingFieldsError!, style: const TextStyle(color: Colors.red)),
       ];
     }
-    final sortedFields = [..._pricingFields]..sort((a, b) => a.fieldKey.compareTo(b.fieldKey));
+    final sortedFields = [..._pricingFields]
+      ..sort((a, b) => a.fieldKey.compareTo(b.fieldKey));
     return [
       const SizedBox(height: 16),
-      Text('تفاصيل تحديد السعر', style: Theme.of(context).textTheme.titleMedium),
+      Text(
+        'تفاصيل تحديد السعر',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
       const SizedBox(height: 8),
       Card(
         child: Padding(
@@ -1047,7 +1333,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // منطق رسم الحقول اتقلع لملف مشترك (catalog/pricing_field_widgets.dart) — P0-10 (2026-08-13):
   // JobDetailsScreen محتاجة نفس الرسم قبل شاشة اختيار الفني، فمفيش داعي نكرره هنا.
   Widget _buildPricingFieldWidget(PricingField field) =>
-      buildPricingFieldWidget(context, field, _fieldValues, _onFieldValueChanged);
+      buildPricingFieldWidget(
+        context,
+        field,
+        _fieldValues,
+        _onFieldValueChanged,
+        onUploadImage: (pricingField, image) async =>
+            _repository.uploadPricingFieldImage(
+              serviceId: widget.service.id,
+              fieldId: pricingField.id,
+              fileBytes: await image.readAsBytes(),
+              filename: image.name,
+            ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -1058,9 +1356,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Card(
-              child: ListTile(title: Text(widget.service.nameAr)),
-            ),
+            Card(child: ListTile(title: Text(widget.service.nameAr))),
             const SizedBox(height: 16),
             Text(
               'عنوان الطلب',
@@ -1071,7 +1367,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             Card(
               child: ListTile(
                 title: Text(_selectedAddress?.displayTitle ?? 'اختار عنوان'),
-                subtitle: _selectedAddress != null ? Text(_selectedAddress!.streetName) : null,
+                subtitle: _selectedAddress != null
+                    ? Text(_selectedAddress!.streetName)
+                    : null,
                 trailing: const Icon(Icons.chevron_left),
                 onTap: _pickAddress,
               ),
@@ -1083,7 +1381,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 child: const ListTile(
                   leading: Icon(Icons.event_available_outlined),
                   title: Text('حجز موعد محدد مع هذا الفني'),
-                  subtitle: Text('الطلب هيتوزّع على الفني ده أول حاجة — لو مش متاح وقتها، هنلاقيلك فني تاني'),
+                  subtitle: Text(
+                    'الطلب هيتوزّع على الفني ده أول حاجة — لو مش متاح وقتها، هنلاقيلك فني تاني',
+                  ),
                 ),
               ),
             ] else if (widget.bookingMode != BookingMode.emergency) ...[
@@ -1101,7 +1401,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   controller: _durationHoursController,
                   keyboardType: TextInputType.number,
                   onChanged: _onDurationHoursChanged,
-                  decoration: const InputDecoration(labelText: 'عدد الساعات', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'عدد الساعات',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
               ]
               // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين مستقلين للاتنين، مالوش علاقة
@@ -1117,7 +1420,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   child: ListTile(
                     leading: const Icon(Icons.event_outlined),
                     title: Text(
-                      _startAndEndStart != null ? _formatFullDateTime(_startAndEndStart!) : 'حدد تاريخ ووقت البداية',
+                      _startAndEndStart != null
+                          ? _formatFullDateTime(_startAndEndStart!)
+                          : 'حدد تاريخ ووقت البداية',
                     ),
                     trailing: const Icon(Icons.chevron_left),
                     onTap: _pickStartAndEndStart,
@@ -1128,18 +1433,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   child: ListTile(
                     leading: const Icon(Icons.event_available_outlined),
                     title: Text(
-                      _startAndEndEnd != null ? _formatFullDateTime(_startAndEndEnd!) : 'حدد تاريخ ووقت النهاية',
+                      _startAndEndEnd != null
+                          ? _formatFullDateTime(_startAndEndEnd!)
+                          : 'حدد تاريخ ووقت النهاية',
                     ),
                     trailing: const Icon(Icons.chevron_left),
                     onTap: _pickStartAndEndEnd,
                   ),
                 ),
               ] else ...[
-                Text('الموعد المطلوب', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'الموعد المطلوب',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 Card(
                   child: ListTile(
-                    leading: Icon(_requestedAtRangeEnd != null ? Icons.event_repeat_outlined : Icons.event_outlined),
+                    leading: Icon(
+                      _requestedAtRangeEnd != null
+                          ? Icons.event_repeat_outlined
+                          : Icons.event_outlined,
+                    ),
                     title: Text(_formatRequestedAt()),
                     trailing: const Icon(Icons.chevron_left),
                     onTap: _pickSchedule,
@@ -1147,12 +1461,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
                 // دقة الوقت (ADR-0031 Slice B) + وضع "بداية بس" (ADR-0032) — الاتنين محتاجين
                 // وقت بداية دقيق فوق اليوم المختار، بس دقة الوقت وحدها محتاجة مدة كمان تحت.
-                if (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly) ...[
+                if (widget.service.requiresPreciseSchedule ||
+                    widget.service.requiresStartTimeOnly) ...[
                   const SizedBox(height: 8),
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.schedule_outlined),
-                      title: Text(_preciseTime != null ? 'الساعة ${_preciseTime!.format(context)}' : 'حدد وقت البداية'),
+                      title: Text(
+                        _preciseTime != null
+                            ? 'الساعة ${_preciseTime!.format(context)}'
+                            : 'حدد وقت البداية',
+                      ),
                       trailing: const Icon(Icons.chevron_left),
                       onTap: _pickPreciseTime,
                     ),
@@ -1164,34 +1483,154 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     controller: _durationHoursController,
                     keyboardType: TextInputType.number,
                     onChanged: _onDurationHoursChanged,
-                    decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: 'عدد الساعات المطلوبة',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ],
               ],
             ],
-            if (_isPerUnitPricing) ...[
+            if (_isQuantityPricing) ...[
               const SizedBox(height: 16),
               Text(
-                'الكمية المطلوبة',
+                widget.service.pricingModel == 'monthly'
+                    ? 'مدة الاشتراك بالشهور'
+                    : 'الكمية المطلوبة',
                 key: _unitsSectionKey,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _pricingQuantityController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: TextInputType.numberWithOptions(
+                  decimal: widget.service.quantityPrecision > 0,
+                ),
                 onChanged: _onPricingQuantityChanged,
                 decoration: InputDecoration(
-                  labelText: 'عدد ${widget.service.unitNameAr ?? 'الوحدات'}',
-                  helperText: 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب',
+                  labelText: 'عدد $_quantityUnitLabel',
+                  helperText:
+                      [
+                        if (widget.service.quantityMin != null)
+                          'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityMax != null)
+                          'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityStep != null)
+                          'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityPrecision == 0)
+                          'أرقام صحيحة فقط',
+                      ].isEmpty
+                      ? widget.service.pricingModel == 'monthly'
+                            ? 'السعر الشهري × عدد الشهور، ويتحدث قبل تأكيد الطلب'
+                            : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
+                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. ${widget.service.pricingModel == 'monthly' ? 'السعر الشهري × عدد الشهور' : 'السعر يتحدث تلقائيًا'}.',
                   border: const OutlineInputBorder(),
                 ),
               ),
             ],
-            if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),
-            if (_addons.isNotEmpty) ...[
+            if (_isFormulaPricing)
+              ..._buildPricingFieldsSection()
+            else
+              ..._buildStandardDataSection(),
+            const SizedBox(height: 16),
+            Text(
+              'صور المشكلة (اختياري)',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'ارفع صور واضحة لو حابب تساعد الفني أو تطلب من الإدارة تحديد السعر قبل إرسال فني.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            if (_problemImages.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var index = 0; index < _problemImages.length; index++)
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.memory(
+                            _problemImages[index].bytes,
+                            width: 84,
+                            height: 84,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: -8,
+                          left: -8,
+                          child: IconButton.filledTonal(
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _uploadingProblemImages
+                                ? null
+                                : () => setState(() {
+                                    _problemImages.removeAt(index);
+                                    if (_problemImages.isEmpty)
+                                      _requestRemoteQuote = false;
+                                  }),
+                            icon: const Icon(Icons.close, size: 16),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _uploadingProblemImages || _problemImages.length >= 10
+                  ? null
+                  : _pickProblemImages,
+              icon: _uploadingProblemImages
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                _uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور',
+              ),
+            ),
+            if (_canRequestRemoteQuote) ...[
+              const SizedBox(height: 10),
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: SwitchListTile(
+                  value: _requestRemoteQuote,
+                  onChanged: _problemImages.isEmpty
+                      ? null
+                      : (value) => setState(() {
+                          _requestRemoteQuote = value;
+                          if (value) {
+                            _selectedAddonIds.clear();
+                            _codeController.clear();
+                            _resolvedCodeKind = null;
+                            _selectedWarrantyPlanId = null;
+                            _repeatFrequency = null;
+                            _selectedPaymentMethod = null;
+                          }
+                        }),
+                  title: const Text('خلّي الإدارة تحدد السعر من الصور'),
+                  subtitle: Text(
+                    _problemImages.isEmpty
+                        ? 'ارفع صورة واحدة على الأقل لتفعيل الاختيار'
+                        : 'هتستلم عرض سعر، وتقدر توافق أو ترفض قبل ما نرسل فني.',
+                  ),
+                  secondary: const Icon(Icons.request_quote_outlined),
+                ),
+              ),
+            ],
+            if (_addons.isNotEmpty && !_requestRemoteQuote) ...[
               const SizedBox(height: 16),
-              Text('إضافات اختيارية', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'إضافات اختيارية',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               Card(
                 child: Column(
@@ -1218,53 +1657,61 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
+            if (!_requestRemoteQuote) const SizedBox(height: 16),
             // حقل كود واحد (docs/08 §77-B4) — شوف تعليق `_codeController` للسبب الكامل.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('order-discount-code'),
-                    controller: _codeController,
-                    decoration: InputDecoration(
-                      labelText: 'كود خاص (خصم أو عمارة) — اختياري',
-                      border: const OutlineInputBorder(),
-                      // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
-                      // من غير ما يدوّر على الفرق في السعر.
-                      suffixIcon: _resolvedCodeKind == null
-                          ? null
-                          : Icon(Icons.check_circle, color: Colors.green.shade600),
-                      helperText: _resolvedCodeKind == 'building'
-                          ? 'اتقبل ككود عمارة'
-                          : _resolvedCodeKind == 'promo'
-                              ? 'اتقبل ككود خصم'
-                              : null,
+            if (!_requestRemoteQuote)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('order-discount-code'),
+                      controller: _codeController,
+                      decoration: InputDecoration(
+                        labelText: 'كود خاص (خصم أو عمارة) — اختياري',
+                        border: const OutlineInputBorder(),
+                        // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
+                        // من غير ما يدوّر على الفرق في السعر.
+                        suffixIcon: _resolvedCodeKind == null
+                            ? null
+                            : Icon(
+                                Icons.check_circle,
+                                color: Colors.green.shade600,
+                              ),
+                        helperText: _resolvedCodeKind == 'building'
+                            ? 'اتقبل ككود عمارة'
+                            : _resolvedCodeKind == 'promo'
+                            ? 'اتقبل ككود خصم'
+                            : null,
+                      ),
+                      textCapitalization: TextCapitalization.characters,
+                      // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
+                      // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
+                      // ده بيمسح الخصم فورًا (بمعاينة تانية من غير كود) لحد ما يضغط "تحقق" تاني،
+                      // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
+                      onChanged: (_) {
+                        setState(() {
+                          _codeError = null;
+                          _resolvedCodeKind = null;
+                          _pricePreview = null;
+                        });
+                        _refreshPreview();
+                      },
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
-                    // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
-                    // ده بيمسح الخصم فورًا (بمعاينة تانية من غير كود) لحد ما يضغط "تحقق" تاني،
-                    // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
-                    onChanged: (_) {
-                      setState(() {
-                        _codeError = null;
-                        _resolvedCodeKind = null;
-                        _pricePreview = null;
-                      });
-                      _refreshPreview();
-                    },
                   ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _validatingCode ? null : _validateCode,
-                  child: _validatingCode
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('تحقق'),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: _validatingCode ? null : _validateCode,
+                    child: _validatingCode
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('تحقق'),
+                  ),
+                ],
+              ),
             if (_codeError != null) ...[
               const SizedBox(height: 4),
               Text(_codeError!, style: const TextStyle(color: Colors.red)),
@@ -1274,7 +1721,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             // عادية كاملة بنفس التفاصيل — سعر كل موعد بيتحسب بسعر الخدمة وقتها (مش سعر مجمد).
             if (_canRepeat) ...[
               const SizedBox(height: 16),
-              Text('تكرار الحجز', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'تكرار الحجز',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               Card(
                 child: Column(
@@ -1282,19 +1732,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     RadioListTile<String?>(
                       value: null,
                       groupValue: _repeatFrequency,
-                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      onChanged: (value) =>
+                          setState(() => _repeatFrequency = value),
                       title: const Text('مرة واحدة'),
                     ),
                     RadioListTile<String?>(
                       value: 'weekly',
                       groupValue: _repeatFrequency,
-                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      onChanged: (value) =>
+                          setState(() => _repeatFrequency = value),
                       title: const Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
                     ),
                     RadioListTile<String?>(
                       value: 'monthly',
                       groupValue: _repeatFrequency,
-                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      onChanged: (value) =>
+                          setState(() => _repeatFrequency = value),
                       title: const Text('شهري — نفس اليوم كل شهر'),
                     ),
                   ],
@@ -1314,7 +1767,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ],
             if (_optionalWarranties.isNotEmpty) ...[
               const SizedBox(height: 16),
-              Text('ضمان إضافي (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'ضمان إضافي (اختياري)',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 4),
               Text(
                 'سعر الضمان يضاف منفصلًا ويظهر في الإجمالي، والإيداع يُعاد حسابه على الإجمالي الجديد.',
@@ -1333,35 +1789,49 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           if (value != null) _repeatFrequency = null;
                         });
                         _refreshPreview(
-                          promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
-                          buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
+                          promoCode: _promoCodeToSend.isEmpty
+                              ? null
+                              : _promoCodeToSend,
+                          buildingCode: _buildingCodeToSend.isEmpty
+                              ? null
+                              : _buildingCodeToSend,
                         );
                       },
                       title: const Text('بدون ضمان إضافي'),
-                      subtitle: Text(widget.service.warrantyDays > 0
-                          ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
-                          : 'لن تضاف تكلفة ضمان'),
+                      subtitle: Text(
+                        widget.service.warrantyDays > 0
+                            ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
+                            : 'لن تضاف تكلفة ضمان',
+                      ),
                     ),
-                    ..._optionalWarranties.map((plan) => RadioListTile<String?>(
-                          value: plan.id,
-                          groupValue: _selectedWarrantyPlanId,
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedWarrantyPlanId = value;
-                              if (value != null) _repeatFrequency = null;
-                            });
-                            _refreshPreview(
-                              promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
-                              buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
-                            );
-                          },
-                          title: Text('${plan.nameAr} — ${plan.coverageMonths} شهر'),
-                          subtitle: Text(
-                            plan.pricingModel == 'fixed'
-                                ? '+${_formatEgp(plan.priceValue.round())}'
-                                : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
-                          ),
-                        )),
+                    ..._optionalWarranties.map(
+                      (plan) => RadioListTile<String?>(
+                        value: plan.id,
+                        groupValue: _selectedWarrantyPlanId,
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedWarrantyPlanId = value;
+                            if (value != null) _repeatFrequency = null;
+                          });
+                          _refreshPreview(
+                            promoCode: _promoCodeToSend.isEmpty
+                                ? null
+                                : _promoCodeToSend,
+                            buildingCode: _buildingCodeToSend.isEmpty
+                                ? null
+                                : _buildingCodeToSend,
+                          );
+                        },
+                        title: Text(
+                          '${plan.nameAr} — ${plan.coverageMonths} شهر',
+                        ),
+                        subtitle: Text(
+                          plan.pricingModel == 'fixed'
+                              ? '+${_formatEgp(plan.priceValue.round())}'
+                              : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1412,7 +1882,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     children: [
                       Icon(Icons.info_outline),
                       SizedBox(width: 8),
-                      Expanded(child: Text('الخدمة دي محتاجة دفع إلكتروني (بطاقة أو InstaPay أو فوري) مقدّم — الدفع بعد الخدمة مش متاح لها.')),
+                      Expanded(
+                        child: Text(
+                          'الخدمة دي محتاجة دفع إلكتروني (بطاقة أو InstaPay أو فوري) مقدّم — الدفع بعد الخدمة مش متاح لها.',
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1435,38 +1909,50 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 children: [
                   RadioListTile<String?>(
                     value: null,
-                    groupValue: _requiresElectronicPayment ? '__electronic_required__' : _selectedPaymentMethod,
-                    onChanged: !_requiresElectronicPayment &&
+                    groupValue: _requiresElectronicPayment
+                        ? '__electronic_required__'
+                        : _selectedPaymentMethod,
+                    onChanged:
+                        !_requiresElectronicPayment &&
                             ((_paymentChannels['cash']?.available ?? false) ||
-                                (_paymentChannels['wallet']?.available ?? false))
-                        ? (value) => setState(() => _selectedPaymentMethod = value)
+                                (_paymentChannels['wallet']?.available ??
+                                    false))
+                        ? (value) =>
+                              setState(() => _selectedPaymentMethod = value)
                         : null,
                     secondary: const Icon(Icons.payments_outlined),
                     title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
-                    subtitle: Text(_requiresElectronicPayment
-                        ? 'غير متاح لأن الخدمة تتطلب دفعًا إلكترونيًا مقدمًا'
-                        : ((_paymentChannels['cash']?.available ?? false) ||
-                                (_paymentChannels['wallet']?.available ?? false))
-                            ? 'تدفع بعد ما الفني يخلّص الشغل'
-                            : 'مش متاح للخدمة دي دلوقتي'),
+                    subtitle: Text(
+                      _requiresElectronicPayment
+                          ? 'غير متاح لأن الخدمة تتطلب دفعًا إلكترونيًا مقدمًا'
+                          : ((_paymentChannels['cash']?.available ?? false) ||
+                                (_paymentChannels['wallet']?.available ??
+                                    false))
+                          ? 'تدفع بعد ما الفني يخلّص الشغل'
+                          : 'مش متاح للخدمة دي دلوقتي',
+                    ),
                   ),
                   _paymentOption(
                     method: 'card',
                     title: 'بطاقة بنكية — فيزا أو ماستركارد',
-                    subtitle: 'تحويل آمن لصفحة الدفع، والتنفيذ بيبدأ بعد تأكيد العملية',
+                    subtitle:
+                        'تحويل آمن لصفحة الدفع، والتنفيذ بيبدأ بعد تأكيد العملية',
                     icon: Icons.credit_card_outlined,
                   ),
                   _paymentOption(
                     method: 'installment',
                     title: 'التقسيط',
-                    subtitle: 'أنشئ الطلب ثم اختر الخطة وقدّمها لمراجعة الإدارة',
+                    subtitle:
+                        'أنشئ الطلب ثم اختر الخطة وقدّمها لمراجعة الإدارة',
                     icon: Icons.calendar_month_outlined,
-                    extraAllowed: !_requiresElectronicPayment && _hasInstallmentPlans,
+                    extraAllowed:
+                        !_requiresElectronicPayment && _hasInstallmentPlans,
                     extraUnavailableReason: _requiresElectronicPayment
                         ? 'التقسيط الحالي يحتاج مراجعة إدارة ولا يغطي الإيداع الفوري لهذه الخدمة'
-                        : _paymentChannels['installment']?.available == true && !_hasInstallmentPlans
-                            ? 'مفيش خطة تقسيط متاحة للخدمة دي'
-                            : null,
+                        : _paymentChannels['installment']?.available == true &&
+                              !_hasInstallmentPlans
+                        ? 'مفيش خطة تقسيط متاحة للخدمة دي'
+                        : null,
                   ),
                   _paymentOption(
                     method: 'instapay',
@@ -1511,7 +1997,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             FilledButton(
               onPressed: _submitting ? null : _submit,
               child: _submitting
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('تأكيد الطلب'),
             ),
           ],

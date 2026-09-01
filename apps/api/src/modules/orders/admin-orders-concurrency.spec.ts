@@ -9,6 +9,7 @@ import { TechnicianOrderCancellation } from './entities/technician-order-cancell
 import { User } from '../auth/entities/user.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { OrderAssignment } from '../matching/entities/order-assignment.entity';
@@ -34,6 +35,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     technicianBProfile: '',
     newLeaderCProfile: '',
     newLeaderDProfile: '',
+    raceCrewProfile: '',
   };
   const users: string[] = [];
 
@@ -174,7 +176,9 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // pricingEngineService — مش متنادى في reassign/crew
       {} as never, // promoCodesService
-      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never, // settingsService (docs/08 §35)
+      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never, // settingsService (docs/08 §35),
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
   });
 
@@ -182,10 +186,21 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     try {
       await q(`DELETE FROM order_team_members WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCC-%`]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCC-%`]);
+      // ADR-0057 — addCrewMember بقت ممكن تنشئ صف technician_work_opportunities (المسار
+      // "فرصة" لما القدرة الاستيعابية مش LIGHT)، فلازم يتنضّف قبل DELETE FROM orders وإلا الـFK
+      // (technician_work_opportunities_order_id_fkey) بيرفض الحذف.
+      await q(`DELETE FROM technician_work_opportunities WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCC-%`]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCC-%`]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-      const allTechnicians = [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile, ids.newLeaderCProfile, ids.newLeaderDProfile];
+      const allTechnicians = [
+        ids.leaderProfile,
+        ids.technicianAProfile,
+        ids.technicianBProfile,
+        ids.newLeaderCProfile,
+        ids.newLeaderDProfile,
+        ids.raceCrewProfile,
+      ];
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1)`, [allTechnicians]);
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [allTechnicians]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [allTechnicians]);
@@ -234,9 +249,15 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       orderStatus: OrderStatus.TECHNICIAN_ASSIGNED,
     });
 
+    // ADR-0057 — technicianAProfile/B ممكن يكون عندهم بالفعل طلب فعّال النهاردة من اختبار
+    // reassign() اللي فات (نفس الملف)، وده هيخلي addCrewMember يتحول لمسار "فرصة" (صحيح ومقصود)
+    // بدل الإضافة الفورية. الاختبار ده تحديدًا بيفحص سباق INSERT المباشر (unique constraint)،
+    // فمحتاج فني نضيف مفيهوش أي التزام تاني النهاردة — نفس ضمان LIGHT tier.
+    ids.raceCrewProfile = await makeTechnician(`race-${runId}`);
+
     const results = await Promise.allSettled([
-      adminOrdersService.addCrewMember(ids.adminUserA, orderId, ids.technicianAProfile, 'دور أ'),
-      adminOrdersService.addCrewMember(ids.adminUserB, orderId, ids.technicianAProfile, 'دور ب'),
+      adminOrdersService.addCrewMember(ids.adminUserA, orderId, ids.raceCrewProfile, 'دور أ'),
+      adminOrdersService.addCrewMember(ids.adminUserB, orderId, ids.raceCrewProfile, 'دور ب'),
     ]);
 
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
@@ -250,7 +271,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     // صف واحد بس في order_team_members — الـUNIQUE constraint منع الصف المكرر فعليًا.
     const members = await q(`SELECT count(*)::int AS c FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
       orderId,
-      ids.technicianAProfile,
+      ids.raceCrewProfile,
     ]);
     expect(members[0].c).toBe(1);
   });

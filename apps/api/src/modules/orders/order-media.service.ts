@@ -55,6 +55,32 @@ export class OrderMediaService {
     });
   }
 
+  async uploadProblemPhotoByAdmin(
+    adminUserId: string,
+    orderId: string,
+    file: IncomingFile,
+    caption?: string,
+  ): Promise<OrderMedia> {
+    const orderExists = await this.orders.exists({ where: { id: orderId } });
+    if (!orderExists) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+
+    const key = `orders/${orderId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const media = this.orderMedia.create({
+        orderId,
+        uploadedByUserId: adminUserId,
+        mediaType: OrderMediaType.PROBLEM_PHOTO,
+        fileUrl,
+        storageKey: key,
+        fileSizeBytes: file.size,
+        caption: caption?.trim() || 'صورة مشكلة أضافتها الإدارة',
+      });
+      return this.orderMedia.save(media);
+    });
+  }
+
   listForOrder(orderId: string): Promise<OrderMedia[]> {
     return this.orderMedia.find({ where: { orderId }, order: { createdAt: 'ASC' } });
   }

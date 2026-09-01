@@ -32,7 +32,15 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     });
   }
 
-  function service(participants: CrewParticipant[]): PaymentsService {
+  function service(
+    participants: CrewParticipant[],
+    collection: {
+      totalAmountCents?: number;
+      directPaidAmountCents?: number;
+      onlinePaidAmountCents?: number;
+      amountDueToTechnicianCents?: number;
+    } = {},
+  ): PaymentsService {
     const svc = Object.create(PaymentsService.prototype) as PaymentsService;
     Object.assign(svc, {
       crewEarningsService: {
@@ -46,9 +54,14 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
       technicianLevelsService: { getOrThrow: async () => ({ commissionAdjustmentPercentage: 0 }) },
       settingsService: { getNumber: async (_k: string, fallback: number) => fallback },
       getCollectionBreakdownForOrder: async () => ({
-        amountDueToTechnicianCents: 100000,
+        totalAmountCents: collection.totalAmountCents ?? 100000,
+        amountDueToTechnicianCents: collection.amountDueToTechnicianCents ?? 100000,
         paidAmountCents: 0,
+        directPaidAmountCents: collection.directPaidAmountCents ?? 0,
+        onlinePaidAmountCents: collection.onlinePaidAmountCents ?? 0,
+        refundedAmountCents: 0,
         financedOrderAmountCents: 0,
+        installmentOutstandingCents: 0,
       }),
     });
     return svc;
@@ -93,6 +106,27 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     expect(memberView.myEarningCents).toBe(Math.floor((80000 * 1) / 2.6));
   });
 
+  it('عضو الطاقم لا يرى الكاش الذي حصّله قائد الطلب', async () => {
+    const participants: CrewParticipant[] = [
+      { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
+      { technicianId: MEMBER, participantRole: 'team_member', technicianLevel: 'new', shareWeight: 1 },
+    ];
+    const svc = service(participants, {
+      directPaidAmountCents: 100000,
+      amountDueToTechnicianCents: 0,
+    });
+
+    const leaderView = await svc.getTechnicianMoneyView(order({ bookingMode: BookingMode.TEAM }));
+    const memberView = await svc.getTechnicianMoneyView(
+      order({ bookingMode: BookingMode.TEAM }),
+      undefined,
+      MEMBER,
+    );
+
+    expect(leaderView.cashCollectedCents).toBe(100000);
+    expect(memberView.cashCollectedCents).toBe(0);
+  });
+
   it('القائد كمان بياخد حصّته هو مش الوعاء — نفس اللي هينزل محفظته وقت التسوية', async () => {
     const participants: CrewParticipant[] = [
       { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
@@ -109,5 +143,54 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     );
     // الثابت الحاكم لـADR-0040: مجموع الحصص = الوعاء بالظبط، مفيش قرش ضايع ولا مضاعف.
     expect(leaderView.myEarningCents + memberView.myEarningCents).toBe(80000);
+  });
+
+  // docs/08 §108-B — بلاغ مالك صريح، قاعدة صارمة: بس القائد (أو الفني الوحيد لو مفيش طاقم) يشوف
+  // المبلغ المطلوب تحصيله من العميل؛ أي عضو تاني بيشوف نصيبه بس، حتى لو فيه فلوس حقيقية مستنية
+  // تحصيل (عربون أونلاين + باقي كاش هنا). قبل الإصلاح ده، عضو الطاقم كان بيشوف نفس رقم القائد.
+  it('عضو الطاقم لا يرى المبلغ المطلوب تحصيله من العميل — القائد بس (§108-B)', async () => {
+    const participants: CrewParticipant[] = [
+      { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
+      { technicianId: MEMBER, participantRole: 'team_member', technicianLevel: 'new', shareWeight: 1 },
+    ];
+    const svc = service(participants, {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 15000, // عربون أونلاين
+      amountDueToTechnicianCents: 85000, // الباقي كاش، لسه ما اتحصّلش
+    });
+
+    const leaderView = await svc.getTechnicianMoneyView(order({ bookingMode: BookingMode.TEAM }));
+    const memberView = await svc.getTechnicianMoneyView(
+      order({ bookingMode: BookingMode.TEAM }),
+      undefined,
+      MEMBER,
+    );
+
+    expect(leaderView.cashToCollectCents).toBe(85000);
+    expect(memberView.cashToCollectCents).toBe(0);
+  });
+
+  it('إيداع أونلاين + باقي كاش: بعد تحصيل الكاش يظل الطلب مختلطًا ولا يتحول إلى "أونلاين بالكامل"', async () => {
+    const view = await service([], {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 15000,
+      amountDueToTechnicianCents: 0,
+    }).getTechnicianMoneyView(order());
+
+    expect(view.hasOnlinePayment).toBe(true);
+    expect(view.fullyPaidOnline).toBe(false);
+    expect(view.cashToCollectCents).toBe(0);
+    expect(view.cashCollectedCents).toBe(0);
+  });
+
+  it('طلب مدفوع إلكترونيًا بالكامل وحده يحمل علامة "أونلاين بالكامل"', async () => {
+    const view = await service([], {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 100000,
+      amountDueToTechnicianCents: 0,
+    }).getTechnicianMoneyView(order());
+
+    expect(view.hasOnlinePayment).toBe(true);
+    expect(view.fullyPaidOnline).toBe(true);
   });
 });

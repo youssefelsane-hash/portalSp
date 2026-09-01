@@ -33,6 +33,8 @@ class Order {
   final String orderStatus;
   final String? problemDescription;
   final int? estimatedPriceCents;
+  final String? initialQuoteSource;
+  final String? initialQuoteNote;
   final int totalAmountCents;
   final int warrantyPriceCents;
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
@@ -87,6 +89,8 @@ class Order {
     required this.orderStatus,
     required this.problemDescription,
     required this.estimatedPriceCents,
+    this.initialQuoteSource,
+    this.initialQuoteNote,
     required this.totalAmountCents,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
@@ -128,6 +132,8 @@ class Order {
         orderStatus: json['order_status'] as String,
         problemDescription: json['problem_description'] as String?,
         estimatedPriceCents: json['estimated_price_cents'] as int?,
+        initialQuoteSource: json['initial_quote_source'] as String?,
+        initialQuoteNote: json['initial_quote_note'] as String?,
         totalAmountCents: json['total_amount_cents'] as int,
         warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
         levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
@@ -275,6 +281,8 @@ const Map<String, String> orderStatusLabelsAr = {
   'technician_arrived': 'الفني وصل',
   'in_progress': 'الشغل شغّال',
   'awaiting_quote_approval': 'في انتظار موافقتك على السعر',
+  'awaiting_admin_quote': 'في انتظار تسعير الإدارة',
+  'awaiting_initial_quote_approval': 'السعر جاهز وفي انتظار موافقتك',
   'work_completed': 'الشغل خلص',
   'awaiting_payment': 'في انتظار الدفع',
   'completed': 'اتقفل',
@@ -299,6 +307,8 @@ const Set<String> customerCancellableStatuses = {
   'accepted',
   'technician_on_way',
   'awaiting_quote_approval',
+  'awaiting_admin_quote',
+  'awaiting_initial_quote_approval',
   'awaiting_technician_reselection',
 };
 

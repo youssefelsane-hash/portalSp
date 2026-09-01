@@ -519,8 +519,9 @@ allocation.md` للتصميم الكامل. ملخص التنفيذ في الم�
   يفضل `SEARCHING_TECHNICIAN`. `HEAVY` (شاغل يوم كامل/منشغل فعليًا دلوقتي) → فرصة برضه بس لو
   `matching.offer_heavy_workload_technicians` مفعّل (افتراضي `true`)، عبر استعلام موسّع
   (`ignoreActiveOrderConflict`، نفس آلية ADR-0017 §10) لأنه مش هيبان أصلاً في المرشحين العاديين.
-- `hasLiveOfferForOrder()` بيوقف أي محاولة تصنيف/عرض جديدة طالما فيه عرض `offered` حي — نفس فكرة
-  `liveAssignments` في `dispatchNextRound()`، بلا تكرار عروض.
+- العرض الأول له نافذة حصرية يحددها `matching.work_opportunity_exclusive_seconds` (افتراضي ساعتان).
+  داخلها لا يتكرر العرض. بعدها يظل العرض الأول `offered` وصالحًا، لكن المطابقة توسّع الاختيارات
+  بعرض متوازٍ لفني مختلف؛ لا تعيّن الثاني بالقوة، وأول قبول ذري هو الذي يحسم الطلب ويغلق الباقي.
 - `acceptWorkOpportunity()`/`declineWorkOpportunity()` — قبول تحت قفل كامل (فرصة + طلب + فني)،
   إعادة فحص أهلية عبر `assertEligibleForWorkOpportunity()` **الجديدة** في `TechnicianAssignmentGuard
   Service` (نسخة مخفّفة من `assertEligible()` — نفس فحوصات معتمد/موقع/خدمة+منطقة/مستوى، لكن بدل
@@ -535,9 +536,23 @@ allocation.md` للتصميم الكامل. ملخص التنفيذ في الم�
   فرق جوهري عن `order_assignments`: **مفيش `expires_at`**، الفرصة تفضل صالحة لحد ما تتقبل/تترفض/
   الطلب يتغطى.
 - **اختبار حي شامل** (`matching-work-opportunity.spec.ts`، 4 اختبارات): فني `LIGHT` يتأكد تلقائيًا
-  بلا فرصة، فني `MEANINGFUL` يتعرضله فرصة (idempotent على النداء المتكرر)، قبولها بيأكد الطلب فعليًا،
+  بلا فرصة، فني `MEANINGFUL` يتعرضله فرصة (idempotent داخل النافذة الحصرية)، وبعد انتهاء النافذة
+  يظهر عرض موازٍ لفني ثانٍ مع بقاء الأول صالحًا؛ قبول أي واحد بيأكد الطلب فعليًا،
   رفضها بيفضل الطلب يدوّر وقبول متأخر عليها يترفض بوضوح، وسباق حقيقي بين فرصتين على نفس الطلب —
   واحد بس يفوز (`Promise.allSettled`، نفس نمط `matching-accept-concurrency.spec.ts`).
+
+## Recovery عادل وقابل للضبط (migration 0229)
+
+الـRecovery لم يعد يقرأ أقدم 25 طلبًا في كل دقيقة بلا ذاكرة. كل طلب `SEARCHING_TECHNICIAN`
+يملك `next_matching_attempt_at` و`matching_attempt_count`: الجولة تعمل claim ذريًا بـ`FOR UPDATE
+SKIP LOCKED` للطلبات المستحقة فقط، ثم تحرك موعد كل طلب للأمام بـexponential backoff قبل بدء
+المطابقة. لذلك الطلب العالق لا يُلغى ولا يختفي، لكنه يترك أول الصف مؤقتًا فتدخل الطلبات الجديدة
+المؤهلة فورًا. رجوع أي طلب إلى حالة البحث يصفّر عداده بtrigger مركزي مهما كان المسار الذي أعاده.
+
+كل knobs التشغيلية قابلة للتعديل من صفحة إعدادات الأدمن بلا deployment:
+`matching.recovery_interval_seconds`، `matching.recovery_batch_size`،
+`matching.recovery_initial_backoff_seconds`، `matching.recovery_max_backoff_seconds`، و
+`matching.work_opportunity_exclusive_seconds`.
 
 ## نموذج العدالة بالتاريخ الحديث + كسر التعادل (docs/08 §34.2، ADR-0020 §6)
 
@@ -778,3 +793,24 @@ BookingMode.TEAM`. `individual`/`emergency` بلا أي تغيير. نفس ال�
 التسليم) — كلها `IN ('sent','viewed')`: **`viewed` عرض مفتوح لسه مستني رد، مش عرض اتقفل**.
 `accept`/`reject`/انتهاء الجولة كانوا أصلاً بيقبلوا الحالتين. اختبار regression في
 `matching-accept-concurrency.spec.ts` بيثبّت السحب مرتين + القبول من `viewed`.
+
+## التثبيت الصارم لإعادة الزيارة (ADR-0051، docs/08 §96)
+
+`requested_technician_id` معناه المستقر هنا هو **تفضيل بيتجاهَل بأمان** ("إعادة الحجز" واعتماد
+شركة): الجولة الأولى بس بتحاول الفني/الشركة المطلوبة، ولو مفيش مؤهّل متاح بيرجع فورًا للبث
+العادي في نفس الجولة. **متغيّرش ده** — فيه مسارين حقيقيين معتمدين عليه.
+
+إعادة الزيارة مسؤولية مش تفضيل، فليها مسار منفصل تمامًا:
+
+- `dispatchNextRound()` فيها فرع أول خالص: لو `isRevisitPinActive(order)`، المرشّحين بيتحصروا في
+  الفني المثبّت (`ignoreActiveOrderConflict = true` — مشغول دلوقتي مش سبب لتحويل إعادة زيارة
+  لحد تاني)، وكل fallbacks التوزيع العادي بتتخطى.
+- الفرع idempotent: بيرجع `noop` لو التثبيت اتقفل (رفض/إلغاء/عدّت المهلة) أو لو العرض اتبعت
+  للفني ده خلاص. عشان كده **`MatchingRecoveryService` اتسابت زي ما هي عن قصد** — لازم تفضل
+  بتعيد المحاولة عشان لو الفني مكانش مؤهّل لحظة الإنشاء يوصله العرض أول ما يبقى مؤهّل، والفرع
+  بيمنع تكرار الإشعارات.
+- `reject()` **ما بتعيدش البث** لطلب مثبّت (بعكس أي رفض عادي) — التحرير قرار أدمن وراه خصم مالي.
+- `dispatchOrAutoConfirm()` بتوجّه الطلب المثبّت لـ`dispatchNextRound()` دايمًا: التأكيد التلقائي
+  بيعيّن فني بالقوة، والتثبيت الصح **عرض حصري** يقبله بنفسه.
+- `listAvailableForTechnician()` بقت بترجّع `order_type` ورقم الطلب الأصلي — الفني لازم يعرف إن
+  ده إعادة زيارة (طلب مالك صريح).

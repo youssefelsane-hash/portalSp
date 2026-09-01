@@ -2,6 +2,8 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AdminOrdersService } from './admin-orders.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { Order, BookingMode } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
@@ -196,6 +198,9 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       {} as never, // settingsService
     );
 
+    // ADR-0057 — addCrewMember بقت بتنادي assertScheduleAvailable() فعليًا (نفس قاعدة السكدول
+    // في recruitMember بالحرف)، فـassignmentGuard بقى لازم يكون حقيقي مش stub.
+    const settingsStub = { getNumber: async (_key: string, fallback: number) => fallback } as never;
     adminOrdersService = new AdminOrdersService(
       dataSource.getRepository(Order),
       dataSource.getRepository(OrderStatusHistory),
@@ -203,14 +208,16 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       dataSource.getRepository(OrderTeamMember),
       dataSource,
       techniciansService,
-      {} as never, // assignmentGuard — مش متنادى في مسارات الطاقم العادية (بس تُستخدم في reassignLeader)
+      new TechnicianAssignmentGuardService(settingsStub),
       new EventEmitter2(),
       { record: auditLogRecord } as unknown as AuditLogService,
       {} as never, // pricingEngineService
       {} as never, // promoCodesService
       // settingsService حقيقي جزئيًا — validateCrewCandidateOrThrow (docs/08 §35) بينادي
       // getNumber() فعليًا لحساب classifyTechnicianCapacity().
-      { getNumber: async (_key: string, fallback: number) => fallback } as never,
+      settingsStub,
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
 
     // docs/08 §35.16 (كارت رؤية طاقم الطلب) — listForOrder() بس، مش محتاجة assignmentGuard/
@@ -272,12 +279,15 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     await expect(adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.unapprovedProfile, 'دور')).rejects.toThrow();
   });
 
-  // docs/08 §35، ADR-0021 §5 — بَقّة حقيقية اتصلحت: addCrewMember كانت بتفحص اعتماد/عضوية بس،
-  // صفر وعي بحظر يوم صريح (BLOCKED) — "hard business restriction" غير قابل للتجاوز حتى بتعيين
-  // إداري، طلب المالك صراحة.
+  // docs/08 §35، ADR-0021 §5/ADR-0057 — بَقّة حقيقية اتصلحت: addCrewMember كانت بتفحص اعتماد/
+  // عضوية بس، صفر وعي بحظر يوم صريح (BLOCKED) — "hard business restriction" غير قابل للتجاوز
+  // حتى بتعيين إداري، طلب المالك صراحة. ADR-0057 ضافت assertScheduleAvailable() *قبل* فحص
+  // classifyTechnicianCapacity() (نفس ترتيب recruitMember() بالحرف) — ورسالتها هي اللي بتوصل
+  // فعليًا لأي حظر ذاتي (blockedExistsExpr نفس منطق CTE الـBLOCKED بالظبط، فالفحص التاني بقى
+  // شبكة أمان مش المصدر الفعلي للرسالة).
   it('addCrewMember — يرفض فني حظر اليوم بنفسه حتى بتعيين إداري (BLOCKED قاعدة صلبة)', async () => {
     const orderId = await insertOrder(`add-blocked-${runId}`, { bookingMode: BookingMode.TEAM, technicianId: ids.leaderProfile, requiredTechnicians: 3 });
-    await expect(adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.blockedProfile, 'دور')).rejects.toThrow(/حظر اليوم/);
+    await expect(adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.blockedProfile, 'دور')).rejects.toThrow(/غير متاح/);
     const rows = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
     expect(rows).toHaveLength(0);
   });

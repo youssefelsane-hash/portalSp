@@ -92,6 +92,11 @@ describe('OrdersService.continueWorkAnotherDay (ADR-0047)', () => {
   afterAll(async () => {
     await q(`DELETE FROM order_work_sessions WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
+    await q(
+      `DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = $1)`,
+      [ids.order],
+    );
+    await q(`DELETE FROM chat_threads WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);

@@ -7,7 +7,6 @@ import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../academy/academy_screen.dart';
-import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../company/company_screen.dart';
@@ -21,10 +20,12 @@ import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../skills/skills_screen.dart';
+import '../legal/legal_links_screen.dart';
 import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order.dart';
+import 'active_order_visibility.dart';
 import 'order_date_labels.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
@@ -57,7 +58,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // دعوات انضمام لفريق (docs/08 §35، ADR-0021 §2) — منفصلة عن _workOpportunities فوق: القبول هنا
   // معناه "انضم كعضو تحت قائد موجود بالفعل"، مش "بقى قائد الطلب".
   List<CrewOpportunity>? _crewOpportunities;
-  Order? _activeOrder;
+  List<Order>? _activeOrders;
   String? _error;
   bool _isActing = false;
   // بَقّة حقيقية اتلقطت (بلاغ مالك مباشر 2026-08-22): المحاولة الصامتة الوحيدة تحت كانت بتفشل
@@ -164,47 +165,52 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
   // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
   // بالضرورة لقايمة الطلبات المتاحة من غير أي أثر للطلب اللي كان شغال عليه. دلوقتي بتتحقق
-  // الأول من GET /technician/orders/active وتفتح شاشة التنفيذ تلقائياً لو لقت طلب نشط.
+  // الأول من GET /technician/orders/active-orders. لو لقت طلب واحد تفتح شاشة التنفيذ تلقائياً؛
+  // لو لقت أكتر من طلب تسيب الشاشة الرئيسية ظاهرة عشان الفني يشوفهم كلهم ويختار بنفسه.
   // **ADR-0018 §11**: بعد ما الفني يرجع من شاشة التنفيذ (رجع بالزرار، مش خلّص الطلب)، الطلب
   // النشط لازم يفضل ظاهر كـbanner بارز فوق الشاشة الرئيسية — مش يختفي تمامًا لحد إعادة فتح
   // التطبيق من الصفر. `_openActiveOrder()` تحت بتعمل نفس الشيء يدويًا لما الفني يدوس البانر.
   Future<void> _recoverActiveOrThenLoad() async {
     try {
-      final activeOrder = await _repository.getActive();
-      if (mounted) setState(() => _activeOrder = activeOrder);
-      if (activeOrder != null && mounted) {
+      final activeOrders = await _repository.fetchActiveOrders();
+      if (mounted) setState(() => _activeOrders = activeOrders);
+      if (activeOrders.length == 1 && mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => OrderExecutionScreen(initialOrder: activeOrder),
+            builder: (_) =>
+                OrderExecutionScreen(initialOrder: activeOrders.single),
           ),
         );
-        await _refreshActiveOrder();
+        await _refreshActiveOrders();
       }
     } on ApiException {
       // فشل فحص الاسترجاع مش لازم يمنع عرض قايمة الطلبات المتاحة العادية
+      if (mounted) setState(() => _activeOrders ??= const []);
     }
     await _load();
   }
 
-  Future<void> _refreshActiveOrder() async {
+  Future<void> _refreshActiveOrders() async {
     try {
-      final activeOrder = await _repository.getActive();
-      if (mounted) setState(() => _activeOrder = activeOrder);
+      final activeOrders = await _repository.fetchActiveOrders();
+      if (mounted) setState(() => _activeOrders = activeOrders);
     } on ApiException {
-      // فشل صامت — البانر بس هيفضل بالقيمة القديمة لحد أول تحديث ناجح.
+      // فشل صامت — الكروت تفضل بآخر قيمة ناجحة لحد أول تحديث ناجح.
     }
   }
 
-  Future<void> _openActiveOrder() async {
-    final order = _activeOrder;
-    if (order == null) return;
+  Future<void> _openActiveOrder(Order order) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OrderExecutionScreen(initialOrder: order),
       ),
     );
-    await _refreshActiveOrder();
+    await _refreshActiveOrders();
     await _load();
+  }
+
+  void _rememberActiveOrder(Order order) {
+    _activeOrders = rememberActiveOrder(_activeOrders, order);
   }
 
   // ADR-0018 §10-11 — الشغل المؤكّد المجدول (بلا قرار قبول/رفض، فقط auto-confirm من الباك-إند)
@@ -218,6 +224,8 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     List<AvailableOrder>? orders;
     List<Order>? upcoming;
     List<Order>? overdue;
+
+    await _refreshActiveOrders();
 
     try {
       orders = await _repository.fetchAvailable();
@@ -279,13 +287,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         opportunity.id,
       );
       if (mounted) {
-        setState(() => _activeOrder = acceptedOrder);
+        setState(() => _rememberActiveOrder(acceptedOrder));
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder),
           ),
         );
-        await _refreshActiveOrder();
+        await _refreshActiveOrders();
       }
       await _load();
     } on ApiException catch (err) {
@@ -362,13 +370,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       final acceptedOrder = await _repository.accept(order.orderId);
       if (mounted) {
-        setState(() => _activeOrder = acceptedOrder);
+        setState(() => _rememberActiveOrder(acceptedOrder));
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder),
           ),
         );
-        await _refreshActiveOrder();
+        await _refreshActiveOrders();
       }
       await _load();
     } on ApiException catch (err) {
@@ -388,7 +396,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         builder: (_) => OrderExecutionScreen(initialOrder: order),
       ),
     );
-    await _refreshActiveOrder();
+    await _refreshActiveOrders();
     await _load();
   }
 
@@ -502,7 +510,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                 onRefresh: _load,
                 // الخطأ بقى **شريط فوق** مش بديل للشاشة (docs/08 §64.أ) — الشغل اللي حمّل بنجاح
                 // لازم يفضل باين وقابل للتنفيذ حتى لو قايمة واحدة فشلت.
-                child: (_orders == null || _upcomingOrders == null)
+                child:
+                    (_orders == null ||
+                        _upcomingOrders == null ||
+                        _activeOrders == null)
                     ? const Padding(
                         padding: EdgeInsets.all(16),
                         child: LoadingList(),
@@ -521,17 +532,22 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // تلقائيًا (مرتّب بأقرب يوم أولًا — الباك-إند بيرجّعه ASC بالفعل). لو الثلاثة فاضيين، شاشة
   // ترحيبية فاضية زي ما كانت.
   Widget _buildHomeList(BuildContext context, AuthRepository auth) {
-    final hasActive = _activeOrder != null;
+    final activeOrders = _activeOrders ?? const <Order>[];
+    final hasActive = activeOrders.isNotEmpty;
     final pending = _orders ?? const <AvailableOrder>[];
-    final upcoming = _upcomingOrders ?? const <Order>[];
+    final upcoming = excludeActiveOrders(_upcomingOrders, activeOrders);
     final overdue = _overdueOrders ?? const <Order>[];
     final teamAssigned = _teamAssignedOrders ?? const <Order>[];
     final workOpportunities = _workOpportunities ?? const <WorkOpportunity>[];
     final crewOpportunities = _crewOpportunities ?? const <CrewOpportunity>[];
     // ADR-0048 §4 — نفس المصدر (`order_assignments`)، نوعين مختلفين. التقسيم هنا مش في الباك-إند
     // عمدًا: الاتنين بيتقبلوا/يترفضوا بنفس الـendpoint بالظبط، الفرق عرضي بحت.
-    final emergencyPending = pending.where((order) => order.isEmergency).toList(growable: false);
-    final scheduledPending = pending.where((order) => !order.isEmergency).toList(growable: false);
+    final emergencyPending = pending
+        .where((order) => order.isEmergency)
+        .toList(growable: false);
+    final scheduledPending = pending
+        .where((order) => !order.isEmergency)
+        .toList(growable: false);
 
     if (!hasActive &&
         pending.isEmpty &&
@@ -556,15 +572,23 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // docs/08 §56 بند 4 — الترتيب مقصود: الشغل الحالي (واحد بس) → المتأخر (أحمر) →
+        // docs/08 §56 بند 4 — الترتيب مقصود: كل الشغل الحالي → المتأخر (أحمر) →
         // الطوارئ المستنية قرارك → الشغل المؤكّد قدامك → فرص إضافية → فريق.
         if (hasActive) ...[
           _SectionHeader(
             icon: Icons.play_circle_outline,
-            label: 'الشغل الحالي',
+            label: activeOrders.length == 1
+                ? 'الشغل الحالي'
+                : 'الشغل الحالي (${activeOrders.length})',
           ),
           const SizedBox(height: 8),
-          _ActiveOrderCard(order: _activeOrder!, onTap: _openActiveOrder),
+          for (final order in activeOrders) ...[
+            _ActiveOrderCard(
+              order: order,
+              onTap: () => _openActiveOrder(order),
+            ),
+            const SizedBox(height: 8),
+          ],
           const SizedBox(height: 16),
         ],
         // شغلانة معادها عدّى ولسه ما بدأتش — أخطر حاجة في الشاشة بعد اللي شغّال دلوقتي.
@@ -814,13 +838,31 @@ class _ActiveOrderCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'طلب ${order.orderNumber}',
-                      style: Theme.of(context).textTheme.titleMedium,
+                      order.serviceNameAr ?? 'طلب ${order.orderNumber}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     Text(
-                      technicianOrderStatusLabelsAr[order.orderStatus] ??
-                          order.orderStatus,
+                      [
+                        order.orderNumber,
+                        technicianOrderStatusLabelsAr[order.orderStatus] ??
+                            order.orderStatus,
+                      ].join(' · '),
                     ),
+                    if (order.customerName != null ||
+                        order.address != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        [
+                          if (order.customerName != null) order.customerName!,
+                          if (order.address != null) order.address!.streetName,
+                        ].join(' — '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1144,15 +1186,21 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // docs/08 §108-H — تصليب وقائي: مكوّن مشترك مستخدم في أكتر من شاشة (~7 مرات)، بعض
+    // النداءات بتحط عدد ديناميكي جوّه التسمية (زي "الشغل الحالي (${count})"). Expanded هنا
+    // يضمن مفيش فيضان أفقي مهما طالت التسمية في أي نداء حالي أو مستقبلي.
     return Row(
       children: [
         Icon(icon, size: 18, color: color),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: color,
+        Expanded(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
           ),
         ),
       ],
@@ -1353,13 +1401,6 @@ class _TechnicianDrawer extends StatelessWidget {
                 label: 'جدول مواعيدي',
                 builder: (_) => const ScheduleScreen(),
               ),
-              // مطابقة المساعد التلقائية (ADR-0007) — فرص مساعدة على طلبات فنيين تانيين
-              // (بث تنافسي، أول قبول صحيح ياخدها)، منفصلة عن قايمة "طلباتي المتاحة".
-              _DrawerItem(
-                icon: Icons.handshake_outlined,
-                label: 'فرص المساعدة',
-                builder: (_) => const AssistantOffersScreen(),
-              ),
               _DrawerItem(
                 icon: Icons.video_library_outlined,
                 label: 'معرض أعمالي',
@@ -1428,6 +1469,12 @@ class _TechnicianDrawer extends StatelessWidget {
                 icon: Icons.report_problem_outlined,
                 label: 'شكاويّي',
                 builder: (_) => const ComplaintsScreen(),
+              ),
+              const Divider(height: 1),
+              _DrawerItem(
+                icon: Icons.description_outlined,
+                label: 'الشروط والسياسات',
+                builder: (_) => const LegalLinksScreen(),
               ),
               const Divider(height: 1),
               ListTile(
@@ -1526,7 +1573,11 @@ class _NearTermRequestCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.event_note_outlined, size: 16, color: context.infoColor),
+                Icon(
+                  Icons.event_note_outlined,
+                  size: 16,
+                  color: context.infoColor,
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -1534,30 +1585,46 @@ class _NearTermRequestCard extends StatelessWidget {
                     scheduledAt != null
                         ? 'شغل ${formatScheduledDayAr(scheduledAt)} — محتاج موافقتك'
                         : 'شغل قريب — محتاج موافقتك',
-                    style: TextStyle(fontSize: 12, color: context.infoColor, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.infoColor,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(order.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              order.serviceNameAr,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
-            Text('${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}'),
+            Text(
+              '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
+            ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-            if (order.problemDescription != null) Text(order.problemDescription!),
+            if (order.problemDescription != null)
+              Text(order.problemDescription!),
             const SizedBox(height: 6),
             Text(
               'بنسألك بدل ما نعيّنه عليك تلقائي لأن معاده قريب — لازم تكون عارف وموافق.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
-                FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                FilledButton(
+                  onPressed: busy ? null : onAccept,
+                  child: const Text('قبول'),
+                ),
                 const SizedBox(width: 8),
-                OutlinedButton(onPressed: busy ? null : onReject, child: const Text('رفض')),
+                OutlinedButton(
+                  onPressed: busy ? null : onReject,
+                  child: const Text('رفض'),
+                ),
               ],
             ),
           ],

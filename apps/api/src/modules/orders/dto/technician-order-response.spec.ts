@@ -48,6 +48,10 @@ const fullOrder: OrderResponseDto = {
   created_at: new Date().toISOString(),
   warranty_expires_at: null,
   original_order_id: null,
+  revisit_pinned_technician_id: null,
+  revisit_pinned_at: null,
+  revisit_released_at: null,
+  revisit_release_reason: null,
   building_id: null,
   recurring_template_id: null,
   recurring_occurrence_at: null,
@@ -75,39 +79,62 @@ const FORBIDDEN_FIELDS = [
   'refunded_amount_cents',
   'installment_outstanding_cents',
   'amount_due_to_technician_cents',
+  // docs/08 §108-B — total_amount_cents بقى ممنوع دايمًا (كان استثناء مشروط وقت الكاش الكامل).
+  'total_amount_cents',
 ] as const;
 
 describe('عقد الفني المالي (docs/08 §60.2)', () => {
   it('جزء أونلاين + جزء كاش: الأونلاين واقعة بلا رقم، والكاش بالرقم كامل', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 66_000,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: true,
       fullyPaidOnline: false,
     });
 
     expect(dto.cash_to_collect_cents).toBe(66_000);
+    expect(dto.cash_collected_cents).toBe(0);
     expect(dto.my_earning_cents).toBe(90_000);
     expect(dto.has_online_payment).toBe(true);
     expect(dto.fully_paid_online).toBe(false);
-    // الإجمالي مخفي — فيه نصيب الشركة والضمان.
-    expect(dto.total_amount_cents).toBeUndefined();
+    // الإجمالي مخفي دايمًا (docs/08 §108-B) — total_amount_cents مش موجود كنوع أصلًا على
+    // TechnicianOrderResponseDto، فمفيش داعي نتأكد منه هنا كمان (مغطّى بالتست الشامل تحت).
   });
 
-  it('كله كاش: الإجمالي بيبان (هو نفسه اللي هيحصّله)', () => {
+  // docs/08 §108-B — رجريشن على قصد: كان فيه استثناء بيظهّر total_amount_cents وقت الكاش
+  // الكامل ("هو نفسه اللي هيحصّله"). المالك ألغاه صراحةً: محدّش يشوف الإجمالي المُسمّى كده أبدًا،
+  // حتى لو الرقم نفسه بيتساوى مع cash_to_collect_cents عمليًا للقائد/الوحيد.
+  it('كله كاش: الإجمالي مخفي دايمًا، cash_to_collect_cents بيغطي نفس الاحتياج للقائد', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 126_000,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: false,
       fullyPaidOnline: false,
     });
-    expect(dto.total_amount_cents).toBe(126_000);
     expect(dto.cash_to_collect_cents).toBe(126_000);
+  });
+
+  // docs/08 §108-B — عضو طاقم مش قائد بياخد صفر في cash_to_collect_cents حتى لو الطلب كاش
+  // بالكامل؛ مش شغله يحصّل حاجة، فمش المفروض يشوف رقم بيسرّب صورة عن إجمالي الطلب.
+  it('عضو طاقم (مش قائد): cash_to_collect_cents صفر حتى لو الطلب كاش بالكامل', () => {
+    const dto = toTechnicianOrderResponseDto(fullOrder, {
+      cashToCollectCents: 0, // PaymentsService.getTechnicianMoneyView() هو اللي بيصفّرها للعضو
+      cashCollectedCents: 0,
+      myEarningCents: 30_000,
+      hasOnlinePayment: false,
+      fullyPaidOnline: false,
+      isCrewShare: true,
+    });
+    expect(dto.cash_to_collect_cents).toBe(0);
+    expect(dto.my_earning_cents).toBe(30_000);
   });
 
   it('كله أونلاين: نصيبه هو بس، مفيش كاش ولا إجمالي', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 0,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: true,
       fullyPaidOnline: true,
@@ -115,13 +142,13 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
     expect(dto.fully_paid_online).toBe(true);
     expect(dto.cash_to_collect_cents).toBe(0);
     expect(dto.my_earning_cents).toBe(90_000);
-    expect(dto.total_amount_cents).toBeUndefined();
   });
 
   it('كل حقول تكوين السعر ونصيب الشركة مش بتخرج على السلك خالص، في كل الحالات', () => {
     for (const hasOnlinePayment of [true, false]) {
       const dto = toTechnicianOrderResponseDto(fullOrder, {
         cashToCollectCents: 1,
+        cashCollectedCents: 0,
         myEarningCents: 1,
         hasOnlinePayment,
         fullyPaidOnline: false,

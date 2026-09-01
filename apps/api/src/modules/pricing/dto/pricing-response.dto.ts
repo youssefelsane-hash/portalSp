@@ -15,6 +15,8 @@ export interface PricingFieldResponseDto {
   options: PricingFieldOption[] | null;
   min_value: number | null;
   max_value: number | null;
+  min_files: number | null;
+  max_files: number | null;
   // القيمة الافتراضية لو الحقل اختياري (migration 0138، Script 6 Part 3/4) — الفرونت (customer-app)
   // لازم يهيّئ حالة الحقل بالقيمة دي مش بـ"غير مُجاب" لو موجودة. لحقول CHECKBOX اختيارية بلا
   // default_value مُعدّ صراحة، القيمة هنا null بس الافتراض المنطقي الضمني (باك-إند وفرونت) false.
@@ -36,6 +38,8 @@ export function toPricingFieldResponseDto(field: ServicePricingField): PricingFi
     options: field.options,
     min_value: field.minValue !== null ? Number(field.minValue) : null,
     max_value: field.maxValue !== null ? Number(field.maxValue) : null,
+    min_files: field.minFiles,
+    max_files: field.maxFiles,
     default_value: field.defaultValue,
     is_active: field.isActive,
     created_at: field.createdAt.toISOString(),

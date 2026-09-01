@@ -8,13 +8,14 @@ import { SettingsService } from './settings.service';
 import { SupportContactController } from './support-contact.controller';
 import { BookingPolicyController } from './booking-policy.controller';
 import { TrustInfoController } from './trust-info.controller';
+import { LegalEntityController } from './legal-entity.controller';
 
 // موديول خفيف مستقل زي AuditModule بالظبط — settings.default_commission_percent
 // وأمثالها لازم تتقرا من موديولات كتير (payments, matching, orders, ...) من غير
 // ما أي حد فيهم يعتمد على admin نفسه.
 @Module({
   imports: [TypeOrmModule.forFeature([Setting]), AuditModule],
-  controllers: [BookingPolicyController, SupportContactController, HomepageContentController, TrustInfoController],
+  controllers: [BookingPolicyController, SupportContactController, HomepageContentController, TrustInfoController, LegalEntityController],
   providers: [SettingsService, RedisCacheService],
   exports: [SettingsService],
 })
