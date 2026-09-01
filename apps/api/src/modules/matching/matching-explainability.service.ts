@@ -16,13 +16,13 @@ import {
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { MatchingService } from './matching.service';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 // batchSize كبير عمدًا (docs/08 §36.6) — عشان findEligibleTechnicians() ترجّع كل المجمّع المؤهّل
 // الحقيقي (مش أول N بس) وقت حساب ترتيب/rank_score فني معيّن للتفسير. صفر تأثير على مسار المطابقة
 // الفعلي — نداء تشخيصي منفصل تمامًا (قراءة بس).
 const EXPLAIN_RANKING_BATCH_SIZE = 10_000;
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 export interface TechnicianEligibilityCheck {
   key: string;
@@ -114,7 +114,7 @@ export class MatchingExplainabilityService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش نطاق خدمة محدد — مفيش مطابقة ممكنة عليه أصلاً', HttpStatus.BAD_REQUEST);
     }
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
 
     const [row] = await this.dataSource.query<EligibilityRow[]>(
@@ -147,7 +147,8 @@ export class MatchingExplainabilityService {
             engagedStatusesParam: '$10',
             isEmergencyParam: '$11',
             serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-            fullDayThresholdMinutesParam: '$12',
+            candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+            dailyCapacityMinutesParam: '$12',
           })}
         ) AS availability_ok,
         -- docs/08 §36.6 — نفس شرط findEligibleTechnicians()/assertCoreEligibility() بالحرف
@@ -188,7 +189,7 @@ export class MatchingExplainabilityService {
         order.scheduledAt,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         isEmergency,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         order.totalAmountCents,
         order.bookingMode === BookingMode.TEAM,
       ],
@@ -243,7 +244,7 @@ export class MatchingExplainabilityService {
         scheduledAt: order.scheduledAt,
         excludeOrderId: order.id,
         serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
-        fullDayThresholdMinutes: fullDayJobMinutes,
+        dailyCapacityMinutes: dailyCapacityMinutes,
       });
     } catch {
       capacityTier = null;
@@ -310,7 +311,7 @@ export class MatchingExplainabilityService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش نطاق خدمة محدد — مفيش فانل مطابقة ممكن عليه أصلاً', HttpStatus.BAD_REQUEST);
     }
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
@@ -392,7 +393,7 @@ export class MatchingExplainabilityService {
         order.serviceZoneId,
         order.scheduledAt,
         order.id,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         serviceDurationMinutes,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,

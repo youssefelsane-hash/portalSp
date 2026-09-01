@@ -4,11 +4,17 @@ import { FORMULA_LIMITS } from './formula-limits';
 import {
   ComparisonOperator,
   ConstantRulePayload,
+  DateDiffRounding,
+  DateDiffUnit,
+  DistanceUnit,
   FinalPriceFormulaPayload,
   FormulaCondition,
+  FormulaDateSource,
+  FormulaGeoSource,
   FormulaNode,
   LookupTableRulePayload,
 } from './pricing-formula.types';
+import { dateDiff, GeoPoint, haversineKm } from './pricing-temporal';
 
 // أقصى عمق لشجرة المعادلة — دفاع ضد أشجار متداخلة بشكل مرضي (تعمل stack overflow أو DoS).
 // 12 كانت كافية للخدمات الموجودة، لكن خدمات SONNA3 المعقدة محتاجة أعمق — 48 (طلب مالك صريح،
@@ -32,7 +38,22 @@ const ALLOWED_NODE_TYPES = new Set<FormulaNode['type']>([
   'ceil',
   'floor',
   'if',
+  'date_diff',
+  'distance',
 ]);
+
+const ALLOWED_DATE_DIFF_UNITS = new Set<DateDiffUnit>(['minutes', 'hours', 'days', 'weeks', 'months']);
+const ALLOWED_DATE_DIFF_ROUNDINGS = new Set<DateDiffRounding>(['exact', 'ceil', 'floor', 'round']);
+const ALLOWED_DISTANCE_UNITS = new Set<DistanceUnit>(['km', 'm']);
+const ALLOWED_DATE_SOURCE_KINDS = new Set<FormulaDateSource['kind']>([
+  'field',
+  'scheduled_at',
+  'scheduled_end_at',
+  'period_start',
+  'period_end',
+  'now',
+]);
+const ALLOWED_GEO_SOURCE_KINDS = new Set<FormulaGeoSource['kind']>(['field', 'order_location', 'point']);
 
 const ALLOWED_COMPARISON_OPERATORS = new Set<ComparisonOperator>(['equals', 'not_equals', 'gt', 'gte', 'lt', 'lte']);
 
@@ -147,6 +168,31 @@ export function validateFormulaNode(node: unknown, depthOrCtx: number | Validati
         rejectFormula(`${String(type)}.decimals لازم يكون رقم لو موجود`, currentPath(ctx));
       }
       return;
+    case 'date_diff':
+      validateDateSource(candidate.from, `${currentPath(ctx)} → date_diff.from`);
+      validateDateSource(candidate.to, `${currentPath(ctx)} → date_diff.to`);
+      if (typeof candidate.unit !== 'string' || !ALLOWED_DATE_DIFF_UNITS.has(candidate.unit as DateDiffUnit)) {
+        rejectFormula(`date_diff.unit غير مسموحة: ${String(candidate.unit)}`, currentPath(ctx));
+      }
+      if (
+        candidate.rounding !== undefined &&
+        (typeof candidate.rounding !== 'string' || !ALLOWED_DATE_DIFF_ROUNDINGS.has(candidate.rounding as DateDiffRounding))
+      ) {
+        rejectFormula(`date_diff.rounding غير مسموحة: ${String(candidate.rounding)}`, currentPath(ctx));
+      }
+      for (const flag of ['inclusive', 'absolute'] as const) {
+        if (candidate[flag] !== undefined && typeof candidate[flag] !== 'boolean') {
+          rejectFormula(`date_diff.${flag} لازم يكون boolean لو موجود`, currentPath(ctx));
+        }
+      }
+      return;
+    case 'distance':
+      validateGeoSource(candidate.from, `${currentPath(ctx)} → distance.from`);
+      validateGeoSource(candidate.to, `${currentPath(ctx)} → distance.to`);
+      if (typeof candidate.unit !== 'string' || !ALLOWED_DISTANCE_UNITS.has(candidate.unit as DistanceUnit)) {
+        rejectFormula(`distance.unit غير مسموحة: ${String(candidate.unit)}`, currentPath(ctx));
+      }
+      return;
     case 'if':
       validateFormulaCondition(candidate.condition, currentPath(ctx));
       ctx.path.push('if.then');
@@ -176,10 +222,51 @@ function validateFormulaCondition(condition: unknown, path: string): void {
   }
 }
 
+function validateDateSource(source: unknown, path: string): void {
+  if (typeof source !== 'object' || source === null) {
+    rejectFormula('مصدر التاريخ لازم يكون object', path);
+  }
+  const candidate = source as Record<string, unknown>;
+  if (typeof candidate.kind !== 'string' || !ALLOWED_DATE_SOURCE_KINDS.has(candidate.kind as FormulaDateSource['kind'])) {
+    rejectFormula(`مصدر تاريخ غير مسموح: ${String(candidate.kind)}`, path);
+  }
+  if (candidate.kind === 'field' && (typeof candidate.field_key !== 'string' || candidate.field_key.length === 0)) {
+    rejectFormula('مصدر التاريخ من نوع حقل لازم يحدد field_key', path);
+  }
+}
+
+function validateGeoSource(source: unknown, path: string): void {
+  if (typeof source !== 'object' || source === null) {
+    rejectFormula('مصدر الموقع لازم يكون object', path);
+  }
+  const candidate = source as Record<string, unknown>;
+  if (typeof candidate.kind !== 'string' || !ALLOWED_GEO_SOURCE_KINDS.has(candidate.kind as FormulaGeoSource['kind'])) {
+    rejectFormula(`مصدر موقع غير مسموح: ${String(candidate.kind)}`, path);
+  }
+  if (candidate.kind === 'field' && (typeof candidate.field_key !== 'string' || candidate.field_key.length === 0)) {
+    rejectFormula('مصدر الموقع من نوع حقل لازم يحدد field_key', path);
+  }
+  if (candidate.kind === 'point') {
+    const lat = candidate.lat;
+    const lng = candidate.lng;
+    if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      rejectFormula('النقطة الثابتة لازم يكون لها lat/lng صالحين', path);
+    }
+  }
+}
+
 export interface FormulaEvaluationContext {
   fieldValues: Record<string, string | number | boolean>;
   constants: Map<string, ConstantRulePayload>;
   lookupTables: Map<string, LookupTableRulePayload>;
+  /**
+   * التواريخ المتاحة للمعادلة (ADR-0050 §2). المفتاح إما `field:<field_key>` لحقل من الفورم، أو
+   * اسم مصدر النظام (`scheduled_at`، `period_start`، …). `now` مابيتخزّنش هنا — بيتحسب لحظة
+   * التقييم عشان نتيجة نفس السياق ماتبقاش معتمدة على متى اتبنى السياق.
+   */
+  dateValues?: Map<string, Date>;
+  /** النقاط الجغرافية المتاحة (ADR-0050 §3) — نفس نظام المفاتيح. */
+  geoPoints?: Map<string, GeoPoint>;
 }
 
 const OPTIONAL_FORMULA_OUTPUT_KEYS: (keyof FinalPriceFormulaPayload)[] = [
@@ -258,6 +345,10 @@ export function countFormulaNodes(payload: FinalPriceFormulaPayload): number {
         walk(candidate.then);
         walk(candidate.else);
         return;
+      case 'date_diff':
+      case 'distance':
+        // عقد ورقية — مصادرها وصف مش شجرة فرعية، فمفيش حاجة تتمشى فيها.
+        return;
       default:
         for (const operand of (candidate.operands ?? []) as unknown[]) walk(operand);
     }
@@ -310,6 +401,50 @@ function evaluateCondition(condition: FormulaCondition, context: FormulaEvaluati
   }
 }
 
+/** اسم عربي للمصدر — بيدخل في رسائل الرفض عشان الأدمن يعرف أنهي طرف ناقص بالظبط. */
+const DATE_SOURCE_LABELS_AR: Record<FormulaDateSource['kind'], string> = {
+  field: 'حقل من الفورم',
+  scheduled_at: 'موعد بداية الخدمة',
+  scheduled_end_at: 'موعد نهاية الخدمة',
+  period_start: 'بداية الفترة',
+  period_end: 'نهاية الفترة',
+  now: 'وقت الحساب',
+};
+
+function dateSourceKey(source: FormulaDateSource): string {
+  return source.kind === 'field' ? `field:${source.field_key}` : source.kind;
+}
+
+function resolveDateSource(source: FormulaDateSource, context: FormulaEvaluationContext): Date {
+  // `now` بيتحسب لحظة التنفيذ مش وقت بناء السياق — سياق واحد ممكن يتقيّم أكتر من مرة.
+  if (source.kind === 'now') return new Date();
+  const value = context.dateValues?.get(dateSourceKey(source));
+  if (!value) {
+    const label = source.kind === 'field' ? `الحقل "${source.field_key}"` : DATE_SOURCE_LABELS_AR[source.kind];
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      `${label} مطلوب كتاريخ لحساب السعر — القيمة مش موجودة أو مش تاريخ صالح`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+  return value;
+}
+
+function resolveGeoSource(source: FormulaGeoSource, context: FormulaEvaluationContext): GeoPoint {
+  if (source.kind === 'point') return { lat: source.lat, lng: source.lng };
+  const key = source.kind === 'field' ? `field:${source.field_key}` : source.kind;
+  const value = context.geoPoints?.get(key);
+  if (!value) {
+    const label = source.kind === 'field' ? `الحقل "${source.field_key}"` : 'موقع الطلب';
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      `${label} مطلوب كموقع لحساب السعر — القيمة مش موجودة أو مش إحداثيات صالحة`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+  return value;
+}
+
 /**
  * تنفيذ فعلي لشجرة معادلة اتوثّقت بالفعل (validateFormulaNode) — بيتنادى وقت حساب سعر حقيقي
  * لعميل. برضه بيرفض بوضوح لو حقل/ثابت/lookup مطلوب في الشجرة مش موجود في السياق، بدل ما
@@ -334,9 +469,18 @@ export function evaluateFormulaNode(node: FormulaNode, context: FormulaEvaluatio
       // (تصنيفية زي dropdown نص) — هنا بس، لحظة الاستخدام الفعلي كرقم في المعادلة، إحنا
       // متأكدين إن السياق محتاج رقم فنرفض بوضوح لو مش رقم صالح.
       if (!Number.isFinite(numeric)) {
+        // ADR-0050 §5 — حقل التاريخ/الموقع بيتقرا بعقدة مخصصة، مش كرقم. الرسالة بتسمّي البديل
+        // بدل ما تقول "مش رقم" وخلاص: ده بالظبط الغلط اللي المالك بلّغ عنه (حقل تاريخ في الفورم
+        // بلا أي استهلاك ممكن). ورجوع epoch ms كرقم **مرفوض عمدًا** — كان هيدّي سعر بالمليارات
+        // بصمت لو الأدمن ضربه في تعريفة.
+        const hint = context.dateValues?.has(`field:${node.field_key}`)
+          ? ' — ده حقل تاريخ، استخدم عقدة «فرق بين تاريخين» بدل قراءته كرقم'
+          : context.geoPoints?.has(`field:${node.field_key}`)
+            ? ' — ده حقل موقع، استخدم عقدة «المسافة بين نقطتين»'
+            : '';
         throw new ApiException(
           ErrorCode.VAL_001,
-          `قيمة الحقل "${node.field_key}" لازم تكون رقم صالح لحساب السعر — القيمة الحالية غير رقمية`,
+          `قيمة الحقل "${node.field_key}" لازم تكون رقم صالح لحساب السعر — القيمة الحالية غير رقمية${hint}`,
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -418,6 +562,24 @@ export function evaluateFormulaNode(node: FormulaNode, context: FormulaEvaluatio
       const value = evaluateFormulaNode(node.value, context);
       const factor = 10 ** (node.decimals ?? 0);
       return Math.floor(value * factor) / factor;
+    }
+
+    case 'date_diff': {
+      const from = resolveDateSource(node.from, context);
+      const to = resolveDateSource(node.to, context);
+      return dateDiff(from, to, {
+        unit: node.unit,
+        rounding: node.rounding,
+        inclusive: node.inclusive,
+        absolute: node.absolute,
+      });
+    }
+
+    case 'distance': {
+      const from = resolveGeoSource(node.from, context);
+      const to = resolveGeoSource(node.to, context);
+      const km = haversineKm(from, to);
+      return node.unit === 'm' ? km * 1000 : km;
     }
 
     case 'if':
@@ -604,6 +766,26 @@ export function evaluateFormulaNodeWithTrace(
         const branch = conditionResult ? n.then : n.else;
         return evalTraced(branch, [...path, conditionResult ? 'then' : 'else']);
       }
+      case 'date_diff': {
+        const value = evaluateFormulaNode(n, context);
+        counter += 1;
+        entries.push({
+          path: path.join('.'),
+          expression: `فرق التواريخ (${DATE_DIFF_UNIT_LABELS_AR[n.unit]}) = ${value}`,
+          value,
+        });
+        return value;
+      }
+      case 'distance': {
+        const value = evaluateFormulaNode(n, context);
+        counter += 1;
+        entries.push({
+          path: path.join('.'),
+          expression: `المسافة (${n.unit === 'm' ? 'متر' : 'كم'}) = ${value}`,
+          value,
+        });
+        return value;
+      }
       default:
         // literal — مفيش سطر مفيد يتسجل عنده
         return evaluateFormulaNode(n, context);
@@ -615,6 +797,29 @@ export function evaluateFormulaNodeWithTrace(
   const finalValue = evalTraced(node, ['price_cents']);
   void counter;
   return { value: finalValue, trace: entries };
+}
+
+const DATE_DIFF_UNIT_LABELS_AR: Record<DateDiffUnit, string> = {
+  minutes: 'دقايق',
+  hours: 'ساعات',
+  days: 'أيام',
+  weeks: 'أسابيع',
+  months: 'شهور',
+};
+
+function describeDateSource(source: unknown): string {
+  if (typeof source !== 'object' || source === null) return '—';
+  const candidate = source as Record<string, unknown>;
+  if (candidate.kind === 'field') return `حقل «${String(candidate.field_key)}»`;
+  return DATE_SOURCE_LABELS_AR[candidate.kind as FormulaDateSource['kind']] ?? String(candidate.kind);
+}
+
+function describeGeoSource(source: unknown): string {
+  if (typeof source !== 'object' || source === null) return '—';
+  const candidate = source as Record<string, unknown>;
+  if (candidate.kind === 'field') return `حقل «${String(candidate.field_key)}»`;
+  if (candidate.kind === 'point') return `نقطة ثابتة (${String(candidate.lat)}, ${String(candidate.lng)})`;
+  return 'موقع الطلب';
 }
 
 /** شرح هيكلي سطري لكل مخرجات المعادلة — explanation-only، مش مصدر تسعير (docs/01B §6). */
@@ -644,6 +849,13 @@ export function describeFormulaPayload(payload: FinalPriceFormulaPayload): strin
         const cond = n.condition as Record<string, unknown>;
         return `لو «${String(cond.field_key)}» ${String(cond.op)} «${String(cond.value)}» ف(${summarize(n.then)}) وإلا(${summarize(n.else)})`;
       }
+      case 'date_diff': {
+        const unit = DATE_DIFF_UNIT_LABELS_AR[n.unit as DateDiffUnit] ?? String(n.unit);
+        const suffix = n.inclusive ? '، شامل الطرفين' : '';
+        return `الفرق بالـ${unit} بين (${describeDateSource(n.from)}) و(${describeDateSource(n.to)})${suffix}`;
+      }
+      case 'distance':
+        return `المسافة بالـ${n.unit === 'm' ? 'متر' : 'كم'} بين (${describeGeoSource(n.from)}) و(${describeGeoSource(n.to)})`;
       default: {
         const ops = Array.isArray(n.operands) ? (n.operands as unknown[]).map(summarize) : [];
         const joiner =

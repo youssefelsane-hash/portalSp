@@ -6,8 +6,8 @@ import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } f
 import { ESCALATABLE_STATUSES } from '../orders/crew-shortage-escalation.service';
 import { SettingsService } from '../settings/settings.service';
 import { RealtimeSessionRegistry } from '../../common/websocket/realtime-session-registry.service';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // نفس افتراض describeTechnicianCapacity() لمعاينة تشخيصية عامة (مفيش طلب مرشّح فعلي هنا) —
 // technician-eligibility.sql.ts:258.
 const GENERIC_SERVICE_DURATION_MINUTES = 60;
@@ -46,10 +46,7 @@ export class AdminOperationsOverviewService {
 
   async getOverview(filters: { categoryId?: string | null }): Promise<OperationsOverview> {
     const categoryId = filters.categoryId ?? null;
-    const fullDayThresholdMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const onlineUserIds = this.realtimeSessions.onlineUserIds();
 
     const [row] = await this.dataSource.query<
@@ -141,7 +138,7 @@ export class AdminOperationsOverviewService {
         ESCALATABLE_STATUSES,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
-        fullDayThresholdMinutes,
+        dailyCapacityMinutes,
         GENERIC_SERVICE_DURATION_MINUTES,
         onlineUserIds,
       ],

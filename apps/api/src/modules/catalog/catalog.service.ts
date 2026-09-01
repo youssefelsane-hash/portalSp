@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext, PricingContext } from '../pricing/pricing-context';
+import { missingPricingInput, pricingMethod } from '../pricing/pricing-methods';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -362,27 +363,13 @@ export class CatalogService {
       isEmergency,
       technicianLevel,
     });
-    if (service.pricingModel === PricingModel.HOURLY && pricingContext.durationHours === null) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الخدمة دي محسوبة بالساعة — لازم تحدد المدة أو وقت البداية والنهاية',
-        HttpStatus.BAD_REQUEST,
-      );
+    // ADR-0050 §1 — المدخل المطلوب لكل طريقة بيتقرا من نفس السجل اللي بيبني شجرة سعرها، فمستحيل
+    // يفترقوا. قبل كده كانت `if` منفصلة هنا لكل طريقة، والشجرة في ملف تاني خالص.
+    const missingInput = missingPricingInput(service.pricingModel, pricingContext);
+    if (missingInput) {
+      throw new ApiException(ErrorCode.VAL_001, missingInput, HttpStatus.BAD_REQUEST);
     }
-    if (
-      (service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) &&
-      pricingContext.quantity === null
-    ) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        service.pricingModel === PricingModel.MONTHLY
-          ? 'الخدمة دي محسوبة بوحدات شهرية — لازم تحدد عدد الوحدات'
-          : 'الخدمة دي محسوبة بالوحدة — لازم تحدد الكمية',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    if (pricingContext.quantity !== null &&
-        (service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY)) {
+    if (pricingContext.quantity !== null && service.pricingModel === PricingModel.PER_UNIT) {
       this.assertQuantityConstraints(service, pricingContext.quantity);
     }
 
@@ -443,11 +430,9 @@ export class CatalogService {
       if (zoneOverride.pricingMode === ZonePricingMode.PERCENTAGE) {
         zoneAdjustedBaseCents = Math.round(result.priceCents * (1 + Number(zoneOverride.modifierPercentage) / 100));
       } else {
-        const units = service.pricingModel === PricingModel.HOURLY
-          ? pricingContext.durationHours!
-          : service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
-            ? pricingContext.quantity!
-            : 1;
+        // نفس السجل برضه — «الوحدة» اللي سعر المنطقة المطلق بيتضرب فيها جزء من تعريف الطريقة،
+        // مش معرفة تالتة متكررة هنا.
+        const units = pricingMethod(service.pricingModel).unitsForZoneOverride(pricingContext);
         zoneAdjustedBaseCents = Math.round(zoneOverride.priceCents! * units);
         surgeMultiplier = Number(zoneOverride.surgeMultiplier);
       }

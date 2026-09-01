@@ -80,6 +80,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [pricingQuantity, setPricingQuantity] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
+  // ADR-0050 §4 — فترة التعاقد لخدمة شهرية. حلّت محل «عدد الشهور» اليدوي اللي كان بلاغ المالك عليه.
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
   const [postpaidPolicies, setPostpaidPolicies] = useState<ApplicablePaymentPolicyDto[]>([]);
   const [problemDescription, setProblemDescription] = useState('');
@@ -120,7 +123,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }, [id]);
 
   useEffect(() => {
-    if (service?.pricing_model === 'formula') {
+    // ADR-0050 §6 — الفورم الديناميكي مابقاش حكر على `formula`: خدمة «كشف ثم عرض سعر» بتنزل
+    // بلا سعر ومحتاجة نفس «الفلتر» عشان الإدارة تقدر تسعّر (طلب مالك صريح).
+    if (service?.pricing_model === 'formula' || service?.pricing_model === 'inspection_then_quote') {
       fetchPricingFields(id).then(setPricingFields);
     }
   }, [id, service]);
@@ -166,9 +171,15 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!service || service.pricing_model === 'formula') return;
-    const quantityBased = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
+    const quantityBased = service.pricing_model === 'per_unit';
+    const periodBased = service.pricing_model === 'monthly';
     const parsedQuantity = Number(pricingQuantity);
     if (quantityBased && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEstimate(null);
+      return;
+    }
+    if (periodBased && (!periodStart || !periodEnd)) {
       setEstimate(null);
       return;
     }
@@ -177,17 +188,18 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       setEstimate(null);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEstimating(true);
     estimatePrice(id, {
       bookingMode,
       pricingQuantity: quantityBased ? parsedQuantity : undefined,
+      periodStart: periodBased ? periodStart : undefined,
+      periodEnd: periodBased ? periodEnd : undefined,
       durationHours: service.pricing_model === 'hourly' ? parsedDuration : undefined,
     })
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [id, service, bookingMode, pricingQuantity, durationHours]);
+  }, [id, service, bookingMode, pricingQuantity, durationHours, periodStart, periodEnd]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -242,14 +254,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           scheduled_at_range_end:
             scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
           duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
-          pricing_quantity:
-            service.pricing_model === 'per_unit' || service.pricing_model === 'monthly'
-              ? Number(pricingQuantity)
-              : undefined,
+          pricing_quantity: service.pricing_model === 'per_unit' ? Number(pricingQuantity) : undefined,
+          period_start: service.pricing_model === 'monthly' ? periodStart : undefined,
+          period_end: service.pricing_model === 'monthly' ? periodEnd : undefined,
           repeat_frequency: requestRemoteQuote ? undefined : repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
-          field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
+          field_values: showsDynamicForm ? fieldValues : undefined,
           payment_method: !requestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
         },
         orderIdempotencyKey,
@@ -303,12 +314,27 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // **الميعاد بقى الخطوة الأولى دايمًا (ADR-0048)** — قبل كده كان بيتخطى لو العميل اختار
   // "طوارئ"؛ الاختيار ده اتشال، والاستعجال نفسه بقى **نتيجة** اختيار النهارده.
   const needsSchedule = service.allows_scheduling;
-  const isQuantityPricing = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
-  const quantityUnit = service.unit_name_ar || (service.pricing_model === 'monthly' ? 'الشهور' : 'الوحدات');
+  const isQuantityPricing = service.pricing_model === 'per_unit';
+  // ADR-0050 §4 — الشهري بقى فترة بتاريخين، مش كمية.
+  const isPeriodPricing = service.pricing_model === 'monthly';
+  // ADR-0050 §6 — «فلتر» أسئلة للعميل على خدمة بلا سعر برضه، مش بس على المعادلة الديناميكية.
+  const showsDynamicForm =
+    service.pricing_model === 'formula' || service.pricing_model === 'inspection_then_quote';
+  const quantityUnit = service.unit_name_ar || 'الوحدات';
   const parsedPricingQuantity = Number(pricingQuantity);
-  const quantityValid = !isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0);
+  const periodValid = !isPeriodPricing || (Boolean(periodStart) && Boolean(periodEnd) && periodEnd > periodStart);
+  const quantityValid =
+    (!isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0)) && periodValid;
+  const billedMonthsPreview = (() => {
+    if (!periodStart || !periodEnd) return 1;
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
+    const whole = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+    const months = end.getDate() > start.getDate() ? whole + 1 : whole;
+    return months < 1 ? 1 : months;
+  })();
   const pricingFieldsValid =
-    service.pricing_model !== 'formula' ||
+    !showsDynamicForm ||
     (pricingFields ?? []).every((field) => {
       const value = fieldValues[field.field_key];
       if (field.field_type === 'image_upload') {
@@ -445,7 +471,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {service.pricing_model === 'formula' && pricingFields && pricingFields.length > 0 && (
+      {showsDynamicForm && pricingFields && pricingFields.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
           <div className="space-y-4">
@@ -465,11 +491,41 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
+      {isPeriodPricing && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="font-semibold">مدة الاشتراك</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-sm text-muted">من تاريخ</span>
+              <input
+                type="date"
+                value={periodStart}
+                onChange={(e) => setPeriodStart(e.target.value)}
+                className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm text-muted">إلى تاريخ</span>
+              <input
+                type="date"
+                value={periodEnd}
+                min={periodStart || undefined}
+                onChange={(e) => setPeriodEnd(e.target.value)}
+                className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-sm text-muted">
+            {periodValid && periodStart && periodEnd
+              ? `المدة ${billedMonthsPreview} ${billedMonthsPreview === 1 ? 'شهر' : 'شهور'} — أي جزء من شهر بيتحسب شهر كامل.`
+              : 'اختار تاريخ البداية والنهاية، والنظام بيحسب عدد الشهور بينهم.'}
+          </p>
+        </section>
+      )}
+
       {isQuantityPricing && (
         <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-          <h2 className="font-semibold">
-            {service.pricing_model === 'monthly' ? 'مدة الاشتراك بالشهور' : 'الكمية المطلوبة'}
-          </h2>
+          <h2 className="font-semibold">الكمية المطلوبة</h2>
           <label className="mt-3 block">
             <span className="mb-1 block text-sm text-muted">عدد {quantityUnit}</span>
             <input
@@ -481,14 +537,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               value={pricingQuantity}
               onChange={(e) => setPricingQuantity(e.target.value)}
               className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
-              placeholder={service.pricing_model === 'monthly' ? 'مثال: 3 شهور' : undefined}
             />
           </label>
-          <p className="mt-2 text-sm text-muted">
-            {service.pricing_model === 'monthly'
-              ? 'الإجمالي = السعر الشهري × عدد الشهور، ويظهر لك قبل تأكيد الطلب.'
-              : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب.'}
-          </p>
+          <p className="mt-2 text-sm text-muted">السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب.</p>
         </section>
       )}
 
@@ -1156,9 +1207,19 @@ function IndividualCard({
           </span>
         </div>
         {conflicted && (
-          <p className="mt-1 text-xs text-danger">
-            مش متاح للفترة دي{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
-          </p>
+          <>
+            <p className="mt-1 text-xs text-danger">
+              مش متاح للفترة دي{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
+            </p>
+            {/* ADR-0059 §6 — الاقتراح بقى تاريخ حقيقي (أقرب يوم فاضي فعلاً بتقويم القاهرة).
+                الكارت هنا مكانش بيعرضه خالص رغم إن الـAPI بترجّعه من زمان — تطبيق العميل بس
+                هو اللي كان بيستخدمه. */}
+            <p className="mt-0.5 text-xs text-muted">
+              {t.available_again_at
+                ? `الفني متاح من ${new Date(t.available_again_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'numeric' })}`
+                : 'الفني ده مش متاح خلال الشهر الجاي'}
+            </p>
+          </>
         )}
         <p className="mt-1 text-sm text-muted">
           {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}

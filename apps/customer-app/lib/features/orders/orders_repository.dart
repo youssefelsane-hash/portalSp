@@ -169,6 +169,10 @@ class OrdersRepository {
     String? standardDataId,
     num? requestedUnits,
     num? pricingQuantity,
+    /// ADR-0050 §4 — نفس فترة `createOrder` بالحرف: المعاينة لازم تحسب نفس عدد الشهور اللي
+    /// الحجز هيتحاسب بيه، وإلا العميل بيشوف رقم وبيتدفع غيره.
+    DateTime? periodStart,
+    DateTime? periodEnd,
     // دفع قبل التوزيع (ADR-0013 §3/§4، docs/08 §19 بند 1) — 'card' أو 'instapay' بس، أو null
     // (الافتراضي القديم: دفع بعد الشغل زي زمان). لو اتبعت، الباك-إند بيرجّع الطلب بحالة
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
@@ -200,6 +204,9 @@ class OrdersRepository {
         if (standardDataId != null) 'standard_data_id': standardDataId,
         if (requestedUnits != null) 'requested_units': requestedUnits,
         if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
+        if (periodStart != null)
+          'period_start': periodStart.toUtc().toIso8601String(),
+        if (periodEnd != null) 'period_end': periodEnd.toUtc().toIso8601String(),
         if (paymentMethod != null) 'payment_method': paymentMethod,
         if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
@@ -258,6 +265,10 @@ class OrdersRepository {
     num? pricingQuantity,
     int? durationHours,
     DateTime? scheduledAt,
+    // ADR-0050 §4 — فترة التعاقد لخدمة شهرية. مش موعد الزيارة: عدد شهور الفوترة بيتحسب من
+    // الفرق بينهم بالتقويم، بدل ما العميل يكتب عدد شهور بإيده.
+    DateTime? periodStart,
+    DateTime? periodEnd,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -285,6 +296,9 @@ class OrdersRepository {
         if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
         if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
         if (durationHours != null) 'duration_hours': durationHours,
+        if (periodStart != null)
+          'period_start': periodStart.toUtc().toIso8601String(),
+        if (periodEnd != null) 'period_end': periodEnd.toUtc().toIso8601String(),
       },
     );
     return OrderPricePreview.fromJson(data!);

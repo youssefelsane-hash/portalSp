@@ -73,7 +73,7 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsStub,
-      null as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   }, 20000);

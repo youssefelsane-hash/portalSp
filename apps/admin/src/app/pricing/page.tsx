@@ -9,7 +9,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { AdminServiceCategoryResponseDto, AdminServiceResponseDto, PricingModel } from '@baytak/shared-types';
+import { PRICING_MODEL_LABELS } from '@baytak/shared-types';
+import type { AdminServiceCategoryResponseDto, AdminServiceResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -20,14 +21,6 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 
-const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
-  fixed: 'ثابت',
-  hourly: 'بالساعة',
-  per_unit: 'بالوحدة',
-  monthly: 'شهري',
-  inspection_then_quote: 'كشف ثم عرض سعر',
-  formula: 'معادلة ديناميكية',
-};
 
 export default function PricingEnginePage() {
   const { isLoading, authedFetch } = useAuth();

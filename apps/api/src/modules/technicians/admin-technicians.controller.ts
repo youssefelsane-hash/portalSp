@@ -43,8 +43,8 @@ import { TechnicianIdentityService } from './technician-identity.service';
 import { SetNationalIdDto } from './dto/set-national-id.dto';
 import { AdminTechnician360Service } from './admin-technician-360.service';
 import { TechnicianEarningsService } from '../payments/technician-earnings.service';
+import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
@@ -226,11 +226,11 @@ export class AdminTechniciansController {
   // التوزيع الفعلي). بلا RequirePermission مخصوصة — عرض بس، نفس مستوى GET :id العادي.
   @Get(':id/capacity')
   async getCapacity(@Param('id', ParseUUIDPipe) id: string, @Query() query: TechnicianCapacityQueryDto) {
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const description = await describeTechnicianCapacity(this.dataSource, {
       technicianId: id,
       date: query.date,
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      dailyCapacityMinutes: dailyCapacityMinutes,
     });
     return {
       technician_id: id,

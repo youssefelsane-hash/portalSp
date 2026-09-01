@@ -4,8 +4,8 @@ import { DataSource } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { DISPATCH_PENDING_STATUSES } from './admin-operations-overview.service';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // نفس افتراض capacity_today (§36.2)/عرض الحمل القريب (§36.4) — مفيش طلب مرشّح فعلي هنا، معاينة
 // عامة بس (technician-eligibility.sql.ts:258).
 const GENERIC_SERVICE_DURATION_MINUTES = 60;
@@ -72,10 +72,7 @@ export class AdminCoverageIntelligenceService {
     const offset = (filters.page - 1) * filters.perPage;
     const categoryId = filters.categoryId ?? null;
     const zoneId = filters.zoneId ?? null;
-    const fullDayThresholdMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
     const rawRows = await this.dataSource.query<RawRow[]>(
       `
@@ -112,7 +109,7 @@ export class AdminCoverageIntelligenceService {
                   OR COALESCE(cs.estimated_duration_minutes, 60) >= $5::int
                   OR $6::int >= $5::int
                 )
-                -- $5 = fullDayThresholdMinutes (العتبة)، $6 = GENERIC_SERVICE_DURATION_MINUTES (قيمة
+                -- $5 = dailyCapacityMinutes (العتبة)، $6 = GENERIC_SERVICE_DURATION_MINUTES (قيمة
                 -- افتراضية لو مفيش خدمة مرشّحة فعلية) — نفس ترتيب admin-operations-overview.service.ts بالحرف.
             ) THEN 'HEAVY'
             WHEN EXISTS (
@@ -172,7 +169,7 @@ export class AdminCoverageIntelligenceService {
         zoneId,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
-        fullDayThresholdMinutes,
+        dailyCapacityMinutes,
         GENERIC_SERVICE_DURATION_MINUTES,
         DISPATCH_PENDING_STATUSES,
         filters.perPage,

@@ -54,7 +54,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       scheduledAt,
       excludeOrderId: candidate.id as string,
       serviceDurationMinutes: durationMinutes,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
   }
 
@@ -187,7 +187,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     const description = await describeTechnicianCapacity(dataSource, {
       technicianId: ids.technician,
       date: today,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(description.tier).toBe('LIGHT');
     expect(description.reasonAr.length).toBeGreaterThan(0);
@@ -202,7 +202,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     const description = await describeTechnicianCapacity(dataSource, {
       technicianId: ids.technician,
       date: today,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(description.tier).toBe('HEAVY');
     expect(description.reasonAr).toContain(order.order_number);
@@ -224,7 +224,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     const description = await describeTechnicianCapacity(dataSource, {
       technicianId: ids.technician,
       date: today,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(description.tier).toBe('BLOCKED');
     expect(description.occupiedFrom).toBe(today);
@@ -349,7 +349,7 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
       scheduledAt: null,
       excludeOrderId: null,
       serviceDurationMinutes: 60,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(tier).toBe('LIGHT');
   });
@@ -377,7 +377,7 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
       scheduledAt: null,
       excludeOrderId: null,
       serviceDurationMinutes: 60,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(['MEANINGFUL', 'HEAVY']).toContain(tier);
 
@@ -390,7 +390,7 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
       scheduledAt: null,
       excludeOrderId: null,
       serviceDurationMinutes: 60,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(tierAsLeader).toBe(tier);
 
@@ -422,7 +422,7 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
       scheduledAt: null,
       excludeOrderId: null,
       serviceDurationMinutes: 60,
-      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+      dailyCapacityMinutes: FULL_DAY_MINUTES,
     });
     expect(tier).toBe('LIGHT');
   });

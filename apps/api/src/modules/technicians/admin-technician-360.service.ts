@@ -7,8 +7,8 @@ import { OrderStatus } from '../orders/entities/order.entity';
 import { SettingsService } from '../settings/settings.service';
 import { describeTechnicianCapacity, TechnicianCapacityDescription } from './technician-eligibility.sql';
 import { TechnicianActivityService, TechnicianActivitySnapshot } from './technician-activity.service';
+import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 const RECENT_CANCELLATION_WINDOW_DAYS = 90;
 // طلبات "حالية/قادمة" — نفس ACTIVE_TECHNICIAN_ORDER_STATUSES زائد technician_assigned (قائد طلب
 // فريق اتعيّن بس طاقمه لسه ناقص، §35.1 — لسه "شغل جاي" من منظور الأدمن حتى لو مش technician-active
@@ -183,7 +183,7 @@ export class AdminTechnician360Service {
       throw new ApiException(ErrorCode.VAL_001, 'الفني غير موجود', HttpStatus.NOT_FOUND);
     }
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
     const [
       categories,
@@ -217,7 +217,7 @@ export class AdminTechnician360Service {
       describeTechnicianCapacity(this.dataSource, {
         technicianId: technicianProfileId,
         date: new Date().toISOString().slice(0, 10),
-        fullDayThresholdMinutes: fullDayJobMinutes,
+        dailyCapacityMinutes: dailyCapacityMinutes,
       }),
       this.dataSource.query<{ order_id: string; order_number: string; order_status: string; scheduled_at: Date | null; service_name_ar: string }[]>(
         `SELECT o.id AS order_id, o.order_number, o.order_status, o.scheduled_at, s.name_ar AS service_name_ar

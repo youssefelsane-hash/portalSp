@@ -36,6 +36,7 @@ import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
 } from '../orders/revisit-pin';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -63,7 +64,6 @@ const EMERGENCY_ESCALATION_AFTER_ROUNDS_FALLBACK = 2;
 // (autoConfirmScheduledOrder تحت) بلا انتظار قبول، بغض النظر عن قرب موعده.
 // حد "شغل يوم كامل" (ADR-0018 §2/§9) — الشغل اللي فوق الحد ده بالدقايق (أو estimated_duration_days
 // >= 1) بيُعتبر شاغل يوم الفني بالكامل لغرض تعارض الجدولة اليومية (technician-eligibility.sql.ts).
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // ADR-0017 بند 10 — الجولة اللي بعدها يتوسّع البحث لفنيين "مرتبطين بس مشغولين بطلب نشط دلوقتي"
 // (نفس شرط الخدمة/المنطقة يفضل ساري دايمًا). قيمة كبيرة (أكبر من matching.max_rounds) = تعطيل.
 const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
@@ -229,10 +229,7 @@ export class MatchingService {
     preferredCompanyId?: string | null,
     ignoreActiveOrderConflict = false,
   ): Promise<EligibleTechnicianRow[]> {
-    const fullDayJobMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const workloadBalanceWeight = await this.settingsService.getNumber(
       'matching.workload_balance_weight',
       WORKLOAD_BALANCE_WEIGHT_FALLBACK,
@@ -363,8 +360,9 @@ export class MatchingService {
             engagedStatusesParam: '$11',
             isEmergencyParam: '$12',
             serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+            candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
             preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
-            fullDayThresholdMinutesParam: '$13',
+            dailyCapacityMinutesParam: '$13',
             ignoreActiveOrderConflict,
           })}
       ) company_capacity ON company.id IS NOT NULL
@@ -453,8 +451,9 @@ export class MatchingService {
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
           serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+          candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
           preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
-          fullDayThresholdMinutesParam: '$13',
+          dailyCapacityMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
       ORDER BY rank_score DESC,
@@ -474,7 +473,7 @@ export class MatchingService {
         order.scheduledAt ?? null,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         order.bookingMode === BookingMode.EMERGENCY,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         workloadBalanceWeight,
         fairnessWeight,
         String(fairnessLookbackDays),
@@ -1002,7 +1001,7 @@ export class MatchingService {
    * قرار إضافية فوقه: `LIGHT` يتأكد تلقائيًا زي ما هو بالحرف، `MEANINGFUL`/`HEAVY` (لو الإعداد
    * سامح) بيتحول لفرصة اختيارية بدل تأكيد صامت.
    */
-  private async classifyCandidate(order: Order, technicianId: string, fullDayJobMinutes: number): Promise<TechnicianCapacityTier> {
+  private async classifyCandidate(order: Order, technicianId: string, dailyCapacityMinutes: number): Promise<TechnicianCapacityTier> {
     const service = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
@@ -1011,8 +1010,13 @@ export class MatchingService {
       technicianId,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      serviceDurationMinutes: service[0]?.estimated_duration_minutes ?? 60,
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      // مدة الطلب نفسه أدق من مدة الخدمة العامة لما تكون محسوبة (محرك التسعير) — نفس الترتيب
+      // اللي `serviceDurationExpr` بيستخدمه في الاستعلامات.
+      serviceDurationMinutes:
+        order.durationMinutes ?? (order.durationHours ? order.durationHours * 60 : null) ?? service[0]?.estimated_duration_minutes ?? 60,
+      dailyCapacityMinutes: dailyCapacityMinutes,
+      // ADR-0059 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
+      candidateSpanDays: Math.max(Math.ceil(Number(order.estimatedDurationDays ?? 1)) || 1, 1),
     });
     if (process.env.DEBUG_MATCHING) {
       // eslint-disable-next-line no-console
@@ -1043,7 +1047,7 @@ export class MatchingService {
       }
       const isOpportunityExpansion = await this.workOpportunities.hasOpenOfferForOrder(orderId, manager);
 
-      const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+      const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
       const candidateBatchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
 
       let candidates = order.requestedTechnicianId
@@ -1066,7 +1070,7 @@ export class MatchingService {
       let lightPick: { technicianId: string; distanceKm: string } | null = null;
       let meaningfulPick: { technicianId: string; distanceKm: string } | null = null;
       for (const candidate of candidates) {
-        const tier = await this.classifyCandidate(order, candidate.technician_id, fullDayJobMinutes);
+        const tier = await this.classifyCandidate(order, candidate.technician_id, dailyCapacityMinutes);
         if (tier === 'LIGHT') {
           lightPick = { technicianId: candidate.technician_id, distanceKm: candidate.distance_km };
           break;
@@ -1088,7 +1092,7 @@ export class MatchingService {
         if (offerHeavy) {
           const broadened = await this.findEligibleTechnicians(order, 1, null, false, null, true);
           if (broadened.length > 0) {
-            const tier = await this.classifyCandidate(order, broadened[0].technician_id, fullDayJobMinutes);
+            const tier = await this.classifyCandidate(order, broadened[0].technician_id, dailyCapacityMinutes);
             if (tier !== 'BLOCKED') {
               meaningfulPick = { technicianId: broadened[0].technician_id, distanceKm: broadened[0].distance_km };
             }
@@ -1126,7 +1130,7 @@ export class MatchingService {
       }
 
       if (meaningfulPick) {
-        const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, fullDayJobMinutes);
+        const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, dailyCapacityMinutes);
         const opportunity = await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
         return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId, opportunity };
       }

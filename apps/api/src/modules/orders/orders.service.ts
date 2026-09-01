@@ -778,6 +778,8 @@ export class OrdersService {
       durationHours: dto.duration_hours,
       scheduledAt: resolvedScheduledAtIso,
       scheduledEndAt: dto.scheduled_end_at,
+      periodStart: dto.period_start,
+      periodEnd: dto.period_end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,
@@ -904,6 +906,17 @@ export class OrdersService {
         'إعادة الزيارة تحت الضمان مجانية ولا تقبل شراء ضمان إضافي',
         HttpStatus.BAD_REQUEST,
       );
+    }
+
+    // ADR-0050 §6 (طلب مالك صريح: «يتحط فلتر للعميل أو مكان يرفع فيه الصور بتاعت الحاجة
+    // البايظة، والمفروض إحنا نرد عليه بالسعر») — خدمات «كشف ثم عرض سعر» بتنزل بلا سعر، بس
+    // ممكن يبقى ليها فورم أسئلة يساعد الإدارة/الفني يسعّروا.
+    //
+    // **الحقول دي مكانش عليها أي تحقق قبل كده**: `validateAndNormalizeFieldValues` بتتنادى
+    // جوّه `pricingEngineService.evaluate()` اللي مابتشتغل غير لخدمات `formula`. النتيجة إن
+    // حقل إجباري ممكن يوصل فاضي وقيمة برّه الخيارات تعدّي، والإدارة تسعّر على بيانات ناقصة.
+    if (service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE) {
+      await this.pricingEngineService.validateFieldValuesOnly(service.id, dto.field_values ?? {});
     }
 
     const remoteQuoteRequested = dto.request_remote_quote === true;
@@ -1107,6 +1120,9 @@ export class OrdersService {
               : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
         scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
+        // ADR-0050 §4 — بتتحفظ زي ما وصلت من السياق (اللي فحصها بالفعل)، مش من الـdto الخام.
+        pricingPeriodStart: pricingContext.periodStart,
+        pricingPeriodEnd: pricingContext.periodEnd,
         projectId: dto.project_id ?? null,
         milestoneId: dto.milestone_id ?? null,
         recurringTemplateId: recurringIdentity?.templateId ?? null,
@@ -1550,6 +1566,8 @@ export class OrdersService {
       durationHours: dto.duration_hours,
       scheduledAt: dto.scheduled_at,
       scheduledEndAt: dto.scheduled_end_at,
+      periodStart: dto.period_start,
+      periodEnd: dto.period_end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,

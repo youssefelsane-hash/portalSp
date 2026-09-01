@@ -1,4 +1,5 @@
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { dailyCapacityExceededExpr, technicianDayLoadSubquery } from './technician-day-capacity.sql';
 
 /**
  * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
@@ -36,7 +37,7 @@ function technicianCommittedOrdersSource(technicianIdExpr: string, alias: string
  *   مصر)، فمقارنة تقاطع وقت بالدقيقة (`tstzrange`) بقت بلا معنى (كل طلبات نفس اليوم هتبتدي
  *   بنفس اللحظة بالظبط). التعارض دلوقتي بيتحسب **بمستوى اليوم** — نفس اليوم (بتوقيت مصر
  *   الصحيح، مش UTC الخام) + الشغل ده "شاغل يوم كامل" (`estimated_duration_days >= 1` أو مدة
- *   الخدمة بالدقايق فوق حد `fullDayThresholdMinutesParam`).
+ *   الخدمة بالدقايق فوق حد `dailyCapacityMinutesParam`).
  * - **طلب الطوارئ "إضافي" مش شاغل يوم كامل** (§9) — الفني اللي عنده طلب مجدول مقبول (accepted)
  *   بس لسه ما بدأش يتحرّك ليه، يقدر يستقبل طوارئ برضه. الاستبعاد للطوارئ بس لو الفني منشغل
  *   جسديًا فعليًا دلوقتي (`ENGAGED_TECHNICIAN_ORDER_STATUSES` — أضيق من الحالات النشطة العادية،
@@ -95,8 +96,10 @@ export function technicianAvailabilityCondition(opts: {
   /** مدة دقيقة بالساعات للطلب المرشّح، أو NULL للخدمات المحجوزة باليوم. وجودها يحوّل التعارض
    * إلى تقاطع وقت حقيقي بنطاق نصف مفتوح بدل قاعدة اليوم العامة. */
   preciseDurationHoursExpr?: string;
-  /** parameter لـ`matching.full_day_job_minutes` (إعداد قابل للتعديل، افتراضي 360) — ADR-0018 §2/§9. */
-  fullDayThresholdMinutesParam: string;
+  /** parameter لـ`matching.daily_capacity_minutes` (السقف اليومي بالدقايق، افتراضي 720 = 12 ساعة) — ADR-0059. */
+  dailyCapacityMinutesParam: string;
+  /** تعبير SQL لعدد الأيام اللي الطلب المرشّح بيمتد عليها (ناتج محرك التسعير). الافتراضي يوم واحد. */
+  candidateSpanDaysExpr?: string;
   /**
    * ADR-0017 بند 10 — Fallback توسيع النطاق لما تنضب قايمة الفنيين "المثاليين". لو `true`، بيتجاهل
    * شروط (1) و(2) (تعارض الطلب النشط) تمامًا — الفني ممكن يترشّح حتى لو مشغول بطلب تاني — لكن
@@ -106,15 +109,15 @@ export function technicianAvailabilityCondition(opts: {
    */
   ignoreActiveOrderConflict?: boolean;
 }): string {
-  const { activeStatusesParam, engagedStatusesParam, isEmergencyParam, fullDayThresholdMinutesParam, ignoreActiveOrderConflict } = opts;
+  const { activeStatusesParam, engagedStatusesParam, isEmergencyParam, dailyCapacityMinutesParam, ignoreActiveOrderConflict } = opts;
   const activeOrderConflictConditions = ignoreActiveOrderConflict
     ? // Postgres مايقدرش يستنتج نوع parameter من غير أي إشارة ليه في الاستعلام ("could not
       // determine data type") — تعبيرات دايمًا صحيحة (tautology) لكل الـparameters الجديدة كمان
-      // (engagedStatusesParam/isEmergencyParam/fullDayThresholdMinutesParam) بلا أي تأثير فعلي.
+      // (engagedStatusesParam/isEmergencyParam/dailyCapacityMinutesParam) بلا أي تأثير فعلي.
       `AND (${activeStatusesParam}::order_status[] IS NULL OR ${activeStatusesParam}::order_status[] IS NOT NULL)
        AND (${engagedStatusesParam}::order_status[] IS NULL OR ${engagedStatusesParam}::order_status[] IS NOT NULL)
        AND (${isEmergencyParam}::boolean IS NULL OR ${isEmergencyParam}::boolean IS NOT NULL)
-       AND (${fullDayThresholdMinutesParam}::int IS NULL OR ${fullDayThresholdMinutesParam}::int IS NOT NULL)`
+       AND (${dailyCapacityMinutesParam}::int IS NULL OR ${dailyCapacityMinutesParam}::int IS NOT NULL)`
     : `AND NOT (${activeOrderConflictExistsExpr(opts)})`;
   // (3) استثناء صريح (blocked) — الفني حدد بنفسه إنه مش متاح وقت الطلب ده (ASAP/طوارئ = دلوقتي)،
   // كله بتوقيت مصر الصحيح مش UTC الخام. **دايمًا سارية حتى لو ignoreActiveOrderConflict=true**
@@ -144,7 +147,8 @@ function activeOrderConflictExistsExpr(opts: {
   isEmergencyParam: string;
   serviceDurationExpr: string;
   preciseDurationHoursExpr?: string;
-  fullDayThresholdMinutesParam: string;
+  dailyCapacityMinutesParam: string;
+  candidateSpanDaysExpr?: string;
 }): string {
   const {
     technicianIdExpr,
@@ -155,7 +159,8 @@ function activeOrderConflictExistsExpr(opts: {
     isEmergencyParam,
     serviceDurationExpr,
     preciseDurationHoursExpr = 'NULL',
-    fullDayThresholdMinutesParam,
+    dailyCapacityMinutesParam,
+    candidateSpanDaysExpr = '1',
   } = opts;
   return `
     -- اليوم المطلوب للطلب المرشّح نفسه (ASAP = النهاردة، مجدول = يوم scheduled_at) — بتوقيت مصر.
@@ -171,10 +176,9 @@ function activeOrderConflictExistsExpr(opts: {
         )
       )
       OR
-      -- (2) أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، docs/08 §32): تعارض لو (أ) الفني
-      -- منشغل جسديًا فعليًا دلوقتي *واليوم المطلوب هو النهاردة*، أو (ب) فيه طلب تاني بموعد نفس
-      -- اليوم المطلوب والشغل (القديم أو الجديد) شاغل يوم كامل. طلب accepted قصير لسه ما بدأش
-      -- مايتعارضش — نفس فلسفة الطلب المجدول تمامًا، بلا استثناء خاص لـASAP.
+      -- (2) تعارض **وقت** حقيقي في نفس اليوم: إما نافذة زمنية متقاطعة فعليًا (خدمات الوقت
+      -- الدقيق)، أو الفني منشغل جسديًا دلوقتي واليوم المطلوب هو النهاردة. قاعدة «شاغل يوم كامل»
+      -- القديمة اتشالت من هنا بالكامل — بقت مسؤولية السقف اليومي في (3) تحت (ADR-0059).
       (
         ${isEmergencyParam}::boolean IS NOT TRUE
         AND EXISTS (
@@ -203,12 +207,25 @@ function activeOrderConflictExistsExpr(opts: {
                   = (now() AT TIME ZONE 'Africa/Cairo')::date
                 AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
               )
-              OR COALESCE(co.estimated_duration_days, 0) >= 1
-              OR COALESCE(co.duration_minutes, co.duration_hours * 60, 0) >= ${fullDayThresholdMinutesParam}::int
-              OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
-              OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
             )
         )
+      )
+      OR
+      -- (3) **ADR-0059 — السقف اليومي بالساعات**. ده اللي بدّل قاعدة «شاغل يوم كامل» القديمة:
+      -- بدل بوليان بيسأل «الطلب القديم كبير؟» (وبيدّي إجابة مختلفة حسب مين بيسأل)، بنجمع
+      -- الدقايق المشغولة فعلاً في كل يوم من أيام الطلب الجديد ونقارنها بالسقف. متماثل بالبناء،
+      -- وبيشوف الشغل الممتد على أيامه كلها مش يوم بدايته بس.
+      (
+        ${isEmergencyParam}::boolean IS NOT TRUE
+        AND ${dailyCapacityExceededExpr({
+          technicianIdExpr,
+          activeStatusesParam,
+          excludeOrderIdParam,
+          dailyCapacityParam: dailyCapacityMinutesParam,
+          scheduledAtParam,
+          candidateMinutesExpr: serviceDurationExpr,
+          candidateSpanDaysExpr: candidateSpanDaysExpr,
+        })}
       )
     )`;
 }
@@ -248,7 +265,8 @@ export function technicianScheduleConflictCondition(opts: {
   isEmergencyParam: string;
   serviceDurationExpr: string;
   preciseDurationHoursExpr?: string;
-  fullDayThresholdMinutesParam: string;
+  dailyCapacityMinutesParam: string;
+  candidateSpanDaysExpr?: string;
 }): string {
   return `
     AND (${activeOrderConflictExistsExpr(opts)})
@@ -285,7 +303,9 @@ export async function classifyTechnicianCapacity(
     excludeOrderId: string | null;
     /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
     serviceDurationMinutes: number;
-    fullDayThresholdMinutes: number;
+    dailyCapacityMinutes: number;
+    /** عدد أيام الطلب المرشّح (ناتج محرك التسعير) — الافتراضي يوم واحد. */
+    candidateSpanDays?: number;
   },
 ): Promise<TechnicianCapacityTier> {
   const rows = await dataSource.query<{ tier: TechnicianCapacityTier }>(
@@ -302,35 +322,42 @@ export async function classifyTechnicianCapacity(
         AND tss.end_time > (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
       LIMIT 1
     ),
-    heavy AS (
-      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}
-      JOIN services cs ON cs.id = co.service_id, target
-      WHERE co.id IS DISTINCT FROM $3::uuid
-        AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
-        AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
-        AND (
-          (
-            target.target_date = (now() AT TIME ZONE 'Africa/Cairo')::date
-            AND co.order_status = ANY($7::order_status[])
-          )
-          OR COALESCE(co.estimated_duration_days, 0) >= 1
-          OR COALESCE(cs.estimated_duration_minutes, 60) >= $4::int
-          OR $5::int >= $4::int
-        )
-      LIMIT 1
+    -- ADR-0059 — نفس حسبة السقف اليومي بالحرف اللي technicianAvailabilityCondition() بتستخدمها.
+    -- قبل كده كان هنا **منطق تاني** بقاعدة «شاغل يوم كامل»، فالتصنيف والتوافر كانوا ممكن
+    -- يختلفوا على نفس الفني (التصنيف يقول MEANINGFUL والتوزيع يستبعده، أو العكس).
+    load_today AS (
+      SELECT COALESCE(dl.busy_minutes, 0) AS busy_minutes
+      FROM target
+      LEFT JOIN ${technicianDayLoadSubquery({
+        technicianIdExpr: '$1',
+        activeStatusesParam: '$6',
+        excludeOrderIdParam: '$3',
+        dailyCapacityParam: '$4',
+      })} dl ON dl.busy_day = target.target_date
     ),
-    meaningful AS (
-      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}, target
-      WHERE co.id IS DISTINCT FROM $3::uuid
-        AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
-        AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
+    heavy AS (
+      SELECT 1 WHERE ${dailyCapacityExceededExpr({
+        technicianIdExpr: '$1',
+        activeStatusesParam: '$6',
+        excludeOrderIdParam: '$3',
+        dailyCapacityParam: '$4',
+        scheduledAtParam: '$2',
+        candidateMinutesExpr: '$5::int',
+        candidateSpanDaysExpr: '$8::int',
+      })}
+      UNION ALL
+      -- منشغل جسديًا دلوقتي واليوم المطلوب هو النهاردة — ده مش سقف ساعات، ده «مش قادر يتحرك».
+      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'eo')}, target
+      WHERE eo.id IS DISTINCT FROM $3::uuid AND eo.deleted_at IS NULL
+        AND eo.order_status = ANY($7::order_status[])
+        AND target.target_date = (now() AT TIME ZONE 'Africa/Cairo')::date
       LIMIT 1
     )
     SELECT
       CASE
         WHEN EXISTS (SELECT 1 FROM blocked) THEN 'BLOCKED'
         WHEN EXISTS (SELECT 1 FROM heavy) THEN 'HEAVY'
-        WHEN EXISTS (SELECT 1 FROM meaningful) THEN 'MEANINGFUL'
+        WHEN (SELECT busy_minutes FROM load_today) > 0 THEN 'MEANINGFUL'
         ELSE 'LIGHT'
       END AS tier
     `,
@@ -338,10 +365,11 @@ export async function classifyTechnicianCapacity(
       params.technicianId,
       params.scheduledAt,
       params.excludeOrderId,
-      params.fullDayThresholdMinutes,
+      params.dailyCapacityMinutes,
       params.serviceDurationMinutes,
       ACTIVE_TECHNICIAN_ORDER_STATUSES,
       ENGAGED_TECHNICIAN_ORDER_STATUSES,
+      params.candidateSpanDays ?? 1,
     ],
   );
   return rows[0].tier;
@@ -364,14 +392,14 @@ export interface TechnicianCapacityDescription {
  */
 export async function describeTechnicianCapacity(
   dataSource: { query: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]> },
-  params: { technicianId: string; date: string; fullDayThresholdMinutes: number },
+  params: { technicianId: string; date: string; dailyCapacityMinutes: number },
 ): Promise<TechnicianCapacityDescription> {
   const tier = await classifyTechnicianCapacity(dataSource, {
     technicianId: params.technicianId,
     scheduledAt: `${params.date}T00:00:00`,
     excludeOrderId: null,
     serviceDurationMinutes: 60,
-    fullDayThresholdMinutes: params.fullDayThresholdMinutes,
+    dailyCapacityMinutes: params.dailyCapacityMinutes,
   });
 
   if (tier === 'BLOCKED') {

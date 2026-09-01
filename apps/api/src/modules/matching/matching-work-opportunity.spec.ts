@@ -433,7 +433,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       scheduledAt: null,
       excludeOrderId: jobBId,
       serviceDurationMinutes: 60,
-      fullDayThresholdMinutes: 360,
+      dailyCapacityMinutes: 360,
     });
     expect(tierAfterCompletion).toBe('LIGHT');
 

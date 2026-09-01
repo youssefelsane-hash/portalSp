@@ -5,8 +5,8 @@ import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } f
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianCapacityTier } from '../technicians/technician-eligibility.sql';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // نفس افتراض describeTechnicianCapacity()/capacity_today (§36.2) — مفيش طلب مرشّح فعلي هنا،
 // معاينة عامة بس (technician-eligibility.sql.ts:258).
 const GENERIC_SERVICE_DURATION_MINUTES = 60;
@@ -76,10 +76,7 @@ export class AdminWorkloadForecastService {
     filters: WorkloadForecastFilters,
   ): Promise<{ items: WorkloadForecastRow[]; meta: { page: number; perPage: number; total: number } }> {
     const offset = (filters.page - 1) * filters.perPage;
-    const fullDayThresholdMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
     const rawRows = await this.dataSource.query<RawRow[]>(
       `
@@ -171,7 +168,7 @@ export class AdminWorkloadForecastService {
         offset,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
-        fullDayThresholdMinutes,
+        dailyCapacityMinutes,
         GENERIC_SERVICE_DURATION_MINUTES,
         FORECAST_DAYS,
       ],

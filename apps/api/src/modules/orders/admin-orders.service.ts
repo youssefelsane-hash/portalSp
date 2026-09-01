@@ -50,9 +50,9 @@ import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 // حالات مايصحش نعدّل السعر فيها: بعد الدفع (لازم يعدّي من استرداد/تحصيل إضافي حقيقي، مش
 // تعديل رقم خام) أو في أي حالة نهائية (اتلغى/انتهت صلاحيته/اتردله فلوسه) — التعديل هنا
@@ -1075,7 +1075,7 @@ export class AdminOrdersService {
       [order.serviceZoneId, order.serviceId, order.technicianId, order.addressId, order.id],
     );
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
@@ -1090,7 +1090,7 @@ export class AdminOrdersService {
           scheduledAt: order.scheduledAt,
           excludeOrderId: order.id,
           serviceDurationMinutes,
-          fullDayThresholdMinutes: fullDayJobMinutes,
+          dailyCapacityMinutes: dailyCapacityMinutes,
         });
         return { ...row, capacity_tier };
       }),
@@ -1173,7 +1173,7 @@ export class AdminOrdersService {
     // = رفض تمامًا. صفر استثناء لكون الفاعل أدمن.
     await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
@@ -1183,7 +1183,7 @@ export class AdminOrdersService {
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
       serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (capacityTier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
@@ -1277,7 +1277,7 @@ export class AdminOrdersService {
 
     await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
@@ -1287,7 +1287,7 @@ export class AdminOrdersService {
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
       serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد حتى بتعيين إداري', HttpStatus.CONFLICT);

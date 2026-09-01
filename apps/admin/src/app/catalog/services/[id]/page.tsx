@@ -41,6 +41,7 @@ import type {
   UpsertPricingTierPricingBody,
   UpsertZonePricingBody,
 } from '@baytak/shared-types';
+import { PRICING_METHODS } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell, useAdminBack } from '@/components/app-shell';
@@ -59,13 +60,13 @@ import { formatEgp } from '@/lib/format';
 import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 import { PricingBuilder } from './pricing-builder';
 
-const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
-  fixed: 'ثابت',
-  hourly: 'بالساعة',
-  per_unit: 'بالوحدة',
-  monthly: 'شهري (عدد وحدات شهرية)',
-  inspection_then_quote: 'كشف ثم عرض سعر',
-  formula: 'معادلة ديناميكية',
+
+/** وصف المدخل اللي كل طريقة بتطلبه من العميل — عرض بس، المصدر هو `requires` في السجل. */
+const PRICING_METHOD_INPUT_LABELS: Record<(typeof PRICING_METHODS)[PricingModel]['requires'], string> = {
+  none: 'مايدخّلش أي حاجة إضافية للسعر.',
+  duration: 'عدد الساعات (أو وقت البداية والنهاية).',
+  quantity: 'الكمية المطلوبة.',
+  period: 'تاريخ بداية وتاريخ نهاية الاشتراك.',
 };
 
 const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
@@ -681,27 +682,28 @@ export default function ServiceDetailPage() {
                     className="mt-2"
                     onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
                   >
-                    {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
+                    {(Object.keys(PRICING_METHODS) as PricingModel[]).map((value) => (
                       <option key={value} value={value}>
-                        {label}
+                        {PRICING_METHODS[value].labelAr}
                       </option>
                     ))}
                   </SelectNative>
+                  {/* ADR-0050 §1 — الشرح والمدخل المطلوب بيتقروا من سجل الطرق المشترك، اللي
+                      الباك-إند بيحسب بيه فعلاً. سلسلة الـternary القديمة كانت بتفوّت طريقتين
+                      (بالوحدة والشهري) وبتديهم نص عام مش بيوصف حسابهم أصلاً. */}
                   <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                    {pricingModelLive === 'formula'
-                      ? 'السعر يُحسب من الحقول والقواعد الموجودة في محرك التسعير الديناميكي بالأسفل.'
-                      : pricingModelLive === 'hourly'
-                        ? 'السعر الأساسي هو سعر الساعة الواحدة ويُضرب في عدد الساعات المختارة.'
-                        : pricingModelLive === 'inspection_then_quote'
-                          ? 'يُحصّل رسم الكشف أولًا، ثم يُرسل السعر النهائي للعميل بعد المعاينة.'
-                          : 'السعر الأساسي هو نقطة البداية، ويمكن تخصيصه حسب المنطقة أو فئة الفني.'}
+                    {PRICING_METHODS[pricingModelLive].descriptionAr}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    <span className="font-medium">اللي العميل بيدخّله: </span>
+                    {PRICING_METHOD_INPUT_LABELS[PRICING_METHODS[pricingModelLive].requires]}
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
                       غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
-                  <Label htmlFor="svc_base_price">{pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}</Label>
+                  <Label htmlFor="svc_base_price">{PRICING_METHODS[pricingModelLive].rateLabelAr}</Label>
                   <Input id="svc_base_price" name="base_price" type="number" min="0" step="0.01" defaultValue={service.base_price_cents / 100} />
                 </div>
                 <div className="flex flex-col gap-1">

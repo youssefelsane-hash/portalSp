@@ -2,6 +2,8 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PricingModel } from '../catalog/entities/service.entity';
+import { pricingMethod } from './pricing-methods';
 import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { describeFormulaPayload, evaluateFormulaNodeWithTrace } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
@@ -16,9 +18,37 @@ import {
   LookupTableRulePayload,
   PricingEvaluationResult,
 } from './pricing-formula.types';
-import { PricingContext, pricingContextFormulaValues } from './pricing-context';
+import {
+  PricingContext,
+  pricingContextDateValues,
+  pricingContextFormulaValues,
+  pricingContextGeoPoints,
+} from './pricing-context';
 
-export type PricingPresetKind = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote';
+/** كل قيم `PricingModel` ما عدا `formula` — الطرق الجاهزة اللي `evaluatePreset()` بتخدمها. */
+export type PricingPresetKind = Exclude<PricingModel, PricingModel.FORMULA>;
+
+// معاينة الأدمن (`evaluateDraft`) بتيجي بلا سياق طلب — حقول التاريخ/الموقع في الفورم لازم تفضل
+// شغالة فيها، وده بيديها نفس الاشتقاق بمصادر نظام فاضية.
+const EMPTY_PRICING_CONTEXT: PricingContext = {
+  quantity: null,
+  durationMinutes: null,
+  durationHours: null,
+  scheduledAt: null,
+  scheduledEndAt: null,
+  periodStart: null,
+  periodEnd: null,
+  location: null,
+  serviceFieldValues: {},
+  numericFieldValues: {},
+  zoneId: null,
+  isEmergency: false,
+  technicianLevel: null,
+  bookingMode: null,
+  addonIds: [],
+  recurringMetadata: {},
+  businessVariables: {},
+};
 
 // نقطة الدخول الوحيدة لحساب سعر خدمة pricing_model=formula — راجع docs/08 §1.5 وADR-0001.
 // catalog.service.ts's estimate() بينادي عليها بس لو الخدمة formula، باقي أنواع التسعير
@@ -31,6 +61,12 @@ export class PricingEngineService {
     private readonly rulesService: PricingRulesService,
   ) {}
 
+  /**
+   * حساب سعر لطريقة جاهزة (مش معادلة) — **lookup في سجل واحد، مش `switch` هنا** (ADR-0050 §1).
+   *
+   * الشجرة اللي السجل بيرجّعها بتتنفّذ في نفس `evaluateFormulaNode()` اللي المعادلة الديناميكية
+   * بتتنفّذ فيه بالحرف. مفيش مسار حساب تاني في المشروع.
+   */
   evaluatePreset(
     preset: PricingPresetKind,
     basePriceCents: number,
@@ -39,26 +75,7 @@ export class PricingEngineService {
     maxPriceCents: number | null,
   ): PricingEvaluationResult & { evaluationId: null } {
     const systemValues = pricingContextFormulaValues(context);
-    const quantityNode: FormulaNode = { type: 'field_ref', field_key: 'quantity' };
-    const durationNode: FormulaNode = { type: 'field_ref', field_key: 'duration_hours' };
-    const rateNode: FormulaNode = { type: 'literal', value: basePriceCents };
-
-    let priceNode: FormulaNode;
-    switch (preset) {
-      case 'fixed':
-        priceNode = rateNode;
-        break;
-      case 'hourly':
-        priceNode = { type: 'multiply', operands: [durationNode, rateNode] };
-        break;
-      case 'per_unit':
-      case 'monthly':
-        priceNode = { type: 'multiply', operands: [quantityNode, rateNode] };
-        break;
-      case 'inspection_then_quote':
-        priceNode = { type: 'literal', value: 0 };
-        break;
-    }
+    const priceNode = pricingMethod(preset).buildPrice({ type: 'literal', value: basePriceCents });
 
     const payload: FinalPriceFormulaPayload = {
       price_cents: priceNode,
@@ -69,6 +86,9 @@ export class PricingEngineService {
       fieldValues: systemValues,
       constants: new Map(),
       lookupTables: new Map(),
+      // الطرق الجاهزة بتقدر تستخدم date_diff زي أي معادلة (ADR-0050 §4 — الشهري بفترة تاريخين).
+      dateValues: pricingContextDateValues(context, context.serviceFieldValues),
+      geoPoints: pricingContextGeoPoints(context, context.serviceFieldValues),
     };
     return { ...this.computeResult(payload, formulaContext), evaluationId: null };
   }
@@ -165,6 +185,25 @@ export class PricingEngineService {
     return this.computeResult(payload, context);
   }
 
+  /**
+   * تحقق من قيم الفورم **بلا أي تسعير** (ADR-0050 §6، طلب مالك صريح).
+   *
+   * خدمات «كشف ثم عرض سعر» بتنزل **بلا سعر خالص**، والعميل بيملا «فلتر» (نوع الجهاز، العطل،
+   * صور الحاجة البايظة) عشان الإدارة/الفني يقدروا يسعّروا. الحقول دي بتتخزّن في
+   * `orders.customer_inputs` وبتتعرض للأدمن — بس **قبل الملف ده مكانش فيه أي تحقق عليها**:
+   * `validateAndNormalizeFieldValues` كانت جوّه `evaluate()` اللي مابتتنادى غير لخدمات
+   * `formula`. النتيجة كانت إن حقل إجباري ممكن يوصل فاضي، وقيمة برّه الخيارات تعدّي.
+   *
+   * الدالة دي **نفس التحقق بالحرف** (نفس الدالة الخاصة)، بس بترجّع القيم بدل ما تحسب سعر.
+   */
+  async validateFieldValuesOnly(
+    serviceId: string,
+    rawFieldValues: Record<string, string | number | boolean>,
+  ): Promise<Record<string, string | number | boolean>> {
+    const fields = await this.fieldsService.listForService(serviceId);
+    return this.validateAndNormalizeFieldValues(fields.filter((field) => field.isActive), rawFieldValues);
+  }
+
   private async prepareEvaluation(
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,
@@ -196,7 +235,18 @@ export class PricingEngineService {
       }
     }
 
-    return { fieldValues, context: { fieldValues, constants, lookupTables }, finalPricePayload };
+    const dateValues = pricingContext
+      ? pricingContextDateValues(pricingContext, fieldValues)
+      : pricingContextDateValues(EMPTY_PRICING_CONTEXT, fieldValues);
+    const geoPoints = pricingContext
+      ? pricingContextGeoPoints(pricingContext, fieldValues)
+      : pricingContextGeoPoints(EMPTY_PRICING_CONTEXT, fieldValues);
+
+    return {
+      fieldValues,
+      context: { fieldValues, constants, lookupTables, dateValues, geoPoints },
+      finalPricePayload,
+    };
   }
 
   private computeResult(finalPricePayload: FinalPriceFormulaPayload, context: FormulaEvaluationContext): PricingEvaluationResult {
