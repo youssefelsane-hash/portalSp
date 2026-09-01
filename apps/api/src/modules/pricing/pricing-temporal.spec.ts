@@ -1,4 +1,13 @@
-import { cairoDayString, cairoMidnight, dateDiff, haversineKm, monthsBetween, parseFieldDate, parseGeoPoint } from './pricing-temporal';
+import {
+  cairoDayString,
+  cairoDaySequence,
+  cairoMidnight,
+  dateDiff,
+  haversineKm,
+  monthsBetween,
+  parseFieldDate,
+  parseGeoPoint,
+} from './pricing-temporal';
 
 /**
  * ADR-0050 §2/§3 — حسابات التواريخ والمسافات. دوال نقية، فالاختبار هنا بلا DB عمدًا.
@@ -83,6 +92,39 @@ describe('pricing-temporal — حساب التواريخ والمسافات (ADR
       const midnight = cairoMidnight('2026-01-15');
       expect(cairoDayString(midnight)).toBe('2026-01-15');
       expect(cairoDayString(new Date(midnight.getTime() - 1))).toBe('2026-01-14');
+    });
+  });
+
+  // ADR-0059 §6 — الحسبة اللي كانت مكسورة في زرار «الاقتراح» («بيجيبنا في اليوم بتاع النهاردة»).
+  describe('cairoDaySequence — تسلسل الأيام المصرية', () => {
+    it('بيبدأ من اليوم المطلوب وبيمشي يوم بيوم بلا تكرار ولا تخطي', () => {
+      expect(cairoDaySequence('2026-09-01', 4)).toEqual(['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04']);
+    });
+
+    it('بيعدّي نهاية الشهر صح', () => {
+      expect(cairoDaySequence('2026-01-30', 3)).toEqual(['2026-01-30', '2026-01-31', '2026-02-01']);
+    });
+
+    it('بيعدّي سنة كبيسة صح', () => {
+      expect(cairoDaySequence('2028-02-28', 3)).toEqual(['2028-02-28', '2028-02-29', '2028-03-01']);
+    });
+
+    // **الاختبار اللي بيمسك البَقّة الأصلية**: البحث بيبدأ من اليوم اللي بعد المرفوض. الحسبة
+    // القديمة (`+24h` ثم `toISOString`) كانت بترجّع نفس اليوم المصري لأي حجز في أول ساعات اليوم.
+    it('البحث من اليوم اللي بعد المرفوض مابيرجعش اليوم المرفوض نفسه', () => {
+      const rejectedDay = '2026-07-15';
+      const searchStart = new Date(cairoMidnight(rejectedDay).getTime() + 86_400_000);
+      const sequence = cairoDaySequence(cairoDayString(searchStart), 3);
+      expect(sequence[0]).toBe('2026-07-16');
+      expect(sequence).not.toContain(rejectedDay);
+    });
+
+    it('نفس الشيء لحجز في أول ساعة من اليوم المصري (حالة يوم UTC المختلف)', () => {
+      // 22:00 UTC يوم 14 = 00:00 بتوقيت القاهرة يوم 15 (توقيت صيفي).
+      const bookedAt = new Date('2026-07-14T22:00:00Z');
+      expect(cairoDayString(bookedAt)).toBe('2026-07-15');
+      const searchStart = new Date(cairoMidnight(cairoDayString(bookedAt)).getTime() + 86_400_000);
+      expect(cairoDaySequence(cairoDayString(searchStart), 1)[0]).toBe('2026-07-16');
     });
   });
 

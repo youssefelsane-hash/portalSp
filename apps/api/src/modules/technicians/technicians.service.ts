@@ -32,7 +32,7 @@ import {
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
-import { cairoDayString, cairoMidnight } from '../pricing/pricing-temporal';
+import { cairoDayString, cairoDaySequence, cairoMidnight } from '../pricing/pricing-temporal';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -924,10 +924,7 @@ export class TechniciansService {
     // القاهرة = 21:00 أو 22:00 UTC اليوم اللي قبله، فالنتيجة كانت بترجّع **نفس اليوم المصري**
     // اللي العميل رافضه أصلاً، والحارس اللي بعدها (`nextAvailable === dateOnly`) يبلعها فيختفي
     // الزرار. دلوقتي التقويم كله بتوقيت القاهرة عبر نفس دوال ADR-0050 اللي التسعير بيستخدمها.
-    const startDay = cairoDayString(fromDate);
-    for (let offset = 0; offset <= maxDays; offset += 1) {
-      const candidateDay = new Date(cairoMidnight(startDay).getTime() + offset * 24 * 60 * 60 * 1000);
-      const candidateDayString = cairoDayString(candidateDay);
+    for (const candidateDayString of cairoDaySequence(cairoDayString(fromDate), maxDays + 1)) {
       // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا.
       const eligible = await this.hasEligibleTechnicianForDate(
         serviceId,

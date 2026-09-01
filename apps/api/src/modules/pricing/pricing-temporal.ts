@@ -241,3 +241,22 @@ function cairoOffsetMs(at: Date): number {
   );
   return asUtc - at.getTime();
 }
+
+/**
+ * تسلسل الأيام المصرية بداية من يوم معيّن (ADR-0059 §6).
+ *
+ * **دي الحسبة اللي كانت مكسورة في «الاقتراح»**: النسخة القديمة كانت بتجمع 24 ساعة على طابع
+ * زمني وتقرا اليوم بـ`toISOString().slice(0, 10)` — يوم **UTC**. منتصف الليل المصري = 21:00 أو
+ * 22:00 UTC اليوم اللي قبله، فأول «يوم تالي» كان بيطلع **نفس اليوم المصري** اللي العميل رافضه.
+ *
+ * الدالة دي بتتحرك بالتقويم المصري نفسه، فمستحيل ترجّع يوم مكرر أو تتخطى يوم.
+ */
+export function cairoDaySequence(fromDay: string, count: number): string[] {
+  const days: string[] = [];
+  const base = cairoMidnight(fromDay);
+  for (let offset = 0; offset < count; offset += 1) {
+    // نص اليوم (12:00) بدل منتصف الليل — نقطة آمنة من أي إزاحة توقيت صيفي بساعة.
+    days.push(cairoDayString(new Date(base.getTime() + offset * 86_400_000 + 12 * 3_600_000)));
+  }
+  return days;
+}
