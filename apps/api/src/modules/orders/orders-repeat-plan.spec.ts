@@ -19,6 +19,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { Address } from '../customers/entities/address.entity';
 import { AddressesService } from '../customers/addresses.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
 import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';
@@ -184,7 +185,9 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      {} as never,
+      // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
+      // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
+      new PricingEngineService({} as never, {} as never, {} as never),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -340,8 +343,14 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
   });
 
   it('أسبوعي: الطلب العادي اتعمل زي أي حجز + خطة بأول موعد بعد أسبوع بنفس التوقيت', async () => {
-    // 2026-09-01 10:00 UTC — تاريخ ثابت في المستقبل عشان التأكيد على القيمة الدقيقة
-    const scheduledAt = '2026-09-01T10:00:00.000Z';
+    // **قنبلة موقوتة اتصلحت**: النسخة القديمة كانت بتحجز `2026-09-01` كـ«تاريخ ثابت في
+    // المستقبل» — والتقويم لحقه، فبقى **نفس اليوم**، وADR-0048 بيرفض نفس اليوم لخدمة
+    // `allows_emergency=false`. التاريخ بقى نسبي (بعد 30 يوم بتوقيت ثابت)، والتأكيد على
+    // «+7 أيام بنفس التوقيت» اتحسب من نفس القيمة بدل ما يكون رقم مكتوب بالإيد.
+    const base = new Date(Date.now() + 30 * 86_400_000);
+    base.setUTCHours(10, 0, 0, 0);
+    const scheduledAt = base.toISOString();
+    const expectedNextRun = new Date(base.getTime() + 7 * 86_400_000).toISOString();
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceRepeatable,
       address_id: ids.address,
@@ -371,7 +380,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       is_active: true,
     });
     // أول موعد للخطة = الموعد المحجوز + 7 أيام **بنفس التوقيت** (مش "بكرة" ولا clamp غلط)
-    expect(new Date(templates[0].next_run_at).toISOString()).toBe('2026-09-08T10:00:00.000Z');
+    expect(new Date(templates[0].next_run_at).toISOString()).toBe(expectedNextRun);
     const [occurrence] = await q(
       `SELECT status, order_id, scheduled_for::text AS scheduled_for
        FROM recurring_order_occurrences WHERE template_id = $1`,

@@ -17,6 +17,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { Address } from '../customers/entities/address.entity';
 import { AddressesService } from '../customers/addresses.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
 import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';
@@ -179,7 +180,9 @@ describe('OrdersService.create() — Idempotency-Key يمنع تكرار الط�
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      {} as never,
+      // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
+      // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
+      new PricingEngineService({} as never, {} as never, {} as never),
       {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
     const techniciansService = new TechniciansService(

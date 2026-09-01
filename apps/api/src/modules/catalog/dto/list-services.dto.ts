@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { TechnicianLevel, TechnicianPricingTier } from '../../technicians/entities/technician-profile.entity';
 
 // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
@@ -79,9 +79,19 @@ export class EstimateQueryDto {
   @IsPositive()
   duration_hours?: number;
 
-  // خدمات per_unit/monthly: عدد الوحدات أو الشهور في المعاينة العامة، بنفس قيمة إنشاء الطلب.
+  // خدمات per_unit: عدد الوحدات في المعاينة العامة، بنفس قيمة إنشاء الطلب.
   @IsOptional()
   @IsNumber()
   @IsPositive()
   pricing_quantity?: number;
+
+  // ADR-0050 §4 — فترة التعاقد لخدمة `monthly`. المعاينة العامة لازم تحسب نفس عدد شهور الفوترة
+  // اللي الحجز الحقيقي هيحسبه، وإلا الرقم اللي العميل شافه في الكتالوج مش هو اللي هيدفعه.
+  @IsOptional()
+  @IsDateString()
+  period_start?: string;
+
+  @IsOptional()
+  @IsDateString()
+  period_end?: string;
 }

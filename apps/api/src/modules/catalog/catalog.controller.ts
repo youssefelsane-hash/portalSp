@@ -7,6 +7,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
@@ -85,6 +86,19 @@ export class CatalogController {
       query.pricing_tier,
       query.duration_hours,
       query.pricing_quantity,
+      undefined,
+      // ADR-0050 §4 — المعاينة العامة بتبني نفس السياق اللي الحجز بيبنيه، عشان عدد شهور
+      // الفوترة اللي بيتعرض في الكتالوج يبقى هو نفسه اللي بيتحاسب.
+      buildPricingContext({
+        quantity: query.pricing_quantity,
+        durationHours: query.duration_hours,
+        periodStart: query.period_start,
+        periodEnd: query.period_end,
+        serviceFieldValues: query.field_values,
+        zoneId: query.zone_id,
+        isEmergency: query.booking_mode === 'emergency',
+        technicianLevel: query.technician_level,
+      }),
     );
   }
 

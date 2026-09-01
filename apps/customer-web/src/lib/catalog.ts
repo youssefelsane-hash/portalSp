@@ -28,6 +28,10 @@ export const estimatePrice = (
     fieldValues?: Record<string, string | number | boolean>;
     pricingQuantity?: number;
     durationHours?: number;
+    // ADR-0050 §4 — فترة التعاقد لخدمة شهرية؛ عدد شهور الفوترة بيتحسب في الباك-إند من الفرق
+    // بينهم بالتقويم، مش من رقم بيكتبه العميل.
+    periodStart?: string;
+    periodEnd?: string;
   },
 ) => {
   const query = new URLSearchParams();
@@ -36,5 +40,7 @@ export const estimatePrice = (
   if (params.fieldValues) query.set('field_values', JSON.stringify(params.fieldValues));
   if (params.pricingQuantity !== undefined) query.set('pricing_quantity', String(params.pricingQuantity));
   if (params.durationHours !== undefined) query.set('duration_hours', String(params.durationHours));
+  if (params.periodStart) query.set('period_start', params.periodStart);
+  if (params.periodEnd) query.set('period_end', params.periodEnd);
   return apiFetch<PriceEstimateDto>(`/services/${serviceId}/estimate?${query.toString()}`, null, { method: 'POST' });
 };

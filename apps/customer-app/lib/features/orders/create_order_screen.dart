@@ -141,12 +141,29 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
   // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
   bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
-  bool get _isQuantityPricing =>
-      widget.service.pricingModel == 'per_unit' ||
-      widget.service.pricingModel == 'monthly';
-  String get _quantityUnitLabel =>
-      widget.service.unitNameAr ??
-      (widget.service.pricingModel == 'monthly' ? 'الشهور' : 'الوحدات');
+
+  /// ADR-0050 §4 — `monthly` **مابقاش** كمية. العميل بيختار فترة بتاريخين، وعدد شهور الفوترة
+  /// بيتحسب في الباك-إند من الفرق بينهم بالتقويم. النسخة القديمة كانت بتخلي العميل يكتب عدد
+  /// الشهور برقم يدوي — وده كان بالظبط بلاغ المالك («مش بيجيب الـdifference بينهم»).
+  bool get _isPeriodPricing => widget.service.pricingModel == 'monthly';
+  bool get _isQuantityPricing => widget.service.pricingModel == 'per_unit';
+  String get _quantityUnitLabel => widget.service.unitNameAr ?? 'الوحدات';
+
+  DateTime? _periodStart;
+  DateTime? _periodEnd;
+
+  bool get _periodComplete => _periodStart != null && _periodEnd != null;
+
+  /// عدد شهور الفوترة زي ما الباك-إند بيحسبه بالظبط (`max(ceil(months), 1)`) — **للعرض بس**.
+  /// السعر النهائي بييجي من المعاينة، مش من الحسبة دي.
+  int get _billedMonthsPreview {
+    final start = _periodStart;
+    final end = _periodEnd;
+    if (start == null || end == null) return 1;
+    final whole = (end.year - start.year) * 12 + (end.month - start.month);
+    final months = end.day > start.day ? whole + 1 : whole;
+    return months < 1 ? 1 : months;
+  }
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -386,6 +403,35 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
   }
 
+  /// اختيار طرف من فترة الاشتراك (ADR-0050 §4).
+  ///
+  /// النهاية بتتزحزح تلقائيًا لو البداية عدّتها — الباك-إند بيرفض فترة معكوسة، وأوضح إننا
+  /// نمنع الحالة دي من الأساس بدل ما العميل يوصل لرسالة خطأ.
+  Future<void> _pickPeriodDate({required bool isStart}) async {
+    final today = DateTime.now();
+    final firstDate = isStart ? today : (_periodStart ?? today).add(const Duration(days: 1));
+    final initial = (isStart ? _periodStart : _periodEnd) ?? firstDate;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isBefore(firstDate) ? firstDate : initial,
+      firstDate: firstDate,
+      lastDate: today.add(const Duration(days: 365 * 3)),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (isStart) {
+        _periodStart = picked;
+        final end = _periodEnd;
+        if (end != null && !end.isAfter(picked)) _periodEnd = null;
+      } else {
+        _periodEnd = picked;
+      }
+      _pricePreview = null;
+      _previewError = null;
+    });
+    if (_periodComplete) _refreshPreview();
+  }
+
   void _onPricingQuantityChanged(String _) {
     setState(() {
       _pricePreview = null;
@@ -505,6 +551,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         (pricingQuantity == null || pricingQuantity <= 0)) {
       return;
     }
+    if (_isPeriodPricing && !_periodComplete) return;
     final durationHours = int.tryParse(_durationHoursController.text.trim());
     if (widget.service.pricingModel == 'hourly' &&
         (widget.service.requiresPreciseSchedule ||
@@ -527,6 +574,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
         pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
+        periodStart: _isPeriodPricing ? _periodStart : null,
+        periodEnd: _isPeriodPricing ? _periodEnd : null,
         durationHours: widget.service.pricingModel == 'hourly'
             ? durationHours
             : null,
@@ -723,6 +772,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           pricingQuantity: _isQuantityPricing
               ? num.tryParse(_pricingQuantityController.text.trim())
               : null,
+          periodStart: _isPeriodPricing ? _periodStart : null,
+          periodEnd: _isPeriodPricing ? _periodEnd : null,
           durationHours: widget.service.pricingModel == 'hourly'
               ? int.tryParse(_durationHoursController.text.trim())
               : null,
@@ -856,6 +907,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _failValidation('حدد عدد $_quantityUnitLabel المطلوبة', _unitsSectionKey);
       return;
     }
+    if (_isPeriodPricing && !_periodComplete) {
+      _failValidation('حدد تاريخ بداية ونهاية الاشتراك', _unitsSectionKey);
+      return;
+    }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
     if (!_requestRemoteQuote && _pricePreview == null) {
@@ -949,6 +1004,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
+        periodStart: _isPeriodPricing ? _periodStart : null,
+        periodEnd: _isPeriodPricing ? _periodEnd : null,
         paymentMethod:
             _requestRemoteQuote || _selectedPaymentMethod == 'installment'
             ? null
@@ -1491,12 +1548,45 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ],
               ],
             ],
+            if (_isPeriodPricing) ...[
+              const SizedBox(height: 16),
+              Text(
+                'مدة الاشتراك',
+                key: _unitsSectionKey,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _PeriodDateField(
+                      label: 'من تاريخ',
+                      value: _periodStart,
+                      onPick: () => _pickPeriodDate(isStart: true),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _PeriodDateField(
+                      label: 'إلى تاريخ',
+                      value: _periodEnd,
+                      onPick: () => _pickPeriodDate(isStart: false),
+                    ),
+                  ),
+                ],
+              ),
+              if (_periodComplete) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'المدة $_billedMonthsPreview ${_billedMonthsPreview == 1 ? 'شهر' : 'شهور'} — أي جزء من شهر بيتحسب شهر كامل.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
             if (_isQuantityPricing) ...[
               const SizedBox(height: 16),
               Text(
-                widget.service.pricingModel == 'monthly'
-                    ? 'مدة الاشتراك بالشهور'
-                    : 'الكمية المطلوبة',
+                'الكمية المطلوبة',
                 key: _unitsSectionKey,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
@@ -1520,10 +1610,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         if (widget.service.quantityPrecision == 0)
                           'أرقام صحيحة فقط',
                       ].isEmpty
-                      ? widget.service.pricingModel == 'monthly'
-                            ? 'السعر الشهري × عدد الشهور، ويتحدث قبل تأكيد الطلب'
-                            : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
-                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. ${widget.service.pricingModel == 'monthly' ? 'السعر الشهري × عدد الشهور' : 'السعر يتحدث تلقائيًا'}.',
+                      ? 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
+                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. السعر يتحدث تلقائيًا.',
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -2006,6 +2094,38 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// حقل تاريخ واحد جوّه فترة الاشتراك (ADR-0050 §4) — عرض بس، الاختيار كله في `showDatePicker`.
+class _PeriodDateField extends StatelessWidget {
+  const _PeriodDateField({
+    required this.label,
+    required this.value,
+    required this.onPick,
+  });
+
+  final String label;
+  final DateTime? value;
+  final VoidCallback onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = value == null
+        ? 'اختار'
+        : '${value!.year}/${value!.month.toString().padLeft(2, '0')}/${value!.day.toString().padLeft(2, '0')}';
+    return InkWell(
+      onTap: onPick,
+      borderRadius: BorderRadius.circular(4),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18),
+        ),
+        child: Text(text),
       ),
     );
   }

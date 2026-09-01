@@ -20,6 +20,9 @@ export interface CreateOrderBody {
   // create_order_screen.dart's _onDurationHoursChanged بالحرف.
   duration_hours?: number;
   pricing_quantity?: number;
+  /** ADR-0050 §4 — فترة التعاقد (اشتراك شهري)، مش موعد الزيارة. */
+  period_start?: string;
+  period_end?: string;
   promo_code?: string;
   field_values?: Record<string, string | number | boolean>;
   payment_method?: 'card' | 'instapay';
