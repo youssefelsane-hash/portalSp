@@ -1,3 +1,4 @@
+import type { PricingModel } from './catalog';
 // محرك التسعير الديناميكي (docs/08 §1، ADR-0001، docs/adr/0001-dynamic-pricing-engine.md) — مطابق
 // لـ apps/api/src/modules/pricing/dto/*.ts وentities. راجع apps/api/src/modules/pricing/README.md.
 
@@ -226,3 +227,64 @@ export const FORMULA_LIMITS = {
   /** أقصى حجم JSON بالبايت للـpayload المخزن. */
   MAX_PAYLOAD_JSON_BYTES: 128 * 1024,
 } as const;
+
+// ===================== سجل طرق حساب السعر (ADR-0050 §1) =====================
+// **مرآة لـ`apps/api/src/modules/pricing/pricing-methods.ts`** — نفس النصوص بالحرف. الوصف
+// والمدخل المطلوب بيتعرضوا للأدمن من هنا، بدل تلات نسخ متفرّقة كانت في صفحات الأدمن (وكانوا
+// اتفرقوا فعلاً: «شهري (عدد وحدات شهرية)» في صفحتين و«شهري» في التالتة).
+
+/** المدخل الإضافي اللي الطريقة بتطلبه من العميل. */
+export type PricingMethodRequirement = 'none' | 'duration' | 'quantity' | 'period';
+
+export interface PricingMethodMeta {
+  labelAr: string;
+  descriptionAr: string;
+  /** معنى `base_price_cents` للطريقة دي — عنوان الخانة في فورم الخدمة. */
+  rateLabelAr: string;
+  requires: PricingMethodRequirement;
+}
+
+export const PRICING_METHODS: Record<PricingModel, PricingMethodMeta> = {
+  fixed: {
+    labelAr: 'سعر ثابت',
+    descriptionAr: 'سعر واحد للخدمة مهما كانت المدة أو الكمية.',
+    rateLabelAr: 'السعر (جنيه)',
+    requires: 'none',
+  },
+  hourly: {
+    labelAr: 'بالساعة',
+    descriptionAr: 'السعر = سعر الساعة × عدد الساعات اللي العميل حجزها.',
+    rateLabelAr: 'سعر الساعة (جنيه)',
+    requires: 'duration',
+  },
+  per_unit: {
+    labelAr: 'بالوحدة/بالقطعة',
+    descriptionAr: 'السعر = سعر الوحدة × الكمية اللي العميل حددها (قطعة، متر، جهاز…).',
+    rateLabelAr: 'سعر الوحدة (جنيه)',
+    requires: 'quantity',
+  },
+  monthly: {
+    labelAr: 'شهري (بفترة تاريخين)',
+    descriptionAr:
+      'العميل بيختار تاريخ بداية وتاريخ نهاية، والنظام بيحسب عدد شهور الفوترة بينهم بالتقويم (أي جزء من شهر = شهر كامل).',
+    rateLabelAr: 'السعر الشهري (جنيه)',
+    requires: 'period',
+  },
+  inspection_then_quote: {
+    labelAr: 'كشف ثم عرض سعر',
+    descriptionAr: 'مفيش سعر خدمة وقت الحجز — بيتحصّل رسم الكشف بس، والسعر النهائي بيتبعت بعد المعاينة.',
+    rateLabelAr: 'السعر الأساسي (جنيه) — مش مستخدم في الحساب',
+    requires: 'none',
+  },
+  formula: {
+    labelAr: 'معادلة ديناميكية',
+    descriptionAr: 'السعر بيتحسب من الحقول والقواعد اللي إنت بانيها في محرك التسعير تحت — أقوى وأمرن اختيار.',
+    rateLabelAr: 'السعر الأساسي (جنيه) — المعادلة هي اللي بتحكم',
+    requires: 'none',
+  },
+};
+
+/** خريطة الأسماء بس — للجداول اللي محتاجة عمود «طريقة الحساب». */
+export const PRICING_MODEL_LABELS: Record<PricingModel, string> = Object.fromEntries(
+  (Object.keys(PRICING_METHODS) as PricingModel[]).map((key) => [key, PRICING_METHODS[key].labelAr]),
+) as Record<PricingModel, string>;

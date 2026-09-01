@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { PRICING_MODEL_LABELS } from '@baytak/shared-types';
 import type {
   AdminServiceCategoryResponseDto,
   AdminServiceResponseDto,
@@ -29,16 +30,6 @@ import { LEVEL_LABELS } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 
-const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
-  fixed: 'ثابت',
-  hourly: 'بالساعة',
-  per_unit: 'بالوحدة',
-  monthly: 'شهري (عدد وحدات شهرية)',
-  inspection_then_quote: 'كشف ثم عرض سعر',
-  // محرك التسعير الديناميكي (docs/08 §1) — بعد الاختيار، إدارة الحقول/القواعد من صفحة تفاصيل
-  // الخدمة (قسم "محرك التسعير الديناميكي").
-  formula: 'معادلة ديناميكية',
-};
 
 function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
   if (!url) {
