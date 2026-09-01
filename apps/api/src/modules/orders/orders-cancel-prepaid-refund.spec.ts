@@ -188,7 +188,9 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       {} as never, // pricingEngineService
       { releaseUsage: async () => undefined } as never, // promoCodesService — الاختبار ده ملوش علاقة بأكواد الخصم
       {} as never, // buildingsService
-      {} as never, // cancellationReasonsService
+      // القاعدة الجديدة (docs/08 §112) بتسأل عن أسباب الإلغاء المتاحة للعميل قبل ما ترفض إلغاء
+      // بلا سبب. الاختبار ده كله بيلغي بلا سبب عمدًا، فبنمثّل «مفيش أسباب معرّفة».
+      { listActive: async () => [] } as never, // cancellationReasonsService
       {} as never, // walletsService
       {} as never, // settingsService
       paymentsService,

@@ -1669,11 +1669,27 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
     }
 
-    // سبب مُختار من القايمة (اختياري) — ممكن يترتب عليه رسوم لو برّه نافذة الإلغاء المجاني.
+    // سبب الإلغاء — ممكن يترتب عليه رسوم لو برّه نافذة الإلغاء المجاني.
     // ملحوظة: affects_technician_score مُخزّن بس مش بيأثر فعلياً على quality_score حالياً —
     // القاموس مالوش صيغة محددة لحساب التأثير ده (نفس مبدأ عدم اختراع أرقام مش موجودة في المواصفات).
+    //
+    // ثغرة حقيقية اتقفلت (docs/08 §112): السبب كان **اختياري بالكامل**، ورسوم الإلغاء بتتحسب
+    // جوّه `if (dto.cancellation_reason_id)` بس. يعني اللي بيدفع الرسوم هو اللي بيقرر لو هي
+    // تنطبق عليه أصلاً — يسيب الراديو من غير اختيار فيخرج بصفر رسوم مهما كانت سياسة الأدمن.
+    // القاعدة دلوقتي: لو الأدمن معرّف أسباب إلغاء للعميل، الاختيار إجباري. لو مفيش أسباب معرّفة
+    // خالص، الإلغاء بيفضل شغّال بنص حر (ما نقفلش على العميل باب الإلغاء بسبب داتا ناقصة).
     let feeCents = 0;
     let cancellationReasonId: string | null = null;
+    if (!dto.cancellation_reason_id) {
+      const availableReasons = await this.cancellationReasonsService.listActive(CancellationAppliesTo.CUSTOMER);
+      if (availableReasons.length > 0) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'لازم تختار سبب الإلغاء من القايمة',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
     if (dto.cancellation_reason_id) {
       const cancellationReason = await this.cancellationReasonsService.findOrThrow(dto.cancellation_reason_id);
       if (cancellationReason.appliesTo !== CancellationAppliesTo.CUSTOMER) {
