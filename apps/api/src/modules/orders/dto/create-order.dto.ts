@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode, OrderType } from '../entities/order.entity';
 
 export class CreateOrderDto {
@@ -87,6 +87,19 @@ export class CreateOrderDto {
   @IsOptional()
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
+
+  // صور اختيارية للمشكلة، متاحة لكل الخدمات ومستقلة عن حقول التسعير الديناميكية.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  problem_image_ids?: string[];
+
+  // لخدمة "معاينة ثم سعر" فقط: الإدارة تراجع الصور وتحدد السعر قبل بدء المطابقة.
+  @IsOptional()
+  @IsBoolean()
+  request_remote_quote?: boolean;
 
   // الجدولة الحقيقية للفني (docs/08 §2-§3، ADR-0002) — العميل اختار سلوت `available` محدد من
   // جدول فني بعينه (GET /technicians/:id/schedule) بدل ما يسيب المطابقة تختار/يستخدم تفضيل عام.

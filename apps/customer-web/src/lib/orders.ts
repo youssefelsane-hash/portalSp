@@ -28,6 +28,8 @@ export interface CreateOrderBody {
   repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
   // نسخ سياسات الدفع المقبولة (migration 0177) — إجبارية من الباك-إند لو الخدمة عليها شروط
   accepted_policy_version_ids?: string[];
+  problem_image_ids?: string[];
+  request_remote_quote?: boolean;
 }
 
 export interface PricingFieldImageUploadDto {
@@ -50,6 +52,24 @@ export const uploadPricingFieldImage = (
   body.set('field_id', fieldId);
   body.set('file', file);
   return authedFetch<PricingFieldImageUploadDto>('/orders/pricing-field-images', {
+    method: 'POST',
+    body,
+  });
+};
+
+export interface ProblemImageUploadDto {
+  id: string;
+  file_url: string;
+  mime_type: string;
+  file_size_bytes: number;
+  expires_at: string;
+}
+
+export const uploadProblemImage = (authedFetch: AuthedFetch, serviceId: string, file: File) => {
+  const body = new FormData();
+  body.set('service_id', serviceId);
+  body.set('file', file);
+  return authedFetch<ProblemImageUploadDto>('/orders/problem-images', {
     method: 'POST',
     body,
   });
@@ -100,6 +120,8 @@ export interface OrderResponseDto {
   technician_phone?: string;
   customer_cash_confirmed_at: string | null;
   technician_cash_not_received_at: string | null;
+  initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
+  initial_quote_note: string | null;
 }
 
 // نفس الأسماء الإنسانية المستخدمة في customer-app (orders/models.dart's orderStatusLabelsAr)
@@ -108,6 +130,7 @@ export interface OrderResponseDto {
 export const orderStatusLabelsAr: Record<string, string> = {
   draft: 'مسودة',
   pending_payment: 'في انتظار الدفع',
+  awaiting_admin_quote: 'الإدارة بتراجع الصور وتحدد السعر',
   searching_technician: 'بيدوّر على فني',
   technician_assigned: 'اتعيّن فني',
   accepted: 'الفني قبل الطلب',
@@ -115,6 +138,7 @@ export const orderStatusLabelsAr: Record<string, string> = {
   technician_arrived: 'الفني وصل',
   in_progress: 'الشغل شغّال',
   awaiting_quote_approval: 'في انتظار موافقتك على السعر',
+  awaiting_initial_quote_approval: 'السعر جاهز ومستني موافقتك',
   work_completed: 'الشغل خلص',
   awaiting_payment: 'في انتظار الدفع',
   completed: 'اتقفل',
@@ -130,11 +154,13 @@ export const orderStatusLabelsAr: Record<string, string> = {
 export const customerCancellableStatuses = new Set([
   'draft',
   'pending_payment',
+  'awaiting_admin_quote',
   'searching_technician',
   'technician_assigned',
   'accepted',
   'technician_on_way',
   'awaiting_quote_approval',
+  'awaiting_initial_quote_approval',
   'awaiting_technician_reselection',
 ]);
 
@@ -179,6 +205,16 @@ export const cancelOrder = (authedFetch: AuthedFetch, id: string, body: { reason
 
 export const confirmCashHandover = (authedFetch: AuthedFetch, id: string) =>
   authedFetch<OrderResponseDto>(`/orders/${id}/confirm-cash-handover`, { method: 'POST' });
+
+export const approveInitialQuote = (
+  authedFetch: AuthedFetch,
+  id: string,
+  paymentChoice: 'cash' | 'electronic' = 'electronic',
+) =>
+  authedFetch<OrderResponseDto>(`/orders/${id}/initial-quote/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ payment_choice: paymentChoice }),
+  });
 
 export interface OrderItemDto {
   id: string;

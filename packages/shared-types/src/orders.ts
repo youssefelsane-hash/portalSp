@@ -9,6 +9,8 @@ export type OrderStatus =
   | 'technician_arrived'
   | 'in_progress'
   | 'awaiting_quote_approval'
+  | 'awaiting_admin_quote'
+  | 'awaiting_initial_quote_approval'
   | 'work_completed'
   | 'awaiting_payment'
   | 'completed'
@@ -43,6 +45,8 @@ export interface OrderResponseDto {
   customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
   scheduled_at: string | null;
   estimated_price_cents: number | null;
+  initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
+  initial_quote_note: string | null;
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
   surge_amount_cents: number;

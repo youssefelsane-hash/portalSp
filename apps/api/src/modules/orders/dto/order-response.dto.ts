@@ -38,6 +38,8 @@ export interface OrderResponseDto {
   /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
   duration_minutes: number | null;
   estimated_price_cents: number | null;
+  initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
+  initial_quote_note: string | null;
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
   surge_amount_cents: number;
@@ -175,6 +177,8 @@ export function toOrderResponseDto(
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
     duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
     estimated_price_cents: order.estimatedPriceCents,
+    initial_quote_source: order.initialQuoteSource,
+    initial_quote_note: order.initialQuoteNote,
     inspection_fee_cents: order.inspectionFeeCents,
     surge_amount_cents: order.surgeAmountCents,
     level_premium_cents: order.levelPremiumCents,

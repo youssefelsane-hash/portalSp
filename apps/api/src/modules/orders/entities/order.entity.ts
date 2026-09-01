@@ -11,6 +11,8 @@ export enum OrderStatus {
   TECHNICIAN_ARRIVED = 'technician_arrived',
   IN_PROGRESS = 'in_progress',
   AWAITING_QUOTE_APPROVAL = 'awaiting_quote_approval',
+  // العميل رفع صور وطلب من الإدارة تحديد السعر قبل إرسال أي فني.
+  AWAITING_ADMIN_QUOTE = 'awaiting_admin_quote',
   // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — مختلفة عن AWAITING_QUOTE_APPROVAL فوق عمدًا:
   // دي بتؤسس أول سعر لطلب لسه بلا سعر (pricing_model=inspection_then_quote)، مش بتضيف على سعر
   // موجود بالفعل. بتوصل من TECHNICIAN_ARRIVED بس (الفني عاين وحدد سعر).
@@ -171,6 +173,12 @@ export class Order {
 
   @Column({ name: 'estimated_price_cents', type: 'integer', nullable: true })
   estimatedPriceCents: number | null;
+
+  @Column({ name: 'initial_quote_source', type: 'varchar', length: 30, nullable: true })
+  initialQuoteSource: 'technician_onsite' | 'admin_remote' | null;
+
+  @Column({ name: 'initial_quote_note', type: 'varchar', length: 1000, nullable: true })
+  initialQuoteNote: string | null;
 
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;

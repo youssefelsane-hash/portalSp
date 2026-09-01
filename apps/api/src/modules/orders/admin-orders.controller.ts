@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService, toCrewAssignResponseDto } from './admin-orders.service';
@@ -40,6 +43,8 @@ import { MatchingExplainabilityService } from '../matching/matching-explainabili
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { InspectionQuoteService } from './inspection-quote.service';
+import { SubmitAdminPhotoQuoteDto } from './dto/submit-admin-photo-quote.dto';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -58,6 +63,7 @@ export class AdminOrdersController {
     private readonly addressesService: AddressesService,
     private readonly customerProfilesService: CustomerProfilesService,
     private readonly catalogService: CatalogService,
+    private readonly inspectionQuoteService: InspectionQuoteService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -257,6 +263,26 @@ export class AdminOrdersController {
     return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
   }
 
+  @Post(':id/problem-images')
+  @RequirePermission('orders.adjust_price')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
+  )
+  async uploadProblemImage(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('caption') caption: string | undefined,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('لازم ترفع صورة');
+    assertFileSignatureMatches(file.buffer, file.mimetype, new Set(['image/jpeg', 'image/png', 'image/webp']));
+    const media = await this.orderMediaService.uploadProblemPhotoByAdmin(user.sub, id, file, caption);
+    return toOrderMediaResponseDto(media, this.storage);
+  }
+
   // نفس نمط listMedia فوق — الأدمن محتاج يشوف بنود عرض السعر (مقترحة/معتمدة) وقت مراجعة شكوى
   // أو دعم فني، تفاصيل كاملة في order-items.service.ts.
   @Get(':id/quote-items')
@@ -396,6 +422,24 @@ export class AdminOrdersController {
   ) {
     return toOrderResponseDto(
       await this.adminOrdersService.adjustPrice(admin.sub, id, dto.new_total_amount_cents, dto.reason, audit),
+    );
+  }
+
+  @Post(':id/photo-quote')
+  @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
+  async submitPhotoQuote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitAdminPhotoQuoteDto,
+  ) {
+    return toOrderResponseDto(
+      await this.inspectionQuoteService.submitAdminRemoteQuote(
+        admin.sub,
+        id,
+        dto.quoted_amount_cents,
+        dto.note,
+      ),
     );
   }
 

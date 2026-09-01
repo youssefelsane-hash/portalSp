@@ -43,6 +43,9 @@ export class OrderMedia {
   @Column({ name: 'pricing_field_upload_id', type: 'uuid', nullable: true })
   pricingFieldUploadId: string | null;
 
+  @Column({ name: 'problem_image_upload_id', type: 'uuid', nullable: true })
+  problemImageUploadId: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   caption: string | null;
 

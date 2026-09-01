@@ -92,3 +92,18 @@ describe('order-state-machine — active technician resource', () => {
     expect(ACTIVE_TECHNICIAN_ORDER_STATUSES).not.toContain(OrderStatus.COMPLETED);
   });
 });
+
+describe('order-state-machine — تسعير الإدارة من الصور', () => {
+  it('يحافظ على الطلب خارج المطابقة لحد ما الإدارة ترسل السعر والعميل يوافق', () => {
+    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.SEARCHING_TECHNICIAN)).toBe(false);
+    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL)).toBe(true);
+    expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.SEARCHING_TECHNICIAN)).toBe(true);
+  });
+
+  it('يسمح للعميل بالإلغاء قبل السعر أو برفض السعر بعد وصوله', () => {
+    expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.AWAITING_ADMIN_QUOTE)).toBe(true);
+    expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL)).toBe(true);
+    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.CANCELLED_BY_CUSTOMER)).toBe(true);
+    expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_CUSTOMER)).toBe(true);
+  });
+});

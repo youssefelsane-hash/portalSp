@@ -358,6 +358,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  Future<void> _approveInitialQuote() async {
+    setState(() => _decidingQuote = true);
+    try {
+      final order = await _repository.approveInitialQuote(widget.orderId);
+      if (mounted) {
+        setState(() => _order = order);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              order.orderStatus == 'searching_technician'
+                  ? 'وافقت على السعر — بدأنا اختيار الفني المناسب'
+                  : 'وافقت على السعر — الفني يقدر يكمل الشغل',
+            ),
+          ),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _decidingQuote = false);
+    }
+  }
+
   Future<void> _cancel() async {
     final result = await _showCancelDialog();
     if (result == null) return; // العميل قفل الـ dialog من غير ما يأكّد
@@ -736,13 +759,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     padding: const EdgeInsets.all(16),
                     children: [
                       // "ادفع بالتقسيط" — بيظهر بس لو الخدمة عليها خطط متاحة
-                      InstallmentSection(
-                        key: ValueKey('inst_${order.id}'),
-                        auth: context.read<AuthRepository>(),
-                        orderId: order.id,
-                        serviceId: order.serviceId,
-                      ),
-                      const SizedBox(height: 8),
+                      if (order.orderStatus != 'awaiting_admin_quote' &&
+                          order.orderStatus != 'awaiting_initial_quote_approval') ...[
+                        InstallmentSection(
+                          key: ValueKey('inst_${order.id}'),
+                          auth: context.read<AuthRepository>(),
+                          orderId: order.id,
+                          serviceId: order.serviceId,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       // طمأنة أثناء الانتظار (docs/08 §77-B3، طلب مالك صريح) — فوق كل حاجة
                       // عشان دي أول سؤال في دماغ العميل وهو مستني.
                       if (_kAwaitingTechnicianStatuses.contains(order.orderStatus)) ...[
@@ -760,7 +786,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 style: Theme.of(context).textTheme.titleLarge,
                               ),
                               const SizedBox(height: 8),
-                              Text('السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}'),
+                              Text(
+                                order.orderStatus == 'awaiting_admin_quote'
+                                    ? 'السعر: الإدارة بتراجعه'
+                                    : order.orderStatus == 'awaiting_initial_quote_approval'
+                                        ? 'السعر المقترح: ${_formatEgp(order.estimatedPriceCents ?? 0)}'
+                                        : 'السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}',
+                              ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
                               // اتعيّن مستواه أعلى، الزيادة لازم تبان بسببها مكتوب، مش رقم
                               // بيتغيّر من غير تفسير. والسطر التاني تحتها مطمئن ومقصود يكون
@@ -1144,6 +1176,76 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                         child: _decidingQuote
                                             ? const SizedBox(
                                                 width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                            : const Text('موافقة'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (order.orderStatus == 'awaiting_admin_quote') ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          child: const ListTile(
+                            leading: Icon(Icons.manage_search_outlined),
+                            title: Text('الإدارة بتراجع الصور'),
+                            subtitle: Text(
+                              'هنبعتلك السعر هنا وفي الإشعارات. مفيش فني هيتحرك قبل موافقتك.',
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (order.orderStatus == 'awaiting_initial_quote_approval') ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text('عرض السعر جاهز', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _formatEgp(order.estimatedPriceCents ?? 0),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  order.initialQuoteSource == 'admin_remote'
+                                      ? 'السعر اتحدد من الصور. بعد الموافقة هنبدأ اختيار الفني.'
+                                      : 'السعر اتحدد بعد المعاينة، راجعه قبل استمرار الشغل.',
+                                ),
+                                if (order.initialQuoteNote != null && order.initialQuoteNote!.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Text(order.initialQuoteNote!),
+                                ],
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _decidingQuote || _cancelling ? null : _cancel,
+                                        child: const Text('رفض وإلغاء الطلب'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: FilledButton(
+                                        onPressed: _decidingQuote ? null : _approveInitialQuote,
+                                        child: _decidingQuote
+                                            ? const SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child: CircularProgressIndicator(strokeWidth: 2),
+                                              )
                                             : const Text('موافقة'),
                                       ),
                                     ),

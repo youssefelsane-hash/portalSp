@@ -6,6 +6,7 @@ import { CustomerProfilesService } from '../../customers/customer-profiles.servi
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { NotificationRoutingService } from '../notification-routing.service';
 
 // أسباب الإلغاء التلقائي الداخلية (matching.service.ts/order-auto-cancel.service.ts) بتتسجّل
 // بصيغة "CODE: نص عربي مفهوم" لمصلحة الأدمن/الـtimeline (Part 12/13 — كود دقيق للتشخيص).
@@ -24,6 +25,10 @@ const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: stri
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: {
     title: 'عرض سعر جديد يستنى موافقتك',
     body: 'الفني اقترح بنود إضافية (قطع غيار/أجرة إضافية) — راجع التفاصيل ووافق أو ارفض.',
+  },
+  [OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL]: {
+    title: 'السعر جاهز ويستنى موافقتك',
+    body: 'راجع السعر اللي اتحدد لطلبك، وبعد موافقتك الطلب هيكمل للخطوة التالية.',
   },
   [OrderStatus.WORK_COMPLETED]: { title: 'الشغل خلص', body: 'الفني خلّص الشغل — راجع الفاتورة واختار طريقة الدفع.' },
   // ADR-0015 — طلب كان مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) واتضاف عليه بند إضافي بعد
@@ -47,6 +52,7 @@ export class OrderStatusNotificationListener {
     private readonly techniciansService: TechniciansService,
     private readonly notificationsService: NotificationsService,
     private readonly workflowService: NotificationWorkflowService,
+    private readonly routingService: NotificationRoutingService,
   ) {}
 
   @OnEvent(ORDER_STATUS_CHANGED_EVENT)
@@ -62,7 +68,8 @@ export class OrderStatusNotificationListener {
         // عشان حتى الإشعار الأول (مش بس التذكيرات) يترتبط بيه (workflow_id) — تتبّع كامل. تذكير
         // كل ساعة (إعداد قابل للتعديل) لحد ما يتحل — راجع الفرع تحت (previousStatus=AWAITING_QUOTE_APPROVAL) لنقطة الحل.
         const workflow =
-          event.newStatus === OrderStatus.AWAITING_QUOTE_APPROVAL
+          event.newStatus === OrderStatus.AWAITING_QUOTE_APPROVAL ||
+          event.newStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL
             ? await this.workflowService.create({
                 userId: customer.userId,
                 notificationType: 'order_quote_pending_approval',
@@ -112,6 +119,27 @@ export class OrderStatusNotificationListener {
       // action_required بتاعة عرض السعر ده مهما كانت الوجهة التالية، مش بس مسار الموافقة العادي.
       if (event.previousStatus === OrderStatus.AWAITING_QUOTE_APPROVAL && event.newStatus !== OrderStatus.AWAITING_QUOTE_APPROVAL) {
         await this.workflowService.resolve('order', event.orderId, 'approve_quote');
+      }
+
+      if (
+        event.previousStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL &&
+        event.newStatus !== OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL
+      ) {
+        await this.workflowService.resolve('order', event.orderId, 'approve_quote');
+      }
+
+      if (
+        event.previousStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL &&
+        event.newStatus === OrderStatus.SEARCHING_TECHNICIAN
+      ) {
+        await this.routingService.routeToRole('order.photo_quote_accepted', {
+          notificationType: 'order_photo_quote_accepted',
+          titleAr: `العميل وافق على سعر الطلب ${event.orderNumber}`,
+          bodyAr: 'الطلب دخل المطابقة الآن بالسعر الذي حددته الإدارة من الصور.',
+          referenceType: 'order',
+          referenceId: event.orderId,
+          deepLink: `/admin/orders/${event.orderId}`,
+        });
       }
 
       // الطلب خرج من accepted (الفني بدأ يتحرك فعليًا، أو اتلغى/اتحول لإعادة اختيار) — تذكيرات

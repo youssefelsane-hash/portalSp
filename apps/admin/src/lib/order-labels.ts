@@ -10,6 +10,8 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   technician_arrived: 'الفني وصل',
   in_progress: 'جاري التنفيذ',
   awaiting_quote_approval: 'بانتظار موافقة السعر',
+  awaiting_admin_quote: 'بانتظار تسعير الإدارة',
+  awaiting_initial_quote_approval: 'بانتظار موافقة العميل على السعر',
   work_completed: 'الشغل خلص',
   awaiting_payment: 'بانتظار السداد',
   completed: 'مكتمل',
@@ -33,6 +35,7 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   'pending_payment',
   'searching_technician',
   'technician_assigned',
+  'awaiting_admin_quote',
   // سياسة إلغاء الفني (docs/10) — order-state-machine.ts بيسمح admin cancel() يقفل الطلب من
   // الحالة دي (العميل واقف مستني اختيار فني بديل، ممكن يقرر يلغي كله بدل ما يستمر).
   'awaiting_technician_reselection',
@@ -89,7 +92,7 @@ const CANCELLED_STATUSES: OrderStatus[] = [
 export function orderStatusTone(status: OrderStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   if (status === 'completed') return 'success';
   if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'danger';
-  if (status === 'pending_payment' || status === 'awaiting_payment' || status === 'awaiting_quote_approval' || status === 'awaiting_technician_reselection') {
+  if (status === 'pending_payment' || status === 'awaiting_payment' || status === 'awaiting_quote_approval' || status === 'awaiting_admin_quote' || status === 'awaiting_initial_quote_approval' || status === 'awaiting_technician_reselection') {
     return 'warning';
   }
   if (status === 'draft' || status === 'refunded') return 'neutral';

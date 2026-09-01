@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { CatalogService } from '../catalog/catalog.service';
 import { PricingModel } from '../catalog/entities/service.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -66,6 +67,8 @@ export class InspectionQuoteService {
 
       const previousStatus = order.orderStatus;
       order.estimatedPriceCents = quotedAmountCents;
+      order.initialQuoteSource = 'technician_onsite';
+      order.initialQuoteNote = note?.trim() || null;
       order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
       await manager.save(order);
 
@@ -92,6 +95,84 @@ export class InspectionQuoteService {
     );
 
     return order;
+  }
+
+  async submitAdminRemoteQuote(
+    adminUserId: string,
+    orderId: string,
+    quotedAmountCents: number,
+    note?: string,
+  ): Promise<Order> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.orderStatus !== OrderStatus.AWAITING_ADMIN_QUOTE || order.initialQuoteSource !== 'admin_remote') {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب مش مستني تسعير الإدارة بالصور', HttpStatus.CONFLICT);
+      }
+      const service = await this.catalogService.findServiceOrThrow(order.serviceId);
+      if (service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الخدمة دي مش من نوع معاينة ثم سعر', HttpStatus.CONFLICT);
+      }
+      const [{ count }] = await manager.query<{ count: string }[]>(
+        `SELECT COUNT(*)::text AS count
+           FROM order_media
+          WHERE order_id = $1 AND media_type = 'problem_photo'`,
+        [order.id],
+      );
+      if (Number(count) < 1) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب مفيهوش صور مشكلة كفاية للتسعير', HttpStatus.BAD_REQUEST);
+      }
+      if (
+        order.settlementPolicyVersion === 2 &&
+        order.platformCommissionCentsSnapshot != null &&
+        order.platformCommissionCentsSnapshot > quotedAmountCents
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const previousStatus = order.orderStatus;
+      order.estimatedPriceCents = quotedAmountCents;
+      order.initialQuoteNote = note?.trim() || null;
+      order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: order.orderStatus,
+          changedByUserId: adminUserId,
+          changedByRole: 'admin',
+          changeSource: OrderChangeSource.ADMIN,
+          reason: `الإدارة حددت السعر من الصور — ${quotedAmountCents} قرش`,
+          metadata: note ? { quoted_amount_cents: quotedAmountCents, note } : { quoted_amount_cents: quotedAmountCents },
+        }),
+      );
+      return { order, previousStatus };
+    });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        result.order.id,
+        result.order.orderNumber,
+        result.previousStatus,
+        result.order.orderStatus,
+        result.order.customerId,
+        result.order.technicianId,
+        `الإدارة حددت سعر الطلب من الصور`,
+      ),
+    );
+    return result.order;
   }
 
   // العميل وافق على السعر بعد المعاينة — نفس نمط OrderItemsService.approve() بالضبط، بس
@@ -127,26 +208,31 @@ export class InspectionQuoteService {
         source: 'inspection_quote',
         includeInCommissionableBase: true,
       });
-      order.orderStatus = OrderStatus.IN_PROGRESS;
+      const nextStatus =
+        order.initialQuoteSource === 'admin_remote' ? OrderStatus.SEARCHING_TECHNICIAN : OrderStatus.IN_PROGRESS;
+      order.orderStatus = nextStatus;
       await manager.save(order);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId: order.id,
           previousStatus,
-          newStatus: OrderStatus.IN_PROGRESS,
+          newStatus: nextStatus,
           changedByUserId: userId,
           changedByRole: 'customer',
           changeSource: OrderChangeSource.CUSTOMER,
-          reason: `العميل وافق على السعر بعد المعاينة — ${quotedAmountCents} قرش`,
-          metadata: { quoted_amount_cents: quotedAmountCents },
+          reason:
+            order.initialQuoteSource === 'admin_remote'
+              ? `العميل وافق على السعر المحدد من الصور — ${quotedAmountCents} قرش`
+              : `العميل وافق على السعر بعد المعاينة — ${quotedAmountCents} قرش`,
+          metadata: { quoted_amount_cents: quotedAmountCents, quote_source: order.initialQuoteSource },
         }),
       );
 
-      return { order, previousStatus, quotedAmountCents };
+      return { order, previousStatus, quotedAmountCents, nextStatus };
     });
 
-    const { order, previousStatus, quotedAmountCents } = result;
+    const { order, previousStatus, quotedAmountCents, nextStatus } = result;
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
@@ -154,12 +240,16 @@ export class InspectionQuoteService {
         order.id,
         order.orderNumber,
         previousStatus,
-        OrderStatus.IN_PROGRESS,
+        nextStatus,
         order.customerId,
         order.technicianId,
         `العميل وافق على السعر بعد المعاينة — ${quotedAmountCents} قرش`,
       ),
     );
+
+    if (nextStatus === OrderStatus.SEARCHING_TECHNICIAN) {
+      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    }
 
     // تحصيل فوري (docs/08 §21 نفس النمط) — برّه الـtransaction عمداً، فشله ميرجّعش خطأ للعميل
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل. batchId هنا مجرد مفتاح idempotency (مش بيتفحص ضد order_items).

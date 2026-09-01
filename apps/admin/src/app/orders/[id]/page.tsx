@@ -178,6 +178,9 @@ export default function OrderDetailPage() {
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
+  const [photoQuoteEgp, setPhotoQuoteEgp] = useState('');
+  const [photoQuoteNote, setPhotoQuoteNote] = useState('');
+  const [uploadingProblemImages, setUploadingProblemImages] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
@@ -527,6 +530,54 @@ export default function OrderDetailPage() {
     }
   }
 
+  async function handlePhotoQuote(e: FormEvent) {
+    e.preventDefault();
+    const quotedAmountCents = Math.round(Number(photoQuoteEgp) * 100);
+    if (!Number.isFinite(quotedAmountCents) || quotedAmountCents < 1) {
+      setError('اكتب سعر صحيح أكبر من صفر');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/photo-quote`, {
+        method: 'POST',
+        body: JSON.stringify({
+          quoted_amount_cents: quotedAmountCents,
+          ...(photoQuoteNote.trim() ? { note: photoQuoteNote.trim() } : {}),
+        }),
+      });
+      setPhotoQuoteEgp('');
+      setPhotoQuoteNote('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إرسال عرض السعر');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAdminProblemImages(files: FileList | null) {
+    if (!files?.length) return;
+    setUploadingProblemImages(true);
+    setError(null);
+    try {
+      for (const file of Array.from(files).slice(0, 10)) {
+        const body = new FormData();
+        body.set('file', file);
+        const uploaded = await authedFetch<OrderMediaResponseDto>(`/admin/orders/${id}/problem-images`, {
+          method: 'POST',
+          body,
+        });
+        setMedia((current) => [...current, uploaded]);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر رفع صور المشكلة');
+    } finally {
+      setUploadingProblemImages(false);
+    }
+  }
+
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — الطلب disputed بعد بلاغ الفني (report-failed-visit)،
   // الأدمن بيحل بعد المراجعة: reschedule (موعد جديد فعلي، راجع docs/08 §25.2) أو cancel_with_fee
   // (رسوم + استرداد الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
@@ -860,6 +911,90 @@ export default function OrderDetailPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      {order.order_status === 'awaiting_admin_quote' && (
+        <Card className="mb-6 border-amber-300 bg-amber-50/60">
+          <CardHeader>
+            <CardTitle className="text-base">العميل مستني تسعير الصور</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5 lg:grid-cols-[1.25fr_1fr]">
+            <div>
+              <p className="mb-3 text-sm text-muted-foreground">
+                راجع صور المشكلة وحدد السعر الكامل. الطلب لن يدخل المطابقة إلا بعد موافقة العميل.
+              </p>
+              {hasPermission('orders.adjust_price') && (
+                <label className="mb-3 inline-flex cursor-pointer items-center rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted/50">
+                  {uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور وصلت للإدارة'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    className="sr-only"
+                    disabled={uploadingProblemImages}
+                    onChange={(event) => {
+                      void handleAdminProblemImages(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              )}
+              {media.filter((item) => item.media_type === 'problem_photo').length === 0 ? (
+                <p className="text-sm text-destructive">لا توجد صور مشكلة صالحة على الطلب.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {media
+                    .filter((item) => item.media_type === 'problem_photo')
+                    .map((item) => (
+                      <a key={item.id} href={resolveMediaUrl(item.file_url)} target="_blank" rel="noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- صورة من تخزين الباك إند */}
+                        <img
+                          src={resolveMediaUrl(item.file_url)}
+                          alt="صورة المشكلة"
+                          className="aspect-square w-full rounded-xl border object-cover"
+                        />
+                      </a>
+                    ))}
+                </div>
+              )}
+            </div>
+            <form onSubmit={handlePhotoQuote} className="flex flex-col gap-3 rounded-xl border bg-background p-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="photo-quote-egp">السعر الكامل (ج.م.)</Label>
+                <Input
+                  id="photo-quote-egp"
+                  inputMode="decimal"
+                  value={photoQuoteEgp}
+                  onChange={(event) => setPhotoQuoteEgp(event.target.value)}
+                  placeholder="مثال: 850"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="photo-quote-note">ملاحظة للعميل (اختياري)</Label>
+                <Input
+                  id="photo-quote-note"
+                  value={photoQuoteNote}
+                  onChange={(event) => setPhotoQuoteNote(event.target.value)}
+                  placeholder="ما الذي يشمله السعر؟"
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={
+                  isSaving ||
+                  !hasPermission('orders.adjust_price') ||
+                  media.every((item) => item.media_type !== 'problem_photo')
+                }
+              >
+                {isSaving ? 'جاري الإرسال…' : 'إرسال السعر للعميل'}
+              </Button>
+              {!hasPermission('orders.adjust_price') && (
+                <p className="text-xs text-destructive">تحتاج صلاحية تعديل الأسعار لإرسال العرض.</p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
           المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
@@ -2296,8 +2431,24 @@ export default function OrderDetailPage() {
         </Card>
 
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle className="text-base">صور الطلب</CardTitle>
+            {hasPermission('orders.adjust_price') && (
+              <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm font-normal hover:bg-muted/50">
+                {uploadingProblemImages ? 'جاري الرفع…' : 'إضافة صورة مشكلة'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  className="sr-only"
+                  disabled={uploadingProblemImages}
+                  onChange={(event) => {
+                    void handleAdminProblemImages(event.target.files);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+            )}
           </CardHeader>
           <CardContent>
             {media.length === 0 ? (

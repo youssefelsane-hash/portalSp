@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -149,6 +151,41 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
   final Map<String, dynamic> _fieldValues = {};
+  final List<({String id, Uint8List bytes})> _problemImages = [];
+  bool _uploadingProblemImages = false;
+  bool _requestRemoteQuote = false;
+
+  bool get _canRequestRemoteQuote =>
+      widget.service.pricingModel == 'inspection_then_quote' &&
+      widget.bookingMode != BookingMode.emergency;
+
+  Future<void> _pickProblemImages() async {
+    if (_uploadingProblemImages || _problemImages.length >= 10) return;
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 82,
+      limit: 10 - _problemImages.length,
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _uploadingProblemImages = true);
+    try {
+      for (final image in picked) {
+        final bytes = await image.readAsBytes();
+        final id = await _repository.uploadProblemImage(
+          serviceId: widget.service.id,
+          fileBytes: bytes,
+          filename: image.name,
+        );
+        if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
+      }
+    } on ApiException catch (err) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _uploadingProblemImages = false);
+    }
+  }
 
   // تفصيل السعر الحقيقي الكامل قبل التأكيد (docs/08 §1/§2) — كانت فجوة موثّقة صراحة: الشاشة
   // كانت بتعرض إما basePriceCents الثابت (بلا تعديل منطقة/طوارئ) أو سعر formula خام (بلا رسوم
@@ -821,8 +858,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
-    if (_pricePreview == null) {
+    if (!_requestRemoteQuote && _pricePreview == null) {
       setState(() => _error = 'استنى لحد ما السعر يتحسب');
+      return;
+    }
+    if (_requestRemoteQuote && _problemImages.isEmpty) {
+      setState(
+        () => _error = 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر',
+      );
       return;
     }
     // أوضاع التوقيت الثلاثة الجديدة (ADR-0032) — تحقق عميل واضح قبل ما نوصل لرسالة الباك-إند
@@ -896,21 +939,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ? _startAndEndEnd?.toUtc().toIso8601String()
             : null,
         problemDescription: _descriptionController.text.trim(),
-        promoCode: _promoCodeToSend,
-        buildingCode: _buildingCodeToSend,
-        addonIds: _selectedAddonIds.toList(),
+        promoCode: _requestRemoteQuote ? '' : _promoCodeToSend,
+        buildingCode: _requestRemoteQuote ? '' : _buildingCodeToSend,
+        addonIds: _requestRemoteQuote ? const [] : _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
+        problemImageIds: _problemImages.map((item) => item.id).toList(),
+        requestRemoteQuote: _requestRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
-        paymentMethod: _selectedPaymentMethod == 'installment'
+        paymentMethod:
+            _requestRemoteQuote || _selectedPaymentMethod == 'installment'
             ? null
             : _selectedPaymentMethod,
-        warrantyPlanId: _selectedWarrantyPlanId,
+        warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
-        repeatFrequency: _canRepeat ? _repeatFrequency : null,
+        repeatFrequency: _requestRemoteQuote
+            ? null
+            : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
@@ -1484,7 +1532,100 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ..._buildPricingFieldsSection()
             else
               ..._buildStandardDataSection(),
-            if (_addons.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              'صور المشكلة (اختياري)',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'ارفع صور واضحة لو حابب تساعد الفني أو تطلب من الإدارة تحديد السعر قبل إرسال فني.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            if (_problemImages.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var index = 0; index < _problemImages.length; index++)
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.memory(
+                            _problemImages[index].bytes,
+                            width: 84,
+                            height: 84,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: -8,
+                          left: -8,
+                          child: IconButton.filledTonal(
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _uploadingProblemImages
+                                ? null
+                                : () => setState(() {
+                                    _problemImages.removeAt(index);
+                                    if (_problemImages.isEmpty)
+                                      _requestRemoteQuote = false;
+                                  }),
+                            icon: const Icon(Icons.close, size: 16),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _uploadingProblemImages || _problemImages.length >= 10
+                  ? null
+                  : _pickProblemImages,
+              icon: _uploadingProblemImages
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                _uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور',
+              ),
+            ),
+            if (_canRequestRemoteQuote) ...[
+              const SizedBox(height: 10),
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: SwitchListTile(
+                  value: _requestRemoteQuote,
+                  onChanged: _problemImages.isEmpty
+                      ? null
+                      : (value) => setState(() {
+                          _requestRemoteQuote = value;
+                          if (value) {
+                            _selectedAddonIds.clear();
+                            _codeController.clear();
+                            _resolvedCodeKind = null;
+                            _selectedWarrantyPlanId = null;
+                            _repeatFrequency = null;
+                            _selectedPaymentMethod = null;
+                          }
+                        }),
+                  title: const Text('خلّي الإدارة تحدد السعر من الصور'),
+                  subtitle: Text(
+                    _problemImages.isEmpty
+                        ? 'ارفع صورة واحدة على الأقل لتفعيل الاختيار'
+                        : 'هتستلم عرض سعر، وتقدر توافق أو ترفض قبل ما نرسل فني.',
+                  ),
+                  secondary: const Icon(Icons.request_quote_outlined),
+                ),
+              ),
+            ],
+            if (_addons.isNotEmpty && !_requestRemoteQuote) ...[
               const SizedBox(height: 16),
               Text(
                 'إضافات اختيارية',
@@ -1516,60 +1657,61 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
+            if (!_requestRemoteQuote) const SizedBox(height: 16),
             // حقل كود واحد (docs/08 §77-B4) — شوف تعليق `_codeController` للسبب الكامل.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('order-discount-code'),
-                    controller: _codeController,
-                    decoration: InputDecoration(
-                      labelText: 'كود خاص (خصم أو عمارة) — اختياري',
-                      border: const OutlineInputBorder(),
-                      // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
-                      // من غير ما يدوّر على الفرق في السعر.
-                      suffixIcon: _resolvedCodeKind == null
-                          ? null
-                          : Icon(
-                              Icons.check_circle,
-                              color: Colors.green.shade600,
-                            ),
-                      helperText: _resolvedCodeKind == 'building'
-                          ? 'اتقبل ككود عمارة'
-                          : _resolvedCodeKind == 'promo'
-                          ? 'اتقبل ككود خصم'
-                          : null,
+            if (!_requestRemoteQuote)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('order-discount-code'),
+                      controller: _codeController,
+                      decoration: InputDecoration(
+                        labelText: 'كود خاص (خصم أو عمارة) — اختياري',
+                        border: const OutlineInputBorder(),
+                        // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
+                        // من غير ما يدوّر على الفرق في السعر.
+                        suffixIcon: _resolvedCodeKind == null
+                            ? null
+                            : Icon(
+                                Icons.check_circle,
+                                color: Colors.green.shade600,
+                              ),
+                        helperText: _resolvedCodeKind == 'building'
+                            ? 'اتقبل ككود عمارة'
+                            : _resolvedCodeKind == 'promo'
+                            ? 'اتقبل ككود خصم'
+                            : null,
+                      ),
+                      textCapitalization: TextCapitalization.characters,
+                      // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
+                      // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
+                      // ده بيمسح الخصم فورًا (بمعاينة تانية من غير كود) لحد ما يضغط "تحقق" تاني،
+                      // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
+                      onChanged: (_) {
+                        setState(() {
+                          _codeError = null;
+                          _resolvedCodeKind = null;
+                          _pricePreview = null;
+                        });
+                        _refreshPreview();
+                      },
                     ),
-                    textCapitalization: TextCapitalization.characters,
-                    // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
-                    // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
-                    // ده بيمسح الخصم فورًا (بمعاينة تانية من غير كود) لحد ما يضغط "تحقق" تاني،
-                    // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
-                    onChanged: (_) {
-                      setState(() {
-                        _codeError = null;
-                        _resolvedCodeKind = null;
-                        _pricePreview = null;
-                      });
-                      _refreshPreview();
-                    },
                   ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _validatingCode ? null : _validateCode,
-                  child: _validatingCode
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('تحقق'),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: _validatingCode ? null : _validateCode,
+                    child: _validatingCode
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('تحقق'),
+                  ),
+                ],
+              ),
             if (_codeError != null) ...[
               const SizedBox(height: 4),
               Text(_codeError!, style: const TextStyle(color: Colors.red)),

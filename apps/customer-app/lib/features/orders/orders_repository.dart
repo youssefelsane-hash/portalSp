@@ -108,6 +108,28 @@ class OrdersRepository {
     return id;
   }
 
+  Future<String> uploadProblemImage({
+    required String serviceId,
+    required List<int> fileBytes,
+    required String filename,
+  }) async {
+    final data = await auth.authedUpload(
+      '/orders/problem-images',
+      fileBytes: fileBytes,
+      filename: filename,
+      fields: {'service_id': serviceId},
+    );
+    final id = data?['id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw ApiException(
+        code: 'UPLOAD_FAILED',
+        message: 'الصورة اترفعت لكن مرجعها ماوصلش — حاول مرة ثانية',
+        statusCode: 500,
+      );
+    }
+    return id;
+  }
+
   Future<Order> create({
     required String serviceId,
     required String addressId,
@@ -126,6 +148,8 @@ class OrdersRepository {
     // محرك التسعير الديناميكي (docs/08 §1) — لازم لخدمات pricing_model=formula بس، القيم اللي
     // العميل ملاها في الفورم الديناميكي (CreateOrderScreen._buildPricingFieldWidget).
     Map<String, dynamic>? fieldValues,
+    List<String>? problemImageIds,
+    bool requestRemoteQuote = false,
     // الجدولة الحقيقية للفني (docs/08 §2-§3) — سلوت `available` محدد من جدول فني بعينه، اختاره
     // العميل في TechnicianProfileScreen. أقوى من requestedTechnicianId (الفني نفسه أعلن التوافر
     // في الوقت ده صراحة) — الباك-إند بيستنتج الفني منها تلقائيًا.
@@ -195,6 +219,9 @@ class OrdersRepository {
           'requested_technician_company_id': requestedTechnicianCompanyId,
         if (fieldValues != null && fieldValues.isNotEmpty)
           'field_values': fieldValues,
+        if (problemImageIds != null && problemImageIds.isNotEmpty)
+          'problem_image_ids': problemImageIds,
+        if (requestRemoteQuote) 'request_remote_quote': true,
         if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
         if (scheduledAt != null) 'scheduled_at': scheduledAt,
         if (scheduledAtRangeEnd != null)
@@ -396,6 +423,15 @@ class OrdersRepository {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/quote-items/decline',
+    );
+    return Order.fromJson(data!);
+  }
+
+  Future<Order> approveInitialQuote(String orderId) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/approve-initial-quote',
+      body: {'payment_choice': 'electronic'},
     );
     return Order.fromJson(data!);
   }

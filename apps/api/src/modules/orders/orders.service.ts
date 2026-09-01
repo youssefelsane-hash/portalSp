@@ -182,6 +182,68 @@ export class OrdersService {
     return plan;
   }
 
+  private async claimProblemImages(
+    manager: EntityManager,
+    customerId: string,
+    customerUserId: string,
+    serviceId: string,
+    imageIds: string[] | undefined,
+    orderId: string,
+  ): Promise<void> {
+    const ids = imageIds ?? [];
+    if (ids.length === 0) return;
+
+    const uploads = await manager.query<
+      {
+        id: string;
+        customer_id: string;
+        service_id: string;
+        storage_key: string;
+        file_url: string;
+        file_size_bytes: number;
+        expires_at: Date;
+        claimed_order_id: string | null;
+      }[]
+    >(
+      `SELECT id, customer_id, service_id, storage_key, file_url, file_size_bytes,
+              expires_at, claimed_order_id
+         FROM order_problem_image_uploads
+        WHERE id = ANY($1::uuid[])
+        FOR UPDATE`,
+      [ids],
+    );
+    const byId = new Map(uploads.map((upload) => [upload.id, upload]));
+    for (const id of ids) {
+      const upload = byId.get(id);
+      if (!upload || upload.customer_id !== customerId || upload.service_id !== serviceId) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة لا تخص حسابك أو هذه الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (upload.claimed_order_id && upload.claimed_order_id !== orderId) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة مرتبطة بطلب آخر', HttpStatus.BAD_REQUEST);
+      }
+      if (!upload.claimed_order_id && new Date(upload.expires_at).getTime() <= Date.now()) {
+        throw new ApiException(ErrorCode.VAL_001, 'إحدى صور المشكلة انتهت صلاحيتها — ارفعها مرة ثانية', HttpStatus.BAD_REQUEST);
+      }
+
+      await manager.query(
+        `INSERT INTO order_media
+           (order_id, uploaded_by_user_id, media_type, file_url, storage_key,
+            file_size_bytes, caption, problem_image_upload_id)
+         VALUES ($1, $2, 'problem_photo', $3, $4, $5, 'صورة المشكلة من العميل', $6)
+         ON CONFLICT (order_id, problem_image_upload_id)
+           WHERE problem_image_upload_id IS NOT NULL DO NOTHING`,
+        [orderId, customerUserId, upload.file_url, upload.storage_key, upload.file_size_bytes, id],
+      );
+      await manager.query(
+        `UPDATE order_problem_image_uploads
+            SET claimed_order_id = COALESCE(claimed_order_id, $2),
+                claimed_at = COALESCE(claimed_at, now())
+          WHERE id = $1`,
+        [id, orderId],
+      );
+    }
+  }
+
   private optionalWarrantyPrice(plan: OptionalWarrantySelection | null, serviceTotalCents: number): number {
     if (!plan) return 0;
     return plan.pricing_model === 'fixed'
@@ -844,6 +906,37 @@ export class OrdersService {
       );
     }
 
+    const remoteQuoteRequested = dto.request_remote_quote === true;
+    if (remoteQuoteRequested) {
+      if (service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'طلب تسعير الإدارة بالصور متاح فقط للخدمات من نوع معاينة ثم سعر',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!dto.problem_image_ids?.length) {
+        throw new ApiException(ErrorCode.VAL_001, 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر', HttpStatus.BAD_REQUEST);
+      }
+      if (originalOrder || bookingMode === BookingMode.EMERGENCY || dto.repeat_frequency) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'تسعير الصور متاح للطلب العادي فقط، وليس للطوارئ أو إعادة الزيارة أو الحجز المتكرر',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.payment_method) {
+        throw new ApiException(ErrorCode.VAL_001, 'الدفع يتم بعد ما الإدارة تحدد السعر وتوافق عليه', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الإضافات والخصومات والضمان الإضافي تتحدد بعد اعتماد السعر، مش مع طلب التسعير بالصور',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
     // "كرّر الحجز ده" (migration 0176) — بوابة الدخول للقالب المتكرر المُنشأ من مسار الحجز
     // العادي. نفس فلسفة كل بوابات القدرة فوق: رفض واضح وقت الطلب بدل حالة نصف جاهزة.
     // التكرار معناه "نفس الحجز ده يتكرر" فمحتاج موعد فعلي محدد + خدمة مفعّل فيها التكرار +
@@ -925,7 +1018,7 @@ export class OrdersService {
     // بتتوزّع فورًا بغض النظر عن dto.payment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
     // إجمالي الطلب صفر لأي سبب تاني (خصم كامل مثلاً) — دفع كارت/InstaPay بمبلغ صفر مالوش معنى.
     // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
-    const requestedPrepayMethod = originalOrder ? undefined : dto.payment_method;
+    const requestedPrepayMethod = originalOrder || remoteQuoteRequested ? undefined : dto.payment_method;
 
     // Earnings Engine V2 is an explicit cutover for new orders only. The fixed amount is copied
     // onto the order now, so later catalog edits can never rewrite historical money.
@@ -941,7 +1034,7 @@ export class OrdersService {
       );
     }
 
-    const initialOrderTotalCents = originalOrder
+    const initialOrderTotalCents = originalOrder || remoteQuoteRequested
       ? 0
       : estimate.estimated_total_cents +
         estimate.inspection_fee_cents +
@@ -985,7 +1078,7 @@ export class OrdersService {
             : (dto.order_type ?? OrderType.STANDARD),
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
-        orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        orderStatus: remoteQuoteRequested ? OrderStatus.AWAITING_ADMIN_QUOTE : OrderStatus.SEARCHING_TECHNICIAN,
         // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — الاتنين بيسجّلوا
         // duration_hours، اتفحصت فوق إنها موجودة/ممنوعة حسب الوضع الفعّال للخدمة.
         durationMinutes: pricingContext.durationMinutes,
@@ -1037,12 +1130,13 @@ export class OrdersService {
         warrantyPlanSnapshot: optionalWarranty ? { ...optionalWarranty } : null,
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
-        estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
-        inspectionFeeCents: originalOrder ? 0 : estimate.inspection_fee_cents,
+        estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
+        initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
+        inspectionFeeCents: originalOrder || remoteQuoteRequested ? 0 : estimate.inspection_fee_cents,
         // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد،
         // بيتفعّل هنا. صفر لأي طلب مش طوارئ أو إعادة زيارة (مجانية بالكامل أصلاً).
-        surgeAmountCents: originalOrder ? 0 : estimate.emergency_surcharge_cents,
-        totalAmountCents: originalOrder
+        surgeAmountCents: originalOrder || remoteQuoteRequested ? 0 : estimate.emergency_surcharge_cents,
+        totalAmountCents: originalOrder || remoteQuoteRequested
           ? 0
           : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents,
         settlementPolicyVersion,
@@ -1074,6 +1168,7 @@ export class OrdersService {
       if (!originalOrder) {
         await this.validatePricingFieldImages(manager, customerProfile.id, userId, service.id, dto.field_values, order.id);
       }
+      await this.claimProblemImages(manager, customerProfile.id, userId, service.id, dto.problem_image_ids, order.id);
 
       // حجز السلوت ذرّي جوّه نفس الـtransaction بتاعة إنشاء الطلب — لو حد تاني حجزه في نفس
       // اللحظة (سباق حقيقي بين طلبين)، الطلب كله بيترول باك مش يتعمل بلا سلوت فعلي بيشاور عليه.
@@ -1153,6 +1248,7 @@ export class OrdersService {
       // settlement that would only fail after the work is complete.
       if (
         settlementPolicyVersion === 2 &&
+        !remoteQuoteRequested &&
         Number(platformCommissionCentsSnapshot) > order.totalAmountCents
       ) {
         throw new ApiException(
@@ -1172,12 +1268,12 @@ export class OrdersService {
       const commissionBasePolicy = await this.commissionBaseService.getPolicy();
       order.commissionableBaseCents = computeCommissionableBase(
         {
-          basePriceCents: originalOrder ? 0 : estimate.base_price_cents,
+          basePriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.base_price_cents,
           levelPriceMultiplier: originalOrder ? 1 : estimate.level_price_multiplier,
-          estimatedTotalCents: originalOrder ? 0 : estimate.estimated_total_cents,
+          estimatedTotalCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
           inspectionFeeCents: order.inspectionFeeCents,
           emergencySurchargeCents: order.surgeAmountCents,
-          addonsTotalCents: originalOrder ? 0 : addonsTotalCents,
+          addonsTotalCents: originalOrder || remoteQuoteRequested ? 0 : addonsTotalCents,
           discountCents: order.discountAmountCents,
           warrantyPriceCents: order.warrantyPriceCents,
           // فوايد/رسوم التقسيط مش بتتحمّل على الطلب وقت الإنشاء (خطة التقسيط بتتعمل بعد كده،
@@ -1192,7 +1288,7 @@ export class OrdersService {
       // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot مبلغ الإيداع بعد كل الخصومات
       // (نفس سبب ترتيب requiresPrepay تحت بالحرف: النسبة بتتحسب على الإجمالي النهائي مش الخام).
       // إعادة الزيارة (originalOrder) وأي إجمالي صفر مستثنيان — مفيش إيداع لمبلغ صفر أصلاً.
-      if (!originalOrder && service.depositRequired && order.totalAmountCents > 0) {
+      if (!originalOrder && !remoteQuoteRequested && service.depositRequired && order.totalAmountCents > 0) {
         order.depositAmountCents = Math.round((order.totalAmountCents * Number(service.depositPercentage)) / 100);
         await manager.save(order);
       }

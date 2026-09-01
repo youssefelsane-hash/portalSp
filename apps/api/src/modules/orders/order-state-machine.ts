@@ -66,12 +66,18 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.DISPUTED,
   ],
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_CUSTOMER],
+  [OrderStatus.AWAITING_ADMIN_QUOTE]: [
+    OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+    OrderStatus.CANCELLED_BY_SYSTEM,
+  ],
   // معاينة-ثم-سعر (ADR-0044) — مختلفة عمدًا عن AWAITING_QUOTE_APPROVAL فوق: دي بتؤسس أول سعر
   // لطلب لسه بلا سعر (workPriceCents=0 وقت الحجز)، مش بتضيف على سعر موجود بالفعل. الموافقة
   // (InspectionQuoteService.approveInitialQuote) بترجع الطلب IN_PROGRESS؛ الرفض = cancel عادي
   // (بلا رسوم إلغاء إضافية — رسم المعاينة اتحصّل بالفعل).
   [OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL]: [
     OrderStatus.IN_PROGRESS,
+    OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.CANCELLED_BY_CUSTOMER,
   ],
   // docs/08 §22 بند 13-14 — الفني بلّغ "لم أستلم" الكاش رغم إن الشغل خلص فعلاً.
@@ -119,6 +125,7 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
   OrderStatus.AWAITING_QUOTE_APPROVAL,
+  OrderStatus.AWAITING_ADMIN_QUOTE,
   OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
   OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
 ]);

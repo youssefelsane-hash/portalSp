@@ -267,6 +267,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM payment_methods WHERE customer_id = $1`, [ids.customerProfile]);
@@ -377,6 +378,66 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
     expect(addlPayment).toBeUndefined();
+  });
+
+  it('الإدارة تسعّر من صور العميل ثم الموافقة تبدأ المطابقة بالسعر المعتمد', async () => {
+    const orderId = await insertOrder(`remote-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
+      totalAmountCents: 0,
+      estimatedPriceCents: 0,
+      inspectionFeeCents: 0,
+      paid: false,
+    });
+    await dataSource.query(
+      `UPDATE orders
+          SET technician_id = NULL,
+              initial_quote_source = 'admin_remote',
+              commissionable_base_cents = 0
+        WHERE id = $1`,
+      [orderId],
+    );
+    await dataSource.query(
+      `INSERT INTO order_media (order_id, uploaded_by_user_id, media_type, file_url)
+       VALUES ($1, $2, 'problem_photo', 'https://example.test/problem.webp')`,
+      [orderId, ids.customerUser],
+    );
+
+    const quoted = await inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000, 'السعر حسب الصور');
+    expect(quoted.orderStatus).toBe(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL);
+    expect(quoted.estimatedPriceCents).toBe(42000);
+    expect(quoted.initialQuoteSource).toBe('admin_remote');
+    expect(quoted.initialQuoteNote).toBe('السعر حسب الصور');
+
+    const approved = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'cash');
+    expect(approved.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
+    expect(approved.totalAmountCents).toBe(42000);
+    expect(approved.commissionableBaseCents).toBe(42000);
+  });
+
+  it('يرفض عرض سعر بالصور أقل من عمولة المنصة المثبتة على الطلب', async () => {
+    const orderId = await insertOrder(`remote-low-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
+      totalAmountCents: 0,
+      estimatedPriceCents: 0,
+      inspectionFeeCents: 0,
+      paid: false,
+    });
+    await dataSource.query(
+      `UPDATE orders
+          SET technician_id = NULL,
+              initial_quote_source = 'admin_remote',
+              settlement_policy_version = 2,
+              platform_commission_cents_snapshot = 50000
+        WHERE id = $1`,
+      [orderId],
+    );
+    await dataSource.query(
+      `INSERT INTO order_media (order_id, uploaded_by_user_id, media_type, file_url)
+       VALUES ($1, $2, 'problem_photo', 'https://example.test/problem-low.webp')`,
+      [orderId, ids.customerUser],
+    );
+
+    await expect(inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000)).rejects.toThrow(
+      'السعر لازم يكون على الأقل',
+    );
   });
 
   it('مسار الرفض — awaiting_initial_quote_approval → cancelled_by_customer مسموح ومُدرج في CUSTOMER_CANCELLABLE_STATUSES (ADR-0044 §4، صفر رسوم إلغاء إضافية)', () => {
