@@ -16,9 +16,36 @@ import {
   LookupTableRulePayload,
   PricingEvaluationResult,
 } from './pricing-formula.types';
-import { PricingContext, pricingContextFormulaValues } from './pricing-context';
+import {
+  PricingContext,
+  pricingContextDateValues,
+  pricingContextFormulaValues,
+  pricingContextGeoPoints,
+} from './pricing-context';
 
 export type PricingPresetKind = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote';
+
+// معاينة الأدمن (`evaluateDraft`) بتيجي بلا سياق طلب — حقول التاريخ/الموقع في الفورم لازم تفضل
+// شغالة فيها، وده بيديها نفس الاشتقاق بمصادر نظام فاضية.
+const EMPTY_PRICING_CONTEXT: PricingContext = {
+  quantity: null,
+  durationMinutes: null,
+  durationHours: null,
+  scheduledAt: null,
+  scheduledEndAt: null,
+  periodStart: null,
+  periodEnd: null,
+  location: null,
+  serviceFieldValues: {},
+  numericFieldValues: {},
+  zoneId: null,
+  isEmergency: false,
+  technicianLevel: null,
+  bookingMode: null,
+  addonIds: [],
+  recurringMetadata: {},
+  businessVariables: {},
+};
 
 // نقطة الدخول الوحيدة لحساب سعر خدمة pricing_model=formula — راجع docs/08 §1.5 وADR-0001.
 // catalog.service.ts's estimate() بينادي عليها بس لو الخدمة formula، باقي أنواع التسعير
@@ -69,6 +96,9 @@ export class PricingEngineService {
       fieldValues: systemValues,
       constants: new Map(),
       lookupTables: new Map(),
+      // الطرق الجاهزة بتقدر تستخدم date_diff زي أي معادلة (ADR-0050 §4 — الشهري بفترة تاريخين).
+      dateValues: pricingContextDateValues(context, context.serviceFieldValues),
+      geoPoints: pricingContextGeoPoints(context, context.serviceFieldValues),
     };
     return { ...this.computeResult(payload, formulaContext), evaluationId: null };
   }
@@ -196,7 +226,18 @@ export class PricingEngineService {
       }
     }
 
-    return { fieldValues, context: { fieldValues, constants, lookupTables }, finalPricePayload };
+    const dateValues = pricingContext
+      ? pricingContextDateValues(pricingContext, fieldValues)
+      : pricingContextDateValues(EMPTY_PRICING_CONTEXT, fieldValues);
+    const geoPoints = pricingContext
+      ? pricingContextGeoPoints(pricingContext, fieldValues)
+      : pricingContextGeoPoints(EMPTY_PRICING_CONTEXT, fieldValues);
+
+    return {
+      fieldValues,
+      context: { fieldValues, constants, lookupTables, dateValues, geoPoints },
+      finalPricePayload,
+    };
   }
 
   private computeResult(finalPricePayload: FinalPriceFormulaPayload, context: FormulaEvaluationContext): PricingEvaluationResult {

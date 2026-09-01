@@ -37,6 +37,8 @@ describe('getUrl(key) — تعميم النمط على order_media/technician_do
       caption: null,
       takenAt: new Date('2026-08-14T00:00:00Z'),
       location: null,
+      pricingFieldUploadId: null,
+      problemImageUploadId: null,
       createdAt: new Date('2026-08-14T00:00:00Z'),
     };
 

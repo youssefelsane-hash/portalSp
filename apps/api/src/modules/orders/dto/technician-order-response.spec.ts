@@ -62,6 +62,9 @@ const fullOrder: OrderResponseDto = {
   pricing_quantity: null,
   customer_cash_confirmed_at: null,
   technician_cash_not_received_at: null,
+  duration_minutes: null,
+  initial_quote_source: null,
+  initial_quote_note: null,
 };
 
 const FORBIDDEN_FIELDS = [

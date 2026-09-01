@@ -18,7 +18,16 @@
 // (no-code كامل) بمخاطرة ومجهود أقل بكتير من drag & drop framework كامل.
 
 import { useState } from 'react';
-import type { ComparisonOperator, FormulaCondition, FormulaNode } from '@baytak/shared-types';
+import type {
+  ComparisonOperator,
+  DateDiffRounding,
+  DateDiffUnit,
+  DistanceUnit,
+  FormulaCondition,
+  FormulaDateSource,
+  FormulaGeoSource,
+  FormulaNode,
+} from '@baytak/shared-types';
 import { FORMULA_LIMITS } from '@baytak/shared-types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,7 +56,57 @@ const NODE_TYPE_LABELS: Record<FormulaNode['type'], string> = {
   ceil: 'تقريب لأعلى (أي جزء من الوحدة = وحدة كاملة)',
   floor: 'تقريب لأسفل',
   if: 'شرط (لو... وإلا)',
+  // ADR-0050 §2/§3 — الطريقة الوحيدة لاستهلاك حقول التاريخ/الموقع جوّه المعادلة.
+  date_diff: 'فرق بين تاريخين (يوم/أسبوع/شهر/ساعة)',
+  distance: 'المسافة بين نقطتين',
 };
+
+const DATE_DIFF_UNIT_LABELS: Record<DateDiffUnit, string> = {
+  minutes: 'دقايق',
+  hours: 'ساعات',
+  days: 'أيام',
+  weeks: 'أسابيع',
+  months: 'شهور',
+};
+
+const DATE_DIFF_ROUNDING_LABELS: Record<DateDiffRounding, string> = {
+  exact: 'بالكسور زي ما هي',
+  ceil: 'لأعلى (أي جزء = وحدة كاملة)',
+  floor: 'لأسفل (الوحدات الكاملة بس)',
+  round: 'لأقرب وحدة',
+};
+
+const DISTANCE_UNIT_LABELS: Record<DistanceUnit, string> = { km: 'كيلومتر', m: 'متر' };
+
+const SYSTEM_DATE_SOURCES: { kind: Exclude<FormulaDateSource['kind'], 'field'>; label: string }[] = [
+  { kind: 'period_start', label: 'بداية الفترة (اشتراك/إيجار)' },
+  { kind: 'period_end', label: 'نهاية الفترة (اشتراك/إيجار)' },
+  { kind: 'scheduled_at', label: 'موعد بداية الزيارة' },
+  { kind: 'scheduled_end_at', label: 'موعد نهاية الزيارة' },
+  { kind: 'now', label: 'وقت الحساب دلوقتي' },
+];
+
+/** قيمة الـselect للمصدر — سلسلة واحدة عشان `<option>` يقدر يحملها. */
+function dateSourceValue(source: FormulaDateSource): string {
+  return source.kind === 'field' ? `field:${source.field_key}` : source.kind;
+}
+
+function parseDateSourceValue(raw: string): FormulaDateSource {
+  if (raw.startsWith('field:')) return { kind: 'field', field_key: raw.slice('field:'.length) };
+  return { kind: raw as Exclude<FormulaDateSource['kind'], 'field'> };
+}
+
+function geoSourceValue(source: FormulaGeoSource): string {
+  return source.kind === 'field' ? `field:${source.field_key}` : source.kind;
+}
+
+function parseGeoSourceValue(raw: string, previous: FormulaGeoSource): FormulaGeoSource {
+  if (raw.startsWith('field:')) return { kind: 'field', field_key: raw.slice('field:'.length) };
+  if (raw === 'point') {
+    return previous.kind === 'point' ? previous : { kind: 'point', lat: 30.0444, lng: 31.2357 };
+  }
+  return { kind: 'order_location' };
+}
 
 const NODE_TYPES = Object.keys(NODE_TYPE_LABELS) as FormulaNode['type'][];
 
@@ -82,6 +141,10 @@ export function nodeSummary(node: FormulaNode, context: FormulaEditorContext): s
       return `تقريب لأسفل(${nodeSummary(node.value, context)})`;
     case 'if':
       return `لو ${key(node.condition.field_key)} ${COMPARISON_LABELS[node.condition.op]} ${String(node.condition.value)} ؟`;
+    case 'date_diff':
+      return `فرق بالـ${DATE_DIFF_UNIT_LABELS[node.unit]}${node.inclusive ? ' (شامل)' : ''}`;
+    case 'distance':
+      return `مسافة بالـ${DISTANCE_UNIT_LABELS[node.unit]}`;
     default: {
       const parts = node.operands.map((o) => nodeSummary(o, context));
       const joiner =
@@ -131,6 +194,22 @@ function defaultNodeForType(type: FormulaNode['type'], context: FormulaEditorCon
         condition: defaultCondition(context),
         then: { type: 'literal', value: 0 },
         else: { type: 'literal', value: 0 },
+      };
+    // الافتراضي هو حالة الاستخدام اللي البلاغ كان عليها: عدد شهور الفوترة بين بداية ونهاية الفترة.
+    case 'date_diff':
+      return {
+        type: 'date_diff',
+        from: { kind: 'period_start' },
+        to: { kind: 'period_end' },
+        unit: 'months',
+        rounding: 'ceil',
+      };
+    case 'distance':
+      return {
+        type: 'distance',
+        from: { kind: 'order_location' },
+        to: { kind: 'point', lat: 30.0444, lng: 31.2357 },
+        unit: 'km',
       };
   }
 }
@@ -444,6 +523,167 @@ export function FormulaTreeEditor({
                   path={[...path, node.type, 'else']}
                   onNavigate={onNavigate}
                 />
+              </div>
+            </div>
+          )}
+
+          {node.type === 'date_diff' && (
+            <div className="flex flex-col gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <Label className="mb-1 block">من</Label>
+                  <SelectNative
+                    value={dateSourceValue(node.from)}
+                    onChange={(e) => onChange({ ...node, from: parseDateSourceValue(e.target.value) })}
+                  >
+                    {SYSTEM_DATE_SOURCES.map((source) => (
+                      <option key={source.kind} value={source.kind}>
+                        {source.label}
+                      </option>
+                    ))}
+                    {context.fieldKeys.map((k) => (
+                      <option key={k} value={`field:${k}`}>
+                        حقل: {k}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+                <div>
+                  <Label className="mb-1 block">إلى</Label>
+                  <SelectNative
+                    value={dateSourceValue(node.to)}
+                    onChange={(e) => onChange({ ...node, to: parseDateSourceValue(e.target.value) })}
+                  >
+                    {SYSTEM_DATE_SOURCES.map((source) => (
+                      <option key={source.kind} value={source.kind}>
+                        {source.label}
+                      </option>
+                    ))}
+                    {context.fieldKeys.map((k) => (
+                      <option key={k} value={`field:${k}`}>
+                        حقل: {k}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+                <div>
+                  <Label className="mb-1 block">الوحدة</Label>
+                  <SelectNative value={node.unit} onChange={(e) => onChange({ ...node, unit: e.target.value as DateDiffUnit })}>
+                    {(Object.entries(DATE_DIFF_UNIT_LABELS) as [DateDiffUnit, string][]).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+                <div>
+                  <Label className="mb-1 block">التقريب</Label>
+                  <SelectNative
+                    value={node.rounding ?? 'exact'}
+                    onChange={(e) => onChange({ ...node, rounding: e.target.value as DateDiffRounding })}
+                  >
+                    {(Object.entries(DATE_DIFF_ROUNDING_LABELS) as [DateDiffRounding, string][]).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={node.inclusive ?? false}
+                    onChange={(e) => onChange({ ...node, inclusive: e.target.checked })}
+                  />
+                  يحسب اليومين الطرفيين (من 1 لـ5 = 5 أيام)
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={node.absolute ?? false}
+                    onChange={(e) => onChange({ ...node, absolute: e.target.checked })}
+                  />
+                  دايمًا موجب
+                </label>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                الأيام والأسابيع والشهور بتتحسب <strong>بالتقويم بتوقيت القاهرة</strong> — من 1 مارس لـ1 أبريل شهر
+                واحد بالظبط، مش 31 ÷ 30.4. الدقايق والساعات بتتحسب كزمن منقضي فعلي.
+              </p>
+            </div>
+          )}
+
+          {node.type === 'distance' && (
+            <div className="flex flex-col gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <Label className="mb-1 block">من</Label>
+                  <SelectNative
+                    value={geoSourceValue(node.from)}
+                    onChange={(e) => onChange({ ...node, from: parseGeoSourceValue(e.target.value, node.from) })}
+                  >
+                    <option value="order_location">موقع الطلب</option>
+                    <option value="point">نقطة ثابتة (مخزن/فرع)</option>
+                    {context.fieldKeys.map((k) => (
+                      <option key={k} value={`field:${k}`}>
+                        حقل: {k}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+                <div>
+                  <Label className="mb-1 block">إلى</Label>
+                  <SelectNative
+                    value={geoSourceValue(node.to)}
+                    onChange={(e) => onChange({ ...node, to: parseGeoSourceValue(e.target.value, node.to) })}
+                  >
+                    <option value="order_location">موقع الطلب</option>
+                    <option value="point">نقطة ثابتة (مخزن/فرع)</option>
+                    {context.fieldKeys.map((k) => (
+                      <option key={k} value={`field:${k}`}>
+                        حقل: {k}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+              </div>
+              {([['from', node.from] as const, ['to', node.to] as const])
+                .filter(([, source]) => source.kind === 'point')
+                .map(([side, source]) => (
+                  <div key={side} className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label className="mb-1 block">{side === 'from' ? 'خط عرض (من)' : 'خط عرض (إلى)'}</Label>
+                      <Input
+                        type="number"
+                        step="0.000001"
+                        dir="ltr"
+                        value={(source as { lat: number }).lat}
+                        onChange={(e) => onChange({ ...node, [side]: { kind: 'point', lat: Number(e.target.value), lng: (source as { lng: number }).lng } })}
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block">{side === 'from' ? 'خط طول (من)' : 'خط طول (إلى)'}</Label>
+                      <Input
+                        type="number"
+                        step="0.000001"
+                        dir="ltr"
+                        value={(source as { lng: number }).lng}
+                        onChange={(e) => onChange({ ...node, [side]: { kind: 'point', lat: (source as { lat: number }).lat, lng: Number(e.target.value) } })}
+                      />
+                    </div>
+                  </div>
+                ))}
+              <div>
+                <Label className="mb-1 block">الوحدة</Label>
+                <SelectNative value={node.unit} onChange={(e) => onChange({ ...node, unit: e.target.value as DistanceUnit })}>
+                  {(Object.entries(DISTANCE_UNIT_LABELS) as [DistanceUnit, string][]).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </SelectNative>
               </div>
             </div>
           )}

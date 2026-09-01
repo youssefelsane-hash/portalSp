@@ -113,7 +113,36 @@ export type FormulaNode =
   | { type: 'round'; value: FormulaNode; decimals?: number }
   | { type: 'ceil'; value: FormulaNode; decimals?: number }
   | { type: 'floor'; value: FormulaNode; decimals?: number }
-  | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode };
+  | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode }
+  // ADR-0050 §2/§3 — فرق بين تاريخين ومسافة بين نقطتين. المدخلات **مصادر** مش أرقام: التاريخ
+  // والموقع مابيعدّوش على field_ref أصلاً (بيرفض غير الأرقام عمدًا).
+  | {
+      type: 'date_diff';
+      from: FormulaDateSource;
+      to: FormulaDateSource;
+      unit: DateDiffUnit;
+      rounding?: DateDiffRounding;
+      inclusive?: boolean;
+      absolute?: boolean;
+    }
+  | { type: 'distance'; from: FormulaGeoSource; to: FormulaGeoSource; unit: DistanceUnit };
+
+export type DateDiffUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months';
+export type DateDiffRounding = 'exact' | 'ceil' | 'floor' | 'round';
+export type DistanceUnit = 'km' | 'm';
+
+export type FormulaDateSource =
+  | { kind: 'field'; field_key: string }
+  | { kind: 'scheduled_at' }
+  | { kind: 'scheduled_end_at' }
+  | { kind: 'period_start' }
+  | { kind: 'period_end' }
+  | { kind: 'now' };
+
+export type FormulaGeoSource =
+  | { kind: 'field'; field_key: string }
+  | { kind: 'order_location' }
+  | { kind: 'point'; lat: number; lng: number };
 
 export type ComparisonOperator = 'equals' | 'not_equals' | 'gt' | 'gte' | 'lt' | 'lte';
 

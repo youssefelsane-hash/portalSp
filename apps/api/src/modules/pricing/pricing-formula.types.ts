@@ -24,7 +24,40 @@ export type FormulaNode =
   // السياسة الفعلية تتأكد، مش تغيير سلوك أي معادلة موجودة بالفعل.
   | { type: 'ceil'; value: FormulaNode; decimals?: number }
   | { type: 'floor'; value: FormulaNode; decimals?: number }
-  | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode };
+  | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode }
+  // ADR-0050 §2 — فرق بين تاريخين بوحدة مختارة. المدخلات **مصادر** مش أرقام عمدًا: التاريخ
+  // مايعديش على field_ref أصلاً (بيرفض غير الأرقام)، والمرور بيه ككاسر للنوع كان هيسمح بضرب
+  // epoch ms في سعر. راجع pricing-temporal.ts لدلالة كل وحدة.
+  | {
+      type: 'date_diff';
+      from: FormulaDateSource;
+      to: FormulaDateSource;
+      unit: DateDiffUnit;
+      rounding?: DateDiffRounding;
+      inclusive?: boolean;
+      absolute?: boolean;
+    }
+  // ADR-0050 §3 — مسافة كروية بين نقطتين (Haversine).
+  | { type: 'distance'; from: FormulaGeoSource; to: FormulaGeoSource; unit: DistanceUnit };
+
+export type DateDiffUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months';
+export type DateDiffRounding = 'exact' | 'ceil' | 'floor' | 'round';
+export type DistanceUnit = 'km' | 'm';
+
+/** مصدر تاريخ داخل المعادلة — حقل من الفورم، أو موعد الخدمة نفسه، أو لحظة الحساب. */
+export type FormulaDateSource =
+  | { kind: 'field'; field_key: string }
+  | { kind: 'scheduled_at' }
+  | { kind: 'scheduled_end_at' }
+  | { kind: 'period_start' }
+  | { kind: 'period_end' }
+  | { kind: 'now' };
+
+/** مصدر نقطة جغرافية — حقل `location` من الفورم، أو موقع الطلب، أو نقطة ثابتة (مخزن/فرع). */
+export type FormulaGeoSource =
+  | { kind: 'field'; field_key: string }
+  | { kind: 'order_location' }
+  | { kind: 'point'; lat: number; lng: number };
 
 export type ComparisonOperator = 'equals' | 'not_equals' | 'gt' | 'gte' | 'lt' | 'lte';
 

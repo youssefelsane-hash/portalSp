@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { GeoPoint, parseFieldDate, parseGeoPoint } from './pricing-temporal';
 
 export const PRICING_CONTEXT_FIELD_KEYS = new Set([
   'quantity',
@@ -18,6 +19,17 @@ export interface PricingContext {
   durationHours: number | null;
   scheduledAt: Date | null;
   scheduledEndAt: Date | null;
+  /**
+   * الفترة المتفق عليها للخدمة (ADR-0050 §4) — بداية/نهاية اشتراك أو إيجار.
+   *
+   * **منفصلة عن `scheduledAt/scheduledEndAt` عمدًا**: دول موعد **الزيارة** (امتى الفني بيروح)،
+   * ودي مدى **التعاقد** (اشتراك 3 شهور بيتنفّذ بزيارة واحدة). خلطهم كان هيخلي زيارة ساعتين
+   * لاشتراك سنة تتحسب ساعتين.
+   */
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  /** موقع تنفيذ الخدمة — مصدر `distance` من نوع `order_location` (ADR-0050 §3). */
+  location: GeoPoint | null;
   serviceFieldValues: Record<string, string | number | boolean>;
   numericFieldValues: Record<string, number>;
   zoneId: string | null;
@@ -34,6 +46,9 @@ export interface BuildPricingContextInput {
   durationHours?: number | null;
   scheduledAt?: string | Date | null;
   scheduledEndAt?: string | Date | null;
+  periodStart?: string | Date | null;
+  periodEnd?: string | Date | null;
+  location?: GeoPoint | null;
   serviceFieldValues?: Record<string, string | number | boolean>;
   zoneId?: string | null;
   isEmergency?: boolean;
@@ -98,6 +113,15 @@ export function buildPricingContext(input: BuildPricingContextInput): PricingCon
     invalidDuration('مدة الخدمة أكبر من الحد الآمن المسموح');
   }
 
+  const periodStart = parseDate(input.periodStart, 'بداية الفترة');
+  const periodEnd = parseDate(input.periodEnd, 'نهاية الفترة');
+  if (periodEnd && !periodStart) {
+    invalidDuration('نهاية الفترة محتاجة بداية فترة');
+  }
+  if (periodStart && periodEnd && periodEnd.getTime() <= periodStart.getTime()) {
+    invalidDuration('نهاية الفترة لازم تكون بعد بدايتها');
+  }
+
   const quantity = input.quantity ?? null;
   if (quantity !== null && (!Number.isFinite(quantity) || quantity <= 0)) {
     throw new ApiException(ErrorCode.VAL_001, 'الكمية لازم تكون رقم أكبر من صفر', HttpStatus.BAD_REQUEST);
@@ -116,6 +140,9 @@ export function buildPricingContext(input: BuildPricingContextInput): PricingCon
     durationHours: durationMinutes === null ? null : durationMinutes / 60,
     scheduledAt,
     scheduledEndAt,
+    periodStart,
+    periodEnd,
+    location: input.location ?? null,
     serviceFieldValues,
     numericFieldValues,
     zoneId: input.zoneId ?? null,
@@ -140,4 +167,46 @@ export function pricingContextFormulaValues(context: PricingContext): Record<str
   if (context.scheduledAt) values.scheduled_at_epoch_ms = context.scheduledAt.getTime();
   if (context.scheduledEndAt) values.scheduled_end_at_epoch_ms = context.scheduledEndAt.getTime();
   return { ...context.numericFieldValues, ...context.businessVariables, ...values };
+}
+
+/**
+ * التواريخ المتاحة للمعادلة — مصادر النظام + أي حقل `date`/`time` في الفورم (ADR-0050 §2).
+ *
+ * المفتاح `field:<field_key>` للحقول واسم المصدر لغيرها — نفس نظام المفاتيح اللي
+ * `resolveDateSource()` بيقرا بيه، متعرّف في مكان واحد بس.
+ */
+export function pricingContextDateValues(
+  context: PricingContext,
+  fieldValues: Record<string, string | number | boolean> = {},
+): Map<string, Date> {
+  const dates = new Map<string, Date>();
+  if (context.scheduledAt) dates.set('scheduled_at', context.scheduledAt);
+  if (context.scheduledEndAt) dates.set('scheduled_end_at', context.scheduledEndAt);
+  if (context.periodStart) dates.set('period_start', context.periodStart);
+  if (context.periodEnd) dates.set('period_end', context.periodEnd);
+
+  // **كل** قيمة نصية بتتجرّب كتاريخ، مش بس اللي نوع حقلها date — القيم اللي وصلت هنا اتفلترت
+  // بالفعل من `validateAndNormalizeFieldValues`، و`parseFieldDate` بترجّع null لأي نص مش تاريخ.
+  // ده بيخلي الدالة دي شغالة كمان في المسارات اللي مامعاهاش تعريفات الحقول (المعاينة/الـpresets).
+  for (const [key, value] of Object.entries(fieldValues)) {
+    if (typeof value !== 'string') continue;
+    const parsed = parseFieldDate(value);
+    if (parsed) dates.set(`field:${key}`, parsed);
+  }
+  return dates;
+}
+
+/** النقاط الجغرافية المتاحة للمعادلة — موقع الطلب + أي حقل قيمته `"lat,lng"` (ADR-0050 §3). */
+export function pricingContextGeoPoints(
+  context: PricingContext,
+  fieldValues: Record<string, string | number | boolean> = {},
+): Map<string, GeoPoint> {
+  const points = new Map<string, GeoPoint>();
+  if (context.location) points.set('order_location', context.location);
+  for (const [key, value] of Object.entries(fieldValues)) {
+    if (typeof value !== 'string') continue;
+    const parsed = parseGeoPoint(value);
+    if (parsed) points.set(`field:${key}`, parsed);
+  }
+  return points;
 }
