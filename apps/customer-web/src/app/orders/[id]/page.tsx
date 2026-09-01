@@ -398,7 +398,10 @@ function CancelSection({
               {r.charges_fee && <span className="text-xs text-warning">(ممكن رسوم إلغاء)</span>}
             </label>
           ))}
-          {(selectedReason?.requires_free_text ?? false) && (
+          {reasons.length === 0 && (
+            <p className="text-sm text-muted-foreground">اكتب سبب الإلغاء بكلامك:</p>
+          )}
+          {(reasons.length === 0 || (selectedReason?.requires_free_text ?? false)) && (
             <textarea
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
@@ -411,8 +414,12 @@ function CancelSection({
       )}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-4 flex gap-2">
+        {/* بَقّة حقيقية (docs/08 §112): الشرط كان `!selectedReasonId` على طول، فلو الأدمن
+            مامعرّفش أي سبب إلغاء للعميل (وده الوضع الافتراضي — seed المشروع فيه أسباب الفني بس)
+            الزرار كان بيفضل مقفول للأبد والعميل مش قادر يلغي من الويب خالص. القاعدة الصح هي
+            نفس قاعدة الباك-إند بالحرف: إجباري لما يبقى فيه قايمة، ومسموح من غيره لما القايمة فاضية. */}
         <button
-          disabled={busy || !selectedReasonId}
+          disabled={busy || reasons === null || (reasons.length > 0 && !selectedReasonId)}
           onClick={submit}
           className="rounded-lg bg-danger px-4 py-2 text-white hover:opacity-90 disabled:opacity-50"
         >

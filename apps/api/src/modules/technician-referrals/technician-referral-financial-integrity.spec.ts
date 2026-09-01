@@ -201,6 +201,13 @@ describe('Technician referral Phase 4 financial integrity', () => {
       await q(`DELETE FROM addresses WHERE user_id = ANY($1::uuid[])`, [ids.customers.map((item) => item.user)]);
       await q(`DELETE FROM customer_profiles WHERE id = ANY($1::uuid[])`, [ids.customers.map((item) => item.profile)]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      // محرك الحملات (docs/08 §74-ج) بيسجّل إرسالات على مستخدمين موجودين، وسويتاته بتشتغل
+      // بالتوازي مع السويت دي على نفس القاعدة — فمستخدمي الاختبار هنا ممكن يبقى عليهم صفوف
+      // `notification_campaign_sends` مش إحنا اللي عملناها، وحذف الـusers بيقع على قيد المفتاح
+      // الأجنبي. مش فشل في الكود المُختبَر — فشل تنظيف، بيخلي سويت سليمة تظهر حمرا.
+      await q(`DELETE FROM notification_campaign_sends WHERE user_id = ANY($1::uuid[])`, [
+        [ids.techUser, ...ids.customers.map((item) => item.user)],
+      ]);
       await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.techUser, ...ids.customers.map((item) => item.user)]]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

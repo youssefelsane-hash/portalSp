@@ -469,13 +469,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 },
                 child: const Text('تراجع'),
               ),
+              // السبب إجباري طول ما فيه قايمة (docs/08 §112) — الباك-إند بيرفض بدونه، والزرار
+              // هنا بيتقفل عشان الرفض ما يوصلش للعميل كرسالة خطأ بعد ما يضغط.
               FilledButton(
-                onPressed: () {
-                  FocusScope.of(dialogContext).unfocus();
-                  Navigator.of(dialogContext).pop(
-                    _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
-                  );
-                },
+                onPressed: reasons.isNotEmpty && selectedReasonId == null
+                    ? null
+                    : () {
+                        FocusScope.of(dialogContext).unfocus();
+                        Navigator.of(dialogContext).pop(
+                          _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
+                        );
+                      },
                 child: const Text('تأكيد الإلغاء'),
               ),
             ],
