@@ -3224,7 +3224,9 @@ export class PaymentsService {
           {
             fromWalletId: platformWallet.id,
             toWalletId: customerWallet.id,
-            amountCents: payment.amountCents,
+            // المبلغ المسترد فعلاً مش المدفوع (ADR-0069) — لولا كده مسار المحفظة كان هيرجّع الكل
+            // بينما مسار البوابة بيرجّع الجزئي، يعني نفس القرار بنتيجتين ماليتين مختلفتين.
+            amountCents: refund.amountCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
             referenceId: refund.id,
@@ -3237,10 +3239,17 @@ export class PaymentsService {
         );
       }
 
-      payment.paymentStatus = PaymentGatewayStatus.REFUNDED;
+      const partiallyRefunded = refundDecision.withheldCents > 0;
+      payment.paymentStatus = partiallyRefunded
+        ? PaymentGatewayStatus.PARTIALLY_REFUNDED
+        : PaymentGatewayStatus.REFUNDED;
       await manager.save(payment);
 
-      order.paymentStatus = OrderPaymentStatus.REFUNDED;
+      // استرداد جزئي معناه إن جزء من فلوس العميل **فضل عند المنصة** بشكل مقصود — تعليمه
+      // `refunded` كان هيكدب على أي تقرير مالي بيقرا العمود ده.
+      order.paymentStatus = partiallyRefunded
+        ? OrderPaymentStatus.PARTIALLY_REFUNDED
+        : OrderPaymentStatus.REFUNDED;
       await manager.save(order);
       // orderStatus فضل CANCELLED_BY_SYSTEM/CANCELLED_BY_CUSTOMER عمدًا — مفيش صف
       // OrderStatusHistory إضافي هنا، الكولر (OrderAutoCancelService أو OrdersService.cancel())
