@@ -17,6 +17,7 @@ import {
 } from '../technicians/technician-eligibility.sql';
 import { MatchingService } from './matching.service';
 import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { DISTANCE_WEIGHT_CONTEXT_LABELS_AR, resolveDistanceWeight } from './matching-weights';
 
 // batchSize كبير عمدًا (docs/08 §36.6) — عشان findEligibleTechnicians() ترجّع كل المجمّع المؤهّل
 // الحقيقي (مش أول N بس) وقت حساب ترتيب/rank_score فني معيّن للتفسير. صفر تأثير على مسار المطابقة
@@ -41,6 +42,15 @@ export interface TechnicianRankScoreBreakdown {
   reliabilityAdjustment: number;
   /** أفضلية شركة مسجلة وقادرة على تغطية طاقم طلب كبير؛ صفر لكل الحالات الأخرى. */
   companyAdjustment: number;
+  /**
+   * مسافة (ADR-0062) — خصم القرب: كيلومتر × الوزن الساري لسياق الطلب. صفر لو الأدمن سايب
+   * الأوزان على الافتراضي (المسافة كاسر تعادل بس).
+   */
+  distancePenalty: number;
+  /** السياق اللي حدّد وزن المسافة (طوارئ/موعد قريب/شغل رخيص/الأساسي) — نص جاهز للعرض للأدمن. */
+  distanceWeightContextAr: string;
+  /** الوزن الفعّال نفسه — عشان الأدمن يربط الخصم بالإعداد اللي غيّره. */
+  distanceWeight: number;
 }
 
 export interface TechnicianRankInfo {
@@ -259,6 +269,9 @@ export class MatchingExplainabilityService {
     // docs/08 §36.6 — ترتيب/rank_score حقيقي بين المرشّحين المؤهّلين فعليًا، مُعاد استخدامه بالحرف
     // من findEligibleTechnicians() (نفس صيغة order_priority_weight/workload/fairness)، صفر صيغة
     // ترتيب موازية مخترعة هنا. batchSize كبير عشان يرجّع المجمّع كامل مش أول N بس.
+    // ADR-0062 — **نفس الدالة** اللي المطابقة الفعلية بتناديها، مش نسخة تانية: التفسير مستحيل
+    // ينحرف عن القرار الحقيقي (نفس درس ADR-0061 §3).
+    const distanceWeight = await resolveDistanceWeight(this.settingsService, order);
     let rankInfo: TechnicianRankInfo | null = null;
     try {
       const rankedCandidates = await this.matchingService.findEligibleTechnicians(
@@ -281,6 +294,9 @@ export class MatchingExplainabilityService {
             fairnessPenalty: Number(row.fairness_penalty),
             reliabilityAdjustment: Number(row.reliability_adjustment),
             companyAdjustment: Number(row.company_adjustment),
+            distancePenalty: Number(row.distance_penalty),
+            distanceWeight: distanceWeight.weight,
+            distanceWeightContextAr: DISTANCE_WEIGHT_CONTEXT_LABELS_AR[distanceWeight.context],
           },
         };
       }

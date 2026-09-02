@@ -181,13 +181,17 @@ export class AdminOrdersController {
             rank_score: explanation.rankInfo.rankScore,
             rank: explanation.rankInfo.rank,
             total_eligible: explanation.rankInfo.totalEligible,
-            // docs/08 §36.20-21، ADR-0023 — تفكيك rank_score لمكوّناته الأربعة (جودة/قدرة/عدالة/موثوقية).
+            // docs/08 §36.20-21 (ADR-0023) + ADR-0062 — تفكيك rank_score لمكوّناته: جودة/قدرة/
+            // عدالة/موثوقية/شركة/مسافة.
             score_breakdown: {
               priority_component: explanation.rankInfo.scoreBreakdown.priorityComponent,
               workload_penalty: explanation.rankInfo.scoreBreakdown.workloadPenalty,
               fairness_penalty: explanation.rankInfo.scoreBreakdown.fairnessPenalty,
               reliability_adjustment: explanation.rankInfo.scoreBreakdown.reliabilityAdjustment,
               company_adjustment: explanation.rankInfo.scoreBreakdown.companyAdjustment,
+              distance_penalty: explanation.rankInfo.scoreBreakdown.distancePenalty,
+              distance_weight: explanation.rankInfo.scoreBreakdown.distanceWeight,
+              distance_weight_context_ar: explanation.rankInfo.scoreBreakdown.distanceWeightContextAr,
             },
           }
         : null,

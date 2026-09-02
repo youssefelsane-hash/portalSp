@@ -32,6 +32,66 @@ interface PaymentChannelStatus {
 // وسط عشرات مفاتيح الإعدادات الخام. المالك طلب «مكان واضح في الـAdmin يقدر يدخلها أو يغيرها
 // بسهولة»، والتحرير هنا بيعدّي على نفس مسار /admin/settings/:key (صلاحية settings.manage +
 // step-up MFA + تسجيل في audit_logs) — صفر بنية تحتية جديدة.
+/**
+ * محرك المطابقة التلقائية (ADR-0062 §4) — قسم مخصّص بدل صف في جدول عام.
+ *
+ * مجموعة `matching` فيها فوق 25 مفتاح. عرضها كـ«مفتاح/وصف/قيمة» في الجدول العام كان تقنيًا
+ * «الأدمن بيتحكم فيها»، وعمليًا حيطة نصوص محدش هيقرأها. التقسيم هنا بمعنى الإعداد مش باسمه،
+ * والتحرير بيعدّي على **نفس** الـendpoint وبنفس المحرر — مسار واحد بالظبط، مش اتنين لنفس المفتاح.
+ *
+ * أي مفتاح `matching.*` جديد مش مذكور هنا بيظهر تلقائيًا في «إعدادات أخرى للمحرك» تحت — مفيش
+ * إعداد بيختفي لمجرد إن القايمة دي ماتحدّثتش.
+ */
+const MATCHING_SECTIONS: { titleAr: string; descriptionAr: string; keys: string[] }[] = [
+  {
+    titleAr: 'أولوية القرب (المسافة)',
+    descriptionAr:
+      'المسافة بتتخصم من نتيجة الفني: كل كيلومتر × الوزن. 0 معناه المسافة كاسر تعادل بس (السلوك الافتراضي). لو أكتر من سياق ينطبق على الطلب، الوزن الأعلى هو اللي بيسري — مش المجموع.',
+    keys: [
+      'matching.distance_weight',
+      'matching.distance_weight_emergency',
+      'matching.distance_weight_near_term',
+      'matching.distance_weight_low_value',
+      'matching.low_value_order_cents',
+    ],
+  },
+  {
+    titleAr: 'أوزان الترتيب الأخرى',
+    descriptionAr: 'الجودة (مستوى الفني) هي الأساس، ودول بيعدّلوا عليها: الحِمل الحالي، العدالة، التقييم، وأفضلية الشركة في الشغل الكبير.',
+    keys: [
+      'matching.workload_balance_weight',
+      'matching.fairness_weight',
+      'matching.fairness_lookback_days',
+      'matching.fairness_decline_weight',
+      'matching.reliability_weight',
+      'matching.reliability_baseline_rating',
+      'matching.reliability_min_ratings_count',
+      'matching.company_large_job_min_crew',
+      'matching.company_large_job_boost',
+      'matching.tie_break_threshold',
+    ],
+  },
+  {
+    titleAr: 'الجولات والدفعات والنطاق',
+    descriptionAr: 'كام فني في الدفعة الواحدة، كام جولة، ونطاق البحث الجغرافي وتوسّعه لما الدفعة تفضى.',
+    keys: [
+      'matching.batch_size',
+      'matching.max_rounds',
+      'matching.round_timeout_seconds',
+      'matching.radius_km_initial',
+      'matching.radius_km_max',
+      'matching.broaden_to_busy_after_round',
+      'matching.near_term_request_hours',
+      'matching.near_term_round_timeouts_minutes',
+    ],
+  },
+  {
+    titleAr: 'القدرة الاستيعابية والتأكيد التلقائي',
+    descriptionAr: 'سقف يوم الفني بالدقايق، وقواعد تحويل الطلب لفرصة اختيارية بدل تأكيد صامت.',
+    keys: ['matching.daily_capacity_minutes', 'matching.work_opportunity_exclusive_seconds'],
+  },
+];
+
 const LEGAL_ENTITY_KEYS = [
   'legal.platform_name_ar',
   'legal.platform_name_en',
@@ -252,7 +312,25 @@ export default function SettingsPage() {
     (settings ?? []).find((s) => s.key === key),
   ).filter((s): s is SettingResponseDto => s !== undefined);
   const earningsV2Enabled = (settings ?? []).find((s) => s.key === 'earnings.v2_cutover_enabled')?.value === true;
-  const groups = Array.from(new Set(generalSettings.map((s) => s.group_name))).sort();
+  // ADR-0062 §4 — مجموعة matching ليها قسم مخصّص تحت، فمستبعدة من الجدول العام: مسار تحرير واحد.
+  const matchingSettings = generalSettings.filter((s) => s.group_name === 'matching');
+  const groups = Array.from(new Set(generalSettings.map((s) => s.group_name)))
+    .filter((group) => group !== 'matching')
+    .sort();
+  const knownMatchingKeys = new Set(MATCHING_SECTIONS.flatMap((section) => section.keys));
+  const matchingSections = [
+    ...MATCHING_SECTIONS.map((section) => ({
+      ...section,
+      settings: section.keys
+        .map((key) => matchingSettings.find((s) => s.key === key))
+        .filter((s): s is SettingResponseDto => s !== undefined),
+    })),
+    {
+      titleAr: 'إعدادات أخرى للمحرك',
+      descriptionAr: 'مفاتيح مجموعة المطابقة اللي لسه مالهاش قسم مخصّص — بتظهر هنا تلقائيًا عشان مفيش إعداد يختفي.',
+      settings: matchingSettings.filter((s) => !knownMatchingKeys.has(s.key)),
+    },
+  ].filter((section) => section.settings.length > 0);
 
   return (
     <AppShell>
@@ -380,6 +458,53 @@ export default function SettingsPage() {
                 ))}
               </TableBody>
             </Table>}
+          </CardContent>
+        </Card>
+      )}
+
+      {matchingSections.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">محرك المطابقة التلقائية (الأوتو ماتشينج)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              ترتيب الفنيين بيتحسب من <strong>نتيجة واحدة</strong> لكل فني: جودة المستوى، ناقص الحِمل
+              الحالي، ناقص العدالة، زائد التقييم، زائد أفضلية الشركة، <strong>ناقص المسافة</strong>. كل
+              وزن تحت بيتحكم في مكوّن واحد من النتيجة دي. أي وزن بصفر = المكوّن ده معطّل تمامًا.
+            </p>
+            {matchingSections.map((section) => (
+              <div key={section.titleAr} className="mb-6 last:mb-0">
+                <h3 className="mb-1 font-semibold">{section.titleAr}</h3>
+                <p className="mb-3 text-sm text-muted-foreground">{section.descriptionAr}</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>المفتاح</TableHead>
+                      <TableHead>الوصف</TableHead>
+                      <TableHead>القيمة</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {section.settings.map((setting) => (
+                      <TableRow key={setting.key}>
+                        <TableCell dir="ltr">{setting.key}</TableCell>
+                        <TableCell className="max-w-xs whitespace-normal text-muted-foreground">
+                          {setting.description ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          <SettingValueEditor
+                            setting={setting}
+                            isSaving={savingKey === setting.key}
+                            onSave={(value) => handleSave(setting.key, value)}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
