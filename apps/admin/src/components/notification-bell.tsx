@@ -39,7 +39,7 @@ const POLL_INTERVAL_MS = 60_000;
  * (push/email) محتاجاه كامل.
  */
 export function NotificationBell() {
-  const { authedFetch } = useAuth();
+  const { authedFetch, authedFetchPaginated } = useAuth();
   const router = useRouter();
   const [items, setItems] = useState<AdminNotification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -50,17 +50,23 @@ export function NotificationBell() {
 
   const load = useCallback(async () => {
     try {
+      // **لازم `authedFetchPaginated` مش `authedFetch`**: الـinterceptor العام بيفرد
+      // `{items, meta}` لـ`data: items`، يعني `apiFetch` بيرجّع **المصفوفة نفسها** مش غلاف فيه
+      // `items`. استخدام `authedFetch` هنا كان بيدّي `undefined` وبيكسّر القشرة كلها.
       const [list, count] = await Promise.all([
-        authedFetch<{ items: AdminNotification[] }>('/notifications?per_page=15'),
+        authedFetchPaginated<AdminNotification>('/notifications?per_page=15'),
         authedFetch<{ unread_count: number }>('/notifications/unread-count'),
       ]);
-      setItems(list.items);
+      // الجرس عنصر في **قشرة كل الصفحات**: أي مفاجأة في شكل البيانات كانت هتوقّع لوحة الإدارة
+      // كلها (RootLayout → AppShell → NotificationBell)، مش الجرس بس. الحارس ده بيخلي أسوأ حالة
+      // «جرس فاضي» مش «الموقع واقع».
+      setItems(Array.isArray(list.items) ? list.items : []);
       setUnread(count.unread_count);
       failing.current = false;
     } catch {
       failing.current = true;
     }
-  }, [authedFetch]);
+  }, [authedFetch, authedFetchPaginated]);
 
   // التحميل الأول والتحديث الدوري الاتنين بيتنفذوا من نفس المؤقّت (النظام الخارجي)، مش من جسم
   // الـeffect — نداء setState مباشرة جوّه الـeffect بيعمل cascading renders (react-hooks/set-state-in-effect).
