@@ -18,6 +18,7 @@ import { ContinueWorkAnotherDayDto } from './dto/continue-work-another-day.dto';
 import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { SubmitInitialQuoteDto } from './dto/submit-initial-quote.dto';
+import { SubmitDiagnosisRevisionDto } from './dto/submit-diagnosis-revision.dto';
 import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
@@ -395,6 +396,29 @@ export class TechnicianOrderExecutionController {
   // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — الفني بيحدد السعر بعد ما وصل وعاين المكان
   // فعليًا لخدمة pricing_model=inspection_then_quote. مختلفة عمداً عن quote-items فوق (راجع
   // inspection-quote.service.ts).
+  // بند 35 — «تعديل السعر بعد التشخيص». مختلف عمدًا عن `submit-initial-quote` فوق (ده بيأسس
+  // أول سعر) وعن `quote-items` (ده بيضيف شغل إضافي **أثناء** التنفيذ فوق سعر شغّال).
+  @Post(':id/submit-diagnosis-revision')
+  async submitDiagnosisRevision(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitDiagnosisRevisionDto,
+  ) {
+    const order = await this.inspectionQuoteService.submitDiagnosisRevision(
+      user.sub,
+      id,
+      dto.new_amount_cents,
+      dto.reason,
+      {
+        diagnosis: dto.diagnosis,
+        scopeIncluded: dto.scope_included,
+        scopeExcluded: dto.scope_excluded,
+        estimatedDurationMinutes: dto.estimated_duration_minutes,
+      },
+    );
+    return this.toDtoAfterAction(order, user.sub);
+  }
+
   @Post(':id/submit-initial-quote')
   async submitInitialQuote(
     @CurrentUser() user: JwtPayload,

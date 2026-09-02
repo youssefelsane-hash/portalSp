@@ -556,6 +556,8 @@ export default function ServiceDetailPage() {
       assessment_fee_credit_bps: Number(form.get('assessment_fee_credit_bps') || 0),
       onsite_assessor_executes_work: form.get('onsite_assessor_executes_work') === 'on',
       quote_validity_minutes: Number(form.get('quote_validity_minutes') || 2880),
+      range_percent_below: form.get('range_percent_below') ? Number(form.get('range_percent_below')) : undefined,
+      range_percent_above: form.get('range_percent_above') ? Number(form.get('range_percent_above')) : undefined,
       display_price_min_cents: form.get('display_price_min')
         ? Math.round(Number(form.get('display_price_min')) * 100)
         : undefined,
@@ -965,7 +967,38 @@ export default function ServiceDetailPage() {
                       </p>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="svc_display_min">أقل سعر معروض (ج)</Label>
+                      <Label htmlFor="svc_range_below">النطاق: نسبة تحت السعر (%)</Label>
+                      <Input
+                        id="svc_range_below"
+                        name="range_percent_below"
+                        type="number"
+                        min="0"
+                        max="99.99"
+                        step="0.01"
+                        defaultValue={service.range_percent_below ?? ''}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_range_above">النطاق: نسبة فوق السعر (%)</Label>
+                      <Input
+                        id="svc_range_above"
+                        name="range_percent_above"
+                        type="number"
+                        min="0"
+                        max="500"
+                        step="0.01"
+                        defaultValue={service.range_percent_above ?? ''}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        لو حطيت النسبتين، النطاق بيتحسب <strong>حوالين السعر المحسوب فعلاً</strong> لكل طلب —
+                        فبيتغيّر مع حجم الشغل بدل ما يفضل ثابت. الرقمين الثابتين تحت بيبقوا احتياطي بس
+                        (بيتستخدموا لو النسب فاضية).
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_display_min">أقل سعر معروض (ج) — احتياطي</Label>
                       <Input
                         id="svc_display_min"
                         name="display_price_min"
@@ -976,7 +1009,7 @@ export default function ServiceDetailPage() {
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <Label htmlFor="svc_display_max">أعلى سعر معروض (ج)</Label>
+                      <Label htmlFor="svc_display_max">أعلى سعر معروض (ج) — احتياطي</Label>
                       <Input
                         id="svc_display_max"
                         name="display_price_max"

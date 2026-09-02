@@ -55,6 +55,10 @@ class CreateOrderScreen extends StatefulWidget {
   // نفس فلسفة requestedAt فوق بالحرف.
   final TimeOfDay? requestedPreciseTime;
 
+  /// تذكرة معاينة المطابقة (بند 11/12) — الفني والسعر اللي العميل شافهم في الشاشة السابقة.
+  /// بتتبعت مع الإنشاء عشان الباك-إند يعيد التحقق ويرفض لو حاجة اتغيّرت، بدل استبدال صامت.
+  final String? matchPreviewId;
+
   const CreateOrderScreen({
     super.key,
     required this.service,
@@ -67,6 +71,7 @@ class CreateOrderScreen extends StatefulWidget {
     this.requestedAt,
     this.requestedAtRangeEnd,
     this.requestedPreciseTime,
+    this.matchPreviewId,
   });
 
   @override
@@ -817,6 +822,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ? null
             : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
+        // بند 12 — قفل السعر: نفس التذكرة اللي العميل شاف عليها الفني وسعره.
+        matchPreviewId: widget.matchPreviewId,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
       // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.

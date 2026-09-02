@@ -267,4 +267,48 @@ class OrdersRepository {
     final orderJson = data!['order'] as Map<String, dynamic>;
     return Order.fromJson(orderJson);
   }
+
+  /// **تحديد أول سعر للطلب بعد المعاينة** (بند 14).
+  ///
+  /// مختلف عن [proposeQuoteItems] فوق: ده بيأسس سعر الشغل الأساسي لطلب لسه بلا سعر،
+  /// مش بيضيف بنود فوق سعر شغّال.
+  Future<Order> submitInitialQuote(
+    String orderId, {
+    required int quotedAmountCents,
+    String? note,
+    String? diagnosis,
+  }) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/submit-initial-quote',
+      body: {
+        'quoted_amount_cents': quotedAmountCents,
+        if (note != null && note.isNotEmpty) 'note': note,
+        if (diagnosis != null && diagnosis.isNotEmpty) 'diagnosis': diagnosis,
+      },
+    );
+    return Order.fromJson(data!);
+  }
+
+  /// **تعديل سعر الشغل الأساسي بعد التشخيص** (بند 35).
+  ///
+  /// التالت المختلف: مش أول سعر، ومش شغل إضافي — ده تصحيح لسعر الشغل نفسه قبل ما يبدأ.
+  /// `reason` إجباري لأن السعر بيتغيّر على عميل وافق على غيره.
+  Future<Order> submitDiagnosisRevision(
+    String orderId, {
+    required int newAmountCents,
+    required String reason,
+    String? diagnosis,
+  }) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/submit-diagnosis-revision',
+      body: {
+        'new_amount_cents': newAmountCents,
+        'reason': reason,
+        if (diagnosis != null && diagnosis.isNotEmpty) 'diagnosis': diagnosis,
+      },
+    );
+    return Order.fromJson(data!);
+  }
 }

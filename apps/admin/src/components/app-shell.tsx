@@ -75,6 +75,9 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/operations', label: 'مركز العمليات', icon: Activity },
       { href: '/orders', label: 'الطلبات', icon: ClipboardList },
+      // بند 7 — الطلبات اللي سعرها لسه مش مستقر لها طابور مخصّص: في قايمة الطلبات العامة بتضيع
+      // وسط طلبات مفيش عليها قرار مطلوب.
+      { href: '/assessment-queue', label: 'طلبات التقييم', icon: ClipboardCheck },
       { href: '/recurring-orders', label: 'الحجوزات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
       { href: '/support', label: 'الشكاوى', icon: Megaphone },
       { href: '/support-tickets', label: 'تذاكر الدعم', icon: LifeBuoy },

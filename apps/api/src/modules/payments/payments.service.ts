@@ -29,6 +29,7 @@ import { TechnicianLevelsService } from '../technicians/technician-levels.servic
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { User } from '../auth/entities/user.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
+import { prepaidOrderNextStatus } from '../orders/prepaid-order-next-status';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
 import { computeDispatchDeferredUntil } from '../orders/deferred-dispatch.util';
@@ -634,7 +635,13 @@ export class PaymentsService {
   ): Promise<{ dispatchStarted: boolean }> {
     if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
       const previousStatus = order.orderStatus;
-      order.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
+      // بند 9 — طلب تقييم بالصور: اللي اتدفع هو **رسم التقييم**، مش سعر شغل. مفيش حاجة تتوزّع
+      // على فني: الطلب بيروح لفرز الإدارة، والتوزيع بيحصل بعدين لو الفرز قرر معاينة في الموقع
+      // أو بعد ما العميل يوافق على السعر ويختار منفّذ. توزيعه هنا كان هيبعت فني لشغل لسه
+      // مالوش سعر أصلاً.
+      const { nextStatus, dispatchStarted } = prepaidOrderNextStatus(order);
+      const isRemoteAssessmentFee = !dispatchStarted;
+      order.orderStatus = nextStatus;
       order.paymentStatus = OrderPaymentStatus.PAID;
       order.paymentMethod = paymentMethod;
       await manager.save(order);
@@ -642,14 +649,14 @@ export class PaymentsService {
         manager.create(OrderStatusHistory, {
           orderId: order.id,
           previousStatus,
-          newStatus: OrderStatus.SEARCHING_TECHNICIAN,
+          newStatus: nextStatus,
           changedByUserId,
           changedByRole: changedByRole === 'system' ? 'system' : 'customer',
           changeSource: changedByRole === 'system' ? OrderChangeSource.SYSTEM : OrderChangeSource.CUSTOMER,
-          reason: 'الدفع اتأكد — التوزيع بدأ',
+          reason: isRemoteAssessmentFee ? 'رسم التقييم اتدفع — الطلب راح لفرز الإدارة' : 'الدفع اتأكد — التوزيع بدأ',
         }),
       );
-      return { dispatchStarted: true };
+      return { dispatchStarted };
     }
 
     await this.settleAndComplete(manager, order, paymentMethod, changedByUserId, changedByRole === 'system' ? 'customer' : changedByRole);

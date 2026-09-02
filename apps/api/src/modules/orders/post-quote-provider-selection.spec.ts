@@ -47,6 +47,13 @@ import { RedisCacheService } from '../../common/cache/redis-cache.service';
  * 4. المرشّح اللي مستواه = 1 مابياخدش أي فرق — الفرق مشتق من المستوى مش رقم ثابت.
  */
 describe('اختيار المنفّذ بعد عرض السعر + فرق المستوى مرة واحدة (ADR-0066)', () => {
+  let emitter: EventEmitter2;
+  const emitted: { event: string; payload: unknown }[] = [];
+
+  beforeEach(() => {
+    emitted.length = 0;
+  });
+
   jest.setTimeout(60_000);
 
   let dataSource: DataSource;
@@ -176,6 +183,10 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     const levelPremiumService = new LevelPremiumService(
       catalogService, settingsService, commissionBaseServiceStub(), new OrderFinancialFinalizationService(),
     );
+    emitter = new EventEmitter2();
+    emitter.onAny((event: string | string[], payload: unknown) => {
+      emitted.push({ event: String(event), payload });
+    });
     service = new PostQuoteProviderSelectionService(
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),
@@ -184,7 +195,7 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
       levelPremiumService,
       new TechnicianAssignmentGuardService(settingsService),
       auditStub,
-      new EventEmitter2(),
+      emitter,
     );
   });
 
@@ -244,6 +255,20 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     expect(row.total_amount_cents).toBe(QUOTE_CENTS + expectedPremium);
     expect(row.level_premium_cents).toBe(expectedPremium);
     expect(row.provider_lock_source).toBe('post_quote_selection');
+  });
+
+  // بَقّة حقيقية اتلقطت في مراجعة: نقل الطلب لـSEARCHING_TECHNICIAN مابيوزّعوش لوحده. التوزيع كله
+  // معلّق على ORDER_CREATED_EVENT (نقطة الدخول الموحّدة، ADR-0018)، والخدمة كانت بتبث
+  // ORDER_STATUS_CHANGED_EVENT بس — يعني الطلب كان بيقف في SEARCHING_TECHNICIAN للأبد بدل ما
+  // يقف في AWAITING_TECHNICIAN_SELECTION. الاختبار القديم عدّى لأنه بيتأكد من الحالة والقفل
+  // والسعر بس، وماكانش بيسأل «هل التوزيع اتطلب أصلاً؟».
+  it('الاختيار بيطلب التوزيع فعليًا — مش بيسيب الطلب واقف في SEARCHING_TECHNICIAN', async () => {
+    const orderId = await seedAwaitingSelectionOrder();
+    await service.selectProvider(ids.customerUser, orderId, ids.plainTech);
+
+    const dispatch = emitted.filter((e) => e.event === 'order.created');
+    expect(dispatch).toHaveLength(1);
+    expect(dispatch[0].payload).toMatchObject({ orderId });
   });
 
   it('الاختيار مرة تانية بيترفض — الطلب خرج من مرحلة الاختيار خلاص (مفيش فرق مضاعف)', async () => {

@@ -91,6 +91,8 @@ export interface AdminServiceResponseDto {
   assessment_fee_credit_bps: number;
   onsite_assessor_executes_work: boolean;
   quote_validity_minutes: number;
+  range_percent_below: number | null;
+  range_percent_above: number | null;
   display_price_min_cents: number | null;
   display_price_max_cents: number | null;
   require_admin_review_above_range: boolean;
@@ -151,6 +153,8 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     assessment_fee_credit_bps: service.assessmentFeeCreditBps,
     onsite_assessor_executes_work: service.onsiteAssessorExecutesWork,
     quote_validity_minutes: service.quoteValidityMinutes,
+    range_percent_below: service.rangePercentBelow === null ? null : Number(service.rangePercentBelow),
+    range_percent_above: service.rangePercentAbove === null ? null : Number(service.rangePercentAbove),
     display_price_min_cents: service.displayPriceMinCents,
     display_price_max_cents: service.displayPriceMaxCents,
     require_admin_review_above_range: service.requireAdminReviewAboveRange,

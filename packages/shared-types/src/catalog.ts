@@ -152,6 +152,9 @@ export interface ServiceAssessmentPolicyFields {
   assessment_fee_credit_bps: number;
   onsite_assessor_executes_work: boolean;
   quote_validity_minutes: number;
+  /** نسب النطاق التقديري الديناميكي (بند 10) — لو موجودة بتغلب الحقول الثابتة تحت. */
+  range_percent_below: number | null;
+  range_percent_above: number | null;
   display_price_min_cents: number | null;
   display_price_max_cents: number | null;
   require_admin_review_above_range: boolean;

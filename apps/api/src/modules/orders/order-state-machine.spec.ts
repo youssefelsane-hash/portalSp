@@ -94,10 +94,16 @@ describe('order-state-machine — active technician resource', () => {
 });
 
 describe('order-state-machine — تسعير الإدارة من الصور', () => {
-  it('يحافظ على الطلب خارج المطابقة لحد ما الإدارة ترسل السعر والعميل يوافق', () => {
-    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.SEARCHING_TECHNICIAN)).toBe(false);
+  // القاعدة اتغيّرت عمدًا مع بند 8 (فرز التقييم): الطلب مايروحش للمطابقة **للتنفيذ** بلا سعر،
+  // لكنه يقدر يروح للمطابقة **لزيارة معاينة** — وده بالظبط قرار «الصور مش كفاية، حوّله لمعاينة
+  // في الموقع» (`AssessmentTriageService.routeToOnsiteAssessment`). الغرض من التوزيع مختلف،
+  // مش القاعدة المالية اللي اتكسرت: لسه مفيش سعر بيتحمّل على العميل قبل ما يوافق عليه.
+  it('الطلب يروح للمطابقة من فرز الصور لغرض المعاينة بس — والتنفيذ لسه محتاج سعر وموافقة', () => {
+    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.SEARCHING_TECHNICIAN)).toBe(true);
     expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL)).toBe(true);
     expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.SEARCHING_TECHNICIAN)).toBe(true);
+    // اللي لازم يفضل ممنوع: الطلب مايبدأش تنفيذ من فرز الصور من غير ما يعدّي على سعر وموافقة.
+    expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.IN_PROGRESS)).toBe(false);
   });
 
   it('يسمح للعميل بالإلغاء قبل السعر أو برفض السعر بعد وصوله', () => {

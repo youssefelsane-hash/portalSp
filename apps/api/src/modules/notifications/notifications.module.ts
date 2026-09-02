@@ -56,6 +56,7 @@ import { ReferralRewardNotificationListener } from './listeners/referral-reward-
 import { SecurityEventRoutingListener } from './listeners/security-event-routing.listener';
 import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
 import { OrderLockedProviderLostNotificationListener } from './listeners/order-locked-provider-lost-notification.listener';
+import { OrderAssessmentInfoRequestedListener } from './listeners/order-assessment-info-requested.listener';
 import { OrderCrewChangedNotificationListener } from './listeners/order-crew-changed-notification.listener';
 import { TechnicianServiceVerificationNotificationListener } from './listeners/technician-service-verification-notification.listener';
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
@@ -137,6 +138,7 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     AssistantMatchingEscalatedRoutingListener,
     TechnicianCancellationNotificationListener,
     OrderLockedProviderLostNotificationListener,
+    OrderAssessmentInfoRequestedListener,
     OrderAssistantAssignedManuallyNotificationListener,
     OrderOfferNotificationListener,
     WorkOpportunityOfferedNotificationListener,

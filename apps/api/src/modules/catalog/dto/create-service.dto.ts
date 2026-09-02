@@ -265,6 +265,19 @@ export class CreateServiceDto {
   quote_validity_minutes?: number;
 
   /** حدود **العرض** للعميل — منفصلة عمدًا عن min/max اللي بتقصّ ناتج المعادلة (بند 29). */
+  // بند 10 — نسب النطاق الديناميكي. لو اتظبطت بتغلب الحقول الثابتة تحت.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(99.99)
+  range_percent_below?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(500)
+  range_percent_above?: number;
+
   @IsOptional()
   @IsInt()
   @Min(0)

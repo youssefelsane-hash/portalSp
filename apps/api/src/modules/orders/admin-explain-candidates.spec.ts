@@ -32,9 +32,16 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
   const ids: Record<string, string> = {};
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
+  // بَقّة نظافة اختبارات (نفس عيلة اللي اتصلحت في matching-work-opportunity وadmin-crew-management):
+  // `+2093${tag}${runId}` بيتقص على 15 حرف، والقص بيقع **جوّه `runId`** فبيسيب منه 3 حروف بس
+  // (`+2093asstNewmtk`). أي تشغيلتين الـrunId بتاعهم بيبدأ بنفس التلات حروف بيتصادموا، والصفوف
+  // اللي بتفضل ورا التشغيلة الفاشلة بتفضل تكسّر كل تشغيلة بعدها للأبد.
+  // الحل: رقم تسلسلي قصير بدل الـtag الطويل، فالـrunId بيدخل كامل جوّه الـ15 حرف.
+  let providerSeq = 0;
   async function makeProvider(tag: string, kind: 'technician' | 'assistant', level: string) {
+    const phoneSuffix = `${providerSeq++}${runId}`;
     const [u] = await q(`INSERT INTO users (phone_number,full_name,user_type) VALUES ($1,$2,'technician') RETURNING id`, [
-      `+2093${tag}${runId}`.slice(0, 15),
+      `+2093${phoneSuffix}`.slice(0, 15),
       `${tag} ${runId}`,
     ]);
     const [p] = await q(

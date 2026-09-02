@@ -28,6 +28,80 @@ export interface CreateOrderBody {
   accepted_policy_version_ids?: string[];
   problem_image_ids?: string[];
   request_remote_quote?: boolean;
+  /**
+   * تذكرة معاينة المطابقة (ADR-0063 §6، بند 11/12).
+   *
+   * لما تتبعت، الباك-إند بيعيد التحقق من نفس الفني ونفس السعر ونفس المدخلات قبل ما ينشئ الطلب،
+   * وبيرفض لو أي حاجة اتغيّرت بدل ما يستبدل الفني في صمت. من غيرها الحجز بيرجع للسلوك القديم:
+   * الطلب بيتعمل الأول وبعدين السيستم بيدوّر.
+   */
+  match_preview_id?: string;
+}
+
+/**
+ * تفكيك السعر زي ما الباك-إند بيرجّعه (`PreviewOrderResponseDto`).
+ *
+ * الحقول اللي الواجهة بتعرضها بس — الواجهة **مابتحسبش** أي رقم منهم، بتعرض اللي جاي.
+ * `emergency_surcharge_cents` موجود عشان الحسابات تتطابق لكن **مايتعرضش كبند منفصل للعميل**
+ * (بند 5): بيفضل في اللقطة والأدمن.
+ */
+export interface PreviewOrderResponseDto {
+  base_price_cents: number;
+  inspection_fee_cents: number;
+  min_price_cents: number | null;
+  max_price_cents: number | null;
+  emergency_surcharge_cents: number;
+  addons_total_cents: number;
+  warranty_price_cents: number;
+  subtotal_before_discount_cents: number;
+  discount_cents: number;
+  discount_source: 'promo_code' | 'building' | null;
+  total_amount_cents: number;
+  level_price_multiplier: number;
+  deposit_amount_cents: number | null;
+  due_now_cents: number;
+  remaining_amount_cents: number | null;
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  remote_assessment_fee_cents: number;
+  booking_mode: 'individual' | 'team' | 'emergency';
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
+}
+
+/** كارت المنفّذ اللي معاينة المطابقة رجّعته (ADR-0063 §6). */
+export interface BookingMatchPreviewProvider {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+  current_level: string;
+  average_rating: number;
+  total_ratings_count: number;
+  completed_orders_count: number;
+  distance_km: number | null;
+}
+
+export interface BookingMatchPreviewDto {
+  match_preview_id: string;
+  expires_at: string;
+  selection_mode: 'auto' | 'manual';
+  provider: BookingMatchPreviewProvider;
+  pricing: PreviewOrderResponseDto;
+}
+
+export interface CreateMatchPreviewBody {
+  service_id: string;
+  address_id: string;
+  selection_mode: 'auto' | 'manual';
+  technician_id?: string;
+  booking_mode?: 'individual' | 'team' | 'emergency';
+  scheduled_at?: string;
+  field_values?: Record<string, string | number | boolean>;
+  promo_code?: string;
+  addon_ids?: string[];
+  warranty_plan_id?: string;
+  request_remote_quote?: boolean;
 }
 
 export interface PricingFieldImageUploadDto {
@@ -191,6 +265,18 @@ export const createOrder = (authedFetch: AuthedFetch, body: CreateOrderBody, ide
   authedFetch<OrderResponseDto>('/orders', {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
+
+/**
+ * بند 9-12 — بيحجز مرشّح بسعره قبل إنشاء الطلب.
+ *
+ * الرد بيحمل `match_preview_id` اللي بيتبعت بعدين في `createOrder`، فالسعر اللي العميل شافه على
+ * الكارت هو نفسه اللي بيتأكد عليه وهو نفسه اللي بيتسجّل — مصدر واحد من الباك-إند.
+ */
+export const createMatchPreview = (authedFetch: AuthedFetch, body: CreateMatchPreviewBody) =>
+  authedFetch<BookingMatchPreviewDto>('/orders/match-preview', {
+    method: 'POST',
     body: JSON.stringify(body),
   });
 

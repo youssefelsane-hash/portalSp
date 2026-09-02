@@ -485,6 +485,78 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // بند 14 — **تلات أفعال مختلفة، مش واحد**:
+  //   1. `_submitInitialQuote`  — أول سعر بعد المعاينة (طلب لسه بلا سعر).
+  //   2. `_submitDiagnosisRevision` — تعديل سعر الشغل الأساسي بعد التشخيص وقبل ما يبدأ.
+  //   3. `_proposeQuoteItems` — شغل إضافي **أثناء** التنفيذ فوق سعر شغّال.
+  // كانوا كلهم غايبين غير التالت، فالفني ماكانش عنده طريقة يحدد بيها سعر أصلاً.
+  Future<void> _submitInitialQuote() async {
+    final result = await showDialog<_PriceEntryResult>(
+      context: context,
+      builder: (context) => const _PriceEntryDialog(
+        titleAr: 'إرسال سعر بعد المعاينة',
+        helperAr: 'ده أول سعر للطلب — العميل هيوافق عليه قبل ما تبدأ.',
+        requireReason: false,
+      ),
+    );
+    if (result == null) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      _order = await _repository.submitInitialQuote(
+        _order.id,
+        quotedAmountCents: result.amountCents,
+        note: result.note,
+        diagnosis: result.note,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتبعت السعر — مستني موافقة العميل')),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Future<void> _submitDiagnosisRevision() async {
+    final result = await showDialog<_PriceEntryResult>(
+      context: context,
+      builder: (context) => const _PriceEntryDialog(
+        titleAr: 'تعديل السعر بعد التشخيص',
+        helperAr: 'الشغل طلع مختلف عن اللي اتسعّر. اكتب السعر الصح والسبب — العميل لازم يوافق قبل ما تكمّل.',
+        requireReason: true,
+      ),
+    );
+    if (result == null) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      _order = await _repository.submitDiagnosisRevision(
+        _order.id,
+        newAmountCents: result.amountCents,
+        reason: result.note ?? '',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتبعت السعر المعدّل — مستني موافقة العميل')),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   // كانت فجوة موثّقة صراحة (S7): مفيش UI لمسار عرض السعر أثناء التنفيذ — الباك-إند
   // (order-items.service.ts) والـ endpoint جاهزين ومختبرين حي، هنا أول استهلاك فعلي من التطبيق.
   Future<void> _proposeQuoteItems() async {
@@ -898,12 +970,47 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 titleAr: 'صور بعد الشغل',
               ),
             ],
-            if (_order.orderStatus == 'in_progress') ...[
+            // بند 14 — «إرسال سعر بعد المعاينة»: بيظهر بس لما الفني يكون واصل والطلب لسه بلا
+            // سعر. ده أول سعر للطلب، مش إضافة على سعر موجود.
+            //
+            // `price_status` هو مصدر الحقيقة الوحيد لـ«الطلب ده محتاج سعر؟» — التطبيق
+            // مابيستنتجش من الحالة التشغيلية ولا بيحسب سعر بنفسه. والحالتين الاتنين معناهم
+            // «لسه مفيش سعر»: `waiting_assessment` (المعاينة لسه ما حصلتش) و`waiting_quote`
+            // (حصلت والسعر لسه ما اتحددش).
+            if (_order.orderStatus == 'technician_arrived' &&
+                (_order.priceStatus == 'waiting_assessment' ||
+                    _order.priceStatus == 'waiting_quote')) ...[
               const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _acting ? null : _submitInitialQuote,
+                icon: const Icon(Icons.price_check_outlined),
+                label: const Text('إرسال سعر بعد المعاينة'),
+              ),
+            ],
+            if (_order.orderStatus == 'in_progress') ...[
+              // بند 14 — «تعديل السعر بعد التشخيص» مختلف عن «شغل إضافي» تحته: ده بيصحّح سعر
+              // الشغل الأساسي نفسه، وده بيضيف بنود فوقه. الاتنين مع بعض عشان الفني يشوف الفرق.
+              const SizedBox(height: 16),
+              if (_order.priceStatus == 'waiting_customer_approval')
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'في سعر مستني رد العميل — استنى رده قبل ما تبعت سعر تاني.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange),
+                  ),
+                ),
+              OutlinedButton.icon(
+                onPressed: _acting || _order.priceStatus == 'waiting_customer_approval'
+                    ? null
+                    : _submitDiagnosisRevision,
+                icon: const Icon(Icons.edit_note_outlined),
+                label: const Text('تعديل السعر بعد التشخيص'),
+              ),
+              const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: _acting ? null : _proposeQuoteItems,
                 icon: const Icon(Icons.receipt_long_outlined),
-                label: const Text('اقترح عرض سعر (قطع غيار/أجرة إضافية)'),
+                label: const Text('إضافة شغل إضافي (قطع غيار/أجرة إضافية)'),
               ),
               // استكمال الشغل يوم تاني (ADR-0047) — متاح بس والشغل شغّال فعلاً، وده بالظبط
               // الموقف اللي المالك وصفه: الفني اكتشف وسط الشغل إنه محتاج قطعة غيار نادرة.
@@ -1801,6 +1908,103 @@ const Map<String, String> _quoteItemTypeLabelsAr = {
 
 // Dialog بسيط لإضافة بند أو أكتر لعرض السعر — كل بند: النوع، الاسم، الكمية، سعر الوحدة بالجنيه
 // (بيتحول لقروش وقت الإرسال، مطابق لباقي التطبيق كله بالقرش).
+/// ناتج حوار إدخال السعر — المبلغ بالقرش + سبب/ملاحظة اختيارية حسب السياق.
+class _PriceEntryResult {
+  const _PriceEntryResult({required this.amountCents, this.note});
+  final int amountCents;
+  final String? note;
+}
+
+/// حوار واحد لإدخال سعر، بيخدم «سعر بعد المعاينة» و«تعديل بعد التشخيص» (بند 14).
+///
+/// حوار واحد بنصوص مختلفة بدل اتنين متطابقين: الفرق بينهم في الصياغة وإجبارية السبب بس،
+/// ونسختين كانوا هيفترقوا مع أول تعديل.
+class _PriceEntryDialog extends StatefulWidget {
+  const _PriceEntryDialog({
+    required this.titleAr,
+    required this.helperAr,
+    required this.requireReason,
+  });
+
+  final String titleAr;
+  final String helperAr;
+  final bool requireReason;
+
+  @override
+  State<_PriceEntryDialog> createState() => _PriceEntryDialogState();
+}
+
+class _PriceEntryDialogState extends State<_PriceEntryDialog> {
+  final _amountController = TextEditingController();
+  final _noteController = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  // FocusScope.unfocus() قبل أي pop — قفل حوار وفيه TextField لسه ماسك الفوكس بيرمي
+  // `_dependents.isEmpty` (شاشة حمرا). الدرس ده اتدفع تمنه في §108-C واتطبّق على كل حوارات
+  // التطبيقين، فأي حوار جديد بيتولد بيه من الأول.
+  void _close(_PriceEntryResult? result) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(result);
+  }
+
+  void _submit() {
+    final egp = double.tryParse(_amountController.text.trim());
+    if (egp == null || egp <= 0) {
+      setState(() => _error = 'اكتب سعر صحيح أكبر من صفر');
+      return;
+    }
+    final note = _noteController.text.trim();
+    if (widget.requireReason && note.length < 3) {
+      setState(() => _error = 'اكتب سبب التعديل — العميل والإدارة هيشوفوه');
+      return;
+    }
+    _close(_PriceEntryResult(amountCents: (egp * 100).round(), note: note.isEmpty ? null : note));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.titleAr),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.helperAr, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'السعر بالجنيه', prefixText: 'ج.م '),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _noteController,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: widget.requireReason ? 'سبب التعديل (إجباري)' : 'إيه اللي شامله السعر؟ (اختياري)',
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => _close(null), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('إرسال للعميل')),
+      ],
+    );
+  }
+}
+
 class _ProposeQuoteDialog extends StatefulWidget {
   const _ProposeQuoteDialog();
 

@@ -8,7 +8,14 @@ import { ServiceDto, PricingFieldDto, PriceEstimateDto } from '@/lib/api-types';
 import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
-import { createOrder, formatEgp, uploadPricingFieldImage, uploadProblemImage } from '@/lib/orders';
+import {
+  createOrder,
+  createMatchPreview,
+  formatEgp,
+  uploadPricingFieldImage,
+  uploadProblemImage,
+  type BookingMatchPreviewDto,
+} from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
@@ -89,6 +96,18 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[] | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'later' | 'card'>('later');
+
+  // بند 2-7 — الحجز بقى **تلات خطوات بالظبط**، مفيش صفحة مراجعة رابعة:
+  //   1. تفاصيل الشغل والموعد + السعر الحالي (قبل اختيار الفني)
+  //   2. العنوان وإكمال الطلب (وصف/صور/تكرار/خصم/دفع/سياسات)
+  //   3. اختيار الفني أو الترشيح التلقائي + التأكيد
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // بند 9-12 — تذكرة المطابقة: الفني وسعره اللي العميل شافه واللي هيتأكد عليه، من الباك-إند.
+  const [matchPreview, setMatchPreview] = useState<BookingMatchPreviewDto | null>(null);
+  // بصمة المدخلات وقت ما التذكرة اتعملت — بيتقارن بالبصمة الحالية عشان نعرف إنها بايتة.
+  const [matchPreviewKey, setMatchPreviewKey] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -199,6 +218,35 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     return `${dateStr}T00:00:00.000Z`;
   }
 
+  /** بند 9-12 — بيطلب المرشّح وسعره من الباك-إند قبل الإنشاء، ويقفلهم بتذكرة. */
+  async function requestMatchPreview(mode: 'auto' | 'manual', technicianId?: string) {
+    if (!selectedAddressId) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setMatchPreview(null);
+    try {
+      const preview = await createMatchPreview(authedFetch, {
+        service_id: service!.id,
+        address_id: selectedAddressId,
+        selection_mode: mode,
+        ...(technicianId ? { technician_id: technicianId } : {}),
+        // نفس اللي بيتبعت في الإنشاء بالحرف — لازم البصمة تطابق، غير كده التذكرة بتبوظ.
+        ...(computeScheduledAt(scheduledDate) ? { scheduled_at: computeScheduledAt(scheduledDate) } : {}),
+        ...(Object.keys(fieldValues).length ? { field_values: fieldValues } : {}),
+        ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
+      });
+      setMatchPreview(preview);
+      setMatchPreviewKey(previewInputsKey);
+    } catch (err) {
+      // رسالة صريحة بدل كارت فاضي — البند بيمنع أي استبدال أو فشل صامت.
+      setPreviewError(
+        err instanceof ApiError ? err.message : 'مقدرناش نرشّح لك فني دلوقتي — جرّب تاني',
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
     if (!requestRemoteQuote && technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
@@ -225,6 +273,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
           field_values: showsDynamicForm ? fieldValues : undefined,
           payment_method: !requestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
+          // بند 12 — قفل السعر: التذكرة اللي العميل شاف عليها الفني والسعر هي نفسها اللي
+          // الباك-إند بيعيد التحقق منها. لو المدخلات اتغيّرت أو الفني بقى مش متاح، الإنشاء
+          // بيترفض بوضوح بدل ما يستبدل حد في صمت.
+          match_preview_id: activePreview?.match_preview_id,
         },
         orderIdempotencyKey,
       );
@@ -301,6 +353,35 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     estimate !== null;
   const remoteQuoteValid = !requestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && service.schedule_precision === 'start_time';
+
+  // بند 11 — **إبطال المعاينة عند تغيير أي مدخل مؤثر**، بالاشتقاق مش بـeffect بيمسح الحالة:
+  // بنقارن بصمة المدخلات دلوقتي ببصمتها وقت ما التذكرة اتعملت. أنضف من ناحية React (مفيش
+  // setState جوّه effect ولا رندر متتالي)، وأقرب لطريقة الباك-إند نفسه اللي بيقارن بصمة
+  // برضه — فالواجهة والباك-إند بيسألوا نفس السؤال بنفس الطريقة.
+  //
+  // ومن غيره العميل يفضل شايف كارت فني وسعر محجوزين وهما مابقوش، والباك-إند هيرفض عند التأكيد.
+  const previewInputsKey = JSON.stringify({
+    selectedAddressId,
+    scheduledDate,
+    scheduledDateRangeEnd,
+    preciseTime,
+    scheduleDayMode,
+    promoCode: promoCode.trim(),
+    requestRemoteQuote,
+    technicianChoiceMode,
+    selectedTechnicianId,
+    fieldValues,
+  });
+  const activePreview = matchPreview !== null && matchPreviewKey === previewInputsKey ? matchPreview : null;
+
+  // بند 6 — شروط إكمال كل خطوة. مبنية من نفس أجزاء `canSubmit` تحت (مفيش قواعد صلاحية موازية):
+  // الخطوة 1 = الشغل والموعد، الخطوة 2 = العنوان والسياسات.
+  const scheduleComplete =
+    !needsSchedule ||
+    (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd);
+  const stepOneComplete = scheduleComplete && (!needsPreciseTime || !!preciseTime) && pricingFieldsValid;
+  const stepTwoComplete = stepOneComplete && !!selectedAddressId && allRequiredAccepted && remoteQuoteValid;
+
   const canSubmit =
     !!selectedAddressId &&
     (!needsSchedule ||
@@ -309,7 +390,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     pricingFieldsValid &&
     priceReady &&
     remoteQuoteValid &&
-    (requestRemoteQuote || technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
+    // بند 9 — في الوضع التلقائي التأكيد **محتاج معاينة فعلية**: العميل لازم يكون شاف الفني
+    // وسعره قبل ما يأكد. من غير الشرط ده الوضع التلقائي بيرجع «أكّد وإحنا هندوّر بعدين».
+    (requestRemoteQuote ||
+      (technicianChoiceMode === 'auto' ? !!activePreview : !!selectedTechnicianId)) &&
     allRequiredAccepted &&
     !submitting &&
     !submitted;
@@ -326,11 +410,38 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         <p className="mt-2 text-sm text-success">ضمان {service.warranty_days} يوم على الشغل ده</p>
       )}
 
+      {/* بند 2-7 — مؤشر الخطوات التلاتة. مفيش خطوة رابعة للمراجعة: المراجعة بتحصل في
+          الخطوة التالتة نفسها جنب كارت الفني والسعر النهائي. */}
+      <ol className="mt-6 flex items-center gap-2 text-sm">
+        {[
+          { n: 1 as const, label: 'الشغل والموعد' },
+          { n: 2 as const, label: 'العنوان والتفاصيل' },
+          { n: 3 as const, label: 'الفني والتأكيد' },
+        ].map((s) => (
+          <li key={s.n} className="flex flex-1 items-center gap-2">
+            <span
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                step === s.n
+                  ? 'bg-primary text-primary-foreground'
+                  : step > s.n
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-surface-variant text-muted'
+              }`}
+            >
+              {step > s.n ? '✓' : s.n}
+            </span>
+            <span className={`truncate ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
+              {s.label}
+            </span>
+          </li>
+        ))}
+      </ol>
+
       {/* قسم "نوع الحجز" اتشال بالكامل (ADR-0048) — «نشيل دول خالص ونحط قواعد على السيستم،
           والسيستم هو اللي بيحدد بناءً على التاريخ». اللي محلّه: التنبيه الأحمر تحت لما العميل
           يختار النهارده. */}
 
-      {needsSchedule && (
+      {step === 1 && needsSchedule && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">الموعد</h2>
           <div className="flex gap-2">
@@ -409,7 +520,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {showsDynamicForm && pricingFields && pricingFields.length > 0 && (
+      {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
           <div className="space-y-4">
@@ -429,6 +540,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
+      {step === 2 && (
       <section className="mt-6">
         <h2 className="mb-3 font-semibold">العنوان</h2>
         {addresses === null ? (
@@ -488,8 +600,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </section>
+      )}
 
-      {selectedAddressId && !requestRemoteQuote && (
+      {step === 3 && selectedAddressId && !requestRemoteQuote && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -516,6 +629,59 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             </button>
           </div>
 
+          {/* بند 9-10 — الترشيح التلقائي بقى **معاينة حقيقية**: العميل بيشوف الفني وسعره
+              وتقييمه قبل ما يأكد، مش بيأكد على المجهول. ولو المرشّح بقى مش متاح وقت التأكيد،
+              الباك-إند بيرفض ويطلب معاينة جديدة — ممنوع استبدال صامت. */}
+          {technicianChoiceMode === 'auto' && (
+            <div className="mt-3">
+              {activePreview === null ? (
+                <button
+                  onClick={() => requestMatchPreview('auto')}
+                  disabled={previewLoading}
+                  className="w-full rounded-xl border border-primary bg-primary/5 px-4 py-3 text-sm font-medium text-primary disabled:opacity-50"
+                >
+                  {previewLoading ? 'بندوّر على أفضل أسطى...' : 'رشّح لي أفضل أسطى وسعره'}
+                </button>
+              ) : (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{activePreview.provider.full_name}</p>
+                      <p className="text-sm text-muted">
+                        {TECHNICIAN_LEVEL_LABELS_AR[
+                          activePreview.provider.current_level as keyof typeof TECHNICIAN_LEVEL_LABELS_AR
+                        ] ?? activePreview.provider.current_level}
+                        {' · '}
+                        {activePreview.provider.average_rating.toFixed(1)} ({activePreview.provider.total_ratings_count})
+                        {activePreview.provider.distance_km !== null &&
+                          ` · ${activePreview.provider.distance_km.toFixed(1)} كم`}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-lg font-bold text-primary">
+                      {formatEgp(activePreview.pricing.total_amount_cents)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    السعر ده محجوز لك مع الأسطى ده لحد{' '}
+                    {new Date(activePreview.expires_at).toLocaleTimeString('ar-EG', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                    . لو غيّرت أي تفصيلة هنرشّح من جديد.
+                  </p>
+                  <button
+                    onClick={() => requestMatchPreview('auto')}
+                    disabled={previewLoading}
+                    className="mt-2 text-sm text-primary underline disabled:opacity-50"
+                  >
+                    رشّح لي حد تاني
+                  </button>
+                </div>
+              )}
+              {previewError && <p className="mt-2 text-sm text-danger">{previewError}</p>}
+            </div>
+          )}
+
           {technicianChoiceMode === 'manual' && (
             <div className="mt-3 space-y-2">
               {technicians === null ? (
@@ -536,7 +702,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                       key={t.id}
                       t={t}
                       selected={selectedTechnicianId === t.id}
-                      onSelect={() => setSelectedTechnicianId(t.id)}
+                      // بند 12 — الاختيار اليدوي بيقفل تذكرة زي التلقائي بالظبط: نفس مصدر السعر
+                      // ونفس إعادة التحقق وقت الإنشاء. من غيرها الاختيار اليدوي بيفضل تفضيل
+                      // ممكن يتغيّر تحت رجل العميل.
+                      onSelect={() => {
+                        setSelectedTechnicianId(t.id);
+                        void requestMatchPreview('manual', t.id);
+                      }}
                     />
                   ),
                 )
@@ -548,7 +720,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {!requestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
+      {step === 2 && !requestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
@@ -578,6 +750,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
+      {step === 2 && (
       <section className="mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
@@ -589,7 +762,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
         />
       </section>
+      )}
 
+      {step === 2 && (
       <section className="mt-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
         <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
@@ -675,8 +850,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           </label>
         )}
       </section>
+      )}
 
-      {!requestRemoteQuote && (
+      {step === 2 && !requestRemoteQuote && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
           <input
@@ -689,7 +865,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {!requestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
+      {step === 2 && !requestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex gap-2">
@@ -711,7 +887,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
           مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
-      {postpaidPolicies.length > 0 && (
+      {step === 2 && postpaidPolicies.length > 0 && (
         <section className="mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">شروط الدفع</h2>
           {postpaidPolicies.map((policy) => {
@@ -749,11 +925,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           <span className="text-xl font-bold text-primary">
             {requestRemoteQuote
               ? 'الإدارة هتحدده من الصور'
-              : estimating
-                ? '...'
-                : totalCents !== null
-                  ? formatEgp(totalCents)
-                  : 'يتحدد بعد المعاينة'}
+              : activePreview
+                ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
+                  formatEgp(activePreview.pricing.total_amount_cents)
+                : estimating
+                  ? '...'
+                  : totalCents !== null
+                    ? formatEgp(totalCents)
+                    : 'يتحدد بعد المعاينة'}
           </span>
         </div>
         {service.pricing_model === 'inspection_then_quote' && !requestRemoteQuote && (
@@ -761,7 +940,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
         )}
-        {technicianChoiceMode === 'auto' && service.pricing_model !== 'inspection_then_quote' && (
+        {technicianChoiceMode === 'auto' && !activePreview && service.pricing_model !== 'inspection_then_quote' && (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
             <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
             <p className="text-muted">
@@ -773,13 +952,41 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
-      <button
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className="mt-6 w-full rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-      >
-        {submitting ? 'جاري تأكيد الحجز...' : submitted ? 'تم التأكيد' : 'أكّد الحجز'}
-      </button>
+      {/* بند 6 — التنقل بين الخطوات. زرار «التالي» مايعديش خطوة ناقصة، وزرار التأكيد مش
+          موجود أصلاً غير في الخطوة التالتة: العميل مايقدرش يأكد قبل ما يشوف الفني وسعره. */}
+      <div className="mt-6 flex gap-3">
+        {step > 1 && (
+          <button
+            onClick={() => setStep((step - 1) as 1 | 2 | 3)}
+            className="rounded-lg border border-border px-5 py-3 font-medium"
+          >
+            رجوع
+          </button>
+        )}
+        {step < 3 ? (
+          <button
+            onClick={() => setStep((step + 1) as 1 | 2 | 3)}
+            disabled={step === 1 ? !stepOneComplete : !stepTwoComplete}
+            className="flex-1 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            التالي
+          </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="flex-1 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? 'جاري تأكيد الحجز...' : submitted ? 'تم التأكيد' : 'أكّد الحجز'}
+          </button>
+        )}
+      </div>
+      {step === 1 && !stepOneComplete && (
+        <p className="mt-2 text-sm text-muted">كمّل تفاصيل الشغل والموعد عشان تعدّي للخطوة الجاية.</p>
+      )}
+      {step === 2 && !stepTwoComplete && (
+        <p className="mt-2 text-sm text-muted">اختار عنوان ووافق على الشروط المطلوبة عشان تعدّي.</p>
+      )}
     </div>
   );
 }

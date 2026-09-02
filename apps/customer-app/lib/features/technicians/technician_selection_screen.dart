@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/api_exception.dart';
+import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
 import '../orders/create_order_screen.dart';
+import 'models.dart';
 import 'technician_marketplace_screen.dart';
+import 'technicians_repository.dart';
 
 // اختيار الفني قبل الحجز (docs/08 §1.5، مُعاد تصميمها Script 6 Part 6-7) — كانت الشاشة دي
 // بتعرض كارت "اختار لي تلقائيًا" وقايمة الفنيين الكاملة (بالصور/التقييمات/الأسعار) في نفس
@@ -65,6 +72,9 @@ class TechnicianSelectionScreen extends StatefulWidget {
 
 class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   Address? _selectedAddress;
+  bool _previewingAuto = false;
+  late final TechniciansRepository _techniciansRepository =
+      TechniciansRepository(context.read<AuthRepository>());
 
   @override
   void initState() {
@@ -94,10 +104,50 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     setState(() => _selectedAddress = address);
   }
 
+  /// **بنود 9-12 — «اختاروا لي الأنسب» بقى معاينة حقيقية.**
+  ///
+  /// قبل كده الزرار ده كان بيروح لإنشاء الطلب على طول، والعميل يأكد وهو ماشافش مين الفني ولا
+  /// السعر النهائي بمستواه. دلوقتي بنجيب المرشّح وسعره الأول، نعرضهم، وبعد ما يوافق بنكمّل
+  /// بالتذكرة — فالباك-إند بيعيد التحقق من نفس الفني ونفس السعر وقت الإنشاء.
+  Future<void> _startAutoMatch() async {
+    final address = _selectedAddress;
+    if (address == null) return;
+    setState(() => _previewingAuto = true);
+    try {
+      final preview = await _techniciansRepository.createMatchPreview(
+        serviceId: widget.service.id,
+        addressId: address.id,
+        selectionMode: 'auto',
+        // نفس المدخلات اللي هتتبعت في الإنشاء — البصمة لازم تطابق.
+        scheduledAt: widget.requestedAt?.toUtc().toIso8601String(),
+        fieldValues: widget.fieldValues,
+      );
+      if (!mounted) return;
+      final accepted = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => _AutoMatchPreviewSheet(preview: preview),
+      );
+      if (accepted != true || !mounted) return;
+      _confirmSelection(
+        requestedTechnicianId: preview.provider.id,
+        matchPreviewId: preview.matchPreviewId,
+      );
+    } on ApiException catch (err) {
+      // رسالة صريحة — ممنوع نكمّل في صمت على مرشّح مش موجود (بند 10).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _previewingAuto = false);
+    }
+  }
+
   void _confirmSelection({
     String? requestedTechnicianId,
     String? requestedTechnicianCompanyId,
     DateTime? effectiveRequestedAt,
+    String? matchPreviewId,
   }) {
     if (widget.onManualSelect != null) {
       // onManualSelect (reselection على طلب موجود) عمداً individual بس — راجع تعليق bookingMode
@@ -120,6 +170,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           requestedAt: effectiveRequestedAt ?? widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
           requestedPreciseTime: widget.requestedPreciseTime,
+          matchPreviewId: matchPreviewId,
         ),
       ),
     );
@@ -206,7 +257,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       subtitle: widget.bookingMode == BookingMode.team
                           ? 'هنبعت الطلب لأنسب فريق/شركة متاحة فورًا حسب تقييمها وقربها منك'
                           : 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
-                      onTap: () => _confirmSelection(),
+                      onTap: _previewingAuto ? () {} : () => unawaited(_startAutoMatch()),
                       highlighted: true,
                     ),
                     const SizedBox(height: 16),
@@ -269,6 +320,82 @@ class _ChoiceCard extends StatelessWidget {
               const Icon(Icons.chevron_left),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// كارت المرشّح اللي المحرك اختاره — بيتعرض **قبل** التأكيد (بنود 9-12).
+///
+/// بيقول تلات حاجات: مين، بكام، ولحد إمتى السعر ده محجوز. من غير الكارت ده «اختاروا لي الأنسب»
+/// بيبقى تأكيد على المجهول.
+class _AutoMatchPreviewSheet extends StatelessWidget {
+  const _AutoMatchPreviewSheet({required this.preview});
+
+  final BookingMatchPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = preview.provider;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('رشّحنا لك', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundImage: provider.avatarUrl != null ? NetworkImage(provider.avatarUrl!) : null,
+                  child: provider.avatarUrl == null ? const Icon(Icons.person_outline) : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        provider.fullName,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${provider.averageRating.toStringAsFixed(1)} (${provider.totalRatingsCount})'
+                        '${provider.distanceKm != null ? ' · ${provider.distanceKm!.toStringAsFixed(1)} كم' : ''}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '${(preview.totalAmountCents / 100).toStringAsFixed(2)} ج.م',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'السعر ده محجوز لك مع الأسطى ده لحد '
+              '${TimeOfDay.fromDateTime(preview.expiresAt.toLocal()).format(context)}. '
+              'لو غيّرت أي تفصيلة هنرشّح من جديد.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('تمام، كمّل بالأسطى ده'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('رجوع'),
+            ),
+          ],
         ),
       ),
     );

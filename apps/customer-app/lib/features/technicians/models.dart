@@ -320,3 +320,65 @@ class TechnicianPublicProfile {
             .toList(),
       );
 }
+
+/// **معاينة المطابقة قبل إنشاء الطلب** (ADR-0063 §6، بنود 9-12).
+///
+/// الفني اللي المحرك رشّحه + سعره النهائي بمستواه + ميعاد انتهاء الحجز. العميل بيشوف ده **قبل**
+/// ما يأكد، والتذكرة (`matchPreviewId`) بتتبعت مع الإنشاء عشان الباك-إند يعيد التحقق من نفس
+/// الفني ونفس السعر — لو حاجة اتغيّرت بيرفض بدل ما يستبدل حد في صمت.
+class BookingMatchPreview {
+  final String matchPreviewId;
+  final DateTime expiresAt;
+  final String selectionMode;
+  final BookingMatchProvider provider;
+  final int totalAmountCents;
+
+  BookingMatchPreview({
+    required this.matchPreviewId,
+    required this.expiresAt,
+    required this.selectionMode,
+    required this.provider,
+    required this.totalAmountCents,
+  });
+
+  factory BookingMatchPreview.fromJson(Map<String, dynamic> json) => BookingMatchPreview(
+        matchPreviewId: json['match_preview_id'] as String,
+        expiresAt: DateTime.parse(json['expires_at'] as String),
+        selectionMode: json['selection_mode'] as String,
+        provider: BookingMatchProvider.fromJson(json['provider'] as Map<String, dynamic>),
+        totalAmountCents: (json['pricing'] as Map<String, dynamic>)['total_amount_cents'] as int,
+      );
+}
+
+class BookingMatchProvider {
+  final String id;
+  final String fullName;
+  final String? avatarUrl;
+  final String currentLevel;
+  final double averageRating;
+  final int totalRatingsCount;
+  final int completedOrdersCount;
+  final double? distanceKm;
+
+  BookingMatchProvider({
+    required this.id,
+    required this.fullName,
+    required this.avatarUrl,
+    required this.currentLevel,
+    required this.averageRating,
+    required this.totalRatingsCount,
+    required this.completedOrdersCount,
+    required this.distanceKm,
+  });
+
+  factory BookingMatchProvider.fromJson(Map<String, dynamic> json) => BookingMatchProvider(
+        id: json['id'] as String,
+        fullName: json['full_name'] as String,
+        avatarUrl: json['avatar_url'] as String?,
+        currentLevel: json['current_level'] as String,
+        averageRating: (json['average_rating'] as num).toDouble(),
+        totalRatingsCount: json['total_ratings_count'] as int,
+        completedOrdersCount: json['completed_orders_count'] as int,
+        distanceKm: (json['distance_km'] as num?)?.toDouble(),
+      );
+}
