@@ -60,6 +60,14 @@ export interface PricingTemplateDescriptor {
   fields: PricingTemplateField[];
   /** الشجرة اللي بتتكتب في `final_price`. `rateCents` هو الرقم اللي الأدمن دخّله. */
   formula(rateCents: number): FormulaNode;
+  /**
+   * **مخرجات تشغيلية** بيولّدها القالب مع السعر (ADR-0061 §1).
+   *
+   * القالب اللي بيسعّر بالساعة عارف بالضرورة إن الشغلانة بتاخد الساعات دي من يوم الفني، واللي
+   * بيسعّر باليوم عارف إنها بتاخد الأيام دي. من غير المخرجات دي، الجدولة كانت بتحسب أي شغلانة
+   * بالساعة بالافتراضي (60 دقيقة) مهما كانت ساعاتها — **حجز مزدوج حقيقي**.
+   */
+  operationalOutputs?: { duration_minutes?: FormulaNode; estimated_duration_days?: FormulaNode };
 }
 
 function numberField(
@@ -95,6 +103,9 @@ const TEMPLATES: Record<PricingTemplateKey, PricingTemplateDescriptor> = {
     rateLabelAr: 'سعر الساعة (جنيه)',
     fields: [numberField(TEMPLATE_FIELD_KEYS.hours, 'عدد الساعات المطلوبة', 'ساعة', '1', '24')],
     formula: (rateCents) => ({ type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.hours), rate(rateCents)] }),
+    operationalOutputs: {
+      duration_minutes: { type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.hours), { type: 'literal', value: 60 }] },
+    },
   },
   [PricingTemplateKey.DAILY]: {
     key: PricingTemplateKey.DAILY,
@@ -103,6 +114,7 @@ const TEMPLATES: Record<PricingTemplateKey, PricingTemplateDescriptor> = {
     rateLabelAr: 'سعر اليوم (جنيه)',
     fields: [numberField(TEMPLATE_FIELD_KEYS.days, 'عدد الأيام المطلوبة', 'يوم', '1', '365')],
     formula: (rateCents) => ({ type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.days), rate(rateCents)] }),
+    operationalOutputs: { estimated_duration_days: ref(TEMPLATE_FIELD_KEYS.days) },
   },
   [PricingTemplateKey.MONTHLY]: {
     key: PricingTemplateKey.MONTHLY,
@@ -165,8 +177,10 @@ export function pricingTemplateFinalPricePayload(
   minPriceCents: number | null = null,
   maxPriceCents: number | null = null,
 ): FinalPriceFormulaPayload {
+  const template = pricingTemplate(key);
   return {
-    price_cents: pricingTemplate(key).formula(rateCents),
+    price_cents: template.formula(rateCents),
+    ...(template.operationalOutputs ?? {}),
     ...(minPriceCents !== null ? { min_price_cents: { type: 'literal' as const, value: minPriceCents } } : {}),
     ...(maxPriceCents !== null ? { max_price_cents: { type: 'literal' as const, value: maxPriceCents } } : {}),
   };

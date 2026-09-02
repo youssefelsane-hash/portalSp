@@ -69,15 +69,20 @@ describe('السقف اليومي وتماثل الجدولة (ADR-0059)', () =>
     return o.id;
   };
 
-  /** «الفني ده يقدر ياخد شغل بالمواصفات دي في اليوم ده؟» — نفس الدالة اللي التوزيع بيستخدمها. */
-  const tierFor = (technicianId: string, day: string, minutes: number, spanDays = 1) =>
+  /**
+   * «الفني ده يقدر ياخد شغل بالمواصفات دي في اليوم ده؟» — نفس الدالة اللي التوزيع بيستخدمها.
+   *
+   * `days` بتتبعت **خام** زي ما هي في الطلب: `null` = المحرك ماحددش أيام (الشغلانة بتتقاس
+   * بدقايقها)، ورقم = المحرك قال «بتاخد N يوم» (يوم كامل في كل يوم منهم).
+   */
+  const tierFor = (technicianId: string, day: string, minutes: number, days: number | null = null) =>
     classifyTechnicianCapacity(dataSource, {
       technicianId,
       scheduledAt: `${day}T09:00:00+02:00`,
       excludeOrderId: null,
       serviceDurationMinutes: minutes,
       dailyCapacityMinutes: CAP,
-      candidateSpanDays: spanDays,
+      candidateEstimatedDurationDays: days,
     });
 
   beforeAll(async () => {
@@ -255,5 +260,46 @@ describe('السقف اليومي وتماثل الجدولة (ADR-0059)', () =>
     for (let offset = 0; offset < 3; offset += 1) {
       expect(await tierFor(ids.techB, dayAfter(70 + offset), 120)).toBe('HEAVY');
     }
+  });
+
+  // ===================== ADR-0061 §2 — نفس المسطرة للمرشّح وللمعيَّن =====================
+  //
+  // البَقّة اللي الاختبارات دي بتقفلها: قبل التوحيد، `dailyCapacityExceededExpr` كانت بتاخد
+  // «دقايق المرشّح» و«أيامه» **جاهزين من الكولر**، بينما الطلب القائم بيتقاس بقاعدة «يوم كامل لو
+  // estimated_duration_days >= 1». يعني نفس الشغلانة كانت **خفيفة وهي مرشّحة** و**يوم كامل بعد
+  // ما تتعيّن** — نفس عدم التماثل اللي المالك بلّغ عنه، بس من باب الكولر.
+  describe('حمل تشغيلي واحد: المرشّح بيتقاس زي ما هيتقاس بعد التعيين', () => {
+    it('شغل 3 أيام كمرشّح بياخد يوم كامل — مش دقايقه الخام', async () => {
+      const day = dayAfter(200);
+      // الفني «ب» عنده 9 ساعات مشغولة في اليوم ده — فاضل 3 ساعات بالظبط.
+      await makeOrder(ids.techB, day, { minutes: 9 * 60 });
+
+      // مرشّح مدته 60 دقيقة **بس** المحرك حدد له 3 أيام ⇒ ياخد اليوم بالكامل ⇒ مرفوض.
+      expect(await tierFor(ids.techB, day, 60, 3)).toBe('HEAVY');
+      // نفس المرشّح بالظبط من غير تقدير أيام ⇒ 60 دقيقة بس ⇒ مقبول.
+      expect(await tierFor(ids.techB, day, 60, null)).toBe('MEANINGFUL');
+    });
+
+    it('التماثل: المرشّح متعدد الأيام بيتحسب بنفس القاعدة قبل التعيين وبعده', async () => {
+      const day = dayAfter(210);
+      // «أ» فاضي تمامًا. مرشّح 3 أيام عنده مقبول (يومه فاضي).
+      expect(await tierFor(ids.techA, day, 60, 3)).toBe('LIGHT');
+
+      // نفس الشغلانة بالظبط بعد التعيين — لازم تقفل التلات أيام كلها (يوم كامل لكل يوم).
+      await makeOrder(ids.techA, day, { days: 3, minutes: 60 });
+      for (let offset = 0; offset < 3; offset += 1) {
+        expect(await tierFor(ids.techA, dayAfter(210 + offset), 60, null)).toBe('HEAVY');
+      }
+      expect(await tierFor(ids.techA, dayAfter(213), 60, null)).toBe('LIGHT');
+
+      // **جوهر ADR-0061 §2**: المرشّح اللي بيتحسب «خفيف» (60 دقيقة) قبل التعيين لازم يبقى نفس
+      // الحمل اللي بيتحسب بعد التعيين. لو الحسبتين مختلفتين، الفني اللي قبل شغلانة 3 أيام على
+      // أساس إنها ساعة بيتعمل عليه حجز مزدوج في اليومين اللي بعدها.
+      const day2 = dayAfter(220);
+      await makeOrder(ids.techB, day2, { minutes: 11 * 60 });
+      // فاضل ساعة واحدة بس ⇒ مرشّح ساعة من غير أيام مقبول، ونفسه بأيام مرفوض.
+      expect(await tierFor(ids.techB, day2, 60, null)).toBe('MEANINGFUL');
+      expect(await tierFor(ids.techB, day2, 60, 1)).toBe('HEAVY');
+    });
   });
 });

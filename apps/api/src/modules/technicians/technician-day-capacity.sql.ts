@@ -121,13 +121,48 @@ export function technicianDayLoadSubquery(opts: DayLoadOpts): string {
   )`;
 }
 
+/**
+ * **الحمل التشغيلي للطلب المرشّح — بنفس قاعدة الطلب القائم بالظبط** (ADR-0061 §2).
+ *
+ * البَقّة اللي القاعدة دي بتقفلها: `dailyCapacityExceededExpr` كانت بتاخد `candidateMinutesExpr`
+ * و`candidateSpanDaysExpr` **جاهزين من الكولر**، بينما الطلب القائم بيتقاس بـ`perDayMinutesExpr`
+ * (اللي فيها قاعدة «يوم كامل لو `estimated_duration_days >= 1`»). يعني نفس الطلب كان بيتحسب
+ * **خفيف وهو مرشّح** و**يوم كامل بعد ما يتعيّن** — نفس عدم التماثل اللي ADR-0059 ادّعى إنه قفله
+ * بنيويًا، بس من باب الكولر بدل باب المنطق.
+ *
+ * دلوقتي الكولر بيقول **مصدر بيانات الطلب المرشّح** بس (أعمدته)، والقاعدة نفسها واحدة.
+ */
+export interface CandidateLoadSource {
+  /** تعبير SQL بيرجّع `estimated_duration_days` للطلب المرشّح (أو `NULL`). */
+  estimatedDurationDaysExpr: string;
+  /** تعبير SQL بيرجّع `duration_minutes` للطلب المرشّح (أو `NULL`). */
+  durationMinutesExpr: string;
+  /** تعبير SQL بيرجّع المدة الافتراضية للخدمة بالدقايق (أو `NULL`). */
+  serviceDefaultMinutesExpr: string;
+}
+
+/** دقايق الطلب المرشّح **من كل يوم** — نفس `perDayMinutesExpr` بالحرف، بس على أعمدة المرشّح. */
+export function candidatePerDayMinutesExpr(source: CandidateLoadSource, capacityParam: string): string {
+  return `CASE
+      WHEN (${source.estimatedDurationDaysExpr}) IS NOT NULL AND (${source.estimatedDurationDaysExpr}) >= 1
+        THEN ${capacityParam}::int
+      ELSE LEAST(
+        COALESCE((${source.durationMinutesExpr}), (${source.serviceDefaultMinutesExpr}), ${DEFAULT_JOB_MINUTES}),
+        ${capacityParam}::int
+      )
+    END`;
+}
+
+/** أيام الطلب المرشّح — نفس `spanDaysExpr` بالحرف. */
+export function candidateSpanDaysFromSource(source: CandidateLoadSource): string {
+  return `GREATEST(COALESCE(CEIL(${source.estimatedDurationDaysExpr})::int, 1), 1)`;
+}
+
 export interface CapacityConflictOpts extends DayLoadOpts {
   /** parameter لموعد الطلب المرشّح (نص/null — null = النهارده). */
   scheduledAtParam: string;
-  /** تعبير SQL لدقايق الطلب المرشّح في اليوم الواحد. */
-  candidateMinutesExpr: string;
-  /** تعبير SQL لعدد أيام الطلب المرشّح. */
-  candidateSpanDaysExpr: string;
+  /** مصدر أعمدة الطلب المرشّح — القاعدة نفسها بتتطبّق عليه هنا، مش في الكولر. */
+  candidateLoad: CandidateLoadSource;
 }
 
 /**
@@ -137,7 +172,9 @@ export interface CapacityConflictOpts extends DayLoadOpts {
  * المقارنة، فمستحيل «أ يشوف ب» من غير «ب يشوف أ».
  */
 export function dailyCapacityExceededExpr(opts: CapacityConflictOpts): string {
-  const { scheduledAtParam, candidateMinutesExpr, candidateSpanDaysExpr, dailyCapacityParam } = opts;
+  const { scheduledAtParam, candidateLoad, dailyCapacityParam } = opts;
+  const candidateMinutesExpr = candidatePerDayMinutesExpr(candidateLoad, dailyCapacityParam);
+  const candidateSpanDaysExpr = candidateSpanDaysFromSource(candidateLoad);
   const candidateStartDay = `(COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date`;
   return `EXISTS (
     SELECT 1

@@ -147,7 +147,11 @@ export class MatchingExplainabilityService {
             engagedStatusesParam: '$10',
             isEmergencyParam: '$11',
             serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-            candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+            candidateLoad: {
+              estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
+              durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+              serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
+            },
             dailyCapacityMinutesParam: '$12',
           })}
         ) AS availability_ok,

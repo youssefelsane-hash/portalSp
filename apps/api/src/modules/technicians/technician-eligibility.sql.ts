@@ -1,5 +1,5 @@
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { dailyCapacityExceededExpr, technicianDayLoadSubquery } from './technician-day-capacity.sql';
+import { CandidateLoadSource, dailyCapacityExceededExpr, technicianDayLoadSubquery } from './technician-day-capacity.sql';
 
 /**
  * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
@@ -98,8 +98,16 @@ export function technicianAvailabilityCondition(opts: {
   preciseDurationHoursExpr?: string;
   /** parameter لـ`matching.daily_capacity_minutes` (السقف اليومي بالدقايق، افتراضي 720 = 12 ساعة) — ADR-0059. */
   dailyCapacityMinutesParam: string;
-  /** تعبير SQL لعدد الأيام اللي الطلب المرشّح بيمتد عليها (ناتج محرك التسعير). الافتراضي يوم واحد. */
-  candidateSpanDaysExpr?: string;
+  /**
+   * **مصدر أعمدة الحمل التشغيلي للطلب المرشّح** (ADR-0061 §2).
+   *
+   * قبل كده كان الكولر بيبعت «دقايق المرشّح» و«أيامه» كتعبيرين جاهزين، وده اللي خلّى المرشّح
+   * يتقاس بمسطرة غير اللي هيتقاس بيها بعد التعيين. دلوقتي الكولر بيقول أعمدته بس، والقاعدة
+   * واحدة في `candidatePerDayMinutesExpr`.
+   *
+   * لو مابعتش حاجة، الافتراضي بيرجّع لسلوك «مدة الخدمة الافتراضية ليوم واحد».
+   */
+  candidateLoad?: CandidateLoadSource;
   /**
    * ADR-0017 بند 10 — Fallback توسيع النطاق لما تنضب قايمة الفنيين "المثاليين". لو `true`، بيتجاهل
    * شروط (1) و(2) (تعارض الطلب النشط) تمامًا — الفني ممكن يترشّح حتى لو مشغول بطلب تاني — لكن
@@ -148,7 +156,8 @@ function activeOrderConflictExistsExpr(opts: {
   serviceDurationExpr: string;
   preciseDurationHoursExpr?: string;
   dailyCapacityMinutesParam: string;
-  candidateSpanDaysExpr?: string;
+  /** مصدر أعمدة الحمل التشغيلي للطلب المرشّح (ADR-0061 §2). */
+  candidateLoad?: CandidateLoadSource;
 }): string {
   const {
     technicianIdExpr,
@@ -160,8 +169,13 @@ function activeOrderConflictExistsExpr(opts: {
     serviceDurationExpr,
     preciseDurationHoursExpr = 'NULL',
     dailyCapacityMinutesParam,
-    candidateSpanDaysExpr = '1',
+    candidateLoad,
   } = opts;
+  const candidateLoadSource: CandidateLoadSource = candidateLoad ?? {
+    estimatedDurationDaysExpr: 'NULL',
+    durationMinutesExpr: serviceDurationExpr,
+    serviceDefaultMinutesExpr: 'NULL',
+  };
   return `
     -- اليوم المطلوب للطلب المرشّح نفسه (ASAP = النهاردة، مجدول = يوم scheduled_at) — بتوقيت مصر.
     (
@@ -223,8 +237,7 @@ function activeOrderConflictExistsExpr(opts: {
           excludeOrderIdParam,
           dailyCapacityParam: dailyCapacityMinutesParam,
           scheduledAtParam,
-          candidateMinutesExpr: serviceDurationExpr,
-          candidateSpanDaysExpr: candidateSpanDaysExpr,
+          candidateLoad: candidateLoadSource,
         })}
       )
     )`;
@@ -266,7 +279,8 @@ export function technicianScheduleConflictCondition(opts: {
   serviceDurationExpr: string;
   preciseDurationHoursExpr?: string;
   dailyCapacityMinutesParam: string;
-  candidateSpanDaysExpr?: string;
+  /** مصدر أعمدة الحمل التشغيلي للطلب المرشّح (ADR-0061 §2). */
+  candidateLoad?: CandidateLoadSource;
 }): string {
   return `
     AND (${activeOrderConflictExistsExpr(opts)})
@@ -304,8 +318,17 @@ export async function classifyTechnicianCapacity(
     /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
     serviceDurationMinutes: number;
     dailyCapacityMinutes: number;
-    /** عدد أيام الطلب المرشّح (ناتج محرك التسعير) — الافتراضي يوم واحد. */
-    candidateSpanDays?: number;
+    /**
+     * `estimated_duration_days` **للطلب المرشّح كما هي** — ناتج محرك التسعير، و`null` لو المحرك
+     * ماحددش أيام (شغلانة بتتقاس بالدقايق).
+     *
+     * **متعمّد إنها nullable ومش بتتحوّل لـ1**: القيمة دي بتتقرا هنا بنفس قاعدة الطلب القائم
+     * (`perDayMinutesExpr`) — «موجودة و>= 1» معناها الشغلانة بتاخد اليوم بالكامل. أول نسخة من
+     * ADR-0061 §2 كانت بتبعت `candidateSpanDays ?? 1`، فـ«يوم واحد افتراضي» بقى مفهوش فرق عن
+     * «المحرك قال يوم كامل»، وكل مرشّح — حتى شغلانة 3 ساعات — بقى بياخد الـ12 ساعة كلها ⇒ كل
+     * الفنيين `HEAVY`. الاختبارات الحية مسكتها فورًا.
+     */
+    candidateEstimatedDurationDays?: number | null;
   },
 ): Promise<TechnicianCapacityTier> {
   const rows = await dataSource.query<{ tier: TechnicianCapacityTier }>(
@@ -342,8 +365,13 @@ export async function classifyTechnicianCapacity(
         excludeOrderIdParam: '$3',
         dailyCapacityParam: '$4',
         scheduledAtParam: '$2',
-        candidateMinutesExpr: '$5::int',
-        candidateSpanDaysExpr: '$8::int',
+        // ADR-0061 §2 — نفس مصدر الحقيقة اللي الطلب القائم بيتقاس بيه: `$8` هي
+        // `estimated_duration_days` الخام (ممكن NULL)، مش «عدد أيام» متحوّل لـ1.
+        candidateLoad: {
+          estimatedDurationDaysExpr: '$8::numeric',
+          durationMinutesExpr: '$5::int',
+          serviceDefaultMinutesExpr: 'NULL',
+        },
       })}
       UNION ALL
       -- منشغل جسديًا دلوقتي واليوم المطلوب هو النهاردة — ده مش سقف ساعات، ده «مش قادر يتحرك».
@@ -369,7 +397,7 @@ export async function classifyTechnicianCapacity(
       params.serviceDurationMinutes,
       ACTIVE_TECHNICIAN_ORDER_STATUSES,
       ENGAGED_TECHNICIAN_ORDER_STATUSES,
-      params.candidateSpanDays ?? 1,
+      params.candidateEstimatedDurationDays ?? null,
     ],
   );
   return rows[0].tier;

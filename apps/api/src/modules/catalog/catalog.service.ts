@@ -45,6 +45,8 @@ export interface PriceEstimate {
    * (اختياري في FinalPriceFormulaPayload). null لباقي نماذج التسعير أو لو المعادلة مش بتحسبها
    * (الإنتاجية القائمة على service_standard_data منفصلة تمامًا، راجع estimateDuration() تحت). */
   estimated_duration_days: number | null;
+  /** المدة التشغيلية بالدقايق الناتجة من المعادلة (ADR-0061 §1) — `null` يعني المعادلة مش بتحددها. */
+  duration_minutes: number | null;
 }
 
 const EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK = 20;
@@ -393,6 +395,7 @@ export class CatalogService {
       ? {
           evaluationId: null,
           priceCents: 0,
+          durationMinutes: null,
           minPriceCents: null,
           maxPriceCents: null,
           estimatedDurationDays: null,
@@ -458,6 +461,7 @@ export class CatalogService {
       max_price_cents: effectiveMaxPrice,
       pricing_evaluation_id: result.evaluationId,
       estimated_duration_days: result.estimatedDurationDays,
+      duration_minutes: result.durationMinutes,
       required_technicians: result.requiredTechnicians,
       required_assistants: result.requiredAssistants,
       suitable_for_emergency: result.suitableForEmergency,

@@ -740,27 +740,6 @@ export class OrdersService {
       recurringMetadata: dto.repeat_frequency ? { frequency: dto.repeat_frequency } : undefined,
     });
 
-    // دقة الوقت (ADR-0031 Slice B) — فحص تعارض حقيقي بدقة ساعة (مش يوم، ADR-0018) لما الفني
-    // معروف صراحة سلفًا (تفضيل أو سلوت). لو العميل سايب المطابقة تختار (auto-match)، بوابة الأهلية
-    // العادية بمستوى اليوم (technicianAvailabilityCondition) هي اللي بتشتغل وقت التوزيع — فحص
-    // ساعي إضافي وقت التوزيع التلقائي نفسه مؤجّل عمدًا (فجوة موثّقة، مش سهو).
-    // ADR-0060 §4 — الفحص الساعي فضل زي ما هو، بس المدة بقت **تقدير المنصة** (ناتج المعادلة)
-    // بدل رقم بيدخّله العميل. يعني الدقة اتحسّنت مش اتقلّت.
-    const preciseScheduleTechnicianId = scheduleSlot?.technicianId ?? requestedTechnicianProfile?.id ?? null;
-    const preciseConflictMinutes = pricingContext.durationMinutes;
-    if (
-      schedulePrecision(service) === 'start_time' &&
-      preciseScheduleTechnicianId &&
-      dto.scheduled_at &&
-      preciseConflictMinutes !== null &&
-      preciseConflictMinutes > 0
-    ) {
-      await this.assertNoPreciseScheduleConflict(
-        preciseScheduleTechnicianId,
-        new Date(dto.scheduled_at),
-        preciseConflictMinutes,
-      );
-    }
 
 
     const estimate = await this.catalogService.estimate(
@@ -811,6 +790,33 @@ export class OrdersService {
       !durationEstimate && estimate.required_assistants != null ? estimate.required_assistants : null;
     const formulaDurationDays =
       !durationEstimate && estimate.estimated_duration_days != null ? estimate.estimated_duration_days : null;
+    // ADR-0061 §1 — المدة التشغيلية بالدقايق من المعادلة. لازم تتخزن على الطلب لأن كل فحوص
+    // الجدولة (`technician-day-capacity.sql.ts`) بتقرا `orders.duration_minutes`؛ من غيرها
+    // الشغلانة بتتحسب بالافتراضي (60 دقيقة) مهما كانت ساعاتها الحقيقية = حجز مزدوج.
+    const formulaDurationMinutes = estimate.duration_minutes != null ? Math.ceil(estimate.duration_minutes) : null;
+
+    // دقة الوقت (ADR-0031 Slice B) — فحص تعارض حقيقي بدقة ساعة (مش يوم، ADR-0018) لما الفني
+    // معروف صراحة سلفًا (تفضيل أو سلوت). لو العميل سايب المطابقة تختار (auto-match)، بوابة الأهلية
+    // العادية بمستوى اليوم (technicianAvailabilityCondition) هي اللي بتشتغل وقت التوزيع — فحص
+    // ساعي إضافي وقت التوزيع التلقائي نفسه مؤجّل عمدًا (فجوة موثّقة، مش سهو).
+    // ADR-0060 §4 — الفحص الساعي فضل زي ما هو، بس المدة بقت **تقدير المنصة** (ناتج المعادلة)
+    // بدل رقم بيدخّله العميل. يعني الدقة اتحسّنت مش اتقلّت.
+    const preciseScheduleTechnicianId = scheduleSlot?.technicianId ?? requestedTechnicianProfile?.id ?? null;
+    const preciseConflictMinutes = formulaDurationMinutes ?? pricingContext.durationMinutes;
+    if (
+      schedulePrecision(service) === 'start_time' &&
+      preciseScheduleTechnicianId &&
+      dto.scheduled_at &&
+      preciseConflictMinutes !== null &&
+      preciseConflictMinutes > 0
+    ) {
+      await this.assertNoPreciseScheduleConflict(
+        preciseScheduleTechnicianId,
+        new Date(dto.scheduled_at),
+        preciseConflictMinutes,
+      );
+    }
+
     if (urgent && estimate.suitable_for_emergency === false) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -1069,7 +1075,8 @@ export class OrdersService {
         orderStatus: remoteQuoteRequested ? OrderStatus.AWAITING_ADMIN_QUOTE : OrderStatus.SEARCHING_TECHNICIAN,
         // ADR-0060 §3 — المدة بقت ناتج محسوب مش مدخل عميل. العمودين بيتسجّلوا من السياق لما
         // تكون معروفة، بلا أي فرع على «وضع» الخدمة.
-        durationMinutes: pricingContext.durationMinutes,
+        // ناتج المعادلة أولاً (ADR-0061 §1)، وبعدين السياق (مدة مشتقة من مدخلات نظامية).
+        durationMinutes: formulaDurationMinutes ?? pricingContext.durationMinutes,
         durationHours:
           pricingContext.durationHours !== null && Number.isInteger(pricingContext.durationHours)
             ? pricingContext.durationHours

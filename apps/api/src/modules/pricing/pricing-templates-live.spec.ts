@@ -28,6 +28,7 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
   let dataSource: DataSource;
   let templatesService: PricingTemplatesService;
   let engine: PricingEngineService;
+  let rulesServiceRef: PricingRulesService;
   const runId = Date.now().toString(36);
   const ids: { category: string; services: string[] } = { category: '', services: [] };
 
@@ -67,6 +68,7 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
       rulesService,
       dataSource.getRepository(Service),
     );
+    rulesServiceRef = rulesService;
     templatesService = new PricingTemplatesService(
       dataSource.getRepository(Service),
       dataSource.getRepository(ServicePricingField),
@@ -209,5 +211,71 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
       period_end: '2026-06-01',
     });
     expect(estimate.estimated_total_cents).toBe(750000);
+  });
+
+  // ADR-0061 §1 — أخطر بند في السكريبت: قبل المخرج ده، خدمة بالساعة كانت بتوصل للجدولة بلا أي
+  // مدة، فبتتحسب بالافتراضي (60 دقيقة) مهما كانت ساعاتها. يعني 6 ساعات كانت بتاخد ساعة من
+  // سقف الفني اليومي — **حجز مزدوج حقيقي**.
+  it('بالساعة: المعادلة بتطلّع duration_minutes = الساعات × 60 (منع الحجز المزدوج)', async () => {
+    const serviceId = await makeService('hourly-duration', 1);
+    await templatesService.apply('admin-1', serviceId, PricingTemplateKey.HOURLY, 8000);
+
+    const threeHours = await engine.evaluate(serviceId, { hours: 3 });
+    expect(threeHours.durationMinutes).toBe(180);
+    const sixHours = await engine.evaluate(serviceId, { hours: 6 });
+    expect(sixHours.durationMinutes).toBe(360);
+  });
+
+  it('باليوم: المعادلة بتطلّع estimated_duration_days = الأيام (الشغل بياخد أيامه كلها)', async () => {
+    const serviceId = await makeService('daily-duration', 1);
+    await templatesService.apply('admin-1', serviceId, PricingTemplateKey.DAILY, 20000);
+    const result = await engine.evaluate(serviceId, { days: 4 });
+    expect(result.estimatedDurationDays).toBe(4);
+  });
+
+  it('قوالب مالهاش معنى تشغيلي: مابتخترعش مدة (ثابت/شهري/بالقطعة)', async () => {
+    for (const [label, key, values] of [
+      ['fixed-nodur', PricingTemplateKey.FIXED, {}],
+      ['unit-nodur', PricingTemplateKey.PER_UNIT, { units: 2 }],
+    ] as const) {
+      const serviceId = await makeService(label, 1);
+      await templatesService.apply('admin-1', serviceId, key, 5000);
+      const result = await engine.evaluate(serviceId, values as Record<string, number>);
+      expect(result.durationMinutes).toBeNull();
+      expect(result.estimatedDurationDays).toBeNull();
+    }
+  });
+
+  // ADR-0061 §5 — `required_assistants` هو مصدر الحقيقة الوحيد؛ `requires_assistant` مشتق منه
+  // فمستحيل يتناقضوا (قبل كده كانوا مخرجين مستقلين ممكن يتكتبوا متعارضين).
+  it('احتياج المساعد مشتق من عددهم', async () => {
+    const serviceId = await makeService('assistant-consistency', 5000);
+    await rulesServiceRef.upsert('admin-1', serviceId, {
+      rule_type: 'formula' as never,
+      rule_key: 'final_price',
+      payload: {
+        price_cents: { type: 'literal', value: 5000 },
+        required_assistants: { type: 'literal', value: 2 },
+      } as never,
+    } as never);
+    const result = await engine.evaluate(serviceId, {});
+    expect(result.requiredAssistants).toBe(2);
+    expect(result.requiresAssistant).toBe(true);
+  });
+
+  // المسار القديم اتشال بالكامل — مش «بيتجاهَل». مخرج بيتحفظ ومحصلش هو نفس نوع اللخبطة اللي
+  // المالك طلب شيلها، فالحفظ نفسه لازم يترفض برسالة بتوجّه للمكان الصح.
+  it('`requires_assistant` كمخرج معادلة مرفوض من الحفظ أصلاً', async () => {
+    const serviceId = await makeService('assistant-legacy-output', 5000);
+    await expect(
+      rulesServiceRef.upsert('admin-1', serviceId, {
+        rule_type: 'formula' as never,
+        rule_key: 'final_price',
+        payload: {
+          price_cents: { type: 'literal', value: 5000 },
+          requires_assistant: { type: 'literal', value: 1 },
+        } as never,
+      } as never),
+    ).rejects.toThrow();
   });
 });

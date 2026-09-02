@@ -360,7 +360,11 @@ export class MatchingService {
             engagedStatusesParam: '$11',
             isEmergencyParam: '$12',
             serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-            candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+            candidateLoad: {
+              estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
+              durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+              serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
+            },
             preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
             dailyCapacityMinutesParam: '$13',
             ignoreActiveOrderConflict,
@@ -451,7 +455,11 @@ export class MatchingService {
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
           serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-          candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+          candidateLoad: {
+            estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
+            durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+            serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
+          },
           preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
           dailyCapacityMinutesParam: '$13',
           ignoreActiveOrderConflict,
@@ -1015,8 +1023,11 @@ export class MatchingService {
       serviceDurationMinutes:
         order.durationMinutes ?? (order.durationHours ? order.durationHours * 60 : null) ?? service[0]?.estimated_duration_minutes ?? 60,
       dailyCapacityMinutes: dailyCapacityMinutes,
-      // ADR-0059 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
-      candidateSpanDays: Math.max(Math.ceil(Number(order.estimatedDurationDays ?? 1)) || 1, 1),
+      // ADR-0059/0061 §2 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
+      // بتتبعت **خام** (`null` لو المحرك ماحددش أيام): تحويلها لـ1 هنا كان بيخلي أي شغلانة قصيرة
+      // تتحسب يوم كامل، لأن «1» في قاعدة الحمل معناها «المحرك قال يوم كامل» مش «يوم واحد».
+      candidateEstimatedDurationDays:
+        order.estimatedDurationDays != null ? Number(order.estimatedDurationDays) : null,
     });
     if (process.env.DEBUG_MATCHING) {
       // eslint-disable-next-line no-console

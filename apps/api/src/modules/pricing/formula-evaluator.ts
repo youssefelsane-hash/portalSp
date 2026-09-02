@@ -272,10 +272,13 @@ export interface FormulaEvaluationContext {
 const OPTIONAL_FORMULA_OUTPUT_KEYS: (keyof FinalPriceFormulaPayload)[] = [
   'min_price_cents',
   'max_price_cents',
+  'duration_minutes',
   'estimated_duration_days',
   'required_technicians',
+  // ADR-0061 §5 — `requires_assistant` **اتشال من هنا بالكامل**، مش بيتجاهَل. مخرج مقبول في
+  // الحفظ وبيتجاهَل وقت التقييم هو تاني مسار صامت بالظبط زي اللي المالك طلب شيله: الأدمن بيكتبه،
+  // بيتحفظ، ومحصلش. رفضه صراحةً بيدّي رسالة واضحة إن `required_assistants` هو المكان.
   'required_assistants',
-  'requires_assistant',
   'suitable_for_emergency',
 ];
 
@@ -301,6 +304,18 @@ export function validateFinalPriceFormulaPayload(payload: Record<string, unknown
   if (payloadBytes > FORMULA_LIMITS.MAX_PAYLOAD_JSON_BYTES) {
     rejectFormula(
       `حجم المعادلة (${payloadBytes} بايت) تعدّى الحد المسموح (${FORMULA_LIMITS.MAX_PAYLOAD_JSON_BYTES} بايت)`,
+    );
+  }
+
+  // ADR-0061 §5 — أي مفتاح مش من المخرجات المعروفة **بيترفض**، مش بيتقبل ويتجاهَل.
+  // ده مش تشدّد شكلي: مخرج بيتحفظ ومحدش بيقراه هو تاني مسار صامت لنفس المعنى (بالظبط اللي حصل
+  // في `requires_assistant` قبل ما يتشال) — الأدمن بيكتبه، الواجهة بتوريه، ومحصلش أي أثر. غلطة
+  // إملائية في اسم مخرج (`duration_minute`) كانت كمان بتعدّي بصمت وبتدّي حجز غلط.
+  const knownKeys = new Set<string>(['price_cents', ...OPTIONAL_FORMULA_OUTPUT_KEYS]);
+  const unknownKeys = Object.keys(payload).filter((key) => !knownKeys.has(key));
+  if (unknownKeys.length > 0) {
+    rejectFormula(
+      `مخرجات مش معروفة في المعادلة: ${unknownKeys.join('، ')}. المسموح: ${[...knownKeys].join('، ')}`,
     );
   }
 
