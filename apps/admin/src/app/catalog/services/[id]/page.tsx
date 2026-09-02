@@ -555,6 +555,7 @@ export default function ServiceDetailPage() {
       remote_assessment_fee_cents: Math.round(Number(form.get('remote_assessment_fee') || 0) * 100),
       assessment_fee_credit_bps: Number(form.get('assessment_fee_credit_bps') || 0),
       onsite_assessor_executes_work: form.get('onsite_assessor_executes_work') === 'on',
+      assessment_fee_refundable_after_visit: form.get('assessment_fee_refundable_after_visit') === 'on',
       quote_validity_minutes: Number(form.get('quote_validity_minutes') || 2880),
       range_percent_below: form.get('range_percent_below') ? Number(form.get('range_percent_below')) : undefined,
       range_percent_above: form.get('range_percent_above') ? Number(form.get('range_percent_above')) : undefined,
@@ -1105,6 +1106,15 @@ export default function ServiceDetailPage() {
                           description="لو مقفول، العميل بيختار منفّذ تاني بعد ما يوافق على السعر."
                           icon={Camera}
                           defaultChecked={service.onsite_assessor_executes_work}
+                        />
+                      )}
+                      {onsiteAssessmentEnabled && (
+                        <CatalogToggle
+                          name="assessment_fee_refundable_after_visit"
+                          title="رسم المعاينة بيترجع بعد الزيارة"
+                          description="لو مقفول، العميل اللي يلغي بعد ما الفني راح وعاين وسعّر مابيستردش رسم المعاينة — الباقي بيترجع عادي."
+                          icon={Camera}
+                          defaultChecked={service.assessment_fee_refundable_after_visit}
                         />
                       )}
                     </div>
