@@ -1023,7 +1023,23 @@ export class OrdersService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      if (dto.payment_method) {
+      // بند 9 + بند 54 من السكربت — رسم التقييم بيتحصّل **عند الإرسال**، مش بعد مراجعة الإدارة:
+      // ده اللي بيغطّي وقت الفرز حتى لو العميل مكمّلش، وبيقلّل الطلبات العبثية.
+      //
+      // مشروط بوجود رسم فعلاً: الافتراضي `remote_assessment_fee_cents = 0`، وساعتها مفيش حاجة
+      // تتحصّل والسلوك بيفضل زي ما هو بالحرف (ممنوع payment_method).
+      //
+      // الكاش ممنوع أصلاً على مستوى الـDTO (`payment_method` بتقبل card/instapay/fawry_reference
+      // بس) — وده مناسب هنا بالضبط: مفيش فني رايح للعميل عشان يستلم منه كاش.
+      if (service.remoteAssessmentFeeCents > 0) {
+        if (!dto.payment_method) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'لازم تختار طريقة دفع لرسم التقييم قبل إرسال الصور',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      } else if (dto.payment_method) {
         throw new ApiException(ErrorCode.VAL_001, 'الدفع يتم بعد ما الإدارة تحدد السعر وتوافق عليه', HttpStatus.BAD_REQUEST);
       }
       if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
@@ -1116,7 +1132,12 @@ export class OrdersService {
     // بتتوزّع فورًا بغض النظر عن dto.payment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
     // إجمالي الطلب صفر لأي سبب تاني (خصم كامل مثلاً) — دفع كارت/InstaPay بمبلغ صفر مالوش معنى.
     // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
-    const requestedPrepayMethod = originalOrder || remoteQuoteRequested ? undefined : dto.payment_method;
+    // طلب التقييم بالصور بياخد prepay **لرسم التقييم بس** لما الخدمة محددة له رسم (بند 9) —
+    // غير كده بيفضل بلا دفع مقدّم زي ما كان.
+    const requestedPrepayMethod =
+      originalOrder || (remoteQuoteRequested && service.remoteAssessmentFeeCents <= 0)
+        ? undefined
+        : dto.payment_method;
 
     // Earnings Engine V2 is an explicit cutover for new orders only. The fixed amount is copied
     // onto the order now, so later catalog edits can never rewrite historical money.

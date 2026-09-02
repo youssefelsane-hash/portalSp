@@ -17,6 +17,9 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   // (POST /orders/:id/cancel رجّع 409 لطلب pending_payment حقيقي).
   [OrderStatus.PENDING_PAYMENT]: [
     OrderStatus.SEARCHING_TECHNICIAN,
+    // بند 9 — رسم التقييم بالصور بيتدفع قبل الفرز، فالطلب بيروح للإدارة مش للتوزيع: مفيش شغل
+    // له سعر لسه عشان يتبعت لفني.
+    OrderStatus.AWAITING_ADMIN_QUOTE,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.EXPIRED,

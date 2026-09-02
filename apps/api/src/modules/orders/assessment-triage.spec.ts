@@ -5,6 +5,8 @@ import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQuote, OrderQuoteSource, OrderQuoteStatus } from './entities/order-quote.entity';
 import { AssessmentTriageService } from './assessment-triage.service';
+import { prepaidOrderNextStatus } from './prepaid-order-next-status';
+import { canTransition } from './order-state-machine';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -364,6 +366,32 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(reissued.amountCents).toBe(44_000);
     const [row] = await q(`SELECT estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
     expect(row.estimated_price_cents).toBe(44_000);
+  });
+
+  // ===== بند 9: رسم التقييم بيتحصّل عند الإرسال =====
+
+  describe('وجهة الطلب المدفوع مقدّمًا', () => {
+    it('رسم تقييم بالصور مدفوع → فرز الإدارة، وبلا توزيع', () => {
+      expect(
+        prepaidOrderNextStatus({ assessmentType: 'remote', priceStatus: OrderPriceStatus.WAITING_ASSESSMENT }),
+      ).toEqual({ nextStatus: OrderStatus.AWAITING_ADMIN_QUOTE, dispatchStarted: false });
+    });
+
+    it('طلب عادي مدفوع مقدّمًا → التوزيع زي ما كان بالحرف', () => {
+      expect(
+        prepaidOrderNextStatus({ assessmentType: null, priceStatus: OrderPriceStatus.CONFIRMED }),
+      ).toEqual({ nextStatus: OrderStatus.SEARCHING_TECHNICIAN, dispatchStarted: true });
+    });
+
+    it('معاينة في الموقع مدفوعة مقدّمًا → توزيع عادي (الفني بيروح فعلاً)', () => {
+      expect(
+        prepaidOrderNextStatus({ assessmentType: 'onsite', priceStatus: OrderPriceStatus.WAITING_ASSESSMENT }),
+      ).toEqual({ nextStatus: OrderStatus.SEARCHING_TECHNICIAN, dispatchStarted: true });
+    });
+
+    it('الانتقال اللي المسار ده محتاجه مسموح في الـstate machine', () => {
+      expect(canTransition(OrderStatus.PENDING_PAYMENT, OrderStatus.AWAITING_ADMIN_QUOTE)).toBe(true);
+    });
   });
 
   // ===== بند 7: الطابور =====
