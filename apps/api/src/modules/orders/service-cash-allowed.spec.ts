@@ -317,4 +317,47 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
     expect(order.serviceId).toBe(ids.serviceCashEnabled);
     expect(order.totalAmountCents).toBe(50000);
   });
+
+  // ─── دقة الموعد بقت وضعين بس (ADR-0060 §4، docs/08 §113) ─────────────────
+  //
+  // المدة والفترة مابقوش مدخلات حجز — بقوا حقول في فورم الخدمة وناتج محرك التسعير. الاختبارات
+  // دي بتثبت الرفض على مسار `OrdersService.create()` الحقيقي (نظيره على القوالب المتكررة في
+  // `recurring-orders-capability.spec.ts`).
+
+  it('duration_hours كمدخل حجز: تترفض — المدة بقت من محرك التسعير (ADR-0060)', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.serviceCashEnabled,
+        address_id: ids.address,
+        duration_hours: 3,
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('scheduled_end_at كمدخل حجز: تترفض — الفترة بقت حقول في فورم الخدمة (ADR-0060)', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.serviceCashEnabled,
+        address_id: ids.address,
+        scheduled_end_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('خدمة «وقت بداية فقط» من غير scheduled_at: تترفض', async () => {
+    await dataSource.query(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.serviceCashEnabled]);
+    try {
+      await expect(
+        ordersService.create(ids.customerUser, { service_id: ids.serviceCashEnabled, address_id: ids.address } as never),
+      ).rejects.toMatchObject({ code: 'VAL_001' });
+    } finally {
+      await dataSource.query(`UPDATE services SET requires_start_time_only = false WHERE id = $1`, [ids.serviceCashEnabled]);
+    }
+  });
+
+  it('قاعدة البيانات نفسها بترفض إحياء الأوضاع المتشالة (chk_services_schedule_modes_supported)', async () => {
+    await expect(
+      dataSource.query(`UPDATE services SET requires_precise_schedule = true WHERE id = $1`, [ids.serviceCashEnabled]),
+    ).rejects.toThrow(/chk_services_schedule_modes_supported/);
+  });
 });

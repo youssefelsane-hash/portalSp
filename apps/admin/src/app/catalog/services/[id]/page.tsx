@@ -9,10 +9,8 @@ import {
   CalendarDays,
   CalendarRange,
   Camera,
-  Clock3,
   CreditCard,
   Eye,
-  Hourglass,
   Repeat2,
   Siren,
   UserRound,
@@ -143,7 +141,8 @@ export default function ServiceDetailPage() {
   const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('formula');
   // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
   // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
-  const [schedulingMode, setSchedulingMode] = useState<'none' | 'precise' | 'start_only' | 'hours_only' | 'start_and_end'>('none');
+  // ADR-0060 §4 — وضعين بس. التلاتة اللي اتشالوا كانوا بيطلبوا مدخلات تسعير مش بيانات جدولة.
+  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('full_day');
 
   // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
   // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
@@ -160,17 +159,7 @@ export default function ServiceDetailPage() {
     setService(next);
     if (!next) return;
     setPricingModelLive(next.pricing_model);
-    setSchedulingMode(
-      next.requires_precise_schedule
-        ? 'precise'
-        : next.requires_start_time_only
-          ? 'start_only'
-          : next.requires_hours_only
-            ? 'hours_only'
-            : next.requires_start_and_end
-              ? 'start_and_end'
-              : 'none',
-    );
+    setSchedulingMode(next.requires_start_time_only ? 'start_time' : 'full_day');
   }
 
   function loadAll() {
@@ -869,47 +858,23 @@ export default function ServiceDetailPage() {
                 <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
                   <div className="mb-3">
                     <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">اختيار واحد فقط. الوضع الافتراضي مناسب لمعظم خدمات الصيانة اليومية.</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">وضعين بس: يا إما التاريخ بس، يا إما التاريخ + ساعة الوصول. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
                   </div>
-                  {schedulingMode === 'precise' && <input type="hidden" name="requires_precise_schedule" value="on" />}
-                  {schedulingMode === 'start_only' && <input type="hidden" name="requires_start_time_only" value="on" />}
-                  {schedulingMode === 'hours_only' && <input type="hidden" name="requires_hours_only" value="on" />}
-                  {schedulingMode === 'start_and_end' && <input type="hidden" name="requires_start_and_end" value="on" />}
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  {schedulingMode === 'start_time' && <input type="hidden" name="requires_start_time_only" value="on" />}
+                  <div className="grid gap-3 md:grid-cols-2">
                     <SchedulingModeChoice
-                      active={schedulingMode === 'none'}
+                      active={schedulingMode === 'full_day'}
                       title="يوم كامل"
-                      description="موعد باليوم فقط، من غير ساعة أو مدة إضافية."
+                      description="العميل بيختار التاريخ بس — من غير ساعة. مناسب لمعظم شغل الصيانة."
                       icon={CalendarDays}
-                      onSelect={() => setSchedulingMode('none')}
+                      onSelect={() => setSchedulingMode('full_day')}
                     />
                     <SchedulingModeChoice
-                      active={schedulingMode === 'precise'}
-                      title="بداية + مدة"
-                      description="وقت بداية محدد وعدد ساعات، مثل التنظيف بالساعة."
-                      icon={Clock3}
-                      onSelect={() => setSchedulingMode('precise')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'start_only'}
+                      active={schedulingMode === 'start_time'}
                       title="وقت بداية فقط"
-                      description="بداية محددة من غير مدة أو وقت نهاية."
+                      description="العميل بيختار التاريخ وساعة وصول الفني. المدة بيحسبها محرك التسعير."
                       icon={CalendarClock}
-                      onSelect={() => setSchedulingMode('start_only')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'hours_only'}
-                      title="عدد ساعات فقط"
-                      description="مدة مطلوبة من غير تحديد ساعة وصول دقيقة."
-                      icon={Hourglass}
-                      onSelect={() => setSchedulingMode('hours_only')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'start_and_end'}
-                      title="بداية ونهاية"
-                      description="تاريخ ووقت بداية ونهاية، مناسب للعقود والإقامات."
-                      icon={CalendarRange}
-                      onSelect={() => setSchedulingMode('start_and_end')}
+                      onSelect={() => setSchedulingMode('start_time')}
                     />
                   </div>
                 </div>

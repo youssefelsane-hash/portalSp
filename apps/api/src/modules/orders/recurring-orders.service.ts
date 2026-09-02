@@ -174,41 +174,21 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // أوضاع التوقيت الأربعة (ADR-0032) — نفس فحوصات OrdersService.create() بالحرف: القالب اللي
-    // هيتولّد منه طلب لازم يحمل نفس الحقول المطلوبة للوضع الفعّال، وإلا كل موعد هيترفض عند
-    // إنشاء الطلب ويوصل dead-letter من غير فايدة. فحص مبكر هنا = رفض واضح وقت الإنشاء بدل فشل صامت مؤجل.
-    if (service.requiresPreciseSchedule) {
-      if (!dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else if (service.requiresHoursOnly) {
-      if (!dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else if (service.requiresStartAndEnd) {
-      if (!dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت نهاية الخدمة', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'duration_hours مش مطلوبة لخدمة محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else {
-      if (dto.duration_hours) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت أو عدد ساعات',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
+    // ADR-0060 §4 — نفس قاعدة `OrdersService.create()` بالحرف: مفيش مدخلات وقت تجارية على
+    // القالب. المدة والفترة بقوا مسؤولية محرك التسعير/فورم الخدمة.
+    if (dto.duration_hours) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مدة الخدمة بقت بتتحسب من محرك التسعير مش من العميل — لو محتاجها كمدخل، اعملها حقل في فورم الخدمة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.scheduled_end_at) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'وقت النهاية مابقاش مدخل حجز — لو الخدمة بفترة (اشتراك/إيجار)، حطها كحقلين تاريخ في فورم الخدمة',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const startsAt = new Date(dto.starts_at);

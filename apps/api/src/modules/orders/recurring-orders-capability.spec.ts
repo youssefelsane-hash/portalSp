@@ -79,30 +79,20 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
-  it('خدمة بدقة وقت من غير duration_hours: يترفض قبل الحفظ — القالب اللي هيولّد طلبات فاشلة مينفعش ينشئ', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, requiresPreciseSchedule: true });
+  // ADR-0060 §4 — وضع «بداية + مدة» اتشال؛ المدة بقت ناتج محرك التسعير مش رقم بيدخّله العميل.
+  // الاختباران القديمان (لازم duration_hours / بيتخزّن) اتحوّلوا لاختبار واحد بيثبت الرفض.
+  it('duration_hours كمدخل على القالب: تترفض — المدة بقت من محرك التسعير (ADR-0060)', async () => {
+    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, requiresStartTimeOnly: true });
     await expect(
       service.create('user-1', {
         service_id: 'service-1',
         address_id: 'address-1',
         frequency: RecurringOrderFrequency.WEEKLY,
         starts_at: futureIso(),
+        duration_hours: 3,
       } as never),
     ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
     expect(templatesRepo.save).not.toHaveBeenCalled();
-  });
-
-  it('خدمة بدقة وقت مع duration_hours: بيتقبل ويخزّن المدة', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, requiresPreciseSchedule: true });
-    const saved = await service.create('user-1', {
-      service_id: 'service-1',
-      address_id: 'address-1',
-      frequency: RecurringOrderFrequency.WEEKLY,
-      starts_at: futureIso(),
-      duration_hours: 3,
-    } as never);
-    expect(saved.durationHours).toBe(3);
-    expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
   // ADR-0060 §3 — الكمية مابقتش مدخل منفصل على القالب؛ بقت حقل جوّه فورم الخدمة نفسها. الاختبار
@@ -139,14 +129,17 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
-  it('وضع "بداية+نهاية" من غير scheduled_end_at: يترفض', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, requiresStartAndEnd: true });
+  // ADR-0060 §4 — وضع «بداية ونهاية» اتشال (كان بيتعارض مع الفترة الشهرية ويعرض حقول تاريخ
+  // مكررة). `scheduled_end_at` مابقاش مدخل حجز أصلاً.
+  it('scheduled_end_at كمدخل على القالب: تترفض — الفترة بقت حقول في فورم الخدمة (ADR-0060)', async () => {
+    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true });
     await expect(
       service.create('user-1', {
         service_id: 'service-1',
         address_id: 'address-1',
         frequency: RecurringOrderFrequency.WEEKLY,
         starts_at: futureIso(),
+        scheduled_end_at: futureIso(),
       } as never),
     ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
     expect(templatesRepo.save).not.toHaveBeenCalled();
