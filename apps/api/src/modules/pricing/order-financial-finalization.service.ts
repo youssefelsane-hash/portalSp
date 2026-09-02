@@ -3,7 +3,12 @@ import { EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { Order, OrderPaymentStatus } from '../orders/entities/order.entity';
 
-export type OrderPriceIncreaseSource = 'level_premium' | 'additional_work' | 'inspection_quote';
+export type OrderPriceIncreaseSource =
+  | 'level_premium'
+  | 'additional_work'
+  | 'inspection_quote'
+  /** تعديل سعر بعد تشخيص الفني وقبل تنفيذ الشغل — مختلف عن `additional_work` اللي بيحصل أثناء التنفيذ. */
+  | 'diagnosis_revision';
 
 export interface OrderPriceIncrease {
   amountCents: number;

@@ -394,6 +394,88 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     });
   });
 
+  // ===== بند 35: تعديل السعر بعد التشخيص (Quote Revision) =====
+
+  async function seedPricedWorkOrder(status: OrderStatus, priceCents: number, paid = false): Promise<string> {
+    const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
+    const [row] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+                           order_status, payment_status, total_amount_cents, estimated_price_cents,
+                           inspection_fee_cents, commissionable_base_cents, technician_earning_cents,
+                           assessment_type, price_status, display_price_max_cents_snapshot)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,0,$9,0,'onsite','confirmed',$10) RETURNING id`,
+      [
+        orderNumber, ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone,
+        status, paid ? 'paid' : 'pending', priceCents, RANGE_MAX + 100_000,
+      ],
+    );
+    return row.id;
+  }
+
+  it('التعديل بيضيف **الفرق** بس — مش السعر الجديد فوق القديم', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, 55_000, 'لقيت ماسورة تانية مكسورة');
+
+    const [afterSubmit] = await q(`SELECT order_status, total_amount_cents FROM orders WHERE id = $1`, [orderId]);
+    expect(afterSubmit.order_status).toBe(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL);
+    // لسه ما اتغيرش قبل موافقة العميل.
+    expect(afterSubmit.total_amount_cents).toBe(40_000);
+
+    await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
+
+    const [row] = await q(
+      `SELECT order_status, total_amount_cents, estimated_price_cents, commissionable_base_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    // 40000 + (55000 - 40000) = 55000. لو الحساب اتعامل معاه كعرض أول كان هيبقى 95000.
+    expect(row.total_amount_cents).toBe(55_000);
+    expect(row.estimated_price_cents).toBe(55_000);
+    expect(row.commissionable_base_cents).toBe(55_000);
+    // الفني واقف في المكان — بيكمّل شغل.
+    expect(row.order_status).toBe(OrderStatus.IN_PROGRESS);
+  });
+
+  it('تخفيض السعر على طلب **غير مدفوع** بيقلّل الإجمالي فعلاً', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, 25_000, 'العطل أبسط من المتوقع');
+    await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
+
+    const [row] = await q(`SELECT total_amount_cents, estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
+    expect(row.total_amount_cents).toBe(25_000);
+    expect(row.estimated_price_cents).toBe(25_000);
+  });
+
+  it('تخفيض السعر على طلب **مدفوع** بيترفض وقت الإرسال — الاسترداد مسار تاني', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000, true);
+    await expect(
+      quotes.submitDiagnosisRevision(ids.techUser, orderId, 25_000, 'أبسط'),
+    ).rejects.toMatchObject({ code: 'ORDR_003' });
+  });
+
+  it('نفس السعر بيترفض، والحالة الغلط بترفض', async () => {
+    const same = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await expect(quotes.submitDiagnosisRevision(ids.techUser, same, 40_000, 'نفسه')).rejects.toMatchObject({
+      code: 'VAL_001',
+    });
+    const wrongState = await seedPricedWorkOrder(OrderStatus.WORK_COMPLETED, 40_000);
+    await expect(quotes.submitDiagnosisRevision(ids.techUser, wrongState, 60_000, 'خلص')).rejects.toMatchObject({
+      code: 'ORDR_003',
+    });
+  });
+
+  it('تعديل فوق النطاق بيروح لمراجعة الإدارة — العميل مايشوفوش وحالة الطلب ما تتغيرش', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    // سقف النطاق على الطلب ده = RANGE_MAX + 100000؛ نعدّيه.
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 200_000, 'شغل ضخم');
+
+    const [row] = await q(`SELECT order_status, total_amount_cents, estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
+    expect(row.order_status).toBe(OrderStatus.IN_PROGRESS);
+    expect(row.total_amount_cents).toBe(40_000);
+    expect(row.estimated_price_cents).toBe(40_000);
+    const [quote] = await q(`SELECT status FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
+    expect(quote.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
+  });
+
   // ===== بند 7: الطابور =====
 
   it('الطابور بيفرز بكل فلتر — كل طلب بيظهر في خانته بس', async () => {

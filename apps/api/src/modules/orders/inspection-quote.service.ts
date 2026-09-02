@@ -147,6 +147,168 @@ export class InspectionQuoteService {
   }
 
   /**
+   * **بند 35 — «تعديل السعر بعد التشخيص» (Quote Revision).**
+   *
+   * الفني وصل، شخّص، ولقى الشغل مختلف عن اللي اتسعّر. ده **مش «شغل إضافي»**: الشغل الإضافي
+   * (`order_items`) بيتضاف **أثناء التنفيذ** فوق سعر شغّال، أما ده بيصحّح **سعر الشغل الأساسي
+   * نفسه قبل ما يبدأ**. خلطهم كان هيخلي بند واحد بمعنيين.
+   *
+   * `OrderQuoteSource.TECHNICIAN_DIAGNOSIS` كانت قيمة enum معرّفة **بلا أي تنفيذ** — لا خدمة ولا
+   * endpoint ولا caller. دي هي.
+   *
+   * التخفيض على طلب مدفوع بيترفض **هنا** (وقت الإرسال) مش وقت الموافقة: الفني لازم يعرف فورًا،
+   * والاسترداد مسار مالي مقصود لوحده مش أثر جانبي لتعديل سعر.
+   */
+  async submitDiagnosisRevision(
+    technicianUserId: string,
+    orderId: string,
+    newAmountCents: number,
+    reason: string,
+    details: InitialQuoteDetails = {},
+  ): Promise<Order> {
+    const technicianProfile = await this.techniciansService.findByUserIdOrThrow(technicianUserId);
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.technician_id = :technicianId', {
+          orderId,
+          technicianId: technicianProfile.id,
+        })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+      }
+      if (![OrderStatus.TECHNICIAN_ARRIVED, OrderStatus.IN_PROGRESS].includes(order.orderStatus)) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'تعديل السعر بعد التشخيص متاح بعد ما توصل وقبل ما تخلّص الشغل بس',
+          HttpStatus.CONFLICT,
+        );
+      }
+      // تعديل السعر بيفترض إن فيه سعر أصلاً. طلب لسه بلا سعر ده مسار «عرض أول» مش «تعديل».
+      const currentPriceCents = order.estimatedPriceCents;
+      if (currentPriceCents == null) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الطلب لسه مالوش سعر — ده مسار تحديد سعر أول مش تعديل بعد التشخيص',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (newAmountCents === currentPriceCents) {
+        throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد زي القديم', HttpStatus.BAD_REQUEST);
+      }
+      if (newAmountCents < currentPriceCents && order.paymentStatus === OrderPaymentStatus.PAID) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الطلب مدفوع بالفعل — تخفيض السعر محتاج استرداد من الإدارة، مش تعديل سعر',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (
+        order.settlementPolicyVersion === 2 &&
+        order.platformCommissionCentsSnapshot != null &&
+        order.platformCommissionCentsSnapshot > newAmountCents
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const service = await this.catalogService.findServiceOrThrow(order.serviceId);
+      const quoteStatus = await this.resolveQuoteStatus(
+        manager,
+        order,
+        service,
+        OrderQuoteSource.TECHNICIAN_DIAGNOSIS,
+        newAmountCents,
+      );
+      const quote = await this.createQuoteVersion(
+        manager,
+        order,
+        technicianUserId,
+        OrderQuoteSource.TECHNICIAN_DIAGNOSIS,
+        newAmountCents,
+        service.quoteValidityMinutes,
+        { ...details, revisionReason: reason },
+        quoteStatus,
+      );
+
+      const previousStatus = order.orderStatus;
+      const needsAdminReview = quoteStatus === OrderQuoteStatus.PENDING_ADMIN_REVIEW;
+      if (needsAdminReview) {
+        // زي مسار المعاينة بالحرف: السعر الخارج عن النطاق مايوصلش العميل قبل قرار الإدارة،
+        // والطلب بيفضل شغّال في مكانه.
+        order.priceStatus = OrderPriceStatus.WAITING_QUOTE;
+      } else {
+        order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
+        order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
+      }
+      await manager.save(order);
+
+      if (!needsAdminReview) {
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus,
+            newStatus: order.orderStatus,
+            changedByUserId: technicianUserId,
+            changedByRole: 'technician',
+            changeSource: OrderChangeSource.TECHNICIAN,
+            reason: `الفني عدّل السعر بعد التشخيص — ${newAmountCents} قرش`,
+            metadata: {
+              quote_id: quote.id,
+              quote_version: quote.version,
+              previous_price_cents: currentPriceCents,
+              new_price_cents: newAmountCents,
+              revision_reason: reason,
+            },
+          }),
+        );
+      }
+
+      await this.auditLog.record(
+        {
+          actorUserId: technicianUserId,
+          actorRole: 'technician',
+          action: 'order.quote.diagnosis_revision_submitted',
+          entityType: 'order_quote',
+          entityId: quote.id,
+          oldValues: { estimated_price_cents: currentPriceCents },
+          newValues: {
+            order_id: order.id,
+            version: quote.version,
+            amount_cents: newAmountCents,
+            quote_status: quote.status,
+            reason,
+          },
+        },
+        manager,
+      );
+      return { order, previousStatus };
+    });
+
+    if (result.order.orderStatus !== result.previousStatus) {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.previousStatus,
+          result.order.orderStatus,
+          result.order.customerId,
+          result.order.technicianId,
+          'الفني عدّل السعر بعد التشخيص',
+        ),
+      );
+    }
+    return result.order;
+  }
+
+  /**
    * بند 8 — «إعادة إصدار عرض منتهي الصلاحية».
    *
    * العرض المنتهي **مابيرجعش يشتغل** (ده كان هيخلي الصلاحية بلا معنى) — بيتعمل **إصدار جديد**
@@ -566,16 +728,40 @@ export class InspectionQuoteService {
       const quotedAmountCents = quote.amountCents;
       const previousStatus = order.orderStatus;
 
-      const assessmentCreditCents = this.assessmentCreditFor(order, quotedAmountCents);
+      // **تعديل بعد التشخيص مختلف حسابيًا عن عرض أول** (بند 35): الطلب أصلاً عليه سعر شغل،
+      // فاللي بيتضاف هو **الفرق** مش القيمة كلها. لو حسبناها زي العرض الأول كنا هنضيف السعر
+      // الجديد كامل فوق القديم ونحصّل من العميل مرتين.
+      const isDiagnosisRevision = quote.source === OrderQuoteSource.TECHNICIAN_DIAGNOSIS;
+      const assessmentCreditCents = isDiagnosisRevision ? 0 : this.assessmentCreditFor(order, quotedAmountCents);
+      const deltaCents = isDiagnosisRevision
+        ? quotedAmountCents - (order.estimatedPriceCents ?? 0)
+        : quotedAmountCents - assessmentCreditCents;
 
-      await this.orderFinancials.increasePrice(manager, order, {
-        amountCents: quotedAmountCents - assessmentCreditCents,
-        source: 'inspection_quote',
-        includeInCommissionableBase: true,
-        commissionableAmountCents: quotedAmountCents,
-      });
-      const nextStatus =
-        order.initialQuoteSource === 'admin_remote'
+      if (isDiagnosisRevision && deltaCents < 0) {
+        // التخفيض اتمنع وقت الإرسال لو الطلب مدفوع؛ الطلب غير المدفوع بيتصحّح سعره كاملاً بدل
+        // ما يتزوّد بفرق سالب (increasePrice بترفض السالب أصلاً وده مقصود).
+        await this.orderFinancials.replaceUncommittedPrice(
+          manager,
+          order,
+          order.totalAmountCents + deltaCents,
+        );
+        if (order.commissionableBaseCents !== null) {
+          order.commissionableBaseCents = Math.max(0, order.commissionableBaseCents + deltaCents);
+        }
+      } else {
+        await this.orderFinancials.increasePrice(manager, order, {
+          amountCents: deltaCents,
+          source: isDiagnosisRevision ? 'diagnosis_revision' : 'inspection_quote',
+          includeInCommissionableBase: true,
+          commissionableAmountCents: isDiagnosisRevision ? deltaCents : quotedAmountCents,
+        });
+      }
+      if (isDiagnosisRevision) order.estimatedPriceCents = quotedAmountCents;
+
+      const nextStatus = isDiagnosisRevision
+        ? // الفني واقف في المكان ومستني موافقة على سعر شغل لسه ما بدأش — بيكمّل من مكانه.
+          OrderStatus.IN_PROGRESS
+        : order.initialQuoteSource === 'admin_remote'
           ? OrderStatus.AWAITING_TECHNICIAN_SELECTION
           : order.onsiteAssessorExecutesWorkSnapshot
             ? OrderStatus.IN_PROGRESS
