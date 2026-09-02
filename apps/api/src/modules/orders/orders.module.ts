@@ -42,6 +42,8 @@ import { OrderItem } from './entities/order-item.entity';
 import { OrderInternalNote } from './entities/order-internal-note.entity';
 import { OrderMedia } from './entities/order-media.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
+import { OrderQuote } from './entities/order-quote.entity';
+import { BookingMatchPreview } from './entities/booking-match-preview.entity';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
 
@@ -57,6 +59,8 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
       RecurringOrderTemplate,
       CancellationReason,
       TechnicianOrderCancellation,
+      OrderQuote,
+      BookingMatchPreview,
     ]),
     CustomersModule,
     CatalogModule,

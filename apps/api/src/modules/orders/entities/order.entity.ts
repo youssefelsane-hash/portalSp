@@ -17,6 +17,8 @@ export enum OrderStatus {
   // دي بتؤسس أول سعر لطلب لسه بلا سعر (pricing_model=inspection_then_quote)، مش بتضيف على سعر
   // موجود بالفعل. بتوصل من TECHNICIAN_ARRIVED بس (الفني عاين وحدد سعر).
   AWAITING_INITIAL_QUOTE_APPROVAL = 'awaiting_initial_quote_approval',
+  // Remote quote was approved, but the customer still has to confirm the executor and final price.
+  AWAITING_TECHNICIAN_SELECTION = 'awaiting_technician_selection',
   WORK_COMPLETED = 'work_completed',
   AWAITING_PAYMENT = 'awaiting_payment',
   COMPLETED = 'completed',
@@ -31,6 +33,17 @@ export enum OrderStatus {
   // بس محتاج العميل يختار فني بديل بنفسه. راجع OrdersService.technicianCancel().
   AWAITING_TECHNICIAN_RESELECTION = 'awaiting_technician_reselection',
 }
+
+export enum OrderPriceStatus {
+  CONFIRMED = 'confirmed',
+  PROVISIONAL = 'provisional',
+  WAITING_ASSESSMENT = 'waiting_assessment',
+  WAITING_QUOTE = 'waiting_quote',
+  WAITING_CUSTOMER_APPROVAL = 'waiting_customer_approval',
+  LOCKED = 'locked',
+}
+
+export type OrderAssessmentType = 'remote' | 'onsite';
 
 // ADR-0051 — أسباب تحرير إعادة زيارة مثبّتة (مطابقة لـchk_orders_revisit_release_reason).
 export type RevisitReleaseReason = 'refused' | 'no_response' | 'admin';
@@ -187,6 +200,39 @@ export class Order {
 
   @Column({ name: 'initial_quote_note', type: 'varchar', length: 1000, nullable: true })
   initialQuoteNote: string | null;
+
+  @Column({ name: 'price_status', type: 'varchar', length: 30, default: OrderPriceStatus.CONFIRMED })
+  priceStatus: OrderPriceStatus;
+
+  @Column({ name: 'price_certainty_mode_snapshot', type: 'varchar', length: 30, default: 'confirmed_price' })
+  priceCertaintyModeSnapshot: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+
+  @Column({ name: 'assessment_type', type: 'varchar', length: 20, nullable: true })
+  assessmentType: OrderAssessmentType | null;
+
+  @Column({ name: 'remote_assessment_fee_cents', type: 'integer', default: 0 })
+  remoteAssessmentFeeCents: number;
+
+  @Column({ name: 'assessment_fee_credit_mode_snapshot', type: 'varchar', length: 20, default: 'none' })
+  assessmentFeeCreditModeSnapshot: 'none' | 'full' | 'percentage';
+
+  @Column({ name: 'assessment_fee_credit_bps_snapshot', type: 'integer', default: 0 })
+  assessmentFeeCreditBpsSnapshot: number;
+
+  @Column({ name: 'assessment_fee_credit_cents', type: 'integer', default: 0 })
+  assessmentFeeCreditCents: number;
+
+  @Column({ name: 'display_price_min_cents_snapshot', type: 'integer', nullable: true })
+  displayPriceMinCentsSnapshot: number | null;
+
+  @Column({ name: 'display_price_max_cents_snapshot', type: 'integer', nullable: true })
+  displayPriceMaxCentsSnapshot: number | null;
+
+  @Column({ name: 'onsite_assessor_executes_work_snapshot', type: 'boolean', default: true })
+  onsiteAssessorExecutesWorkSnapshot: boolean;
+
+  @Column({ name: 'selected_match_preview_id', type: 'uuid', nullable: true })
+  selectedMatchPreviewId: string | null;
 
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;

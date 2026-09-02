@@ -43,6 +43,13 @@ export interface OrderResponseDto {
   estimated_price_cents: number | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
   initial_quote_note: string | null;
+  price_status: string;
+  price_certainty_mode: string;
+  assessment_type: 'remote' | 'onsite' | null;
+  remote_assessment_fee_cents: number;
+  assessment_fee_credit_cents: number;
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
   surge_amount_cents: number;
@@ -184,6 +191,13 @@ export function toOrderResponseDto(
     estimated_price_cents: order.estimatedPriceCents,
     initial_quote_source: order.initialQuoteSource,
     initial_quote_note: order.initialQuoteNote,
+    price_status: order.priceStatus,
+    price_certainty_mode: order.priceCertaintyModeSnapshot,
+    assessment_type: order.assessmentType,
+    remote_assessment_fee_cents: order.remoteAssessmentFeeCents,
+    assessment_fee_credit_cents: order.assessmentFeeCreditCents,
+    display_price_min_cents: order.displayPriceMinCentsSnapshot,
+    display_price_max_cents: order.displayPriceMaxCentsSnapshot,
     inspection_fee_cents: order.inspectionFeeCents,
     surge_amount_cents: order.surgeAmountCents,
     level_premium_cents: order.levelPremiumCents,

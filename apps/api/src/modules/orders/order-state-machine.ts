@@ -77,8 +77,17 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   // (بلا رسوم إلغاء إضافية — رسم المعاينة اتحصّل بالفعل).
   [OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL]: [
     OrderStatus.IN_PROGRESS,
+    OrderStatus.AWAITING_TECHNICIAN_SELECTION,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.CANCELLED_BY_CUSTOMER,
+  ],
+  // A remote quote has been accepted, but provider and final level-adjusted price are not locked
+  // yet. The customer can finish selection, cancel, or let operations cancel the request.
+  [OrderStatus.AWAITING_TECHNICIAN_SELECTION]: [
+    OrderStatus.SEARCHING_TECHNICIAN,
+    OrderStatus.PENDING_PAYMENT,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+    OrderStatus.CANCELLED_BY_SYSTEM,
   ],
   // docs/08 §22 بند 13-14 — الفني بلّغ "لم أستلم" الكاش رغم إن الشغل خلص فعلاً.
   [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED, OrderStatus.DISPUTED],
@@ -128,6 +137,7 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.AWAITING_ADMIN_QUOTE,
   OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
   OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+  OrderStatus.AWAITING_TECHNICIAN_SELECTION,
 ]);
 
 // الحالات اللي الطلب "نشط" فيها من ناحية الفني — مُستخدمة في order-tracking.gateway.ts (تحديد

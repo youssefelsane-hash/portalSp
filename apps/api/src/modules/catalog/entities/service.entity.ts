@@ -15,6 +15,25 @@ export enum PricingModel {
   INSPECTION_THEN_QUOTE = 'inspection_then_quote',
   FORMULA = 'formula',
 }
+
+export enum PriceCertaintyMode {
+  CONFIRMED_PRICE = 'confirmed_price',
+  ESTIMATED_RANGE = 'estimated_range',
+  ASSESSMENT_REQUIRED = 'assessment_required',
+}
+
+export enum AssessmentRoutePolicy {
+  ADMIN_TRIAGE = 'admin_triage',
+  REMOTE_ONLY = 'remote_only',
+  ONSITE_ONLY = 'onsite_only',
+  CUSTOMER_CHOICE = 'customer_choice',
+}
+
+export enum AssessmentFeeCreditMode {
+  NONE = 'none',
+  FULL = 'full',
+  PERCENTAGE = 'percentage',
+}
 // ملحوظة: قيم الـPostgres enum القديمة ('fixed', 'hourly', 'per_unit', 'monthly', و'worker_rate'
 // من ADR-0029) فضلت في نوع الـenum نفسه عمدًا — إعادة بناء enum type محتاج إعادة إنشاء العمود،
 // خطر أكبر من فايدة. migration 0242 حوّلت كل الصفوف وحطّت CHECK constraint
@@ -69,6 +88,46 @@ export class Service {
     enumName: 'pricing_model',
   })
   pricingModel: PricingModel;
+
+  @Column({ name: 'price_certainty_mode', type: 'varchar', length: 30, default: PriceCertaintyMode.CONFIRMED_PRICE })
+  priceCertaintyMode: PriceCertaintyMode;
+
+  @Column({ name: 'assessment_route_policy', type: 'varchar', length: 30, default: AssessmentRoutePolicy.ADMIN_TRIAGE })
+  assessmentRoutePolicy: AssessmentRoutePolicy;
+
+  @Column({ name: 'remote_assessment_enabled', type: 'boolean', default: false })
+  remoteAssessmentEnabled: boolean;
+
+  @Column({ name: 'remote_assessment_fee_cents', type: 'integer', default: 0 })
+  remoteAssessmentFeeCents: number;
+
+  @Column({ name: 'onsite_assessment_enabled', type: 'boolean', default: false })
+  onsiteAssessmentEnabled: boolean;
+
+  @Column({ name: 'assessment_fee_credit_mode', type: 'varchar', length: 20, default: AssessmentFeeCreditMode.NONE })
+  assessmentFeeCreditMode: AssessmentFeeCreditMode;
+
+  @Column({ name: 'assessment_fee_credit_bps', type: 'integer', default: 0 })
+  assessmentFeeCreditBps: number;
+
+  @Column({ name: 'onsite_assessor_executes_work', type: 'boolean', default: true })
+  onsiteAssessorExecutesWork: boolean;
+
+  @Column({ name: 'quote_validity_minutes', type: 'integer', default: 2880 })
+  quoteValidityMinutes: number;
+
+  /** Customer-facing fallback range. min/maxPriceCents remain pricing clamps. */
+  @Column({ name: 'display_price_min_cents', type: 'integer', nullable: true })
+  displayPriceMinCents: number | null;
+
+  @Column({ name: 'display_price_max_cents', type: 'integer', nullable: true })
+  displayPriceMaxCents: number | null;
+
+  @Column({ name: 'require_admin_review_above_range', type: 'boolean', default: true })
+  requireAdminReviewAboveRange: boolean;
+
+  @Column({ name: 'max_quote_increase_without_admin_review_bps', type: 'integer', default: 0 })
+  maxQuoteIncreaseWithoutAdminReviewBps: number;
 
   @Column({ name: 'base_price_cents', type: 'integer' })
   basePriceCents: number;
