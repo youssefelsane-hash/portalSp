@@ -29,6 +29,8 @@ import { TechnicianLevelsService } from '../technicians/technician-levels.servic
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { User } from '../auth/entities/user.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
+import { resolveCancellationRefund } from '../orders/assessment-fee-refund-policy';
+import { OrderQuoteSource } from '../orders/entities/order-quote.entity';
 import { prepaidOrderNextStatus } from '../orders/prepaid-order-next-status';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
@@ -3101,6 +3103,36 @@ export class PaymentsService {
       const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
       if (existingRefund) return null;
 
+      // ADR-0069 — رسم معاينة مقابل زيارة **حصلت فعلاً** ممكن يتحجز، حسب سياسة الخدمة المحفوظة
+      // على الطلب. الافتراضي بيرجّع الكل زي ما كان بالظبط.
+      const [onsiteQuote] = await manager.query<{ exists: boolean }[]>(
+        `SELECT EXISTS(SELECT 1 FROM order_quotes WHERE order_id = $1 AND source = $2) AS exists`,
+        [order.id, OrderQuoteSource.TECHNICIAN_ONSITE],
+      );
+      const refundDecision = resolveCancellationRefund(order, {
+        onsiteQuoteExists: onsiteQuote?.exists === true,
+        paidAmountCents: payment.amountCents,
+      });
+      // المحجوز غطّى المبلغ كله — مفيش استرداد يتعمل، والدفعة بتفضل PAID مقابل الزيارة.
+      if (refundDecision.refundableCents <= 0) {
+        await this.auditLog.record(
+          {
+            actorUserId: PLATFORM_SYSTEM_USER_ID,
+            actorRole: 'system',
+            action: 'order.refund_withheld_for_completed_visit',
+            entityType: 'order',
+            entityId: order.id,
+            newValues: {
+              withheld_cents: refundDecision.withheldCents,
+              paid_amount_cents: payment.amountCents,
+              reason: reasonNotes,
+            },
+          },
+          manager,
+        );
+        return null;
+      }
+
       const provider = this.paymentProviders.getProvider(payment.paymentMethod);
       const goesThroughGateway = provider.supportsRefund && !!payment.gatewayTransactionId;
 
@@ -3109,8 +3141,8 @@ export class PaymentsService {
         refundNumber,
         paymentId: payment.id,
         orderId: order.id,
-        amountCents: payment.amountCents,
-        refundType: RefundType.FULL,
+        amountCents: refundDecision.refundableCents,
+        refundType: refundDecision.withheldCents > 0 ? RefundType.PARTIAL : RefundType.FULL,
         reasonNotes,
         refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
         refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
@@ -3123,18 +3155,19 @@ export class PaymentsService {
       });
       await manager.save(refund);
 
-      return { order, payment, goesThroughGateway, provider, refund };
+      return { order, payment, goesThroughGateway, provider, refund, refundDecision };
     });
 
     if (!prepared) return null;
-    const { order, payment, goesThroughGateway, provider, refund } = prepared;
+    const { order, payment, goesThroughGateway, provider, refund, refundDecision } = prepared;
 
     let providerSucceeded = true;
     let providerRefundId: string | null = null;
     if (goesThroughGateway) {
       const providerResult = await provider.refund({
         providerReference: payment.gatewayTransactionId!,
-        amountCents: payment.amountCents,
+        // المبلغ اللي بيروح للبوابة هو المسترد فعلاً — مش المدفوع (ADR-0069).
+        amountCents: refund.amountCents,
         reasonAr: reasonNotes,
       });
       providerSucceeded = providerResult.succeeded;
@@ -3156,6 +3189,8 @@ export class PaymentsService {
             newValues: {
               refund_id: refund.id,
               amount_cents: refund.amountCents,
+              // ADR-0068 §3 — المبلغ المحجوز مسجّل صراحة: مفيش جنيه بيقف من غير سطر بيقول ليه.
+              withheld_for_completed_visit_cents: refundDecision.withheldCents,
               refund_status: refund.refundStatus,
               trigger: triggeredBy,
             },
@@ -3189,7 +3224,9 @@ export class PaymentsService {
           {
             fromWalletId: platformWallet.id,
             toWalletId: customerWallet.id,
-            amountCents: payment.amountCents,
+            // المبلغ المسترد فعلاً مش المدفوع (ADR-0069) — لولا كده مسار المحفظة كان هيرجّع الكل
+            // بينما مسار البوابة بيرجّع الجزئي، يعني نفس القرار بنتيجتين ماليتين مختلفتين.
+            amountCents: refund.amountCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
             referenceId: refund.id,
@@ -3202,10 +3239,17 @@ export class PaymentsService {
         );
       }
 
-      payment.paymentStatus = PaymentGatewayStatus.REFUNDED;
+      const partiallyRefunded = refundDecision.withheldCents > 0;
+      payment.paymentStatus = partiallyRefunded
+        ? PaymentGatewayStatus.PARTIALLY_REFUNDED
+        : PaymentGatewayStatus.REFUNDED;
       await manager.save(payment);
 
-      order.paymentStatus = OrderPaymentStatus.REFUNDED;
+      // استرداد جزئي معناه إن جزء من فلوس العميل **فضل عند المنصة** بشكل مقصود — تعليمه
+      // `refunded` كان هيكدب على أي تقرير مالي بيقرا العمود ده.
+      order.paymentStatus = partiallyRefunded
+        ? OrderPaymentStatus.PARTIALLY_REFUNDED
+        : OrderPaymentStatus.REFUNDED;
       await manager.save(order);
       // orderStatus فضل CANCELLED_BY_SYSTEM/CANCELLED_BY_CUSTOMER عمدًا — مفيش صف
       // OrderStatusHistory إضافي هنا، الكولر (OrderAutoCancelService أو OrdersService.cancel())

@@ -34,6 +34,7 @@ import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { classifyPriceChange, FULL_PRICE_AUTHORITY, PriceChangeAuthority } from './price-change-authority';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
@@ -959,12 +960,20 @@ export class AdminOrdersService {
     return result.order;
   }
 
+  /**
+   * ADR-0068 §1 — سلطة السعر مفصولة لتلاتة، والفرز بيتم بـ**أثر التغيير** مش بالـendpoint.
+   *
+   * الصلاحيات بتتحل في الـcontroller وبتتمرّر هنا محسومة: القرار نفسه لازم يتاخد **جوّه**
+   * الترانزاكشن وبعد قفل الصف، لأن الاتجاه (زيادة/إعفاء) متوقّف على السعر الحالي — لو فحصناه
+   * برّه كان فيه نافذة السعر يتغيّر فيها بين الفحص والقفل.
+   */
   async adjustPrice(
     adminUserId: string,
     orderId: string,
     newTotalAmountCents: number,
     reason: string,
     meta?: AuditActorMeta,
+    authority: PriceChangeAuthority = FULL_PRICE_AUTHORITY,
   ): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       const order = await manager
@@ -993,6 +1002,22 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
       }
 
+      const change = classifyPriceChange(order, newTotalAmountCents);
+      if (change.isIncrease && !authority.canApprovePriceIncrease) {
+        throw new ApiException(
+          ErrorCode.AUTH_001,
+          'دورك بيسمح بتعديل السعر لكن مش باعتماد زيادة على العميل',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      if (change.waivesFees && !authority.canWaiveFees) {
+        throw new ApiException(
+          ErrorCode.AUTH_001,
+          'السعر الجديد بينزل تحت رسوم التقييم/المعاينة المسجّلة على الطلب — ده إعفاء من رسوم ودورك مش مديك الصلاحية دي',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
       const financialChange = await this.orderFinancials.replaceUncommittedPrice(
         manager,
         order,
@@ -1013,6 +1038,9 @@ export class AdminOrdersService {
             total_amount_cents: financialChange.newTotalCents,
             commissionable_base_cents: financialChange.newCommissionableBaseCents,
             reason,
+            // نوع القرار مسجّل صراحة عشان المراجعة اللاحقة تعرف ده كان خفض عادي ولا إعفاء
+            // رسوم ولا زيادة على العميل — من غيره المبلغين لوحدهم بيخلّوا التمييز شغل يدوي.
+            change_kind: change.isIncrease ? 'increase' : change.waivesFees ? 'fee_waiver' : 'decrease',
           },
           meta,
         },

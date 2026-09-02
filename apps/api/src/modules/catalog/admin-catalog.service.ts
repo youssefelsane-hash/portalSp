@@ -375,6 +375,9 @@ export class AdminCatalogService {
     if (dto.onsite_assessor_executes_work !== undefined) {
       service.onsiteAssessorExecutesWork = dto.onsite_assessor_executes_work;
     }
+    if (dto.assessment_fee_refundable_after_visit !== undefined) {
+      service.assessmentFeeRefundableAfterVisit = dto.assessment_fee_refundable_after_visit;
+    }
     if (dto.quote_validity_minutes !== undefined) service.quoteValidityMinutes = dto.quote_validity_minutes;
     if (dto.range_percent_below !== undefined) service.rangePercentBelow = String(dto.range_percent_below);
     if (dto.range_percent_above !== undefined) service.rangePercentAbove = String(dto.range_percent_above);

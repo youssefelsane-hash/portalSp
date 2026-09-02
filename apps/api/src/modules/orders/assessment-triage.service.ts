@@ -9,6 +9,14 @@ import {
   ORDER_ASSESSMENT_INFO_REQUESTED_EVENT,
   OrderAssessmentInfoRequestedEvent,
 } from '../../common/events/order-assessment-info-requested.event';
+import {
+  ORDER_QUOTE_ABOVE_RANGE_DECIDED_EVENT,
+  OrderQuoteAboveRangeDecidedEvent,
+} from '../../common/events/order-quote-above-range-decided.event';
+import {
+  ORDER_ROUTED_TO_ONSITE_ASSESSMENT_EVENT,
+  OrderRoutedToOnsiteAssessmentEvent,
+} from '../../common/events/order-routed-to-onsite-assessment.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
@@ -161,6 +169,18 @@ export class AssessmentTriageService {
         'الإدارة حوّلت الطلب لمعاينة في الموقع',
       ),
     );
+    // الحالة الجديدة بتتشارك مع التوزيع العادي اللي مالوش إشعار عمدًا، فالعميل ماكانش بياخد أي
+    // حاجة — رغم إن رسم معاينة اتضاف على طلبه (ADR-0067 §1).
+    this.events.emit(
+      ORDER_ROUTED_TO_ONSITE_ASSESSMENT_EVENT,
+      new OrderRoutedToOnsiteAssessmentEvent(
+        result.order.id,
+        result.order.orderNumber,
+        result.order.customerId,
+        result.order.inspectionFeeCents,
+        reason,
+      ),
+    );
     // التوزيع كله معلّق على الحدث ده (ADR-0018) — من غيره الطلب بيقف في SEARCHING_TECHNICIAN.
     await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(result.order.id));
     return result.order;
@@ -285,6 +305,21 @@ export class AssessmentTriageService {
       );
       return { order, quote, previousStatus };
     });
+
+    // الفني اللي بعت العرض لازم ياخد رد في الحالتين. مسار الرفض مابيغيّرش حالة الطلب خالص،
+    // فماكانش بيتبعت عنه أي حدث والفني المطلوب منه سعر جديد ماكانش فيه حاجة تقوله (ADR-0067 §1).
+    this.events.emit(
+      ORDER_QUOTE_ABOVE_RANGE_DECIDED_EVENT,
+      new OrderQuoteAboveRangeDecidedEvent(
+        result.order.id,
+        result.order.orderNumber,
+        result.quote.id,
+        result.quote.amountCents,
+        approve,
+        reason,
+        result.quote.submittedByUserId,
+      ),
+    );
 
     if (result.order.orderStatus !== result.previousStatus) {
       this.events.emit(

@@ -57,6 +57,10 @@ import { SecurityEventRoutingListener } from './listeners/security-event-routing
 import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
 import { OrderLockedProviderLostNotificationListener } from './listeners/order-locked-provider-lost-notification.listener';
 import { OrderAssessmentInfoRequestedListener } from './listeners/order-assessment-info-requested.listener';
+import { OrderQuoteAboveRangeRoutingListener } from './listeners/order-quote-above-range-routing.listener';
+import { OrderQuoteAboveRangeDecidedNotificationListener } from './listeners/order-quote-above-range-decided-notification.listener';
+import { OrderQuoteExpiredNotificationListener } from './listeners/order-quote-expired-notification.listener';
+import { OrderRoutedToOnsiteNotificationListener } from './listeners/order-routed-to-onsite-notification.listener';
 import { OrderCrewChangedNotificationListener } from './listeners/order-crew-changed-notification.listener';
 import { TechnicianServiceVerificationNotificationListener } from './listeners/technician-service-verification-notification.listener';
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
@@ -139,6 +143,10 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     TechnicianCancellationNotificationListener,
     OrderLockedProviderLostNotificationListener,
     OrderAssessmentInfoRequestedListener,
+    OrderQuoteAboveRangeRoutingListener,
+    OrderQuoteAboveRangeDecidedNotificationListener,
+    OrderQuoteExpiredNotificationListener,
+    OrderRoutedToOnsiteNotificationListener,
     OrderAssistantAssignedManuallyNotificationListener,
     OrderOfferNotificationListener,
     WorkOpportunityOfferedNotificationListener,

@@ -107,6 +107,11 @@ export class Service {
   @Column({ name: 'assessment_fee_credit_mode', type: 'varchar', length: 20, default: AssessmentFeeCreditMode.NONE })
   assessmentFeeCreditMode: AssessmentFeeCreditMode;
 
+  // ADR-0069 — الافتراضي true = سلوك ما قبل ADR-0069 بالحرف (الرسم بيترجع كامل). المالك بيفعّلها
+  // للخدمات اللي زيارة المعاينة فيها تكلفة حقيقية.
+  @Column({ name: 'assessment_fee_refundable_after_visit', type: 'boolean', default: true })
+  assessmentFeeRefundableAfterVisit: boolean;
+
   @Column({ name: 'assessment_fee_credit_bps', type: 'integer', default: 0 })
   assessmentFeeCreditBps: number;
 

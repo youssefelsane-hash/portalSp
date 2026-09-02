@@ -854,3 +854,15 @@ rank_score = … − distance_km × effective_distance_weight
   بيعيّن فني بالقوة، والتثبيت الصح **عرض حصري** يقبله بنفسه.
 - `listAvailableForTechnician()` بقت بترجّع `order_type` ورقم الطلب الأصلي — الفني لازم يعرف إن
   ده إعادة زيارة (طلب مالك صريح).
+
+## فك قفل المنفّذ بيسجّل audit (ADR-0068 §3)
+
+`releaseLockedProvider()` بينادي `levelPremiumService.reverseOnProviderLost()` — يعني **بيرجّع
+فلوس فعليًا من إجمالي الطلب**. قبل ADR-0068 ده كان بيتسجّل في `order_status_history` بس، من غير
+أي سطر audit بيقول ليه ولا كام اترجّع. القاعدة الحاكمة: «لا يدخل جنيه ولا يخرج دون Ledger/Audit
+يوضح المصدر والوجهة والطلب والطرف والسبب».
+
+الفعل `order.provider_lock.released` بـ`actorRole: 'system'`، وفيه سبب الفقد وفرق المستوى اللي
+اترجّع والفني اللي ضاع. `AuditLogService` حُقن `@Optional()` عمدًا — عشرات السبيكات بتبني
+`MatchingService` بـpositional args؛ في الإنتاج الـDI بيوفّرها دايمًا، و
+`provider-lock-no-silent-replacement.spec.ts` بيثبت الكتابة الفعلية.

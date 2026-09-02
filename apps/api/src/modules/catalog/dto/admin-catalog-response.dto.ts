@@ -88,6 +88,7 @@ export interface AdminServiceResponseDto {
   remote_assessment_fee_cents: number;
   onsite_assessment_enabled: boolean;
   assessment_fee_credit_mode: string;
+  assessment_fee_refundable_after_visit: boolean;
   assessment_fee_credit_bps: number;
   onsite_assessor_executes_work: boolean;
   quote_validity_minutes: number;
@@ -150,6 +151,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     remote_assessment_fee_cents: service.remoteAssessmentFeeCents,
     onsite_assessment_enabled: service.onsiteAssessmentEnabled,
     assessment_fee_credit_mode: service.assessmentFeeCreditMode,
+    assessment_fee_refundable_after_visit: service.assessmentFeeRefundableAfterVisit,
     assessment_fee_credit_bps: service.assessmentFeeCreditBps,
     onsite_assessor_executes_work: service.onsiteAssessorExecutesWork,
     quote_validity_minutes: service.quoteValidityMinutes,

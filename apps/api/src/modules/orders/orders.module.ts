@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from '../admin/admin.module';
 import { AuditModule } from '../audit/audit.module';
 import { BuildingsModule } from '../buildings/buildings.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -29,6 +30,7 @@ import { CrewShortageEscalationService } from './crew-shortage-escalation.servic
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { AssessmentTriageService } from './assessment-triage.service';
+import { QuoteExpiryService } from './quote-expiry.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
 import { PricingFieldImagesService } from './pricing-field-images.service';
@@ -76,6 +78,8 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     PaymentsModule,
     SupportModule,
     AuditModule,
+    // ADR-0068 — الـcontroller بيحلّ صلاحيتَي السعر الأدق (زيادة/إعفاء) قبل ما ينادي الخدمة.
+    AdminModule,
     BuildingsModule,
     RealtimeSecurityModule,
   ],
@@ -96,6 +100,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderItemsService,
     InspectionQuoteService,
     AssessmentTriageService,
+    QuoteExpiryService,
     OrderInternalNotesService,
     OrderMediaService,
     PricingFieldImagesService,
