@@ -36,6 +36,21 @@ export function bookingMatchContextHash(
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+/**
+ * **بصمة الحجز بلا الفني** (ADR-0065 §4) — نفس الدالة فوق بالظبط بـ`technician_id` فاضي.
+ *
+ * `bookingMatchContextHash` بيدخل فيه الفني، فتذكرة لفني تاني بتديّ هاش مختلف بالضرورة —
+ * مالوش لازمة لسؤال «هي دي نفس الشغلانة؟». البصمة دي هي اللي بتخلي إعادة اختيار المنفّذ تقدر
+ * تثبت إن التذكرة الجديدة لنفس المدخلات، مش لحجز أرخص.
+ *
+ * `selection_mode` مستبعد كمان: العميل يقدر يعيد الاختيار يدويًا بعد ما كان تلقائي (والعكس)،
+ * وده مش تغيير في الشغلانة نفسها.
+ */
+export function bookingContextHashWithoutProvider(dto: PreviewOrderDto): string {
+  const payload = canonicalize({ dto: { ...dto, requested_technician_id: undefined } });
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
 /** يحصر مدخلات إنشاء الطلب في الحقول التي أثرت فعليًا على السعر والمطابقة. */
 export function bookingPreviewInputFromCreate(dto: CreateOrderDto): PreviewOrderDto {
   return {

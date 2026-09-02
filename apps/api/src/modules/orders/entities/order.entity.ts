@@ -1,5 +1,11 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
+/**
+ * ADR-0066 §1 — إزاي اتقفل المنفّذ على الطلب. معرَّف هنا (مش في `order-provider-lock.ts`) عشان
+ * الملف ده مايستوردش من هناك — الاتجاه دايمًا من المنطق للكيان، مش العكس.
+ */
+export type ProviderLockSource = 'match_preview' | 'post_quote_selection';
+
 // مطابق لـ infra/migrations/0007_orders.sql — القائمة الكاملة في docs/02-data-dictionary.md §6.2
 export enum OrderStatus {
   DRAFT = 'draft',
@@ -233,6 +239,18 @@ export class Order {
 
   @Column({ name: 'selected_match_preview_id', type: 'uuid', nullable: true })
   selectedMatchPreviewId: string | null;
+
+  /**
+   * ADR-0065 §4 — بصمة مدخلات الحجز **بلا الفني**. إعادة اختيار المنفّذ بتقارنها بتذكرة المعاينة
+   * الجديدة عشان تتأكد إن التذكرة لنفس الشغلانة، مش لشغلانة أرخص. `null` للطلبات اللي اتعملت
+   * قبل migration 0248 أو من غير تذكرة أصلاً.
+   */
+  @Column({ name: 'booking_context_hash', type: 'varchar', length: 64, nullable: true })
+  bookingContextHash: string | null;
+
+  /** ADR-0066 §1 — إزاي اتقفل المنفّذ: تذكرة معاينة، أو اختيار بعد عرض سعر معتمد. `null` = توزيع حر. */
+  @Column({ name: 'provider_lock_source', type: 'varchar', length: 30, nullable: true })
+  providerLockSource: ProviderLockSource | null;
 
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;

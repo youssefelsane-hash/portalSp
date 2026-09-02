@@ -150,12 +150,35 @@ export class CatalogController {
   @Public()
   @Get('services/:id/technicians')
   async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
+    const service = await this.catalogService.findServiceOrThrow(id);
+    const isEmergency = query.booking_mode === 'emergency';
+    // خدمات formula من غير field_values مالهاش سعر ولا حمل تشغيلي معروف لسه (العميل ما ملاش
+    // الفورم) — بترجع null صراحة بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
+    const canPrice = !(service.pricingModel === PricingModel.FORMULA && !query.field_values);
+    // **ADR-0064 §3** — الحمل التشغيلي بيتحسب **مرة واحدة قبل الفلترة**، بنفس محرك التسعير اللي
+    // `POST /orders` هيستخدمه بالحرف (تسعير محايد بلا مستوى فني — المدة مخرج المعادلة، مش
+    // بتتغيّر بمستوى المنفّذ). من غيره كانت فلترة التوافر بتفترض «يوم واحد» لأي حجز مهما كان
+    // مداه، فحجز 67 يوم يفضل يعرض فني عنده شغل في نص المدى (بلاغ المالك 2026-09-02).
+    //
+    // المنطقة لازم تتحدد الأول عشان التسعير المحايد يبقى بنفس منطقة الحجز الفعلي — نفس نداء
+    // المنطقة اللي `listForServiceBooking()` بتعمله جوّاها (استخراج، مش استعلام تاني موازي).
+    const zone = await this.techniciansService.resolveZoneForAddressOrThrow(query.address_id);
+    const neutralEstimate = canPrice
+      ? await this.catalogService.estimate(id, zone.id, undefined, isEmergency, query.field_values)
+      : null;
     const { zoneId, items } = await this.techniciansService.listForServiceBooking(
       id,
       query.address_id,
       query.exclude_technician_id,
       query.scheduled_at ? new Date(query.scheduled_at) : null,
       query.booking_mode === 'team',
+      true,
+      neutralEstimate
+        ? {
+            durationMinutes: neutralEstimate.duration_minutes,
+            estimatedDurationDays: neutralEstimate.estimated_duration_days,
+          }
+        : undefined,
     );
     // ADR-0031 — avatar_storage_key (لو موجود) هو المصدر المعتمد، بيتفك لرابط طازة هنا قبل الرد
     // (presigned S3 URLs بتنتهي، مش نستخدم avatarUrl الخام مباشرة). صفر أثر لو مفيش صور معتمدة أصلاً.
@@ -164,8 +187,6 @@ export class CatalogController {
         item.avatarUrl = await resolveAvatarUrl(this.storage, item.avatarUrl, item.avatarStorageKey);
       }),
     );
-    const service = await this.catalogService.findServiceOrThrow(id);
-    const isEmergency = query.booking_mode === 'emergency';
     // خدمات formula محتاجة field_values عشان estimate() تقدر تحسب سعر أصلاً (المعادلة نفسها
     // بتحتاج مدخلات الفورم الديناميكي) — لو العميل ملاها بالفعل قبل الوصول لشاشة اختيار الفني
     // (field_values اتبعتت)، بقى نقدر نحسب final_price_cents حقيقي لكل فني حسب مستواه بالظبط
@@ -173,7 +194,7 @@ export class CatalogController {
     // catalogService.estimate()'s FORMULA branch). لو لسه مالهاش field_values، بترجع null صراحة
     // بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
     const withPricing =
-      service.pricingModel === PricingModel.FORMULA && !query.field_values
+      !canPrice
         ? items.map((item) => ({ item, estimate: null }))
         : await Promise.all(
             items.map(async (item) => {

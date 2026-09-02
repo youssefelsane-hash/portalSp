@@ -110,6 +110,41 @@ export function isSoloJob(order: Pick<Order, 'requiredTechnicians' | 'requiredAs
   return (order.requiredTechnicians ?? 1) <= 1 && (order.requiredAssistants ?? 0) === 0;
 }
 
+/**
+ * **هل الطلب ده محتاج طاقم زيادة عن القائد؟** (ADR-0064 §1) — نقطة القراءة الوحيدة للسؤال ده.
+ *
+ * بلاغ مالك حقيقي (2026-09-02): فني وحيد على طلب فردي دَس «ابدأ الشغل» فاترفض بـ«الطاقم لسه
+ * ناقص — محتاج 0 فني و1 مساعد»، **والأدمن مكانش واخد باله أصلاً**.
+ *
+ * السبب: نفس السؤال كان متجاوب عليه في مكانين بتعريفين مختلفين —
+ *   • بوابة `IN_PROGRESS` في `OrdersService`: `TEAM` **أو** فنيين>1 **أو** مساعدين>0.
+ *   • مسح التصعيد في `CrewShortageEscalationService`: `bookingMode = TEAM` **بس**.
+ *
+ * فالطلب الفردي المحتاج مساعد كان بيقع في الفجوة بالظبط: **بيتمنع** من البدء، و**مابيتصعّدش**
+ * للإدارة. الفني واقف، العميل مستني، ومحدش عارف. الدالة دي بتخلي التعريف واحد، فالفجوة دي
+ * مستحيلة بنيويًا مش متصلّحة في موضع.
+ */
+export function orderRequiresCrewBeyondLeader(
+  order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants' | 'bookingMode'>,
+): boolean {
+  return order.bookingMode === BookingMode.TEAM || !isSoloJob(order);
+}
+
+/**
+ * رسالة نقص الطاقم للفني — **بتذكر الناقص بس** (ADR-0064 §1).
+ *
+ * الرسالة القديمة كانت بتقول حرفيًا «محتاج 0 فني و1 مساعد»، والصفر ده مش معلومة، ده ضوضاء
+ * بتخلي الفني يقرا رقمين عشان يعرف واحد. وكانت كمان بتسيبه في طريق مسدود بلا أي إشارة إن حد
+ * بيتصرّف. دلوقتي بتسمّي الناقص الفعلي، وبتقول له إن الإدارة اتبلّغت.
+ */
+export function crewShortageMessageAr(crew: Pick<CrewComposition, 'missingTechnicians' | 'missingAssistants'>): string {
+  const parts: string[] = [];
+  if (crew.missingTechnicians > 0) parts.push(`${crew.missingTechnicians} فني`);
+  if (crew.missingAssistants > 0) parts.push(`${crew.missingAssistants} مساعد`);
+  const missing = parts.join(' و');
+  return `الطاقم لسه ناقص ${missing} — بلّغنا الإدارة وهيتم تدبيره. لو الشغل ينفع يبدأ من غيره، كلّم الدعم.`;
+}
+
 /** كام خانة مساعد اختياري لسه مفتوحة. صفر لأي طلب مش فردي، أو لو الميزة متقفلة من الإعدادات. */
 export function computeOptionalAssistantSlots(
   order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'> & { orderType?: OrderType },

@@ -1694,3 +1694,85 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 
 أي اختبار بيستدعي `cancel()` بلا سبب لازم يمرّر stub فيه `listActive` (مش `{} as never`) —
 `orders-cancel-prepaid-refund.spec.ts` مثال. التغطية الحية في `orders-cancel-reason-required.spec.ts`.
+
+## بوابة بدء الشغل والتصعيد بيسألوا نفس السؤال بنفس الدالة (ADR-0064 §1)
+
+**بلاغ مالك حقيقي (2026-09-02)**: فني وحيد على شغلانة، داس «ابدأ الشغل»، اترفض بـ«الطاقم لسه
+ناقص — محتاج 0 فني و1 مساعد»، ومحدش في الإدارة عرف إن فيه شغل متعطّل.
+
+السبب: بوابة `IN_PROGRESS` في `orders.service.ts` كانت بتسأل «محتاج طاقم؟» بـ
+`TEAM || required_technicians > 1 || required_assistants > 0`، و`CrewShortageEscalationService.sweep()`
+كانت بتسأل نفس السؤال بـ`booking_mode = TEAM` بس. طلب `individual` محتاج مساعد واحد بيقع في
+الفجوة: **ممنوع يبدأ، ومش بيتصعّد**.
+
+- `orderRequiresCrewBeyondLeader()` (`order-team.service.ts`) هي نقطة القراءة الوحيدة دلوقتي.
+  الاتنين بينادوها — مستحيل يفترقوا.
+- `escalateNow(orderId, reason)` بيتصعّد **لحظة** المنع، مش في المسح الدوري الجاي. ده كمان
+  بيغطّي طلبات ASAP بلا `scheduled_at` اللي كانت بتفلت من شرط الـsweep (`scheduled_at <= cutoff`).
+  الحارس ضد التكرار هو `crew_shortage_escalated_at IS NULL` نفسه، مش عدّاد جديد.
+- `crewShortageMessageAr()` بتذكر الناقص الفعلي بس — «محتاج 0 فني» كان عرض هيكل بيانات داخلي
+  للمستخدم، مش رسالة.
+
+الحقن `@Optional()` عمدًا: عشرات الاختبارات القديمة بتبني `OrdersService` بـpositional args.
+
+## أي حالة طلب جديدة لازم توصل الحزمة المشتركة (ADR-0064 §2)
+
+`awaiting_technician_selection` (migration 0247) اتضافت للداتابيز والباك-إند وما وصلتش
+`@baytak/shared-types` ولا مفردات الأدمن. `Record<OrderStatus, string>` كان هيمسكها **لو**
+الـunion اتحدّث — بس الـunion هو اللي كان ناقص، فالنوع فضل «كامل» شكليًا.
+
+الحارس: `admin-orders-visibility.spec.ts` بيقارن `pg_enum` × `OrderStatus` × `ORDER_STATUSES`
+على داتابيز حقيقية، وبيتأكد إن `list()` و`toOrderResponseDto()` والفلترة بالحالة بيشتغلوا لكل
+قيمة. أي حالة تتضاف في migration بلا الحزمة المشتركة بتفشل الاختبار **باسمها**.
+
+## قفل المنفّذ: الفني اللي العميل أكّده مايتبدلش بصمت (ADR-0065)
+
+بعد ADR-0063 بقى العميل يشوف **فني بعينه بسعره بالذات** ويأكّد. اللي كان ناقص إن
+`requested_technician_id` فضل يتقري كـ«تفضيل» في التوزيع، فالطلب كان يروح لفني تاني — وده مش
+استبدال منفّذ بس، ده **زيادة سعر صامتة** (مستوى الفني التاني ممكن يكون أغلى).
+
+- `orderHasLockedProvider(order)` (`order-provider-lock.ts`) = `selectedMatchPreviewId != null
+  && requestedTechnicianId != null`. لما ترجع `true`، `MatchingService` بيستخدم **قايمة حصرية**
+  (نفس آلية `pinnedOnlyCandidates` بتاعة إعادة الزيارة) وبيتخطى **كل** الـfallbacks — الشركة،
+  البث المفتوح، وتوسيع المشغولين — على **كل** الجولات مش الأولى بس.
+- المنفّذ لما يضيع (رفض / مهلة / بقى غير متاح): الطلب بيروح
+  `AWAITING_TECHNICIAN_RESELECTION` (انتقال جديد من `SEARCHING_TECHNICIAN`)، القفل بينفك،
+  والعميل بياخد إشعار بيقول **إن محدش اتحجز بداله وإن السعر ما اتغيّرش**.
+- `create()` بيعيد فحص الفني **جوّه نفس الترانزاكشن** بعد ما يقفل صفه، بنفس
+  `TechnicianAssignmentGuardService.assertEligible()` اللي التعيين الإداري بيستخدمه. الرفض
+  بيرول باك الطلب كله ويعلّم التذكرة `stale` — مفيش طلب بيتعمل ومفيش سعر بيتغيّر.
+- `requestRematch` بقى **يطلب تذكرة معاينة جديدة** لأي طلب سعره مربوط بمنفّذ
+  (`orderPriceIsProviderBound`، أي `booking_context_hash != null`)، وبيحدّث سعر الطلب من لقطة
+  التذكرة. الطلبات القديمة (مسار إلغاء الفني، docs/10) بسلوكها القديم بالحرف.
+
+**قيد حقيقي في القاعدة صحّح تنفيذًا غلط**: أول نسخة كانت بتحاول ترجّع التذكرة المستهلَكة
+`stale` وقت فك القفل، و`chk_booking_match_preview_consumed` رفضت. القيد كان محق — التذكرة
+اتستهلكت فعلاً والطلب اتعمل، والتاريخ ده مايتغيّرش لأن المنفّذ ضاع بعدين.
+
+الاختبار الحي: `provider-lock-no-silent-replacement.spec.ts` — بيغطي سيناريو المالك بالحرف
+(«أحمد بسعر 330، بقى غير متاح، التأكيد لا يحجز محمد ولا يغيّر السعر») + التوزيع + إعادة الاختيار.
+
+## اختيار المنفّذ بعد عرض السعر (ADR-0066)
+
+`AWAITING_TECHNICIAN_SELECTION` كانت **حالة بلا مخرج**: عرض السعر عن بُعد بيوصلها والعميل بيقف
+فيها للأبد. `PostQuoteProviderSelectionService` هو المخرج:
+
+- `GET /orders/:id/provider-candidates` — **نفس** قايمة السوق (`listForServiceBooking`) بالحرف،
+  الفرق الوحيد إن سعر كل مرشّح = قيمة العرض المعتمد + فرق مستواه (معروض كسطر مستقل).
+- `POST /orders/:id/select-provider` — بيقفل صف الفني، بيفحصه بنفس بوابة المطابقة، بيضيف فرق
+  المستوى **مرة واحدة**، وبيقفل الطلب عليه (`provider_lock_source = 'post_quote_selection'`)
+  فالتوزيع مايستبدلوش بصمت (ADR-0065 §1).
+
+**فرق المستوى** بقى واجهتين على كور واحد في `LevelPremiumService`:
+`applyOnAutoAssignment()` (المطابقة عيّنت فني على حجز عادي) و`applyOnProviderSelection()`
+(العميل اختار منفّذ فوق عرض معتمد). الحارس ضد التحصيل المزدوج (`levelPremiumCents > 0`) مشترك.
+عرض السعر بالموقع من نفس الفني مابيمرّش على أي واحدة منهم أصلاً (بيروح `IN_PROGRESS` مباشرة)،
+فمفيش ضرب مستوى تاني — والاختبار بيثبت ده صراحة مش بالافتراض.
+
+ولما المنفّذ المقفول يضيع، الفرق بتاعه **بيترجّع** قبل فك القفل (`reverseOnProviderLost` عبر
+`replaceUncommittedPrice` اللي بيرفض لو بدأ أي التزام دفع)، وإلا الحارس كان هيمنع فرق المنفّذ
+الجديد ويسيب الطلب على سعر حد مش هو اللي هينفّذ.
+
+`provider_lock_source` (migration 0249) هو مصدر الحقيقة لنوع القفل، وبيحدد كمان الطلب بيرجع لفين
+لما القفل ينفك: تذكرة حجز ⇒ `AWAITING_TECHNICIAN_RESELECTION`، اختيار بعد عرض ⇒
+`AWAITING_TECHNICIAN_SELECTION`. كل واحد بيرجع لبابه.

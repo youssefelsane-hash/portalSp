@@ -53,12 +53,13 @@ describe('CrewShortageEscalationService — تصعيد نقص الطاقم قب�
       orderStatus?: OrderStatus;
       alreadyEscalated?: boolean;
       bookingMode?: BookingMode;
+      requiredAssistants?: number;
     },
   ) {
     const scheduledAt = new Date(Date.now() + opts.scheduledInHours * 60 * 60 * 1000);
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants, scheduled_at, crew_shortage_escalated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0,$8,$9,0,$10,$11) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0,$8,$9,$10,$11,$12) RETURNING id`,
       [
         `TESTESC-${label}`.slice(0, 24),
         ids.customerProfile,
@@ -69,6 +70,7 @@ describe('CrewShortageEscalationService — تصعيد نقص الطاقم قب�
         opts.orderStatus ?? OrderStatus.TECHNICIAN_ASSIGNED,
         opts.bookingMode ?? BookingMode.TEAM,
         opts.requiredTechnicians,
+        opts.requiredAssistants ?? 0,
         scheduledAt,
         opts.alreadyEscalated ? new Date() : null,
       ],
@@ -259,11 +261,65 @@ describe('CrewShortageEscalationService — تصعيد نقص الطاقم قب�
     expect(row.crew_shortage_escalated_at).toBeNull();
   });
 
-  it('sweep() — طلب فردي (booking_mode=individual) مش بيتصعّد حتى لو required_technicians ناقص نظريًا', async () => {
+  /**
+   * **الاختبار ده اتقلب** (ADR-0064 §1) — كان بيوثّق السلوك القديم: «طلب فردي مش بيتصعّد».
+   *
+   * بلاغ المالك أثبت إن السلوك ده غلط: طلب فردي محتاج مساعد كان **بيتمنع** من البدء ببوابة
+   * `IN_PROGRESS` و**مابيتصعّدش** هنا، فالفني بيقف قدام باب مقفول والإدارة مش عارفة. الشرط بقى
+   * «الطلب محتاج طاقم زيادة عن القائد» بدل «وضع الحجز فريق» — ووضع الحجز مجرد تسمية تجارية،
+   * مش وصف للاحتياج التشغيلي الفعلي.
+   */
+  it('sweep() — طلب فردي محتاج فنيين أكتر من واحد بيتصعّد (وضع الحجز مش هو المعيار)', async () => {
     const orderId = await insertOrder('individual', { requiredTechnicians: 2, scheduledInHours: 2, bookingMode: BookingMode.INDIVIDUAL });
     await escalationService.sweep();
     const [row] = await q(`SELECT crew_shortage_escalated_at FROM orders WHERE id = $1`, [orderId]);
+    expect(row.crew_shortage_escalated_at).not.toBeNull();
+  });
+
+  // بلاغ المالك بالحرف: فني وحيد على طلب فردي محتاج مساعد واحد.
+  it('sweep() — طلب فردي محتاج مساعد واحد بيتصعّد (بلاغ المالك بالظبط)', async () => {
+    const orderId = await insertOrder('solo-needs-assistant', {
+      requiredTechnicians: 1,
+      requiredAssistants: 1,
+      scheduledInHours: 2,
+      bookingMode: BookingMode.INDIVIDUAL,
+    });
+    await escalationService.sweep();
+    const [row] = await q(`SELECT crew_shortage_escalated_at FROM orders WHERE id = $1`, [orderId]);
+    expect(row.crew_shortage_escalated_at).not.toBeNull();
+  });
+
+  // الحد التاني: شغلانة فردية حقيقية (فني واحد، صفر مساعدين) مالهاش نقص أصلاً — مايتصعّدش.
+  it('sweep() — شغلانة فردية حقيقية (1 فني، 0 مساعد) مش بتتصعّد', async () => {
+    const orderId = await insertOrder('true-solo', {
+      requiredTechnicians: 1,
+      requiredAssistants: 0,
+      scheduledInHours: 2,
+      bookingMode: BookingMode.INDIVIDUAL,
+    });
+    await escalationService.sweep();
+    const [row] = await q(`SELECT crew_shortage_escalated_at FROM orders WHERE id = $1`, [orderId]);
     expect(row.crew_shortage_escalated_at).toBeNull();
+  });
+
+  // التصعيد الفوري — نفس المسار بالظبط، بس بلا شرط الموعد (الفني واقف دلوقتي).
+  it('escalateNow() — طلب ASAP بلا موعد بيتصعّد فورًا، ومرة واحدة بس', async () => {
+    const orderId = await insertOrder('asap-blocked', {
+      requiredTechnicians: 1,
+      requiredAssistants: 1,
+      scheduledInHours: 500, // بعيد جدًا عن نافذة المسح الدوري
+      bookingMode: BookingMode.INDIVIDUAL,
+    });
+    await q(`UPDATE orders SET scheduled_at = NULL WHERE id = $1`, [orderId]);
+
+    expect(await escalationService.escalateNow(orderId, 'technician_blocked_at_start')).toBe(true);
+    const [first] = await q(`SELECT crew_shortage_escalated_at FROM orders WHERE id = $1`, [orderId]);
+    expect(first.crew_shortage_escalated_at).not.toBeNull();
+
+    // دوس تاني ⇒ مفيش تصعيد جديد ومفيش إشعار مكرر للإدارة.
+    expect(await escalationService.escalateNow(orderId, 'technician_blocked_at_start')).toBe(false);
+    const [second] = await q(`SELECT crew_shortage_escalated_at FROM orders WHERE id = $1`, [orderId]);
+    expect(second.crew_shortage_escalated_at.getTime()).toBe(first.crew_shortage_escalated_at.getTime());
   });
 
   it('sweep() — طلب اتصعّد بالفعل (crew_shortage_escalated_at متسجّل مسبقًا) ميتلمسش تاني', async () => {

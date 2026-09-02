@@ -132,6 +132,19 @@ export function technicianDayLoadSubquery(opts: DayLoadOpts): string {
  *
  * دلوقتي الكولر بيقول **مصدر بيانات الطلب المرشّح** بس (أعمدته)، والقاعدة نفسها واحدة.
  */
+/**
+ * **الحمل التشغيلي لشغلانة لسه ما اتعملتش** (ADR-0064 §3) — القيم الفعلية اللي محرك التسعير
+ * طلّعها من مدخلات العميل، قبل ما يبقى فيه صف `orders` نقراها منه.
+ *
+ * ده اللي بيخلي كل شاشة بتعرض «متاح/مش متاح» **قبل** الحجز تقيس بنفس مسطرة التوزيع الفعلي.
+ * `null` في أي حقل معناها «المحرك ماحددهاش» — ومتعمّد إنها تفضل `null` لحد
+ * `candidatePerDayMinutesExpr()`، مش تتحوّل لقيمة «معقولة» في الطريق (ADR-0061 §2، الفخ الموثّق).
+ */
+export interface CandidateOperationalLoad {
+  durationMinutes: number | null;
+  estimatedDurationDays: number | null;
+}
+
 export interface CandidateLoadSource {
   /** تعبير SQL بيرجّع `estimated_duration_days` للطلب المرشّح (أو `NULL`). */
   estimatedDurationDaysExpr: string;

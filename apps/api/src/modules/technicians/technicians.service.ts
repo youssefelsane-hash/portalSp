@@ -5,6 +5,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
+import { ServiceZone } from '../geo/entities/service-zone.entity';
 import { Service } from '../catalog/entities/service.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from '../catalog/entities/technician-service.entity';
 import {
@@ -31,7 +32,7 @@ import {
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
+import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 import { cairoDayString, cairoDaySequence, cairoMidnight } from '../pricing/pricing-temporal';
 
 export interface TechnicianBookingListItem {
@@ -335,6 +336,34 @@ export class TechniciansService {
   }
 
   /**
+   * منطقة الخدمة اللي عنوان العميل واقع فيها — **نقطة القراءة الوحيدة** للسؤال ده.
+   *
+   * كانت مدفونة جوّه `listForServiceBooking()`، فالكولر ماكانش يعرف المنطقة إلا **بعد** ما
+   * القايمة ترجع. ده خلّى استحالة يحسب سعر/حمل تشغيلي بالمنطقة الصح **قبل** فلترة التوافر
+   * (ADR-0064 §3). استخراج، مش نسخة تانية — `listForServiceBooking()` نفسها بقت بتناديها.
+   */
+  async resolveZoneForAddressOrThrow(addressId: string): Promise<ServiceZone> {
+    interface AddressRow {
+      city_id: string | null;
+      latitude: number;
+      longitude: number;
+    }
+    const [address] = await this.technicianProfiles.manager.query<AddressRow[]>(
+      `SELECT city_id, ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude
+       FROM addresses WHERE id = $1 AND deleted_at IS NULL`,
+      [addressId],
+    );
+    if (!address || !address.city_id) {
+      throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const zone = await this.geoService.findZoneForPoint(address.city_id, address.latitude, address.longitude);
+    if (!zone) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة مش متاحة في منطقتك دلوقتي', HttpStatus.CONFLICT);
+    }
+    return zone;
+  }
+
+  /**
    * قايمة الفنيين المؤهلين لخدمة في منطقة العميل — اختيار الفني قبل الحجز (docs/08 §3، بدل
    * auto-match بس). مرحلتين (Script 6 Part 9):
    *
@@ -363,25 +392,12 @@ export class TechniciansService {
     // افتراضيًا (فردي/طوارئ) = صفر تغيير عن السلوك الحالي.
     isTeamBooking = false,
     includeCompanyEntities = true,
+    // **ADR-0064 §3** — الحمل التشغيلي الحقيقي للحجز اللي العميل بيحضّره (ناتج محرك التسعير من
+    // مدخلات الفورم). من غيره الفلترة بتفترض «يوم واحد» لأي حجز مهما كان مداه، فحجز 67 يوم كان
+    // بيتفحص على يوم بدايته بس والفني المشغول في نص المدى يفضل ظاهر «متاح» (بلاغ المالك).
+    candidateLoad?: CandidateOperationalLoad,
   ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
-    interface AddressRow {
-      city_id: string | null;
-      latitude: number;
-      longitude: number;
-    }
-    const [address] = await this.technicianProfiles.manager.query<AddressRow[]>(
-      `SELECT city_id, ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude
-       FROM addresses WHERE id = $1 AND deleted_at IS NULL`,
-      [addressId],
-    );
-    if (!address || !address.city_id) {
-      throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
-    }
-
-    const zone = await this.geoService.findZoneForPoint(address.city_id, address.latitude, address.longitude);
-    if (!zone) {
-      throw new ApiException(ErrorCode.VAL_001, 'الخدمة مش متاحة في منطقتك دلوقتي', HttpStatus.CONFLICT);
-    }
+    const zone = await this.resolveZoneForAddressOrThrow(addressId);
 
     const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
     const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
@@ -483,7 +499,14 @@ export class TechniciansService {
           activeStatusesParam: '$8',
           engagedStatusesParam: '$9',
           isEmergencyParam: '$10',
-          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          serviceDurationExpr: 'COALESCE($13::int, (SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1))',
+          // ADR-0064 §3 — نفس شكل `MatchingService.findEligibleTechnicians()` بالحرف: أعمدة
+          // المرشّح بتتبعت كـparameters، والقاعدة نفسها بتتطبّق عليها جوّه المحرك المشترك.
+          candidateLoad: {
+            estimatedDurationDaysExpr: '$14::numeric',
+            durationMinutesExpr: '$13::int',
+            serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+          },
           dailyCapacityMinutesParam: '$11',
         })}
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, COALESCE(ts.completed_count, 0) DESC
@@ -502,6 +525,8 @@ export class TechniciansService {
         false,
         dailyCapacityMinutes,
         isTeamBooking,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
       ],
     );
 
@@ -547,6 +572,7 @@ export class TechniciansService {
             individualItems.map((i) => i.technicianId),
             isTeamBooking,
             dailyCapacityMinutes,
+            candidateLoad,
           )
         : [];
 
@@ -616,7 +642,12 @@ export class TechniciansService {
           activeStatusesParam: '$5',
           engagedStatusesParam: '$6',
           isEmergencyParam: '$7',
-          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          serviceDurationExpr: 'COALESCE($9::int, (SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1))',
+          candidateLoad: {
+            estimatedDurationDaysExpr: '$10::numeric',
+            durationMinutesExpr: '$9::int',
+            serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+          },
           dailyCapacityMinutesParam: '$8',
         })}
       GROUP BY tc.id, tc.name
@@ -631,6 +662,8 @@ export class TechniciansService {
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
         dailyCapacityMinutes,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
       ],
     );
 
@@ -698,6 +731,7 @@ export class TechniciansService {
     excludeTechnicianIds: string[],
     isTeamBooking: boolean,
     dailyCapacityMinutes: number,
+    candidateLoad: CandidateOperationalLoad | undefined,
   ): Promise<TechnicianBookingListItem[]> {
     interface ConflictedRow {
       technician_id: string;
@@ -750,7 +784,15 @@ export class TechniciansService {
           activeStatusesParam: '$5',
           engagedStatusesParam: '$6',
           isEmergencyParam: '$7',
-          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          serviceDurationExpr: 'COALESCE($11::int, (SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1))',
+          // ADR-0064 §3 — «متعارض» هو **العكس الدقيق** لـ«متاح»، فلازم يتقاس بنفس الحمل بالظبط.
+          // لو الاتنين اتقاسوا بمسطرتين، فني ممكن يقع بره القايمتين (لا متاح ولا متعارض) فيختفي
+          // من شاشة العميل تمامًا بلا أي سبب معروض.
+          candidateLoad: {
+            estimatedDurationDaysExpr: '$12::numeric',
+            durationMinutesExpr: '$11::int',
+            serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+          },
           dailyCapacityMinutesParam: '$8',
         })}
       ORDER BY average_rating DESC, distance_km ASC NULLS LAST
@@ -767,6 +809,8 @@ export class TechniciansService {
         dailyCapacityMinutes,
         excludeTechnicianIds,
         isTeamBooking,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
       ],
     );
 
@@ -797,6 +841,11 @@ export class TechniciansService {
           zoneId,
           addressId,
           new Date(cairoMidnight(lastBusyDay).getTime() + 24 * 60 * 60 * 1000),
+          undefined,
+          // ADR-0064 §3 — «متاح تاني إمتى؟» لازم يجاوب على **نفس الحجز** اللي العميل بيحاوله،
+          // مش على شغلانة افتراضية يوم واحد. من غير كده الاقتراح ممكن يرجّع يوم فاضي ليوم واحد
+          // بس، والعميل يحاول فيه فيترفض تاني.
+          candidateLoad,
         );
         // شبكة أمان أخيرة — لو رغم كل ده الاقتراح طلع بنفس تاريخ اليوم المطلوب (نفس التنسيق
         // المستخدم فوق في `dateOnly`)، بلاش نعرضه: مفيش اقتراح أوضح من عدم عرض اقتراح غلط.
@@ -854,6 +903,7 @@ export class TechniciansService {
     date: Date,
     technicianId?: string,
     excludeOrderId?: string,
+    candidateLoad?: CandidateOperationalLoad,
   ): Promise<boolean> {
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [{ exists }] = await this.technicianProfiles.manager.query<{ exists: boolean }[]>(
@@ -883,7 +933,12 @@ export class TechniciansService {
             activeStatusesParam: '$5',
             engagedStatusesParam: '$6',
             isEmergencyParam: '$7',
-            serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+            serviceDurationExpr: 'COALESCE($11::int, (SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1))',
+            candidateLoad: {
+              estimatedDurationDaysExpr: '$12::numeric',
+              durationMinutesExpr: '$11::int',
+              serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+            },
             dailyCapacityMinutesParam: '$8',
           })}
       ) AS exists
@@ -899,6 +954,8 @@ export class TechniciansService {
         dailyCapacityMinutes,
         technicianId ?? null,
         excludeOrderId ?? null,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
       ],
     );
     return exists;
@@ -917,6 +974,7 @@ export class TechniciansService {
     addressId: string,
     fromDate: Date,
     maxDays = 30,
+    candidateLoad?: CandidateOperationalLoad,
   ): Promise<string | null> {
     // **بَقّة حقيقية اتصلحت (ADR-0059 §6، بلاغ مالك: «الاقتراح ده مش شغال بكفاءة، هو أصلًا
     // بيجيبنا في اليوم بتاع النهاردة»)**: النسخة القديمة كانت بتبني اليوم المرشّح بجمع 24 ساعة
@@ -934,6 +992,8 @@ export class TechniciansService {
         // يزحلق اليوم عند تغيير التوقيت الصيفي.
         cairoMidnight(candidateDayString),
         technicianId,
+        undefined,
+        candidateLoad,
       );
       if (eligible) return candidateDayString;
     }

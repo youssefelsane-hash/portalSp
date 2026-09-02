@@ -21,7 +21,45 @@ export type OrderStatus =
   | 'disputed'
   | 'refunded'
   // سياسة إلغاء الفني (docs/10) — فني لغى طلب كان العميل مختاره بنفسه، مستني العميل يختار بديل.
-  | 'awaiting_technician_reselection';
+  | 'awaiting_technician_reselection'
+  // ADR-0063 / migration 0247 — العميل وافق على عرض سعر الإدارة، وباقي إنه يختار المنفّذ.
+  | 'awaiting_technician_selection';
+
+/**
+ * **كل حالات الطلب كقيم وقت-تشغيل** — مش نوع بس (ADR-0064 §2).
+ *
+ * الاتحاد فوق نوع TypeScript، يعني بيختفي وقت التشغيل ومفيش حاجة تقدر تتأكد إنه مطابق لـenum
+ * قاعدة البيانات. القايمة دي هي النسخة القابلة للفحص: اختبار حي في `apps/api` بيقارنها بـ
+ * `pg_enum` مباشرة، فأي حالة جديدة تتضاف للداتابيز من غير ما تتسجّل هنا **بتكسر الاختبار فورًا**
+ * بدل ما تعيش صامتة وتخلي طلب حقيقي غير مرئي في لوحة الإدارة.
+ *
+ * ده اللي حصل فعلاً مع `awaiting_technician_selection`: اتضافت للباك-إند وقاعدة البيانات، وفضلت
+ * ناقصة من هنا ومن `ORDER_STATUS_LABELS` — فالأدمن مكانش عنده أصلاً كلمة يوصف بيها الحالة دي.
+ */
+export const ORDER_STATUSES = [
+  'draft',
+  'pending_payment',
+  'searching_technician',
+  'technician_assigned',
+  'accepted',
+  'technician_on_way',
+  'technician_arrived',
+  'in_progress',
+  'awaiting_quote_approval',
+  'awaiting_admin_quote',
+  'awaiting_initial_quote_approval',
+  'work_completed',
+  'awaiting_payment',
+  'completed',
+  'cancelled_by_customer',
+  'cancelled_by_technician',
+  'cancelled_by_system',
+  'expired',
+  'disputed',
+  'refunded',
+  'awaiting_technician_reselection',
+  'awaiting_technician_selection',
+] as const satisfies readonly OrderStatus[];
 
 export interface OrderResponseDto {
   id: string;

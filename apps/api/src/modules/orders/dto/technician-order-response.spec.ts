@@ -67,6 +67,15 @@ const fullOrder: OrderResponseDto = {
   initial_quote_note: null,
   pricing_period_start: null,
   pricing_period_end: null,
+  // ADR-0063 — حقول رحلة التقييم/عرض السعر (migration 0247). زوّدها هنا لما تزوّد حقل في العقد
+  // المشترك، وقرّر صراحةً: هل الفني المفروض يشوفه؟ الحقول المالية منها في FORBIDDEN_FIELDS تحت.
+  price_status: 'estimated',
+  price_certainty_mode: 'confirmed_price',
+  assessment_type: null,
+  remote_assessment_fee_cents: 0,
+  assessment_fee_credit_cents: 0,
+  display_price_min_cents: null,
+  display_price_max_cents: null,
 };
 
 const FORBIDDEN_FIELDS = [

@@ -23,6 +23,13 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   ],
   [OrderStatus.SEARCHING_TECHNICIAN]: [
     OrderStatus.TECHNICIAN_ASSIGNED,
+    // ADR-0065 §2 — الطلب مقفول على منفّذ بعينه والمنفّذ ده ضاع (رفض/مهلة/بقى غير متاح).
+    // مفيش fallback لفني تاني، فالطلب بيقف عند العميل يختار من جديد. الانتقال ده كان مسموح
+    // من ACCEPTED/ON_WAY/ARRIVED بس (إلغاء الفني بعد القبول) — ده بيحصل **قبل** أي قبول.
+    OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+    // ADR-0066 §2 — نفس الحالة بس لطلب اتقفل من مسار عرض السعر: بيرجع لقايمة مرشّحي نفس
+    // العرض، مش لمعاينة حجز جديدة (الحجز اتعمل من زمان).
+    OrderStatus.AWAITING_TECHNICIAN_SELECTION,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.EXPIRED,

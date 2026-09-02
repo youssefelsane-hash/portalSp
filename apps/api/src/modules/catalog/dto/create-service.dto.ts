@@ -15,7 +15,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { PricingModel } from '../entities/service.entity';
+import { AssessmentFeeCreditMode, AssessmentRoutePolicy, PriceCertaintyMode, PricingModel } from '../entities/service.entity';
 import { SCHEDULE_PRECISIONS, SchedulePrecision } from '../schedule-precision';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
@@ -216,4 +216,73 @@ export class CreateServiceDto {
   @IsString({ each: true })
   @MaxLength(60, { each: true })
   search_keywords?: string[];
+
+  // ===== ADR-0063/0066 — سياسة تحديد السعر والمعاينة (migration 0247) =====
+  // كل الحقول دي اختيارية بالكامل: الافتراضيات في الداتابيز آمنة (`confirmed_price` + كل مسارات
+  // التقييم مقفولة)، فأي خدمة قديمة أو أي كولر مابيبعتهاش بتفضل بسلوكها بالحرف.
+
+  /** سعر مؤكد / نطاق تقديري / محتاج تقييم — ده اللي بيحدد شكل الخطوة الأولى عند العميل. */
+  @IsOptional()
+  @IsEnum(PriceCertaintyMode)
+  price_certainty_mode?: PriceCertaintyMode;
+
+  @IsOptional()
+  @IsEnum(AssessmentRoutePolicy)
+  assessment_route_policy?: AssessmentRoutePolicy;
+
+  @IsOptional()
+  @IsBoolean()
+  remote_assessment_enabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  remote_assessment_fee_cents?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  onsite_assessment_enabled?: boolean;
+
+  @IsOptional()
+  @IsEnum(AssessmentFeeCreditMode)
+  assessment_fee_credit_mode?: AssessmentFeeCreditMode;
+
+  /** نسبة الخصم بالعشر-آلاف (bps) — 10000 = 100%. بتُقرأ بس لو الوضع `percentage`. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  assessment_fee_credit_bps?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  onsite_assessor_executes_work?: boolean;
+
+  /** صلاحية عرض السعر بالدقايق — إعداد إداري، مش رقم مخبّي في الكود (بند 51 من السكربت). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  quote_validity_minutes?: number;
+
+  /** حدود **العرض** للعميل — منفصلة عمدًا عن min/max اللي بتقصّ ناتج المعادلة (بند 29). */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  display_price_min_cents?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  display_price_max_cents?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  require_admin_review_above_range?: boolean;
+
+  /** العتبة اللي فوقها الزيادة بتحتاج مراجعة إدارة — قابلة للضبط، مش 20% ثابتة (بند 34). */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  max_quote_increase_without_admin_review_bps?: number;
 }

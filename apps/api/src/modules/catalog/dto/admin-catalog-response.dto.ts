@@ -80,6 +80,21 @@ export interface AdminServiceResponseDto {
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
+  // ADR-0063/0066 — سياسة تحديد السعر والمعاينة (migration 0247). كانت في الداتابيز والكيان
+  // وما وصلتش الرد، فواجهة الأدمن ماكانتش تقدر تعرضها ولا تعدّلها.
+  price_certainty_mode: string;
+  assessment_route_policy: string;
+  remote_assessment_enabled: boolean;
+  remote_assessment_fee_cents: number;
+  onsite_assessment_enabled: boolean;
+  assessment_fee_credit_mode: string;
+  assessment_fee_credit_bps: number;
+  onsite_assessor_executes_work: boolean;
+  quote_validity_minutes: number;
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  require_admin_review_above_range: boolean;
+  max_quote_increase_without_admin_review_bps: number;
   /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات: `full_day` أو `start_time`. */
   schedule_precision: SchedulePrecision;
   min_technician_level: string;
@@ -127,6 +142,19 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     allows_date_range_booking: service.allowsDateRangeBooking,
     allows_recurring_booking: service.allowsRecurringBooking,
     show_unavailable_providers: service.showUnavailableProviders,
+    price_certainty_mode: service.priceCertaintyMode,
+    assessment_route_policy: service.assessmentRoutePolicy,
+    remote_assessment_enabled: service.remoteAssessmentEnabled,
+    remote_assessment_fee_cents: service.remoteAssessmentFeeCents,
+    onsite_assessment_enabled: service.onsiteAssessmentEnabled,
+    assessment_fee_credit_mode: service.assessmentFeeCreditMode,
+    assessment_fee_credit_bps: service.assessmentFeeCreditBps,
+    onsite_assessor_executes_work: service.onsiteAssessorExecutesWork,
+    quote_validity_minutes: service.quoteValidityMinutes,
+    display_price_min_cents: service.displayPriceMinCents,
+    display_price_max_cents: service.displayPriceMaxCents,
+    require_admin_review_above_range: service.requireAdminReviewAboveRange,
+    max_quote_increase_without_admin_review_bps: service.maxQuoteIncreaseWithoutAdminReviewBps,
     schedule_precision: schedulePrecision(service),
     min_technician_level: service.minTechnicianLevel,
     commission_percentage: Number(service.commissionPercentage),
