@@ -44,6 +44,14 @@ import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { InspectionQuoteService } from './inspection-quote.service';
+import { AssessmentTriageService } from './assessment-triage.service';
+import {
+  AssessmentQueueQueryDto,
+  DecideAboveRangeQuoteDto,
+  ReissueQuoteDto,
+  RequestAssessmentInfoDto,
+  RouteToOnsiteAssessmentDto,
+} from './dto/assessment-triage.dto';
 import { SubmitAdminPhotoQuoteDto } from './dto/submit-admin-photo-quote.dto';
 import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 
@@ -65,6 +73,7 @@ export class AdminOrdersController {
     private readonly customerProfilesService: CustomerProfilesService,
     private readonly catalogService: CatalogService,
     private readonly inspectionQuoteService: InspectionQuoteService,
+    private readonly assessmentTriage: AssessmentTriageService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -81,6 +90,17 @@ export class AdminOrdersController {
       })),
       meta,
     };
+  }
+
+  /**
+   * بند 7 — طابور «طلبات التقييم».
+   *
+   * **لازم تفضل فوق أي `@Get(':id')`**: NestJS بيطابق المسارات بترتيب التسجيل، فلو نزلت تحت
+   * `@Get(':id')` كانت `assessment-queue` هتتقري كـid وترجع 400.
+   */
+  @Get('assessment-queue')
+  async assessmentQueue(@Query() query: AssessmentQueueQueryDto) {
+    return this.assessmentTriage.listAssessmentQueue(query.filter);
   }
 
   /**
@@ -460,6 +480,70 @@ export class AdminOrdersController {
   @Get(':id/quotes')
   async listQuotes(@Param('id', ParseUUIDPipe) id: string) {
     return (await this.inspectionQuoteService.listQuotesForOrder(id)).map(toOrderQuoteResponseDto);
+  }
+
+  // ===== فرز التقييم (بنود 7 و8) =====
+  // كل القرارات تحت بتغيّر سعر العميل أو بتحمّله رسم، فبتاخد نفس بوابة `orders.adjust_price`
+  // + step-up MFA بالحرف زي `photo-quote` و`adjust-price` فوق. مفيش صلاحية أوسع لقرار مالي.
+
+  @Post(':id/route-to-onsite-assessment')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
+  async routeToOnsiteAssessment(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RouteToOnsiteAssessmentDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.assessmentTriage.routeToOnsiteAssessment(admin.sub, id, dto.reason, audit),
+    );
+  }
+
+  @Post(':id/request-assessment-info')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.adjust_price')
+  async requestAssessmentInfo(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RequestAssessmentInfoDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.assessmentTriage.requestMoreInformation(admin.sub, id, dto.message, audit),
+    );
+  }
+
+  @Post(':id/quotes/:quoteId/above-range-decision')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
+  async decideAboveRangeQuote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('quoteId', ParseUUIDPipe) quoteId: string,
+    @Body() dto: DecideAboveRangeQuoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderQuoteResponseDto(
+      await this.assessmentTriage.decideAboveRangeQuote(admin.sub, id, quoteId, dto.approve, dto.reason, audit),
+    );
+  }
+
+  @Post(':id/quotes/reissue')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
+  async reissueQuote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReissueQuoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderQuoteResponseDto(
+      await this.inspectionQuoteService.reissueExpiredQuote(admin.sub, id, dto.new_amount_cents, audit),
+    );
   }
 
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — قرار مالي (رسوم + استرداد)، نفس مستوى حساسية

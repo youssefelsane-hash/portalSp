@@ -137,6 +137,37 @@ import {
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { formatEgp } from '@/lib/format';
 
+/** إصدار عرض سعر كما بيرجّعه `GET /admin/orders/:id/quotes`. */
+interface AdminOrderQuote {
+  id: string;
+  version: number;
+  source: string;
+  status: string;
+  amount_cents: number;
+  diagnosis: string | null;
+  revision_reason: string | null;
+  expected_max_cents: number | null;
+  valid_until: string;
+  created_at: string;
+  admin_decided_at: string | null;
+  customer_decided_at: string | null;
+}
+
+const QUOTE_STATUS_LABELS: Record<string, string> = {
+  pending_admin_review: 'مستني مراجعة الإدارة',
+  pending_customer: 'مستني العميل',
+  approved: 'معتمد',
+  rejected: 'مرفوض',
+  expired: 'منتهي الصلاحية',
+  superseded: 'اتبدل بعرض أحدث',
+};
+
+const QUOTE_SOURCE_LABELS: Record<string, string> = {
+  admin_remote: 'الإدارة — من الصور',
+  technician_onsite: 'الفني — بعد المعاينة',
+  technician_diagnosis: 'الفني — بعد التشخيص',
+};
+
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
@@ -148,6 +179,10 @@ export default function OrderDetailPage() {
   const [earningShares, setEarningShares] = useState<OrderEarningShareResponseDto[] | null>(null);
   const [earningSharesError, setEarningSharesError] = useState(false);
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
+  // بند 8 — إصدارات عرض السعر. الـendpoint كان موجود من غير أي شاشة بتقراه.
+  const [quotes, setQuotes] = useState<AdminOrderQuote[]>([]);
+  const [quoteDecisionReason, setQuoteDecisionReason] = useState('');
+  const [reissueEgp, setReissueEgp] = useState('');
   const [quoteItems, setQuoteItems] = useState<OrderItemResponseDto[]>([]);
   const [timeline, setTimeline] = useState<OrderTimelineEventResponseDto[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +215,10 @@ export default function OrderDetailPage() {
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
   const [photoQuoteEgp, setPhotoQuoteEgp] = useState('');
   const [photoQuoteNote, setPhotoQuoteNote] = useState('');
+  // بند 8 — القرارات اللي مش تسعير: الصور مش كفاية، أو ناقص معلومات.
+  const [triageReason, setTriageReason] = useState('');
+  const [infoRequest, setInfoRequest] = useState('');
+  const [triageOutcome, setTriageOutcome] = useState<string | null>(null);
   const [uploadingProblemImages, setUploadingProblemImages] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
@@ -260,6 +299,9 @@ export default function OrderDetailPage() {
     authedFetch<OrderItemResponseDto[]>(`/admin/orders/${id}/quote-items`)
       .then(setQuoteItems)
       .catch(() => setQuoteItems([]));
+    authedFetch<AdminOrderQuote[]>(`/admin/orders/${id}/quotes`)
+      .then(setQuotes)
+      .catch(() => setQuotes([]));
     // الملخص المالي (docs/08 §20 بند 11) — مسار منفصل عمداً زي الصور وبنود العرض فوق
     authedFetch<OrderFinancialSummaryResponseDto>(`/admin/orders/${id}/financial-summary`)
       .then(setFinancialSummary)
@@ -552,6 +594,99 @@ export default function OrderDetailPage() {
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'تعذّر إرسال عرض السعر');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // بند 8 — «تحويل لمعاينة في الموقع». الطلب بيتوزّع على معاين والسعر بيتحدد بعد الزيارة.
+  async function handleRouteToOnsite(e: FormEvent) {
+    e.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    setTriageOutcome(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/route-to-onsite-assessment`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: triageReason.trim() }),
+      });
+      setTriageReason('');
+      setTriageOutcome('اتحوّل لمعاينة في الموقع، والطلب راح للتوزيع على معاين.');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر التحويل لمعاينة في الموقع');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // بند 8 — «طلب معلومات إضافية». مفيش تغيير حالة: العميل بياخد إشعار بالمطلوب منه.
+  async function handleRequestInfo(e: FormEvent) {
+    e.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    setTriageOutcome(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/request-assessment-info`, {
+        method: 'POST',
+        body: JSON.stringify({ message: infoRequest.trim() }),
+      });
+      setInfoRequest('');
+      setTriageOutcome('اتبعت للعميل طلب المعلومات، والطلب فاضل مستني التسعير.');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إرسال طلب المعلومات');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // بند 8 — قبول/رفض عرض خرج عن النطاق. العرض ده العميل ماشافهوش أصلاً.
+  async function handleAboveRangeDecision(quoteId: string, approve: boolean) {
+    if (quoteDecisionReason.trim().length < 3) {
+      setError('اكتب سبب القرار — بيتسجّل في سجل النشاط');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setTriageOutcome(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/quotes/${quoteId}/above-range-decision`, {
+        method: 'POST',
+        body: JSON.stringify({ approve, reason: quoteDecisionReason.trim() }),
+      });
+      setQuoteDecisionReason('');
+      setTriageOutcome(approve ? 'العرض اتعمد وراح للعميل.' : 'العرض اترفض، والفني مطلوب منه سعر جديد.');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تسجيل القرار');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // بند 8 — إعادة إصدار عرض منتهي الصلاحية كإصدار **جديد**.
+  async function handleReissueQuote(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = reissueEgp.trim();
+    const newAmountCents = trimmed ? Math.round(Number(trimmed) * 100) : undefined;
+    if (trimmed && (!Number.isFinite(newAmountCents) || (newAmountCents ?? 0) < 1)) {
+      setError('اكتب سعر صحيح أكبر من صفر، أو سيبه فاضي عشان يتبعت بنفس السعر');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setTriageOutcome(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/quotes/reissue`, {
+        method: 'POST',
+        body: JSON.stringify(newAmountCents ? { new_amount_cents: newAmountCents } : {}),
+      });
+      setReissueEgp('');
+      setTriageOutcome('اتعمل إصدار جديد من العرض وراح للعميل بمهلة جديدة.');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّرت إعادة إصدار العرض');
     } finally {
       setIsSaving(false);
     }
@@ -992,6 +1127,142 @@ export default function OrderDetailPage() {
                 <p className="text-xs text-destructive">تحتاج صلاحية تعديل الأسعار لإرسال العرض.</p>
               )}
             </form>
+
+            {/* بند 8 — القرارين التانيين على نفس الشاشة: مش كل فرز بينتهي بسعر. من غيرهم الأدمن
+                مالوش غير «ابعت سعر» حتى لو الصور مش كفاية أصلاً. */}
+            <div className="grid gap-3 md:grid-cols-2">
+              <form onSubmit={handleRouteToOnsite} className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+                <Label htmlFor="triage-reason">الصور مش كفاية — تحويل لمعاينة في الموقع</Label>
+                <Input
+                  id="triage-reason"
+                  value={triageReason}
+                  onChange={(event) => setTriageReason(event.target.value)}
+                  placeholder="السبب اللي هيتسجّل ويظهر في تاريخ الطلب"
+                  required
+                  minLength={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  الطلب هيتوزّع على معاين، وهيتحمّل رسم المعاينة المحدد في الخدمة، والسعر هيتحدد بعد الزيارة.
+                </p>
+                <Button type="submit" variant="outline" disabled={isSaving || !hasPermission('orders.adjust_price')}>
+                  {isSaving ? 'جاري التحويل…' : 'تحويل لمعاينة في الموقع'}
+                </Button>
+              </form>
+
+              <form onSubmit={handleRequestInfo} className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+                <Label htmlFor="info-request">ناقص معلومات — اطلبها من العميل</Label>
+                <Input
+                  id="info-request"
+                  value={infoRequest}
+                  onChange={(event) => setInfoRequest(event.target.value)}
+                  placeholder="مثال: ابعتلنا صورة للعداد من قريب"
+                  required
+                  minLength={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  العميل هياخد إشعار بالمطلوب منه. حالة الطلب مش هتتغير — هيفضل مستني التسعير.
+                </p>
+                <Button type="submit" variant="outline" disabled={isSaving || !hasPermission('orders.adjust_price')}>
+                  {isSaving ? 'جاري الإرسال…' : 'طلب معلومات إضافية'}
+                </Button>
+              </form>
+            </div>
+            {triageOutcome && <p className="text-sm text-emerald-600">{triageOutcome}</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* بند 8 — إصدارات عرض السعر وقراراتها. الـendpoint كان موجود من غير مستهلك، يعني الأدمن
+          ماكانش يقدر يشوف تاريخ الأسعار ولا يتصرف في عرض خارج النطاق أو منتهي. */}
+      {quotes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>عروض السعر ({quotes.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="p-2 text-start">الإصدار</th>
+                    <th className="p-2 text-start">المصدر</th>
+                    <th className="p-2 text-start">المبلغ</th>
+                    <th className="p-2 text-start">الحالة</th>
+                    <th className="p-2 text-start">الصلاحية</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {quotes.map((quote) => (
+                    <tr key={quote.id} className="border-t">
+                      <td className="p-2">#{quote.version}</td>
+                      <td className="p-2">{QUOTE_SOURCE_LABELS[quote.source] ?? quote.source}</td>
+                      <td className="p-2 whitespace-nowrap">{formatEgp(quote.amount_cents)}</td>
+                      <td className="p-2">
+                        <Badge variant={quote.status === 'pending_admin_review' ? 'destructive' : 'outline'}>
+                          {QUOTE_STATUS_LABELS[quote.status] ?? quote.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2 whitespace-nowrap text-xs text-muted-foreground">
+                        {new Date(quote.valid_until).toLocaleString('ar-EG')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {quotes
+              .filter((quote) => quote.status === 'pending_admin_review')
+              .map((quote) => (
+                <div key={quote.id} className="space-y-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+                  <p className="text-sm font-medium">
+                    الإصدار #{quote.version} بـ{formatEgp(quote.amount_cents)} عدّى النطاق
+                    {quote.expected_max_cents ? ` (سقف النطاق ${formatEgp(quote.expected_max_cents)})` : ''} — العميل لسه ماشافهوش.
+                  </p>
+                  {quote.diagnosis && <p className="text-xs text-muted-foreground">تشخيص الفني: {quote.diagnosis}</p>}
+                  <Input
+                    value={quoteDecisionReason}
+                    onChange={(event) => setQuoteDecisionReason(event.target.value)}
+                    placeholder="سبب القرار (بيتسجّل في سجل النشاط)"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={isSaving || !hasPermission('orders.adjust_price')}
+                      onClick={() => handleAboveRangeDecision(quote.id, true)}
+                    >
+                      اعتماد وإرساله للعميل
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={isSaving || !hasPermission('orders.adjust_price')}
+                      onClick={() => handleAboveRangeDecision(quote.id, false)}
+                    >
+                      رفض وطلب سعر جديد
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+            {quotes.length > 0 && ['expired'].includes(quotes[quotes.length - 1].status) && (
+              <form onSubmit={handleReissueQuote} className="space-y-2 rounded-xl border bg-background p-4">
+                <Label htmlFor="reissue-egp">العرض خلصت صلاحيته — إعادة إصدار</Label>
+                <Input
+                  id="reissue-egp"
+                  inputMode="decimal"
+                  value={reissueEgp}
+                  onChange={(event) => setReissueEgp(event.target.value)}
+                  placeholder="سيبه فاضي عشان يتبعت بنفس السعر"
+                />
+                <p className="text-xs text-muted-foreground">
+                  بيتعمل <strong>إصدار جديد</strong> بمهلة جديدة — العرض القديم بيفضل منتهي في التاريخ.
+                </p>
+                <Button type="submit" variant="outline" disabled={isSaving || !hasPermission('orders.adjust_price')}>
+                  {isSaving ? 'جاري الإصدار…' : 'إعادة إصدار العرض'}
+                </Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       )}

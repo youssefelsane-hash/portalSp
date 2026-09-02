@@ -75,6 +75,9 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_CUSTOMER],
   [OrderStatus.AWAITING_ADMIN_QUOTE]: [
     OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+    // فرز الأدمن (بند 8) — الصور مش كفاية، فالطلب بيتحوّل لمعاينة في الموقع: بيتوزّع على معاين
+    // زي أي طلب، والسعر بيتحدد بعد الزيارة بدل ما يتحدد من الصور.
+    OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_SYSTEM,
   ],

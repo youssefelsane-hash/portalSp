@@ -6,7 +6,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingModel } from '../catalog/entities/service.entity';
+import { PricingModel, Service } from '../catalog/entities/service.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -49,6 +49,52 @@ export class InspectionQuoteService {
     private readonly auditLog: AuditLogService,
   ) {}
 
+  /**
+   * بوابة «السعر خارج النطاق يروح لمراجعة الأدمن» (بند 33 من سكربت المالك، ADR-0063).
+   *
+   * بتسري على عروض **الفني** بس (معاينة بالموقع أو تعديل بعد التشخيص). عرض الأدمن نفسه
+   * مابيتعرضش على الأدمن تاني — هو اللي كتبه.
+   *
+   * المرجع اللي بنقيس عليه بالترتيب:
+   *   1. سقف النطاق التقديري المحفوظ على الطلب (`display_price_max_cents_snapshot`).
+   *   2. لو مفيش نطاق: قيمة آخر عرض **معتمد** — يعني الفني بيزوّد على سعر العميل وافق عليه.
+   *   3. لو مفيش لا ده ولا ده: مفيش مرجع نحكم بيه، فمفيش بوابة (صفر تغيير سلوك للخدمات اللي
+   *      مالهاش نطاق النهاردة).
+   *
+   * السماح = المرجع + `max_quote_increase_without_admin_review_bps`. الافتراضي 0 نقطة أساس،
+   * يعني أي مليم فوق النطاق بيروح مراجعة — وده المقصود من `require_admin_review_above_range`
+   * الافتراضية `true`. الرقم من الإعدادات مش ثابت في الكود.
+   */
+  private async resolveQuoteStatus(
+    manager: EntityManager,
+    order: Order,
+    service: Service,
+    source: OrderQuoteSource,
+    amountCents: number,
+  ): Promise<OrderQuoteStatus> {
+    if (source === OrderQuoteSource.ADMIN_REMOTE) return OrderQuoteStatus.PENDING_CUSTOMER;
+    if (!service.requireAdminReviewAboveRange) return OrderQuoteStatus.PENDING_CUSTOMER;
+
+    let referenceCents = order.displayPriceMaxCentsSnapshot;
+    if (referenceCents == null) {
+      const [approved] = await manager.query<{ amount_cents: number }[]>(
+        `SELECT amount_cents
+           FROM order_quotes
+          WHERE order_id = $1 AND status = $2
+          ORDER BY version DESC
+          LIMIT 1`,
+        [order.id, OrderQuoteStatus.APPROVED],
+      );
+      referenceCents = approved?.amount_cents ?? null;
+    }
+    if (referenceCents == null) return OrderQuoteStatus.PENDING_CUSTOMER;
+
+    const allowanceCents = Math.round(
+      referenceCents * (1 + service.maxQuoteIncreaseWithoutAdminReviewBps / 10_000),
+    );
+    return amountCents > allowanceCents ? OrderQuoteStatus.PENDING_ADMIN_REVIEW : OrderQuoteStatus.PENDING_CUSTOMER;
+  }
+
   private async createQuoteVersion(
     manager: EntityManager,
     order: Order,
@@ -57,6 +103,7 @@ export class InspectionQuoteService {
     amountCents: number,
     validityMinutes: number,
     details: InitialQuoteDetails,
+    status: OrderQuoteStatus = OrderQuoteStatus.PENDING_CUSTOMER,
   ): Promise<OrderQuote> {
     const [{ next_version }] = await manager.query<{ next_version: string }[]>(
       `SELECT (COALESCE(MAX(version), 0) + 1)::text AS next_version
@@ -68,7 +115,7 @@ export class InspectionQuoteService {
       orderId: order.id,
       version: Number(next_version),
       source,
-      status: OrderQuoteStatus.PENDING_CUSTOMER,
+      status,
       amountCents,
       diagnosis: details.diagnosis?.trim() || null,
       scopeIncluded: details.scopeIncluded?.trim() || null,
@@ -97,6 +144,120 @@ export class InspectionQuoteService {
         ? feeCents
         : Math.round((feeCents * order.assessmentFeeCreditBpsSnapshot) / 10_000);
     return Math.min(quoteAmountCents, requestedCredit);
+  }
+
+  /**
+   * بند 8 — «إعادة إصدار عرض منتهي الصلاحية».
+   *
+   * العرض المنتهي **مابيرجعش يشتغل** (ده كان هيخلي الصلاحية بلا معنى) — بيتعمل **إصدار جديد**
+   * بنفس مصدر الأصلي، والأدمن هو اللي عمله. لو الأدمن ماحطش مبلغ جديد بيتاخد مبلغ العرض المنتهي
+   * زي ما هو، وده الاستخدام الشائع (العميل اتأخر في الرد بس).
+   *
+   * موجودة هنا مش في `AssessmentTriageService` عشان `createQuoteVersion` تفضل **الكاتب الوحيد**
+   * لأي إصدار عرض في المنظومة.
+   */
+  async reissueExpiredQuote(
+    adminUserId: string,
+    orderId: string,
+    newAmountCents: number | undefined,
+    meta?: AuditActorMeta,
+  ): Promise<OrderQuote> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      const [latest] = await manager.find(OrderQuote, {
+        where: { orderId },
+        order: { version: 'DESC' },
+        take: 1,
+      });
+      if (!latest) {
+        throw new ApiException(ErrorCode.VAL_001, 'مفيش عرض سعر على الطلب ده', HttpStatus.NOT_FOUND);
+      }
+      const isExpired =
+        latest.status === OrderQuoteStatus.EXPIRED ||
+        (latest.status === OrderQuoteStatus.PENDING_CUSTOMER && latest.validUntil.getTime() <= Date.now());
+      if (!isExpired) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'العرض ده لسه ساري — مفيش داعي لإعادة إصداره',
+          HttpStatus.CONFLICT,
+        );
+      }
+      // العرض القديم بيتقفل صراحة قبل ما نفتح واحد جديد — الـpartial unique index بيسمح بعرض
+      // «حي» واحد بس لكل طلب.
+      latest.status = OrderQuoteStatus.EXPIRED;
+      await manager.save(latest);
+
+      const service = await this.catalogService.findServiceOrThrow(order.serviceId);
+      const amountCents = newAmountCents ?? latest.amountCents;
+      const quote = await this.createQuoteVersion(
+        manager,
+        order,
+        adminUserId,
+        latest.source,
+        amountCents,
+        service.quoteValidityMinutes,
+        {
+          diagnosis: latest.diagnosis ?? undefined,
+          scopeIncluded: latest.scopeIncluded ?? undefined,
+          scopeExcluded: latest.scopeExcluded ?? undefined,
+          estimatedDurationMinutes: latest.estimatedDurationMinutes ?? undefined,
+          requiredTechnicians: latest.requiredTechnicians ?? undefined,
+          requiredAssistants: latest.requiredAssistants ?? undefined,
+          revisionReason: `إعادة إصدار العرض رقم ${latest.version} بعد انتهاء صلاحيته`,
+        },
+        // الأدمن هو اللي أعاد الإصدار، فمفيش داعي يراجع نفسه.
+        OrderQuoteStatus.PENDING_CUSTOMER,
+      );
+
+      const previousStatus = order.orderStatus;
+      order.estimatedPriceCents = amountCents;
+      order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
+      if (order.orderStatus !== OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL) {
+        if (!canTransition(order.orderStatus, OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL)) {
+          throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+        }
+        order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
+      }
+      await manager.save(order);
+
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.quote.reissued',
+          entityType: 'order_quote',
+          entityId: quote.id,
+          oldValues: { expired_quote_id: latest.id, version: latest.version, amount_cents: latest.amountCents },
+          newValues: { version: quote.version, amount_cents: amountCents, valid_until: quote.validUntil.toISOString() },
+          meta,
+        },
+        manager,
+      );
+      return { order, quote, previousStatus };
+    });
+
+    if (result.order.orderStatus !== result.previousStatus) {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.previousStatus,
+          result.order.orderStatus,
+          result.order.customerId,
+          result.order.technicianId,
+          'الإدارة أعادت إصدار عرض السعر',
+        ),
+      );
+    }
+    return result.quote;
   }
 
   async listQuotesForOrder(orderId: string): Promise<OrderQuote[]> {
@@ -148,6 +309,13 @@ export class InspectionQuoteService {
       }
 
       const previousStatus = order.orderStatus;
+      const quoteStatus = await this.resolveQuoteStatus(
+        manager,
+        order,
+        service,
+        OrderQuoteSource.TECHNICIAN_ONSITE,
+        quotedAmountCents,
+      );
       const quote = await this.createQuoteVersion(
         manager,
         order,
@@ -156,32 +324,44 @@ export class InspectionQuoteService {
         quotedAmountCents,
         service.quoteValidityMinutes,
         { ...details, diagnosis: details.diagnosis ?? note },
+        quoteStatus,
       );
-      order.estimatedPriceCents = quotedAmountCents;
+      const needsAdminReview = quoteStatus === OrderQuoteStatus.PENDING_ADMIN_REVIEW;
       order.initialQuoteSource = 'technician_onsite';
       order.initialQuoteNote = note?.trim() || null;
-      order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
-      order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
+      if (needsAdminReview) {
+        // السعر خارج النطاق: **مايوصلش العميل** قبل ما الأدمن يقرّر. الطلب بيفضل في حالته
+        // التشغيلية زي ما هي (الفني لسه في المكان)، و`estimatedPriceCents` مابيتحطش عشان
+        // مايظهرش للعميل سعر محدش اعتمده.
+        order.priceStatus = OrderPriceStatus.WAITING_QUOTE;
+      } else {
+        order.estimatedPriceCents = quotedAmountCents;
+        order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
+        order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
+      }
       await manager.save(order);
 
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus,
-          newStatus: OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
-          changedByUserId: userId,
-          changedByRole: 'technician',
-          changeSource: OrderChangeSource.TECHNICIAN,
-          reason: `الفني حدد سعر بعد المعاينة — ${quotedAmountCents} قرش`,
-          metadata: {
-            quote_id: quote.id,
-            quote_version: quote.version,
-            quoted_amount_cents: quotedAmountCents,
-            valid_until: quote.validUntil.toISOString(),
-            ...(note ? { note } : {}),
-          },
-        }),
-      );
+      // مفيش انتقال حالة لما العرض بيستنى الأدمن — التسجيل بيبقى في الـaudit تحت بس.
+      if (!needsAdminReview) {
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus,
+            newStatus: OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+            changedByUserId: userId,
+            changedByRole: 'technician',
+            changeSource: OrderChangeSource.TECHNICIAN,
+            reason: `الفني حدد سعر بعد المعاينة — ${quotedAmountCents} قرش`,
+            metadata: {
+              quote_id: quote.id,
+              quote_version: quote.version,
+              quoted_amount_cents: quotedAmountCents,
+              valid_until: quote.validUntil.toISOString(),
+              ...(note ? { note } : {}),
+            },
+          }),
+        );
+      }
 
       await this.auditLog.record(
         {
@@ -190,7 +370,13 @@ export class InspectionQuoteService {
           action: 'order.quote.submitted',
           entityType: 'order_quote',
           entityId: quote.id,
-          newValues: { order_id: order.id, version: quote.version, source: quote.source, amount_cents: quotedAmountCents },
+          newValues: {
+            order_id: order.id,
+            version: quote.version,
+            source: quote.source,
+            amount_cents: quotedAmountCents,
+            quote_status: quote.status,
+          },
         },
         manager,
       );
@@ -199,10 +385,14 @@ export class InspectionQuoteService {
     });
 
     const { order, previousStatus } = result;
-    this.events.emit(
-      ORDER_STATUS_CHANGED_EVENT,
-      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, order.orderStatus, order.customerId, order.technicianId),
-    );
+    // العرض اللي راح لمراجعة الأدمن مابيغيّرش حالة الطلب، فمفيش حدث تغيير حالة يتبث عليه —
+    // البث كان هيوصل للعميل إشعار عن انتقال ماحصلش.
+    if (order.orderStatus !== previousStatus) {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, order.orderStatus, order.customerId, order.technicianId),
+      );
+    }
 
     return order;
   }
