@@ -22,6 +22,9 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   disputed: 'متنازع عليه',
   refunded: 'مسترجَع',
   awaiting_technician_reselection: 'بانتظار اختيار فني بديل',
+  // ADR-0063 — العميل وافق على السعر، وباقي إنه يختار المنفّذ. الطلب **واقف مستني العميل**،
+  // فبيتلوّن تحذير زي باقي حالات الانتظار.
+  awaiting_technician_selection: 'بانتظار اختيار العميل للفني',
 };
 
 // إصلاح حقيقي (مراجعة booking flow الشاملة 2026-08-12) — كانت القايمة دي فيها 5 حالات زيادة
@@ -39,6 +42,9 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   // سياسة إلغاء الفني (docs/10) — order-state-machine.ts بيسمح admin cancel() يقفل الطلب من
   // الحالة دي (العميل واقف مستني اختيار فني بديل، ممكن يقرر يلغي كله بدل ما يستمر).
   'awaiting_technician_reselection',
+  // العميل لسه ما اختارش منفّذ — الإلغاء مسموح، ومطابق لـCUSTOMER_CANCELLABLE_STATUSES في
+  // apps/api/src/modules/orders/order-state-machine.ts.
+  'awaiting_technician_selection',
 ];
 
 export function isOrderCancellable(status: OrderStatus): boolean {
@@ -92,7 +98,8 @@ const CANCELLED_STATUSES: OrderStatus[] = [
 export function orderStatusTone(status: OrderStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   if (status === 'completed') return 'success';
   if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'danger';
-  if (status === 'pending_payment' || status === 'awaiting_payment' || status === 'awaiting_quote_approval' || status === 'awaiting_admin_quote' || status === 'awaiting_initial_quote_approval' || status === 'awaiting_technician_reselection') {
+  if (status === 'pending_payment' || status === 'awaiting_payment' || status === 'awaiting_quote_approval' || status === 'awaiting_admin_quote' || status === 'awaiting_initial_quote_approval' || status === 'awaiting_technician_reselection' ||
+      status === 'awaiting_technician_selection') {
     return 'warning';
   }
   if (status === 'draft' || status === 'refunded') return 'neutral';
