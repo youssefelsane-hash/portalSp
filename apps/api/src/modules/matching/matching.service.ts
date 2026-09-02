@@ -551,7 +551,16 @@ export class MatchingService {
     reason: LockedProviderLostReason,
   ): Promise<void> {
     const previousStatus = order.orderStatus;
-    order.orderStatus = OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
+    // ADR-0066 §2 — كل مصدر قفل بيرجع لبابه: تذكرة الحجز ⇒ معاينة جديدة، اختيار بعد عرض السعر
+    // ⇒ قايمة مرشّحي نفس العرض. إرجاع طلب عرض سعر لـ«اعمل معاينة حجز» كان هيبقى طلب مستحيل.
+    const nextStatus =
+      order.providerLockSource === 'post_quote_selection'
+        ? OrderStatus.AWAITING_TECHNICIAN_SELECTION
+        : OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
+    // ADR-0066 §4 — الفرق بتاع المنفّذ اللي ضاع بيترجّع قبل أي حاجة، وإلا حارس التحصيل المزدوج
+    // هيمنع فرق المنفّذ الجديد ويسيب الطلب على سعر منفّذ مش هو اللي هينفّذ.
+    await this.levelPremiumService.reverseOnProviderLost(manager, order);
+    order.orderStatus = nextStatus;
     order.requestedTechnicianId = null;
     await manager.save(order);
 
@@ -564,7 +573,7 @@ export class MatchingService {
       manager.create(OrderStatusHistory, {
         orderId: order.id,
         previousStatus,
-        newStatus: OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+        newStatus: nextStatus,
         changedByUserId: null,
         changedByRole: 'system',
         changeSource: OrderChangeSource.SYSTEM,
@@ -947,7 +956,7 @@ export class MatchingService {
           result.order.id,
           result.order.orderNumber,
           OrderStatus.SEARCHING_TECHNICIAN,
-          OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+          result.order.orderStatus,
           result.order.customerId,
           null,
         ),

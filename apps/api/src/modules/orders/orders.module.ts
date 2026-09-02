@@ -23,6 +23,7 @@ import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { RecurringOrdersController } from './recurring-orders.controller';
 import { OrdersService } from './orders.service';
+import { PostQuoteProviderSelectionService } from './post-quote-provider-selection.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { OrderItemsService } from './order-items.service';
@@ -88,6 +89,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
   ],
   providers: [
     OrdersService,
+    PostQuoteProviderSelectionService,
     OrderAutoCancelService,
     CrewShortageEscalationService,
     OrderItemsService,

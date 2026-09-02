@@ -1,7 +1,9 @@
-import { Order } from './entities/order.entity';
+import { Order, ProviderLockSource } from './entities/order.entity';
+
+export type { ProviderLockSource };
 
 /**
- * **هل الطلب ده مقفول على منفّذ بعينه؟** (ADR-0065 §1) — نقطة القراءة الوحيدة للسؤال ده.
+ * **هل الطلب ده مقفول على منفّذ بعينه؟** (ADR-0065 §1، ADR-0066 §1) — نقطة القراءة الوحيدة.
  *
  * الفرق اللي العمود ده بيحمله مش تقني، هو تجاري: `requested_technician_id` لوحده معناه
  * **تفضيل** (العميل يفضّل الفني ده، ولو مش متاح ماشي أي حد)، بينما وجوده **مع** تذكرة معاينة
@@ -14,19 +16,19 @@ import { Order } from './entities/order.entity';
  * أنشأته) — اللي بينفك هو `requested_technician_id`، عشان كده الشرط على الاتنين مش على واحد.
  */
 export function orderHasLockedProvider(
-  order: Pick<Order, 'selectedMatchPreviewId' | 'requestedTechnicianId'>,
+  order: Pick<Order, 'providerLockSource' | 'requestedTechnicianId'>,
 ): boolean {
-  return order.selectedMatchPreviewId !== null && order.requestedTechnicianId !== null;
+  return order.providerLockSource !== null && order.requestedTechnicianId !== null;
 }
 
 /**
- * **هل سعر الطلب ده مربوط بمنفّذ بعينه؟** (ADR-0065 §3) — أوسع من `orderHasLockedProvider()`:
+ * **هل سعر الطلب ده مربوط بمنفّذ بعينه؟** (ADR-0065 §3، ADR-0066 §1) — أوسع من `orderHasLockedProvider()`:
  * بتفضل `true` حتى بعد ما القفل ينفك، لأن السؤال هنا مش «مين المنفّذ دلوقتي؟» لكن «الفاتورة دي
- * اتحسبت على أساس فني معيّن؟». وده اللي بيقرر إن إعادة الاختيار لازم تعدّي من تذكرة جديدة بسعر
+ * اتحسبت على أساس فني معيّن؟». وده اللي بيقرر إن إعادة الاختيار لازم تعدّي من مسار فيه سعر
  * جديد بدل ما ترجّع الطلب للتوزيع بالسعر القديم.
  */
-export function orderPriceIsProviderBound(order: Pick<Order, 'bookingContextHash'>): boolean {
-  return order.bookingContextHash !== null;
+export function orderPriceIsProviderBound(order: Pick<Order, 'providerLockSource'>): boolean {
+  return order.providerLockSource !== null;
 }
 
 /** رسالة العميل لما المنفّذ المقفول يضيع — بتقول اللي حصل وبتقول الخطوة الجاية، بلا مصطلح تقني. */

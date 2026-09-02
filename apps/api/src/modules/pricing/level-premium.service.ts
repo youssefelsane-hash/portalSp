@@ -50,10 +50,42 @@ export class LevelPremiumService {
   ): Promise<number> {
     if (order.requestedTechnicianId) return 0;
     if (order.requestedTechnicianCompanyId) return 0;
-    if (order.estimatedPriceCents === null || order.estimatedPriceCents <= 0) return 0;
+    return this.applyPremium(manager, order, technician, order.estimatedPriceCents);
+  }
+
+  /**
+   * **ADR-0066 §3** — العميل اختار منفّذ **بعد** ما السعر اتحدد من عرض معتمد (تقييم بالصور).
+   *
+   * الفرق عن `applyOnAutoAssignment()` فوق مش في القاعدة، في **مين مؤهّل يمر**: هناك الشرط إن
+   * الفني ماكانش معروف وقت الحجز (وإلا مستواه داخل السعر أصلاً)، وهنا الفني **بيتحدد دلوقتي**
+   * وقيمة العرض مالهاش مضاعف مستوى من الأساس (الأدمن سعّر شغلانة مش سعّر فني).
+   *
+   * الأساس هنا هو `totalAmountCents` مش `estimatedPriceCents`: عرض التقييم بيتضاف عبر
+   * `increasePrice()` فبيقع على الإجمالي، و`estimatedPriceCents` بتفضل صفر لطلب التقييم.
+   *
+   * الحارس ضد التحصيل المزدوج نفسه (`levelPremiumCents > 0`) — مشترك في `applyPremium()`.
+   */
+  async applyOnProviderSelection(
+    manager: EntityManager,
+    order: Order,
+    technician: Pick<TechnicianProfile, 'currentLevel' | 'pricingTier'>,
+  ): Promise<number> {
+    if (order.requestedTechnicianCompanyId) return 0;
+    return this.applyPremium(manager, order, technician, order.totalAmountCents);
+  }
+
+  /** القاعدة نفسها — المدخل الوحيد اللي بيفرق بين المسارين هو الأساس اللي الفرق بيتحسب عليه. */
+  private async applyPremium(
+    manager: EntityManager,
+    order: Order,
+    technician: Pick<TechnicianProfile, 'currentLevel' | 'pricingTier'>,
+    baseCents: number | null,
+  ): Promise<number> {
+    if (baseCents === null || baseCents <= 0) return 0;
     // حارس ضد التحصيل المزدوج: الطلب ممكن يتعيّن أكتر من مرة (الفني الأول لغى وأعيد التوزيع،
     // أو الأدمن أعاد التعيين). من غير الحارس ده كل تعيين جديد كان هيضيف فرق تاني فوق القديم.
-    // الفرق الأول بيفضل هو الساري — العميل شاف السعر ده واتعامل عليه.
+    // الفرق الأول بيفضل هو الساري — العميل شاف السعر ده واتعامل عليه. لو المنفّذ نفسه اتغيّر،
+    // الفرق بيترجّع أولاً (ADR-0066 §4) فالحارس ده مايمنعش فرق المنفّذ الجديد.
     if (order.levelPremiumCents > 0) return 0;
 
     const policy = await this.settingsService.getString(AUTO_MATCH_LEVEL_PREMIUM_SETTING, CHARGE);
@@ -66,7 +98,7 @@ export class LevelPremiumService {
     );
     if (!(multiplier > 1)) return 0;
 
-    const premiumCents = Math.round(order.estimatedPriceCents * (multiplier - 1));
+    const premiumCents = Math.round(baseCents * (multiplier - 1));
     if (premiumCents <= 0) return 0;
 
     order.levelPremiumCents = premiumCents;
@@ -83,6 +115,24 @@ export class LevelPremiumService {
       `فرق فني مميّز على الطلب ${order.orderNumber}: ${premiumCents} قرش (مضاعف ${multiplier})` +
         (financialResult.requiresSupplementalCollection ? ' — تحصيل إضافي بعد الدفعة الأصلية' : ''),
     );
+    return premiumCents;
+  }
+
+  /**
+   * **ADR-0066 §4 — ترجيع الفرق لما المنفّذ يتغيّر.**
+   *
+   * الحارس في `applyPremium()` بيمنع التحصيل المزدوج، لكن من غير الترجيع ده كان هيمنع كمان فرق
+   * **المنفّذ الجديد** ويسيب الطلب على فرق القديم — تسعير غلط في الاتجاه التاني.
+   *
+   * بيمر على `replaceUncommittedPrice()` اللي بيرفض من نفسه لو بدأ أي التزام دفع فعلي، فالترجيع
+   * مسموح بس في المرحلة اللي مفيش فيها فلوس اتحركت — وده بالظبط وضع الطلب قبل التوزيع.
+   */
+  async reverseOnProviderLost(manager: EntityManager, order: Order): Promise<number> {
+    const premiumCents = order.levelPremiumCents;
+    if (premiumCents <= 0) return 0;
+    order.levelPremiumCents = 0;
+    await this.orderFinancials.replaceUncommittedPrice(manager, order, order.totalAmountCents - premiumCents);
+    this.logger.log(`فرق فني مميّز اترجّع من الطلب ${order.orderNumber}: ${premiumCents} قرش (المنفّذ اتغيّر)`);
     return premiumCents;
   }
 }

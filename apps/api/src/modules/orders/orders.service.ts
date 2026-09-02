@@ -1203,6 +1203,8 @@ export class OrdersService {
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
         selectedMatchPreviewId: lockedMatchPreview?.id ?? null,
+        // ADR-0066 §1 — مصدر القفل مسمّى، مش مستنتَج من عمود تاني.
+        providerLockSource: lockedMatchPreview ? 'match_preview' : null,
         // ADR-0065 §4 — بصمة الشغلانة بلا الفني. بتتخزّن بس لما يبقى فيه قفل منفّذ فعلي، لأنها
         // مالهاش معنى غير في إعادة اختيار المنفّذ.
         bookingContextHash: lockedMatchPreview ? bookingContextHashWithoutProvider(bookingPreviewInputFromCreate(dto)) : null,
@@ -3377,6 +3379,7 @@ export class OrdersService {
     const snapshot = locked.pricingSnapshot as unknown as PreviewOrderResponseDto;
     order.requestedTechnicianId = locked.technicianId;
     order.selectedMatchPreviewId = locked.id;
+    order.providerLockSource = 'match_preview';
     order.estimatedPriceCents = snapshot.base_price_cents;
     order.inspectionFeeCents = snapshot.inspection_fee_cents;
     order.surgeAmountCents = snapshot.emergency_surcharge_cents;

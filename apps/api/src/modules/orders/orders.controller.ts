@@ -22,6 +22,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ApproveQuoteItemsDto } from './dto/approve-quote-items.dto';
 import { ApproveInitialQuoteDto } from './dto/approve-initial-quote.dto';
+import { SelectProviderDto } from './dto/select-provider.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -37,6 +38,7 @@ import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
+import { PostQuoteProviderSelectionService } from './post-quote-provider-selection.service';
 import { OrderMediaService } from './order-media.service';
 import { PricingFieldImagesService } from './pricing-field-images.service';
 import { ProblemImagesService } from './problem-images.service';
@@ -61,6 +63,7 @@ export class OrdersController {
     private readonly addressesService: AddressesService,
     private readonly techniciansService: TechniciansService,
     private readonly bookingMatchPreviews: BookingMatchPreviewService,
+    private readonly postQuoteProviderSelection: PostQuoteProviderSelectionService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -256,6 +259,32 @@ export class OrdersController {
     @Body() dto: ApproveInitialQuoteDto,
   ) {
     const order = await this.inspectionQuoteService.approveInitialQuote(user.sub, id, dto.payment_choice ?? 'electronic');
+    return this.enrichedResponse(user.sub, order);
+  }
+
+  /**
+   * **ADR-0066 §5** — مرشّحو تنفيذ الشغلانة بعد ما العميل وافق على عرض السعر.
+   *
+   * نفس قايمة السوق اللي بتظهر قبل الحجز بالحرف (نفس الأهلية والترتيب والتوافر) — الفرق الوحيد
+   * إن السعر المعروض لكل مرشّح أساسه **قيمة العرض المعتمد** مضروبة في مضاعف مستواه، مش معادلة
+   * الخدمة (الأدمن سعّر شغلانة، مش سعّر فني).
+   */
+  @Get(':id/provider-candidates')
+  async listProviderCandidates(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.postQuoteProviderSelection.listCandidates(user.sub, id);
+  }
+
+  /**
+   * ADR-0066 — العميل اختار منفّذ. فرق المستوى بيتضاف مرة واحدة بس، والطلب بيتقفل على المنفّذ ده
+   * (ADR-0065 §1: التوزيع مايستبدلوش بصمت).
+   */
+  @Post(':id/select-provider')
+  async selectProvider(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SelectProviderDto,
+  ) {
+    const order = await this.postQuoteProviderSelection.selectProvider(user.sub, id, dto.technician_id);
     return this.enrichedResponse(user.sub, order);
   }
 
