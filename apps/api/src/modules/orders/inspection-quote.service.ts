@@ -5,6 +5,10 @@ import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import {
+  ORDER_QUOTE_ABOVE_RANGE_SUBMITTED_EVENT,
+  OrderQuoteAboveRangeSubmittedEvent,
+} from '../../common/events/order-quote-above-range-submitted.event';
 import { CatalogService } from '../catalog/catalog.service';
 import { PricingModel, Service } from '../catalog/entities/service.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -134,6 +138,41 @@ export class InspectionQuoteService {
       validUntil: new Date(Date.now() + validityMinutes * 60_000),
     });
     return manager.save(quote);
+  }
+
+  /**
+   * ADR-0067 §2 — **الكاتب الوحيد** اللي بيعلّم عرض إنه منتهي الصلاحية.
+   *
+   * تلات مسارات بتوصل هنا: الكاسح الدوري (`QuoteExpiryService`)، ومحاولة موافقة العميل بعد
+   * الميعاد، وإعادة إصدار الأدمن. قبل كده كان كل واحد فيهم كاتب السطرين بنفسه — وده بالظبط نوع
+   * التكرار اللي بيفضل متطابق لحد أول تعديل في واحد بس منهم.
+   *
+   * **مابيغيّرش حالة الطلب** عمدًا: الطلب بيفضل في `AWAITING_INITIAL_QUOTE_APPROVAL` و`price_status`
+   * بيرجع `waiting_quote` — نفس السلوك اللي المسار الكسول كان بيعمله من يوم ما اتكتب.
+   */
+  async expireQuoteInTransaction(manager: EntityManager, order: Order, quote: OrderQuote): Promise<void> {
+    quote.status = OrderQuoteStatus.EXPIRED;
+    order.priceStatus = OrderPriceStatus.WAITING_QUOTE;
+    await manager.save(quote);
+    await manager.save(order);
+  }
+
+  /**
+   * ADR-0067 §1 — نقطة بث واحدة لـ«سعر خارج النطاق مستني الأدمن»، بينادوها المسارين اللي
+   * `resolveQuoteStatus` بترجعلهم `PENDING_ADMIN_REVIEW` (عرض أول بعد المعاينة، وتعديل بعد
+   * التشخيص). بتتنادى **بعد** نجاح الترانزاكشن بس.
+   */
+  private emitAboveRangeSubmitted(order: Order, quote: OrderQuote): void {
+    this.events.emit(
+      ORDER_QUOTE_ABOVE_RANGE_SUBMITTED_EVENT,
+      new OrderQuoteAboveRangeSubmittedEvent(
+        order.id,
+        order.orderNumber,
+        quote.id,
+        quote.amountCents,
+        quote.expectedMaxCents,
+      ),
+    );
   }
 
   private assessmentCreditFor(order: Order, quoteAmountCents: number): number {
@@ -288,7 +327,7 @@ export class InspectionQuoteService {
         },
         manager,
       );
-      return { order, previousStatus };
+      return { order, previousStatus, quote, needsAdminReview };
     });
 
     if (result.order.orderStatus !== result.previousStatus) {
@@ -304,6 +343,9 @@ export class InspectionQuoteService {
           'الفني عدّل السعر بعد التشخيص',
         ),
       );
+    }
+    if (result.needsAdminReview) {
+      this.emitAboveRangeSubmitted(result.order, result.quote);
     }
     return result.order;
   }
@@ -353,8 +395,7 @@ export class InspectionQuoteService {
       }
       // العرض القديم بيتقفل صراحة قبل ما نفتح واحد جديد — الـpartial unique index بيسمح بعرض
       // «حي» واحد بس لكل طلب.
-      latest.status = OrderQuoteStatus.EXPIRED;
-      await manager.save(latest);
+      await this.expireQuoteInTransaction(manager, order, latest);
 
       const service = await this.catalogService.findServiceOrThrow(order.serviceId);
       const amountCents = newAmountCents ?? latest.amountCents;
@@ -543,17 +584,21 @@ export class InspectionQuoteService {
         manager,
       );
 
-      return { order, previousStatus };
+      return { order, previousStatus, quote, needsAdminReview };
     });
 
     const { order, previousStatus } = result;
     // العرض اللي راح لمراجعة الأدمن مابيغيّرش حالة الطلب، فمفيش حدث تغيير حالة يتبث عليه —
-    // البث كان هيوصل للعميل إشعار عن انتقال ماحصلش.
+    // البث كان هيوصل للعميل إشعار عن انتقال ماحصلش. بس ده **مش** معناه إن الحدث ملوش وجود:
+    // ADR-0067 §1 بيبعت حدث دومين مخصوص عشان الأدمن يعرف إن فيه قرار مستنيه.
     if (order.orderStatus !== previousStatus) {
       this.events.emit(
         ORDER_STATUS_CHANGED_EVENT,
         new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, order.orderStatus, order.customerId, order.technicianId),
       );
+    }
+    if (result.needsAdminReview) {
+      this.emitAboveRangeSubmitted(order, result.quote);
     }
 
     return order;
@@ -711,10 +756,7 @@ export class InspectionQuoteService {
         throw new ApiException(ErrorCode.ORDR_003, 'عرض السعر الحالي مش متاح للموافقة', HttpStatus.CONFLICT);
       }
       if (quote.validUntil.getTime() <= Date.now()) {
-        quote.status = OrderQuoteStatus.EXPIRED;
-        order.priceStatus = OrderPriceStatus.WAITING_QUOTE;
-        await manager.save(quote);
-        await manager.save(order);
+        await this.expireQuoteInTransaction(manager, order, quote);
         return {
           order,
           previousStatus: order.orderStatus,

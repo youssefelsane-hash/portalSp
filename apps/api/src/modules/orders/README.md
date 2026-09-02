@@ -1776,3 +1776,20 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 `provider_lock_source` (migration 0249) هو مصدر الحقيقة لنوع القفل، وبيحدد كمان الطلب بيرجع لفين
 لما القفل ينفك: تذكرة حجز ⇒ `AWAITING_TECHNICIAN_RESELECTION`، اختيار بعد عرض ⇒
 `AWAITING_TECHNICIAN_SELECTION`. كل واحد بيرجع لبابه.
+
+## كاسح انتهاء صلاحية العروض (ADR-0067 §2)
+
+`quote-expiry.service.ts` بيكسح كل دقيقة العروض `pending_customer` اللي `valid_until` بتاعها عدّى.
+قبل كده الانتهاء كان **كسول بالكامل**: العرض مايتعلّمش `expired` غير لما العميل يحاول يوافق متأخر
+(`approveInitialQuote`) أو الأدمن يعيد الإصدار (`reissueExpiredQuote`) — يعني عميل ماحاولش أصلاً
+كان طلبه بيفضل معلّق على عرض ميّت للأبد، وفلتر `expired_quote` في طابور الأدمن بيرجع فاضي.
+
+نمط `setInterval` مش BullMQ — نفس سبب `order-auto-cancel.service.ts` بالحرف: الشبكة دي مالهاش
+لازمة لو معلّقة على الـWorker اللي عنده بَقّة إعادة الاتصال الموثّقة (`../technicians/README.md`).
+
+**كاتب واحد بس بيعلّم `expired`**: `InspectionQuoteService.expireQuoteInTransaction()`. التلات
+مسارات بتناديها — الكاسح، محاولة العميل المتأخرة، وإعادة إصدار الأدمن. قبل ADR-0067 كل واحد فيهم
+كان كاتب السطرين بنفسه.
+
+`pending_admin_review` مستثنى من الكسح عمدًا: العرض ده ماوصلش العميل أصلاً، ومهلته بتبدأ من لحظة
+اعتماد الأدمن (`AssessmentTriageService.decideAboveRangeQuote`).

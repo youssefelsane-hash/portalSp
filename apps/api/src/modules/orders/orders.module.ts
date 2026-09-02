@@ -29,6 +29,7 @@ import { CrewShortageEscalationService } from './crew-shortage-escalation.servic
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { AssessmentTriageService } from './assessment-triage.service';
+import { QuoteExpiryService } from './quote-expiry.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
 import { PricingFieldImagesService } from './pricing-field-images.service';
@@ -96,6 +97,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderItemsService,
     InspectionQuoteService,
     AssessmentTriageService,
+    QuoteExpiryService,
     OrderInternalNotesService,
     OrderMediaService,
     PricingFieldImagesService,
