@@ -1,10 +1,11 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { AuditLogService } from '../audit/audit-log.service';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { ORDER_OFFER_CREATED_EVENT, OrderOfferCreatedEvent } from '../../common/events/order-offer-created.event';
 import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../common/events/order-offer-resolved.event';
@@ -172,6 +173,11 @@ export class MatchingService {
     // docs/08 §60.3 — آخر بند عمدًا: أقل بلاست-رديوس ممكن على السبيكات الكتير اللي بتبني
     // MatchingService بـpositional args (append واحد بس في الآخر).
     private readonly levelPremiumService: LevelPremiumService,
+    // ADR-0068 §3 — فك قفل المنفّذ **بيرجّع فلوس** (فرق المستوى)، والقاعدة إن مفيش جنيه يتحرّك
+    // من غير audit. `@Optional()` لنفس سبب `levelPremiumService` فوق: عشرات السبيكات بتبني
+    // الخدمة دي بـpositional args، والإلزام كان هيكسّرهم كلهم. في الإنتاج الـDI بيوفّرها دايمًا،
+    // و`provider-lock-audit.spec.ts` بيثبت الكتابة الفعلية بخدمة audit حقيقية.
+    @Optional() private readonly auditLog?: AuditLogService,
   ) {}
 
   /**
@@ -559,7 +565,8 @@ export class MatchingService {
         : OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
     // ADR-0066 §4 — الفرق بتاع المنفّذ اللي ضاع بيترجّع قبل أي حاجة، وإلا حارس التحصيل المزدوج
     // هيمنع فرق المنفّذ الجديد ويسيب الطلب على سعر منفّذ مش هو اللي هينفّذ.
-    await this.levelPremiumService.reverseOnProviderLost(manager, order);
+    const reversedPremiumCents = await this.levelPremiumService.reverseOnProviderLost(manager, order);
+    const lostTechnicianId = order.requestedTechnicianId;
     order.orderStatus = nextStatus;
     order.requestedTechnicianId = null;
     await manager.save(order);
@@ -580,6 +587,29 @@ export class MatchingService {
         reason: LOCKED_PROVIDER_LOST_REASON_AR[reason],
       }),
     );
+    await this.auditLog?.record(
+      {
+        actorUserId: null,
+        actorRole: 'system',
+        action: 'order.provider_lock.released',
+        entityType: 'order',
+        entityId: order.id,
+        oldValues: {
+          order_status: previousStatus,
+          requested_technician_id: lostTechnicianId,
+          level_premium_cents: reversedPremiumCents,
+        },
+        newValues: {
+          order_status: nextStatus,
+          requested_technician_id: null,
+          level_premium_cents: 0,
+          reversed_premium_cents: reversedPremiumCents,
+          reason,
+        },
+      },
+      manager,
+    );
+
     this.logger.warn(
       `قفل المنفّذ اتفك لطلب ${order.orderNumber} — ${LOCKED_PROVIDER_LOST_REASON_AR[reason]}`,
     );

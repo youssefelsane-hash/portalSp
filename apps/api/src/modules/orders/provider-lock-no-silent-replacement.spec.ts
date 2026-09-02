@@ -95,6 +95,12 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
     blockerOrder: '',
   };
 
+  const auditRecords: {
+    action: string;
+    actorRole?: string | null;
+    oldValues?: Record<string, unknown>;
+    newValues?: Record<string, unknown>;
+  }[] = [];
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
   /** يوم الحجز — بعيد بما يكفي عن النهاردة عشان قواعد «الشغل القريب» ماتدخلش في النتيجة. */
@@ -270,6 +276,9 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
       assignmentGuard, settingsService, { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource), levelPremiumServiceStub(),
+      // ADR-0068 §3 — فك القفل بيرجّع فلوس، فلازم يسيب سطر audit. الـstub بيسجّل عشان الاختبار
+      // تحت يثبت الكتابة فعلاً، مش يفترضها.
+      { record: async (params: { action: string }) => { auditRecords.push(params); } } as never,
     );
   });
 
@@ -349,6 +358,7 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
   });
 
   it('التوزيع: طلب مقفول على أحمد وأحمد بقى مش متاح ⇒ الطلب بيروح لاختيار العميل، مش لمحمد', async () => {
+    auditRecords.length = 0;
     // طلب مقفول على أحمد اتعمل وأحمد لسه متاح (الشغلانة الشاغلة اتشالت مؤقتًا).
     await q(`UPDATE orders SET order_status = 'cancelled_by_system' WHERE id = $1`, [ids.blockerOrder]);
     const preview = await seedPreview(ids.ahmedTech);
@@ -380,6 +390,14 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
     expect(after.total_amount_cents).toBe(AHMED_PRICE_CENTS);
     const assignments = await q(`SELECT technician_id FROM order_assignments WHERE order_id = $1`, [order.id]);
     expect(assignments).toHaveLength(0);
+
+    // ADR-0068 §3 — فك القفل بيرجّع فرق المستوى من إجمالي الطلب، وده تحرّك فلوس. قبل الشغل ده
+    // كان بيتسجّل في order_status_history بس، من غير أي سطر audit بيقول ليه ولا كام اترجّع.
+    const release = auditRecords.find((r) => r.action === 'order.provider_lock.released');
+    expect(release).toBeDefined();
+    expect(release?.actorRole).toBe('system');
+    expect(release?.newValues).toMatchObject({ requested_technician_id: null, reason: 'technician_unavailable' });
+    expect(release?.oldValues).toMatchObject({ requested_technician_id: ids.ahmedTech });
   });
 
   it('إعادة الاختيار: طلب سعره مربوط بمنفّذ مايرجعش للتوزيع بلا تذكرة جديدة', async () => {

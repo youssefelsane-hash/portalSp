@@ -45,6 +45,13 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CatalogService } from '../catalog/catalog.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { AssessmentTriageService } from './assessment-triage.service';
+import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PermissionsService } from '../admin/permissions.service';
+import {
+  PERMISSION_APPROVE_PRICE_INCREASE,
+  PERMISSION_WAIVE_FEES,
+  PriceChangeAuthority,
+} from './price-change-authority';
 import {
   AssessmentQueueQueryDto,
   DecideAboveRangeQuoteDto,
@@ -74,8 +81,22 @@ export class AdminOrdersController {
     private readonly catalogService: CatalogService,
     private readonly inspectionQuoteService: InspectionQuoteService,
     private readonly assessmentTriage: AssessmentTriageService,
+    private readonly permissionsService: PermissionsService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
+
+  /**
+   * ADR-0068 §1 — الـguard بيتأكد من `orders.adjust_price` الأساسية بس، لأنه بيشتغل **قبل** ما
+   * نعرف السعر الحالي فمش قادر يعرف لو ده زيادة ولا إعفاء. الصلاحيتين الأدق بيتحلّوا هنا
+   * وبيتمرّروا للخدمة، والقرار نفسه بيتاخد جوّه الترانزاكشن بعد قفل الصف.
+   */
+  private async resolvePriceAuthority(adminUserId: string): Promise<PriceChangeAuthority> {
+    const [canApprovePriceIncrease, canWaiveFees] = await Promise.all([
+      this.permissionsService.hasPermission(adminUserId, PERMISSION_APPROVE_PRICE_INCREASE),
+      this.permissionsService.hasPermission(adminUserId, PERMISSION_WAIVE_FEES),
+    ]);
+    return { canApprovePriceIncrease, canWaiveFees };
+  }
 
   @Get()
   async list(@Query() query: ListOrdersQueryDto) {
@@ -446,7 +467,14 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(
-      await this.adminOrdersService.adjustPrice(admin.sub, id, dto.new_total_amount_cents, dto.reason, audit),
+      await this.adminOrdersService.adjustPrice(
+        admin.sub,
+        id,
+        dto.new_total_amount_cents,
+        dto.reason,
+        audit,
+        await this.resolvePriceAuthority(admin.sub),
+      ),
     );
   }
 
@@ -526,6 +554,16 @@ export class AdminOrdersController {
     @Body() dto: DecideAboveRangeQuoteDto,
     @AuditContext() audit: AuditMeta,
   ) {
+    // اعتماد سعر خارج النطاق = زيادة صريحة فوق السقف اللي العميل شافه، فبياخد نفس صلاحية
+    // اعتماد الزيادة (ADR-0068 §1). الرفض مش زيادة، فمابياخدهاش — القرار في الـbody مش في
+    // القاعدة، فمفيش نافذة سباق هنا تخلينا نأجّل الفحص لجوّه الترانزاكشن.
+    if (dto.approve && !(await this.resolvePriceAuthority(admin.sub)).canApprovePriceIncrease) {
+      throw new ApiException(
+        ErrorCode.AUTH_001,
+        'دورك بيسمح بمراجعة العروض لكن مش باعتماد سعر أعلى من النطاق المعروض للعميل',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     return toOrderQuoteResponseDto(
       await this.assessmentTriage.decideAboveRangeQuote(admin.sub, id, quoteId, dto.approve, dto.reason, audit),
     );

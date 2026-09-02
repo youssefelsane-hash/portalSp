@@ -201,7 +201,7 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
       new OrderFinancialFinalizationService(),
       auditStub,
     );
-    expiry = new QuoteExpiryService(dataSource, quotes, emitter);
+    expiry = new QuoteExpiryService(dataSource, quotes, emitter, auditStub);
   });
 
   afterAll(async () => {

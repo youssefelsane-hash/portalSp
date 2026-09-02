@@ -10,6 +10,10 @@ export const MFA_REQUIRED_PERMISSIONS = [
   'refunds.issue',
   'payouts.approve',
   'orders.adjust_price',
+  // ADR-0068 — سلطتَي السعر المفصولتين ماليتين زي الأصل بالظبط: اعتماد زيادة على العميل،
+  // وإسقاط رسم اتحسب عليه. لو فضلوا برّه القايمة كان الفصل هيقلّل الحماية بدل ما يزوّدها.
+  'orders.approve_price_increase',
+  'orders.waive_fees',
   'roles.manage',
   'roles.grant_unrestricted',
   'settings.manage',

@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { ORDER_QUOTE_EXPIRED_EVENT, OrderQuoteExpiredEvent } from '../../common/events/order-quote-expired.event';
+import { AuditLogService } from '../audit/audit-log.service';
 import { Order } from './entities/order.entity';
 import { OrderQuote, OrderQuoteSource, OrderQuoteStatus } from './entities/order-quote.entity';
 import { InspectionQuoteService } from './inspection-quote.service';
@@ -34,6 +35,7 @@ export class QuoteExpiryService implements OnModuleInit, OnModuleDestroy {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly inspectionQuoteService: InspectionQuoteService,
     private readonly events: EventEmitter2,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   onModuleInit(): void {
@@ -90,6 +92,25 @@ export class QuoteExpiryService implements OnModuleInit, OnModuleDestroy {
       if (!order) return null;
 
       await this.inspectionQuoteService.expireQuoteInTransaction(manager, order, quote);
+      // ADR-0068 §3 — العرض ده كان سعر معروض على العميل وبقى ملغي. فاعل النظام مش أقل استحقاقًا
+      // للتسجيل من الأدمن، والفرق بين «العرض سقط بالمهلة» و«حد رفضه» لازم يفضل مقروء بعدين.
+      await this.auditLog.record(
+        {
+          actorUserId: null,
+          actorRole: 'system',
+          action: 'order.quote.expired',
+          entityType: 'order_quote',
+          entityId: quote.id,
+          oldValues: { status: OrderQuoteStatus.PENDING_CUSTOMER },
+          newValues: {
+            order_id: order.id,
+            status: OrderQuoteStatus.EXPIRED,
+            amount_cents: quote.amountCents,
+            valid_until: quote.validUntil.toISOString(),
+          },
+        },
+        manager,
+      );
       return { order, quote };
     });
 

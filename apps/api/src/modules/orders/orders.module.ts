@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from '../admin/admin.module';
 import { AuditModule } from '../audit/audit.module';
 import { BuildingsModule } from '../buildings/buildings.module';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -77,6 +78,8 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     PaymentsModule,
     SupportModule,
     AuditModule,
+    // ADR-0068 — الـcontroller بيحلّ صلاحيتَي السعر الأدق (زيادة/إعفاء) قبل ما ينادي الخدمة.
+    AdminModule,
     BuildingsModule,
     RealtimeSecurityModule,
   ],

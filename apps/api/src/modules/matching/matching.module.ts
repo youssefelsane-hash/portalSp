@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CustomersModule } from '../customers/customers.module';
+import { AuditModule } from '../audit/audit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
@@ -33,6 +34,7 @@ import { PaymentsModule } from '../payments/payments.module';
     TypeOrmModule.forFeature([OrderAssignment, Order]),
     TechniciansModule,
     SettingsModule,
+    AuditModule,
     // CustomersModule (AddressesService، لعنوان الطلب وقت القبول — للملاحة في apps/technician-app)
     // — عمداً مش OrdersModule زي التحذير فوق. CustomersModule بتاعته controller مختلف تماماً
     // (/addresses) ومفيش أي استيراد لـ OrdersModule جواها، فمفيش نفس فخ ترتيب التسجيل.
