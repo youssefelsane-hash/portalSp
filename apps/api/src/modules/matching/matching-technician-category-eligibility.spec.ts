@@ -84,13 +84,13 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
     // خدمتين في نفس الفئة — عشان نتأكد إن اعتماد الفئة بيغطي أكتر من خدمة واحدة فعليًا.
     const [serviceA] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة أ اختبار ${runId}`, `test-service-a-cat-${runId}`],
     );
     ids.serviceA = serviceA.id;
     const [serviceB] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة ب اختبار ${runId}`, `test-service-b-cat-${runId}`],
     );
     ids.serviceB = serviceB.id;

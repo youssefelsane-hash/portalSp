@@ -30,7 +30,7 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
           requiresStartTimeOnly: false,
           requiresHoursOnly: false,
           requiresStartAndEnd: false,
-          pricingModel: PricingModel.FIXED,
+          pricingModel: PricingModel.FORMULA,
           ...serviceOverrides,
         }),
       } as never,
@@ -105,35 +105,37 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
-  it('خدمة بالوحدة من غير كمية: تترفض قبل إنشاء قالب هيفشل عند كل نوبة', async () => {
+  // ADR-0060 §3 — الكمية مابقتش مدخل منفصل على القالب؛ بقت حقل جوّه فورم الخدمة نفسها. الاختبار
+  // اتقلب: اللي كان «لازم كمية» بقى «الكمية مرفوضة كمدخل منفصل».
+  it('كمية تسعير كمدخل منفصل: تترفض — بقت حقل في فورم الخدمة (ADR-0060)', async () => {
     const { service, templatesRepo } = buildService({
       allowsRecurringBooking: true,
-      pricingModel: PricingModel.PER_UNIT,
+      pricingModel: PricingModel.FORMULA,
     });
     await expect(
       service.create('user-1', {
         service_id: 'service-1',
         address_id: 'address-1',
-        frequency: RecurringOrderFrequency.WEEKLY,
+        frequency: RecurringOrderFrequency.MONTHLY,
         starts_at: futureIso(),
+        pricing_quantity: 3.5,
       } as never),
     ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
     expect(templatesRepo.save).not.toHaveBeenCalled();
   });
 
-  it('خدمة بالوحدة تحفظ الكمية كمدخل لكل طلب متولد', async () => {
+  it('قالب متكرر من غير كمية: بينجح عادي', async () => {
     const { service, templatesRepo } = buildService({
       allowsRecurringBooking: true,
-      pricingModel: PricingModel.PER_UNIT,
+      pricingModel: PricingModel.FORMULA,
     });
     const saved = await service.create('user-1', {
       service_id: 'service-1',
       address_id: 'address-1',
       frequency: RecurringOrderFrequency.MONTHLY,
       starts_at: futureIso(),
-      pricing_quantity: 3.5,
     } as never);
-    expect(saved.pricingQuantity).toBe('3.5');
+    expect(saved.pricingQuantity).toBeNull();
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 

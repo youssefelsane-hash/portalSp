@@ -1,3 +1,4 @@
+import { Service } from '../catalog/entities/service.entity';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { PricingEngineService } from './pricing-engine.service';
@@ -106,7 +107,7 @@ describe('PricingEngineService — قيمة افتراضية لحقل CHECKBOX �
       },
     });
 
-    pricingEngineService = new PricingEngineService(dataSource.getRepository(ServicePricingEvaluation), fieldsService, rulesService);
+    pricingEngineService = new PricingEngineService(dataSource.getRepository(ServicePricingEvaluation), fieldsService, rulesService, dataSource.getRepository(Service));
   });
 
   afterAll(async () => {

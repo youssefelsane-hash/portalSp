@@ -151,13 +151,13 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     ids.categoryB = categoryB.id;
     const [serviceA] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',50000,20,0,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0,60) RETURNING id`,
       [ids.categoryA, `خدمة استثناء أ ${runId}`, `test-ex-svc-a-${runId}`],
     );
     ids.serviceA = serviceA.id;
     const [serviceB] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',50000,20,0,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0,60) RETURNING id`,
       [ids.categoryB, `خدمة استثناء ب ${runId}`, `test-ex-svc-b-${runId}`],
     );
     ids.serviceB = serviceB.id;

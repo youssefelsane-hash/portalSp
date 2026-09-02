@@ -87,7 +87,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
     // مدة > full_day_job_minutes (360) عمدًا — عشان تعارض "يوم كامل" يتفعّل فعلاً في الاختبار التالت.
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',30000,20,0,480) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0,480) RETURNING id`,
       [category.id, `خدمة ADR34 ${runId}`, `svc-rsdb-${runId}`],
     );
     ids.service = service.id;

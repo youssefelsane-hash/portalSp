@@ -167,13 +167,13 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     ]);
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [ids.category, `خدمة تجنيد ${runId}`, `test-recruit-service-${runId}`],
     );
     ids.service = service.id;
     const [otherService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [otherCategory.id, `خدمة تانية ${runId}`, `test-other-service-${runId}`],
     );
 

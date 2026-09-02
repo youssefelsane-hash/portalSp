@@ -124,7 +124,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',10000,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,60) RETURNING id`,
       [ids.category, `خدمة فرص ${runId}`, `opp-service-${runId}`],
     );
     ids.service = service.id;

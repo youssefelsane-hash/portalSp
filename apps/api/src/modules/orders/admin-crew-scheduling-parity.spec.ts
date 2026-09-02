@@ -138,7 +138,7 @@ describe('AdminOrdersService — تكافؤ السكدول بين التعيين
     ids.address = address.id;
     const [svc] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,commission_percentage,estimated_duration_minutes,is_active)
-       VALUES ($1,$2,$3,'fixed',50000,20,60,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,60,true) RETURNING id`,
       [ids.category, `خدمة تكافؤ ${runId}`, `parity-svc-${runId}`],
     );
     ids.service = svc.id;

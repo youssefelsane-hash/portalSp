@@ -73,7 +73,7 @@ describe('حصة المساعد داخل الطاقم (ADR-0043، docs/08 §66)'
     ids.category = cat.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',100000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000) RETURNING id`,
       [ids.category, `خدمة طاقم ${runId}`, `crew-svc-${runId}`],
     );
     ids.service = svc.id;

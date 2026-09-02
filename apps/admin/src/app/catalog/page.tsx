@@ -604,7 +604,7 @@ export default function CatalogPage() {
                   </div>
                 </div>
                 <Label htmlFor="service_pricing_model">نوع التسعير</Label>
-                <SelectNative id="service_pricing_model" name="pricing_model" required defaultValue="fixed">
+                <SelectNative id="service_pricing_model" name="pricing_model" required defaultValue="formula">
                   {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}

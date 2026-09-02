@@ -45,7 +45,7 @@ describe('ترتيب قايمة الطلبات عند الأدمن (docs/08 §63
     ids.addressId = a.id;
     const [svc] = await dataSource.query(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [category.id, `خدمة ترتيب ${runId}`, `ord-service-${runId}`],
     );
     ids.serviceId = svc.id;

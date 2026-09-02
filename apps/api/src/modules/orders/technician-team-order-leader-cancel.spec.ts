@@ -75,7 +75,7 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
     ]);
     ids.category = category.id;
     const [serviceRow] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',30000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',30000) RETURNING id`,
       [ids.category, `خدمة قيادة ${runId}`, `test-leader-cancel-service-${runId}`],
     );
     ids.service = serviceRow.id;

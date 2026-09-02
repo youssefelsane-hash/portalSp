@@ -85,6 +85,7 @@ describe('Price Engine — lifecycle guards + trace/explanation (PostgreSQL)', (
       dataSource.getRepository(ServicePricingEvaluation),
       fieldsService,
       rulesService,
+      dataSource.getRepository(Service),
     );
 
     // حقول: واحد هيتستخدم في المعادلة وواحد حر

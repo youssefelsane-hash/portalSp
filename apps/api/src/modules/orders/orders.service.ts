@@ -1172,10 +1172,9 @@ export class OrdersService {
         assistantDailyWageCentsSnapshot: originalOrder ? null : (durationEstimate?.assistant_daily_wage_cents ?? null),
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
-        pricingQuantity:
-          service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
-            ? String(dto.pricing_quantity)
-            : null,
+        // ADR-0060 §3 — مفيش طريقة حساب بتاخد كمية من العميل تاني. العمود بيفضل للطلبات
+        // التاريخية والتقارير، وبيتكتب null لأي طلب جديد.
+        pricingQuantity: null,
         idempotencyKey: idempotencyKey ?? null,
       });
       await manager.save(order);
@@ -1847,13 +1846,22 @@ export class OrdersService {
     }
   }
 
-  private assertPricingQuantity(pricingModel: PricingModel, quantity?: number): void {
-    const quantityBased = pricingModel === PricingModel.PER_UNIT || pricingModel === PricingModel.MONTHLY;
-    if (quantityBased && quantity == null) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الوحدات المطلوبة لهذه الخدمة', HttpStatus.BAD_REQUEST);
-    }
-    if (!quantityBased && quantity != null) {
-      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدات', HttpStatus.BAD_REQUEST);
+  /**
+   * بَقّة حقيقية بلّغها المالك (docs/08 §113، ADR-0060): الشرط هنا كان مكتوب بإيد
+   * (`PER_UNIT || MONTHLY`) بدل ما يتقرا من سجل الطرق. ADR-0050 §4 حوّلت `monthly` لفترة
+   * تاريخين (`requires: 'period'`) وحدّثت السجل، بس الحارس ده فضل شايفها محسوبة بالكمية —
+   * فخدمة شهرية كانت بتتطلب رقم كمية **مفيش أي شاشة بتطلبه أصلاً**، والحجز يقف على رسالة
+   * «لازم تحدد عدد الوحدات المطلوبة لهذه الخدمة» بلا أي حقل يقدر يرضيها.
+   *
+   * دلوقتي مصدر واحد: `pricingMethod(model).requires`.
+   */
+  private assertPricingQuantity(_pricingModel: PricingModel, quantity?: number): void {
+    if (quantity != null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الكمية بقت حقل في فورم الخدمة نفسها مش مدخل منفصل — ابعتها جوّه field_values',
+        HttpStatus.BAD_REQUEST,
+      );
     }
   }
 

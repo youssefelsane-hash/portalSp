@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource, EntityManager } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -112,8 +116,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
         ServiceAddon,
         ServiceStandardData,
         TechnicianLevelConfig,
-        LoyaltyTransaction,
-      ],
+        LoyaltyTransaction, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -141,13 +144,33 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     // إجمالي 1000ج (100000 قرش)، إيداع 30% = 30000 قرش بالظبط.
     const [serviceDeposit] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, unit_name_ar, commission_percentage, warranty_days, deposit_required, deposit_percentage)
-       VALUES ($1,$2,$3,'per_unit',100000,'قطعة',20,0,true,30) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,'قطعة',20,0,true,30) RETURNING id`,
       [ids.category, `خدمة إيداع ${runId}`, `test-service-deposit-${runId}`],
     );
     ids.serviceDeposit = serviceDeposit.id;
+    // ADR-0060 §3 — الكمية مابقتش مدخل منفصل (`pricing_quantity`)، بقت حقل في فورم الخدمة
+    // والمعادلة بتقرا منه. ده بالظبط اللي قالب «بالقطعة/بالوحدة» بيولّده.
+    await q(
+      `INSERT INTO service_pricing_fields (service_id, field_key, label_ar, field_type, is_required, display_order, unit_ar, min_value, max_value)
+       VALUES ($1,'units','الكمية المطلوبة','number',true,10,'قطعة',1,1000)`,
+      [ids.serviceDeposit],
+    );
+    await q(
+      `INSERT INTO service_pricing_rules (service_id, rule_type, rule_key, payload, valid_from, is_active)
+       VALUES ($1,'formula','final_price',$2::jsonb, now(), true)`,
+      [
+        ids.serviceDeposit,
+        JSON.stringify({
+          price_cents: {
+            type: 'multiply',
+            operands: [{ type: 'field_ref', field_key: 'units' }, { type: 'literal', value: 100000 }],
+          },
+        }),
+      ],
+    );
     const [serviceNoDeposit] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',100000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,20,0) RETURNING id`,
       [ids.category, `خدمة عادية إيداع ${runId}`, `test-service-no-deposit-${runId}`],
     );
     ids.serviceNoDeposit = serviceNoDeposit.id;
@@ -193,7 +216,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       settingsService,
       // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
       // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -267,7 +290,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       {} as never,
       {} as never,
       {} as never,
@@ -295,6 +318,8 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1)`, [[ids.serviceDeposit, ids.serviceNoDeposit]]);
+      await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1)`, [[ids.serviceDeposit, ids.serviceNoDeposit]]);
       await q(`DELETE FROM services WHERE id = ANY($1)`, [[ids.serviceDeposit, ids.serviceNoDeposit]]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
@@ -310,11 +335,12 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       ordersService.create(ids.customerUser, {
         service_id: ids.serviceDeposit,
         address_id: ids.address,
-        pricing_quantity: 1,
+        field_values: { units: 1 },
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
   });
 
+  // نفس روح الاختبار القديم بالظبط، بس المدخل بقى حقل فورم إجباري بدل `pricing_quantity`.
   it('خدمة بالوحدة ترفض الحجز والمعاينة من غير كمية صريحة', async () => {
     const input = { service_id: ids.serviceDeposit, address_id: ids.address };
     await expect(ordersService.previewPrice(ids.customerUser, input)).rejects.toMatchObject({ code: 'VAL_001' });
@@ -327,7 +353,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
       payment_method: 'card',
     } as never);
     expect(order.serviceId).toBe(ids.serviceDeposit);
@@ -341,7 +367,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
       payment_method: 'fawry_reference',
     });
     expect(order.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
@@ -352,7 +378,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const input = {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 2,
+      field_values: { units: 2 },
       warranty_plan_id: ids.warrantyPlan,
     };
     const preview = await ordersService.previewPrice(ids.customerUser, input);
@@ -367,14 +393,15 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     expect(order.warrantyPriceCents).toBe(preview.warranty_price_cents);
     expect(order.totalAmountCents).toBe(preview.total_amount_cents);
     expect(order.depositAmountCents).toBe(preview.deposit_amount_cents);
-    expect(Number(order.pricingQuantity)).toBe(2);
+    // العمود ده بقى تاريخي بس (ADR-0060 §3) — الكمية الفعلية بانت في السعر فوق (200000).
+    expect(order.pricingQuantity).toBeNull();
   });
 
   it('الضمان الاختياري 30% يضاف للإجمالي، يعيد حساب الإيداع، ويصدر من snapshot غير قابل للتغيير', async () => {
     const preview = await ordersService.previewPrice(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
       warranty_plan_id: ids.warrantyPlan,
     });
     expect(preview.warranty_price_cents).toBe(30000);
@@ -384,7 +411,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
       payment_method: 'card',
       warranty_plan_id: ids.warrantyPlan,
     });
@@ -425,7 +452,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
       payment_method: 'card',
     } as never);
 
@@ -481,7 +508,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const preview = await ordersService.previewPrice(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
-      pricing_quantity: 1,
+      field_values: { units: 1 },
     } as never);
     expect(preview.total_amount_cents).toBe(100000);
     expect(preview.deposit_amount_cents).toBe(30000);

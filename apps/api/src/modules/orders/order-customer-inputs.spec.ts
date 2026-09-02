@@ -65,7 +65,7 @@ describe('مدخلات العميل على الطلب — snapshot معروض (d
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,'fixed',50000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,true) RETURNING id`,
       [ids.category, `خدمة مدخلات ${runId}`, `test-inputs-svc-${runId}`],
     );
     ids.service = service.id;

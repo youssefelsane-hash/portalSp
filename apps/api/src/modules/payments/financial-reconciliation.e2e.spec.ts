@@ -131,7 +131,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'fixed',100000,20,0,false) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,20,0,false) RETURNING id`,
       [ids.category, `خدمة التسوية ${runId}`, `test-service-recon-${runId}`],
     );
     ids.service = service.id;

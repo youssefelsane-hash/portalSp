@@ -78,7 +78,7 @@ describe('AdminCampaignsService.listAbandonedLeads() — عملاء متروكي
     ids.category = category.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,$4,'fixed',20000,true) RETURNING id`,
+       VALUES ($1,$2,$3,$4,'formula',20000,true) RETURNING id`,
       [ids.category, `خدمة متروكين ${runId}`, `Leads Svc ${runId}`, `leads-svc-${runId}`],
     );
     ids.service = svc.id;

@@ -113,7 +113,7 @@ describe('ADR-0052 — مساعد اختياري واحد للشغلانة ال�
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',50000,20,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,60) RETURNING id`,
       [ids.category, `تسليك حوض ${runId}`, `test-oa-svc-${runId}`],
     );
     ids.service = service.id;

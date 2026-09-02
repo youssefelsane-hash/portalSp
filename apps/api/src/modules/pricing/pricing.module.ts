@@ -1,5 +1,6 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { CatalogModule } from '../catalog/catalog.module';
+import { Service } from '../catalog/entities/service.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -15,6 +16,7 @@ import { PricingEngineService } from './pricing-engine.service';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { PricingRuleTestsService } from './pricing-rule-tests.service';
+import { PricingTemplatesService } from './pricing-templates.service';
 import { OrderFinancialFinalizationService } from './order-financial-finalization.service';
 
 // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — موديول مستقل عمدًا (راجع §14 في docs/08):
@@ -22,7 +24,7 @@ import { OrderFinancialFinalizationService } from './order-financial-finalizatio
 // ميكبرش أكتر من اللازم مع كل ميزة جديدة.
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ServicePricingField, ServicePricingRule, ServicePricingEvaluation, ServicePricingRuleTest]),
+    TypeOrmModule.forFeature([ServicePricingField, ServicePricingRule, ServicePricingEvaluation, ServicePricingRuleTest, Service]),
     AuditModule,
     // ADR-0037 — سياسة وعاء العمولة بتتقرا من محرك الإعدادات، مش من كود ثابت.
     SettingsModule,
@@ -35,12 +37,14 @@ import { OrderFinancialFinalizationService } from './order-financial-finalizatio
     PricingRulesService,
     PricingEngineService,
     PricingRuleTestsService,
+    PricingTemplatesService,
     CommissionBaseService,
     OrderFinancialFinalizationService,
     LevelPremiumService,
   ],
   exports: [
     PricingEngineService,
+    PricingTemplatesService,
     PricingFieldsService,
     PricingRulesService,
     CommissionBaseService,

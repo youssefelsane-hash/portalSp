@@ -128,7 +128,7 @@ describe('OrderTeamService.acceptCrewOpportunity() — أمان التزامن (
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',30000,20,0,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0,60) RETURNING id`,
       [ids.category, `خدمة قبول ${runId}`, `test-accept-service-${runId}`],
     );
     ids.service = service.id;

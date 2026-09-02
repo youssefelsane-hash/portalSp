@@ -85,7 +85,7 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
     ids.category = category.id;
     const [serviceRow] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',500000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',500000) RETURNING id`,
       [category.id, `خدمة تقديم ${runId}`, `sub-svc-${runId}`],
     );
     ids.service = serviceRow.id;

@@ -10,7 +10,7 @@ const evaluationContext: FormulaEvaluationContext = {
 };
 
 describe('PricingEngine semantic result validation', () => {
-  const engine = new PricingEngineService({} as never, {} as never, {} as never);
+  const engine = new PricingEngineService({} as never, {} as never, {} as never, {} as never);
   const compute = (payload: FinalPriceFormulaPayload) =>
     (engine as unknown as {
       computeResult: (formula: FinalPriceFormulaPayload, context: FormulaEvaluationContext) => unknown;

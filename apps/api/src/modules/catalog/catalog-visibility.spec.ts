@@ -51,13 +51,13 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
 
     const [activeService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.activeCategory, `خدمة نشطة ${runId}`, `active-svc-vis-${runId}`],
     );
     ids.activeService = activeService.id;
     const [inactiveService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,'fixed',10000,false) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,false) RETURNING id`,
       [ids.activeCategory, `خدمة معطّلة ${runId}`, `inactive-svc-vis-${runId}`],
     );
     ids.inactiveService = inactiveService.id;
@@ -65,7 +65,7 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
     // بيستثنيها تلقائيًا عبر deleted_at IS NULL الضمنية، مش شرط WHERE صريح في الكود).
     const [softDeletedService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active, deleted_at)
-       VALUES ($1,$2,$3,'fixed',10000,true, now()) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true, now()) RETURNING id`,
       [ids.activeCategory, `خدمة محذوفة ${runId}`, `deleted-svc-vis-${runId}`],
     );
     ids.softDeletedService = softDeletedService.id;

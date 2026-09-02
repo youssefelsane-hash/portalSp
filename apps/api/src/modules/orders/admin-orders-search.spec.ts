@@ -46,7 +46,7 @@ describe('بحث الأدمن برقم الطلب (docs/08 §67)', () => {
     ids.category = cat.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة بحث ${runId}`, `search-svc-${runId.toLowerCase()}`],
     );
     ids.service = svc.id;
@@ -176,7 +176,7 @@ describe('البحث الموسّع — اسم/تليفون العميل وال�
     ids.category = cat.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة بحث موسّع ${runId}`, `wide-search-svc-${runId.toLowerCase()}`],
     );
     ids.service = svc.id;

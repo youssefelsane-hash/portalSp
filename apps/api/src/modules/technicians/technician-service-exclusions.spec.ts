@@ -72,7 +72,7 @@ describe('حجب خدمات عن فني (ADR-0049)', () => {
     const mkService = async (categoryId: string, label: string) => {
       const [svc] = await q(
         `INSERT INTO services (category_id, name_ar, name_en, slug, base_price_cents, pricing_model)
-         VALUES ($1,$2,$3,$4,10000,'fixed') RETURNING id`,
+         VALUES ($1,$2,$3,$4,10000,'formula') RETURNING id`,
         [categoryId, `${label} ${runId}`, `${label} ${runId}`, `${label}-${runId.toLowerCase()}`],
       );
       return svc.id as string;

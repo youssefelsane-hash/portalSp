@@ -4,7 +4,7 @@ import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext, PricingContext } from '../pricing/pricing-context';
-import { missingPricingInput, pricingMethod } from '../pricing/pricing-methods';
+import { PricingEvaluationResult } from '../pricing/pricing-formula.types';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -363,15 +363,10 @@ export class CatalogService {
       isEmergency,
       technicianLevel,
     });
-    // ADR-0050 §1 — المدخل المطلوب لكل طريقة بيتقرا من نفس السجل اللي بيبني شجرة سعرها، فمستحيل
-    // يفترقوا. قبل كده كانت `if` منفصلة هنا لكل طريقة، والشجرة في ملف تاني خالص.
-    const missingInput = missingPricingInput(service.pricingModel, pricingContext);
-    if (missingInput) {
-      throw new ApiException(ErrorCode.VAL_001, missingInput, HttpStatus.BAD_REQUEST);
-    }
-    if (pricingContext.quantity !== null && service.pricingModel === PricingModel.PER_UNIT) {
-      this.assertQuantityConstraints(service, pricingContext.quantity);
-    }
+    // ADR-0060 §1 — مفيش «مدخل مطلوب لكل طريقة» تاني: أي حقل الحساب محتاجه بقى حقل في الفورم
+    // الديناميكي، والمحرك نفسه بيرفض لو حقل إجباري ناقص (`validateAndNormalizeFieldValues`).
+    // الفحص اللي كان هنا كان بيتفرّع على `pricing_model` بمعرفة متكررة — وده اللي طلّع بلاغ
+    // «لازم تحدد عدد الوحدات» لخدمة شهرية مفيش شاشة بتطلب منها كمية أصلاً (docs/08 §113).
 
     // docs/08 §108-G — بَقّة حقيقية اتكشفت: تسعير المناطق (service_zone_pricing) كان بيتحقق
     // بس **جوّه** فرع الأسعار الثابتة/بالساعة/بالوحدة، بعد return مبكر لخدمات formula (السطر
@@ -392,23 +387,29 @@ export class CatalogService {
           .getOne()
       : null;
 
-    const result = service.pricingModel === PricingModel.FORMULA
-      ? await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {}, undefined, pricingContext)
-      : this.pricingEngineService.evaluatePreset(
-          service.pricingModel,
-          service.basePriceCents,
-          pricingContext,
-          service.minPriceCents,
-          service.maxPriceCents,
-        );
+    // مسار حساب واحد بس (ADR-0060 §1). `inspection_then_quote` مش بتمرّ منه أصلاً — مفيش سعر
+    // خدمة وقت الحجز، رسم الكشف بس (بيتضاف تحت كـ`inspection_fee_cents`).
+    const result: PricingEvaluationResult & { evaluationId: string | null } = service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE
+      ? {
+          evaluationId: null,
+          priceCents: 0,
+          minPriceCents: null,
+          maxPriceCents: null,
+          estimatedDurationDays: null,
+          requiredTechnicians: null,
+          requiredAssistants: null,
+          requiresAssistant: null,
+          suitableForEmergency: null,
+        }
+      : await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {}, undefined, pricingContext);
 
-    if (
-      zoneOverride?.pricingMode === ZonePricingMode.OVERRIDE &&
-      (service.pricingModel === PricingModel.FORMULA || service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE)
-    ) {
+    // الاستبدال المطلق لسعر المنطقة كان مرفوض أصلاً لـ`formula` و`inspection_then_quote`
+    // (السعر مش «سعر وحدة» يتضرب في كمية معروفة). بعد ADR-0060 مفيش غير الاتنين دول، يعني
+    // الوضع ده بقى مرفوض دايمًا — النسبة المئوية هي طريقة تسعير المناطق الوحيدة.
+    if (zoneOverride?.pricingMode === ZonePricingMode.OVERRIDE) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        'الاستبدال المطلق لسعر المنطقة غير مدعوم لهذا النوع من التسعير — استخدم نسبة مئوية',
+        'الاستبدال المطلق لسعر المنطقة مش مدعوم — استخدم نسبة مئوية',
         HttpStatus.CONFLICT,
       );
     }
@@ -427,15 +428,8 @@ export class CatalogService {
     let inspectionFeeCents = service.inspectionFeeCents;
     if (zoneOverride) {
       inspectionFeeCents = zoneOverride.inspectionFeeCents;
-      if (zoneOverride.pricingMode === ZonePricingMode.PERCENTAGE) {
-        zoneAdjustedBaseCents = Math.round(result.priceCents * (1 + Number(zoneOverride.modifierPercentage) / 100));
-      } else {
-        // نفس السجل برضه — «الوحدة» اللي سعر المنطقة المطلق بيتضرب فيها جزء من تعريف الطريقة،
-        // مش معرفة تالتة متكررة هنا.
-        const units = pricingMethod(service.pricingModel).unitsForZoneOverride(pricingContext);
-        zoneAdjustedBaseCents = Math.round(zoneOverride.priceCents! * units);
-        surgeMultiplier = Number(zoneOverride.surgeMultiplier);
-      }
+      // OVERRIDE اترفض فوق، فالباقي نسبة مئوية بس.
+      zoneAdjustedBaseCents = Math.round(result.priceCents * (1 + Number(zoneOverride.modifierPercentage) / 100));
     }
 
     let estimatedTotalCents = Math.round(zoneAdjustedBaseCents * surgeMultiplier * levelMultiplier);

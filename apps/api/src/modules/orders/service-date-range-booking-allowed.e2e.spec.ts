@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -107,8 +111,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
         ServiceAddon,
         ServiceStandardData,
         TechnicianLevelConfig,
-        LoyaltyTransaction,
-      ],
+        LoyaltyTransaction, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -135,14 +138,14 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
     ids.category = category.id;
     const [serviceRangeDisabled] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_date_range_booking)
-       VALUES ($1,$2,$3,'fixed',50000,20,0,false) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0,false) RETURNING id`,
       [ids.category, `خدمة بلا نطاق ${runId}`, `test-service-no-range-${runId}`],
     );
     ids.serviceRangeDisabled = serviceRangeDisabled.id;
     // الافتراضي (allows_date_range_booking مش متبعت في الـINSERT، NOT NULL DEFAULT true بيمسكها).
     const [serviceRangeEnabled] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',50000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0) RETURNING id`,
       [ids.category, `خدمة نطاق عادية ${runId}`, `test-service-default-range-${runId}`],
     );
     ids.serviceRangeEnabled = serviceRangeEnabled.id;
@@ -180,7 +183,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       settingsService,
       // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
       // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -254,7 +257,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       {} as never,
       {} as never,
       {} as never,

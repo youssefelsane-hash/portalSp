@@ -94,13 +94,13 @@ describe('السقف اليومي وتماثل الجدولة (ADR-0059)', () =>
     ids.category = cat.id;
     const [svcShort] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, base_price_cents, estimated_duration_minutes, pricing_model)
-       VALUES ($1,$2,$3,$4,10000,120,'fixed') RETURNING id`,
+       VALUES ($1,$2,$3,$4,10000,120,'formula') RETURNING id`,
       [ids.category, `قصيرة ${runId}`, `short ${runId}`, `short-${runId.toLowerCase()}`],
     );
     ids.shortService = svcShort.id;
     const [svcLong] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, base_price_cents, estimated_duration_minutes, pricing_model)
-       VALUES ($1,$2,$3,$4,50000,480,'fixed') RETURNING id`,
+       VALUES ($1,$2,$3,$4,50000,480,'formula') RETURNING id`,
       [ids.category, `طويلة ${runId}`, `long ${runId}`, `long-${runId.toLowerCase()}`],
     );
     ids.longService = svcLong.id;

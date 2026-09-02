@@ -186,6 +186,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       dataSource.getRepository(ServicePricingEvaluation),
       fieldsService,
       rulesService,
+      dataSource.getRepository(Service),
     );
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),

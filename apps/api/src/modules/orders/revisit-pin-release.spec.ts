@@ -80,7 +80,7 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',50000,20,14,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,14,60) RETURNING id`,
       [ids.category, `خدمة إعادة زيارة ${runId}`, `test-rv-svc-${runId}`],
     );
     ids.service = service.id;

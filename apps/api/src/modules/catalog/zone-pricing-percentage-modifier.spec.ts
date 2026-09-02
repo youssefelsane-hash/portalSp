@@ -1,3 +1,4 @@
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -30,7 +31,7 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData],
+      entities: [Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -58,7 +59,7 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
     ids.category = category.id;
 
     const [overrideService] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة override ${runId}`, `override-service-${runId}`],
     );
     ids.overrideService = overrideService.id;
@@ -69,7 +70,7 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
     );
 
     const [percentageService] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة نسبة ${runId}`, `percentage-service-${runId}`],
     );
     ids.percentageService = percentageService.id;
@@ -87,7 +88,7 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       {} as never,
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
   });
@@ -102,10 +103,12 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
     await dataSource.destroy();
   });
 
-  it('override — رقم مطلق يستبدل السعر الأساسي بالكامل (السلوك القديم بالحرف)', async () => {
-    const estimate = await service.estimate(ids.overrideService, ids.zone);
-    expect(estimate.base_price_cents).toBe(50000);
-    expect(estimate.estimated_total_cents).toBe(50000);
+  // ADR-0060 §1 — الاستبدال المطلق كان **مرفوض أصلاً** لخدمات `formula` من قبل القرار ده (السعر
+  // مش «سعر وحدة» يتضرب في كمية معروفة). بعد ما كل الخدمات بقت معادلة، الوضع ده بقى مرفوض
+  // دايمًا، والنسبة المئوية هي طريقة تسعير المناطق الوحيدة. الاختبار اتقلب عشان يوثّق ده صراحة
+  // بدل ما يختفي.
+  it('override — مرفوض دلوقتي لأي خدمة، والرسالة بتوجّه للنسبة المئوية (ADR-0060)', async () => {
+    await expect(service.estimate(ids.overrideService, ids.zone)).rejects.toMatchObject({ code: 'VAL_001' });
   });
 
   it('percentage — نسبة مئوية فوق السعر الأساسي الحالي (10000 + 15% = 11500)', async () => {
@@ -242,6 +245,7 @@ describe('CatalogService.estimate() — تسعير المنطقة على خدم�
       dataSource.getRepository(ServicePricingEvaluation),
       fieldsService,
       rulesService,
+      dataSource.getRepository(Service),
     );
 
     // نسبة منطقة +15% — نفس صف تسعير المناطق العادي، بس على خدمة formula هنا.

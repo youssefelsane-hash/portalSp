@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -109,8 +113,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
         ServiceAddon,
         ServiceStandardData,
         TechnicianLevelConfig,
-        LoyaltyTransaction,
-      ],
+        LoyaltyTransaction, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -134,13 +137,13 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     // خدمة مفعّل فيها التكرار + خدمة عادية (الافتراضي allows_recurring_booking=false)
     const [serviceRepeatable] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_recurring_booking)
-       VALUES ($1,$2,$3,'fixed',30000,15,0,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,15,0,true) RETURNING id`,
       [ids.category, `خدمة بتتكرر ${runId}`, `test-service-repeat-${runId}`],
     );
     ids.serviceRepeatable = serviceRepeatable.id;
     const [servicePlain] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,15,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,15,0) RETURNING id`,
       [ids.category, `خدمة عادية ${runId}`, `test-service-plain-${runId}`],
     );
     ids.servicePlain = servicePlain.id;
@@ -187,7 +190,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       settingsService,
       // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
       // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -275,7 +278,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       promoCodesService as never,
       {} as never,
       {} as never,

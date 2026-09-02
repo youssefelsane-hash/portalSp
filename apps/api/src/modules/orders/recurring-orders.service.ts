@@ -165,11 +165,13 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
-    if ((service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) && dto.pricing_quantity == null) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
-    }
-    if (service.pricingModel !== PricingModel.PER_UNIT && service.pricingModel !== PricingModel.MONTHLY && dto.pricing_quantity != null) {
-      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    // ADR-0060 §3 — الكمية بقت حقل في فورم الخدمة نفسها، مش مدخل منفصل على القالب.
+    if (dto.pricing_quantity != null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الكمية بقت حقل في فورم الخدمة نفسها مش مدخل منفصل — ابعتها جوّه field_values',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     // أوضاع التوقيت الأربعة (ADR-0032) — نفس فحوصات OrdersService.create() بالحرف: القالب اللي
@@ -233,10 +235,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
-      pricingQuantity:
-        service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
-          ? String(dto.pricing_quantity)
-          : null,
+      pricingQuantity: null,
       durationHours: dto.duration_hours ?? null,
       durationMinutes: pricingContext.durationMinutes,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,

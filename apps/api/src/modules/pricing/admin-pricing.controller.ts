@@ -5,6 +5,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { ApplyPricingTemplateDto } from './dto/apply-pricing-template.dto';
 import { CreatePricingFieldDto } from './dto/create-pricing-field.dto';
 import { CreatePricingRuleTestDto } from './dto/create-pricing-rule-test.dto';
 import { EvaluateDraftPricingDto } from './dto/evaluate-draft-pricing.dto';
@@ -16,6 +17,8 @@ import { PricingEngineService } from './pricing-engine.service';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { PricingRuleTestsService } from './pricing-rule-tests.service';
+import { PricingTemplatesService } from './pricing-templates.service';
+import { allPricingTemplates } from './pricing-templates';
 
 // إدارة محرك التسعير — نفس صلاحية catalog.manage الموجودة أصلاً (حقول/قواعد التسعير جزء من
 // إدارة الكتالوج، مش صلاحية منفصلة، تجنّبًا لتكرار بلا داعي). راجع docs/08 §1.7: ده المرحلة 1
@@ -28,7 +31,40 @@ export class AdminPricingController {
     private readonly rulesService: PricingRulesService,
     private readonly pricingEngineService: PricingEngineService,
     private readonly ruleTestsService: PricingRuleTestsService,
+    private readonly templatesService: PricingTemplatesService,
   ) {}
+
+  // ── قوالب التسعير (ADR-0060 §2) ─────────────────────────────────────
+  //
+  // القالب مش وضع تشغيل — بيزرع حقول ويكتب شجرة `final_price` مرة واحدة، وبعدها الخدمة معادلة
+  // عادية بالكامل. مفيش أي فرع في الكود بيسأل «دي كانت أنهي قالب؟» بعد التطبيق.
+
+  @Get('pricing-templates')
+  listTemplates() {
+    return allPricingTemplates().map((template) => ({
+      key: template.key,
+      label_ar: template.labelAr,
+      description_ar: template.descriptionAr,
+      rate_label_ar: template.rateLabelAr,
+      fields: template.fields.map((field) => ({
+        field_key: field.fieldKey,
+        label_ar: field.labelAr,
+        field_type: field.fieldType,
+        unit_ar: field.unitAr,
+      })),
+    }));
+  }
+
+  @Post('services/:id/pricing/apply-template')
+  @RequirePermission('catalog.manage')
+  async applyTemplate(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApplyPricingTemplateDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.templatesService.apply(admin.sub, id, dto.template_key, dto.rate_cents, audit);
+  }
 
   // ── حقول الفورم الديناميكي ──────────────────────────────────────────
 
