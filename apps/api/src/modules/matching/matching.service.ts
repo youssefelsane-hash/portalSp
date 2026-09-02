@@ -116,6 +116,12 @@ export interface EligibleTechnicianRow {
   company_available_staff_count: string;
 }
 
+/** حمل طلب لم يُنشأ بعد، لاستخدام نفس استعلام المطابقة الحقيقي في معاينة الحجز. */
+export interface MatchingPreviewLoad {
+  durationMinutes: number | null;
+  estimatedDurationDays: number | null;
+}
+
 export interface AvailableOrderRow {
   assignment_id: string;
   order_id: string;
@@ -231,6 +237,7 @@ export class MatchingService {
     ignoreAvailabilityFilter = false,
     preferredCompanyId?: string | null,
     ignoreActiveOrderConflict = false,
+    previewLoad?: MatchingPreviewLoad,
   ): Promise<EligibleTechnicianRow[]> {
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const workloadBalanceWeight = await this.settingsService.getNumber(
@@ -369,13 +376,13 @@ export class MatchingService {
             activeStatusesParam: '$6',
             engagedStatusesParam: '$11',
             isEmergencyParam: '$12',
-            serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+            serviceDurationExpr: "COALESCE($27::int, (SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
             candidateLoad: {
-              estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
-              durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+              estimatedDurationDaysExpr: 'COALESCE($28::numeric, (SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))',
+              durationMinutesExpr: 'COALESCE($27::int, (SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid))',
               serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
             },
-            preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
+            preciseDurationHoursExpr: 'COALESCE($27::numeric / 60.0, (SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid))',
             dailyCapacityMinutesParam: '$13',
             ignoreActiveOrderConflict,
           })}
@@ -423,6 +430,7 @@ export class MatchingService {
         -- التالت ده تعبير دايمًا صحيح (tautology) بس عشان Postgres يقدر يستنتج نوع $8 أصلاً
         -- (parameter من غير أي إشارة ليه بيرمي "could not determine data type").
         AND ($8::boolean IS NULL OR $8::boolean IS NOT NULL)
+        AND ($28::numeric IS NULL OR $28::numeric IS NOT NULL)
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
@@ -464,13 +472,13 @@ export class MatchingService {
           activeStatusesParam: '$6',
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
-          serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+          serviceDurationExpr: "COALESCE($27::int, (SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
           candidateLoad: {
-            estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
-            durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+            estimatedDurationDaysExpr: 'COALESCE($28::numeric, (SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))',
+            durationMinutesExpr: 'COALESCE($27::int, (SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid))',
             serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
           },
-          preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
+          preciseDurationHoursExpr: 'COALESCE($27::numeric / 60.0, (SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid))',
           dailyCapacityMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
@@ -505,6 +513,8 @@ export class MatchingService {
         companyLargeJobMinCrew,
         companyLargeJobBoost,
         distanceWeight.weight,
+        previewLoad?.durationMinutes ?? null,
+        previewLoad?.estimatedDurationDays ?? null,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);

@@ -51,4 +51,9 @@ export interface PreviewOrderResponseDto {
   display_price_min_cents: number | null;
   display_price_max_cents: number | null;
   remote_assessment_fee_cents: number;
+  booking_mode: 'individual' | 'team' | 'emergency';
+  service_zone_id: string;
+  duration_minutes: number | null;
+  required_technicians: number | null;
+  required_assistants: number | null;
 }

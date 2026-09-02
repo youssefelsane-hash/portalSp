@@ -1643,6 +1643,28 @@ export class OrdersService {
       previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
       pricingContext,
     );
+    if (Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'standard_data_id وrequested_units لازم يتبعتوا مع بعض — مينفعش واحد من غير التاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const durationEstimate =
+      dto.standard_data_id && dto.requested_units
+        ? await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units)
+        : null;
+    const requiredTechnicians = durationEstimate?.assigned_technicians ?? estimate.required_technicians ?? null;
+    const requiredAssistants = durationEstimate?.assigned_assistants ?? estimate.required_assistants ?? null;
+    const durationMinutes = estimate.duration_minutes != null ? Math.ceil(estimate.duration_minutes) : pricingContext.durationMinutes;
+    if (urgent && estimate.suitable_for_emergency === false) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش مناسبة لطلب طوارئ بالمواصفات دي حسب سياسة التسعير — احجزها بموعد عادي',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const bookingMode = resolveBookingMode({ urgent, requiredTechnicians, requiredAssistants, service });
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
 
@@ -1706,7 +1728,7 @@ export class OrdersService {
       discount_cents: discountCents,
       discount_source: discountSource,
       total_amount_cents: totalAmountCents,
-      estimated_duration_days: estimate.estimated_duration_days,
+      estimated_duration_days: durationEstimate?.estimated_days ?? estimate.estimated_duration_days,
       level_price_multiplier: estimate.level_price_multiplier,
       deposit_amount_cents: depositAmountCents,
       due_now_cents: depositAmountCents ?? totalAmountCents,
@@ -1715,6 +1737,11 @@ export class OrdersService {
       display_price_min_cents: service.displayPriceMinCents,
       display_price_max_cents: service.displayPriceMaxCents,
       remote_assessment_fee_cents: remoteAssessmentRequested ? service.remoteAssessmentFeeCents : 0,
+      booking_mode: bookingMode,
+      service_zone_id: zone.id,
+      duration_minutes: durationMinutes,
+      required_technicians: requiredTechnicians,
+      required_assistants: requiredAssistants,
     };
   }
 

@@ -44,6 +44,8 @@ import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
+import { CreateBookingMatchPreviewDto } from './dto/create-booking-match-preview.dto';
+import { BookingMatchPreviewService } from './booking-match-preview.service';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -58,6 +60,7 @@ export class OrdersController {
     private readonly problemImagesService: ProblemImagesService,
     private readonly addressesService: AddressesService,
     private readonly techniciansService: TechniciansService,
+    private readonly bookingMatchPreviews: BookingMatchPreviewService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -142,6 +145,11 @@ export class OrdersController {
   @Post('preview')
   async preview(@CurrentUser() user: JwtPayload, @Body() dto: PreviewOrderDto) {
     return this.ordersService.previewPrice(user.sub, dto);
+  }
+
+  @Post('match-preview')
+  async matchPreview(@CurrentUser() user: JwtPayload, @Body() dto: CreateBookingMatchPreviewDto) {
+    return this.bookingMatchPreviews.create(user.sub, dto);
   }
 
   @Post(':id/cancel')

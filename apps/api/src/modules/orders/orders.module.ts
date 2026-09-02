@@ -44,6 +44,7 @@ import { OrderMedia } from './entities/order-media.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderQuote } from './entities/order-quote.entity';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
+import { BookingMatchPreviewService } from './booking-match-preview.service';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
 
@@ -100,6 +101,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     RecurringOrdersService,
     AdminOrdersService,
     CancellationReasonsService,
+    BookingMatchPreviewService,
     storageServiceProvider,
   ],
   exports: [OrdersService],

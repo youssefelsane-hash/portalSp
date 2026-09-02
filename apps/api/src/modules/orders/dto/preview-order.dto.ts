@@ -108,6 +108,15 @@ export class PreviewOrderDto {
 
   @IsOptional()
   @IsUUID()
+  standard_data_id?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  requested_units?: number;
+
+  @IsOptional()
+  @IsUUID()
   warranty_plan_id?: string;
 
   // نفس CreateOrderDto.pricing_quantity بالحرف لضمان أن المعاينة والحجز النهائي يستخدمان
