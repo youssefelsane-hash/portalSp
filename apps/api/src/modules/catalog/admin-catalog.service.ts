@@ -23,7 +23,7 @@ import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
-import { PricingModel, Service } from './entities/service.entity';
+import { AssessmentFeeCreditMode, AssessmentRoutePolicy, PriceCertaintyMode, PricingModel, Service } from './entities/service.entity';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
 import { randomUUID } from 'node:crypto';
@@ -338,6 +338,7 @@ export class AdminCatalogService {
       launchPhase: dto.launch_phase ?? 1,
       searchKeywords: dto.search_keywords ?? [],
     });
+    this.applyAssessmentPolicy(service, dto);
     await this.services.save(service);
 
     await this.auditLog.record({
@@ -354,6 +355,79 @@ export class AdminCatalogService {
       meta,
     });
     return service;
+  }
+
+  /**
+   * **ADR-0063/0066 — سياسة تحديد السعر والمعاينة**: نقطة الكتابة الوحيدة للـ13 حقل دول، مشتركة
+   * بين الإنشاء والتعديل. لو اتكتبوا في المكانين، أول تعديل في قاعدة تحقق هيسري في واحد بس.
+   *
+   * كل الحقول اختيارية والافتراضيات في الداتابيز آمنة، فالخدمة القديمة اللي الأدمن مابيبعتش
+   * ليها الحقول دي بتفضل `confirmed_price` بكل مسارات التقييم مقفولة — نفس سلوكها بالحرف.
+   */
+  private applyAssessmentPolicy(service: Service, dto: Partial<CreateServiceDto>): void {
+    if (dto.price_certainty_mode !== undefined) service.priceCertaintyMode = dto.price_certainty_mode;
+    if (dto.assessment_route_policy !== undefined) service.assessmentRoutePolicy = dto.assessment_route_policy;
+    if (dto.remote_assessment_enabled !== undefined) service.remoteAssessmentEnabled = dto.remote_assessment_enabled;
+    if (dto.remote_assessment_fee_cents !== undefined) service.remoteAssessmentFeeCents = dto.remote_assessment_fee_cents;
+    if (dto.onsite_assessment_enabled !== undefined) service.onsiteAssessmentEnabled = dto.onsite_assessment_enabled;
+    if (dto.assessment_fee_credit_mode !== undefined) service.assessmentFeeCreditMode = dto.assessment_fee_credit_mode;
+    if (dto.assessment_fee_credit_bps !== undefined) service.assessmentFeeCreditBps = dto.assessment_fee_credit_bps;
+    if (dto.onsite_assessor_executes_work !== undefined) {
+      service.onsiteAssessorExecutesWork = dto.onsite_assessor_executes_work;
+    }
+    if (dto.quote_validity_minutes !== undefined) service.quoteValidityMinutes = dto.quote_validity_minutes;
+    if (dto.display_price_min_cents !== undefined) service.displayPriceMinCents = dto.display_price_min_cents;
+    if (dto.display_price_max_cents !== undefined) service.displayPriceMaxCents = dto.display_price_max_cents;
+    if (dto.require_admin_review_above_range !== undefined) {
+      service.requireAdminReviewAboveRange = dto.require_admin_review_above_range;
+    }
+    if (dto.max_quote_increase_without_admin_review_bps !== undefined) {
+      service.maxQuoteIncreaseWithoutAdminReviewBps = dto.max_quote_increase_without_admin_review_bps;
+    }
+
+    // خدمة «محتاجة تقييم» بمسارين مقفولين = خدمة العميل مايقدرش يحجزها ولا يطلب تقييم لها.
+    // الرفض هنا بدل ما الأدمن يكتشف السكتة دي من بلاغ عميل.
+    if (
+      service.priceCertaintyMode === PriceCertaintyMode.ASSESSMENT_REQUIRED &&
+      !service.remoteAssessmentEnabled &&
+      !service.onsiteAssessmentEnabled
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'خدمة «محتاجة تقييم» لازم تفعّل تقييم بالصور أو معاينة في الموقع — واحد على الأقل',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // مسار مثبّت على وضع مقفول = نفس السكتة، بس أوضح: السياسة بتقول «بالصور بس» والصور مقفولة.
+    if (service.assessmentRoutePolicy === AssessmentRoutePolicy.REMOTE_ONLY && !service.remoteAssessmentEnabled) {
+      throw new ApiException(ErrorCode.VAL_001, 'سياسة «تقييم بالصور فقط» محتاجة تفعيل التقييم بالصور', HttpStatus.BAD_REQUEST);
+    }
+    if (service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY && !service.onsiteAssessmentEnabled) {
+      throw new ApiException(ErrorCode.VAL_001, 'سياسة «معاينة في الموقع فقط» محتاجة تفعيل المعاينة', HttpStatus.BAD_REQUEST);
+    }
+    if (
+      service.assessmentFeeCreditMode === AssessmentFeeCreditMode.PERCENTAGE &&
+      !(service.assessmentFeeCreditBps > 0)
+    ) {
+      throw new ApiException(ErrorCode.VAL_001, 'خصم رسوم التقييم بنسبة محتاج نسبة أكبر من صفر', HttpStatus.BAD_REQUEST);
+    }
+    if (
+      service.displayPriceMinCents !== null &&
+      service.displayPriceMaxCents !== null &&
+      service.displayPriceMaxCents < service.displayPriceMinCents
+    ) {
+      throw new ApiException(ErrorCode.VAL_001, 'الحد الأقصى للنطاق المعروض لازم يكون أكبر من أو يساوي الحد الأدنى', HttpStatus.BAD_REQUEST);
+    }
+    if (
+      service.priceCertaintyMode === PriceCertaintyMode.ESTIMATED_RANGE &&
+      (service.displayPriceMinCents === null || service.displayPriceMaxCents === null)
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'وضع «نطاق تقديري» محتاج حد أدنى وحد أقصى للعرض — النطاق ده غير حدود قصّ المعادلة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   async updateService(adminUserId: string, id: string, dto: UpdateServiceDto, meta?: AuditActorMeta): Promise<Service> {
@@ -420,6 +494,7 @@ export class AdminCatalogService {
     if (dto.launch_phase !== undefined) service.launchPhase = dto.launch_phase;
     if (dto.search_keywords !== undefined) service.searchKeywords = dto.search_keywords;
     if (dto.is_active !== undefined) service.isActive = dto.is_active;
+    this.applyAssessmentPolicy(service, dto);
     await this.services.save(service);
 
     await this.auditLog.record({

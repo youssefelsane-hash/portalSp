@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import {
+  ClipboardCheck,
   BadgeDollarSign,
   CalendarCheck2,
   CalendarClock,
@@ -39,7 +40,20 @@ import type {
   UpsertPricingTierPricingBody,
   UpsertZonePricingBody,
 } from '@baytak/shared-types';
-import { PRICING_MODEL_LABELS, PRICING_TEMPLATES, type PricingTemplateKey } from '@baytak/shared-types';
+import {
+  ASSESSMENT_FEE_CREDIT_MODE_LABELS_AR,
+  ASSESSMENT_FEE_CREDIT_MODES,
+  ASSESSMENT_ROUTE_POLICIES,
+  ASSESSMENT_ROUTE_POLICY_LABELS_AR,
+  PRICE_CERTAINTY_MODE_LABELS_AR,
+  PRICE_CERTAINTY_MODES,
+  PRICING_MODEL_LABELS,
+  PRICING_TEMPLATES,
+  type AssessmentFeeCreditMode,
+  type AssessmentRoutePolicy,
+  type PriceCertaintyMode,
+  type PricingTemplateKey,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell, useAdminBack } from '@/components/app-shell';
@@ -143,6 +157,13 @@ export default function ServiceDetailPage() {
   // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
   // ADR-0060 §4 — وضعين بس. التلاتة اللي اتشالوا كانوا بيطلبوا مدخلات تسعير مش بيانات جدولة.
   const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('full_day');
+  // ADR-0063/0066 — سياسة تحديد السعر والمعاينة. الأوضاع في state (مش defaultValue) عشان الفورم
+  // يعرض الحقول المرتبطة بالوضع المختار بس — إظهار تدريجي، مش 13 حقل كلهم ظاهرين لأي خدمة.
+  const [priceCertaintyMode, setPriceCertaintyMode] = useState<PriceCertaintyMode>('confirmed_price');
+  const [assessmentRoutePolicy, setAssessmentRoutePolicy] = useState<AssessmentRoutePolicy>('admin_triage');
+  const [remoteAssessmentEnabled, setRemoteAssessmentEnabled] = useState(false);
+  const [onsiteAssessmentEnabled, setOnsiteAssessmentEnabled] = useState(false);
+  const [assessmentFeeCreditMode, setAssessmentFeeCreditMode] = useState<AssessmentFeeCreditMode>('none');
 
   // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
   // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
@@ -160,6 +181,11 @@ export default function ServiceDetailPage() {
     if (!next) return;
     setPricingModelLive(next.pricing_model);
     setSchedulingMode(next.schedule_precision);
+    setPriceCertaintyMode(next.price_certainty_mode);
+    setAssessmentRoutePolicy(next.assessment_route_policy);
+    setRemoteAssessmentEnabled(next.remote_assessment_enabled);
+    setOnsiteAssessmentEnabled(next.onsite_assessment_enabled);
+    setAssessmentFeeCreditMode(next.assessment_fee_credit_mode);
   }
 
   function loadAll() {
@@ -518,6 +544,26 @@ export default function ServiceDetailPage() {
       show_unavailable_providers: form.get('show_unavailable_providers') === 'on',
       // ADR-0060 §4 — حقل واحد بدل أربع بوليانات: مستحيل تتبعت تركيبة غلط أصلاً.
       schedule_precision: form.get('requires_start_time_only') === 'on' ? 'start_time' : 'full_day',
+      // ADR-0063/0066 — سياسة تحديد السعر والمعاينة. الأوضاع نفسها في state (عشان الإظهار
+      // التدريجي)، والأرقام من الفورم. الباك-إند بيتحقق من التركيبات المستحيلة مش الواجهة —
+      // الواجهة بتمنع أوضحها بس، والقرار النهائي في مكان واحد.
+      price_certainty_mode: priceCertaintyMode,
+      assessment_route_policy: assessmentRoutePolicy,
+      remote_assessment_enabled: remoteAssessmentEnabled,
+      onsite_assessment_enabled: onsiteAssessmentEnabled,
+      assessment_fee_credit_mode: assessmentFeeCreditMode,
+      remote_assessment_fee_cents: Math.round(Number(form.get('remote_assessment_fee') || 0) * 100),
+      assessment_fee_credit_bps: Number(form.get('assessment_fee_credit_bps') || 0),
+      onsite_assessor_executes_work: form.get('onsite_assessor_executes_work') === 'on',
+      quote_validity_minutes: Number(form.get('quote_validity_minutes') || 2880),
+      display_price_min_cents: form.get('display_price_min')
+        ? Math.round(Number(form.get('display_price_min')) * 100)
+        : undefined,
+      display_price_max_cents: form.get('display_price_max')
+        ? Math.round(Number(form.get('display_price_max')) * 100)
+        : undefined,
+      require_admin_review_above_range: form.get('require_admin_review_above_range') === 'on',
+      max_quote_increase_without_admin_review_bps: Number(form.get('max_quote_increase_bps') || 0),
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
@@ -876,6 +922,420 @@ export default function ServiceDetailPage() {
                     />
                   </div>
                 </div>
+              </div>
+            </CatalogConfigSection>
+
+            <Separator />
+
+            <CatalogConfigSection
+              title="سياسة تحديد السعر والمعاينة"
+              description="إمتى السعر مؤكد قبل الحجز، وإمتى محتاج تقييم بالصور أو معاينة في الموقع — ورسوم كل مسار وخصمها."
+              icon={ClipboardCheck}
+              tone="amber"
+            >
+              <div className="space-y-4">
+                <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                  <p className="text-sm font-semibold">وضع يقين السعر</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    ده اللي بيحدد شكل الخطوة الأولى عند العميل: يأكّد على سعر، أو يشوف نطاق، أو يبعت صور للتقييم.
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {PRICE_CERTAINTY_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setPriceCertaintyMode(mode)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          priceCertaintyMode === mode
+                            ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                            : 'border-border hover:border-amber-300'
+                        }`}
+                      >
+                        {PRICE_CERTAINTY_MODE_LABELS_AR[mode]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {priceCertaintyMode === 'estimated_range' && (
+                  <div className="grid gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        النطاق المعروض للعميل — <strong>غير</strong> حدود قصّ المعادلة (min/max فوق). ده رقم بيتقال للعميل، وده حارس على ناتج الحساب.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_display_min">أقل سعر معروض (ج)</Label>
+                      <Input
+                        id="svc_display_min"
+                        name="display_price_min"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={service.display_price_min_cents !== null ? service.display_price_min_cents / 100 : ''}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_display_max">أعلى سعر معروض (ج)</Label>
+                      <Input
+                        id="svc_display_max"
+                        name="display_price_max"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={service.display_price_max_cents !== null ? service.display_price_max_cents / 100 : ''}
+                      />
+                    </div>
+                    <CatalogToggle
+                      name="require_admin_review_above_range"
+                      title="مراجعة إدارة فوق النطاق"
+                      description="أي سعر نهائي فوق النطاق المعروض بيقف لمراجعة قبل ما يوصل العميل."
+                      icon={Eye}
+                      defaultChecked={service.require_admin_review_above_range}
+                    />
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_max_increase">أقصى زيادة بلا مراجعة (bps)</Label>
+                      <Input
+                        id="svc_max_increase"
+                        name="max_quote_increase_bps"
+                        type="number"
+                        min="0"
+                        defaultValue={service.max_quote_increase_without_admin_review_bps}
+                      />
+                      <p className="text-[11px] text-muted-foreground">2000 = 20%. صفر = أي زيادة تحتاج مراجعة.</p>
+                    </div>
+                  </div>
+                )}
+
+                {priceCertaintyMode === 'assessment_required' && (
+                  <div className="space-y-3 rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                    <div>
+                      <p className="text-sm font-semibold">مسار التقييم</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        لازم تفعّل مسار واحد على الأقل، وإلا الخدمة هتبقى غير قابلة للحجز خالص.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {ASSESSMENT_ROUTE_POLICIES.map((policy) => (
+                        <button
+                          key={policy}
+                          type="button"
+                          onClick={() => setAssessmentRoutePolicy(policy)}
+                          className={`rounded-lg border p-3 text-right text-sm transition ${
+                            assessmentRoutePolicy === policy
+                              ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                              : 'border-border hover:border-amber-300'
+                          }`}
+                        >
+                          {ASSESSMENT_ROUTE_POLICY_LABELS_AR[policy]}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setRemoteAssessmentEnabled(!remoteAssessmentEnabled)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          remoteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
+                        }`}
+                      >
+                        تقييم بالصور {remoteAssessmentEnabled ? '— مفعّل' : '— مقفول'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOnsiteAssessmentEnabled(!onsiteAssessmentEnabled)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          onsiteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
+                        }`}
+                      >
+                        معاينة في الموقع {onsiteAssessmentEnabled ? '— مفعّلة' : '— مقفولة'}
+                      </button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {remoteAssessmentEnabled && (
+                        <div className="flex flex-col gap-1">
+                          <Label htmlFor="svc_remote_fee">رسوم التقييم بالصور (ج)</Label>
+                          <Input
+                            id="svc_remote_fee"
+                            name="remote_assessment_fee"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={service.remote_assessment_fee_cents / 100}
+                          />
+                        </div>
+                      )}
+                      {onsiteAssessmentEnabled && (
+                        <CatalogToggle
+                          name="onsite_assessor_executes_work"
+                          title="المعاين هو اللي ينفّذ"
+                          description="لو مقفول، العميل بيختار منفّذ تاني بعد ما يوافق على السعر."
+                          icon={Camera}
+                          defaultChecked={service.onsite_assessor_executes_work}
+                        />
+                      )}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="flex flex-col gap-1 sm:col-span-2">
+                        <Label>خصم رسوم التقييم من سعر التنفيذ</Label>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          {ASSESSMENT_FEE_CREDIT_MODES.map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setAssessmentFeeCreditMode(mode)}
+                              className={`rounded-lg border p-2 text-sm transition ${
+                                assessmentFeeCreditMode === mode
+                                  ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                                  : 'border-border hover:border-amber-300'
+                              }`}
+                            >
+                              {ASSESSMENT_FEE_CREDIT_MODE_LABELS_AR[mode]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {assessmentFeeCreditMode === 'percentage' && (
+                        <div className="flex flex-col gap-1">
+                          <Label htmlFor="svc_credit_bps">نسبة الخصم (bps)</Label>
+                          <Input
+                            id="svc_credit_bps"
+                            name="assessment_fee_credit_bps"
+                            type="number"
+                            min="0"
+                            max="10000"
+                            defaultValue={service.assessment_fee_credit_bps}
+                          />
+                          <p className="text-[11px] text-muted-foreground">10000 = 100%.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {priceCertaintyMode !== 'confirmed_price' && (
+                  <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                    <div className="flex flex-col gap-1 sm:max-w-xs">
+                      <Label htmlFor="svc_quote_validity">صلاحية عرض السعر (دقيقة)</Label>
+                      <Input
+                        id="svc_quote_validity"
+                        name="quote_validity_minutes"
+                        type="number"
+                        min="1"
+                        defaultValue={service.quote_validity_minutes}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        بعد المدة دي العرض بيبقى منتهي والعميل محتاج عرض جديد. 2880 = يومين.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CatalogConfigSection>
+
+            <Separator />
+
+            <CatalogConfigSection
+              title="سياسة تحديد السعر والمعاينة"
+              description="إمتى السعر مؤكد قبل الحجز، وإمتى محتاج تقييم بالصور أو معاينة في الموقع — ورسوم كل مسار وخصمها."
+              icon={ClipboardCheck}
+              tone="amber"
+            >
+              <div className="space-y-4">
+                <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                  <p className="text-sm font-semibold">وضع يقين السعر</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    ده اللي بيحدد شكل الخطوة الأولى عند العميل: يأكّد على سعر، أو يشوف نطاق، أو يبعت صور للتقييم.
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {PRICE_CERTAINTY_MODES.map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setPriceCertaintyMode(mode)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          priceCertaintyMode === mode
+                            ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                            : 'border-border hover:border-amber-300'
+                        }`}
+                      >
+                        {PRICE_CERTAINTY_MODE_LABELS_AR[mode]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {priceCertaintyMode === 'estimated_range' && (
+                  <div className="grid gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2">
+                    <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
+                      النطاق المعروض للعميل — <strong>غير</strong> حدود قصّ المعادلة (min/max فوق). ده رقم بيتقال للعميل، وده حارس على ناتج الحساب.
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_display_min">أقل سعر معروض (ج)</Label>
+                      <Input
+                        id="svc_display_min"
+                        name="display_price_min"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={service.display_price_min_cents !== null ? service.display_price_min_cents / 100 : ''}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_display_max">أعلى سعر معروض (ج)</Label>
+                      <Input
+                        id="svc_display_max"
+                        name="display_price_max"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={service.display_price_max_cents !== null ? service.display_price_max_cents / 100 : ''}
+                      />
+                    </div>
+                    <CatalogToggle
+                      name="require_admin_review_above_range"
+                      title="مراجعة إدارة فوق النطاق"
+                      description="أي سعر نهائي فوق النطاق المعروض بيقف لمراجعة قبل ما يوصل العميل."
+                      icon={Eye}
+                      defaultChecked={service.require_admin_review_above_range}
+                    />
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="svc_max_increase">أقصى زيادة بلا مراجعة (bps)</Label>
+                      <Input
+                        id="svc_max_increase"
+                        name="max_quote_increase_bps"
+                        type="number"
+                        min="0"
+                        defaultValue={service.max_quote_increase_without_admin_review_bps}
+                      />
+                      <p className="text-[11px] text-muted-foreground">2000 = 20%. صفر = أي زيادة تحتاج مراجعة.</p>
+                    </div>
+                  </div>
+                )}
+
+                {priceCertaintyMode === 'assessment_required' && (
+                  <div className="space-y-3 rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                    <div>
+                      <p className="text-sm font-semibold">مسار التقييم</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        لازم تفعّل مسار واحد على الأقل، وإلا الخدمة هتبقى غير قابلة للحجز خالص.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {ASSESSMENT_ROUTE_POLICIES.map((policy) => (
+                        <button
+                          key={policy}
+                          type="button"
+                          onClick={() => setAssessmentRoutePolicy(policy)}
+                          className={`rounded-lg border p-3 text-right text-sm transition ${
+                            assessmentRoutePolicy === policy
+                              ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                              : 'border-border hover:border-amber-300'
+                          }`}
+                        >
+                          {ASSESSMENT_ROUTE_POLICY_LABELS_AR[policy]}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setRemoteAssessmentEnabled(!remoteAssessmentEnabled)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          remoteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
+                        }`}
+                      >
+                        تقييم بالصور {remoteAssessmentEnabled ? '— مفعّل' : '— مقفول'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOnsiteAssessmentEnabled(!onsiteAssessmentEnabled)}
+                        className={`rounded-lg border p-3 text-right text-sm transition ${
+                          onsiteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
+                        }`}
+                      >
+                        معاينة في الموقع {onsiteAssessmentEnabled ? '— مفعّلة' : '— مقفولة'}
+                      </button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {remoteAssessmentEnabled && (
+                        <div className="flex flex-col gap-1">
+                          <Label htmlFor="svc_remote_fee">رسوم التقييم بالصور (ج)</Label>
+                          <Input
+                            id="svc_remote_fee"
+                            name="remote_assessment_fee"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={service.remote_assessment_fee_cents / 100}
+                          />
+                        </div>
+                      )}
+                      {onsiteAssessmentEnabled && (
+                        <CatalogToggle
+                          name="onsite_assessor_executes_work"
+                          title="المعاين هو اللي ينفّذ"
+                          description="لو مقفول، العميل بيختار منفّذ تاني بعد ما يوافق على السعر."
+                          icon={Camera}
+                          defaultChecked={service.onsite_assessor_executes_work}
+                        />
+                      )}
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="flex flex-col gap-1 sm:col-span-2">
+                        <Label>خصم رسوم التقييم من سعر التنفيذ</Label>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          {ASSESSMENT_FEE_CREDIT_MODES.map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setAssessmentFeeCreditMode(mode)}
+                              className={`rounded-lg border p-2 text-sm transition ${
+                                assessmentFeeCreditMode === mode
+                                  ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                                  : 'border-border hover:border-amber-300'
+                              }`}
+                            >
+                              {ASSESSMENT_FEE_CREDIT_MODE_LABELS_AR[mode]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {assessmentFeeCreditMode === 'percentage' && (
+                        <div className="flex flex-col gap-1">
+                          <Label htmlFor="svc_credit_bps">نسبة الخصم (bps)</Label>
+                          <Input
+                            id="svc_credit_bps"
+                            name="assessment_fee_credit_bps"
+                            type="number"
+                            min="0"
+                            max="10000"
+                            defaultValue={service.assessment_fee_credit_bps}
+                          />
+                          <p className="text-[11px] text-muted-foreground">10000 = 100%.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {priceCertaintyMode !== 'confirmed_price' && (
+                  <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                    <div className="flex flex-col gap-1 sm:max-w-xs">
+                      <Label htmlFor="svc_quote_validity">صلاحية عرض السعر (دقيقة)</Label>
+                      <Input
+                        id="svc_quote_validity"
+                        name="quote_validity_minutes"
+                        type="number"
+                        min="1"
+                        defaultValue={service.quote_validity_minutes}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        بعد المدة دي العرض بيبقى منتهي والعميل محتاج عرض جديد. 2880 = يومين.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </CatalogConfigSection>
 

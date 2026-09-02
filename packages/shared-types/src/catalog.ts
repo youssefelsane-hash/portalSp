@@ -56,7 +56,7 @@ export interface UpdateServiceCategoryBody extends Partial<CreateServiceCategory
   is_active?: boolean;
 }
 
-export interface AdminServiceResponseDto {
+export interface AdminServiceResponseDto extends ServiceAssessmentPolicyFields {
   id: string;
   category_id: string;
   name_ar: string;
@@ -104,7 +104,61 @@ export interface AdminServiceResponseDto {
   created_at: string;
 }
 
-export interface CreateServiceBody {
+/**
+ * **ADR-0063/0066 — سياسة تحديد السعر والمعاينة** (migration 0247).
+ *
+ * الأعمدة دي كانت في الداتابيز والكيان من 0247 وما وصلتش الحزمة المشتركة ولا واجهة الأدمن، يعني
+ * الأدمن ماكانش يقدر يشغّل رحلة التقييم أصلاً من الشاشة. نفس فئة البَقّة اللي ADR-0064 §2 قفلها
+ * لحالات الطلب: العمود موجود، والمفردات ناقصة، فالقدرة غير موجودة عمليًا.
+ */
+export const PRICE_CERTAINTY_MODES = ['confirmed_price', 'estimated_range', 'assessment_required'] as const;
+export type PriceCertaintyMode = (typeof PRICE_CERTAINTY_MODES)[number];
+
+export const PRICE_CERTAINTY_MODE_LABELS_AR: Record<PriceCertaintyMode, string> = {
+  confirmed_price: 'سعر مؤكد قبل الحجز',
+  estimated_range: 'نطاق تقديري (من — إلى)',
+  assessment_required: 'محتاج تقييم قبل السعر',
+};
+
+/** مين بيقرر مسار التقييم: الإدارة تفرز، أو المسار مثبّت، أو العميل يختار. */
+export const ASSESSMENT_ROUTE_POLICIES = ['admin_triage', 'remote_only', 'onsite_only', 'customer_choice'] as const;
+export type AssessmentRoutePolicy = (typeof ASSESSMENT_ROUTE_POLICIES)[number];
+
+export const ASSESSMENT_ROUTE_POLICY_LABELS_AR: Record<AssessmentRoutePolicy, string> = {
+  admin_triage: 'الإدارة تفرز بعد الصور',
+  remote_only: 'تقييم بالصور فقط',
+  onsite_only: 'معاينة في الموقع فقط',
+  customer_choice: 'العميل يختار المسار',
+};
+
+/** إزاي رسوم التقييم بتتخصم من سعر التنفيذ بعد الموافقة. */
+export const ASSESSMENT_FEE_CREDIT_MODES = ['none', 'full', 'percentage'] as const;
+export type AssessmentFeeCreditMode = (typeof ASSESSMENT_FEE_CREDIT_MODES)[number];
+
+export const ASSESSMENT_FEE_CREDIT_MODE_LABELS_AR: Record<AssessmentFeeCreditMode, string> = {
+  none: 'مابتتخصمش',
+  full: 'بتتخصم بالكامل',
+  percentage: 'بتتخصم بنسبة',
+};
+
+/** الحقول المشتركة بين رد الأدمن وجسم الإنشاء/التعديل — مصدر واحد بدل تكرار 13 حقل مرتين. */
+export interface ServiceAssessmentPolicyFields {
+  price_certainty_mode: PriceCertaintyMode;
+  assessment_route_policy: AssessmentRoutePolicy;
+  remote_assessment_enabled: boolean;
+  remote_assessment_fee_cents: number;
+  onsite_assessment_enabled: boolean;
+  assessment_fee_credit_mode: AssessmentFeeCreditMode;
+  assessment_fee_credit_bps: number;
+  onsite_assessor_executes_work: boolean;
+  quote_validity_minutes: number;
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  require_admin_review_above_range: boolean;
+  max_quote_increase_without_admin_review_bps: number;
+}
+
+export interface CreateServiceBody extends Partial<ServiceAssessmentPolicyFields> {
   category_id: string;
   name_ar: string;
   name_en?: string;
@@ -144,7 +198,8 @@ export interface CreateServiceBody {
   search_keywords?: string[];
 }
 
-export interface UpdateServiceBody extends Partial<CreateServiceBody> {
+
+export interface UpdateServiceBody extends Partial<CreateServiceBody>, Partial<ServiceAssessmentPolicyFields> {
   is_active?: boolean;
   is_promotable?: boolean;
 }
