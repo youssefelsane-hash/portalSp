@@ -1,11 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ORDER_CREW_SHORTAGE_ESCALATED_EVENT, OrderCrewShortageEscalatedEvent } from '../../common/events/order-crew-shortage-escalated.event';
 import { SettingsService } from '../settings/settings.service';
 import { BookingMode, Order, OrderStatus } from './entities/order.entity';
-import { OrderTeamService } from './order-team.service';
+import { OrderTeamService, orderRequiresCrewBeyondLeader } from './order-team.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
 // نفس SWEEP_BATCH_SIZE بالحرف زي OrderAutoCancelService/NotificationWorkflowReminderService —
@@ -68,17 +68,25 @@ export class CrewShortageEscalationService implements OnModuleInit, OnModuleDest
     const now = new Date();
     const cutoff = new Date(now.getTime() + hoursBefore * 60 * 60 * 1000);
 
-    const candidates = await this.orders.find({
-      select: ['id'],
-      where: {
-        bookingMode: BookingMode.TEAM,
-        orderStatus: In(ESCALATABLE_STATUSES),
-        scheduledAt: LessThanOrEqual(cutoff),
-        crewShortageEscalatedAt: IsNull(),
-      },
-      order: { scheduledAt: 'ASC' },
-      take: SWEEP_BATCH_SIZE,
-    });
+    // ADR-0064 §1 — الشرط بقى «الطلب محتاج طاقم زيادة عن القائد»، مش «وضع الحجز فريق».
+    //
+    // البَقّة اللي اتقفلت: طلب **فردي** محتاج مساعد (`required_assistants > 0`) كان بيتمنع من
+    // البدء ببوابة `IN_PROGRESS` ومابيتصعّدش هنا أبدًا، لأن المسح كان بيدوّر على
+    // `bookingMode = TEAM` بس. الفني متسكّر والإدارة مش عارفة. الشرط دلوقتي مطابق للبوابة بالحرف
+    // (`orderRequiresCrewBeyondLeader`) — مصدر واحد للسؤال.
+    const candidates = await this.orders
+      .createQueryBuilder('o')
+      .select(['o.id'])
+      .where('o.order_status IN (:...statuses)', { statuses: ESCALATABLE_STATUSES })
+      .andWhere('o.scheduled_at <= :cutoff', { cutoff })
+      .andWhere('o.crew_shortage_escalated_at IS NULL')
+      .andWhere(
+        '(o.booking_mode = :team OR COALESCE(o.required_technicians, 1) > 1 OR COALESCE(o.required_assistants, 0) > 0)',
+        { team: BookingMode.TEAM },
+      )
+      .orderBy('o.scheduled_at', 'ASC')
+      .take(SWEEP_BATCH_SIZE)
+      .getMany();
 
     let escalatedCount = 0;
     for (const { id } of candidates) {
@@ -91,8 +99,26 @@ export class CrewShortageEscalationService implements OnModuleInit, OnModuleDest
     return escalatedCount;
   }
 
+  /**
+   * **تصعيد فوري** لحظة ما نقص الطاقم يعطّل شغل حقيقي (ADR-0064 §1).
+   *
+   * المسح الدوري بيصعّد قبل الموعد بـ24 ساعة — تنبيه استباقي كويس، بس متأخر جدًا لما الفني يكون
+   * **واقف على الباب دلوقتي** ومش قادر يبدأ. الدالة دي بتتنادى من البوابة نفسها، وبتستخدم
+   * **نفس** مسار التصعيد والقفل والحدث (مش مسار موازي)، فالفرق الوحيد إنها مش مشروطة بوجود موعد.
+   *
+   * بتعتمد على نفس بوابة المرة الواحدة (`crew_shortage_escalated_at`)، فلو الفني دَس عشر مرات
+   * الإدارة بتاخد إشعار واحد.
+   */
+  async escalateNow(orderId: string, reason: string): Promise<boolean> {
+    const escalated = await this.escalateIfStillIncomplete(orderId, new Date(), false);
+    if (escalated) {
+      this.logger.warn(`تصعيد فوري لنقص طاقم على الطلب ${orderId} (${reason})`);
+    }
+    return escalated;
+  }
+
   // قفل ذري لكل صف على حدة — نفس نمط OrderAutoCancelService.cancelIfStillPendingPayment().
-  private async escalateIfStillIncomplete(orderId: string, now: Date): Promise<boolean> {
+  private async escalateIfStillIncomplete(orderId: string, now: Date, requireSchedule = true): Promise<boolean> {
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
@@ -104,9 +130,11 @@ export class CrewShortageEscalationService implements OnModuleInit, OnModuleDest
       if (
         !order ||
         order.crewShortageEscalatedAt ||
-        order.bookingMode !== BookingMode.TEAM ||
+        !orderRequiresCrewBeyondLeader(order) ||
         !ESCALATABLE_STATUSES.includes(order.orderStatus) ||
-        !order.scheduledAt
+        // التصعيد المجدول محتاج موعد يقيس عليه؛ التصعيد الفوري (`escalateNow`) مش محتاج، لأن
+        // اللحظة نفسها هي الدليل. عشان كده الشرط ده هنا مش في `escalateIfIncomplete`.
+        (requireSchedule && !order.scheduledAt)
       ) {
         return null;
       }
@@ -126,7 +154,9 @@ export class CrewShortageEscalationService implements OnModuleInit, OnModuleDest
       new OrderCrewShortageEscalatedEvent(
         result.order.id,
         result.order.orderNumber,
-        result.order.scheduledAt as Date,
+        // التصعيد الفوري ممكن يحصل لطلب ASAP بلا موعد — بنستخدم لحظة التصعيد نفسها كمرجع زمني
+        // للإشعار بدل ما نكسر النوع بـ`as Date` على null.
+        result.order.scheduledAt ?? now,
         result.composition.missingTechnicians,
         result.composition.missingAssistants,
       ),

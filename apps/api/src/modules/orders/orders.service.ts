@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, In, IsNull, LessThan, LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
@@ -67,7 +67,8 @@ import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recu
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
-import { OrderTeamService } from './order-team.service';
+import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
+import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
@@ -163,6 +164,11 @@ export class OrdersService {
     // ADR-0037 — آخر بند عمدًا، نفس سبب orderTeamService فوقه بالحرف: أقل بلاست-رديوس ممكن على
     // الاختبارات الكتير اللي بتبني OrdersService بـpositional args (append واحد بس في الآخر).
     private readonly commissionBaseService: CommissionBaseService,
+    // ADR-0064 §1 — التصعيد الفوري لحظة ما نقص الطاقم يمنع الفني من البدء. `@Optional()` عمدًا:
+    // عشرات السبيكات القديمة بتبني `OrdersService` بـpositional args، والبوابة نفسها بتفضل
+    // شغّالة من غيره (الفرق إن الإدارة مش هتتبلّغ) — فمفيش سلوك بيتغيّر بصمت في الإنتاج، والـ
+    // module بيحقنه فعليًا. اختبار حي بيثبت إن التصعيد بيحصل بالفعل في المسار الحقيقي.
+    @Optional() private readonly crewShortageEscalation?: CrewShortageEscalationService,
   ) {}
 
   private async resolveOptionalWarranty(
@@ -3452,15 +3458,18 @@ export class OrdersService {
     // docs/01B — تكامل Booking → Execution: البوابة بتنطبق على طلب الفريق (زي ما كانت) **وكمان**
     // على أي طلب محرك التسعير/الإنتاجية حسبله طاقم أكتر من واحد مهما كان وضع الحجز — عميل
     // اختار فني فرد مايبقاش سبب لتخطي متطلبات الطاقم المحسوبة.
-    if (
-      to === OrderStatus.IN_PROGRESS &&
-      (order.bookingMode === BookingMode.TEAM || ((order.requiredTechnicians ?? 1) > 1 || (order.requiredAssistants ?? 0) > 0))
-    ) {
+    if (to === OrderStatus.IN_PROGRESS && orderRequiresCrewBeyondLeader(order)) {
       const crew = await this.orderTeamService.getCrewComposition(order.id, order);
       if (!crew.crewComplete) {
+        // ADR-0064 §1 — الفني واقف قدام باب مقفول، فده **أدق لحظة** نعرف فيها إن النقص بيعطّل
+        // شغل حقيقي دلوقتي، مش بعد 24 ساعة لما المسح الدوري يلاحظ. التصعيد بيحصل هنا فورًا
+        // (وبيتقفل على نفسه بـ`crew_shortage_escalated_at`، فمفيش إشعار متكرر لو دَس تاني).
+        // قبل كده كان الطلب الفردي المحتاج مساعد **بيتمنع بلا أي تصعيد خالص** — الفني متسكّر
+        // والإدارة مش عارفة.
+        await this.crewShortageEscalation?.escalateNow(order.id, 'technician_blocked_at_start');
         throw new ApiException(
           ErrorCode.ORDR_005,
-          `الطاقم لسه ناقص — محتاج ${crew.missingTechnicians} فني و${crew.missingAssistants} مساعد قبل ما تقدر تبدأ الشغل`,
+          crewShortageMessageAr(crew),
           HttpStatus.BAD_REQUEST,
         );
       }

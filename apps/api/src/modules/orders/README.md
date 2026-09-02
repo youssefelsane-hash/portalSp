@@ -1694,3 +1694,33 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 
 أي اختبار بيستدعي `cancel()` بلا سبب لازم يمرّر stub فيه `listActive` (مش `{} as never`) —
 `orders-cancel-prepaid-refund.spec.ts` مثال. التغطية الحية في `orders-cancel-reason-required.spec.ts`.
+
+## بوابة بدء الشغل والتصعيد بيسألوا نفس السؤال بنفس الدالة (ADR-0064 §1)
+
+**بلاغ مالك حقيقي (2026-09-02)**: فني وحيد على شغلانة، داس «ابدأ الشغل»، اترفض بـ«الطاقم لسه
+ناقص — محتاج 0 فني و1 مساعد»، ومحدش في الإدارة عرف إن فيه شغل متعطّل.
+
+السبب: بوابة `IN_PROGRESS` في `orders.service.ts` كانت بتسأل «محتاج طاقم؟» بـ
+`TEAM || required_technicians > 1 || required_assistants > 0`، و`CrewShortageEscalationService.sweep()`
+كانت بتسأل نفس السؤال بـ`booking_mode = TEAM` بس. طلب `individual` محتاج مساعد واحد بيقع في
+الفجوة: **ممنوع يبدأ، ومش بيتصعّد**.
+
+- `orderRequiresCrewBeyondLeader()` (`order-team.service.ts`) هي نقطة القراءة الوحيدة دلوقتي.
+  الاتنين بينادوها — مستحيل يفترقوا.
+- `escalateNow(orderId, reason)` بيتصعّد **لحظة** المنع، مش في المسح الدوري الجاي. ده كمان
+  بيغطّي طلبات ASAP بلا `scheduled_at` اللي كانت بتفلت من شرط الـsweep (`scheduled_at <= cutoff`).
+  الحارس ضد التكرار هو `crew_shortage_escalated_at IS NULL` نفسه، مش عدّاد جديد.
+- `crewShortageMessageAr()` بتذكر الناقص الفعلي بس — «محتاج 0 فني» كان عرض هيكل بيانات داخلي
+  للمستخدم، مش رسالة.
+
+الحقن `@Optional()` عمدًا: عشرات الاختبارات القديمة بتبني `OrdersService` بـpositional args.
+
+## أي حالة طلب جديدة لازم توصل الحزمة المشتركة (ADR-0064 §2)
+
+`awaiting_technician_selection` (migration 0247) اتضافت للداتابيز والباك-إند وما وصلتش
+`@baytak/shared-types` ولا مفردات الأدمن. `Record<OrderStatus, string>` كان هيمسكها **لو**
+الـunion اتحدّث — بس الـunion هو اللي كان ناقص، فالنوع فضل «كامل» شكليًا.
+
+الحارس: `admin-orders-visibility.spec.ts` بيقارن `pg_enum` × `OrderStatus` × `ORDER_STATUSES`
+على داتابيز حقيقية، وبيتأكد إن `list()` و`toOrderResponseDto()` والفلترة بالحالة بيشتغلوا لكل
+قيمة. أي حالة تتضاف في migration بلا الحزمة المشتركة بتفشل الاختبار **باسمها**.
