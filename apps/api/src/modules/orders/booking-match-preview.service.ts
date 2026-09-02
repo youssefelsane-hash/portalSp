@@ -81,6 +81,13 @@ export class BookingMatchPreviewService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    if (dto.requested_technician_company_id || dto.schedule_slot_id) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        "معاينة المطابقة تختار فنيًا واحدًا؛ لا تجمعها مع شركة أو سلوت فني آخر",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     const customer = await this.customerProfiles.findByUserIdOrThrow(userId);
     const pricingInput = this.toPricingInput(dto);

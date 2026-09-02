@@ -56,6 +56,11 @@ export class CreateOrderDto {
   @IsUUID()
   requested_technician_id?: string;
 
+  /** تذكرة السعر+الفني الصادرة من POST /orders/match-preview. */
+  @IsOptional()
+  @IsUUID()
+  match_preview_id?: string;
+
   // "إعادة زيارة" تحت الضمان (docs/08 §7) — لو العميل عنده مشكلة تانية بنفس الخدمة في نفس
   // العنوان قبل ما ضمان الطلب الأصلي يخلص. order_type بيتحدد تلقائيًا لـ"revisit" (بيتجاهل
   // dto.order_type)، والطلب مجاني بالكامل — كل تفاصيل التحقق في orders.service.ts.

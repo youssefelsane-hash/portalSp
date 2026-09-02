@@ -75,6 +75,8 @@ import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
+import { BookingMatchPreview } from './entities/booking-match-preview.entity';
+import { bookingMatchContextHash, bookingPreviewInputFromCreate } from './booking-match-context';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
 // سياسة إلغاء الفني (docs/10) — fallback بس، المصدر الحقيقي إعدادات cancellation.* (migration 0070).
@@ -508,6 +510,61 @@ export class OrdersService {
     if (idempotencyKey) {
       const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
       if (existing) return existing;
+    }
+
+    let selectedMatchPreview: BookingMatchPreview | null = null;
+    let selectedMatchContextHash: string | null = null;
+    if (dto.match_preview_id) {
+      selectedMatchPreview = await this.dataSource.getRepository(BookingMatchPreview).findOne({
+        where: { id: dto.match_preview_id, customerId: customerProfile.id },
+      });
+      if (
+        !selectedMatchPreview ||
+        selectedMatchPreview.status !== 'active' ||
+        selectedMatchPreview.expiresAt.getTime() <= Date.now() ||
+        !selectedMatchPreview.technicianId
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'معاينة الفني والسعر انتهت أو استُخدمت — اعمل معاينة جديدة قبل التأكيد',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (
+        selectedMatchPreview.serviceId !== dto.service_id ||
+        selectedMatchPreview.addressId !== dto.address_id
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'معاينة الحجز لا تخص هذه الخدمة أو العنوان', HttpStatus.CONFLICT);
+      }
+      if (
+        dto.request_remote_quote ||
+        dto.original_order_id ||
+        dto.repeat_frequency ||
+        dto.schedule_slot_id ||
+        dto.requested_technician_company_id
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'معاينة الفني لا تُجمع مع تقييم الصور أو إعادة الزيارة أو التكرار أو الشركة أو السلوت',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.requested_technician_id && dto.requested_technician_id !== selectedMatchPreview.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني المرسل مختلف عن الفني المثبّت في المعاينة', HttpStatus.CONFLICT);
+      }
+      dto.requested_technician_id = selectedMatchPreview.technicianId;
+      selectedMatchContextHash = bookingMatchContextHash(
+        bookingPreviewInputFromCreate(dto),
+        selectedMatchPreview.selectionMode,
+        selectedMatchPreview.technicianId,
+      );
+      if (selectedMatchContextHash !== selectedMatchPreview.contextHash) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'تفاصيل الحجز تغيّرت بعد المعاينة — راجع السعر والفني من جديد',
+          HttpStatus.CONFLICT,
+        );
+      }
     }
 
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
@@ -1087,6 +1144,29 @@ export class OrdersService {
     let createdOrder: Order;
     try {
       createdOrder = await this.dataSource.transaction(async (manager) => {
+      const lockedMatchPreview = selectedMatchPreview
+        ? await manager
+            .createQueryBuilder(BookingMatchPreview, 'preview')
+            .setLock('pessimistic_write')
+            .where('preview.id = :id AND preview.customerId = :customerId', {
+              id: selectedMatchPreview.id,
+              customerId: customerProfile.id,
+            })
+            .getOne()
+        : null;
+      if (
+        selectedMatchPreview &&
+        (!lockedMatchPreview ||
+          lockedMatchPreview.status !== 'active' ||
+          lockedMatchPreview.expiresAt.getTime() <= Date.now() ||
+          lockedMatchPreview.contextHash !== selectedMatchContextHash)
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'معاينة الفني والسعر لم تعد صالحة — اعمل معاينة جديدة',
+          HttpStatus.CONFLICT,
+        );
+      }
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
       >("SELECT next_human_readable_number('ORD')");
@@ -1110,6 +1190,7 @@ export class OrdersService {
             : (dto.order_type ?? OrderType.STANDARD),
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
+        selectedMatchPreviewId: lockedMatchPreview?.id ?? null,
         orderStatus: remoteQuoteRequested ? OrderStatus.AWAITING_ADMIN_QUOTE : OrderStatus.SEARCHING_TECHNICIAN,
         // ADR-0060 §3 — المدة بقت ناتج محسوب مش مدخل عميل. العمودين بيتسجّلوا من السياق لما
         // تكون معروفة، بلا أي فرع على «وضع» الخدمة.
@@ -1167,7 +1248,9 @@ export class OrdersService {
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
         initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
-        priceStatus: remoteQuoteRequested
+        priceStatus: lockedMatchPreview
+          ? OrderPriceStatus.LOCKED
+          : remoteQuoteRequested
           ? OrderPriceStatus.WAITING_ASSESSMENT
           : service.priceCertaintyMode === PriceCertaintyMode.ESTIMATED_RANGE
             ? OrderPriceStatus.PROVISIONAL
@@ -1295,6 +1378,20 @@ export class OrdersService {
         order.warrantyPriceCents = this.optionalWarrantyPrice(optionalWarranty, order.totalAmountCents);
         order.totalAmountCents += order.warrantyPriceCents;
         await manager.save(order);
+      }
+
+      if (lockedMatchPreview) {
+        if (order.totalAmountCents !== lockedMatchPreview.finalPriceCents) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'السعر تغيّر منذ المعاينة — لن نؤكد الطلب قبل عرض السعر الجديد عليك',
+            HttpStatus.CONFLICT,
+          );
+        }
+        lockedMatchPreview.status = 'consumed';
+        lockedMatchPreview.consumedAt = new Date();
+        lockedMatchPreview.orderId = order.id;
+        await manager.save(lockedMatchPreview);
       }
 
       // V2 settles a fixed platform amount exactly once. Promotions/building discounts are applied
