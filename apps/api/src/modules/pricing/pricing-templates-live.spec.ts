@@ -14,7 +14,7 @@ import { PricingEngineService } from './pricing-engine.service';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { PricingTemplatesService } from './pricing-templates.service';
-import { PricingTemplateKey, pricingTemplateFinalPricePayload } from './pricing-templates';
+import { contractPeriodFromFieldValues, PricingTemplateKey, pricingTemplateFinalPricePayload } from './pricing-templates';
 
 // اختبار حي ضد Postgres حقيقي — قوالب التسعير (ADR-0060، docs/08 §113).
 //
@@ -261,6 +261,34 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
     const result = await engine.evaluate(serviceId, {});
     expect(result.requiredAssistants).toBe(2);
     expect(result.requiresAssistant).toBe(true);
+  });
+
+  /**
+   * ADR-0060 §2 — **مصدر واحد للفترة في التلات مسارات**.
+   *
+   * الحجز والمعاينة والتقدير العام كانوا بياخدوا `period_start`/`period_end` كمدخلات مستقلة في
+   * الـDTO/الـquery. يعني كان ممكن العميل يملا حقلي التاريخ في الفورم، والمعاينة تحسب من الفورم،
+   * والحفظ يقرا من مدخل تاني فاضي — سعر معروض ≠ سعر محفوظ، بلا أي إشارة.
+   *
+   * دلوقتي التلاتة بينادوا `contractPeriodFromFieldValues()` على نفس `field_values`.
+   */
+  it('فترة التعاقد بتتقرا من حقول الفورم — نفس المصدر اللي المعادلة بتحسب منه', async () => {
+    const serviceId = await makeService('period-source', 30000);
+    await templatesService.apply('admin-1', serviceId, PricingTemplateKey.MONTHLY, 30000, {});
+
+    const fieldValues = { period_start: '2026-01-10', period_end: '2026-04-05' };
+    const period = contractPeriodFromFieldValues(fieldValues);
+    expect(period).toEqual({ start: '2026-01-10', end: '2026-04-05' });
+
+    // نفس القيم بتدّي نفس عدد الشهور اللي المعادلة بتحسبه (3 شهور: أي جزء من شهر = شهر كامل).
+    const result = await engine.evaluate(serviceId, fieldValues as never);
+    expect(result.priceCents).toBe(90000);
+
+    // فورم فاضي ⇒ مفيش فترة، مش تواريخ مخترعة.
+    expect(contractPeriodFromFieldValues({})).toEqual({ start: null, end: null });
+    expect(contractPeriodFromFieldValues(undefined)).toEqual({ start: null, end: null });
+    // قيمة فاضية نصيًا معناها «العميل ماملاهاش»، مش سلسلة فاضية بتتبعت للداتابيز.
+    expect(contractPeriodFromFieldValues({ period_start: '   ' })).toEqual({ start: null, end: null });
   });
 
   // المسار القديم اتشال بالكامل — مش «بيتجاهَل». مخرج بيتحفظ ومحصلش هو نفس نوع اللخبطة اللي
