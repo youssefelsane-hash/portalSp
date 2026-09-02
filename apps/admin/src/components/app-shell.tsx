@@ -51,6 +51,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
+import { NotificationBell } from '@/components/notification-bell';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -346,6 +347,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p className="text-sm font-semibold">{activeNavigation?.item.label ?? 'لوحة الإدارة'}</p>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             {user && (
               <div className="flex items-center gap-2">
                 <Avatar className="size-7">
