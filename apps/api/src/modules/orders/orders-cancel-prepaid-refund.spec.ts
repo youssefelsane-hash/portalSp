@@ -75,22 +75,42 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     },
   });
 
-  async function insertOrder(opts: { label: string; orderStatus: OrderStatus; paymentStatus: OrderPaymentStatus }) {
+  async function insertOrder(opts: {
+    label: string;
+    orderStatus: OrderStatus;
+    paymentStatus: OrderPaymentStatus;
+    /** الافتراضي 30000 — طلب شغل عادي. طلب التقييم بالصور إجماليه = رسم التقييم بس. */
+    totalAmountCents?: number;
+    assessmentType?: 'remote' | 'onsite';
+    priceStatus?: string;
+  }) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0, now()) RETURNING id, order_number`,
-      [`TESTCPR-${opts.label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, opts.orderStatus, opts.paymentStatus, 30000],
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at, assessment_type, price_status, remote_assessment_fee_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0, now(), $9, COALESCE($10, 'confirmed'), $11) RETURNING id, order_number`,
+      [
+        `TESTCPR-${opts.label}`.slice(0, 24),
+        ids.customerProfile,
+        ids.service,
+        ids.address,
+        ids.zone,
+        opts.orderStatus,
+        opts.paymentStatus,
+        opts.totalAmountCents ?? 30000,
+        opts.assessmentType ?? null,
+        opts.priceStatus ?? null,
+        opts.assessmentType === 'remote' ? (opts.totalAmountCents ?? 0) : 0,
+      ],
     );
     return { orderId: order.id as string, orderNumber: order.order_number as string };
   }
 
-  async function insertSucceededPayment(orderId: string, label: string) {
+  async function insertSucceededPayment(orderId: string, label: string, amountCents = 30000) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, gateway_transaction_id, completed_at)
        VALUES ($1,$2,$3,$4,'card','succeeded',$5,$6, now())`,
-      [`PAYCPR-${label}`.slice(0, 24), orderId, ids.customerProfile, 30000, `idem-cpr-${label}-${Math.random()}`, `gw-cpr-${label}`],
+      [`PAYCPR-${label}`.slice(0, 24), orderId, ids.customerProfile, amountCents, `idem-cpr-${label}-${Math.random()}`, `gw-cpr-${label}`],
     );
   }
 
@@ -266,6 +286,37 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
 
     const [orderRow] = await dataSource.query(`SELECT payment_status FROM orders WHERE id = $1`, [orderId]);
     expect(orderRow.payment_status).toBe('refunded');
+  });
+
+  // **قرار المالك (2026-09-02، docs/08 §117): استرداد كامل دايمًا.**
+  //
+  // العميل يقدر يلغي وهو في `awaiting_admin_quote` — يعني ممكن يكون الإدارة خلاص فرزت الصور
+  // وسعّرت. المالك اختار صراحة إن الرسم يترد **كامل** برضه، مش نسبة ولا صفر.
+  //
+  // الاختبار ده بيقفل القرار ده: أي تغيير مستقبلي لسياسة الاسترداد (خصم رسم فرز، استرداد جزئي)
+  // هيكسّره، فمحدش يغيّرها بالغلط من غير قرار جديد من المالك.
+  it('قرار المالك: رسم التقييم بيترد **كامل** لو العميل لغى بعد الدفع — حتى لو الإدارة فرزت', async () => {
+    const FEE_CENTS = 7500;
+    const { orderId } = await insertOrder({
+      label: 'assessment-fee',
+      orderStatus: OrderStatus.AWAITING_ADMIN_QUOTE,
+      paymentStatus: OrderPaymentStatus.PAID,
+      totalAmountCents: FEE_CENTS,
+      assessmentType: 'remote',
+      priceStatus: 'waiting_assessment',
+    });
+    await insertSucceededPayment(orderId, 'assessment-fee', FEE_CENTS);
+
+    const cancelled = await service.cancel(ids.customerUser, orderId, {});
+    expect(cancelled.orderStatus).toBe(OrderStatus.CANCELLED_BY_CUSTOMER);
+
+    const [orderRow] = await dataSource.query(`SELECT payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(orderRow.payment_status).toBe('refunded');
+
+    const [refundRow] = await dataSource.query(`SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1`, [orderId]);
+    // كامل — مش أقل بأي جنيه.
+    expect(refundRow.amount_cents).toBe(FEE_CENTS);
+    expect(refundRow.refund_status).toBe('completed');
   });
 
   it('العميل يلغي طلب غير مدفوع (كاش) — مفيش أي محاولة استرداد (regression — مفيش فلوس اتاخدت أصلاً)', async () => {
