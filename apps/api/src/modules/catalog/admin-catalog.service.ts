@@ -376,6 +376,8 @@ export class AdminCatalogService {
       service.onsiteAssessorExecutesWork = dto.onsite_assessor_executes_work;
     }
     if (dto.quote_validity_minutes !== undefined) service.quoteValidityMinutes = dto.quote_validity_minutes;
+    if (dto.range_percent_below !== undefined) service.rangePercentBelow = String(dto.range_percent_below);
+    if (dto.range_percent_above !== undefined) service.rangePercentAbove = String(dto.range_percent_above);
     if (dto.display_price_min_cents !== undefined) service.displayPriceMinCents = dto.display_price_min_cents;
     if (dto.display_price_max_cents !== undefined) service.displayPriceMaxCents = dto.display_price_max_cents;
     if (dto.require_admin_review_above_range !== undefined) {

@@ -116,6 +116,19 @@ export class Service {
   @Column({ name: 'quote_validity_minutes', type: 'integer', default: 2880 })
   quoteValidityMinutes: number;
 
+  /**
+   * نسب النطاق التقديري (بند 10، migration 0251) — **مش حدود قصّ**.
+   * `minPriceCents`/`maxPriceCents` فاضلين القصّ الصلب؛ النسب دي بتتطبّق **بعد** القصّ على
+   * السعر المحسوب فعلاً للمدخلات، فالنطاق المعروض بيفضل جوّه الحدود دايمًا.
+   *
+   * `null` في الاتنين = ارجع للحقول الثابتة `displayPriceMin/MaxCents` تحت (fallback ADR-0063).
+   */
+  @Column({ name: 'range_percent_below', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  rangePercentBelow: string | null;
+
+  @Column({ name: 'range_percent_above', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  rangePercentAbove: string | null;
+
   /** Customer-facing fallback range. min/maxPriceCents remain pricing clamps. */
   @Column({ name: 'display_price_min_cents', type: 'integer', nullable: true })
   displayPriceMinCents: number | null;

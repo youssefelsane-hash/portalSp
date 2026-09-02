@@ -33,6 +33,7 @@ import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technic
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { schedulePrecision } from '../catalog/schedule-precision';
+import { estimatedDisplayRange } from '../catalog/estimated-display-range';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
@@ -1914,8 +1915,9 @@ export class OrdersService {
       due_now_cents: depositAmountCents ?? totalAmountCents,
       remaining_amount_cents: depositAmountCents !== null ? totalAmountCents - depositAmountCents : null,
       price_certainty_mode: service.priceCertaintyMode,
-      display_price_min_cents: service.displayPriceMinCents,
-      display_price_max_cents: service.displayPriceMaxCents,
+      // بند 10 — النطاق بيتحسب حوالين السعر المحسوب فعلاً للمدخلات دي، مش الحقول الثابتة.
+      // من غير كده خدمة سعرها بيتغيّر حسب الشغل كانت بتعرض نفس النطاق دايمًا.
+      ...estimatedDisplayRange(service, totalAmountCents),
       remote_assessment_fee_cents: remoteAssessmentRequested ? service.remoteAssessmentFeeCents : 0,
       booking_mode: bookingMode,
       service_zone_id: zone.id,
