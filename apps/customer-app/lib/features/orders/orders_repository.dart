@@ -168,22 +168,12 @@ class OrdersRepository {
     // بس (CatalogRepository.estimateDuration()) بلا ما القيم دي تتسجّل على الطلب نفسه خالص.
     String? standardDataId,
     num? requestedUnits,
-    num? pricingQuantity,
-    /// ADR-0050 §4 — نفس فترة `createOrder` بالحرف: المعاينة لازم تحسب نفس عدد الشهور اللي
-    /// الحجز هيتحاسب بيه، وإلا العميل بيشوف رقم وبيتدفع غيره.
-    DateTime? periodStart,
-    DateTime? periodEnd,
     // دفع قبل التوزيع (ADR-0013 §3/§4، docs/08 §19 بند 1) — 'card' أو 'instapay' بس، أو null
     // (الافتراضي القديم: دفع بعد الشغل زي زمان). لو اتبعت، الباك-إند بيرجّع الطلب بحالة
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
     // لشاشة الدفع فورًا بعد ده، التوزيع مش هيبدأ غير بعد ما الدفع يتأكد فعليًا.
     String? paymentMethod,
     String? warrantyPlanId,
-    // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — إجباري لخدمة
-    // service.requiresPreciseSchedule=true أو service.requiresHoursOnly=true بس.
-    int? durationHours,
-    // وضع "بداية+نهاية" (ADR-0032) — إجباري لخدمة service.requiresStartAndEnd=true بس، ISO 8601 UTC.
-    String? scheduledEndAt,
     // "كرّر الحجز ده" (migration 0176) — 'weekly'/'monthly'/'yearly'. الطلب بيتعمل بالمسار العادي
     // زي زمان، وقالب متكرر بيتإنشاء بنفس العملية أول موعد له بعد الموعد المحجوز. الباك-إند بيرفضه
     // للطوارئ/إعادة الزيارة والخدمات غير مفعّل فيها التكرار (allows_recurring_booking=false).
@@ -203,10 +193,6 @@ class OrdersRepository {
         'address_id': addressId,
         if (standardDataId != null) 'standard_data_id': standardDataId,
         if (requestedUnits != null) 'requested_units': requestedUnits,
-        if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
-        if (periodStart != null)
-          'period_start': periodStart.toUtc().toIso8601String(),
-        if (periodEnd != null) 'period_end': periodEnd.toUtc().toIso8601String(),
         if (paymentMethod != null) 'payment_method': paymentMethod,
         if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
@@ -233,8 +219,6 @@ class OrdersRepository {
         if (scheduledAt != null) 'scheduled_at': scheduledAt,
         if (scheduledAtRangeEnd != null)
           'scheduled_at_range_end': scheduledAtRangeEnd,
-        if (durationHours != null) 'duration_hours': durationHours,
-        if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
         if (repeatFrequency != null) 'repeat_frequency': repeatFrequency,
         if (originalOrderId != null) 'original_order_id': originalOrderId,
       },
@@ -262,13 +246,7 @@ class OrdersRepository {
     String? requestedTechnicianId,
     String? scheduleSlotId,
     String? warrantyPlanId,
-    num? pricingQuantity,
-    int? durationHours,
     DateTime? scheduledAt,
-    // ADR-0050 §4 — فترة التعاقد لخدمة شهرية. مش موعد الزيارة: عدد شهور الفوترة بيتحسب من
-    // الفرق بينهم بالتقويم، بدل ما العميل يكتب عدد شهور بإيده.
-    DateTime? periodStart,
-    DateTime? periodEnd,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -294,11 +272,6 @@ class OrdersRepository {
           'requested_technician_id': requestedTechnicianId,
         if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
         if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
-        if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
-        if (durationHours != null) 'duration_hours': durationHours,
-        if (periodStart != null)
-          'period_start': periodStart.toUtc().toIso8601String(),
-        if (periodEnd != null) 'period_end': periodEnd.toUtc().toIso8601String(),
       },
     );
     return OrderPricePreview.fromJson(data!);

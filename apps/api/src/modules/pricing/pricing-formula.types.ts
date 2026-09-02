@@ -84,15 +84,32 @@ export interface FinalPriceFormulaPayload {
   price_cents: FormulaNode;
   min_price_cents?: FormulaNode;
   max_price_cents?: FormulaNode;
+  /**
+   * **المدة التشغيلية بالدقايق** (ADR-0061 §1) — الوقت اللي الشغلانة بتاخده فعليًا من يوم الفني.
+   *
+   * ده مخرج منفصل عن `estimated_duration_days` عمدًا: الأيام بتوصف شغل بياخد اليوم بالكامل
+   * (تركيب، تشطيب)، والدقايق بتوصف شغلانة قصيرة جوّه اليوم (ساعتين تنظيف). الجدولة بتقرا
+   * الاتنين — وقبل المخرج ده كانت أي خدمة بالساعة بتتحسب بالافتراضي (60 دقيقة) مهما كانت
+   * الساعات اللي العميل طلبها، وده **حجز مزدوج حقيقي**.
+   */
+  duration_minutes?: FormulaNode;
   estimated_duration_days?: FormulaNode;
   required_technicians?: FormulaNode;
+  /**
+   * عدد المساعدين المطلوبين — **مصدر الحقيقة الوحيد** لاحتياج المساعد (ADR-0061 §5).
+   *
+   * كان فيه مخرج تاني اسمه `requires_assistant` (بوليان) جنبه، فكان ممكن تتكتب معادلة بتقول
+   * «محتاج 2 مساعد» و«مش محتاج مساعد» في نفس الوقت، وكل مستهلك يقرا اللي هو عارفه. المخرج ده
+   * **اتشال بالكامل** — البوليان بقى مشتق هنا وبس.
+   */
   required_assistants?: FormulaNode;
-  requires_assistant?: FormulaNode; // 0 = false، أي قيمة تانية = true
   suitable_for_emergency?: FormulaNode; // 0 = false، أي قيمة تانية = true
 }
 
 export interface PricingEvaluationResult {
   priceCents: number;
+  /** المدة التشغيلية بالدقايق (ADR-0061 §1) — `null` يعني المعادلة مابتحددهاش. */
+  durationMinutes: number | null;
   minPriceCents: number | null;
   maxPriceCents: number | null;
   estimatedDurationDays: number | null;

@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -15,6 +16,7 @@ import {
   Min,
 } from 'class-validator';
 import { PricingModel } from '../entities/service.entity';
+import { SCHEDULE_PRECISIONS, SchedulePrecision } from '../schedule-precision';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
 export class CreateServiceDto {
@@ -179,26 +181,16 @@ export class CreateServiceDto {
   @IsBoolean()
   show_unavailable_providers?: boolean;
 
-  // دقة الوقت (ADR-0031 Slice B) — true يعني العميل لازم يحدد بداية + مدة بالساعات وقت الحجز
-  // (duration_hours إجباري)، وفحص التعارض بدقة ساعة حقيقية بدل يوم بس.
+  /**
+   * دقة الموعد (ADR-0060 §4) — **حقل واحد بدل أربع بوليانات تبادلية**.
+   *
+   * الأربعة القدام كانوا محتاجين قيد تبادل على مستوى الداتابيز + تحقق صريح في الخدمة عشان
+   * مايتفعّلش أكتر من واحد، وكان لسه ممكن يوصلوا كلهم `false` أو كلهم `true` من كولر غلطان.
+   * الحقل الواحد بيخلي «وضع واحد بالظبط» **مستحيل يتكسر** بدل ما يبقى مفروض بقاعدة.
+   */
   @IsOptional()
-  @IsBoolean()
-  requires_precise_schedule?: boolean;
-
-  // 3 أوضاع توقيت جديدة (ADR-0032) — تبادلية مع requires_precise_schedule فوق ومع بعض (CHECK
-  // constraint chk_services_scheduling_mode_exclusive على مستوى الـDB + تحقق صريح في
-  // AdminCatalogService.assertSchedulingModeExclusive()).
-  @IsOptional()
-  @IsBoolean()
-  requires_start_time_only?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  requires_hours_only?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  requires_start_and_end?: boolean;
+  @IsIn(SCHEDULE_PRECISIONS)
+  schedule_precision?: SchedulePrecision;
 
   @IsOptional()
   @IsEnum(TechnicianLevel)

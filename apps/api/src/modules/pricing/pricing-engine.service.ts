@@ -294,17 +294,33 @@ export class PricingEngineService {
       throw new ApiException(ErrorCode.VAL_001, 'المدة المتوقعة الناتجة من المعادلة غير صالحة', HttpStatus.UNPROCESSABLE_ENTITY);
     }
 
-    const requiresAssistantRaw = evalOptional(finalPricePayload.requires_assistant, 'حالة احتياج مساعد');
+    // ADR-0061 §1 — المدة التشغيلية بالدقايق. السقف نفس سقف الأيام مترجَم لدقايق عشان معادلة
+    // غلط ماتحجزش الفني سنين. الكسور بتتقرّب لأعلى: نص دقيقة زيادة أأمن من نص دقيقة ناقصة في
+    // فحص التعارض.
+    const durationMinutesRaw = evalOptional(finalPricePayload.duration_minutes, 'المدة بالدقايق');
+    if (
+      durationMinutesRaw !== null &&
+      (!Number.isFinite(durationMinutesRaw) || durationMinutesRaw <= 0 || durationMinutesRaw > MAX_ESTIMATED_DURATION_DAYS * 24 * 60)
+    ) {
+      throw new ApiException(ErrorCode.VAL_001, 'المدة بالدقايق الناتجة من المعادلة غير صالحة', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    const durationMinutes = durationMinutesRaw !== null ? Math.ceil(durationMinutesRaw) : null;
+
+    // ADR-0061 §5 — `required_assistants` هو مصدر الحقيقة الوحيد لاحتياج المساعد. `requires_assistant`
+    // بقى **مشتق** منه بدل مخرج مستقل ممكن يناقضه (كان ممكن تكتب requires_assistant=1 مع
+    // required_assistants=0 والنظام يصدّق الاتنين في مكانين مختلفين).
+    const requiredAssistants = crewOutput(finalPricePayload.required_assistants, 'عدد المساعدين', 0);
     const suitableForEmergencyRaw = evalOptional(finalPricePayload.suitable_for_emergency, 'ملاءمة الطوارئ');
 
     return {
       priceCents,
       minPriceCents,
       maxPriceCents,
+      durationMinutes,
       estimatedDurationDays,
       requiredTechnicians: crewOutput(finalPricePayload.required_technicians, 'عدد الفنيين', 1),
-      requiredAssistants: crewOutput(finalPricePayload.required_assistants, 'عدد المساعدين', 0),
-      requiresAssistant: requiresAssistantRaw !== null ? requiresAssistantRaw !== 0 : null,
+      requiredAssistants,
+      requiresAssistant: requiredAssistants !== null ? requiredAssistants > 0 : null,
       suitableForEmergency: suitableForEmergencyRaw !== null ? suitableForEmergencyRaw !== 0 : null,
     };
   }

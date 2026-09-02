@@ -1,5 +1,6 @@
 import { ServiceCategory } from '../entities/service-category.entity';
 import { Service } from '../entities/service.entity';
+import { SchedulePrecision, schedulePrecision } from '../schedule-precision';
 
 export interface ServiceCategoryResponseDto {
   id: string;
@@ -64,10 +65,8 @@ export interface ServiceResponseDto {
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
-  requires_precise_schedule: boolean;
-  requires_start_time_only: boolean;
-  requires_hours_only: boolean;
-  requires_start_and_end: boolean;
+  /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات: `full_day` أو `start_time`. */
+  schedule_precision: SchedulePrecision;
   min_technician_level: string;
 }
 
@@ -103,10 +102,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     allows_date_range_booking: service.allowsDateRangeBooking,
     allows_recurring_booking: service.allowsRecurringBooking,
     show_unavailable_providers: service.showUnavailableProviders,
-    requires_precise_schedule: service.requiresPreciseSchedule,
-    requires_start_time_only: service.requiresStartTimeOnly,
-    requires_hours_only: service.requiresHoursOnly,
-    requires_start_and_end: service.requiresStartAndEnd,
+    schedule_precision: schedulePrecision(service),
     min_technician_level: service.minTechnicianLevel,
   };
 }

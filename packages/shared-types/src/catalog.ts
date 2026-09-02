@@ -6,6 +6,22 @@ import type { TechnicianLevel, TechnicianPricingTier } from './technicians';
 // بتولّد معادلة (`PRICING_TEMPLATES` في pricing.ts)، مش أوضاع تشغيل.
 export type PricingModel = 'inspection_then_quote' | 'formula';
 
+/**
+ * دقة الموعد المطلوبة من العميل (ADR-0060 §4) — **وضعين بس**.
+ *
+ * `full_day` = تاريخ بس، `start_time` = تاريخ + ساعة وصول. الأربع بوليانات القدام
+ * (`requires_precise_schedule`, `requires_start_time_only`, `requires_hours_only`,
+ * `requires_start_and_end`) اتشالوا: تلاتة منهم كانوا بيطلبوا من العميل **مدخلات تسعير** مش
+ * بيانات جدولة، وده اللي كان بيعرض أربع حقول تاريخ على نفس الشاشة.
+ */
+export const SCHEDULE_PRECISIONS = ['full_day', 'start_time'] as const;
+export type SchedulePrecision = (typeof SCHEDULE_PRECISIONS)[number];
+
+export const SCHEDULE_PRECISION_LABELS_AR: Record<SchedulePrecision, string> = {
+  full_day: 'يوم كامل',
+  start_time: 'وقت بداية فقط',
+};
+
 export interface AdminServiceCategoryResponseDto {
   id: string;
   parent_category_id: string | null;
@@ -74,10 +90,8 @@ export interface AdminServiceResponseDto {
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
-  requires_precise_schedule: boolean;
-  requires_start_time_only: boolean;
-  requires_hours_only: boolean;
-  requires_start_and_end: boolean;
+  /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات تبادلية. */
+  schedule_precision: SchedulePrecision;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -123,10 +137,7 @@ export interface CreateServiceBody {
   allows_date_range_booking?: boolean;
   allows_recurring_booking?: boolean;
   show_unavailable_providers?: boolean;
-  requires_precise_schedule?: boolean;
-  requires_start_time_only?: boolean;
-  requires_hours_only?: boolean;
-  requires_start_and_end?: boolean;
+  schedule_precision?: SchedulePrecision;
   min_technician_level?: string;
   display_order?: number;
   launch_phase?: number;

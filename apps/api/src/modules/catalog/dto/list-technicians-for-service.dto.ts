@@ -52,10 +52,4 @@ export class ListTechniciansForServiceDto {
   @IsIn(['recommended', 'lowest_price', 'highest_rating'])
   sort?: 'recommended' | 'lowest_price' | 'highest_rating';
 
-  // دقة الوقت (ADR-0031 Slice B/H) — بس لخدمات pricing_model=hourly، عشان final_price_cents
-  // المعروض لكل فني مرشّح يطابق بالحرف اللي هيتحصّل فعليًا لو العميل أكّد بعدد الساعات ده.
-  @IsOptional()
-  @IsNumber()
-  @IsPositive()
-  duration_hours?: number;
 }

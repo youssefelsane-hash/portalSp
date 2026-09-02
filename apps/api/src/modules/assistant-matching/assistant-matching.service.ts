@@ -6,10 +6,12 @@ import { Queue } from 'bullmq';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
+  technicianAvailabilityCondition,
   technicianCityCoverageCondition,
   technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 import {
   ASSISTANT_MATCHING_ESCALATED_EVENT,
   AssistantMatchingEscalatedEvent,
@@ -22,9 +24,9 @@ import {
   ASSISTANT_PERSONAL_ASSIGNED_EVENT,
   AssistantPersonalAssignedEvent,
 } from '../../common/events/assistant-personal-assigned.event';
-import { Order } from '../orders/entities/order.entity';
+import { BookingMode, Order } from '../orders/entities/order.entity';
 import { OrderTeamMember } from '../orders/entities/order-team-member.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssistantLinkStatus } from '../technicians/entities/technician-profile.entity';
@@ -45,6 +47,24 @@ interface EligibleAssistantRow {
 }
 
 const MEMBER_TYPE_ASSISTANT = 'assistant';
+
+/**
+ * **مصدر أعمدة الحمل التشغيلي للطلب المرشّح** (ADR-0061 §2) — الطلب معروف بـuuid، فأعمدته
+ * بتتقرا منه مباشرة والقاعدة الموحّدة هي اللي بتحوّلها لدقايق/يوم.
+ */
+function assistantCandidateLoad(orderIdParam: string, serviceAlias: string) {
+  return {
+    estimatedDurationDaysExpr: `(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = ${orderIdParam}::uuid)`,
+    durationMinutesExpr: `(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = ${orderIdParam}::uuid)`,
+    serviceDefaultMinutesExpr: `${serviceAlias}.estimated_duration_minutes`,
+  };
+}
+
+/** مدة الطلب المرشّح بالدقايق — نفس ترتيب المصادر المستخدم في matching.service.ts بالحرف. */
+function assistantServiceDurationExpr(orderIdParam: string, serviceAlias: string): string {
+  return `COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = ${orderIdParam}::uuid), COALESCE(${serviceAlias}.estimated_duration_minutes, 60), 60)`;
+}
+
 
 /**
  * مطابقة المساعد التلقائية (ADR-0007) — أولوية 1 (المساعد الشخصي) ثم أولوية 2 (بث لمجمع
@@ -71,16 +91,31 @@ export class AssistantMatchingService {
   }
 
   /**
-   * فحص أهلية أساسي مشترك بين أولوية 1 وأولوية 2 — نفس معايير findEligibleTechnicians في
-   * matching.service.ts، بما فيها تعارض الجدولة (كانت فجوة موثّقة صراحة في ADR-0007 §7 —
-   * "بالاكتفاء بفحص 'مفيش طلب نشط' نفس دقة الفني القائد" — اتقفلت 2026-08-13، نفس منطق
-   * matching.service.ts's findEligibleTechnicians() بالحرف، راجع التعليق هناك للتفاصيل الكاملة).
+   * فحص أهلية أساسي مشترك بين أولوية 1 وأولوية 2.
+   *
+   * **ADR-0061 §3 — شرط التوافر هنا بقى `technicianAvailabilityCondition()` نفسها**، مش نسخة
+   * موازية. التعليق القديم كان بيقول «نفس منطق findEligibleTechnicians() بالحرف»، والحقيقة إنه
+   * كان **منطق تاني خالص** انجرف عنه بتلات فروق حقيقية:
+   *
+   * 1. أي طلب نشط للمساعد — **في أي يوم، مهما كان قصير** — كان بيستبعده تمامًا. دي بالظبط بَقّة
+   *    ADR-0018 §32 اللي اتصلحت للفني القائد من تسعة شهور وفضلت عايشة هنا: المساعد اللي عنده
+   *    شغلانة ساعتين الأسبوع الجاي كان «مش موجود» لكل عروض النهاردة.
+   * 2. السقف اليومي بالدقايق (ADR-0059) ماكانش بيتطبّق عليه خالص — فمساعد يومه مليان 12 ساعة
+   *    ومساعد فاضي كانوا **نفس الشيء** لو الاتنين مالهمش طلب نشط.
+   * 3. كان بيفحص `technician_schedule_slots.status = 'booked'` بدل `'blocked'` — يعني **إجازة
+   *    المساعد الصريحة ماكانتش بتتقرا أصلاً**. مساعد حاجز يوم لنفسه كان لسه بياخد عروض فيه.
+   *
+   * وكمان `($4::timestamptz)::date` كانت بتتحسب بتوقيت جلسة Postgres (UTC) بدل توقيت مصر — نفس
+   * غلطة اليوم-الأسبق اللي ADR-0018 قفلها في المحرك المشترك.
    */
   private async isCandidateEligible(technicianId: string, order: Order, manager?: EntityManager): Promise<boolean> {
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [row] = await (manager ?? this.dataSource).query<{ eligible: boolean }[]>(
       `
-      SELECT (
-        tp.verification_status = 'approved'
+      SELECT EXISTS (
+        SELECT 1 FROM technician_profiles tp, services s
+        WHERE tp.id = $1 AND s.id = $3
+        AND tp.verification_status = 'approved'
         AND tp.deleted_at IS NULL
         -- ADR-0050 — الاتجاه العكسي: المسار ده بيدوّر على **مساعد**، فالفنيين مستبعدين منه.
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
@@ -94,30 +129,31 @@ export class AssistantMatchingService {
           requestedServiceZoneIdExpr: '$5',
         })}
         AND tp.current_location IS NOT NULL
-        AND tp.id NOT IN (
-          SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($2::order_status[]) AND deleted_at IS NULL
-        )
-        AND tp.id NOT IN (
-          SELECT otm.technician_id FROM order_team_members otm
-          JOIN orders o ON o.id = otm.order_id
-          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM technician_schedule_slots tss
-          WHERE tss.technician_id = tp.id
-            AND tss.status = 'booked'
-            AND tss.deleted_at IS NULL
-            AND $4::timestamptz IS NOT NULL
-            AND tss.slot_date = ($4::timestamptz)::date
-            AND tss.start_time < (($4::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
-            AND tss.end_time > ($4::timestamptz)::time
-        )
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$4',
+          excludeOrderIdParam: '$9',
+          activeStatusesParam: '$2',
+          engagedStatusesParam: '$6',
+          isEmergencyParam: '$7',
+          serviceDurationExpr: assistantServiceDurationExpr('$9', 's'),
+          candidateLoad: assistantCandidateLoad('$9', 's'),
+          preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $9::uuid)',
+          dailyCapacityMinutesParam: '$8',
+        })}
       ) AS eligible
-      FROM technician_profiles tp, services s
-      WHERE tp.id = $1 AND s.id = $3
       `,
-      [technicianId, ACTIVE_TECHNICIAN_ORDER_STATUSES, order.serviceId, order.scheduledAt ?? null, order.serviceZoneId],
+      [
+        technicianId,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        order.serviceId,
+        order.scheduledAt ?? null,
+        order.serviceZoneId,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        order.bookingMode === BookingMode.EMERGENCY,
+        dailyCapacityMinutes,
+        order.id,
+      ],
     );
     return row?.eligible === true;
   }
@@ -169,17 +205,23 @@ export class AssistantMatchingService {
     const poolEnabled = await this.settingsService.getBoolean('assistant_matching.pool_matching_enabled', true);
     if (!poolEnabled) return;
 
-    await this.broadcastToPool(order, lead.id);
+    await this.broadcastToPool(order, lead.id, 1);
   }
 
-  /** أولوية 2: بث لمجمع المساعدين المؤهلين — نفس معايير أهلية الفني العادي لخدمة/منطقة الطلب. */
-  private async broadcastToPool(order: Order, leadTechnicianId: string): Promise<void> {
-    if (!order.serviceZoneId) return;
+  /**
+   * أولوية 2: بث لمجمع المساعدين المؤهلين — نفس معايير أهلية الفني العادي لخدمة/منطقة الطلب.
+   *
+   * بترجّع **عدد العروض الجديدة اللي اتبعتت فعلاً** (ADR-0061 §4) — ده هو شرط استمرار الجولات:
+   * جولة بترجّع صفر معناها المجمع خلص، وساعتها بس بيتصعّد للعمليات.
+   */
+  private async broadcastToPool(order: Order, leadTechnicianId: string, round: number): Promise<number> {
+    if (!order.serviceZoneId) return 0;
 
     const alreadyOffered = await this.offers.find({ where: { orderId: order.id } });
     const excludeIds = [leadTechnicianId, ...alreadyOffered.map((o) => o.assistantTechnicianId)];
 
     const batchSize = await this.settingsService.getNumber('assistant_matching.batch_size', BATCH_SIZE_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const candidates = await this.dataSource.query<EligibleAssistantRow[]>(
       `
       SELECT tp.id AS technician_id
@@ -210,27 +252,22 @@ export class AssistantMatchingService {
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id != ALL($6::uuid[])
-        AND tp.id NOT IN (
-          SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($5::order_status[]) AND deleted_at IS NULL
-        )
-        AND tp.id NOT IN (
-          SELECT otm.technician_id FROM order_team_members otm
-          JOIN orders o ON o.id = otm.order_id
-          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($5::order_status[]) AND o.deleted_at IS NULL
-        )
-        -- تعارض جدولة (ADR-0007 §7 — كانت فجوة موثّقة صراحة، اتقفلت) — نفس منطق
-        -- matching.service.ts's findEligibleTechnicians() بالحرف بالنسبة للمساعد نفسه.
-        AND NOT EXISTS (
-          SELECT 1 FROM technician_schedule_slots tss
-          WHERE tss.technician_id = tp.id
-            AND tss.status = 'booked'
-            AND tss.deleted_at IS NULL
-            AND $7::timestamptz IS NOT NULL
-            AND tss.slot_date = ($7::timestamptz)::date
-            AND tss.start_time < (($7::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
-            AND tss.end_time > ($7::timestamptz)::time
-        )
+        -- ADR-0061 §3 — نفس محرك التوافر بالظبط اللي بيقرر أهلية الفني القائد
+        -- (technicianAvailabilityCondition)، مش نسخة موازية. الشرط ده بيغطّي التزام المساعد
+        -- كقائد وكعضو طاقم مع بعض (committedOrdersSource)، والسقف اليومي بالدقايق (ADR-0059)،
+        -- وإجازته الصريحة (blocked) — تلاتتهم ماكانوش موجودين في النسخة القديمة.
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$7',
+          excludeOrderIdParam: '$11',
+          activeStatusesParam: '$5',
+          engagedStatusesParam: '$8',
+          isEmergencyParam: '$9',
+          serviceDurationExpr: assistantServiceDurationExpr('$11', 's'),
+          candidateLoad: assistantCandidateLoad('$11', 's'),
+          preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $11::uuid)',
+          dailyCapacityMinutesParam: '$10',
+        })}
       ORDER BY ST_Distance(tp.current_location, a.location) ASC,
                CASE tp.current_level
                  WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
@@ -247,11 +284,18 @@ export class AssistantMatchingService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         excludeIds,
         order.scheduledAt ?? null,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        order.bookingMode === BookingMode.EMERGENCY,
+        dailyCapacityMinutes,
+        order.id,
       ],
     );
 
     if (candidates.length === 0) {
-      this.logger.warn(`مفيش مساعدين مؤهلين متاحين لطلب ${order.orderNumber} — هيصعّد بعد المهلة لو محدش قبل`);
+      this.logger.warn(
+        `مفيش مساعدين مؤهلين جدد لطلب ${order.orderNumber} في الجولة ${round} — المجمع خلص`,
+      );
+      return 0;
     }
 
     const responseTimeoutSeconds = await this.settingsService.getNumber(
@@ -261,6 +305,7 @@ export class AssistantMatchingService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
 
+    let sent = 0;
     for (const c of candidates) {
       const inserted = await this.offers
         .createQueryBuilder()
@@ -271,12 +316,14 @@ export class AssistantMatchingService {
           offerStatus: AssistantOfferStatus.SENT,
           sentAt: now,
           expiresAt,
+          matchingRound: round,
         })
         .orIgnore()
         .returning(['id'])
         .execute();
       const offerId = (inserted.raw as Array<{ id: string }>)[0]?.id;
       if (offerId) {
+        sent += 1;
         this.events.emit(
           ASSISTANT_OPPORTUNITY_OFFERED_EVENT,
           new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id, order.orderNumber),
@@ -284,11 +331,25 @@ export class AssistantMatchingService {
       }
     }
 
+    // مفيش عرض جديد اتكتب فعلاً (كلهم اتسبقوا بـorIgnore) — نفس معنى «المجمع خلص» بالظبط،
+    // وبلا مؤقّت جديد عشان مانستنّاش مهلة كاملة على لا شيء.
+    if (sent === 0) return 0;
+
     await this.queue.add(
       ASSISTANT_OFFERS_EXPIRED_JOB,
       { orderId: order.id },
-      { delay: responseTimeoutSeconds * 1000, jobId: assistantOffersExpiredJobId(order.id) },
+      { delay: responseTimeoutSeconds * 1000, jobId: assistantOffersExpiredJobId(order.id, round) },
     );
+    return sent;
+  }
+
+  /** آخر جولة بث اتبعتت للطلب — 0 لو لسه مفيش أي بث. */
+  private async currentRound(orderId: string): Promise<number> {
+    const [row] = await this.dataSource.query<{ round: number }[]>(
+      `SELECT COALESCE(MAX(matching_round), 0)::int AS round FROM order_assistant_offers WHERE order_id = $1`,
+      [orderId],
+    );
+    return row?.round ?? 0;
   }
 
   async listAvailableForTechnician(userId: string): Promise<AssistantOfferListRow[]> {
@@ -381,7 +442,7 @@ export class AssistantMatchingService {
           { orderId: order.id, offerStatus: AssistantOfferStatus.SENT },
           { offerStatus: AssistantOfferStatus.SLOT_FILLED, respondedAt: now },
         );
-        await this.queue.remove(assistantOffersExpiredJobId(order.id));
+        await this.queue.remove(assistantOffersExpiredJobId(order.id, offer.matchingRound));
         this.logger.log(`كل شرائح المساعد اكتملت لطلب ${order.orderNumber} — قفل البث`);
       }
     });
@@ -424,12 +485,35 @@ export class AssistantMatchingService {
 
     const filled = await this.filledSlotsCount(orderId);
     const remaining = (order.requiredAssistants ?? 0) - filled;
-    if (remaining > 0) {
-      this.logger.warn(`مهلة مطابقة المساعد انتهت لطلب ${order.orderNumber} — لسه ${remaining} شريحة فاضية، بيتصعّد للعمليات`);
-      this.events.emit(
-        ASSISTANT_MATCHING_ESCALATED_EVENT,
-        new AssistantMatchingEscalatedEvent(order.id, order.orderNumber, remaining),
-      );
+    if (remaining <= 0) return;
+
+    // ADR-0061 §4 — **جولة تانية (وتالتة، ورابعة…) قبل التصعيد**.
+    //
+    // قبل كده كان التصعيد بيحصل بعد الجولة الأولى على طول: أول دفعة مرشّحين ماتردش ⇒ العمليات
+    // بتتنده، حتى لو فيه عشرات المساعدين المؤهلين المتاحين **لسه ماتسألوش أصلاً**. ده تصعيد
+    // كاذب — بيحوّل شغل الغطاء التلقائي لشغل يدوي بلا سبب حقيقي.
+    //
+    // الجولات بتنتهي بنفسها بلا أي سقف صناعي: كل مرشّح اتبعتله عرض بيتسجّل ويتستبعد من الدفعة
+    // اللي بعدها (`excludeIds`)، فعدد الجولات محدود ببنيته بحجم المجمع. التصعيد بيحصل بس لما
+    // جولة ترجّع صفر مرشّح جديد = المجمع خلص فعلاً.
+    const poolEnabled = await this.settingsService.getBoolean('assistant_matching.pool_matching_enabled', true);
+    if (poolEnabled && order.technicianId) {
+      const nextRound = (await this.currentRound(orderId)) + 1;
+      const sent = await this.broadcastToPool(order, order.technicianId, nextRound);
+      if (sent > 0) {
+        this.logger.log(
+          `مهلة الجولة انتهت لطلب ${order.orderNumber} — اتبعتت جولة ${nextRound} لـ${sent} مساعد جديد بدل التصعيد`,
+        );
+        return;
+      }
     }
+
+    this.logger.warn(
+      `مطابقة المساعد استنفدت المجمع لطلب ${order.orderNumber} — لسه ${remaining} شريحة فاضية، بيتصعّد للعمليات`,
+    );
+    this.events.emit(
+      ASSISTANT_MATCHING_ESCALATED_EVENT,
+      new AssistantMatchingEscalatedEvent(order.id, order.orderNumber, remaining),
+    );
   }
 }

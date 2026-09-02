@@ -57,8 +57,7 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
     MaterialPageRoute(
       builder: (_) => ScheduleSelectionScreen(
         allowsDateRangeBooking: service.allowsDateRangeBooking,
-        requiresPreciseTime: service.requiresPreciseSchedule || service.requiresStartTimeOnly,
-        requiresDurationHours: service.requiresPreciseSchedule,
+        requiresPreciseTime: service.requiresStartTime,
         allowsSameDay: service.allowsEmergency,
       ),
     ),
@@ -67,7 +66,6 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   final DateTime? scheduledAt = choice.scheduledAt;
   final DateTime? scheduledAtRangeEnd = choice.rangeEnd;
   final TimeOfDay? preciseTime = choice.preciseTime;
-  final int? durationHours = choice.durationHours;
 
   // الوضع المحلي ده **للتنقّل بس** — الباك-إند بيعيد اشتقاقه من جديد بتوقيت القاهرة وهو المرجع
   // الوحيد (ADR-0048 §1). اليوم المختار هو النهارده ⇒ خدمة مستعجلة ⇒ مفيش خطوة اختيار فني
@@ -91,7 +89,6 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
-              requestedDurationHours: durationHours,
             )
           : service.pricingModel == 'formula'
               ? JobDetailsScreen(
@@ -100,7 +97,6 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
                   requestedAt: scheduledAt,
                   requestedAtRangeEnd: scheduledAtRangeEnd,
                   requestedPreciseTime: preciseTime,
-                  requestedDurationHours: durationHours,
                 )
               : TechnicianSelectionScreen(
                   service: service,
@@ -108,7 +104,6 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
                   requestedAt: scheduledAt,
                   requestedAtRangeEnd: scheduledAtRangeEnd,
                   requestedPreciseTime: preciseTime,
-                  requestedDurationHours: durationHours,
                 ),
     ),
   );

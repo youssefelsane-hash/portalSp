@@ -60,6 +60,14 @@ export interface PricingTemplateDescriptor {
   fields: PricingTemplateField[];
   /** الشجرة اللي بتتكتب في `final_price`. `rateCents` هو الرقم اللي الأدمن دخّله. */
   formula(rateCents: number): FormulaNode;
+  /**
+   * **مخرجات تشغيلية** بيولّدها القالب مع السعر (ADR-0061 §1).
+   *
+   * القالب اللي بيسعّر بالساعة عارف بالضرورة إن الشغلانة بتاخد الساعات دي من يوم الفني، واللي
+   * بيسعّر باليوم عارف إنها بتاخد الأيام دي. من غير المخرجات دي، الجدولة كانت بتحسب أي شغلانة
+   * بالساعة بالافتراضي (60 دقيقة) مهما كانت ساعاتها — **حجز مزدوج حقيقي**.
+   */
+  operationalOutputs?: { duration_minutes?: FormulaNode; estimated_duration_days?: FormulaNode };
 }
 
 function numberField(
@@ -95,6 +103,9 @@ const TEMPLATES: Record<PricingTemplateKey, PricingTemplateDescriptor> = {
     rateLabelAr: 'سعر الساعة (جنيه)',
     fields: [numberField(TEMPLATE_FIELD_KEYS.hours, 'عدد الساعات المطلوبة', 'ساعة', '1', '24')],
     formula: (rateCents) => ({ type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.hours), rate(rateCents)] }),
+    operationalOutputs: {
+      duration_minutes: { type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.hours), { type: 'literal', value: 60 }] },
+    },
   },
   [PricingTemplateKey.DAILY]: {
     key: PricingTemplateKey.DAILY,
@@ -103,6 +114,7 @@ const TEMPLATES: Record<PricingTemplateKey, PricingTemplateDescriptor> = {
     rateLabelAr: 'سعر اليوم (جنيه)',
     fields: [numberField(TEMPLATE_FIELD_KEYS.days, 'عدد الأيام المطلوبة', 'يوم', '1', '365')],
     formula: (rateCents) => ({ type: 'multiply', operands: [ref(TEMPLATE_FIELD_KEYS.days), rate(rateCents)] }),
+    operationalOutputs: { estimated_duration_days: ref(TEMPLATE_FIELD_KEYS.days) },
   },
   [PricingTemplateKey.MONTHLY]: {
     key: PricingTemplateKey.MONTHLY,
@@ -165,9 +177,29 @@ export function pricingTemplateFinalPricePayload(
   minPriceCents: number | null = null,
   maxPriceCents: number | null = null,
 ): FinalPriceFormulaPayload {
+  const template = pricingTemplate(key);
   return {
-    price_cents: pricingTemplate(key).formula(rateCents),
+    price_cents: template.formula(rateCents),
+    ...(template.operationalOutputs ?? {}),
     ...(minPriceCents !== null ? { min_price_cents: { type: 'literal' as const, value: minPriceCents } } : {}),
     ...(maxPriceCents !== null ? { max_price_cents: { type: 'literal' as const, value: maxPriceCents } } : {}),
   };
+}
+
+/**
+ * فترة التعاقد من قيم الفورم (ADR-0060 §2) — **نقطة القراءة الوحيدة** للتاريخين دول.
+ *
+ * قالب «بالشهر» بيزرع حقلين تاريخ عاديين في `service_pricing_fields`، والمعادلة بتقرا منهم
+ * بـ`kind: 'field'`. الطلب بيحفظ نفس التاريخين في `pricing_period_start/end` — فلو الحفظ قرا من
+ * مدخل منفصل في الـDTO (زي ما كان)، السعر المحسوب والعمود المحفوظ كانوا ممكن يختلفوا بلا أي
+ * إشارة. الدالة دي بتخلّي المصدر واحد.
+ */
+export function contractPeriodFromFieldValues(
+  fieldValues: Record<string, string | number | boolean> | undefined,
+): { start: string | null; end: string | null } {
+  const read = (key: string): string | null => {
+    const raw = fieldValues?.[key];
+    return typeof raw === 'string' && raw.trim() !== '' ? raw : null;
+  };
+  return { start: read(TEMPLATE_FIELD_KEYS.periodStart), end: read(TEMPLATE_FIELD_KEYS.periodEnd) };
 }

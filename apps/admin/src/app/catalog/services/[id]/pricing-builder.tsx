@@ -81,10 +81,12 @@ const DEFAULT_FORMULA_PAYLOAD: FinalPriceFormulaPayload = {
 const OPTIONAL_PAYLOAD_KEYS: { key: keyof Omit<FinalPriceFormulaPayload, 'price_cents'>; labelAr: string }[] = [
   { key: 'min_price_cents', labelAr: 'أقل سعر مسموح' },
   { key: 'max_price_cents', labelAr: 'أعلى سعر مسموح' },
-  { key: 'estimated_duration_days', labelAr: 'المدة المقدّرة (أيام)' },
+  // ADR-0061 §1 — المدة التشغيلية اللي الجدولة بتحجز بيها. من غيرها أي شغلانة بالساعة بتتحجز
+  // بالافتراضي (ساعة) مهما كانت ساعاتها، فالفني بياخد شغل تاني فوقها في نفس اليوم.
+  { key: 'duration_minutes', labelAr: 'المدة التشغيلية (دقايق) — بتحجز وقت الفني' },
+  { key: 'estimated_duration_days', labelAr: 'المدة المقدّرة (أيام) — بتحجز اليوم بالكامل' },
   { key: 'required_technicians', labelAr: 'عدد الفنيين المطلوب' },
   { key: 'required_assistants', labelAr: 'عدد المساعدين المطلوب' },
-  { key: 'requires_assistant', labelAr: 'محتاج مساعد؟ (0 = لأ، غير كده = أيوه)' },
   { key: 'suitable_for_emergency', labelAr: 'مناسب لطوارئ؟ (0 = لأ، غير كده = أيوه)' },
 ];
 

@@ -29,6 +29,7 @@ import {
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
+import { resolveDistanceWeight } from './matching-weights';
 import { LevelPremiumService } from '../pricing/level-premium.service';
 import {
   isRevisitPinActive,
@@ -101,6 +102,8 @@ export interface EligibleTechnicianRow {
   technician_id: string;
   distance_km: string;
   rank_score: string;
+  /** ADR-0062 — خصم المسافة الفعلي على النتيجة (كيلومتر × الوزن الساري لسياق الطلب). */
+  distance_penalty: string;
   // docs/08 §36.20-21، ADR-0023 — تفكيك مكوّنات rank_score للتفسير (§36.6)، صفر تأثير على الترتيب نفسه.
   priority_component: string;
   workload_penalty: string;
@@ -263,6 +266,8 @@ export class MatchingService {
       COMPANY_LARGE_JOB_BOOST_FALLBACK,
     );
     const requiredCrew = Math.max(1, order.requiredTechnicians ?? 1) + Math.max(0, order.requiredAssistants ?? 0);
+    // ADR-0062 — شدّة القرب حسب سياق الطلب، كلها من إعدادات الأدمن (نفس الدالة اللي التفسير بيناديها).
+    const distanceWeight = await resolveDistanceWeight(this.settingsService, order);
     // نافذة أكبر قبل تمثيل كل شركة مرة واحدة؛ شركة كبيرة لا يجوز أن تملأ LIMIT بأعضائها ثم
     // يترك dedupe دفعة ناقصة. السقف يحافظ على زمن الاستعلام، ونداء التفسير الكبير يحتفظ بحجمه.
     const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 20, 500));
@@ -274,6 +279,10 @@ export class MatchingService {
                COALESCE(tlc.order_priority_weight, 0)
                - COALESCE(workload.active_count, 0) * $14::int
                - COALESCE(fairness.recent_effective_workload, 0) * $15::numeric
+               -- ADR-0062 — المسافة مكوّن حقيقي في النتيجة، مش كاسر تعادل بس. الوزن بيتحسب في
+               -- resolveDistanceWeight() حسب سياق الطلب (طوارئ/موعد قريب/شغل رخيص)، و0 (الافتراضي)
+               -- بيرجّع السلوك القديم بالحرف.
+               - (ST_Distance(tp.current_location, a.location) / 1000.0) * $26::numeric
                + (
                  CASE WHEN tp.total_ratings_count >= $22::int
                    THEN (tp.average_rating - $21::numeric) * $20::numeric
@@ -292,6 +301,7 @@ export class MatchingService {
                )
              ) AS rank_score,
              COALESCE(tlc.order_priority_weight, 0) AS priority_component,
+             (ST_Distance(tp.current_location, a.location) / 1000.0) * $26::numeric AS distance_penalty,
              COALESCE(workload.active_count, 0) * $14::int AS workload_penalty,
              COALESCE(fairness.recent_effective_workload, 0) * $15::numeric AS fairness_penalty,
              (
@@ -360,7 +370,11 @@ export class MatchingService {
             engagedStatusesParam: '$11',
             isEmergencyParam: '$12',
             serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-            candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+            candidateLoad: {
+              estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
+              durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+              serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
+            },
             preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
             dailyCapacityMinutesParam: '$13',
             ignoreActiveOrderConflict,
@@ -451,7 +465,11 @@ export class MatchingService {
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
           serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
-          candidateSpanDaysExpr: "GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid))::int, 1), 1)",
+          candidateLoad: {
+            estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $4::uuid)',
+            durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid)',
+            serviceDefaultMinutesExpr: 's.estimated_duration_minutes',
+          },
           preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid)',
           dailyCapacityMinutesParam: '$13',
           ignoreActiveOrderConflict,
@@ -486,6 +504,7 @@ export class MatchingService {
         requiredCrew,
         companyLargeJobMinCrew,
         companyLargeJobBoost,
+        distanceWeight.weight,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
@@ -1015,8 +1034,11 @@ export class MatchingService {
       serviceDurationMinutes:
         order.durationMinutes ?? (order.durationHours ? order.durationHours * 60 : null) ?? service[0]?.estimated_duration_minutes ?? 60,
       dailyCapacityMinutes: dailyCapacityMinutes,
-      // ADR-0059 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
-      candidateSpanDays: Math.max(Math.ceil(Number(order.estimatedDurationDays ?? 1)) || 1, 1),
+      // ADR-0059/0061 §2 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
+      // بتتبعت **خام** (`null` لو المحرك ماحددش أيام): تحويلها لـ1 هنا كان بيخلي أي شغلانة قصيرة
+      // تتحسب يوم كامل، لأن «1» في قاعدة الحمل معناها «المحرك قال يوم كامل» مش «يوم واحد».
+      candidateEstimatedDurationDays:
+        order.estimatedDurationDays != null ? Number(order.estimatedDurationDays) : null,
     });
     if (process.env.DEBUG_MATCHING) {
       // eslint-disable-next-line no-console

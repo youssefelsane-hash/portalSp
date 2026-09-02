@@ -109,14 +109,12 @@ class CatalogService {
   // في رد الباك-إند من زمان بس مش مقروء هنا خالص، فـCreateOrderScreen كان بيعرض "ادفع بعد الخدمة"
   // (كاش) لكل خدمة بلا استثناء حتى لو الباك-إند هيرفضها. false يعني الكاش ممنوع صراحة.
   final bool cashAllowed;
-  // دقة الوقت (ADR-0031 Slice B) — لو true، العميل لازم يحدد بداية + مدة بالساعات (duration_hours)
-  // بدل يوم كامل بس. نفس نمط allowsDateRangeBooking بالحرف.
-  final bool requiresPreciseSchedule;
-  // 3 أوضاع توقيت جديدة (ADR-0032) — تبادلية مع requiresPreciseSchedule فوق ومع بعض (الباك-إند
-  // بيضمن ده بـCHECK constraint، على الأكتر وضع واحد true في نفس الوقت لأي خدمة).
-  final bool requiresStartTimeOnly;
-  final bool requiresHoursOnly;
-  final bool requiresStartAndEnd;
+  /// دقة الموعد (ADR-0060 §4) — `'full_day'` (تاريخ بس) أو `'start_time'` (تاريخ + ساعة وصول).
+  ///
+  /// حلّ محل أربع بوليانات تبادلية كانت محتاجة CHECK constraint عشان مايتفعّلش أكتر من واحد،
+  /// وتلاتة منهم كانوا بيطلبوا من العميل **مدخلات تسعير** (مدة، فترة) مش بيانات جدولة — وده
+  /// اللي كان بيعرض أربع حقول تاريخ على نفس الشاشة.
+  final String schedulePrecision;
 
   CatalogService({
     required this.id,
@@ -142,11 +140,11 @@ class CatalogService {
     required this.allowsDateRangeBooking,
     required this.allowsRecurringBooking,
     required this.cashAllowed,
-    required this.requiresPreciseSchedule,
-    required this.requiresStartTimeOnly,
-    required this.requiresHoursOnly,
-    required this.requiresStartAndEnd,
+    required this.schedulePrecision,
   });
+
+  /// هل الخدمة دي بتطلب ساعة وصول فوق التاريخ؟ نقطة القراءة الوحيدة لكل الشاشات.
+  bool get requiresStartTime => schedulePrecision == 'start_time';
 
   factory CatalogService.fromJson(Map<String, dynamic> json) => CatalogService(
     id: json['id'] as String,
@@ -172,11 +170,7 @@ class CatalogService {
     allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
     allowsRecurringBooking: json['allows_recurring_booking'] as bool? ?? false,
     cashAllowed: json['cash_allowed'] as bool? ?? true,
-    requiresPreciseSchedule:
-        json['requires_precise_schedule'] as bool? ?? false,
-    requiresStartTimeOnly: json['requires_start_time_only'] as bool? ?? false,
-    requiresHoursOnly: json['requires_hours_only'] as bool? ?? false,
-    requiresStartAndEnd: json['requires_start_and_end'] as bool? ?? false,
+    schedulePrecision: json['schedule_precision'] as String? ?? 'full_day',
   );
 
   String? get featuredCardIconUrl {

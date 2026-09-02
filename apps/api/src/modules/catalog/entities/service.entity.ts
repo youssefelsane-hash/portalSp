@@ -175,29 +175,18 @@ export class Service {
   })
   showUnavailableProviders: boolean;
 
-  // دقة الوقت (ADR-0031 Slice B) — نفس نمط cash_allowed بالحرف. الافتراضي false (الجدولة تبقى
-  // بمستوى اليوم، ADR-0018) — true يعني العميل لازم يحدد بداية + مدة بالساعات وقت الحجز، وفحص
-  // التعارض بيبقى بدقة ساعة حقيقية (OrdersService.create()) بدل يوم بس.
-  @Column({
-    name: 'requires_precise_schedule',
-    type: 'boolean',
-    default: false,
-  })
-  requiresPreciseSchedule: boolean;
-
-  // 3 أوضاع توقيت جديدة (ADR-0032، migration 0172) — تبادلية مع requires_precise_schedule فوق
-  // ومع بعض (CHECK constraint chk_services_scheduling_mode_exclusive على مستوى الـDB: على الأكتر
-  // وضع واحد فعّال). كل وضع بيطلب حقول مختلفة وقت إنشاء الطلب (OrdersService.create()):
-  // requiresStartTimeOnly → scheduled_at بس، requiresHoursOnly → duration_hours بس،
-  // requiresStartAndEnd → scheduled_at + scheduled_end_at (عمود جديد على orders) الاتنين.
+  /**
+   * دقة الموعد — العمود الوحيد الباقي من أربعة (ADR-0060 §4، migration 0244).
+   *
+   * `false` = «يوم كامل» (تاريخ بس)، `true` = «وقت بداية فقط» (تاريخ + ساعة وصول). التلاتة
+   * التانيين (`requires_precise_schedule`, `requires_hours_only`, `requires_start_and_end`)
+   * أعمدتهم لسه في الداتابيز لبيانات تاريخية، بس CHECK بيفرض إنهم `false` دايمًا، **وماتقراش من
+   * الكود خالص** — عشان مايبقاش فيه مسار تاني بيسأل نفس السؤال.
+   *
+   * أي فرع محتاج يسأل عن دقة الموعد بينادي `schedulePrecision(service)`.
+   */
   @Column({ name: 'requires_start_time_only', type: 'boolean', default: false })
   requiresStartTimeOnly: boolean;
-
-  @Column({ name: 'requires_hours_only', type: 'boolean', default: false })
-  requiresHoursOnly: boolean;
-
-  @Column({ name: 'requires_start_and_end', type: 'boolean', default: false })
-  requiresStartAndEnd: boolean;
 
   @Column({
     name: 'min_technician_level',

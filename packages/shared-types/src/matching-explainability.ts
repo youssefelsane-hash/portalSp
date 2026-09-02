@@ -21,6 +21,11 @@ export interface TechnicianRankScoreBreakdownDto {
   fairness_penalty: number;
   reliability_adjustment: number;
   company_adjustment: number;
+  /** ADR-0062 — خصم القرب: كيلومتر × الوزن الساري لسياق الطلب. 0 = الأدمن سايب الأوزان معطّلة. */
+  distance_penalty: number;
+  distance_weight: number;
+  /** السياق اللي حدّد الوزن (طوارئ/موعد قريب/شغل رخيص/الأساسي) — نص عربي جاهز للعرض. */
+  distance_weight_context_ar: string;
 }
 
 export interface TechnicianRankInfoDto {

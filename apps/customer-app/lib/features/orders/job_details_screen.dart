@@ -26,7 +26,6 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAtRangeEnd;
   // دقة الوقت (docs/08 §84 جزء ج) — مليانين لو الخدمة requiresPreciseSchedule/requiresStartTimeOnly.
   final TimeOfDay? requestedPreciseTime;
-  final int? requestedDurationHours;
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
   // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
   // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
@@ -39,7 +38,6 @@ class JobDetailsScreen extends StatefulWidget {
     this.requestedAt,
     this.requestedAtRangeEnd,
     this.requestedPreciseTime,
-    this.requestedDurationHours,
   });
 
   @override
@@ -146,7 +144,6 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           requestedAt: widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
           requestedPreciseTime: widget.requestedPreciseTime,
-          requestedDurationHours: widget.requestedDurationHours,
         ),
       ),
     );

@@ -1187,7 +1187,14 @@ export default function OrderDetailPage() {
                       {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
                       {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
                       {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
-                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)}
+                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)} − مسافة{' '}
+                      {explanation.rank_info.score_breakdown.distance_penalty.toFixed(2)}
+                      {explanation.rank_info.score_breakdown.distance_weight > 0 && (
+                        <span className="text-muted-foreground">
+                          {' '}(وزن {explanation.rank_info.score_breakdown.distance_weight} —{' '}
+                          {explanation.rank_info.score_breakdown.distance_weight_context_ar})
+                        </span>
+                      )}
                     </p>
                   </>
                 )}

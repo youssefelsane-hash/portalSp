@@ -156,12 +156,13 @@ export interface FormulaCondition {
 // payload صف rule_type='formula' بـ rule_key='final_price' — المخرجات الكاملة للمحرك.
 export interface FinalPriceFormulaPayload {
   price_cents: FormulaNode;
+  /** المدة التشغيلية بالدقايق (ADR-0061 §1) — الوقت اللي الشغلانة بتاخده من يوم الفني. */
+  duration_minutes?: FormulaNode;
   min_price_cents?: FormulaNode;
   max_price_cents?: FormulaNode;
   estimated_duration_days?: FormulaNode;
   required_technicians?: FormulaNode;
   required_assistants?: FormulaNode;
-  requires_assistant?: FormulaNode;
   suitable_for_emergency?: FormulaNode;
 }
 
@@ -171,6 +172,7 @@ export interface EvaluatePricingBody {
 
 export interface PricingEvaluationResponseDto {
   price_cents: number;
+  duration_minutes: number | null;
   min_price_cents: number | null;
   max_price_cents: number | null;
   estimated_duration_days: number | null;

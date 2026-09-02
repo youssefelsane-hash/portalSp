@@ -76,18 +76,22 @@ export function toPricingRuleResponseDto(rule: ServicePricingRule): PricingRuleR
 
 export interface PricingEvaluationResponseDto {
   price_cents: number;
+  /** المدة التشغيلية بالدقايق (ADR-0061 §1) — `null` يعني المعادلة مابتحددهاش. */
+  duration_minutes: number | null;
   min_price_cents: number | null;
   max_price_cents: number | null;
   estimated_duration_days: number | null;
   required_technicians: number | null;
-  required_assistants: number | null;
+  /** **مشتق** من `required_assistants` (ADR-0061 §5) — مش مخرج معادلة مستقل. */
   requires_assistant: boolean | null;
+  required_assistants: number | null;
   suitable_for_emergency: boolean | null;
 }
 
 export function toPricingEvaluationResponseDto(result: PricingEvaluationResult): PricingEvaluationResponseDto {
   return {
     price_cents: result.priceCents,
+    duration_minutes: result.durationMinutes,
     min_price_cents: result.minPriceCents,
     max_price_cents: result.maxPriceCents,
     estimated_duration_days: result.estimatedDurationDays,

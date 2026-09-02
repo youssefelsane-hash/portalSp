@@ -62,9 +62,13 @@ export class TechnicianAssignmentGuardService {
            isEmergencyParam: '$7',
            serviceDurationExpr:
              'COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)',
-           // ADR-0059 — الطلب المرشّح هنا معروف بـ$3، فمداه بيتقرا منه مباشرة.
-           candidateSpanDaysExpr:
-             'GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $3::uuid))::int, 1), 1)',
+           // ADR-0061 §2 — الطلب المرشّح هنا معروف بـ$3، فأعمدته بتتقرا منه مباشرة والقاعدة
+           // نفسها بتتطبّق عليه في `candidatePerDayMinutesExpr` (نفس قاعدة الطلب القائم).
+           candidateLoad: {
+             estimatedDurationDaysExpr: '(SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $3::uuid)',
+             durationMinutesExpr: '(SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $3::uuid)',
+             serviceDefaultMinutesExpr: '(SELECT estimated_duration_minutes FROM services WHERE id = $2)',
+           },
            preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $3::uuid)',
            dailyCapacityMinutesParam: '$8',
          })}
