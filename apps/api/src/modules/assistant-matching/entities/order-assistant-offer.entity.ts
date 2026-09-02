@@ -41,6 +41,15 @@ export class OrderAssistantOffer {
   @Column({ name: 'responded_at', type: 'timestamptz', nullable: true })
   respondedAt: Date | null;
 
+  /**
+   * جولة البث اللي العرض ده اتبعت فيها (ADR-0061 §4، migration 0245) — 1 = أول دفعة.
+   *
+   * الجولة حقيقة مسجّلة مش استنتاج من التوقيت، عشان `handleExpiry()` تعرف تبعت الدفعة اللي
+   * بعدها بمعرّف job مستقل، وعشان الأدمن يشوف الطلب اتسأل كام دفعة قبل ما يتصعّد له.
+   */
+  @Column({ name: 'matching_round', type: 'smallint', default: 1 })
+  matchingRound: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

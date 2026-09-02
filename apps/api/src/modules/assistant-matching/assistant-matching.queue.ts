@@ -8,7 +8,14 @@ export interface AssistantOffersExpiredJobData {
   orderId: string;
 }
 
-// BullMQ بيرفض أي jobId فيه ":" — نفس سبب roundExpiredJobId في matching-rounds.queue.ts
-export function assistantOffersExpiredJobId(orderId: string): string {
-  return `assistant-offers-${orderId}`;
+/**
+ * BullMQ بيرفض أي jobId فيه ":" — نفس سبب roundExpiredJobId في matching-rounds.queue.ts.
+ *
+ * **الجولة جزء من المعرّف** (ADR-0061 §4): BullMQ بيتجاهل `add()` لمعرّف موجود بالفعل (حتى لو
+ * الـjob خلص وقاعد في مجموعة completed)، فمعرّف واحد لكل الجولات كان معناه إن مؤقّت الجولة
+ * التانية **مايشتغلش خالص** — والطلب يفضل معلّق للأبد بدل ما يتصعّد. ده كان هيبقى أسوأ من
+ * التصعيد الفوري اللي بنستبدله.
+ */
+export function assistantOffersExpiredJobId(orderId: string, round: number): string {
+  return `assistant-offers-${orderId}-r${round}`;
 }
