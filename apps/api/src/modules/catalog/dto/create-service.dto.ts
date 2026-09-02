@@ -254,6 +254,14 @@ export class CreateServiceDto {
   @Max(10000)
   assessment_fee_credit_bps?: number;
 
+  /**
+   * ADR-0069 — `false` معناها رسم المعاينة بيتحجز من الاسترداد لو الفني راح وعاين فعلاً وبعدين
+   * العميل لغى. الافتراضي `true` = الرسم بيترجع كامل (سلوك ما قبل ADR-0069).
+   */
+  @IsOptional()
+  @IsBoolean()
+  assessment_fee_refundable_after_visit?: boolean;
+
   @IsOptional()
   @IsBoolean()
   onsite_assessor_executes_work?: boolean;

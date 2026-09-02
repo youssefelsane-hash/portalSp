@@ -150,6 +150,8 @@ export interface ServiceAssessmentPolicyFields {
   onsite_assessment_enabled: boolean;
   assessment_fee_credit_mode: AssessmentFeeCreditMode;
   assessment_fee_credit_bps: number;
+  /** ADR-0069 — false = رسم المعاينة بيتحجز لو الزيارة حصلت فعلاً قبل الإلغاء. */
+  assessment_fee_refundable_after_visit: boolean;
   onsite_assessor_executes_work: boolean;
   quote_validity_minutes: number;
   /** نسب النطاق التقديري الديناميكي (بند 10) — لو موجودة بتغلب الحقول الثابتة تحت. */

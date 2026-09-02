@@ -225,6 +225,11 @@ export class Order {
   @Column({ name: 'assessment_fee_credit_bps_snapshot', type: 'integer', default: 0 })
   assessmentFeeCreditBpsSnapshot: number;
 
+  // ADR-0069 — snapshot لسياسة استرداد رسم المعاينة بعد زيارة حصلت: تعديل الأدمن بكرة مايغيّرش
+  // استرداد طلب اتعمل النهاردة.
+  @Column({ name: 'assessment_fee_refundable_after_visit_snapshot', type: 'boolean', default: true })
+  assessmentFeeRefundableAfterVisitSnapshot: boolean;
+
   @Column({ name: 'assessment_fee_credit_cents', type: 'integer', default: 0 })
   assessmentFeeCreditCents: number;
 

@@ -1301,6 +1301,7 @@ export class OrdersService {
               : 'onsite'
             : null,
         remoteAssessmentFeeCents,
+        assessmentFeeRefundableAfterVisitSnapshot: service.assessmentFeeRefundableAfterVisit,
         assessmentFeeCreditModeSnapshot: service.assessmentFeeCreditMode,
         assessmentFeeCreditBpsSnapshot: service.assessmentFeeCreditBps,
         assessmentFeeCreditCents: 0,
