@@ -118,14 +118,11 @@ export interface ServiceDto {
   allows_recurring_booking?: boolean;
   // إعادة ترتيب اختيار الميعاد (docs/08 §83 جزء ب) — الحقول دي موجودة في ServiceResponseDto من
   // زمان (مستخدمة في apps/customer-app's ScheduleSelectionScreen/CreateOrderScreen) بس غايبة من
-  // هنا خالص. allows_date_range_booking = خيار "مرن — نطاق أيام" متاح. requires_precise_schedule/
-  // requires_start_time_only = محتاجة وقت بداية دقيق فوق اليوم (ADR-0031 Slice B) —
-  // requires_precise_schedule بس محتاجة duration_hours كمان. requires_hours_only/
-  // requires_start_and_end (ADR-0032) عمدًا مش مضافين هنا — أوضاع مستقلة نادرة، خارج نطاق الدفعة
-  // دي (لسه بتستخدم نفس حقل scheduled_at القديم لحد ما تتقفل في دفعة منفصلة).
+  // هنا خالص. allows_date_range_booking = خيار "مرن — نطاق أيام" متاح.
+  // ADR-0060 §4 — دقة الموعد بقت حقل واحد: `full_day` (تاريخ بس) أو `start_time` (تاريخ + ساعة).
+  // الأربع بوليانات القدام اتشالوا من الـAPI بالكامل.
   allows_date_range_booking: boolean;
-  requires_precise_schedule: boolean;
-  requires_start_time_only: boolean;
+  schedule_precision: 'full_day' | 'start_time';
 }
 
 export interface PricingFieldOptionDto {

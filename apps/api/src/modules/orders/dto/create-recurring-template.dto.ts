@@ -38,22 +38,9 @@ export class CreateRecurringTemplateDto {
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
 
-  // مدخل سعر الوحدة الذي يتكرر مع كل طلب، بينما السعر نفسه يظل حيًا ويُحسب وقت كل نوبة.
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @IsPositive()
-  pricing_quantity?: number;
-
-  // إجبارية لخدمة requiresPreciseSchedule/requiresHoursOnly (نفس قيود CreateOrderDto بالحرف).
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  duration_hours?: number;
-
-  // إجبارية لخدمة requiresStartAndEnd بس (نفس قيود CreateOrderDto بالحرف).
-  @IsOptional()
-  @IsDateString()
-  scheduled_end_at?: string;
+  // ADR-0060 — `pricing_quantity` و`duration_hours` و`scheduled_end_at` اتشالوا: الكمية والمدة
+  // والفترة بقوا **حقول في فورم الخدمة** (`field_values`)، وكل نوبة بتتسعّر من نفس الفورم زي
+  // الطلب العادي بالحرف. سيبهم هنا كان معناه مسار تسعير تاني للقوالب بس.
 
   @IsOptional()
   @IsString()

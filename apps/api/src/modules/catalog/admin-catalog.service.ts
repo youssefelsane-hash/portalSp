@@ -259,28 +259,6 @@ export class AdminCatalogService {
     });
   }
 
-  /**
-   * دقة الموعد بقت وضعين بس (ADR-0060 §4): «يوم كامل» (الافتراضي) أو «وقت بداية فقط».
-   *
-   * التلاتة اللي اتشالوا (`precise` = بداية+مدة، `hours_only`، `start_and_end`) كانوا بيطلبوا من
-   * العميل **مدخلات تسعير** مش بيانات جدولة. الرفض هنا برسالة عربية واضحة قبل ما يوصل لـCHECK
-   * الخام على الـDB (`chk_services_schedule_modes_supported`).
-   */
-  private assertSchedulingModeExclusive(modes: {
-    requiresPreciseSchedule: boolean;
-    requiresStartTimeOnly: boolean;
-    requiresHoursOnly: boolean;
-    requiresStartAndEnd: boolean;
-  }): void {
-    if (modes.requiresPreciseSchedule || modes.requiresHoursOnly || modes.requiresStartAndEnd) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'دقة الموعد بقت وضعين بس: «يوم كامل» أو «وقت بداية فقط». المدة والفترة بقوا حقول في فورم الخدمة',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
   private async findServiceOrThrow(id: string): Promise<Service> {
     const service = await this.services.findOne({ where: { id } });
     if (!service) {
@@ -314,12 +292,6 @@ export class AdminCatalogService {
     if (dto.deposit_required && dto.deposit_percentage === undefined) {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
     }
-    this.assertSchedulingModeExclusive({
-      requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
-      requiresStartTimeOnly: dto.requires_start_time_only ?? false,
-      requiresHoursOnly: dto.requires_hours_only ?? false,
-      requiresStartAndEnd: dto.requires_start_and_end ?? false,
-    });
     this.assertQuantityConfiguration({
       min: dto.quantity_min ?? null,
       max: dto.quantity_max ?? null,
@@ -360,10 +332,7 @@ export class AdminCatalogService {
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       allowsRecurringBooking: dto.allows_recurring_booking ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
-      requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
-      requiresStartTimeOnly: dto.requires_start_time_only ?? false,
-      requiresHoursOnly: dto.requires_hours_only ?? false,
-      requiresStartAndEnd: dto.requires_start_and_end ?? false,
+      requiresStartTimeOnly: dto.schedule_precision === 'start_time',
       minTechnicianLevel: dto.min_technician_level,
       displayOrder: dto.display_order ?? 0,
       launchPhase: dto.launch_phase ?? 1,
@@ -439,16 +408,8 @@ export class AdminCatalogService {
     if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
     if (dto.allows_recurring_booking !== undefined) service.allowsRecurringBooking = dto.allows_recurring_booking;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
-    if (dto.requires_precise_schedule !== undefined) service.requiresPreciseSchedule = dto.requires_precise_schedule;
-    if (dto.requires_start_time_only !== undefined) service.requiresStartTimeOnly = dto.requires_start_time_only;
-    if (dto.requires_hours_only !== undefined) service.requiresHoursOnly = dto.requires_hours_only;
-    if (dto.requires_start_and_end !== undefined) service.requiresStartAndEnd = dto.requires_start_and_end;
-    this.assertSchedulingModeExclusive({
-      requiresPreciseSchedule: service.requiresPreciseSchedule,
-      requiresStartTimeOnly: service.requiresStartTimeOnly,
-      requiresHoursOnly: service.requiresHoursOnly,
-      requiresStartAndEnd: service.requiresStartAndEnd,
-    });
+    // ADR-0060 §4 — وضع واحد بالظبط بالبناء: مفيش تركيبة غلط ممكن تتبعت أصلاً، فمفيش تحقق تبادل.
+    if (dto.schedule_precision !== undefined) service.requiresStartTimeOnly = dto.schedule_precision === 'start_time';
     this.assertQuantityConfiguration({
       min: service.quantityMin === null ? null : Number(service.quantityMin),
       max: service.quantityMax === null ? null : Number(service.quantityMax),

@@ -72,26 +72,7 @@ export class EstimateQueryDto {
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
 
-  // دقة الوقت (ADR-0031 Slice B/H) — بس لخدمات pricing_model=hourly، اختياري بالكامل (خدمة
-  // hourly من غيرها بترجع سعر الساعة الخام زي ما كان). راجع CatalogService.estimate().
-  @IsOptional()
-  @IsNumber()
-  @IsPositive()
-  duration_hours?: number;
 
-  // خدمات per_unit: عدد الوحدات في المعاينة العامة، بنفس قيمة إنشاء الطلب.
-  @IsOptional()
-  @IsNumber()
-  @IsPositive()
-  pricing_quantity?: number;
 
-  // ADR-0050 §4 — فترة التعاقد لخدمة `monthly`. المعاينة العامة لازم تحسب نفس عدد شهور الفوترة
-  // اللي الحجز الحقيقي هيحسبه، وإلا الرقم اللي العميل شافه في الكتالوج مش هو اللي هيدفعه.
-  @IsOptional()
-  @IsDateString()
-  period_start?: string;
 
-  @IsOptional()
-  @IsDateString()
-  period_end?: string;
 }

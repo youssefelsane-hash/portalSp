@@ -16,6 +16,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CatalogService } from '../catalog/catalog.service';
 import { PricingModel } from '../catalog/entities/service.entity';
 import { buildPricingContext } from '../pricing/pricing-context';
+import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
@@ -165,42 +166,20 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
-    // ADR-0060 §3 — الكمية بقت حقل في فورم الخدمة نفسها، مش مدخل منفصل على القالب.
-    if (dto.pricing_quantity != null) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الكمية بقت حقل في فورم الخدمة نفسها مش مدخل منفصل — ابعتها جوّه field_values',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    // ADR-0060 §4 — نفس قاعدة `OrdersService.create()` بالحرف: مفيش مدخلات وقت تجارية على
-    // القالب. المدة والفترة بقوا مسؤولية محرك التسعير/فورم الخدمة.
-    if (dto.duration_hours) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'مدة الخدمة بقت بتتحسب من محرك التسعير مش من العميل — لو محتاجها كمدخل، اعملها حقل في فورم الخدمة',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    if (dto.scheduled_end_at) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'وقت النهاية مابقاش مدخل حجز — لو الخدمة بفترة (اشتراك/إيجار)، حطها كحقلين تاريخ في فورم الخدمة',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    // ADR-0060 §3/§4 — الكمية والمدة والفترة اتشالوا من الـDTO خالص (مش مرفوضين بحارس): الـ
+    // ValidationPipe العام (`forbidNonWhitelisted`) بيرفض أي واحد فيهم قبل ما يوصل هنا أصلاً.
+    // القالب بيتسعّر من `field_values` زي الطلب العادي بالحرف.
 
     const startsAt = new Date(dto.starts_at);
     if (startsAt.getTime() <= Date.now()) {
       throw new ApiException(ErrorCode.VAL_001, 'أول موعد تنفيذ لازم يكون في المستقبل', HttpStatus.BAD_REQUEST);
     }
 
+    const period = contractPeriodFromFieldValues(dto.field_values);
     const pricingContext = buildPricingContext({
-      quantity: dto.pricing_quantity,
-      durationHours: dto.duration_hours,
       scheduledAt: startsAt,
-      scheduledEndAt: dto.scheduled_end_at,
+      periodStart: period.start,
+      periodEnd: period.end,
       serviceFieldValues: dto.field_values,
       bookingMode: dto.booking_mode,
       recurringMetadata: { frequency: dto.frequency },
@@ -216,9 +195,9 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
       pricingQuantity: null,
-      durationHours: dto.duration_hours ?? null,
+      durationHours: null,
       durationMinutes: pricingContext.durationMinutes,
-      scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
+      scheduledEndAt: null,
       problemDescription: dto.problem_description ?? null,
       paymentMethod: dto.payment_method ?? null,
       nextRunAt: startsAt,
@@ -488,16 +467,11 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       // الفعلية بيتحسبها محرك التسعير الحي جوّه OrdersService.create() وقت التوليد بالظبط، فتغيير
       // أسعار/قواعد الخدمة بيأثر على الطلبات الجديدة بس، والطلبات المتولّدة فعلاً بتحتفظ بـsnapshot
       // سعرها العادي زي أي طلب.
+      // ADR-0060 — `field_values` هي **كل** مدخلات التسعير. الأعمدة القديمة على القالب
+      // (`pricing_quantity`/`duration_hours`/`scheduled_end_at`) بقت بيانات تاريخية بس، وبعتها
+      // هنا كان هيرفض كل نوبة متولّدة من قالب قديم: `OrdersService.create()` بيرفض التلاتة
+      // صراحةً دلوقتي. بَقّة حقيقية كانت هتظهر أول ما قالب قديم ييجي معاده.
       field_values: template.fieldValues ?? undefined,
-      pricing_quantity: template.pricingQuantity == null ? undefined : Number(template.pricingQuantity),
-      duration_hours:
-        template.durationMinutes == null
-          ? (template.durationHours ?? undefined)
-          : template.durationMinutes / 60,
-      scheduled_end_at:
-        template.scheduledEndAt && template.durationMinutes != null
-          ? new Date(occurrence.scheduledFor.getTime() + template.durationMinutes * 60_000).toISOString()
-          : undefined,
       // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،
       // فكل طلب متولّد من قالب متكرر كان non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء
       // القالب. لو الطلب المتولّد بقى PENDING_PAYMENT، sweepPendingPayment() (docs/08 §19 بند

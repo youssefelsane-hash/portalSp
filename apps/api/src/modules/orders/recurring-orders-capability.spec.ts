@@ -5,6 +5,9 @@ import { nextOccurrence } from './recurring-schedule.util';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { BookingMode } from './entities/order.entity';
 import { PricingModel } from '../catalog/entities/service.entity';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
 
 // قدرة "الحجز المتكرر" لكل خدمة (migration 0176) — بوابة دخول على مستوى إنشاء القالب: خدمة
 // allows_recurring_booking=false يعني مفيش قالب متكرر خالص، برفض واضح VAL_001 وقت الطلب بدل
@@ -26,10 +29,7 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
           allowsIndividual: true,
           allowsTeam: false,
           allowsEmergency: false,
-          requiresPreciseSchedule: false,
           requiresStartTimeOnly: false,
-          requiresHoursOnly: false,
-          requiresStartAndEnd: false,
           pricingModel: PricingModel.FORMULA,
           ...serviceOverrides,
         }),
@@ -79,41 +79,6 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
-  // ADR-0060 §4 — وضع «بداية + مدة» اتشال؛ المدة بقت ناتج محرك التسعير مش رقم بيدخّله العميل.
-  // الاختباران القديمان (لازم duration_hours / بيتخزّن) اتحوّلوا لاختبار واحد بيثبت الرفض.
-  it('duration_hours كمدخل على القالب: تترفض — المدة بقت من محرك التسعير (ADR-0060)', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, requiresStartTimeOnly: true });
-    await expect(
-      service.create('user-1', {
-        service_id: 'service-1',
-        address_id: 'address-1',
-        frequency: RecurringOrderFrequency.WEEKLY,
-        starts_at: futureIso(),
-        duration_hours: 3,
-      } as never),
-    ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
-    expect(templatesRepo.save).not.toHaveBeenCalled();
-  });
-
-  // ADR-0060 §3 — الكمية مابقتش مدخل منفصل على القالب؛ بقت حقل جوّه فورم الخدمة نفسها. الاختبار
-  // اتقلب: اللي كان «لازم كمية» بقى «الكمية مرفوضة كمدخل منفصل».
-  it('كمية تسعير كمدخل منفصل: تترفض — بقت حقل في فورم الخدمة (ADR-0060)', async () => {
-    const { service, templatesRepo } = buildService({
-      allowsRecurringBooking: true,
-      pricingModel: PricingModel.FORMULA,
-    });
-    await expect(
-      service.create('user-1', {
-        service_id: 'service-1',
-        address_id: 'address-1',
-        frequency: RecurringOrderFrequency.MONTHLY,
-        starts_at: futureIso(),
-        pricing_quantity: 3.5,
-      } as never),
-    ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
-    expect(templatesRepo.save).not.toHaveBeenCalled();
-  });
-
   it('قالب متكرر من غير كمية: بينجح عادي', async () => {
     const { service, templatesRepo } = buildService({
       allowsRecurringBooking: true,
@@ -129,21 +94,27 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 
-  // ADR-0060 §4 — وضع «بداية ونهاية» اتشال (كان بيتعارض مع الفترة الشهرية ويعرض حقول تاريخ
-  // مكررة). `scheduled_end_at` مابقاش مدخل حجز أصلاً.
-  it('scheduled_end_at كمدخل على القالب: تترفض — الفترة بقت حقول في فورم الخدمة (ADR-0060)', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true });
-    await expect(
-      service.create('user-1', {
-        service_id: 'service-1',
-        address_id: 'address-1',
+  /**
+   * ADR-0060 §3/§4 — الكمية والمدة والفترة **اتشالوا من الـDTO خالص**، مش مرفوضين بحارس جوّه
+   * الخدمة. الاختبار بيتحقق من مسار الرفض الحقيقي: نفس إعدادات `ValidationPipe` العامة
+   * (`whitelist` + `forbidNonWhitelisted`) على الـDTO نفسه.
+   *
+   * ده أقوى من حارس: الحارس بيتنسى لو حد ضاف مدخل جديد، والقايمة البيضا بترفض أي حاجة مش معرّفة.
+   */
+  it.each(['pricing_quantity', 'duration_hours', 'scheduled_end_at', 'period_start', 'period_end'])(
+    'مدخل التسعير القديم «%s» مرفوض على مستوى الـDTO (ADR-0060)',
+    async (legacyKey) => {
+      const instance = plainToInstance(CreateRecurringTemplateDto, {
+        service_id: '00000000-0000-4000-8000-000000000001',
+        address_id: '00000000-0000-4000-8000-000000000002',
         frequency: RecurringOrderFrequency.WEEKLY,
         starts_at: futureIso(),
-        scheduled_end_at: futureIso(),
-      } as never),
-    ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
-    expect(templatesRepo.save).not.toHaveBeenCalled();
-  });
+        [legacyKey]: legacyKey.endsWith('_at') || legacyKey.startsWith('period') ? futureIso() : 3,
+      });
+      const errors = await validate(instance, { whitelist: true, forbidNonWhitelisted: true });
+      expect(errors.map((e) => e.property)).toContain(legacyKey);
+    },
+  );
 
   it('شركة محددة مع وضع مش "اعتماد": يترفض (نفس قيد CreateOrderDto)', async () => {
     const { service } = buildService({ allowsRecurringBooking: true });

@@ -73,16 +73,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // في الباك-إند بالحرف، بلا أي حساب حدود يوم (البَقّة الموثّقة في `CAIRO_DAY_EXPR`).
   const isSameDayBooking = scheduledDate !== '' && scheduledDate <= new Date().toLocaleDateString('en-CA');
   const bookingMode: BookingMode = isSameDayBooking ? 'emergency' : 'individual';
-  // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule/requires_start_time_only بس،
-  // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
+  // ADR-0060 §4 — دقة الموعد وضعين بس. `start_time` بيطلب ساعة وصول فوق التاريخ، و`full_day`
+  // بيطلب التاريخ بس. المدة والكمية والفترة **مابقوش مدخلات جدولة** — بقوا حقول في فورم الخدمة.
   const [preciseTime, setPreciseTime] = useState('');
-  const [durationHours, setDurationHours] = useState('');
-  const [pricingQuantity, setPricingQuantity] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
-  // ADR-0050 §4 — فترة التعاقد لخدمة شهرية. حلّت محل «عدد الشهور» اليدوي اللي كان بلاغ المالك عليه.
-  const [periodStart, setPeriodStart] = useState('');
-  const [periodEnd, setPeriodEnd] = useState('');
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
   const [postpaidPolicies, setPostpaidPolicies] = useState<ApplicablePaymentPolicyDto[]>([]);
   const [problemDescription, setProblemDescription] = useState('');
@@ -169,37 +164,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       .finally(() => setEstimating(false));
   }, [id, service, bookingMode, debouncedFieldValues, pricingFields]);
 
-  useEffect(() => {
-    if (!service || service.pricing_model === 'formula') return;
-    const quantityBased = service.pricing_model === 'per_unit';
-    const periodBased = service.pricing_model === 'monthly';
-    const parsedQuantity = Number(pricingQuantity);
-    if (quantityBased && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEstimate(null);
-      return;
-    }
-    if (periodBased && (!periodStart || !periodEnd)) {
-      setEstimate(null);
-      return;
-    }
-    const parsedDuration = Number(durationHours);
-    if (service.pricing_model === 'hourly' && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
-      setEstimate(null);
-      return;
-    }
-    setEstimating(true);
-    estimatePrice(id, {
-      bookingMode,
-      pricingQuantity: quantityBased ? parsedQuantity : undefined,
-      periodStart: periodBased ? periodStart : undefined,
-      periodEnd: periodBased ? periodEnd : undefined,
-      durationHours: service.pricing_model === 'hourly' ? parsedDuration : undefined,
-    })
-      .then(setEstimate)
-      .catch(() => setEstimate(null))
-      .finally(() => setEstimating(false));
-  }, [id, service, bookingMode, pricingQuantity, durationHours, periodStart, periodEnd]);
+  // ADR-0060 — الـeffect القديم اللي كان بيسعّر `per_unit`/`monthly`/`hourly` من مدخلات منفصلة
+  // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و
+  // `inspection_then_quote` (مفيش سعر قبل المعاينة أصلاً).
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -226,7 +193,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // اليوم بنفس الاتفاقية، مطابق create_order_screen.dart's _combinedPreciseScheduledAt.
   function computeScheduledAt(dateStr: string): string | undefined {
     if (!dateStr) return undefined;
-    if ((service?.requires_precise_schedule || service?.requires_start_time_only) && preciseTime) {
+    if (service?.schedule_precision === 'start_time' && preciseTime) {
       return `${dateStr}T${preciseTime}:00.000Z`;
     }
     return `${dateStr}T00:00:00.000Z`;
@@ -253,10 +220,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           scheduled_at: computeScheduledAt(scheduledDate),
           scheduled_at_range_end:
             scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
-          duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
-          pricing_quantity: service.pricing_model === 'per_unit' ? Number(pricingQuantity) : undefined,
-          period_start: service.pricing_model === 'monthly' ? periodStart : undefined,
-          period_end: service.pricing_model === 'monthly' ? periodEnd : undefined,
           repeat_frequency: requestRemoteQuote ? undefined : repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
@@ -314,25 +277,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // **الميعاد بقى الخطوة الأولى دايمًا (ADR-0048)** — قبل كده كان بيتخطى لو العميل اختار
   // "طوارئ"؛ الاختيار ده اتشال، والاستعجال نفسه بقى **نتيجة** اختيار النهارده.
   const needsSchedule = service.allows_scheduling;
-  const isQuantityPricing = service.pricing_model === 'per_unit';
-  // ADR-0050 §4 — الشهري بقى فترة بتاريخين، مش كمية.
-  const isPeriodPricing = service.pricing_model === 'monthly';
   // ADR-0050 §6 — «فلتر» أسئلة للعميل على خدمة بلا سعر برضه، مش بس على المعادلة الديناميكية.
+  //
+  // **ADR-0060 §2** — أقسام «مدة الاشتراك» و«الكمية المطلوبة» المستقلة اتشالت من الشاشة دي
+  // بالكامل. الاتنين بقوا **حقول عادية جوّه الفورم الديناميكي**: قالب «بالشهر» بيزرع حقلين
+  // تاريخ، وقالب «بالقطعة» بيزرع حقل رقم. سيبهم كأقسام منفصلة كان معناه إن نفس السؤال بيتعرض
+  // مرتين على نفس الشاشة — وده بالظبط بلاغ «أربع حقول تاريخ».
   const showsDynamicForm =
     service.pricing_model === 'formula' || service.pricing_model === 'inspection_then_quote';
-  const quantityUnit = service.unit_name_ar || 'الوحدات';
-  const parsedPricingQuantity = Number(pricingQuantity);
-  const periodValid = !isPeriodPricing || (Boolean(periodStart) && Boolean(periodEnd) && periodEnd > periodStart);
-  const quantityValid =
-    (!isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0)) && periodValid;
-  const billedMonthsPreview = (() => {
-    if (!periodStart || !periodEnd) return 1;
-    const start = new Date(periodStart);
-    const end = new Date(periodEnd);
-    const whole = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-    const months = end.getDate() > start.getDate() ? whole + 1 : whole;
-    return months < 1 ? 1 : months;
-  })();
   const pricingFieldsValid =
     !showsDynamicForm ||
     (pricingFields ?? []).every((field) => {
@@ -348,14 +300,12 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     (technicianChoiceMode === 'manual' && !!technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
     estimate !== null;
   const remoteQuoteValid = !requestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
-  const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
+  const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && service.schedule_precision === 'start_time';
   const canSubmit =
     !!selectedAddressId &&
     (!needsSchedule ||
       (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
     (!needsPreciseTime || !!preciseTime) &&
-    (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
-    quantityValid &&
     pricingFieldsValid &&
     priceReady &&
     remoteQuoteValid &&
@@ -454,18 +404,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                   className="rounded-lg border border-border bg-surface px-3 py-2"
                 />
               </label>
-              {service.requires_precise_schedule && (
-                <label className="flex items-center gap-2 text-sm">
-                  <span>عدد الساعات المطلوبة</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={durationHours}
-                    onChange={(e) => setDurationHours(e.target.value)}
-                    className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
-                  />
-                </label>
-              )}
             </div>
           )}
         </section>
@@ -488,58 +426,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 />
               ))}
           </div>
-        </section>
-      )}
-
-      {isPeriodPricing && (
-        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-          <h2 className="font-semibold">مدة الاشتراك</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-sm text-muted">من تاريخ</span>
-              <input
-                type="date"
-                value={periodStart}
-                onChange={(e) => setPeriodStart(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-sm text-muted">إلى تاريخ</span>
-              <input
-                type="date"
-                value={periodEnd}
-                min={periodStart || undefined}
-                onChange={(e) => setPeriodEnd(e.target.value)}
-                className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
-              />
-            </label>
-          </div>
-          <p className="mt-2 text-sm text-muted">
-            {periodValid && periodStart && periodEnd
-              ? `المدة ${billedMonthsPreview} ${billedMonthsPreview === 1 ? 'شهر' : 'شهور'} — أي جزء من شهر بيتحسب شهر كامل.`
-              : 'اختار تاريخ البداية والنهاية، والنظام بيحسب عدد الشهور بينهم.'}
-          </p>
-        </section>
-      )}
-
-      {isQuantityPricing && (
-        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-          <h2 className="font-semibold">الكمية المطلوبة</h2>
-          <label className="mt-3 block">
-            <span className="mb-1 block text-sm text-muted">عدد {quantityUnit}</span>
-            <input
-              type="number"
-              inputMode={service.quantity_precision > 0 ? 'decimal' : 'numeric'}
-              min={service.quantity_min ?? 1}
-              max={service.quantity_max ?? undefined}
-              step={service.quantity_step ?? (service.quantity_precision > 0 ? 10 ** -service.quantity_precision : 1)}
-              value={pricingQuantity}
-              onChange={(e) => setPricingQuantity(e.target.value)}
-              className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
-            />
-          </label>
-          <p className="mt-2 text-sm text-muted">السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب.</p>
         </section>
       )}
 

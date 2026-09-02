@@ -51,10 +51,9 @@ class CreateOrderScreen extends StatefulWidget {
   // بتتصفّر تلقائيًا لو العميل غيّر الموعد من هنا (نفس فلسفة _pickSchedule تحت).
   final DateTime? requestedAtRangeEnd;
   // دقة الوقت (docs/08 §84 جزء ج) — مليانين مسبقًا لو العميل اختارهم أصلاً في
-  // ScheduleSelectionScreen (requiresPreciseSchedule/requiresStartTimeOnly). لسه قابلين للتعديل
-  // هنا (_pickPreciseTime/_durationHoursController)، نفس فلسفة requestedAt فوق بالحرف.
+  // ScheduleSelectionScreen (وضع `start_time`). لسه قابل للتعديل هنا (_pickPreciseTime)،
+  // نفس فلسفة requestedAt فوق بالحرف.
   final TimeOfDay? requestedPreciseTime;
-  final int? requestedDurationHours;
 
   const CreateOrderScreen({
     super.key,
@@ -68,7 +67,6 @@ class CreateOrderScreen extends StatefulWidget {
     this.requestedAt,
     this.requestedAtRangeEnd,
     this.requestedPreciseTime,
-    this.requestedDurationHours,
   });
 
   @override
@@ -105,7 +103,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// للنقص، و`Scrollable.ensureVisible` بيوصّله. صفر مكتبات، صفر أثر على الأداء.
   final _addressSectionKey = GlobalKey();
   final _pricingFieldsSectionKey = GlobalKey();
-  final _unitsSectionKey = GlobalKey();
   final _scheduleSectionKey = GlobalKey();
 
   /// نوع الكود اللي اتحقق منه بنجاح — `null` يعني لسه ما اتحققش أو الكود اتغيّر بعد التحقق.
@@ -151,28 +148,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool get _showsDynamicForm =>
       _isFormulaPricing || widget.service.pricingModel == 'inspection_then_quote';
 
-  /// ADR-0050 §4 — `monthly` **مابقاش** كمية. العميل بيختار فترة بتاريخين، وعدد شهور الفوترة
-  /// بيتحسب في الباك-إند من الفرق بينهم بالتقويم. النسخة القديمة كانت بتخلي العميل يكتب عدد
-  /// الشهور برقم يدوي — وده كان بالظبط بلاغ المالك («مش بيجيب الـdifference بينهم»).
-  bool get _isPeriodPricing => widget.service.pricingModel == 'monthly';
-  bool get _isQuantityPricing => widget.service.pricingModel == 'per_unit';
-  String get _quantityUnitLabel => widget.service.unitNameAr ?? 'الوحدات';
-
-  DateTime? _periodStart;
-  DateTime? _periodEnd;
-
-  bool get _periodComplete => _periodStart != null && _periodEnd != null;
-
-  /// عدد شهور الفوترة زي ما الباك-إند بيحسبه بالظبط (`max(ceil(months), 1)`) — **للعرض بس**.
-  /// السعر النهائي بييجي من المعاينة، مش من الحسبة دي.
-  int get _billedMonthsPreview {
-    final start = _periodStart;
-    final end = _periodEnd;
-    if (start == null || end == null) return 1;
-    final whole = (end.year - start.year) * 12 + (end.month - start.month);
-    final months = end.day > start.day ? whole + 1 : whole;
-    return months < 1 ? 1 : months;
-  }
+  /// ADR-0060 §2 — الكمية والفترة **مابقوش أوضاع تسعير**، بقوا حقول عادية جوّه الفورم
+  /// الديناميكي (قالب «بالقطعة» بيزرع حقل رقم، وقالب «بالشهر» بيزرع حقلين تاريخ). كل الحالة
+  /// والدوال والواجهة اللي كانت بتديرهم كأقسام منفصلة اتشالت — كانت بتعرض نفس السؤال مرتين على
+  /// نفس الشاشة، وده بالظبط بلاغ «أربع حقول تاريخ».
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -232,22 +211,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   List<ServiceStandardDataRow> _standardDataRows = [];
   ServiceStandardDataRow? _selectedStandardData;
   final _requestedUnitsController = TextEditingController();
-  final _pricingQuantityController = TextEditingController();
-
-  // دقة الوقت (ADR-0031 Slice B) — service.requiresPreciseSchedule=true محتاجة وقت بداية دقيق
-  // (مش يوم بس، ADR-0018) + مدة بالساعات. TimeOfDay منفصل عن _requestedAt (اللي بيحمل اليوم بس
-  // من ScheduleSelectionScreen)، بيتدمجوا مع بعض وقت الإرسال (_combinedPreciseScheduledAt).
+  // دقة الموعد (ADR-0060 §4) — وضع `start_time` بيطلب ساعة وصول فوق اليوم. TimeOfDay منفصل عن
+  // _requestedAt (اللي بيحمل اليوم بس من ScheduleSelectionScreen)، بيتدمجوا وقت الإرسال
+  // (_combinedPreciseScheduledAt). المدة بقت ناتج معادلة، مش رقم بيدخّله العميل.
   TimeOfDay? _preciseTime;
-  final _durationHoursController = TextEditingController();
   DurationEstimate? _durationEstimate;
   bool _estimatingDuration = false;
   String? _durationError;
   Timer? _durationDebounce;
-
-  // وضع "بداية+نهاية" (ADR-0032) — service.requiresStartAndEnd=true محتاجة تاريخ ووقت كاملين
-  // للاتنين، مستقلة تمامًا عن _requestedAt/_preciseTime فوق (عقد شهري/إقامة بمدة محددة).
-  DateTime? _startAndEndStart;
-  DateTime? _startAndEndEnd;
 
   // "كرّر الحجز ده" (migration 0176) — null = مرة واحدة (الافتراضي، صفر تغيير سلوك). الطلب
   // الحالي بيتعمل بالمسار العادي زي زمان، والباك-إند بينشئ قالب متكرر بنفس العملية أول موعد
@@ -278,9 +249,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _requestedAt = widget.requestedAt;
     _requestedAtRangeEnd = widget.requestedAtRangeEnd;
     _preciseTime = widget.requestedPreciseTime;
-    if (widget.requestedDurationHours != null) {
-      _durationHoursController.text = widget.requestedDurationHours.toString();
-    }
     if (widget.initialFieldValues != null)
       _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
@@ -299,18 +267,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
 
   // "كرّر الحجز ده" (migration 0176) — الاختيار بيظهر بس لما التكرار ممكن فعلاً: خدمة مفعّل
-  // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد). خدمات "عدد ساعات
-  // بس" مالهاش موعد محدد أصلاً فمينفعش تتكرر (نفس شرط الباك-إند بالحرف).
+  // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد).
   bool get _canRepeat {
     if (_selectedWarrantyPlanId != null) return false;
     if (!widget.service.allowsRecurringBooking) return false;
     if (widget.bookingMode == BookingMode.emergency) return false;
     if (widget.scheduleSlotId != null) return true;
-    if (widget.service.requiresHoursOnly) return false;
-    final DateTime? at = widget.service.requiresStartAndEnd
-        ? _startAndEndStart
-        : (widget.service.requiresPreciseSchedule ||
-              widget.service.requiresStartTimeOnly)
+    final DateTime? at = widget.service.requiresStartTime
         ? _combinedPreciseScheduledAt()
         : _requestedAt;
     return at != null;
@@ -379,8 +342,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _priceDebounce?.cancel();
     _durationDebounce?.cancel();
     _requestedUnitsController.dispose();
-    _pricingQuantityController.dispose();
-    _durationHoursController.dispose();
     super.dispose();
   }
 
@@ -410,53 +371,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       const Duration(milliseconds: 500),
       _refreshDurationEstimate,
     );
-  }
-
-  /// اختيار طرف من فترة الاشتراك (ADR-0050 §4).
-  ///
-  /// النهاية بتتزحزح تلقائيًا لو البداية عدّتها — الباك-إند بيرفض فترة معكوسة، وأوضح إننا
-  /// نمنع الحالة دي من الأساس بدل ما العميل يوصل لرسالة خطأ.
-  Future<void> _pickPeriodDate({required bool isStart}) async {
-    final today = DateTime.now();
-    final firstDate = isStart ? today : (_periodStart ?? today).add(const Duration(days: 1));
-    final initial = (isStart ? _periodStart : _periodEnd) ?? firstDate;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial.isBefore(firstDate) ? firstDate : initial,
-      firstDate: firstDate,
-      lastDate: today.add(const Duration(days: 365 * 3)),
-    );
-    if (picked == null || !mounted) return;
-    setState(() {
-      if (isStart) {
-        _periodStart = picked;
-        final end = _periodEnd;
-        if (end != null && !end.isAfter(picked)) _periodEnd = null;
-      } else {
-        _periodEnd = picked;
-      }
-      _pricePreview = null;
-      _previewError = null;
-    });
-    if (_periodComplete) _refreshPreview();
-  }
-
-  void _onPricingQuantityChanged(String _) {
-    setState(() {
-      _pricePreview = null;
-      _previewError = null;
-    });
-    _priceDebounce?.cancel();
-    _priceDebounce = Timer(const Duration(milliseconds: 400), _refreshPreview);
-  }
-
-  void _onDurationHoursChanged(String _) {
-    setState(() {
-      _pricePreview = null;
-      _previewError = null;
-    });
-    _priceDebounce?.cancel();
-    _priceDebounce = Timer(const Duration(milliseconds: 400), _refreshPreview);
   }
 
   Future<void> _refreshDurationEstimate() async {
@@ -553,21 +467,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   }) async {
     if (_selectedAddress == null) return;
     if (_showsDynamicForm && !_pricingFieldsComplete) return;
-    final pricingQuantity = num.tryParse(
-      _pricingQuantityController.text.trim(),
-    );
-    if (_isQuantityPricing &&
-        (pricingQuantity == null || pricingQuantity <= 0)) {
-      return;
-    }
-    if (_isPeriodPricing && !_periodComplete) return;
-    final durationHours = int.tryParse(_durationHoursController.text.trim());
-    if (widget.service.pricingModel == 'hourly' &&
-        (widget.service.requiresPreciseSchedule ||
-            widget.service.requiresHoursOnly) &&
-        durationHours == null) {
-      return;
-    }
     final generation = ++_previewRequestGeneration;
     setState(() => _previewLoading = true);
     try {
@@ -582,12 +481,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: promoCode,
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
-        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
-        periodStart: _isPeriodPricing ? _periodStart : null,
-        periodEnd: _isPeriodPricing ? _periodEnd : null,
-        durationHours: widget.service.pricingModel == 'hourly'
-            ? durationHours
-            : null,
         scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
       );
       if (mounted && generation == _previewRequestGeneration) {
@@ -640,10 +533,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       MaterialPageRoute(
         builder: (_) => ScheduleSelectionScreen(
           allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
-          requiresPreciseTime:
-              widget.service.requiresPreciseSchedule ||
-              widget.service.requiresStartTimeOnly,
-          requiresDurationHours: widget.service.requiresPreciseSchedule,
+          requiresPreciseTime: widget.service.requiresStartTime,
           // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
           // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
           // تنبيه رسوم الاستعجال.
@@ -656,8 +546,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _requestedAt = choice.scheduledAt;
         _requestedAtRangeEnd = choice.rangeEnd;
         if (choice.preciseTime != null) _preciseTime = choice.preciseTime;
-        if (choice.durationHours != null)
-          _durationHoursController.text = choice.durationHours.toString();
       });
     }
   }
@@ -677,42 +565,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0),
     );
     if (picked != null && mounted) setState(() => _preciseTime = picked);
-  }
-
-  // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين في نفس الخطوة (بعكس _pickSchedule/
-  // _pickPreciseTime اللي بيقسّموا اليوم والساعة على شاشتين منفصلتين، لأن دي مستقلة تمامًا).
-  Future<DateTime?> _pickFullDateTime(DateTime? initial) async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: initial ?? now.add(const Duration(days: 1)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-    );
-    if (date == null || !mounted) return null;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: initial != null
-          ? TimeOfDay.fromDateTime(initial)
-          : const TimeOfDay(hour: 10, minute: 0),
-    );
-    if (time == null || !mounted) return null;
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-  }
-
-  Future<void> _pickStartAndEndStart() async {
-    final picked = await _pickFullDateTime(_startAndEndStart);
-    if (picked != null && mounted) setState(() => _startAndEndStart = picked);
-  }
-
-  Future<void> _pickStartAndEndEnd() async {
-    final picked = await _pickFullDateTime(_startAndEndEnd);
-    if (picked != null && mounted) setState(() => _startAndEndEnd = picked);
-  }
-
-  String _formatFullDateTime(DateTime at) {
-    final two = (int n) => n.toString().padLeft(2, '0');
-    return '${two(at.day)}/${two(at.month)}/${at.year} — ${two(at.hour)}:${two(at.minute)}';
   }
 
   // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ
@@ -778,14 +630,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           promoCode: asBuilding ? null : code,
           buildingCode: asBuilding ? code : null,
           warrantyPlanId: _selectedWarrantyPlanId,
-          pricingQuantity: _isQuantityPricing
-              ? num.tryParse(_pricingQuantityController.text.trim())
-              : null,
-          periodStart: _isPeriodPricing ? _periodStart : null,
-          periodEnd: _isPeriodPricing ? _periodEnd : null,
-          durationHours: widget.service.pricingModel == 'hourly'
-              ? int.tryParse(_durationHoursController.text.trim())
-              : null,
           scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
         );
 
@@ -908,18 +752,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         return;
       }
     }
-    final pricingQuantity = num.tryParse(
-      _pricingQuantityController.text.trim(),
-    );
-    if (_isQuantityPricing &&
-        (pricingQuantity == null || pricingQuantity <= 0)) {
-      _failValidation('حدد عدد $_quantityUnitLabel المطلوبة', _unitsSectionKey);
-      return;
-    }
-    if (_isPeriodPricing && !_periodComplete) {
-      _failValidation('حدد تاريخ بداية ونهاية الاشتراك', _unitsSectionKey);
-      return;
-    }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
     if (!_requestRemoteQuote && _pricePreview == null) {
@@ -932,29 +764,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       );
       return;
     }
-    // أوضاع التوقيت الثلاثة الجديدة (ADR-0032) — تحقق عميل واضح قبل ما نوصل لرسالة الباك-إند
-    // الخام، نفس فلسفة تحقق العنوان/بيانات السعر فوق.
-    if (widget.scheduleSlotId == null && widget.service.requiresStartAndEnd) {
-      if (_startAndEndStart == null || _startAndEndEnd == null) {
-        _failValidation('حدد تاريخ ووقت البداية والنهاية', _scheduleSectionKey);
-        return;
-      }
-      if (!_startAndEndEnd!.isAfter(_startAndEndStart!)) {
-        _failValidation(
-          'وقت النهاية لازم يكون بعد وقت البداية',
-          _scheduleSectionKey,
-        );
-        return;
-      }
-    }
+    // ADR-0060 §4 — تحقق واحد بس: وضع `start_time` محتاج تاريخ + ساعة. الفرعين التانيين
+    // (بداية ونهاية / عدد ساعات) اتشالوا مع الأوضاع نفسها.
     if (widget.scheduleSlotId == null &&
-        widget.service.requiresHoursOnly &&
-        int.tryParse(_durationHoursController.text.trim()) == null) {
-      _failValidation('حدد عدد الساعات المطلوبة', _scheduleSectionKey);
-      return;
-    }
-    if (widget.scheduleSlotId == null &&
-        widget.service.requiresStartTimeOnly &&
+        widget.service.requiresStartTime &&
         _combinedPreciseScheduledAt() == null) {
       _failValidation('حدد تاريخ ووقت بداية الخدمة', _scheduleSectionKey);
       return;
@@ -971,36 +784,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestedTechnicianId: widget.requestedTechnicianId,
         scheduleSlotId: widget.scheduleSlotId,
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
-        // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه. وضع "بداية+نهاية" (ADR-0032)
-        // بيستخدم _startAndEndStart المستقل، و"عدد ساعات بس" مالوش scheduled_at خالص (ASAP).
+        // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
         scheduledAt: widget.scheduleSlotId != null
             ? null
-            : widget.service.requiresStartAndEnd
-            ? _startAndEndStart?.toUtc().toIso8601String()
-            : widget.service.requiresHoursOnly
-            ? null
-            : (widget.service.requiresPreciseSchedule ||
-                          widget.service.requiresStartTimeOnly
+            : (widget.service.requiresStartTime
                       ? _combinedPreciseScheduledAt()
                       : _requestedAt)
                   ?.toUtc()
                   .toIso8601String(),
-        // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد أو وضع
-        // "بداية+نهاية"/"عدد ساعات بس" الجديدين (نفس منطق scheduledAt فوق بالحرف).
-        scheduledAtRangeEnd:
-            widget.scheduleSlotId == null &&
-                !widget.service.requiresStartAndEnd &&
-                !widget.service.requiresHoursOnly
+        // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد.
+        scheduledAtRangeEnd: widget.scheduleSlotId == null
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()
-            : null,
-        durationHours:
-            (widget.service.requiresPreciseSchedule ||
-                widget.service.requiresHoursOnly)
-            ? int.tryParse(_durationHoursController.text.trim())
-            : null,
-        // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true.
-        scheduledEndAt: widget.service.requiresStartAndEnd
-            ? _startAndEndEnd?.toUtc().toIso8601String()
             : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _requestRemoteQuote ? '' : _promoCodeToSend,
@@ -1012,9 +806,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestRemoteQuote: _requestRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
-        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
-        periodStart: _isPeriodPricing ? _periodStart : null,
-        periodEnd: _isPeriodPricing ? _periodEnd : null,
         paymentMethod:
             _requestRemoteQuote || _selectedPaymentMethod == 'installment'
             ? null
@@ -1454,60 +1245,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
             ] else if (widget.bookingMode != BookingMode.emergency) ...[
               const SizedBox(height: 16),
-              // وضع "عدد ساعات بس" (ADR-0032) — ASAP، من غير وقت بداية محدد خالص، فصف اختيار
-              // اليوم بيتخفي تمامًا.
-              if (widget.service.requiresHoursOnly) ...[
-                Text(
-                  'عدد الساعات المطلوبة',
-                  key: _scheduleSectionKey,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _durationHoursController,
-                  keyboardType: TextInputType.number,
-                  onChanged: _onDurationHoursChanged,
-                  decoration: const InputDecoration(
-                    labelText: 'عدد الساعات',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ]
-              // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين مستقلين للاتنين، مالوش علاقة
-              // بصف اختيار اليوم العادي (_pickSchedule) خالص.
-              else if (widget.service.requiresStartAndEnd) ...[
-                Text(
-                  'مدة الخدمة',
-                  key: _scheduleSectionKey,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.event_outlined),
-                    title: Text(
-                      _startAndEndStart != null
-                          ? _formatFullDateTime(_startAndEndStart!)
-                          : 'حدد تاريخ ووقت البداية',
-                    ),
-                    trailing: const Icon(Icons.chevron_left),
-                    onTap: _pickStartAndEndStart,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.event_available_outlined),
-                    title: Text(
-                      _startAndEndEnd != null
-                          ? _formatFullDateTime(_startAndEndEnd!)
-                          : 'حدد تاريخ ووقت النهاية',
-                    ),
-                    trailing: const Icon(Icons.chevron_left),
-                    onTap: _pickStartAndEndEnd,
-                  ),
-                ),
-              ] else ...[
+              // ADR-0060 §4 — فرع واحد بس: اليوم دايمًا، وساعة الوصول فوقه لو الخدمة
+              // `start_time`. فرعَي «عدد ساعات بس» و«بداية ونهاية» اتشالوا — الاتنين كانوا
+              // بيطلبوا من العميل مدخلات تسعير على شاشة الجدولة.
+              ...[
                 Text(
                   'الموعد المطلوب',
                   style: Theme.of(context).textTheme.titleMedium,
@@ -1525,10 +1266,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     onTap: _pickSchedule,
                   ),
                 ),
-                // دقة الوقت (ADR-0031 Slice B) + وضع "بداية بس" (ADR-0032) — الاتنين محتاجين
-                // وقت بداية دقيق فوق اليوم المختار، بس دقة الوقت وحدها محتاجة مدة كمان تحت.
-                if (widget.service.requiresPreciseSchedule ||
-                    widget.service.requiresStartTimeOnly) ...[
+                // ADR-0060 §4 — ساعة الوصول فوق اليوم المختار، لوضع `start_time` بس.
+                if (widget.service.requiresStartTime) ...[
                   const SizedBox(height: 8),
                   Card(
                     child: ListTile(
@@ -1543,87 +1282,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     ),
                   ),
                 ],
-                if (widget.service.requiresPreciseSchedule) ...[
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _durationHoursController,
-                    keyboardType: TextInputType.number,
-                    onChanged: _onDurationHoursChanged,
-                    decoration: const InputDecoration(
-                      labelText: 'عدد الساعات المطلوبة',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
               ],
-            ],
-            if (_isPeriodPricing) ...[
-              const SizedBox(height: 16),
-              Text(
-                'مدة الاشتراك',
-                key: _unitsSectionKey,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _PeriodDateField(
-                      label: 'من تاريخ',
-                      value: _periodStart,
-                      onPick: () => _pickPeriodDate(isStart: true),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _PeriodDateField(
-                      label: 'إلى تاريخ',
-                      value: _periodEnd,
-                      onPick: () => _pickPeriodDate(isStart: false),
-                    ),
-                  ),
-                ],
-              ),
-              if (_periodComplete) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'المدة $_billedMonthsPreview ${_billedMonthsPreview == 1 ? 'شهر' : 'شهور'} — أي جزء من شهر بيتحسب شهر كامل.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ],
-            if (_isQuantityPricing) ...[
-              const SizedBox(height: 16),
-              Text(
-                'الكمية المطلوبة',
-                key: _unitsSectionKey,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _pricingQuantityController,
-                keyboardType: TextInputType.numberWithOptions(
-                  decimal: widget.service.quantityPrecision > 0,
-                ),
-                onChanged: _onPricingQuantityChanged,
-                decoration: InputDecoration(
-                  labelText: 'عدد $_quantityUnitLabel',
-                  helperText:
-                      [
-                        if (widget.service.quantityMin != null)
-                          'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}',
-                        if (widget.service.quantityMax != null)
-                          'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}',
-                        if (widget.service.quantityStep != null)
-                          'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}',
-                        if (widget.service.quantityPrecision == 0)
-                          'أرقام صحيحة فقط',
-                      ].isEmpty
-                      ? 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
-                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. السعر يتحدث تلقائيًا.',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
             ],
             if (_showsDynamicForm)
               ..._buildPricingFieldsSection()
@@ -2109,33 +1768,3 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 }
 
 /// حقل تاريخ واحد جوّه فترة الاشتراك (ADR-0050 §4) — عرض بس، الاختيار كله في `showDatePicker`.
-class _PeriodDateField extends StatelessWidget {
-  const _PeriodDateField({
-    required this.label,
-    required this.value,
-    required this.onPick,
-  });
-
-  final String label;
-  final DateTime? value;
-  final VoidCallback onPick;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = value == null
-        ? 'اختار'
-        : '${value!.year}/${value!.month.toString().padLeft(2, '0')}/${value!.day.toString().padLeft(2, '0')}';
-    return InkWell(
-      onTap: onPick,
-      borderRadius: BorderRadius.circular(4),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18),
-        ),
-        child: Text(text),
-      ),
-    );
-  }
-}

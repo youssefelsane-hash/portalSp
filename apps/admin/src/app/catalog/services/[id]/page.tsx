@@ -159,7 +159,7 @@ export default function ServiceDetailPage() {
     setService(next);
     if (!next) return;
     setPricingModelLive(next.pricing_model);
-    setSchedulingMode(next.requires_start_time_only ? 'start_time' : 'full_day');
+    setSchedulingMode(next.schedule_precision);
   }
 
   function loadAll() {
@@ -516,10 +516,8 @@ export default function ServiceDetailPage() {
       allows_date_range_booking: form.get('allows_date_range_booking') === 'on',
       allows_recurring_booking: form.get('allows_recurring_booking') === 'on',
       show_unavailable_providers: form.get('show_unavailable_providers') === 'on',
-      requires_precise_schedule: form.get('requires_precise_schedule') === 'on',
-      requires_start_time_only: form.get('requires_start_time_only') === 'on',
-      requires_hours_only: form.get('requires_hours_only') === 'on',
-      requires_start_and_end: form.get('requires_start_and_end') === 'on',
+      // ADR-0060 §4 — حقل واحد بدل أربع بوليانات: مستحيل تتبعت تركيبة غلط أصلاً.
+      schedule_precision: form.get('requires_start_time_only') === 'on' ? 'start_time' : 'full_day',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,

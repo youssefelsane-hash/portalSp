@@ -185,3 +185,21 @@ export function pricingTemplateFinalPricePayload(
     ...(maxPriceCents !== null ? { max_price_cents: { type: 'literal' as const, value: maxPriceCents } } : {}),
   };
 }
+
+/**
+ * فترة التعاقد من قيم الفورم (ADR-0060 §2) — **نقطة القراءة الوحيدة** للتاريخين دول.
+ *
+ * قالب «بالشهر» بيزرع حقلين تاريخ عاديين في `service_pricing_fields`، والمعادلة بتقرا منهم
+ * بـ`kind: 'field'`. الطلب بيحفظ نفس التاريخين في `pricing_period_start/end` — فلو الحفظ قرا من
+ * مدخل منفصل في الـDTO (زي ما كان)، السعر المحسوب والعمود المحفوظ كانوا ممكن يختلفوا بلا أي
+ * إشارة. الدالة دي بتخلّي المصدر واحد.
+ */
+export function contractPeriodFromFieldValues(
+  fieldValues: Record<string, string | number | boolean> | undefined,
+): { start: string | null; end: string | null } {
+  const read = (key: string): string | null => {
+    const raw = fieldValues?.[key];
+    return typeof raw === 'string' && raw.trim() !== '' ? raw : null;
+  };
+  return { start: read(TEMPLATE_FIELD_KEYS.periodStart), end: read(TEMPLATE_FIELD_KEYS.periodEnd) };
+}

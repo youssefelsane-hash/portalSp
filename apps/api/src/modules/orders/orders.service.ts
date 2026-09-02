@@ -33,6 +33,7 @@ import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technic
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { schedulePrecision } from '../catalog/schedule-precision';
+import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
 import { CancellationReasonsService } from './cancellation-reasons.service';
@@ -617,6 +618,13 @@ export class OrdersService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    if (dto.period_start || dto.period_end) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'فترة التعاقد بقت حقلين تاريخ في فورم الخدمة نفسها مش مدخل منفصل — ابعتهم جوّه field_values',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     // "إعادة الحجز" — نتأكد إن الـ id فعلاً فني حقيقي بس (404 واضح لو لأ)، مش هل هو متاح/مؤهّل
     // للخدمة دي تحديداً — ده بيتفحص وقت المطابقة نفسها (matching.service.ts)، فالتفضيل ده
@@ -725,13 +733,15 @@ export class OrdersService {
     // مصدر مستقل (technician_profiles.pricing_tier) عشان الفصل الكامل عن currentLevel التشغيلي.
     const knownTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
+    // ADR-0060 §2 — فترة التعاقد مصدرها **حقول الفورم** (اللي قالب «بالشهر» بيزرعها)، مش مدخل
+    // منفصل في الطلب. القراءة من نفس المكان اللي المعادلة بتحسب منه بتضمن إن العمود المحفوظ على
+    // الطلب والسعر المحسوب مابيتفرقوش أبدًا.
+    const period = contractPeriodFromFieldValues(dto.field_values);
+
     const pricingContext = buildPricingContext({
-      quantity: dto.pricing_quantity,
-      durationHours: dto.duration_hours,
       scheduledAt: resolvedScheduledAtIso,
-      scheduledEndAt: dto.scheduled_end_at,
-      periodStart: dto.period_start,
-      periodEnd: dto.period_end,
+      periodStart: period.start,
+      periodEnd: period.end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,
@@ -751,8 +761,8 @@ export class OrdersService {
       urgent,
       dto.field_values,
       knownTechnicianPricingTier,
-      pricingContext.durationHours ?? undefined,
-      dto.pricing_quantity,
+      undefined,
+      undefined,
       // ADR-0042 — حجز شركة بيتسعّر بمعاملها هي بدل مضاعف المستوى (اللي بيبقى غير معروف أصلاً
       // في حجز الشركة). نفس القيمة اللي العميل شافها في المقارنة قبل ما يختار.
       requestedCompany ? Number(requestedCompany.priceMultiplier) : undefined,
@@ -1507,6 +1517,7 @@ export class OrdersService {
     );
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
+    const previewPeriod = contractPeriodFromFieldValues(dto.field_values);
 
     // نفس اشتقاق `create()` بالحرف (ADR-0048) — لازم يفضلوا متطابقين، وإلا المعاينة بتقول سعر
     // والتحصيل ياخد سعر تاني. السلوت بيلغي الاستعجال هنا كمان، بنفس السبب المشروح في `create()`.
@@ -1541,13 +1552,12 @@ export class OrdersService {
       ? await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id)
       : null;
 
+    // ADR-0060 §2 — نفس مصدر `create()` بالحرف: الفترة من حقول الفورم. لو المعاينة قرأت من مكان
+    // والإنشاء من مكان تاني، الرقمين هيختلفوا — وده بالظبط عكس الغرض من المعاينة.
     const pricingContext = buildPricingContext({
-      quantity: dto.pricing_quantity,
-      durationHours: dto.duration_hours,
       scheduledAt: dto.scheduled_at,
-      scheduledEndAt: dto.scheduled_end_at,
-      periodStart: dto.period_start,
-      periodEnd: dto.period_end,
+      periodStart: previewPeriod.start,
+      periodEnd: previewPeriod.end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,
@@ -1562,8 +1572,8 @@ export class OrdersService {
       urgent,
       dto.field_values,
       previewTechnicianPricingTier,
-      pricingContext.durationHours ?? undefined,
-      dto.pricing_quantity,
+      undefined,
+      undefined,
       previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
       pricingContext,
     );

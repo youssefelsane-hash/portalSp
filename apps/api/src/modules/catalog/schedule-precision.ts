@@ -13,7 +13,8 @@
  *
  * المدة بتيجي من ناتج المعادلة (`computed_duration_days` / `duration_minutes`) مش من رقم العميل.
  */
-export type SchedulePrecision = 'full_day' | 'start_time';
+export const SCHEDULE_PRECISIONS = ['full_day', 'start_time'] as const;
+export type SchedulePrecision = (typeof SCHEDULE_PRECISIONS)[number];
 
 export const SCHEDULE_PRECISION_LABELS_AR: Record<SchedulePrecision, string> = {
   full_day: 'يوم كامل',

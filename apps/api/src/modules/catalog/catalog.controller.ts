@@ -8,6 +8,7 @@ import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { buildPricingContext } from '../pricing/pricing-context';
+import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
@@ -77,6 +78,7 @@ export class CatalogController {
   @Public()
   @Post('services/:id/estimate')
   async estimate(@Param('id', ParseUUIDPipe) id: string, @Query() query: EstimateQueryDto) {
+    const period = contractPeriodFromFieldValues(query.field_values);
     return this.catalogService.estimate(
       id,
       query.zone_id,
@@ -84,16 +86,15 @@ export class CatalogController {
       query.booking_mode === 'emergency',
       query.field_values,
       query.pricing_tier,
-      query.duration_hours,
-      query.pricing_quantity,
       undefined,
-      // ADR-0050 §4 — المعاينة العامة بتبني نفس السياق اللي الحجز بيبنيه، عشان عدد شهور
-      // الفوترة اللي بيتعرض في الكتالوج يبقى هو نفسه اللي بيتحاسب.
+      undefined,
+      undefined,
+      // ADR-0050 §4 + ADR-0060 §2 — المعاينة العامة بتبني نفس السياق اللي الحجز بيبنيه بالظبط،
+      // من **نفس المصدر**: حقول الفورم. لو المعاينة قرأت الفترة من query params والحجز قراها من
+      // الفورم، الرقمين كانوا هيختلفوا بلا أي إشارة.
       buildPricingContext({
-        quantity: query.pricing_quantity,
-        durationHours: query.duration_hours,
-        periodStart: query.period_start,
-        periodEnd: query.period_end,
+        periodStart: period.start,
+        periodEnd: period.end,
         serviceFieldValues: query.field_values,
         zoneId: query.zone_id,
         isEmergency: query.booking_mode === 'emergency',
@@ -191,7 +192,7 @@ export class CatalogController {
                 isEmergency,
                 query.field_values,
                 item.isCompany ? undefined : item.pricingTier,
-                query.duration_hours,
+                undefined,
                 undefined,
                 // ADR-0042 — الشركة بتتسعّر بمعاملها هي بدل مضاعف المستوى (اللي مالوش معنى هنا).
                 item.isCompany ? item.companyPriceMultiplier : undefined,

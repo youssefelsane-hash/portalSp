@@ -25,15 +25,12 @@ class ScheduleChoice {
   final DateTime scheduledAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس (مفيش نطاق).
   final DateTime? rangeEnd;
-  // دقة الوقت (docs/08 §84 جزء ج) — مليانين بس لو requiresPreciseTime، وإلا null دايمًا.
+  // دقة الموعد (ADR-0060 §4) — مليان بس لو requiresPreciseTime، وإلا null دايمًا.
+  //
+  // `durationHours` اتشال: المدة بقت ناتج معادلة التسعير، مش رقم بيدخّله العميل على شاشة
+  // اختيار الميعاد. شاشة الجدولة بتجاوب على سؤال واحد بس: امتى الفني ييجي؟
   final TimeOfDay? preciseTime;
-  final int? durationHours;
-  const ScheduleChoice(
-    this.scheduledAt, {
-    this.rangeEnd,
-    this.preciseTime,
-    this.durationHours,
-  });
+  const ScheduleChoice(this.scheduledAt, {this.rangeEnd, this.preciseTime});
 }
 
 // بداية اليوم المحلي (Africa/Cairo، نفس منطقة العمل الوحيدة للمشروع) — نفس التاريخ اللي هيتعرض
@@ -51,10 +48,6 @@ class ScheduleSelectionScreen extends StatefulWidget {
   final bool allowsDateRangeBooking;
   // محتاجة وقت بداية دقيق (docs/08 §84 جزء ج) — لو true، كارت "الساعة" بيظهر بعد اختيار اليوم.
   final bool requiresPreciseTime;
-  // محتاجة عدد الساعات كمان (requiresPreciseSchedule بس، مش requiresStartTimeOnly) — فرعية من
-  // requiresPreciseTime (مينفعش تبقى true من غيرها).
-  final bool requiresDurationHours;
-
   /// هل الخدمة بتتعمل في نفس اليوم؟ (`allows_emergency`، ADR-0048 §3).
   ///
   /// لو `false`، التقويم بيبدأ من **بكرة** — العميل مايختارش يوم الباك-إند هيرفضه بعدين. نفس
@@ -65,7 +58,6 @@ class ScheduleSelectionScreen extends StatefulWidget {
     super.key,
     required this.allowsDateRangeBooking,
     this.requiresPreciseTime = false,
-    this.requiresDurationHours = false,
     this.allowsSameDay = true,
   });
 
@@ -261,27 +253,18 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return '${two(date.day)}/${two(date.month)}/${date.year}';
   }
 
-  bool get _canConfirm {
-    if (_selectedDate == null || _selectedTime == null) return false;
-    if (!widget.requiresDurationHours) return true;
-    final hours = int.tryParse(_durationController.text.trim());
-    return hours != null && hours > 0;
-  }
+  bool get _canConfirm => _selectedDate != null && _selectedTime != null;
 
   void _confirm() {
     if (!_canConfirm) return;
-    // راجع docs/08 §108-C — شيل الفوكس من حقل عدد الساعات قبل الإقفال عشان
-    // نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا) لو المستخدم
-    // لسه واقف في الحقل.
+    // راجع docs/08 §108-C — شيل الفوكس قبل الإقفال عشان نتجنب Flutter assertion
+    // '_dependents.isEmpty' (شاشة حمرا) لو المستخدم لسه واقف في حقل.
     FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       ScheduleChoice(
         _selectedDate!,
         rangeEnd: _selectedRangeEnd,
         preciseTime: _selectedTime,
-        durationHours: widget.requiresDurationHours
-            ? int.parse(_durationController.text.trim())
-            : null,
       ),
     );
   }
@@ -340,18 +323,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                     selected: _selectedTime != null,
                     onTap: () => _pickTime(context),
                   ),
-                  if (widget.requiresDurationHours) ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _durationController,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'عدد الساعات المطلوبة',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 20),
                   FilledButton(
                     onPressed: _canConfirm ? _confirm : null,
