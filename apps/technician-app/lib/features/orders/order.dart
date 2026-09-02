@@ -115,6 +115,10 @@ class Order {
   // الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040).
   final bool isCrewShare;
   final String paymentStatus;
+
+  /// حالة سعر الطلب من الباك-إند (`orders.price_status`) — المصدر الوحيد اللي بيقول
+  /// «الطلب ده محتاج سعر؟». التطبيق بيقرا منها بس ومابيستنتجش من الحالة التشغيلية.
+  final String priceStatus;
   final OrderAddress? address;
   // "اعتماد" (docs/06 §1) — بس لما يبقى 'team' في الباك-إند (order.entity.ts's BookingMode) فيه
   // مفهوم "طاقم" أصلاً (order_team_members). Script 7 Phase 13/14 — كانت مفقودة تمامًا من نموذج
@@ -157,6 +161,9 @@ class Order {
     this.earningPending = false,
     this.isCrewShare = false,
     required this.paymentStatus,
+    // قيمة افتراضية مش `required`: حقل جديد، و'confirmed' معناها «سعره مستقر» — وده السلوك
+    // الصح لأي طلب قديم أو أي كود بينشئ Order من غير الحقل ده (مفيش زرار تسعير بيظهر).
+    this.priceStatus = 'confirmed',
     required this.bookingMode,
     this.requiredTechnicians,
     this.requiredAssistants,
@@ -185,6 +192,9 @@ class Order {
         earningPending: json['earning_pending'] as bool? ?? false,
         isCrewShare: json['is_crew_share'] as bool? ?? false,
         paymentStatus: json['payment_status'] as String,
+        // الطلبات القديمة قبل ADR-0063 مالهاش الحقل ده — 'confirmed' يعني «سعره مستقر»،
+        // وده السلوك الصح ليها: مفيش زرار تسعير بيظهر.
+        priceStatus: json['price_status'] as String? ?? 'confirmed',
         bookingMode: json['booking_mode'] as String? ?? 'individual',
         requiredTechnicians: json['required_technicians'] as int?,
         requiredAssistants: json['required_assistants'] as int?,

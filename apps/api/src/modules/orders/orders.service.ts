@@ -33,6 +33,7 @@ import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technic
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { schedulePrecision } from '../catalog/schedule-precision';
+import { initialPriceStatus } from './initial-price-status';
 import { estimatedDisplayRange } from '../catalog/estimated-display-range';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { CommissionBaseService } from '../pricing/commission-base.service';
@@ -1287,13 +1288,11 @@ export class OrdersService {
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
         initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
-        priceStatus: lockedMatchPreview
-          ? OrderPriceStatus.LOCKED
-          : remoteQuoteRequested
-          ? OrderPriceStatus.WAITING_ASSESSMENT
-          : service.priceCertaintyMode === PriceCertaintyMode.ESTIMATED_RANGE
-            ? OrderPriceStatus.PROVISIONAL
-            : OrderPriceStatus.CONFIRMED,
+        priceStatus: initialPriceStatus({
+          hasLockedMatchPreview: Boolean(lockedMatchPreview),
+          remoteQuoteRequested,
+          priceCertaintyMode: service.priceCertaintyMode,
+        }),
         priceCertaintyModeSnapshot: service.priceCertaintyMode,
         assessmentType:
           service.priceCertaintyMode === PriceCertaintyMode.ASSESSMENT_REQUIRED
