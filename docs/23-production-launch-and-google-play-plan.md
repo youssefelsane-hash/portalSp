@@ -268,6 +268,49 @@ PAYMOB_HMAC_SECRET=
 نستخدم أسرارًا عشوائية مختلفة لا تقل عن 32 حرفًا، ولا نغيّر مفاتيح التشفير بعد بدء تخزين البيانات
 إلا بخطة تدوير؛ فقدانها قد يجعل البيانات المشفرة غير قابلة للقراءة.
 
+### فشل النشر على Railway بـ`Config validation error` — التشخيص والحل (2026-09-02)
+
+اللوج الفعلي من Railway (Deploy Logs):
+
+```text
+ERROR [ExceptionHandler] Config validation error: "SETTINGS_ENCRYPTION_KEY" is required.
+"CORS_ORIGIN" is required. "WEBAUTHN_RP_ID" is required. "WEBAUTHN_ORIGIN" is required.
+"STORAGE_PROVIDER" is required
+```
+
+**ده مش فشل بناء ولا بَقّة كود** — السيرفر اتبنى وقلع فعلاً، و`ConfigModule` رفض يكمّل لأن
+`apps/api/src/config/env.validation.ts` بيفرض المتغيرات دي **إجباريًا لما `NODE_ENV` تكون
+`staging` أو `production`** (fail-fast مقصود: أفضل ما يقلع بمفتاح تشفير غايب أو CORS مفتوح للكل).
+الرسالة بتقول بالاسم إيه الناقص. الحل كله في **Railway → Service → Variables**، مفيش أي تعديل كود:
+
+| المتغيّر | القيمة المطلوبة | ليه إجباري |
+|---|---|---|
+| `SETTINGS_ENCRYPTION_KEY` | سلسلة عشوائية ≥ 32 حرف، **تتثبّت ولا تتغيّر بعدها** | بيشفّر أسرار Paymob/الهوية المخزّنة في القاعدة؛ تغييره بيبطّل فك كل القيم المحفوظة |
+| `CORS_ORIGIN` | `https://admin.YOUR_DOMAIN,https://www.YOUR_DOMAIN` (بفاصلة، بلا مسافات) | فاضي = مفتوح للكل، مرفوض في الإنتاج |
+| `WEBAUTHN_RP_ID` | دومين لوحة الأدمن **بدون** بروتوكول، مثل `admin.YOUR_DOMAIN` | Passkeys الأدمن بتترفض من المتصفح لو غلط |
+| `WEBAUTHN_ORIGIN` | نفس الدومين كامل، مثل `https://admin.YOUR_DOMAIN` | نفس السبب |
+| `STORAGE_PROVIDER` | `s3` (+ `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`، و`S3_ENDPOINT` لو R2/Spaces) | `local` بيكتب على قرص مؤقت بيتمسح مع كل نشر |
+
+لو اللوج جاب بعد كده متغيّر تاني «is required»، نفس القاعدة: القايمة الكاملة لكل اللي بيتفرض في
+الإنتاج موجودة في `env.validation.ts` (زيادةً على اللي فوق: `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET`
+≥ 32 حرف ومختلفين، و`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_SMS_FROM_NUMBER` التلاتة مع
+بعض لأن OTP مالوش قناة تانية).
+
+**ليه ظهرت فجأة رغم إن النشر كان شغال قبل كده؟** الاحتمال الأرجح إن الخدمة دي على Railway اتعملت
+من جديد (أو بيئة PR/Preview جديدة) — بيئات Railway الجديدة **مابتورّثش** المتغيرات تلقائيًا إلا لو
+معمولة كـShared Variables ومربوطة بالخدمة. راجع إن نفس المتغيرات موجودة فعلاً على **الخدمة اللي
+بتنشر من `main`** مش على خدمة تانية.
+
+**خطوة الـmigrations**: لازم `node infra/migrations/migrate.js` يتنفّذ قبل ما التطبيق يقلع (P0-7
+فوق). أمر التشغيل المعتمد لخدمة الـAPI على Railway هو:
+
+```text
+npm run start:railway --workspace=@baytak/api
+```
+
+(السكربت بيشغّل الـmigrations بنفس `DATABASE_URL` بتاعة الخدمة، وبعدها `node dist/main.js` —
+لو migration فشلت، النشر بيفشل صراحةً بدل ما يقلع تطبيق جديد على schema قديمة.)
+
 ## 6. خطة Google Play للتطبيقين
 
 ### إنشاء الحساب والقوائم
