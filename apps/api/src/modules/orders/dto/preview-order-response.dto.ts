@@ -47,4 +47,8 @@ export interface PreviewOrderResponseDto {
   /** = total_amount_cents - deposit_amount_cents، أو null لو مفيش إيداع (يبقى remaining=0 ضمنيًا،
    * الإجمالي كله اتحصّل أو هيتحصّل بعد الشغل زي أي طلب عادي). */
   remaining_amount_cents: number | null;
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  remote_assessment_fee_cents: number;
 }

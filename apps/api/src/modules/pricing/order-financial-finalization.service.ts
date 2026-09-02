@@ -9,6 +9,12 @@ export interface OrderPriceIncrease {
   amountCents: number;
   source: OrderPriceIncreaseSource;
   includeInCommissionableBase: boolean;
+  /**
+   * The approved work value can differ from the amount newly owed. Assessment-fee credit is the
+   * canonical example: a 700 EGP work quote with a 100 EGP credited inspection adds 600 EGP to
+   * the order total, while the full 700 EGP remains the commissionable work value.
+   */
+  commissionableAmountCents?: number;
 }
 
 export interface OrderPriceIncreaseResult {
@@ -45,9 +51,13 @@ export class OrderFinancialFinalizationService {
     }
 
     const previousTotalCents = order.totalAmountCents;
+    const requestedCommissionableAmount = adjustment.commissionableAmountCents ?? adjustment.amountCents;
+    if (!Number.isSafeInteger(requestedCommissionableAmount) || requestedCommissionableAmount < 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'قيمة وعاء العمولة غير صالحة', HttpStatus.BAD_REQUEST);
+    }
     const commissionableIncreaseCents =
       adjustment.includeInCommissionableBase && order.commissionableBaseCents !== null
-        ? adjustment.amountCents
+        ? requestedCommissionableAmount
         : 0;
 
     order.totalAmountCents += adjustment.amountCents;

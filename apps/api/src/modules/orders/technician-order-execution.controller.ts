@@ -401,7 +401,20 @@ export class TechnicianOrderExecutionController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SubmitInitialQuoteDto,
   ) {
-    const order = await this.inspectionQuoteService.submitInitialQuote(user.sub, id, dto.quoted_amount_cents, dto.note);
+    const order = await this.inspectionQuoteService.submitInitialQuote(
+      user.sub,
+      id,
+      dto.quoted_amount_cents,
+      dto.note,
+      {
+        diagnosis: dto.diagnosis,
+        scopeIncluded: dto.scope_included,
+        scopeExcluded: dto.scope_excluded,
+        estimatedDurationMinutes: dto.estimated_duration_minutes,
+        requiredTechnicians: dto.required_technicians,
+        requiredAssistants: dto.required_assistants,
+      },
+    );
     return this.toDtoAfterAction(order, user.sub);
   }
 

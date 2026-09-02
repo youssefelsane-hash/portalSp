@@ -14,7 +14,7 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingModel } from '../catalog/entities/service.entity';
+import { AssessmentRoutePolicy, PriceCertaintyMode, PricingModel } from '../catalog/entities/service.entity';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
@@ -57,6 +57,7 @@ import {
   Order,
   OrderCustomerInput,
   OrderPaymentStatus,
+  OrderPriceStatus,
   OrderSourceChannel,
   OrderStatus,
   OrderType,
@@ -511,6 +512,23 @@ export class OrdersService {
 
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    const remoteAssessmentRequested = dto.request_remote_quote === true;
+    if (remoteAssessmentRequested) {
+      if (
+        service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE ||
+        !service.remoteAssessmentEnabled ||
+        service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'التقييم بالصور غير متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الإضافات والخصومات والضمان تتحدد بعد اعتماد سعر التقييم',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
@@ -922,6 +940,13 @@ export class OrdersService {
       if (!dto.problem_image_ids?.length) {
         throw new ApiException(ErrorCode.VAL_001, 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر', HttpStatus.BAD_REQUEST);
       }
+      if (!service.remoteAssessmentEnabled || service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'التقييم بالصور غير متاح لهذه الخدمة — يلزم حجز معاينة في الموقع',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       if (originalOrder || bookingMode === BookingMode.EMERGENCY || dto.repeat_frequency) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -1038,8 +1063,11 @@ export class OrdersService {
       );
     }
 
-    const initialOrderTotalCents = originalOrder || remoteQuoteRequested
+    const remoteAssessmentFeeCents = remoteQuoteRequested ? service.remoteAssessmentFeeCents : 0;
+    const initialOrderTotalCents = originalOrder
       ? 0
+      : remoteQuoteRequested
+        ? remoteAssessmentFeeCents
       : estimate.estimated_total_cents +
         estimate.inspection_fee_cents +
         estimate.emergency_surcharge_cents +
@@ -1139,12 +1167,33 @@ export class OrdersService {
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
         initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
+        priceStatus: remoteQuoteRequested
+          ? OrderPriceStatus.WAITING_ASSESSMENT
+          : service.priceCertaintyMode === PriceCertaintyMode.ESTIMATED_RANGE
+            ? OrderPriceStatus.PROVISIONAL
+            : OrderPriceStatus.CONFIRMED,
+        priceCertaintyModeSnapshot: service.priceCertaintyMode,
+        assessmentType:
+          service.priceCertaintyMode === PriceCertaintyMode.ASSESSMENT_REQUIRED
+            ? remoteQuoteRequested
+              ? 'remote'
+              : 'onsite'
+            : null,
+        remoteAssessmentFeeCents,
+        assessmentFeeCreditModeSnapshot: service.assessmentFeeCreditMode,
+        assessmentFeeCreditBpsSnapshot: service.assessmentFeeCreditBps,
+        assessmentFeeCreditCents: 0,
+        displayPriceMinCentsSnapshot: service.displayPriceMinCents,
+        displayPriceMaxCentsSnapshot: service.displayPriceMaxCents,
+        onsiteAssessorExecutesWorkSnapshot: service.onsiteAssessorExecutesWork,
         inspectionFeeCents: originalOrder || remoteQuoteRequested ? 0 : estimate.inspection_fee_cents,
         // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد،
         // بيتفعّل هنا. صفر لأي طلب مش طوارئ أو إعادة زيارة (مجانية بالكامل أصلاً).
         surgeAmountCents: originalOrder || remoteQuoteRequested ? 0 : estimate.emergency_surcharge_cents,
-        totalAmountCents: originalOrder || remoteQuoteRequested
+        totalAmountCents: originalOrder
           ? 0
+          : remoteQuoteRequested
+            ? remoteAssessmentFeeCents
           : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents,
         settlementPolicyVersion,
         platformCommissionCentsSnapshot,
@@ -1508,6 +1557,23 @@ export class OrdersService {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    const remoteAssessmentRequested = dto.request_remote_quote === true;
+    if (remoteAssessmentRequested) {
+      if (
+        service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE ||
+        !service.remoteAssessmentEnabled ||
+        service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'التقييم بالصور غير متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الإضافات والخصومات والضمان تتحدد بعد اعتماد سعر التقييم',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
     await this.validatePricingFieldImages(
       this.dataSource.manager,
       customerProfile.id,
@@ -1584,8 +1650,9 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'مينفعش كود خصم وكود عمارة مع بعض', HttpStatus.BAD_REQUEST);
     }
 
-    const subtotalBeforeDiscountCents =
-      estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents;
+    const subtotalBeforeDiscountCents = remoteAssessmentRequested
+      ? service.remoteAssessmentFeeCents
+      : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents;
 
     let discountCents = 0;
     let discountSource: 'promo_code' | 'building' | null = null;
@@ -1611,19 +1678,21 @@ export class OrdersService {
     const totalAmountCents = serviceTotalAfterDiscountCents + warrantyPriceCents;
     // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نفس حساب create() بالحرف (راجع تعليق
     // depositAmountCents هناك). المعاينة لازم تطابق المحصّل الفعلي 100% (نفس مبدأ الملف كله).
-    const depositAmountCents = service.depositRequired && totalAmountCents > 0
+    const depositAmountCents = !remoteAssessmentRequested && service.depositRequired && totalAmountCents > 0
       ? Math.round((totalAmountCents * Number(service.depositPercentage)) / 100)
       : null;
 
     return {
-      base_price_cents: estimate.estimated_total_cents,
-      inspection_fee_cents: estimate.inspection_fee_cents,
+      base_price_cents: remoteAssessmentRequested ? 0 : estimate.estimated_total_cents,
+      inspection_fee_cents: remoteAssessmentRequested ? 0 : estimate.inspection_fee_cents,
       min_price_cents: estimate.min_price_cents,
       max_price_cents: estimate.max_price_cents,
-      emergency_surcharge_cents: estimate.emergency_surcharge_cents,
-      emergency_sla_minutes: estimate.emergency_sla_minutes,
-      addons: addons.map((addon) => ({ id: addon.id, name_ar: addon.nameAr, price_cents: addon.priceCents })),
-      addons_total_cents: addonsTotalCents,
+      emergency_surcharge_cents: remoteAssessmentRequested ? 0 : estimate.emergency_surcharge_cents,
+      emergency_sla_minutes: remoteAssessmentRequested ? null : estimate.emergency_sla_minutes,
+      addons: remoteAssessmentRequested
+        ? []
+        : addons.map((addon) => ({ id: addon.id, name_ar: addon.nameAr, price_cents: addon.priceCents })),
+      addons_total_cents: remoteAssessmentRequested ? 0 : addonsTotalCents,
       optional_warranty: optionalWarranty
         ? {
             id: optionalWarranty.id,
@@ -1642,6 +1711,10 @@ export class OrdersService {
       deposit_amount_cents: depositAmountCents,
       due_now_cents: depositAmountCents ?? totalAmountCents,
       remaining_amount_cents: depositAmountCents !== null ? totalAmountCents - depositAmountCents : null,
+      price_certainty_mode: service.priceCertaintyMode,
+      display_price_min_cents: service.displayPriceMinCents,
+      display_price_max_cents: service.displayPriceMaxCents,
+      remote_assessment_fee_cents: remoteAssessmentRequested ? service.remoteAssessmentFeeCents : 0,
     };
   }
 

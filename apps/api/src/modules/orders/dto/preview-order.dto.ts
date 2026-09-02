@@ -3,6 +3,7 @@ import {
   ArrayUnique,
   IsArray,
   IsDateString,
+  IsBoolean,
   IsEnum,
   IsNumber,
   IsObject,
@@ -31,6 +32,10 @@ export class PreviewOrderDto {
 
   @IsUUID()
   address_id: string;
+
+  @IsOptional()
+  @IsBoolean()
+  request_remote_quote?: boolean;
 
   /**
    * **متجاهَل تمامًا (ADR-0048)** — الوضع بقى مشتق من `scheduled_at` وعدد العمال، مش مختار.

@@ -37,6 +37,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
+import { OrderQuote } from './entities/order-quote.entity';
 
 // اختبار حي ضد Postgres حقيقي — معاينة-ثم-سعر كوضع حجز (ADR-0044، docs/08 §73 بند 1).
 // بيغطي: (1) CatalogService.estimate() فرع inspection_then_quote — رسم معاينة بس وقت الحجز.
@@ -111,6 +112,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       entities: [
         Order,
         OrderStatusHistory,
+        OrderQuote,
         Payment,
         Refund,
         User,
@@ -262,6 +264,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       paymentsService,
       events,
       new OrderFinancialFinalizationService(),
+      { record: async () => undefined } as never,
     );
   });
 
@@ -383,7 +386,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(addlPayment).toBeUndefined();
   });
 
-  it('الإدارة تسعّر من صور العميل ثم الموافقة تبدأ المطابقة بالسعر المعتمد', async () => {
+  it('الإدارة تسعّر من صور العميل ثم الموافقة تنتظر اختيار الفني بالسعر المعتمد', async () => {
     const orderId = await insertOrder(`remote-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
       totalAmountCents: 0,
       estimatedPriceCents: 0,
@@ -411,7 +414,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(quoted.initialQuoteNote).toBe('السعر حسب الصور');
 
     const approved = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'cash');
-    expect(approved.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
+    expect(approved.orderStatus).toBe(OrderStatus.AWAITING_TECHNICIAN_SELECTION);
     expect(approved.totalAmountCents).toBe(42000);
     expect(approved.commissionableBaseCents).toBe(42000);
   });

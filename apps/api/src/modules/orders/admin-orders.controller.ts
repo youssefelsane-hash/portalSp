@@ -45,6 +45,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CatalogService } from '../catalog/catalog.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { SubmitAdminPhotoQuoteDto } from './dto/submit-admin-photo-quote.dto';
+import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -436,6 +437,7 @@ export class AdminOrdersController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SubmitAdminPhotoQuoteDto,
+    @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(
       await this.inspectionQuoteService.submitAdminRemoteQuote(
@@ -443,8 +445,21 @@ export class AdminOrdersController {
         id,
         dto.quoted_amount_cents,
         dto.note,
+        {
+          scopeIncluded: dto.scope_included,
+          scopeExcluded: dto.scope_excluded,
+          estimatedDurationMinutes: dto.estimated_duration_minutes,
+          requiredTechnicians: dto.required_technicians,
+          requiredAssistants: dto.required_assistants,
+        },
+        audit,
       ),
     );
+  }
+
+  @Get(':id/quotes')
+  async listQuotes(@Param('id', ParseUUIDPipe) id: string) {
+    return (await this.inspectionQuoteService.listQuotesForOrder(id)).map(toOrderQuoteResponseDto);
   }
 
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — قرار مالي (رسوم + استرداد)، نفس مستوى حساسية

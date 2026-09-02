@@ -30,6 +30,10 @@ const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: stri
     title: 'السعر جاهز ويستنى موافقتك',
     body: 'راجع السعر اللي اتحدد لطلبك، وبعد موافقتك الطلب هيكمل للخطوة التالية.',
   },
+  [OrderStatus.AWAITING_TECHNICIAN_SELECTION]: {
+    title: 'اختر الفني لإكمال الحجز',
+    body: 'وافقت على السعر. اختار الفني بنفسك أو خلّي أسطى يرشح لك فنيًا مع السعر النهائي.',
+  },
   [OrderStatus.WORK_COMPLETED]: { title: 'الشغل خلص', body: 'الفني خلّص الشغل — راجع الفاتورة واختار طريقة الدفع.' },
   // ADR-0015 — طلب كان مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) واتضاف عليه بند إضافي بعد
   // الدفع — الفرق (الدلتا) لازم يترحصّل قبل ما الطلب يقفل. السبب الدقيق (المبلغ) موجود في
@@ -69,16 +73,23 @@ export class OrderStatusNotificationListener {
         // كل ساعة (إعداد قابل للتعديل) لحد ما يتحل — راجع الفرع تحت (previousStatus=AWAITING_QUOTE_APPROVAL) لنقطة الحل.
         const workflow =
           event.newStatus === OrderStatus.AWAITING_QUOTE_APPROVAL ||
-          event.newStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL
+          event.newStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL ||
+          event.newStatus === OrderStatus.AWAITING_TECHNICIAN_SELECTION
             ? await this.workflowService.create({
                 userId: customer.userId,
-                notificationType: 'order_quote_pending_approval',
+                notificationType:
+                  event.newStatus === OrderStatus.AWAITING_TECHNICIAN_SELECTION
+                    ? 'order_technician_selection_required'
+                    : 'order_quote_pending_approval',
                 titleAr: customerMessage.title,
                 bodyAr: customerMessage.body,
                 entityType: 'order',
                 entityId: event.orderId,
                 deepLink: `/orders/${event.orderId}`,
-                actionType: 'approve_quote',
+                actionType:
+                  event.newStatus === OrderStatus.AWAITING_TECHNICIAN_SELECTION
+                    ? 'select_technician'
+                    : 'approve_quote',
               })
             : null;
 
@@ -130,16 +141,23 @@ export class OrderStatusNotificationListener {
 
       if (
         event.previousStatus === OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL &&
-        event.newStatus === OrderStatus.SEARCHING_TECHNICIAN
+        event.newStatus === OrderStatus.AWAITING_TECHNICIAN_SELECTION
       ) {
         await this.routingService.routeToRole('order.photo_quote_accepted', {
           notificationType: 'order_photo_quote_accepted',
           titleAr: `العميل وافق على سعر الطلب ${event.orderNumber}`,
-          bodyAr: 'الطلب دخل المطابقة الآن بالسعر الذي حددته الإدارة من الصور.',
+          bodyAr: 'السعر اتثبت، والطلب مستني العميل يختار الفني أو يؤكد الترشيح التلقائي.',
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/admin/orders/${event.orderId}`,
         });
+      }
+
+      if (
+        event.previousStatus === OrderStatus.AWAITING_TECHNICIAN_SELECTION &&
+        event.newStatus !== OrderStatus.AWAITING_TECHNICIAN_SELECTION
+      ) {
+        await this.workflowService.resolve('order', event.orderId, 'select_technician');
       }
 
       // الطلب خرج من accepted (الفني بدأ يتحرك فعليًا، أو اتلغى/اتحول لإعادة اختيار) — تذكيرات

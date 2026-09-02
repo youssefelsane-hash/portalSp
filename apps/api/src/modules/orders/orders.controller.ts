@@ -43,6 +43,7 @@ import { ProblemImagesService } from './problem-images.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -150,6 +151,11 @@ export class OrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return this.enrichedResponse(user.sub, await this.ordersService.cancel(user.sub, id, dto));
+  }
+
+  @Get(':id/current-quote')
+  async currentQuote(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return toOrderQuoteResponseDto(await this.inspectionQuoteService.getCurrentQuoteForCustomer(user.sub, id));
   }
 
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده.
