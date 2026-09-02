@@ -9,10 +9,8 @@ import {
   StorageService,
 } from "../../common/storage/storage.service";
 import { CustomerProfilesService } from "../customers/customer-profiles.service";
-import {
-  MatchingPreviewLoad,
-  MatchingService,
-} from "../matching/matching.service";
+import { MatchingService } from "../matching/matching.service";
+import { CandidateOperationalLoad } from "../technicians/technician-day-capacity.sql";
 import { SettingsService } from "../settings/settings.service";
 import { TechniciansService } from "../technicians/technicians.service";
 import { CreateBookingMatchPreviewDto } from "./dto/create-booking-match-preview.dto";
@@ -95,7 +93,7 @@ export class BookingMatchPreviewService {
       userId,
       pricingInput,
     );
-    const previewLoad: MatchingPreviewLoad = {
+    const previewLoad: CandidateOperationalLoad = {
       durationMinutes: neutralPricing.duration_minutes,
       estimatedDurationDays: neutralPricing.estimated_duration_days,
     };

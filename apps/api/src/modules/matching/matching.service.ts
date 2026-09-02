@@ -37,7 +37,7 @@ import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
 } from '../orders/revisit-pin';
-import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -114,12 +114,6 @@ export interface EligibleTechnicianRow {
   company_name: string | null;
   is_commercial_company: boolean;
   company_available_staff_count: string;
-}
-
-/** حمل طلب لم يُنشأ بعد، لاستخدام نفس استعلام المطابقة الحقيقي في معاينة الحجز. */
-export interface MatchingPreviewLoad {
-  durationMinutes: number | null;
-  estimatedDurationDays: number | null;
 }
 
 export interface AvailableOrderRow {
@@ -237,7 +231,7 @@ export class MatchingService {
     ignoreAvailabilityFilter = false,
     preferredCompanyId?: string | null,
     ignoreActiveOrderConflict = false,
-    previewLoad?: MatchingPreviewLoad,
+    previewLoad?: CandidateOperationalLoad,
   ): Promise<EligibleTechnicianRow[]> {
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const workloadBalanceWeight = await this.settingsService.getNumber(

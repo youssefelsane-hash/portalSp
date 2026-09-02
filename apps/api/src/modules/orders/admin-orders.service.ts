@@ -619,6 +619,13 @@ export class AdminOrdersService {
       order.scheduledAt,
       order.bookingMode === BookingMode.TEAM,
       false,
+      // ADR-0064 §3 — الطلب ده موجود فعلاً، فحمله التشغيلي متخزّن عليه. من غير ما يتبعت، قايمة
+      // إعادة التعيين كانت بتقيس كل مرشّح على «يوم واحد» حتى لو الطلب ممتد لشهور، فالأدمن يشوف
+      // فني «متاح» والتوزيع الفعلي (اللي بيقرا نفس الأعمدة دي من صف الطلب) يرفضه.
+      {
+        durationMinutes: order.durationMinutes ?? (order.durationHours !== null ? Math.round(order.durationHours * 60) : null),
+        estimatedDurationDays: order.estimatedDurationDays,
+      },
     );
     const formatted = formatEligibleTechniciansForAdmin(result);
     return { ...formatted, items: await this.attachAdminRoleMetadata(formatted.items) };

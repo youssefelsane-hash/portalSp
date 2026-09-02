@@ -1138,3 +1138,25 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 **البوابة الوحيدة** للتأكيد التلقائي في `MatchingService.classifyCandidate()`. يعني قاعدة المالك
 («الطلب الأول بس في اليوم بيتقبل أوتوماتيك، بعد كده بيروح كـrequests») ناتج مباشر للتصنيف، مش
 شرط منفصل ممكن ينحرف عنه.
+
+## الحمل التشغيلي للحجز المرشّح لازم يوصل لكل نداء توافر (ADR-0064 §3)
+
+`technicianAvailabilityCondition()` و`technicianScheduleConflictCondition()` بياخدوا `candidateLoad`
+**اختياري**. الاختيارية دي مريحة للكولر وخطرة عليه: الافتراضي هو
+`{ estimatedDurationDaysExpr: 'NULL', … }`، و`NULL` معناها في `candidateSpanDaysFromSource()`
+**يوم واحد**. يعني نداء ناسي الحمل مش بيفشل — بيشتغل وبيدّي إجابة غلط بصمت.
+
+ده بالظبط اللي حصل: الأربع نداءات في `technicians.service.ts` فضلت بلا حمل بعد ADR-0061، فحجز
+67 يوم كان بيتفحص على يوم بدايته بس والفني المشغول في اليوم 30 يفضل ظاهر «متاح» — بينما التوزيع
+الفعلي (`MatchingService`، بيقرا `orders.estimated_duration_days`) كان **صح**، فالعميل يختار فني
+من قايمة قالت «متاح» والتوزيع يرفضه بعدها.
+
+**القاعدة لأي نداء جديد**: لو عندك طلب حقيقي → ابعت أعمدته. لو لسه مفيش طلب (تصفّح/معاينة) →
+اطلع الحمل من `CatalogService.estimate()` بنفس `field_values` و`zoneId` اللي الحجز الفعلي هيستخدمهم،
+وابعته كـ`CandidateOperationalLoad`. **مفيش حالة تالتة صح.**
+
+`resolveZoneForAddressOrThrow()` اتفصلت من جوّه `listForServiceBooking()` عشان الكولر يقدر يحدد
+المنطقة **قبل** التسعير — التسعير المحايد لازم يبقى بنفس منطقة الحجز الفعلي.
+
+الاختبارات الحية: `multi-day-booking-availability.spec.ts` (الخدمة) و
+`catalog/booking-technician-list-endpoint.spec.ts` (نقطة الدخول الحقيقية اللي العملاء بينادوها).
