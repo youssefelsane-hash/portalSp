@@ -183,6 +183,11 @@ class OrdersRepository {
     // payments_repository.dart بالحرف) ويتبعت هنا — أي retry (double-tap، timeout شبكة) بنفس
     // المفتاح يرجّع نفس الطلب الأصلي من الباك-إند بدل ما ينشئ نسخة جديدة.
     required String idempotencyKey,
+    /// تذكرة معاينة المطابقة (ADR-0063 §6، بند 11/12).
+    ///
+    /// لما تتبعت، الباك-إند بيعيد التحقق من نفس الفني ونفس السعر ونفس المدخلات قبل الإنشاء،
+    /// وبيرفض لو حاجة اتغيّرت بدل ما يستبدل الفني في صمت.
+    String? matchPreviewId,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -191,6 +196,7 @@ class OrdersRepository {
       body: {
         'service_id': serviceId,
         'address_id': addressId,
+        if (matchPreviewId != null) 'match_preview_id': matchPreviewId,
         if (standardDataId != null) 'standard_data_id': standardDataId,
         if (requestedUnits != null) 'requested_units': requestedUnits,
         if (paymentMethod != null) 'payment_method': paymentMethod,

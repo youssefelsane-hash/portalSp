@@ -65,4 +65,37 @@ class TechniciansRepository {
     final items = await auth.authedRequestList('/technicians/$technicianId/schedule');
     return items.map(ScheduleSlot.fromJson).toList();
   }
+
+  /// **بنود 9-12 — بيحجز مرشّح بسعره قبل إنشاء الطلب.**
+  ///
+  /// قبل كده «خلي أسطى يختار لي» كان بينشئ الطلب الأول وبعدين السيستم يدوّر — العميل بيأكد وهو
+  /// ماشافش مين ولا بكام. دلوقتي بيشوف الكارت الأول، والتذكرة اللي بترجع بتتبعت مع الإنشاء
+  /// فالسعر اللي شافه هو اللي بيتسجّل.
+  ///
+  /// `fieldValues`/`scheduledAt`/`promoCode` لازم يبقوا **نفس اللي هيتبعت في الإنشاء بالحرف** —
+  /// الباك-إند بيقارن بصمة المدخلات، وأي اختلاف معناه التذكرة بايتة والحجز بيترفض.
+  Future<BookingMatchPreview> createMatchPreview({
+    required String serviceId,
+    required String addressId,
+    required String selectionMode,
+    String? technicianId,
+    String? scheduledAt,
+    Map<String, dynamic>? fieldValues,
+    String? promoCode,
+  }) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/match-preview',
+      body: {
+        'service_id': serviceId,
+        'address_id': addressId,
+        'selection_mode': selectionMode,
+        if (technicianId != null) 'technician_id': technicianId,
+        if (scheduledAt != null) 'scheduled_at': scheduledAt,
+        if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
+        if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+      },
+    );
+    return BookingMatchPreview.fromJson(data!);
+  }
 }
