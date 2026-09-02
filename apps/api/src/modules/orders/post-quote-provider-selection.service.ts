@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -192,6 +193,13 @@ export class PostQuoteProviderSelectionService {
         null,
       ),
     );
+    // نقل الطلب لـSEARCHING_TECHNICIAN مابيوزّعوش لوحده: التوزيع كله بيتعلّق على
+    // ORDER_CREATED_EVENT (نقطة الدخول الموحّدة، ADR-0018 — OrderDispatchListener →
+    // dispatchOrAutoConfirm). من غير البث ده الطلب بيقف في SEARCHING_TECHNICIAN للأبد، وده كان
+    // بيحوّل «الوقفة الأبدية» من AWAITING_TECHNICIAN_SELECTION لحالة بعدها بس مش بيحلّها.
+    // بعد الـcommit عمدًا (قاعدة المشروع: مفيش حدث قبل نجاح الـtransaction)، وبـemitAsync زي
+    // OrdersService.create() بالحرف. الـlistener بيبلع أخطاءه بنفسه فمفيش خطر على رد العميل.
+    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(result.order.id));
     this.logger.log(
       `الطلب ${result.order.orderNumber} اتقفل على منفّذ بعد عرض السعر — فرق المستوى ${result.premiumCents} قرش`,
     );
