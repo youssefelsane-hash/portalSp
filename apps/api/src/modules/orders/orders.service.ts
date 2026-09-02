@@ -69,6 +69,8 @@ import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, orderPriceIsProviderBound } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
@@ -77,7 +79,7 @@ import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
-import { bookingMatchContextHash, bookingPreviewInputFromCreate } from './booking-match-context';
+import { bookingContextHashWithoutProvider, bookingMatchContextHash, bookingPreviewInputFromCreate } from './booking-match-context';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
 // سياسة إلغاء الفني (docs/10) — fallback بس، المصدر الحقيقي إعدادات cancellation.* (migration 0070).
@@ -169,6 +171,10 @@ export class OrdersService {
     // شغّالة من غيره (الفرق إن الإدارة مش هتتبلّغ) — فمفيش سلوك بيتغيّر بصمت في الإنتاج، والـ
     // module بيحقنه فعليًا. اختبار حي بيثبت إن التصعيد بيحصل بالفعل في المسار الحقيقي.
     @Optional() private readonly crewShortageEscalation?: CrewShortageEscalationService,
+    // ADR-0065 §5 — إعادة فحص أهلية الفني المقفول لحظة التأكيد بنفس بوابة المطابقة (مش نسخة
+    // تانية من الشروط). `@Optional()` لنفس سبب اللي فوقه بالحرف؛ الفرق إن غيابه بيخلي القفل
+    // يتأكد من التذكرة بس بدل التذكرة + الفني، والاختبار الحي بيثبت إن المسار الحقيقي بيحقنه.
+    @Optional() private readonly assignmentGuard?: TechnicianAssignmentGuardService,
   ) {}
 
   private async resolveOptionalWarranty(
@@ -1197,6 +1203,9 @@ export class OrdersService {
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
         selectedMatchPreviewId: lockedMatchPreview?.id ?? null,
+        // ADR-0065 §4 — بصمة الشغلانة بلا الفني. بتتخزّن بس لما يبقى فيه قفل منفّذ فعلي، لأنها
+        // مالهاش معنى غير في إعادة اختيار المنفّذ.
+        bookingContextHash: lockedMatchPreview ? bookingContextHashWithoutProvider(bookingPreviewInputFromCreate(dto)) : null,
         orderStatus: remoteQuoteRequested ? OrderStatus.AWAITING_ADMIN_QUOTE : OrderStatus.SEARCHING_TECHNICIAN,
         // ADR-0060 §3 — المدة بقت ناتج محسوب مش مدخل عميل. العمودين بيتسجّلوا من السياق لما
         // تكون معروفة، بلا أي فرع على «وضع» الخدمة.
@@ -1387,6 +1396,42 @@ export class OrdersService {
       }
 
       if (lockedMatchPreview) {
+        // **ADR-0065 §5** — الفني اتفحص وقت المعاينة، والمعاينة ليها عمر. بين اللحظتين ممكن يكون
+        // بقى مشغول أو اتحجب أو خرج من المنطقة. الفحص هنا بيحصل **جوّه نفس الترانزاكشن** وبعد
+        // ما صف الفني نفسه يتقفل، فقبول متزامن لطلب تاني مايعديش من تحت إيدينا.
+        //
+        // البوابة هي **نفس** `assertEligible()` اللي التعيين الإداري القسري وقبول الفني بيستخدموها
+        // — مش نسخة تانية من الشروط. الرمي هنا بيرجّع الترانزاكشن كلها: **مفيش طلب بيتعمل**،
+        // ومفيش سعر بيتغيّر، والعميل بياخد رسالة صريحة يعمل معاينة جديدة.
+        if (this.assignmentGuard && lockedMatchPreview.technicianId) {
+          const lockedTechnician = await manager
+            .createQueryBuilder(TechnicianProfile, 'tp')
+            .setLock('pessimistic_write')
+            .where('tp.id = :id', { id: lockedMatchPreview.technicianId })
+            .getOne();
+          if (!lockedTechnician) {
+            throw new ApiException(
+              ErrorCode.ORDR_001,
+              LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR,
+              HttpStatus.CONFLICT,
+            );
+          }
+          try {
+            await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+          } catch (guardError) {
+            if (process.env.DEBUG_PROVIDER_LOCK) {
+              // eslint-disable-next-line no-console
+              console.log('[DEBUG provider-lock]', guardError instanceof Error ? guardError.message : guardError);
+            }
+            // سبب الرفض التفصيلي (مشغول/محجوب/مش مؤهّل) معلومة تشغيلية داخلية — العميل محتاج
+            // يعرف حاجة واحدة: الفني ده مابقاش متاح، والخطوة الجاية معاينة جديدة.
+            throw new ApiException(
+              ErrorCode.ORDR_001,
+              LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR,
+              HttpStatus.CONFLICT,
+            );
+          }
+        }
         if (order.totalAmountCents !== lockedMatchPreview.finalPriceCents) {
           throw new ApiException(
             ErrorCode.VAL_001,
@@ -1566,6 +1611,15 @@ export class OrdersService {
       if (idempotencyKey && this.isIdempotencyKeyViolation(err)) {
         const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
         if (existing) return existing;
+      }
+      // ADR-0065 §5 — التأكيد فشل والطلب اترول باك. التذكرة **لازم تموت** بره الترانزاكشن
+      // (اللي جواها اترول باك أصلاً)، وإلا العميل يقدر يعيد نفس التأكيد بنفس التذكرة ويفضل
+      // يصطدم بنفس الرفض. بتتعلّم `stale` مش `consumed` — مااتستخدمتش، بطلت تصلح.
+      if (selectedMatchPreview) {
+        await this.dataSource
+          .getRepository(BookingMatchPreview)
+          .update({ id: selectedMatchPreview.id, status: 'active' }, { status: 'stale' })
+          .catch(() => undefined);
       }
       throw err;
     }
@@ -3276,6 +3330,71 @@ export class OrdersService {
   }
 
   /**
+   * **استهلاك تذكرة معاينة بديلة على طلب قايم** (ADR-0065 §3) — نقطة الكتابة الوحيدة لتحديث
+   * منفّذ الطلب وسعره مع بعض.
+   *
+   * التذكرة بتتقفل هنا (`FOR UPDATE`) وبتتفحص تاني جوّه الترانزاكشن — نفس نمط `create()` بالحرف،
+   * عشان نداءين متزامنين مايستهلكوش نفس التذكرة. وبعدها الفني بيتفحص بنفس بوابة المطابقة قبل ما
+   * الطلب يرجع للتوزيع، فالبديل نفسه مايبقاش «مختار» وهو أصلاً مرفوض.
+   *
+   * **السعر بيتحدّث من لقطة التذكرة، مش بيفضل زي ما هو.** المدخلات واحدة (البصمة اتفحصت فوق)،
+   * فالفرق الوحيد هو مضاعف مستوى المنفّذ الجديد — والعميل شافه في المعاينة ووافق عليه.
+   */
+  private async consumeReplacementPreview(
+    manager: EntityManager,
+    order: Order,
+    previewId: string,
+  ): Promise<void> {
+    const locked = await manager
+      .createQueryBuilder(BookingMatchPreview, 'preview')
+      .setLock('pessimistic_write')
+      .where('preview.id = :id AND preview.customerId = :customerId', { id: previewId, customerId: order.customerId })
+      .getOne();
+    if (!locked || locked.status !== 'active' || locked.expiresAt.getTime() <= Date.now() || !locked.technicianId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'معاينة الفني والسعر لم تعد صالحة — اعمل معاينة جديدة',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (this.assignmentGuard) {
+      const technician = await manager
+        .createQueryBuilder(TechnicianProfile, 'tp')
+        .setLock('pessimistic_write')
+        .where('tp.id = :id', { id: locked.technicianId })
+        .getOne();
+      if (!technician) {
+        throw new ApiException(ErrorCode.ORDR_001, LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, HttpStatus.CONFLICT);
+      }
+      try {
+        await this.assignmentGuard.assertEligible(manager, technician, order);
+      } catch {
+        throw new ApiException(ErrorCode.ORDR_001, LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, HttpStatus.CONFLICT);
+      }
+    }
+
+    const snapshot = locked.pricingSnapshot as unknown as PreviewOrderResponseDto;
+    order.requestedTechnicianId = locked.technicianId;
+    order.selectedMatchPreviewId = locked.id;
+    order.estimatedPriceCents = snapshot.base_price_cents;
+    order.inspectionFeeCents = snapshot.inspection_fee_cents;
+    order.surgeAmountCents = snapshot.emergency_surcharge_cents;
+    order.discountAmountCents = snapshot.discount_cents;
+    order.warrantyPriceCents = snapshot.warranty_price_cents;
+    order.totalAmountCents = locked.finalPriceCents;
+    if (snapshot.duration_minutes !== null) order.durationMinutes = snapshot.duration_minutes;
+    if (snapshot.estimated_duration_days !== null) order.estimatedDurationDays = snapshot.estimated_duration_days;
+    if (snapshot.required_technicians !== null) order.requiredTechnicians = snapshot.required_technicians;
+    if (snapshot.required_assistants !== null) order.requiredAssistants = snapshot.required_assistants;
+
+    locked.status = 'consumed';
+    locked.consumedAt = new Date();
+    locked.orderId = order.id;
+    await manager.save(locked);
+  }
+
+  /**
    * العميل بيستخدمها لما طلبه يبقى `awaiting_technician_reselection` (فني لغى طلب كان مختاره
    * بنفسه) — إما يختار فني بديل بعينه (`requested_technician_id`) أو يسيب المطابقة التلقائية
    * تختار. الطلب الأصلي (خدمة/عنوان/موعد) محفوظ بالكامل — مفيش إنشاء طلب جديد.
@@ -3287,6 +3406,51 @@ export class OrdersService {
     }
     if (dto.requested_technician_id) {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
+    }
+
+    // **ADR-0065 §3** — طلب سعره اتحسب على أساس فني بعينه مايرجعش للتوزيع بنفس الفاتورة. الفني
+    // البديل ممكن يكون مستوى أغلى، فالرجوع الصامت كان بيبقى زيادة سعر بلا موافقة — نفس اللي
+    // القفل اتعمل عشانه من الأساس، بس من الباب التاني.
+    const priceBound = orderPriceIsProviderBound(order);
+    if (priceBound && !dto.match_preview_id) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'سعر الطلب ده اتحسب على أساس فني بعينه — اعمل معاينة جديدة واختار منها فني وسعره قبل ما نكمّل',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    let replacementPreview: BookingMatchPreview | null = null;
+    if (dto.match_preview_id) {
+      replacementPreview = await this.dataSource.getRepository(BookingMatchPreview).findOne({
+        where: { id: dto.match_preview_id, customerId: order.customerId },
+      });
+      if (
+        !replacementPreview ||
+        replacementPreview.status !== 'active' ||
+        replacementPreview.expiresAt.getTime() <= Date.now() ||
+        !replacementPreview.technicianId
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'معاينة الفني والسعر انتهت أو استُخدمت — اعمل معاينة جديدة قبل التأكيد',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (
+        replacementPreview.serviceId !== order.serviceId ||
+        replacementPreview.addressId !== order.addressId ||
+        (priceBound && replacementPreview.bookingContextHash !== order.bookingContextHash)
+      ) {
+        // ADR-0065 §4 — البصمة هي اللي بتمنع «معاينة لشغلانة أرخص» تتستخدم لطلب قايم.
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'المعاينة دي مش لنفس تفاصيل الطلب — اعمل معاينة جديدة من صفحة الطلب',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (dto.requested_technician_id && dto.requested_technician_id !== replacementPreview.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني المرسل مختلف عن الفني المثبّت في المعاينة', HttpStatus.CONFLICT);
+      }
     }
 
     const previousStatus = order.orderStatus;
@@ -3301,6 +3465,9 @@ export class OrdersService {
       }
       lockedOrder.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
       lockedOrder.requestedTechnicianId = dto.requested_technician_id ?? null;
+      if (replacementPreview) {
+        await this.consumeReplacementPreview(manager, lockedOrder, replacementPreview.id);
+      }
       await manager.save(lockedOrder);
 
       await manager.save(

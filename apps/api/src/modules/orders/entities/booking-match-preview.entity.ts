@@ -32,6 +32,10 @@ export class BookingMatchPreview {
   @Column({ name: 'context_hash', type: 'varchar', length: 64 })
   contextHash: string;
 
+  /** ADR-0065 §4 — نفس بصمة `orders.booking_context_hash` بالظبط (نفس الدالة بـtechnician_id فاضي). */
+  @Column({ name: 'booking_context_hash', type: 'varchar', length: 64, nullable: true })
+  bookingContextHash: string | null;
+
   @Column({ name: 'pricing_snapshot', type: 'jsonb' })
   pricingSnapshot: Record<string, unknown>;
 

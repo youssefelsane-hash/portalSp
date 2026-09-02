@@ -13,8 +13,18 @@ import {
   OrderEmergencyDispatchStrugglingEvent,
 } from '../../common/events/order-emergency-dispatch-struggling.event';
 import { ORDER_NO_TECHNICIAN_FOUND_EVENT, OrderNoTechnicianFoundEvent } from '../../common/events/order-no-technician-found.event';
+import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import {
+  ORDER_LOCKED_PROVIDER_LOST_EVENT,
+  OrderLockedProviderLostEvent,
+} from '../../common/events/order-locked-provider-lost.event';
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
+import {
+  LockedProviderLostReason,
+  LOCKED_PROVIDER_LOST_REASON_AR,
+  orderHasLockedProvider,
+} from '../orders/order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
@@ -529,6 +539,44 @@ export class MatchingService {
   }
 
   /**
+   * **فك قفل المنفّذ** (ADR-0065 §2) — نقطة الكتابة الوحيدة للانتقال ده.
+   *
+   * بيحصل جوّه ترانزاكشن قافلة صف الطلب أصلاً (الكولر)، فالحالة والقفل والتذكرة بيتغيّروا مع
+   * بعض أو مايتغيّروش خالص. `selected_match_preview_id` **بيفضل** — سجل تاريخي لأي تذكرة أنشأت
+   * الطلب. اللي بينفك هو `requested_technician_id`، وبيه `orderHasLockedProvider()` بترجع false.
+   */
+  private async releaseLockedProvider(
+    manager: EntityManager,
+    order: Order,
+    reason: LockedProviderLostReason,
+  ): Promise<void> {
+    const previousStatus = order.orderStatus;
+    order.orderStatus = OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
+    order.requestedTechnicianId = null;
+    await manager.save(order);
+
+    // **التذكرة مابتتلمسش هنا** — وده اتأكد بقيد حقيقي في القاعدة
+    // (`chk_booking_match_preview_consumed`: `status='consumed'` ⇔ `consumed_at IS NOT NULL`).
+    // التذكرة **اتستهلكت فعلاً** لما الطلب اتعمل، والتاريخ ده صحيح ومايتلغيش لأن المنفّذ ضاع
+    // بعدين. وإعادة استخدامها مستحيلة أصلاً: كل مسارات الاستهلاك بتشترط `status = 'active'`.
+
+    await manager.save(
+      manager.create(OrderStatusHistory, {
+        orderId: order.id,
+        previousStatus,
+        newStatus: OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+        changedByUserId: null,
+        changedByRole: 'system',
+        changeSource: OrderChangeSource.SYSTEM,
+        reason: LOCKED_PROVIDER_LOST_REASON_AR[reason],
+      }),
+    );
+    this.logger.warn(
+      `قفل المنفّذ اتفك لطلب ${order.orderNumber} — ${LOCKED_PROVIDER_LOST_REASON_AR[reason]}`,
+    );
+  }
+
+  /**
    * كسر التعادل بين مرشّحين متقاربين (docs/08 §34.2، ADR-0020 §6، بند T من رسالة المالك — "avoid
    * permanent deterministic winners"). لو الفرق بين أعلى `rank_score` ومرشّحين تانيين أقل من
    * `threshold`، دول بيُعتبروا "متعادلين" — بدل ترتيب حتمي صارم بينهم، تشويش عشوائي موزون
@@ -756,6 +804,39 @@ export class MatchingService {
         pinnedOnlyCandidates = pinnedCandidates;
       }
 
+      // **ADR-0065 §1/§2 — قفل المنفّذ**. الطلب ده العميل شاف فيه اسم فني بعينه وسعره بالذات
+      // وأكّد. `requested_technician_id` هنا مش تفضيل، هو التزام — فالقايمة الحصرية هي القايمة
+      // الوحيدة، على **كل** الجولات مش الجولة الأولى بس (اللي كانت بتخلي الاستبدال يحصل بصمت
+      // بعد أول انتهاء مهلة). لو المنفّذ ضاع، الطلب بيقف عند العميل، ما بيروحش لحد تاني.
+      let lockedProviderLost: LockedProviderLostReason | null = null;
+      if (!pinnedOnlyCandidates && orderHasLockedProvider(order)) {
+        const lockedTechnicianId = order.requestedTechnicianId!;
+        const priorAssignments = await manager.find(OrderAssignment, {
+          where: { orderId, technicianId: lockedTechnicianId },
+        });
+        // عرض مفتوح لسه ما اتردّش عليه — نستناه، بلا عرض جديد وبلا أي بديل (نفس سلوك تثبيت
+        // إعادة الزيارة بالحرف).
+        if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.SENT)) {
+          return { kind: 'noop' as const };
+        }
+        if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.REJECTED)) {
+          lockedProviderLost = 'technician_declined';
+        } else if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.TIMEOUT)) {
+          lockedProviderLost = 'offer_expired';
+        } else {
+          const lockedCandidates = await this.findEligibleTechnicians(order, 1, lockedTechnicianId, isEmergency);
+          if (lockedCandidates.length === 0) {
+            lockedProviderLost = 'technician_unavailable';
+          } else {
+            pinnedOnlyCandidates = lockedCandidates;
+          }
+        }
+        if (lockedProviderLost) {
+          await this.releaseLockedProvider(manager, order, lockedProviderLost);
+          return { kind: 'provider_lost' as const, order, reason: lockedProviderLost };
+        }
+      }
+
       // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
       // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
       // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
@@ -855,6 +936,31 @@ export class MatchingService {
     });
 
     if (result.kind === 'noop') {
+      return { dispatched: 0 };
+    }
+    // ADR-0065 §2 — الطلب اتحوّل لـ`AWAITING_TECHNICIAN_RESELECTION` جوّه الترانزاكشن. الأحداث
+    // بره عمدًا (نفس فلسفة باقي الملف): محدش يسمع بحاجة لسه ما اتأكدتش.
+    if (result.kind === 'provider_lost') {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          result.order.id,
+          result.order.orderNumber,
+          OrderStatus.SEARCHING_TECHNICIAN,
+          OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+          result.order.customerId,
+          null,
+        ),
+      );
+      this.events.emit(
+        ORDER_LOCKED_PROVIDER_LOST_EVENT,
+        new OrderLockedProviderLostEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.order.customerId,
+          result.reason,
+        ),
+      );
       return { dispatched: 0 };
     }
     if (result.kind === 'stalled') {
@@ -1079,6 +1185,12 @@ export class MatchingService {
       let candidates = order.requestedTechnicianId
         ? await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false)
         : [];
+      // ADR-0065 §1 — التأكيد التلقائي مالوش استثناء من قفل المنفّذ. لو الفني المقفول مش متاح،
+      // بنوقف هنا (`stalled`) بدل ما نأكّد فني تاني تلقائيًا — أخطر شكل من أشكال الاستبدال
+      // الصامت، لأنه بيتم بلا أي عرض ولا رد. `dispatchNextRound()` هي اللي بتفك القفل رسميًا.
+      if (candidates.length === 0 && orderHasLockedProvider(order)) {
+        return { kind: 'stalled' as const, order };
+      }
       if (candidates.length === 0 && order.requestedTechnicianCompanyId) {
         candidates = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
       }

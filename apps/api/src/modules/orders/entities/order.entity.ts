@@ -234,6 +234,14 @@ export class Order {
   @Column({ name: 'selected_match_preview_id', type: 'uuid', nullable: true })
   selectedMatchPreviewId: string | null;
 
+  /**
+   * ADR-0065 §4 — بصمة مدخلات الحجز **بلا الفني**. إعادة اختيار المنفّذ بتقارنها بتذكرة المعاينة
+   * الجديدة عشان تتأكد إن التذكرة لنفس الشغلانة، مش لشغلانة أرخص. `null` للطلبات اللي اتعملت
+   * قبل migration 0248 أو من غير تذكرة أصلاً.
+   */
+  @Column({ name: 'booking_context_hash', type: 'varchar', length: 64, nullable: true })
+  bookingContextHash: string | null;
+
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;
 
