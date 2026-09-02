@@ -153,8 +153,13 @@ export interface PriceEstimateDto {
   estimated_total_cents: number;
   emergency_surcharge_cents: number;
   emergency_sla_minutes: number | null;
+  /** حدود **قصّ** المحرك — مش نطاق بيتعرض للعميل (بند 29). */
   min_price_cents: number | null;
   max_price_cents: number | null;
+  /** **نطاق العرض** للعميل (ADR-0063، بند 10) — ده اللي بيترسم، منفصل عن القصّ فوق. */
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
   pricing_evaluation_id: string | null;
   estimated_duration_days: number | null;
 }

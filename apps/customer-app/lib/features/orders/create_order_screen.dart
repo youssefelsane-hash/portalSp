@@ -943,22 +943,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildPriceLine('السعر الأساسي', _formatEgp(preview.basePriceCents)),
-        if (preview.minPriceCents != null && preview.maxPriceCents != null)
+        // بند 10/29 — النطاق المعروض بييجي من **حقول العرض**، مش من `min/max_price_cents`.
+        // دول حدود قصّ للمحرك: عرضهم للعميل كـ«نطاق تقديري» بيدّيه رقمين مالهمش علاقة بالتقدير
+        // الحقيقي للشغل اللي طلبه — وده بالظبط اللي البند 29 بيمنعه بالنص.
+        // والنطاق للخدمات «نطاق تقديري» بس: خدمة سعرها مؤكد لو عرضت نطاق بتقلّل ثقة العميل في
+        // رقم هو أصلاً نهائي.
+        if (preview.priceCertaintyMode == 'estimated_range' &&
+            preview.displayPriceMinCents != null &&
+            preview.displayPriceMaxCents != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              'نطاق تقديري: ${_formatEgp(preview.minPriceCents!)} – ${_formatEgp(preview.maxPriceCents!)}',
+              'نطاق تقديري: ${_formatEgp(preview.displayPriceMinCents!)} – ${_formatEgp(preview.displayPriceMaxCents!)}',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
         if (preview.inspectionFeeCents > 0)
           _buildPriceLine('رسوم الفحص', _formatEgp(preview.inspectionFeeCents)),
-        if (preview.emergencySurchargeCents > 0)
-          _buildPriceLine(
-            'رسوم الطوارئ',
-            '+${_formatEgp(preview.emergencySurchargeCents)}',
-            color: Colors.orange,
-          ),
+        // بند 5/13 — رسوم الطوارئ **مابتتعرضش كبند مستقل للعميل**. بتفضل في الإجمالي واللقطة
+        // المالية وشاشة الأدمن زي ما هي؛ اللي اتشال هو السطر المعروض بس، بالظبط زي customer-web.
+        // `emergencySlaMinutes` تحت مالوش علاقة — ده وقت وصول متوقع، معلومة مفيدة مش تفكيك فلوس.
         if (preview.emergencySlaMinutes != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
