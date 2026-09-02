@@ -1,3 +1,10 @@
+import { CatalogService } from '../catalog/catalog.service';
+import { ServiceAddon } from '../catalog/entities/service-addon.entity';
+import { ServiceCategory } from '../catalog/entities/service-category.entity';
+import { ServiceLevelPricing } from '../catalog/entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from '../catalog/entities/service-pricing-tier-pricing.entity';
+import { ServiceStandardData } from '../catalog/entities/service-standard-data.entity';
+import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';
 import { DataSource } from 'typeorm';
 import { Service } from '../catalog/entities/service.entity';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
@@ -40,7 +47,7 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Service, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
+      entities: [Service, ServicePricingField, ServicePricingRule, ServicePricingEvaluation, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData, ServicePricingTierPricing],
     });
     await dataSource.initialize();
     const auditStub = { record: async () => undefined } as never;
@@ -177,5 +184,30 @@ describe('قوالب التسعير — كل قالب بيولّد فلو شغّ
         migrated.max_price_cents,
       ),
     );
+  });
+
+  // المسار اللي العميل بيمشي فيه فعلاً (`CatalogService.estimate()`) مش المحرك لوحده — ده اللي
+  // بيثبت إن «الحجز بالشهر» شغّال end-to-end من الشاشة، وهو البلاغ الأصلي.
+  it('المسار العام للعميل: خدمة شهرية بتتسعّر من حقلي التاريخ في الفورم', async () => {
+    const serviceId = await makeService('monthly-public', 1);
+    await templatesService.apply('admin-1', serviceId, PricingTemplateKey.MONTHLY, 250000);
+
+    const catalogService = new CatalogService(
+      dataSource.getRepository(ServiceCategory),
+      dataSource.getRepository(Service),
+      dataSource.getRepository(ServiceZonePricing),
+      dataSource.getRepository(ServiceLevelPricing),
+      dataSource.getRepository(ServiceAddon),
+      dataSource.getRepository(ServiceStandardData),
+      { getNumber: async (_key: string, fallback: number) => fallback } as never,
+      engine,
+      dataSource.getRepository(ServicePricingTierPricing),
+    );
+
+    const estimate = await catalogService.estimate(serviceId, undefined, undefined, false, {
+      period_start: '2026-03-01',
+      period_end: '2026-06-01',
+    });
+    expect(estimate.estimated_total_cents).toBe(750000);
   });
 });
