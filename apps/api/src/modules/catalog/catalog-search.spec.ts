@@ -44,14 +44,14 @@ describe('CatalogService.searchServices() — بحث بلغة طبيعية بس�
 
     const [leakService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, search_keywords)
-       VALUES ($1,$2,$3,'fixed',20000,$4) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',20000,$4) RETURNING id`,
       [ids.category, `إصلاح تسريب مواسير ${runId}`, `leak-repair-${runId}`, ['حوض', 'مياه بتنزل', 'تسريب من تحت']],
     );
     ids.leakService = leakService.id;
 
     const [wiringService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, search_keywords)
-       VALUES ($1,$2,$3,'fixed',30000,$4) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,$4) RETURNING id`,
       [ids.category, `تمديد كهرباء ${runId}`, `wiring-${runId}`, ['كهرباء بايظة', 'قصر']],
     );
     ids.wiringService = wiringService.id;

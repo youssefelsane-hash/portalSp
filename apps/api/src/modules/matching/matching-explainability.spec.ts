@@ -125,7 +125,7 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     ids.category = category.id;
     const [service_] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',30000,20,0,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0,60) RETURNING id`,
       [ids.category, `خدمة تفسير ${runId}`, `test-explain-service-${runId}`],
     );
     ids.service = service_.id;

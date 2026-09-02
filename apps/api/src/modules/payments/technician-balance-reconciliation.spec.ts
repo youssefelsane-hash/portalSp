@@ -66,7 +66,7 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
     ids.category = category.id;
     const [svc] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,commission_percentage,warranty_days)
-       VALUES ($1,$2,$3,'fixed',100000,15,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,15,0) RETURNING id`,
       [ids.category, `خدمة مطابقة ${runId}`, `rec-svc-${runId}`],
     );
     ids.service = svc.id;

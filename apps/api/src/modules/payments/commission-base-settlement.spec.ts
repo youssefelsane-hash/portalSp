@@ -149,7 +149,7 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
     ids.category = category.id;
     const [serviceRow] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,$4,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,$4,0) RETURNING id`,
       [ids.category, `خدمة اختبار ${runId}`, `test-service-cbs-${runId}`, COMMISSION_PERCENT],
     );
     ids.service = serviceRow.id;

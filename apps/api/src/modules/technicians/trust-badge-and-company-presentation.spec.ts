@@ -98,7 +98,7 @@ describe('علامة التوثيق + عرض الشركة (ADR-0039، docs/08 §
 
     const [svc] = await dataSource.query(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.categoryId, `خدمة توثيق ${runId}`, `trust-service-${runId}`],
     );
     ids.serviceId = svc.id;

@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { ServiceCategory } from './entities/service-category.entity';
@@ -26,7 +30,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData, ServicePricingTierPricing],
+      entities: [Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData, ServicePricingTierPricing, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -56,7 +60,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
     // خدمة عندها الاتنين: تسعير مستوى قديم (professional=1.2) وتسعير فئة جديد (premium=1.5) — لازم
     // الفئة الجديدة تغلب.
     const [tierService] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة فئة ${runId}`, `tier-service-${runId}`],
     );
     ids.tierService = tierService.id;
@@ -71,7 +75,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
 
     // خدمة من غير أي صف فئة خالص — لازم تفضل تستخدم تسعير المستوى القديم بالحرف (رجريشن).
     const [levelOnlyService] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة مستوى بس ${runId}`, `level-only-service-${runId}`],
     );
     ids.levelOnlyService = levelOnlyService.id;
@@ -88,7 +92,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       {} as never,
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   });

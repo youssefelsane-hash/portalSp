@@ -64,13 +64,13 @@ describe('اعتماد تخصص المساعد — نفس جدار الفني ب
 
     const [serviceA] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.category, `خدمة أ ${runId}`, `test-q-svc-a-${runId}`],
     );
     ids.serviceA = serviceA.id;
     const [serviceB] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.otherCategory, `خدمة ب ${runId}`, `test-q-svc-b-${runId}`],
     );
     ids.serviceB = serviceB.id;

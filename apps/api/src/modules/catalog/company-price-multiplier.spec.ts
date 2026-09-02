@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { CatalogService } from './catalog.service';
 import { Service } from './entities/service.entity';
@@ -40,8 +44,7 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
         ServiceLevelPricing,
         ServiceAddon,
         ServiceStandardData,
-        ServicePricingTierPricing,
-      ],
+        ServicePricingTierPricing, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -53,7 +56,7 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, inspection_fee_cents)
-       VALUES ($1,$2,$3,'fixed',100000,20,0,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,20,0,0) RETURNING id`,
       [ids.category, `خدمة معامل شركة ${runId}`, `company-mult-service-${runId}`],
     );
     ids.service = service.id;
@@ -73,7 +76,7 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsStub,
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   }, 20000);

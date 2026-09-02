@@ -83,7 +83,7 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
       [`فئة كشف ${runId}`, `Stmt Cat ${runId}`, `stmt-cat-${runId}`]);
     ids.category = category.id;
-    const [svc] = await q(`INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days) VALUES ($1,$2,$3,'fixed',100000,15,0) RETURNING id`,
+    const [svc] = await q(`INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days) VALUES ($1,$2,$3,'formula',100000,15,0) RETURNING id`,
       [ids.category, `خدمة كشف ${runId}`, `stmt-svc-${runId}`]);
     ids.service = svc.id;
     const [cu] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`, [`+2060${runId}`.slice(0, 15), `عميل كشف ${runId}`]);

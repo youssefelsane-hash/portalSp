@@ -56,13 +56,13 @@ describe('تصريح مهارات ذاتي للفني + موافقة أدمن (S
     ids.category = category.id;
     const [serviceA] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,20,0) RETURNING id`,
       [ids.category, `خدمة أ ${runId}`, `test-service-sd-a-${runId}`],
     );
     ids.serviceA = serviceA.id;
     const [serviceB] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,20,0) RETURNING id`,
       [ids.category, `خدمة ب ${runId}`, `test-service-sd-b-${runId}`],
     );
     ids.serviceB = serviceB.id;

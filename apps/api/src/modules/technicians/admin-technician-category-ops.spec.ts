@@ -123,13 +123,13 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     ids.otherCategory = otherCategory.id;
     const [service_] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [ids.category, `خدمة عمليات ${runId}`, `test-ops-service-${runId}`],
     );
     ids.service = service_.id;
     const [otherService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [ids.otherCategory, `خدمة عمليات تانية ${runId}`, `test-ops-other-service-${runId}`],
     );
     ids.otherService = otherService.id;

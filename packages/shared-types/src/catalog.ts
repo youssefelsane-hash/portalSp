@@ -2,7 +2,9 @@
 import type { TechnicianLevel, TechnicianPricingTier } from './technicians';
 
 // 'formula' — محرك التسعير الديناميكي (docs/08 §1، ADR-0001)، راجع pricing.ts لباقي أنواعه.
-export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote' | 'formula';
+// ADR-0060 §1 — قيمتين بس. اللي كان اسمه «سعر ثابت / بالساعة / بالوحدة / شهري» بقى **قوالب**
+// بتولّد معادلة (`PRICING_TEMPLATES` في pricing.ts)، مش أوضاع تشغيل.
+export type PricingModel = 'inspection_then_quote' | 'formula';
 
 export interface AdminServiceCategoryResponseDto {
   id: string;

@@ -1,3 +1,4 @@
+import { Service } from '../catalog/entities/service.entity';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { PricingEngineService } from './pricing-engine.service';
@@ -72,7 +73,7 @@ describe('PricingEngineService.evaluateDraft() + PricingRuleTestsService (Script
       payload: { price_cents: { type: 'multiply', operands: [{ type: 'field_ref', field_key: 'area' }, { type: 'literal', value: 100 }] } },
     });
 
-    pricingEngineService = new PricingEngineService(dataSource.getRepository(ServicePricingEvaluation), fieldsService, rulesService);
+    pricingEngineService = new PricingEngineService(dataSource.getRepository(ServicePricingEvaluation), fieldsService, rulesService, dataSource.getRepository(Service));
     ruleTestsService = new PricingRuleTestsService(
       dataSource.getRepository(ServicePricingRuleTest),
       pricingEngineService,

@@ -2,8 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { PricingModel } from '../catalog/entities/service.entity';
-import { pricingMethod } from './pricing-methods';
+import { Service } from '../catalog/entities/service.entity';
 import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { describeFormulaPayload, evaluateFormulaNodeWithTrace } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
@@ -11,6 +10,7 @@ import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
 import { PricingRuleType } from './entities/service-pricing-rule.entity';
+import { PricingTemplateKey, pricingTemplateFinalPricePayload } from './pricing-templates';
 import {
   ConstantRulePayload,
   FinalPriceFormulaPayload,
@@ -24,9 +24,6 @@ import {
   pricingContextFormulaValues,
   pricingContextGeoPoints,
 } from './pricing-context';
-
-/** كل قيم `PricingModel` ما عدا `formula` — الطرق الجاهزة اللي `evaluatePreset()` بتخدمها. */
-export type PricingPresetKind = Exclude<PricingModel, PricingModel.FORMULA>;
 
 // معاينة الأدمن (`evaluateDraft`) بتيجي بلا سياق طلب — حقول التاريخ/الموقع في الفورم لازم تفضل
 // شغالة فيها، وده بيديها نفس الاشتقاق بمصادر نظام فاضية.
@@ -59,39 +56,9 @@ export class PricingEngineService {
     @InjectRepository(ServicePricingEvaluation) private readonly evaluations: Repository<ServicePricingEvaluation>,
     private readonly fieldsService: PricingFieldsService,
     private readonly rulesService: PricingRulesService,
+    // append-only زي باقي المشروع — لازم للسقوط الافتراضي على «سعر ثابت» لخدمة لسه بلا معادلة.
+    @InjectRepository(Service) private readonly services: Repository<Service>,
   ) {}
-
-  /**
-   * حساب سعر لطريقة جاهزة (مش معادلة) — **lookup في سجل واحد، مش `switch` هنا** (ADR-0050 §1).
-   *
-   * الشجرة اللي السجل بيرجّعها بتتنفّذ في نفس `evaluateFormulaNode()` اللي المعادلة الديناميكية
-   * بتتنفّذ فيه بالحرف. مفيش مسار حساب تاني في المشروع.
-   */
-  evaluatePreset(
-    preset: PricingPresetKind,
-    basePriceCents: number,
-    context: PricingContext,
-    minPriceCents: number | null,
-    maxPriceCents: number | null,
-  ): PricingEvaluationResult & { evaluationId: null } {
-    const systemValues = pricingContextFormulaValues(context);
-    const priceNode = pricingMethod(preset).buildPrice({ type: 'literal', value: basePriceCents });
-
-    const payload: FinalPriceFormulaPayload = {
-      price_cents: priceNode,
-      ...(minPriceCents !== null ? { min_price_cents: { type: 'literal' as const, value: minPriceCents } } : {}),
-      ...(maxPriceCents !== null ? { max_price_cents: { type: 'literal' as const, value: maxPriceCents } } : {}),
-    };
-    const formulaContext: FormulaEvaluationContext = {
-      fieldValues: systemValues,
-      constants: new Map(),
-      lookupTables: new Map(),
-      // الطرق الجاهزة بتقدر تستخدم date_diff زي أي معادلة (ADR-0050 §4 — الشهري بفترة تاريخين).
-      dateValues: pricingContextDateValues(context, context.serviceFieldValues),
-      geoPoints: pricingContextGeoPoints(context, context.serviceFieldValues),
-    };
-    return { ...this.computeResult(payload, formulaContext), evaluationId: null };
-  }
 
   async evaluate(
     serviceId: string,
@@ -232,6 +199,22 @@ export class PricingEngineService {
         lookupTables.set(rule.ruleKey, rule.payload as LookupTableRulePayload);
       } else if (rule.ruleType === PricingRuleType.FORMULA && rule.ruleKey === 'final_price') {
         finalPricePayload = rule.payload as FinalPriceFormulaPayload;
+      }
+    }
+
+    // خدمة لسه الأدمن ما بناش ليها معادلة = **سعر ثابت عند `base_price_cents`** (ADR-0060 §2).
+    // ده مش «محرك تاني»: الشجرة الافتراضية هي حرفيًا شجرة قالب «سعر ثابت» من نفس السجل، وبتتنفّذ
+    // في نفس المُقيّم. الفايدة إن خدمة جديدة بتشتغل من أول لحظة بدل ما ترمي «مفيش معادلة سارية»
+    // قبل ما الأدمن يخلص إعدادها.
+    if (!finalPricePayload) {
+      const service = await this.services.findOne({ where: { id: serviceId } });
+      if (service) {
+        finalPricePayload = pricingTemplateFinalPricePayload(
+          PricingTemplateKey.FIXED,
+          service.basePriceCents,
+          service.minPriceCents,
+          service.maxPriceCents,
+        );
       }
     }
 

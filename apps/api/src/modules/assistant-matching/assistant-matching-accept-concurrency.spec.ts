@@ -98,7 +98,7 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
     ids.category = category.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents)
-       VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة اختبار ${runId}`, `test-service-${runId}`],
     );
     ids.service = svc.id;

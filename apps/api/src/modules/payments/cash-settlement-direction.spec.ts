@@ -155,13 +155,13 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     ids.category = category.id;
     const [service20] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,20,0) RETURNING id`,
       [ids.category, `خدمة عمولة 20 ${runId}`, `test-service-csd20-${runId}`],
     );
     ids.service20 = service20.id;
     const [serviceZero] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,0,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,0,0) RETURNING id`,
       [ids.category, `خدمة عمولة صفر ${runId}`, `test-service-csd0-${runId}`],
     );
     ids.serviceZero = serviceZero.id;

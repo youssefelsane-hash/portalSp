@@ -9,10 +9,8 @@ import {
   CalendarDays,
   CalendarRange,
   Camera,
-  Clock3,
   CreditCard,
   Eye,
-  Hourglass,
   Repeat2,
   Siren,
   UserRound,
@@ -41,7 +39,7 @@ import type {
   UpsertPricingTierPricingBody,
   UpsertZonePricingBody,
 } from '@baytak/shared-types';
-import { PRICING_METHODS } from '@baytak/shared-types';
+import { PRICING_MODEL_LABELS, PRICING_TEMPLATES, type PricingTemplateKey } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell, useAdminBack } from '@/components/app-shell';
@@ -61,12 +59,10 @@ import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config
 import { PricingBuilder } from './pricing-builder';
 
 
-/** وصف المدخل اللي كل طريقة بتطلبه من العميل — عرض بس، المصدر هو `requires` في السجل. */
-const PRICING_METHOD_INPUT_LABELS: Record<(typeof PRICING_METHODS)[PricingModel]['requires'], string> = {
-  none: 'مايدخّلش أي حاجة إضافية للسعر.',
-  duration: 'عدد الساعات (أو وقت البداية والنهاية).',
-  quantity: 'الكمية المطلوبة.',
-  period: 'تاريخ بداية وتاريخ نهاية الاشتراك.',
+/** شرح الطريقتين الباقيتين (ADR-0060 §1). */
+const PRICING_MODEL_DESCRIPTIONS: Record<PricingModel, string> = {
+  formula: 'السعر بيتحسب من الحقول والمعادلة اللي تحت. تقدر تبدأ من قالب جاهز وتعدّل عليه.',
+  inspection_then_quote: 'مفيش سعر وقت الحجز — بيتحصّل رسم الكشف بس، والسعر بيتبعت للعميل بعد المعاينة.',
 };
 
 const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
@@ -142,10 +138,11 @@ export default function ServiceDetailPage() {
   const [actualsFormOpenFor, setActualsFormOpenFor] = useState<string | null>(null);
   // تسمية ديناميكية لحقل السعر الأساسي (طلب مالك صريح 2026-08-22) — لما نوع التسعير bالساعة،
   // الحقل ده فعليًا "سعر الساعة" وبيتضرب في عدد الساعات المختارة (ADR-0031 Slice H).
-  const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('fixed');
+  const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('formula');
   // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
   // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
-  const [schedulingMode, setSchedulingMode] = useState<'none' | 'precise' | 'start_only' | 'hours_only' | 'start_and_end'>('none');
+  // ADR-0060 §4 — وضعين بس. التلاتة اللي اتشالوا كانوا بيطلبوا مدخلات تسعير مش بيانات جدولة.
+  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('full_day');
 
   // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
   // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
@@ -162,17 +159,7 @@ export default function ServiceDetailPage() {
     setService(next);
     if (!next) return;
     setPricingModelLive(next.pricing_model);
-    setSchedulingMode(
-      next.requires_precise_schedule
-        ? 'precise'
-        : next.requires_start_time_only
-          ? 'start_only'
-          : next.requires_hours_only
-            ? 'hours_only'
-            : next.requires_start_and_end
-              ? 'start_and_end'
-              : 'none',
-    );
+    setSchedulingMode(next.requires_start_time_only ? 'start_time' : 'full_day');
   }
 
   function loadAll() {
@@ -674,7 +661,7 @@ export default function ServiceDetailPage() {
             >
               <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.8fr)]">
                 <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
-                  <Label htmlFor="svc_pricing_model">طريقة حساب السعر</Label>
+                  <Label htmlFor="svc_pricing_model">طريقة تحديد السعر</Label>
                   <SelectNative
                     id="svc_pricing_model"
                     name="pricing_model"
@@ -682,28 +669,21 @@ export default function ServiceDetailPage() {
                     className="mt-2"
                     onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
                   >
-                    {(Object.keys(PRICING_METHODS) as PricingModel[]).map((value) => (
+                    {(Object.keys(PRICING_MODEL_LABELS) as PricingModel[]).map((value) => (
                       <option key={value} value={value}>
-                        {PRICING_METHODS[value].labelAr}
+                        {PRICING_MODEL_LABELS[value]}
                       </option>
                     ))}
                   </SelectNative>
-                  {/* ADR-0050 §1 — الشرح والمدخل المطلوب بيتقروا من سجل الطرق المشترك، اللي
-                      الباك-إند بيحسب بيه فعلاً. سلسلة الـternary القديمة كانت بتفوّت طريقتين
-                      (بالوحدة والشهري) وبتديهم نص عام مش بيوصف حسابهم أصلاً. */}
                   <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                    {PRICING_METHODS[pricingModelLive].descriptionAr}
-                  </p>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    <span className="font-medium">اللي العميل بيدخّله: </span>
-                    {PRICING_METHOD_INPUT_LABELS[PRICING_METHODS[pricingModelLive].requires]}
+                    {PRICING_MODEL_DESCRIPTIONS[pricingModelLive]}
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
                       غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
-                  <Label htmlFor="svc_base_price">{PRICING_METHODS[pricingModelLive].rateLabelAr}</Label>
+                  <Label htmlFor="svc_base_price">السعر الأساسي (جنيه) — المعادلة هي اللي بتحكم</Label>
                   <Input id="svc_base_price" name="base_price" type="number" min="0" step="0.01" defaultValue={service.base_price_cents / 100} />
                 </div>
                 <div className="flex flex-col gap-1">
@@ -878,47 +858,23 @@ export default function ServiceDetailPage() {
                 <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
                   <div className="mb-3">
                     <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">اختيار واحد فقط. الوضع الافتراضي مناسب لمعظم خدمات الصيانة اليومية.</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">وضعين بس: يا إما التاريخ بس، يا إما التاريخ + ساعة الوصول. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
                   </div>
-                  {schedulingMode === 'precise' && <input type="hidden" name="requires_precise_schedule" value="on" />}
-                  {schedulingMode === 'start_only' && <input type="hidden" name="requires_start_time_only" value="on" />}
-                  {schedulingMode === 'hours_only' && <input type="hidden" name="requires_hours_only" value="on" />}
-                  {schedulingMode === 'start_and_end' && <input type="hidden" name="requires_start_and_end" value="on" />}
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  {schedulingMode === 'start_time' && <input type="hidden" name="requires_start_time_only" value="on" />}
+                  <div className="grid gap-3 md:grid-cols-2">
                     <SchedulingModeChoice
-                      active={schedulingMode === 'none'}
+                      active={schedulingMode === 'full_day'}
                       title="يوم كامل"
-                      description="موعد باليوم فقط، من غير ساعة أو مدة إضافية."
+                      description="العميل بيختار التاريخ بس — من غير ساعة. مناسب لمعظم شغل الصيانة."
                       icon={CalendarDays}
-                      onSelect={() => setSchedulingMode('none')}
+                      onSelect={() => setSchedulingMode('full_day')}
                     />
                     <SchedulingModeChoice
-                      active={schedulingMode === 'precise'}
-                      title="بداية + مدة"
-                      description="وقت بداية محدد وعدد ساعات، مثل التنظيف بالساعة."
-                      icon={Clock3}
-                      onSelect={() => setSchedulingMode('precise')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'start_only'}
+                      active={schedulingMode === 'start_time'}
                       title="وقت بداية فقط"
-                      description="بداية محددة من غير مدة أو وقت نهاية."
+                      description="العميل بيختار التاريخ وساعة وصول الفني. المدة بيحسبها محرك التسعير."
                       icon={CalendarClock}
-                      onSelect={() => setSchedulingMode('start_only')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'hours_only'}
-                      title="عدد ساعات فقط"
-                      description="مدة مطلوبة من غير تحديد ساعة وصول دقيقة."
-                      icon={Hourglass}
-                      onSelect={() => setSchedulingMode('hours_only')}
-                    />
-                    <SchedulingModeChoice
-                      active={schedulingMode === 'start_and_end'}
-                      title="بداية ونهاية"
-                      description="تاريخ ووقت بداية ونهاية، مناسب للعقود والإقامات."
-                      icon={CalendarRange}
-                      onSelect={() => setSchedulingMode('start_and_end')}
+                      onSelect={() => setSchedulingMode('start_time')}
                     />
                   </div>
                 </div>
@@ -1442,9 +1398,80 @@ export default function ServiceDetailPage() {
       {service.pricing_model === 'formula' && (
         <div className="mt-6">
           <h2 className="mb-3 text-lg font-semibold">محرك التسعير الديناميكي</h2>
+          {/* ADR-0060 §2 — القوالب مش أوضاع تشغيل: كل زرار بيزرع الحقول ويكتب شجرة `final_price`
+              مرة واحدة، وبعدها الخدمة معادلة عادية بيتعدّل عليها من البانِي تحت. */}
+          <PricingTemplateStrip serviceId={id} baseCents={service.base_price_cents} onApplied={() => window.location.reload()} />
           <PricingBuilder serviceId={id} />
         </div>
       )}
     </AppShell>
+  );
+}
+
+
+/**
+ * شريط قوالب التسعير (ADR-0060 §2).
+ *
+ * القالب بيتطبّق مرة واحدة: بيزرع الحقول اللي محتاجها في فورم الخدمة، وبيكتب شجرة `final_price`.
+ * بعدها الخدمة معادلة عادية بالكامل — مفيش «وضع تشغيل» محفوظ في أي مكان.
+ */
+function PricingTemplateStrip({
+  serviceId,
+  baseCents,
+  onApplied,
+}: {
+  serviceId: string;
+  baseCents: number;
+  onApplied: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const [busy, setBusy] = useState<PricingTemplateKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function apply(key: PricingTemplateKey) {
+    const template = PRICING_TEMPLATES[key];
+    const raw = window.prompt(`${template.rateLabelAr}:`, String(baseCents / 100));
+    if (raw === null) return;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) {
+      setError('السعر لازم يكون رقم مش أقل من صفر');
+      return;
+    }
+    setBusy(key);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/${serviceId}/pricing/apply-template`, {
+        method: 'POST',
+        body: JSON.stringify({ template_key: key, rate_cents: Math.round(value * 100) }),
+      });
+      onApplied();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تطبيق القالب');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-background/85 p-4">
+      <p className="text-sm font-semibold">ابدأ من قالب جاهز</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        القالب بيزرع الحقول ويكتب المعادلة مرة واحدة — بعد كده عدّل عليها زي أي معادلة تانية.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(Object.keys(PRICING_TEMPLATES) as PricingTemplateKey[]).map((key) => (
+          <Button key={key} type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => apply(key)}>
+            {busy === key ? '...' : PRICING_TEMPLATES[key].labelAr}
+          </Button>
+        ))}
+      </div>
+      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+        {(Object.keys(PRICING_TEMPLATES) as PricingTemplateKey[])
+          .filter((key) => PRICING_TEMPLATES[key].fields.length > 0)
+          .map((key) => `${PRICING_TEMPLATES[key].labelAr}: ${PRICING_TEMPLATES[key].fields.map((f) => f.labelAr).join(' + ')}`)
+          .join(' — ')}
+      </p>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </div>
   );
 }

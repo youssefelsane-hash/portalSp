@@ -59,7 +59,7 @@ describe('OrdersService.continueWorkAnotherDay (ADR-0047)', () => {
     ids.category = cat.id;
     const [svc] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, base_price_cents, pricing_model)
-       VALUES ($1,$2,$3,$4,50000,'fixed') RETURNING id`,
+       VALUES ($1,$2,$3,$4,50000,'formula') RETURNING id`,
       [ids.category, `خدمة استكمال ${runId}`, `cont svc ${runId}`, `cont-svc-${runId.toLowerCase()}`],
     );
     ids.service = svc.id;

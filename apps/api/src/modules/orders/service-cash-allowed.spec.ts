@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -106,8 +110,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
         ServiceAddon,
         ServiceStandardData,
         TechnicianLevelConfig,
-        LoyaltyTransaction,
-      ],
+        LoyaltyTransaction, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -134,7 +137,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
     ids.category = category.id;
     const [serviceCashDisabled] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, cash_allowed)
-       VALUES ($1,$2,$3,'fixed',50000,20,0,false) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0,false) RETURNING id`,
       [ids.category, `خدمة بلا كاش ${runId}`, `test-service-no-cash-${runId}`],
     );
     ids.serviceCashDisabled = serviceCashDisabled.id;
@@ -142,7 +145,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
     // أي خدمة موجودة قبل الـmigration ده بالظبط.
     const [serviceCashEnabled] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',50000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',50000,20,0) RETURNING id`,
       [ids.category, `خدمة عادية ${runId}`, `test-service-default-cash-${runId}`],
     );
     ids.serviceCashEnabled = serviceCashEnabled.id;
@@ -180,7 +183,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
       settingsService,
       // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
       // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
     const techniciansService = new TechniciansService(
@@ -254,7 +257,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       {} as never,
       {} as never,
       {} as never,
@@ -313,5 +316,48 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
     } as never);
     expect(order.serviceId).toBe(ids.serviceCashEnabled);
     expect(order.totalAmountCents).toBe(50000);
+  });
+
+  // ─── دقة الموعد بقت وضعين بس (ADR-0060 §4، docs/08 §113) ─────────────────
+  //
+  // المدة والفترة مابقوش مدخلات حجز — بقوا حقول في فورم الخدمة وناتج محرك التسعير. الاختبارات
+  // دي بتثبت الرفض على مسار `OrdersService.create()` الحقيقي (نظيره على القوالب المتكررة في
+  // `recurring-orders-capability.spec.ts`).
+
+  it('duration_hours كمدخل حجز: تترفض — المدة بقت من محرك التسعير (ADR-0060)', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.serviceCashEnabled,
+        address_id: ids.address,
+        duration_hours: 3,
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('scheduled_end_at كمدخل حجز: تترفض — الفترة بقت حقول في فورم الخدمة (ADR-0060)', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.serviceCashEnabled,
+        address_id: ids.address,
+        scheduled_end_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('خدمة «وقت بداية فقط» من غير scheduled_at: تترفض', async () => {
+    await dataSource.query(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.serviceCashEnabled]);
+    try {
+      await expect(
+        ordersService.create(ids.customerUser, { service_id: ids.serviceCashEnabled, address_id: ids.address } as never),
+      ).rejects.toMatchObject({ code: 'VAL_001' });
+    } finally {
+      await dataSource.query(`UPDATE services SET requires_start_time_only = false WHERE id = $1`, [ids.serviceCashEnabled]);
+    }
+  });
+
+  it('قاعدة البيانات نفسها بترفض إحياء الأوضاع المتشالة (chk_services_schedule_modes_supported)', async () => {
+    await expect(
+      dataSource.query(`UPDATE services SET requires_precise_schedule = true WHERE id = $1`, [ids.serviceCashEnabled]),
+    ).rejects.toThrow(/chk_services_schedule_modes_supported/);
   });
 });

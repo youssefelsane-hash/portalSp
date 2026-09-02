@@ -76,13 +76,13 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
     const [promotable] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, pricing_model, base_price_cents, is_active, is_promotable)
-       VALUES ($1,$2,$3,$4,'fixed',30000,true,true) RETURNING id`,
+       VALUES ($1,$2,$3,$4,'formula',30000,true,true) RETURNING id`,
       [ids.category, `تسليك مواسير ${runId}`, `Pipe ${runId}`, `campaign-svc-a-${runId}`],
     );
     ids.servicePromotable = promotable.id;
     const [notPromotable] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, pricing_model, base_price_cents, is_active, is_promotable)
-       VALUES ($1,$2,$3,$4,'fixed',30000,true,false) RETURNING id`,
+       VALUES ($1,$2,$3,$4,'formula',30000,true,false) RETURNING id`,
       [ids.category, `خدمة مش جاهزة ${runId}`, `NotReady ${runId}`, `campaign-svc-b-${runId}`],
     );
     ids.serviceNotPromotable = notPromotable.id;

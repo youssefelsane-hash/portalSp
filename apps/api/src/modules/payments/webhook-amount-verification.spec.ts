@@ -96,7 +96,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     ids.category = category.id;
 
     const [serviceRow] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة اختبار ${runId}`, `test-service-pay-${runId}`],
     );
     ids.service = serviceRow.id;

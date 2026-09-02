@@ -60,7 +60,7 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     ids.addressId = addr.id;
     const [svc] = await dataSource.query(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active)
-       VALUES ($1,$2,$3,'fixed',100000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,true) RETURNING id`,
       [category.id, `خدمة حصص ${runId}`, `share-service-${runId}`],
     );
     ids.serviceId = svc.id;

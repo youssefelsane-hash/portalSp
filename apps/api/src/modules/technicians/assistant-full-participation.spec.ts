@@ -70,7 +70,7 @@ describe('ADR-0055 — المساعد مشارك كامل (حارس التعيي
     // خدمة "نقل عفش" — بالظبط نوع الشغل اللي المالك قال إنه شغل المساعدين.
     const [service] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active,estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',15000,true,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',15000,true,60) RETURNING id`,
       [ids.category, `نقل عفش ${runId}`, `test-part-svc-${runId}`],
     );
     ids.service = service.id;

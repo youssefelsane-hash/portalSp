@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -119,8 +123,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
         ServiceStandardData,
         TechnicianLevelConfig,
         LoyaltyTransaction,
-        Rating,
-      ],
+        Rating, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -147,7 +150,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'fixed',100000,20,14,false) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',100000,20,14,false) RETURNING id`,
       [ids.category, `خدمة المسار الذهبي ${runId}`, `test-service-gp-${runId}`],
     );
     ids.service = service.id;
@@ -197,7 +200,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       settingsService,
       // ADR-0050 §1 — `evaluatePreset()` بقى بيمر على محرك المعادلات لكل طرق الحساب، فمحرك
       // فاضي هنا مابقاش كافي. الطرق الجاهزة مابتقراش من الريبوهات، فالبناء بلا اعتماديات صح.
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
     const techniciansService = new TechniciansService(
@@ -273,7 +276,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       {} as never,
       {} as never,
       {} as never,

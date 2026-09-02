@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -113,8 +117,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
         ServiceAddon,
         ServiceStandardData,
         TechnicianLevelConfig,
-        LoyaltyTransaction,
-      ],
+        LoyaltyTransaction, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
 
@@ -137,7 +140,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     ids.category = category.id;
     const [serviceRow] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_recurring_booking)
-       VALUES ($1,$2,$3,'fixed',30000,15,0,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,15,0,true) RETURNING id`,
       [ids.category, `خدمة تكامل ${runId}`, `test-service-gen-${runId}`],
     );
     ids.service = serviceRow.id;
@@ -181,7 +184,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never,
     );
     const techniciansService = new TechniciansService(
@@ -265,7 +268,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       techniciansService,
       {} as never,
       scheduleService,
-      {} as never,
+      realPricingEngineService(dataSource), // pricingEngineService (ADR-0060 — كل خدمة بقت معادلة)
       {} as never,
       {} as never,
       {} as never,

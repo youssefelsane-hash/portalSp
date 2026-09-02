@@ -35,7 +35,7 @@ describe('CatalogService.findMostRequestedCategories (docs/08 §77-E2)', () => {
   async function makeService(categoryId: string, label: string): Promise<string> {
     const [row] = await q(
       `INSERT INTO services (category_id, name_ar, name_en, slug, base_price_cents, pricing_model)
-       VALUES ($1,$2,$3,$4,10000,'fixed') RETURNING id`,
+       VALUES ($1,$2,$3,$4,10000,'formula') RETURNING id`,
       [categoryId, `خدمة ${label} ${runId}`, `${label} svc ${runId}`, `mr-svc-${label}-${runId.toLowerCase()}`],
     );
     return row.id;

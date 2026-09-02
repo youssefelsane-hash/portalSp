@@ -94,7 +94,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
     ids.category = category.id;
     const [catalogService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [ids.category, `خدمة إحالة ${runId}`, `referral-service-${runId}`],
     );
     ids.service = catalogService.id;

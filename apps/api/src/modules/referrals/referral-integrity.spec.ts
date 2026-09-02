@@ -53,7 +53,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     ids.category = category.id;
     const [catalogService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,20,0) RETURNING id`,
       [ids.category, `خدمة referral ${runId}`, `referral-standard-service-${runId}`],
     );
     ids.service = catalogService.id;

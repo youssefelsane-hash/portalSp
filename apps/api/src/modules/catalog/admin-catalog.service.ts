@@ -259,20 +259,23 @@ export class AdminCatalogService {
     });
   }
 
-  // أوضاع التوقيت الأربعة (ADR-0032) — تحقق واضح على مستوى التطبيق قبل ما يوصل لـCHECK constraint
-  // الخام على الـDB (chk_services_scheduling_mode_exclusive)، عشان الأدمن ياخد رسالة عربية مفهومة
-  // بدل خطأ Postgres خام.
+  /**
+   * دقة الموعد بقت وضعين بس (ADR-0060 §4): «يوم كامل» (الافتراضي) أو «وقت بداية فقط».
+   *
+   * التلاتة اللي اتشالوا (`precise` = بداية+مدة، `hours_only`، `start_and_end`) كانوا بيطلبوا من
+   * العميل **مدخلات تسعير** مش بيانات جدولة. الرفض هنا برسالة عربية واضحة قبل ما يوصل لـCHECK
+   * الخام على الـDB (`chk_services_schedule_modes_supported`).
+   */
   private assertSchedulingModeExclusive(modes: {
     requiresPreciseSchedule: boolean;
     requiresStartTimeOnly: boolean;
     requiresHoursOnly: boolean;
     requiresStartAndEnd: boolean;
   }): void {
-    const activeCount = [modes.requiresPreciseSchedule, modes.requiresStartTimeOnly, modes.requiresHoursOnly, modes.requiresStartAndEnd].filter(Boolean).length;
-    if (activeCount > 1) {
+    if (modes.requiresPreciseSchedule || modes.requiresHoursOnly || modes.requiresStartAndEnd) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        'وضع توقيت واحد بس يقدر يكون فعّال لكل خدمة (دقة وقت / بداية بس / عدد ساعات بس / بداية ونهاية)',
+        'دقة الموعد بقت وضعين بس: «يوم كامل» أو «وقت بداية فقط». المدة والفترة بقوا حقول في فورم الخدمة',
         HttpStatus.BAD_REQUEST,
       );
     }

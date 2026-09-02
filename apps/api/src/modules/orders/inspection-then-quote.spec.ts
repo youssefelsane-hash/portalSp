@@ -1,3 +1,7 @@
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
+import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
+import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InspectionQuoteService } from './inspection-quote.service';
@@ -122,8 +126,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
         TechnicianCompany,
         CustomerProfile,
         LoyaltyTransaction,
-        Setting,
-      ],
+        Setting, ServicePricingField, ServicePricingRule, ServicePricingEvaluation],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -159,7 +162,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
 
     const [fixedService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',10000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,20,0) RETURNING id`,
       [ids.category, `خدمة ثابتة اختبار ${runId}`, `test-fixed-service-itq-${runId}`],
     );
     ids.fixedService = fixedService.id;
@@ -199,7 +202,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      new PricingEngineService({} as never, {} as never, {} as never),
+      realPricingEngineService(dataSource),
       {} as never,
     );
     const techniciansService = new TechniciansService(

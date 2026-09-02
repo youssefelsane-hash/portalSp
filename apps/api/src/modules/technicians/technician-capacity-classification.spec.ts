@@ -86,7 +86,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',10000,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,60) RETURNING id`,
       [category.id, `خدمة قدرة ${runId}`, `cap-service-${runId}`],
     );
     ids.service = service.id;
@@ -282,7 +282,7 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes)
-       VALUES ($1,$2,$3,'fixed',10000,60) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,60) RETURNING id`,
       [category.id, `خدمة عضوية ${runId}`, `member-service-${runId}`],
     );
     ids.service = service.id;

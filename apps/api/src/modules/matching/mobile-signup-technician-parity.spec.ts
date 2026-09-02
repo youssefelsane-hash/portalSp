@@ -183,7 +183,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     ids.realCategoryId = category.id;
     const [realService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage)
-       VALUES ($1,'تسليك مواسير',$2,'fixed',30000,20) RETURNING id`,
+       VALUES ($1,'تسليك مواسير',$2,'formula',30000,20) RETURNING id`,
       [ids.realCategoryId, `signup-drain-${runId}`],
     );
     ids.realServiceId = realService.id;

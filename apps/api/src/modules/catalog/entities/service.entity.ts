@@ -1,21 +1,24 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
+/**
+ * طريقة تحديد سعر الخدمة — **قيمتين بس** (ADR-0060 §1).
+ *
+ * `FORMULA` هي الحالة العامة لكل خدمة بيتحسبلها سعر: الشجرة في `service_pricing_rules`
+ * والحقول في `service_pricing_fields`. اللي كان اسمه «سعر ثابت / بالساعة / بالوحدة / شهري»
+ * بقى **قوالب** بتولّد الشجرة دي مرة واحدة (`pricing-templates.ts`) — مش أوضاع تشغيل.
+ *
+ * `INSPECTION_THEN_QUOTE` مش طريقة حساب، دي **غياب حساب وقت الحجز**: العميل بيدفع رسم كشف بس،
+ * والسعر بيتبعتله بعد المعاينة.
+ */
 export enum PricingModel {
-  FIXED = 'fixed',
-  HOURLY = 'hourly',
-  PER_UNIT = 'per_unit',
-  MONTHLY = 'monthly',
   INSPECTION_THEN_QUOTE = 'inspection_then_quote',
-  // محرك تسعير ديناميكي (docs/08 §1، ADR-0001) — الخدمة عندها حقول وقواعد تسعير مخصصة
-  // (service_pricing_fields/service_pricing_rules) بدل base_price_cents ثابت. راجع
-  // apps/api/src/modules/pricing/README.md للتفاصيل الكاملة.
   FORMULA = 'formula',
 }
-// ملحوظة: قيمة enum قديمة 'worker_rate' كانت هنا (ADR-0029، هجرة حجز الشغالة القديمة) — اتشالت
-// من TS بعد إلغاء البنية دي بالكامل (ADR-0031). قيمة الـPostgres enum type نفسها (`pricing_model`)
-// فضلت من غير تعديل عمدًا (إعادة بناء enum type محتاج إعادة إنشاء العمود، خطر أكبر من فايدة لقيمة
-// مالهاش أي صف بيستخدمها بعد التنظيف) — orphaned بس غير مؤذية، موثّق هنا بدل ما تتنسى.
+// ملحوظة: قيم الـPostgres enum القديمة ('fixed', 'hourly', 'per_unit', 'monthly', و'worker_rate'
+// من ADR-0029) فضلت في نوع الـenum نفسه عمدًا — إعادة بناء enum type محتاج إعادة إنشاء العمود،
+// خطر أكبر من فايدة. migration 0242 حوّلت كل الصفوف وحطّت CHECK constraint
+// (`chk_services_pricing_model_supported`) بيمنع رجوع أي قيمة منهم من أي مسار.
 
 @Entity('services')
 export class Service {

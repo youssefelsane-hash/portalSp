@@ -121,7 +121,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [ids.category, `خدمة اختبار ${runId}`, `test-service-rsc-${runId}`],
     );
     ids.service = service.id;
@@ -557,7 +557,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
     ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
       [category.id, `خدمة اختبار أدمن ${runId}`, `test-service-arsc-${runId}`],
     );
     ids.service = service.id;

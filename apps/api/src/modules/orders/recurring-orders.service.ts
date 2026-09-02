@@ -165,48 +165,30 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
-    if ((service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) && dto.pricing_quantity == null) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
-    }
-    if (service.pricingModel !== PricingModel.PER_UNIT && service.pricingModel !== PricingModel.MONTHLY && dto.pricing_quantity != null) {
-      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    // ADR-0060 §3 — الكمية بقت حقل في فورم الخدمة نفسها، مش مدخل منفصل على القالب.
+    if (dto.pricing_quantity != null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الكمية بقت حقل في فورم الخدمة نفسها مش مدخل منفصل — ابعتها جوّه field_values',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
-    // أوضاع التوقيت الأربعة (ADR-0032) — نفس فحوصات OrdersService.create() بالحرف: القالب اللي
-    // هيتولّد منه طلب لازم يحمل نفس الحقول المطلوبة للوضع الفعّال، وإلا كل موعد هيترفض عند
-    // إنشاء الطلب ويوصل dead-letter من غير فايدة. فحص مبكر هنا = رفض واضح وقت الإنشاء بدل فشل صامت مؤجل.
-    if (service.requiresPreciseSchedule) {
-      if (!dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else if (service.requiresHoursOnly) {
-      if (!dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else if (service.requiresStartAndEnd) {
-      if (!dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت نهاية الخدمة', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'duration_hours مش مطلوبة لخدمة محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
-    } else {
-      if (dto.duration_hours) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت أو عدد ساعات',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      if (dto.scheduled_end_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
-      }
+    // ADR-0060 §4 — نفس قاعدة `OrdersService.create()` بالحرف: مفيش مدخلات وقت تجارية على
+    // القالب. المدة والفترة بقوا مسؤولية محرك التسعير/فورم الخدمة.
+    if (dto.duration_hours) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مدة الخدمة بقت بتتحسب من محرك التسعير مش من العميل — لو محتاجها كمدخل، اعملها حقل في فورم الخدمة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.scheduled_end_at) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'وقت النهاية مابقاش مدخل حجز — لو الخدمة بفترة (اشتراك/إيجار)، حطها كحقلين تاريخ في فورم الخدمة',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const startsAt = new Date(dto.starts_at);
@@ -233,10 +215,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
-      pricingQuantity:
-        service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
-          ? String(dto.pricing_quantity)
-          : null,
+      pricingQuantity: null,
       durationHours: dto.duration_hours ?? null,
       durationMinutes: pricingContext.durationMinutes,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,

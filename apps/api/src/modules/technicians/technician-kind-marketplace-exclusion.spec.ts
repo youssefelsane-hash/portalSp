@@ -72,7 +72,7 @@ describe('TechniciansService.listForServiceBooking() — المساعد بيظه
     ids.addressId = address.id;
     const [svc] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.categoryId, `خدمة دور ${runId}`, `kind-service-${runId}`],
     );
     ids.serviceId = svc.id;

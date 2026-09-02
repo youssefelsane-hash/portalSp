@@ -80,13 +80,13 @@ describe('TechniciansService.listForServiceBooking() — سياسة إظهار �
 
     const [serviceVisible] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active,show_unavailable_providers)
-       VALUES ($1,$2,$3,'fixed',10000,true,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true,true) RETURNING id`,
       [ids.categoryId, `خدمة إظهار متعارض ${runId}`, `conflict-vis-service-shown-${runId}`],
     );
     ids.serviceVisibleId = serviceVisible.id;
     const [serviceHidden] = await q(
       `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,is_active)
-       VALUES ($1,$2,$3,'fixed',10000,true) RETURNING id`,
+       VALUES ($1,$2,$3,'formula',10000,true) RETURNING id`,
       [ids.categoryId, `خدمة عادية تعارض ${runId}`, `conflict-vis-service-hidden-${runId}`],
     );
     ids.serviceHiddenId = serviceHidden.id;

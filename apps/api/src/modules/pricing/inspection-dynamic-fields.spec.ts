@@ -67,6 +67,7 @@ describe('فورم الأسئلة على خدمة «كشف ثم عرض سعر» 
       dataSource.getRepository(ServicePricingEvaluation),
       fields,
       {} as never,
+      {} as never,
     );
   });
 
