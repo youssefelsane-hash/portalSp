@@ -74,14 +74,28 @@ class TechniciansRepository {
   ///
   /// `fieldValues`/`scheduledAt`/`promoCode` لازم يبقوا **نفس اللي هيتبعت في الإنشاء بالحرف** —
   /// الباك-إند بيقارن بصمة المدخلات، وأي اختلاف معناه التذكرة بايتة والحجز بيترفض.
+  /// بَقّة حقيقية اتلقطت باختبار حي (بلاغ مالك 2026-09-03، docs/08 §121-ب): الدالة دي كانت
+  /// بتبعت 4 حقول بس، وشاشة التأكيد بتبعت للباك-إند إضافات وضمان وعدد وحدات وفترة — فالبصمة
+  /// بتختلف والحجز بيترفض بـ«تفاصيل الحجز تغيّرت». أي حقل داخل في البصمة لازم يبقى ليه مكان
+  /// هنا، وإلا نفس البَقّة بترجع بشكل تاني.
   Future<BookingMatchPreview> createMatchPreview({
     required String serviceId,
     required String addressId,
     required String selectionMode,
     String? technicianId,
     String? scheduledAt,
+    String? scheduledEndAt,
+    String? periodStart,
+    String? periodEnd,
     Map<String, dynamic>? fieldValues,
     String? promoCode,
+    String? buildingCode,
+    List<String>? addonIds,
+    String? warrantyPlanId,
+    String? standardDataId,
+    num? requestedUnits,
+    num? pricingQuantity,
+    num? durationHours,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -92,8 +106,18 @@ class TechniciansRepository {
         'selection_mode': selectionMode,
         if (technicianId != null) 'technician_id': technicianId,
         if (scheduledAt != null) 'scheduled_at': scheduledAt,
+        if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
+        if (periodStart != null) 'period_start': periodStart,
+        if (periodEnd != null) 'period_end': periodEnd,
         if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+        if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
+        if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
+        if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+        if (standardDataId != null) 'standard_data_id': standardDataId,
+        if (requestedUnits != null) 'requested_units': requestedUnits,
+        if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
+        if (durationHours != null) 'duration_hours': durationHours,
       },
     );
     return BookingMatchPreview.fromJson(data!);

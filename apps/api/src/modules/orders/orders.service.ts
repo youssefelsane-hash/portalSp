@@ -81,7 +81,36 @@ import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
-import { bookingContextHashWithoutProvider, bookingMatchContextHash, bookingPreviewInputFromCreate } from './booking-match-context';
+import {
+  bookingContextHashWithoutProvider,
+  bookingFingerprintDiff,
+  bookingFingerprintInput,
+  bookingMatchContextHash,
+  bookingPreviewInputFromCreate,
+} from './booking-match-context';
+
+/** تسميات عربية لحقول بصمة الحجز — عشان رسالة الرفض تقول للعميل الحقل بلغته مش باسمه التقني. */
+const BOOKING_FINGERPRINT_FIELD_LABELS_AR: Record<string, string> = {
+  service_id: 'الخدمة',
+  address_id: 'العنوان',
+  scheduled_at: 'الموعد',
+  scheduled_end_at: 'وقت الانتهاء',
+  period_start: 'بداية الفترة',
+  period_end: 'نهاية الفترة',
+  field_values: 'تفاصيل الخدمة',
+  addon_ids: 'الإضافات',
+  promo_code: 'كود الخصم',
+  building_code: 'كود المبنى',
+  requested_technician_id: 'الفني المختار',
+  requested_technician_company_id: 'الشركة المختارة',
+  schedule_slot_id: 'موعد الفني',
+  standard_data_id: 'بيانات الخدمة القياسية',
+  requested_units: 'عدد الوحدات',
+  warranty_plan_id: 'خطة الضمان',
+  pricing_quantity: 'الكمية',
+  duration_hours: 'عدد الساعات',
+  request_remote_quote: 'التقييم بالصور',
+};
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
 // سياسة إلغاء الفني (docs/10) — fallback بس، المصدر الحقيقي إعدادات cancellation.* (migration 0070).
@@ -573,9 +602,28 @@ export class OrdersService {
         selectedMatchPreview.technicianId,
       );
       if (selectedMatchContextHash !== selectedMatchPreview.contextHash) {
+        // «معاينة» في الرسالة القديمة كانت بتتقري على إنها معاينة الموقع (زيارة الفني)، وهي
+        // أصلاً تذكرة السعر والفني — بلاغ مالك صريح إن الرسالة بتوحي إن الطلب محتاج معاينة
+        // وهو مش محتاج. الصياغة الجديدة بتقول اللي حصل فعلاً.
+        const changed = selectedMatchPreview.fingerprintInput
+          ? bookingFingerprintDiff(
+              selectedMatchPreview.fingerprintInput,
+              bookingFingerprintInput(bookingPreviewInputFromCreate(dto)),
+            )
+          : [];
+        // أسماء الحقول بس — القيم فيها مدخلات العميل ومالهاش لازمة في اللوج.
+        this.logger.warn(
+          `تذكرة حجز مرفوضة للعميل ${customerProfile.id}: ${
+            changed.length ? `حقول اتغيّرت [${changed.join(', ')}]` : 'تذكرة قديمة قبل migration 0256'
+          }`,
+        );
         throw new ApiException(
           ErrorCode.VAL_001,
-          'تفاصيل الحجز تغيّرت بعد المعاينة — راجع السعر والفني من جديد',
+          changed.length
+            ? `غيّرت في تفاصيل الحجز بعد ما اخترت الفني (${changed
+                .map((field) => BOOKING_FINGERPRINT_FIELD_LABELS_AR[field] ?? field)
+                .join('، ')}) — ارجع خطوة واختار الفني والسعر من جديد`
+            : 'تفاصيل الحجز اتغيّرت بعد ما اخترت الفني — ارجع خطوة واختار الفني والسعر من جديد',
           HttpStatus.CONFLICT,
         );
       }

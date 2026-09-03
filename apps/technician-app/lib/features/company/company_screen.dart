@@ -142,7 +142,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
         child: StatefulBuilder(
           builder: (dialogContext, setDialogState) => AlertDialog(
             title: const Text('تعديل الفرع'),
-            content: Column(
+            // نفس بَقّة الـoverflow في حوار السعر — حقول نص + كيبورد على شاشة قصيرة.
+            content: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(controller: nameController, decoration: const InputDecoration(labelText: 'اسم الفرع')),
@@ -156,6 +158,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
                   onChanged: (v) => setDialogState(() => isActive = v),
                 ),
               ],
+              ),
             ),
             actions: [
               TextButton(

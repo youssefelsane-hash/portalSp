@@ -80,7 +80,9 @@ Future<RatingResult?> showTechnicianRatingDialog(BuildContext context) async {
 
   final result = await showDialog<RatingResult>(
     context: context,
-    builder: (context) => Directionality(
+    builder: (context) => _DisposeOnRouteExit(
+      controller: controller,
+      child: Directionality(
       textDirection: TextDirection.rtl,
       child: StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -182,8 +184,39 @@ Future<RatingResult?> showTechnicianRatingDialog(BuildContext context) async {
           ],
         ),
       ),
+      ),
     ),
   );
-  controller.dispose();
   return result;
 }
+
+/// **بيتخلّص من الـcontroller لما الحوار يخرج من الشجرة فعلاً، مش لما `showDialog` ترجع.**
+///
+/// بَقّة حقيقية اتلقطت باختبار widget (بلاغ مالك 2026-09-03، docs/08 §121-ج): `showDialog`
+/// بترجع أول ما `Navigator.pop` يتنادى — لكن الحوار بيفضل **مرسوم في الشجرة** طول أنيميشن
+/// الخروج (~150ms)، و`EditableText` جوّاه لسه بيسمع الـcontroller. `controller.dispose()` بعد
+/// الـawait مباشرة معناها `A TextEditingController was used after being disposed` = شاشة حمرا
+/// بعد ما التقييم يكون اتبعت فعلاً — بالظبط اللي المالك وصفه.
+///
+/// `State.dispose()` بتتنادى لما الـroute تتشال خلاص، فالتوقيت بقى صح بالبناء مش بالتخمين.
+class _DisposeOnRouteExit extends StatefulWidget {
+  const _DisposeOnRouteExit({required this.controller, required this.child});
+
+  final TextEditingController controller;
+  final Widget child;
+
+  @override
+  State<_DisposeOnRouteExit> createState() => _DisposeOnRouteExitState();
+}
+
+class _DisposeOnRouteExitState extends State<_DisposeOnRouteExit> {
+  @override
+  void dispose() {
+    widget.controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+

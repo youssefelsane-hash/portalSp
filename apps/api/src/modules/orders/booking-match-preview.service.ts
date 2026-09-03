@@ -19,7 +19,11 @@ import { PreviewOrderResponseDto } from "./dto/preview-order-response.dto";
 import { BookingMatchPreview } from "./entities/booking-match-preview.entity";
 import { BookingMode, Order, OrderType } from "./entities/order.entity";
 import { OrdersService } from "./orders.service";
-import { bookingContextHashWithoutProvider, bookingMatchContextHash } from "./booking-match-context";
+import {
+  bookingContextHashWithoutProvider,
+  bookingFingerprintInput,
+  bookingMatchContextHash,
+} from "./booking-match-context";
 
 const MATCH_PREVIEW_TTL_SECONDS_FALLBACK = 300;
 const MATCH_PREVIEW_CANDIDATE_LIMIT_FALLBACK = 25;
@@ -209,6 +213,8 @@ export class BookingMatchPreviewService {
           technicianCompanyId: chosen!.company_id,
           selectionMode: dto.selection_mode,
           contextHash,
+          // migration 0256 — نفس المدخلات اللي البصمة اتحسبت منها، عشان الرفض يبقى قابل للتشخيص.
+          fingerprintInput: bookingFingerprintInput(exactInput),
           // ADR-0065 §4 — بصمة الشغلانة نفسها، عشان إعادة اختيار المنفّذ تقدر تتأكد إن التذكرة
           // الجديدة لنفس الحجز.
           bookingContextHash: bookingContextHashWithoutProvider(exactInput),

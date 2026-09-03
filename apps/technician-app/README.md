@@ -499,3 +499,16 @@ KYC أضعف من الفني العادي). اتلغى بالكامل: `features
 
 كمان: أيقونة `Icons.savings_outlined` (حصّالة خنزير) جنب «مستحقك أنت» اتشالت بالكامل بطلب صريح من
 المالك → `Icons.wallet_outlined`. مفيش أي استخدام تاني لـ`savings*` في المستودع.
+
+## أي `AlertDialog` فيه `TextField` لازم محتواه يبقى قابل للتمرير (docs/08 §121-أ)
+
+screenshot المالك (2026-09-03): «BOTTOM OVERFLOWED BY 81 PIXELS» في حوار «تعديل السعر بعد
+التشخيص»، والأزرار بتركب فوق حقل السبب. `AlertDialog` مابيعملش scroll لمحتواه — أول ما الكيبورد
+يطلع على شاشة قصيرة المحتوى بيعدّي المساحة المتاحة. الحوارين اللي فيهم حقول نص اتلفّوا بـ
+`SingleChildScrollView` (`_PriceEntryDialog` و«تعديل الفرع» في `company_screen.dart`).
+
+## حوار التقييم — نفس إصلاح customer-app بالحرف (docs/08 §121-ج)
+
+`showTechnicianRatingDialog` كانت بتعمل `controller.dispose()` بعد `await showDialog` مباشرة،
+والحوار لسه مرسوم طول أنيميشن الخروج → شاشة حمرا بعد ما التقييم يتبعت. `_DisposeOnRouteExit`
+بيربط التخلص بـ`State.dispose()`. اختبار الانحدار: `test/rating_dialog_dispose_test.dart`.
