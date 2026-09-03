@@ -47,12 +47,12 @@ export default function OrdersPage() {
           </Link>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="motion-list space-y-3">
           {orders.map((o) => (
             <Link
               key={o.id}
               href={`/orders/${o.id}`}
-              className="flex items-center justify-between rounded-xl border border-border bg-surface p-4 hover:border-primary"
+              className="motion-rise motion-press flex items-center justify-between rounded-xl border border-border bg-surface p-4 transition-colors hover:border-primary"
             >
               <div>
                 <p className="font-medium">طلب #{o.order_number}</p>

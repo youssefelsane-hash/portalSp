@@ -138,3 +138,101 @@
     box-shadow: none;
   }
 }
+
+/* ── أساس الحركة (docs/08 §122) ──────────────────────────────────────────────────────────────
+   المبدأ اللي المالك حدّده بالحرف: «حاجات بسيطة جدًا، لكن تخلي الـApps تحس إنها polished»،
+   و«لو حركة صغيرة هتخلي المستخدم يفهم إن حاجة حصلت، اعملها» — يعني الحركة هنا **وظيفتها
+   توصيل معلومة** (حصل تغيير / اتحمّل / اتقدّم خطوة)، مش زينة.
+
+   صفر مكتبة جديدة: الأدمن عنده `tw-animate-css` وRadix `data-state` أصلاً، وcustomer-web
+   الـCSS ده لوحده كفايته. أي حاجة تتعمل بـCSS ما تستاهلش JS.
+
+   المدد قصيرة عمدًا (120–260ms): فوق كده الواجهة بتحس بطيئة بدل ما تحس ناعمة. */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  /* منحنى بيبدأ سريع وبيهدى في الآخر — بيدّي إحساس «استجابة فورية» بدل ما يبان مطّاط. */
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* الحركة كلها اختيارية: المستخدم اللي مفعّل تقليل الحركة في نظامه (أو عنده حساسية دوار) بياخد
+   نفس الواجهة بالظبط بلا أي حركة. ده مش «إضافة lأحسن»، ده شرط وصول أساسي. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer components {
+  /* دخول محتوى جديد: شفافية + إزاحة 4px بس. الإزاحة الصغيرة هي اللي بتخلي العين تلاحظ
+     إن ده محتوى **جديد**، والكبيرة هي اللي بتخلي الصفحة تبان بتترجرج. */
+  @keyframes motion-rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .motion-rise {
+    animation: motion-rise var(--motion-base) var(--motion-ease) both;
+  }
+
+  /* تدرّج بسيط لقايمة قصيرة (كروت/صفوف). بيقف عند العنصر الثامن عمدًا — أي تأخير أطول من
+     كده بيتحوّل من «إحساس بالترتيب» لـ«انتظار». */
+  .motion-list > *:nth-child(1) { animation-delay: 0ms; }
+  .motion-list > *:nth-child(2) { animation-delay: 25ms; }
+  .motion-list > *:nth-child(3) { animation-delay: 50ms; }
+  .motion-list > *:nth-child(4) { animation-delay: 75ms; }
+  .motion-list > *:nth-child(5) { animation-delay: 100ms; }
+  .motion-list > *:nth-child(6) { animation-delay: 125ms; }
+  .motion-list > *:nth-child(7) { animation-delay: 150ms; }
+  .motion-list > *:nth-child(n + 8) { animation-delay: 175ms; }
+
+  /* رقم اتغيّر (عدّاد لحظي، سعر، رصيد): ومضة خفيفة على القيمة نفسها. أنضف بكتير من عدّاد
+     بيلف من رقم لرقم — ده بيخلي القراءة أصعب وقت التغيير بالظبط. */
+  @keyframes motion-value-change {
+    0%   { transform: translateY(-2px); opacity: 0.55; }
+    100% { transform: none; opacity: 1; }
+  }
+  .motion-value-change {
+    animation: motion-value-change var(--motion-slow) var(--motion-ease);
+  }
+
+  /* صف اتحدّث لحظيًا: تظليل بيروح لوحده. المستخدم بيعرف **أنهي** صف اتغيّر من غير ما نضطر
+     نلوّنه للأبد ولا نحطّ بادچ زيادة. */
+  @keyframes motion-row-flash {
+    from { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
+    to   { background-color: transparent; }
+  }
+  .motion-row-flash {
+    animation: motion-row-flash 900ms var(--motion-ease);
+  }
+
+  /* فتح/غلق قسم بارتفاع مش معروف — بـgrid-template-rows بدل max-height التخميني: بيتحرّك
+     للارتفاع الحقيقي بالظبط، بلا JS يقيس، وبلا «قفزة» في الآخر لو المحتوى أطول من التخمين. */
+  .motion-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--motion-base) var(--motion-ease);
+  }
+  .motion-collapse > * {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .motion-collapse[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  /* استجابة اللمس/الضغط على أي عنصر تفاعلي — أصغر feedback ممكن وأكترهم إفادة: بيقول
+     «الضغطة وصلت» قبل ما الشبكة ترد أصلاً. */
+  .motion-press {
+    transition: transform var(--motion-fast) var(--motion-ease),
+                box-shadow var(--motion-fast) var(--motion-ease);
+  }
+  .motion-press:active {
+    transform: scale(0.985);
+  }
+}
