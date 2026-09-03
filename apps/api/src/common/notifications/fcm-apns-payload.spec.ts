@@ -6,7 +6,7 @@ import { FcmPushDispatcher } from './fcm-push-dispatcher.service';
 import { DispatchNotificationInput } from './notification-dispatcher';
 
 /**
- * حمولة APNs (docs/08 §124) — التطبيقان على أندرويد كانوا شغالين، وiOS كان بيتسقط بصمت لتلات
+ * حمولة APNs (docs/08 §127) — التطبيقان على أندرويد كانوا شغالين، وiOS كان بيتسقط بصمت لتلات
  * أسباب مستقلة في نفس الحمولة. الاختبار ده بيقفل التلاتة كـregression:
  *
  * 1. رسالة actionable كانت بتتبعت `content-available` بلا `alert` مع `apns-push-type: 'alert'`

@@ -12,8 +12,8 @@ class ScheduleRepository {
 
   Future<List<ScheduleSlot>> list({String? from, String? to}) async {
     final query = <String, String>{
-      if (from != null) 'from': from,
-      if (to != null) 'to': to,
+      'from': ?from,
+      'to': ?to,
     };
     final path = query.isEmpty ? '/technician/schedule' : '/technician/schedule?${Uri(queryParameters: query).query}';
     final items = await auth.authedRequestList(path);

@@ -16,7 +16,7 @@ import { TechnicianLevel } from '../technicians/entities/technician-profile.enti
 import { PricingTemplateKey, pricingTemplate, pricingTemplateFinalPricePayload } from '../pricing/pricing-templates';
 
 /**
- * **مصفوفة سيناريوهات التسعير الموسّعة (docs/08 §127، طلب مالك صريح).**
+ * **مصفوفة سيناريوهات التسعير الموسّعة (docs/08 §130، طلب مالك صريح).**
  *
  * المالك طلب تشغيل عدد كبير من التركيبات الحقيقية بدل عشر اختبارات وحدة. الملف ده بيعمل كده على
  * محرك التسعير **الحقيقي** وقاعدة **حقيقية** — مفيش mocks ولا إعادة تنفيذ للمعادلة.
@@ -39,7 +39,7 @@ import { PricingTemplateKey, pricingTemplate, pricingTemplateFinalPricePayload }
  *
  * التقرير بيتكتب في `docs/scenario-matrix-report.md` عشان يبقى فيه أثر مقروء لكل تشغيلة.
  */
-describe('§127 — مصفوفة سيناريوهات التسعير (تغطية أزواج على المحرك الحقيقي)', () => {
+describe('§130 — مصفوفة سيناريوهات التسعير (تغطية أزواج على المحرك الحقيقي)', () => {
   jest.setTimeout(600_000);
 
   // بذرة ثابتة: نفس التشغيلة بتدي نفس السيناريوهات بالترتيب — قابلة لإعادة الإنتاج بالحرف.
@@ -463,7 +463,7 @@ describe('§127 — مصفوفة سيناريوهات التسعير (تغطية
     const passed = rows.filter((r) => r.result === 'PASS').length;
     const reportPath = join(__dirname, '../../../../../docs/scenario-matrix-report.md');
     const lines = [
-      '# تقرير مصفوفة سيناريوهات التسعير (docs/08 §127)',
+      '# تقرير مصفوفة سيناريوهات التسعير (docs/08 §130)',
       '',
       `المصدر: \`apps/api/src/modules/orders/pricing-scenario-matrix.spec.ts\` — بيتولّد حتميًا (بلا عشوائية).`,
       `عدد السيناريوهات: **${rows.length}** — نجح **${passed}** / فشل **${rows.length - passed}**.`,

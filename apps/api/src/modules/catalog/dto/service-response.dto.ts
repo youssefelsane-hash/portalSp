@@ -1,5 +1,5 @@
 import { ServiceCategory } from '../entities/service-category.entity';
-import { Service } from '../entities/service.entity';
+import { AssessmentRoutePolicy, PriceCertaintyMode, Service } from '../entities/service.entity';
 import { SchedulePrecision, schedulePrecision } from '../schedule-precision';
 
 export interface ServiceCategoryResponseDto {
@@ -68,6 +68,19 @@ export interface ServiceResponseDto {
   /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات: `full_day` أو `start_time`. */
   schedule_precision: SchedulePrecision;
   min_technician_level: string;
+
+  // ── سياسة التقييم والمعاينة (ADR-0063/0066، docs/08 §124) ────────────────────────────────
+  // **بَقّة عقد حقيقية**: الأعلام الخمسة دي كانت موجودة في DTO الأدمن **بس**. العميل كان بياخد
+  // `pricing_model` و`inspection_fee_cents` وخلاص، فتطبيق العميل مكانش عنده أي طريقة يعرف
+  // إن التقييم بالصور مقفول أو إن السياسة «معاينة في الموقع فقط» — فكان بيعرض رفع الصور
+  // لأي خدمة `inspection_then_quote`، والعميل يرفع صور والباك-إند يرفض: طريق مسدود كامل.
+  // (بلاغ مالك: «حرص الصور ده إنه يرفع صور، ما بيمشيش... ومش عارف أعمل معاينة لوحدها»).
+  price_certainty_mode: PriceCertaintyMode;
+  assessment_route_policy: AssessmentRoutePolicy;
+  remote_assessment_enabled: boolean;
+  onsite_assessment_enabled: boolean;
+  /** رسم التقييم بالصور — بيتحصّل وقت إرسال الصور، والعميل لازم يشوفه قبل ما يبعت. */
+  remote_assessment_fee_cents: number;
 }
 
 export function toServiceResponseDto(service: Service): ServiceResponseDto {
@@ -91,6 +104,11 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     quantity_precision: service.quantityPrecision,
     estimated_duration_minutes: service.estimatedDurationMinutes,
     warranty_days: service.warrantyDays,
+    price_certainty_mode: service.priceCertaintyMode,
+    assessment_route_policy: service.assessmentRoutePolicy,
+    remote_assessment_enabled: service.remoteAssessmentEnabled,
+    onsite_assessment_enabled: service.onsiteAssessmentEnabled,
+    remote_assessment_fee_cents: service.remoteAssessmentFeeCents,
     requires_photos: service.requiresPhotos,
     allows_scheduling: service.allowsScheduling,
     allows_emergency: service.allowsEmergency,

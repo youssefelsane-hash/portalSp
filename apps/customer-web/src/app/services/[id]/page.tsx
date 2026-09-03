@@ -17,9 +17,11 @@ import {
   type BookingMatchPreviewDto,
 } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
+import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
+import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { MapPicker } from '@/components/map-picker';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
@@ -249,7 +251,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
-    if (!requestRemoteQuote && technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
+    if (!effectiveRequestRemoteQuote && technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -258,21 +260,21 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         {
           service_id: service.id,
           address_id: selectedAddressId,
-          booking_mode: requestRemoteQuote ? 'individual' : bookingMode,
+          booking_mode: effectiveRequestRemoteQuote ? 'individual' : bookingMode,
           requested_technician_id:
-            !requestRemoteQuote && technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
+            !effectiveRequestRemoteQuote && technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
           problem_image_ids: problemImages.map((image) => image.id),
-          request_remote_quote: requestRemoteQuote || undefined,
+          request_remote_quote: effectiveRequestRemoteQuote || undefined,
           // التاريخ بيتبعت دايمًا دلوقتي (ADR-0048) — هو مدخل الاشتقاق نفسه في الباك-إند.
           scheduled_at: computeScheduledAt(scheduledDate),
           scheduled_at_range_end:
             scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
-          repeat_frequency: requestRemoteQuote ? undefined : repeatFrequency,
+          repeat_frequency: effectiveRequestRemoteQuote ? undefined : repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
-          promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
+          promo_code: effectiveRequestRemoteQuote ? undefined : promoCode || undefined,
           field_values: showsDynamicForm ? fieldValues : undefined,
-          payment_method: !requestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
+          payment_method: !effectiveRequestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
           // بند 12 — قفل السعر: التذكرة اللي العميل شاف عليها الفني والسعر هي نفسها اللي
           // الباك-إند بيعيد التحقق منها. لو المدخلات اتغيّرت أو الفني بقى مش متاح، الإنشاء
           // بيترفض بوضوح بدل ما يستبدل حد في صمت.
@@ -281,9 +283,12 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         orderIdempotencyKey,
       );
       setSubmitted(true);
-      if (!requestRemoteQuote && paymentMethod === 'card') {
+      if (!effectiveRequestRemoteQuote && paymentMethod === 'card') {
         const cardResult = await payWithCard(authedFetch, order.id);
-        window.location.href = cardResult.redirect_url;
+        // `assign()` مش `location.href = ...`: قاعدة react-hooks/immutability بتعتبر الإسناد
+        // على كائن برّه المكوّن تعديلًا ممنوعًا (خطأ lint حقيقي كان واقف في المشروع). الاتنين
+        // نفس السلوك بالظبط — تنقّل بيتسجّل في تاريخ المتصفح — فده تصليح مش التفاف.
+        window.location.assign(cardResult.redirect_url);
         return;
       }
       router.push(`/orders/${order.id}`);
@@ -335,6 +340,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // بالكامل. الاتنين بقوا **حقول عادية جوّه الفورم الديناميكي**: قالب «بالشهر» بيزرع حقلين
   // تاريخ، وقالب «بالقطعة» بيزرع حقل رقم. سيبهم كأقسام منفصلة كان معناه إن نفس السؤال بيتعرض
   // مرتين على نفس الشاشة — وده بالظبط بلاغ «أربع حقول تاريخ».
+  // مسارات التقييم المتاحة فعلاً لسياسة الخدمة (docs/08 §124) — نفس الحارس بالظبط اللي
+  // apps/customer-app وapps/api بيستخدموه. `effectiveRequestRemoteQuote` هي القيمة الحقيقية
+  // اللي بتتبعت وبتحدد الشاشة: لو مسار الصور هو الوحيد المتاح، الطلب لازم يتبعت كطلب تقييم
+  // بالصور — وإلا الباك-إند هيرفضه (بعد إصلاح خرق remote_only، §124-B).
+  const routes = assessmentRoutesForService(service);
+  const remoteRouteAvailable = routes.remote && bookingMode !== 'emergency';
+  const onsiteRouteAvailable = routes.onsite;
+  const remoteRouteForced = remoteRouteAvailable && !onsiteRouteAvailable;
+  const effectiveRequestRemoteQuote = remoteRouteForced ? true : requestRemoteQuote;
+
   const showsDynamicForm =
     service.pricing_model === 'formula' || service.pricing_model === 'inspection_then_quote';
   const pricingFieldsValid =
@@ -351,7 +366,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     service.pricing_model === 'inspection_then_quote' ||
     (technicianChoiceMode === 'manual' && !!technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
     estimate !== null;
-  const remoteQuoteValid = !requestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
+  const remoteQuoteValid = !effectiveRequestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && service.schedule_precision === 'start_time';
 
   // بند 11 — **إبطال المعاينة عند تغيير أي مدخل مؤثر**، بالاشتقاق مش بـeffect بيمسح الحالة:
@@ -367,7 +382,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     preciseTime,
     scheduleDayMode,
     promoCode: promoCode.trim(),
-    requestRemoteQuote,
+    effectiveRequestRemoteQuote,
     technicianChoiceMode,
     selectedTechnicianId,
     fieldValues,
@@ -392,7 +407,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     remoteQuoteValid &&
     // بند 9 — في الوضع التلقائي التأكيد **محتاج معاينة فعلية**: العميل لازم يكون شاف الفني
     // وسعره قبل ما يأكد. من غير الشرط ده الوضع التلقائي بيرجع «أكّد وإحنا هندوّر بعدين».
-    (requestRemoteQuote ||
+    (effectiveRequestRemoteQuote ||
       (technicianChoiceMode === 'auto' ? !!activePreview : !!selectedTechnicianId)) &&
     allRequiredAccepted &&
     !submitting &&
@@ -420,7 +435,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         ].map((s) => (
           <li key={s.n} className="flex flex-1 items-center gap-2">
             <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
                 step === s.n
                   ? 'bg-primary text-primary-foreground'
                   : step > s.n
@@ -430,7 +445,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             >
               {step > s.n ? '✓' : s.n}
             </span>
-            <span className={`truncate ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
+            <span className={`truncate transition-colors duration-200 ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
               {s.label}
             </span>
           </li>
@@ -442,7 +457,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           يختار النهارده. */}
 
       {step === 1 && needsSchedule && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">الموعد</h2>
           <div className="flex gap-2">
             <button
@@ -521,7 +536,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
           <div className="space-y-4">
             {pricingFields
@@ -541,7 +556,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6">
+      <section className="motion-rise mt-6">
         <h2 className="mb-3 font-semibold">العنوان</h2>
         {addresses === null ? (
           <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
@@ -602,8 +617,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       </section>
       )}
 
-      {step === 3 && selectedAddressId && !requestRemoteQuote && (
-        <section className="mt-6">
+      {step === 3 && selectedAddressId && !effectiveRequestRemoteQuote && (
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
@@ -683,7 +698,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           )}
 
           {technicianChoiceMode === 'manual' && (
-            <div className="mt-3 space-y-2">
+            <div className="motion-list mt-3 space-y-2">
               {technicians === null ? (
                 <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
               ) : technicians.length === 0 ? (
@@ -720,8 +735,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {step === 2 && !requestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
-        <section className="mt-6">
+      {step === 2 && !effectiveRequestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
             {(
@@ -751,7 +766,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6">
+      <section className="motion-rise mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
           value={problemDescription}
@@ -765,7 +780,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+      <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
         <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
         {problemImages.length > 0 && (
@@ -826,34 +841,80 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         <span className="ms-3 text-xs text-muted">{problemImages.length}/10</span>
         {problemImageError && <p className="mt-2 text-sm text-danger">{problemImageError}</p>}
 
-        {service.pricing_model === 'inspection_then_quote' && (
-          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
-            <input
-              type="checkbox"
-              checked={requestRemoteQuote}
-              disabled={problemImages.length === 0 || isSameDayBooking}
-              onChange={(event) => setRequestRemoteQuote(event.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              <span className="block font-medium text-primary">خلّي الإدارة تحدد السعر من الصور</span>
-              <span className="mt-1 block text-sm text-muted">
-                الإدارة هتبعت السعر، وإنت تقبله أو ترفضه قبل ما الطلب يروح لأي فني.
+        {/* ── اختيار مسار التقييم (docs/08 §124) ─────────────────────────────────────────
+            قبل كده كان checkbox واحد مربوط بـ`pricing_model === 'inspection_then_quote'` بس،
+            بلا أي فحص لسياسة الأدمن — فخدمة سياستها "معاينة في الموقع فقط" كانت تعرض الاختيار
+            وتقبله، والباك-إند يرفض الطلب (بلاغ مالك: "مش عارف أعمل معاينة لوحدها"). دلوقتي
+            بيتعرض المسار المسموح فعلاً بس، والمسارين مسمّيين صراحة لما الاتنين متاحين. */}
+        {remoteRouteAvailable && onsiteRouteAvailable && (
+          <div className="mt-4 flex flex-col gap-2">
+            <p className="text-sm font-medium text-foreground">إزاي نحدد السعر؟</p>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+              <input
+                type="radio"
+                name="assessment_route"
+                checked={requestRemoteQuote}
+                disabled={problemImages.length === 0 || isSameDayBooking}
+                onChange={() => setRequestRemoteQuote(true)}
+                className="mt-1"
+              />
+              <span>
+                <span className="block font-medium">الإدارة تحدد السعر من الصور</span>
+                <span className="mt-1 block text-sm text-muted">
+                  الإدارة هتبعت السعر، وإنت تقبله أو ترفضه قبل ما الطلب يروح لأي فني
+                  {service.remote_assessment_fee_cents > 0 &&
+                    ` — رسم التقييم ${formatEgp(service.remote_assessment_fee_cents)}`}
+                  .
+                </span>
+                {problemImages.length === 0 && (
+                  <span className="mt-1 block text-xs text-danger">ارفع صورة واحدة على الأقل لتفعيل الاختيار.</span>
+                )}
+                {isSameDayBooking && (
+                  <span className="mt-1 block text-xs text-danger">التسعير بالصور مش متاح لطلب نفس اليوم.</span>
+                )}
               </span>
-              {problemImages.length === 0 && (
-                <span className="mt-1 block text-xs text-danger">ارفع صورة واحدة على الأقل لتفعيل الاختيار.</span>
-              )}
-              {isSameDayBooking && (
-                <span className="mt-1 block text-xs text-danger">التسعير بالصور مش متاح لطلب نفس اليوم.</span>
-              )}
-            </span>
-          </label>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+              <input
+                type="radio"
+                name="assessment_route"
+                checked={!requestRemoteQuote}
+                onChange={() => setRequestRemoteQuote(false)}
+                className="mt-1"
+              />
+              <span>
+                <span className="block font-medium">معاينة في الموقع</span>
+                <span className="mt-1 block text-sm text-muted">
+                  فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(service.inspection_fee_cents)}
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+        {remoteRouteForced && (
+          <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3">
+            <p className="font-medium text-primary">الإدارة تحدد السعر من الصور</p>
+            <p className="mt-1 text-sm text-muted">
+              الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر
+              {service.remote_assessment_fee_cents > 0 &&
+                ` — رسم التقييم ${formatEgp(service.remote_assessment_fee_cents)}`}
+              .
+            </p>
+          </div>
+        )}
+        {!remoteRouteAvailable && onsiteRouteAvailable && (
+          <div className="mt-4 rounded-xl border border-border bg-surface-variant p-3">
+            <p className="font-medium">معاينة في الموقع</p>
+            <p className="mt-1 text-sm text-muted">
+              فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(service.inspection_fee_cents)}
+            </p>
+          </div>
         )}
       </section>
       )}
 
-      {step === 2 && !requestRemoteQuote && (
-        <section className="mt-6">
+      {step === 2 && !effectiveRequestRemoteQuote && (
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
           <input
             value={promoCode}
@@ -865,8 +926,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {step === 2 && !requestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
-        <section className="mt-6">
+      {step === 2 && !effectiveRequestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex gap-2">
             <button
@@ -888,7 +949,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
           مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
       {step === 2 && postpaidPolicies.length > 0 && (
-        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+        <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">شروط الدفع</h2>
           {postpaidPolicies.map((policy) => {
             const checked = acceptedPolicyVersions.has(policy.currentVersionId);
@@ -921,26 +982,30 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       <section className="mt-8 rounded-xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between">
-          <span className="text-muted">{requestRemoteQuote ? 'السعر' : 'السعر المتوقع'}</span>
-          <span className="text-xl font-bold text-primary">
-            {requestRemoteQuote
-              ? 'الإدارة هتحدده من الصور'
-              : activePreview
-                ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
-                  formatEgp(activePreview.pricing.total_amount_cents)
-                : estimating
-                  ? '...'
-                  : totalCents !== null
-                    ? formatEgp(totalCents)
-                    : 'يتحدد بعد المعاينة'}
-          </span>
+          <span className="text-muted">{effectiveRequestRemoteQuote ? 'السعر' : 'السعر المتوقع'}</span>
+          {/* بيومض عند كل تغيّر — العميل يعرف إن اختياره أثّر في السعر من غير ما يدوّر (§122). */}
+          <LiveAmount
+            className="text-xl font-bold text-primary"
+            value={
+              effectiveRequestRemoteQuote
+                ? 'الإدارة هتحدده من الصور'
+                : activePreview
+                  ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
+                    formatEgp(activePreview.pricing.total_amount_cents)
+                  : estimating
+                    ? '...'
+                    : totalCents !== null
+                      ? formatEgp(totalCents)
+                      : 'يتحدد بعد المعاينة'
+            }
+          />
         </div>
         {/* بند 10 — النطاق التقديري بنفس صياغة customer-app بالحرف (Web/Flutter parity).
             الأرقام من **حقول العرض** مش من min/max_price_cents: دول حدود قصّ للمحرك، وعرضهم
             كنطاق للعميل ممنوع بالنص في البند 29.
             لما تبقى في تذكرة مطابقة، السعر بقى مقفول برقم واحد فالنطاق مالوش لازمة. */}
         {!activePreview &&
-          !requestRemoteQuote &&
+          !effectiveRequestRemoteQuote &&
           estimate?.price_certainty_mode === 'estimated_range' &&
           estimate.display_price_min_cents !== null &&
           estimate.display_price_max_cents !== null && (
@@ -957,7 +1022,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             {formatEgp(activePreview.pricing.discount_cents)}
           </p>
         )}
-        {service.pricing_model === 'inspection_then_quote' && !requestRemoteQuote && (
+        {service.pricing_model === 'inspection_then_quote' && !effectiveRequestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
@@ -1302,7 +1367,7 @@ function IndividualCard({
   const conflicted = t.availability_status === 'schedule_conflicted';
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${
+      className={`motion-rise motion-press flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
         selected ? 'border-primary bg-primary/5' : 'border-border'
       } ${conflicted ? 'opacity-70' : ''}`}
     >
@@ -1362,7 +1427,7 @@ function CompanyCard({
 }) {
   return (
     <label
-      className={`block cursor-pointer overflow-hidden rounded-xl border-2 ${
+      className={`motion-rise motion-press block cursor-pointer overflow-hidden rounded-xl border-2 transition-colors ${
         selected ? 'border-primary' : 'border-primary/40'
       }`}
     >

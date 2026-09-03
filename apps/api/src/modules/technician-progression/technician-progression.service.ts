@@ -42,7 +42,7 @@ export class TechnicianProgressionService implements OnModuleInit, OnModuleDestr
   ) {}
 
   /**
-   * **فجوة حقيقية اتقفلت (docs/08 §126)**: `calculateAll()` كانت **مالهاش أي مُشغّل تلقائي خالص** —
+   * **فجوة حقيقية اتقفلت (docs/08 §129)**: `calculateAll()` كانت **مالهاش أي مُشغّل تلقائي خالص** —
    * لا cron ولا interval ولا listener. المدخل الوحيد كان `POST /admin/technician-progression/calculate`.
    *
    * لكن `getTechnicianSummary()` (اللي `GET /technician/progression` بينادي عليها) بتقرا **صف

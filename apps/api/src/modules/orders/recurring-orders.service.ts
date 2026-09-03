@@ -132,7 +132,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
-    // انتماء العمارة (migration 0257، docs/08 §122) — نفس تحقق OrdersService.create() بالحرف:
+    // انتماء العمارة (migration 0257، docs/08 §125) — نفس تحقق OrdersService.create() بالحرف:
     // 404 واضح لو الكود غلط وقت الإنشاء، مش فشل صامت كل موعد بعدين.
     const building = dto.building_code
       ? await this.buildingsService.findActiveByCodeOrThrow(dto.building_code)
@@ -468,7 +468,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    // انتماء العمارة (migration 0257، docs/08 §122) — بيتقرا **فريش** من الداتابيز في كل نوبة،
+    // انتماء العمارة (migration 0257، docs/08 §125) — بيتقرا **فريش** من الداتابيز في كل نوبة،
     // مش snapshot لنسبة الخصم القديمة: لو الإدارة غيّرت النسبة، النوبة الجديدة بتاخدها تلقائيًا
     // لأن OrdersService.create() هي اللي بتحسب الخصم من صف العمارة الحالي (نفس مسار الطلب العادي).
     //

@@ -4,8 +4,11 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/lib/utils';
 
+// `active:scale-[0.985]` — أصغر feedback ممكن وأكترهم إفادة (docs/08 §122): بيقول للمستخدم
+// «الضغطة وصلت» **قبل** ما الشبكة ترد أصلاً. مكانه هنا مش في كل صفحة عشان يشمل كل زرار في
+// اللوحة بتعديل واحد، و`prefers-reduced-motion` في globals.css بيلغيه لمن طلب تقليل الحركة.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all active:scale-[0.985] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
   {
     variants: {
       variant: {

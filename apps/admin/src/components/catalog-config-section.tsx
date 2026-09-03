@@ -20,6 +20,7 @@ const TONE_STYLES = {
 } as const;
 
 export function CatalogConfigSection({
+  id,
   title,
   description,
   icon: Icon,
@@ -27,6 +28,8 @@ export function CatalogConfigSection({
   children,
   className,
 }: {
+  /** مرساة للتنقّل من شريط مراحل الإعداد (docs/08 §123). */
+  id?: string;
   title: string;
   description: string;
   icon: LucideIcon;
@@ -36,7 +39,7 @@ export function CatalogConfigSection({
 }) {
   const styles = TONE_STYLES[tone];
   return (
-    <section className={cn('rounded-2xl border p-4 sm:p-5', styles.shell, className)}>
+    <section id={id} className={cn('scroll-mt-6 rounded-2xl border p-4 sm:p-5', styles.shell, className)}>
       <div className="mb-5 flex items-start gap-3">
         <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl shadow-lg', styles.icon)}>
           <Icon className="size-5" aria-hidden="true" />

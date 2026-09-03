@@ -63,7 +63,7 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
     ),
   );
   if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
-  final DateTime? scheduledAt = choice.scheduledAt;
+  final DateTime scheduledAt = choice.scheduledAt;
   final DateTime? scheduledAtRangeEnd = choice.rangeEnd;
   final TimeOfDay? preciseTime = choice.preciseTime;
 

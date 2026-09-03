@@ -56,7 +56,7 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { Building } from '../buildings/entities/building.entity';
 
 /**
- * انتماء العمارة يستمر مع الطلبات المتكررة (docs/08 §122، طلب مالك صريح 2026-09-03).
+ * انتماء العمارة يستمر مع الطلبات المتكررة (docs/08 §125، طلب مالك صريح 2026-09-03).
  *
  * حي ضد Postgres حقيقي عبر OrdersService.create() + RecurringOrdersService.sweep() الحقيقيتين
  * (صفر منطق تسعير موازي). بيثبت الخمس نقاط اللي المالك طلب التحقق منهم بالحرف:
@@ -66,7 +66,7 @@ import { Building } from '../buildings/entities/building.entity';
  * 4. الـpromo code لا يتكرر (نفس القاعدة القديمة، بس بتتأكد هنا صراحة مع عمارة في نفس الصورة).
  * 5. مفيش double discount ولا كسر transaction — لا مع عمارة اتقفلت، ولا مع كود عمارة غلط.
  */
-describe('Recurring Orders × Buildings — انتماء العمارة يستمر عبر النوبات (docs/08 §122)', () => {
+describe('Recurring Orders × Buildings — انتماء العمارة يستمر عبر النوبات (docs/08 §125)', () => {
   jest.setTimeout(60_000);
   let dataSource: DataSource;
   let ordersService: OrdersService;

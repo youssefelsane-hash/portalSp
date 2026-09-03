@@ -14,7 +14,8 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { AssessmentRoutePolicy, PriceCertaintyMode, PricingModel } from '../catalog/entities/service.entity';
+import { PriceCertaintyMode, PricingModel } from '../catalog/entities/service.entity';
+import { assessmentRouteRejection } from './assessment-route-guard';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
@@ -632,14 +633,9 @@ export class OrdersService {
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const remoteAssessmentRequested = dto.request_remote_quote === true;
+    const earlyRejection = assessmentRouteRejection(service, remoteAssessmentRequested ? 'remote' : 'onsite');
+    if (earlyRejection) throw new ApiException(ErrorCode.VAL_001, earlyRejection, HttpStatus.BAD_REQUEST);
     if (remoteAssessmentRequested) {
-      if (
-        service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE ||
-        !service.remoteAssessmentEnabled ||
-        service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY
-      ) {
-        throw new ApiException(ErrorCode.VAL_001, 'التقييم بالصور غير متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
-      }
       if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -1048,24 +1044,18 @@ export class OrdersService {
     }
 
     const remoteQuoteRequested = dto.request_remote_quote === true;
+    // مسار المعاينة في الموقع محتاج فحص برضه — مش بس مسار الصور. غيابه كان بيخلي خدمة
+    // سياستها «بالصور فقط» تقبل حجز معاينة وتحصّل رسم الكشف وتبعت فني (docs/08 §124).
+    if (!remoteQuoteRequested) {
+      const onsiteRejection = assessmentRouteRejection(service, 'onsite');
+      if (onsiteRejection) throw new ApiException(ErrorCode.VAL_001, onsiteRejection, HttpStatus.BAD_REQUEST);
+    }
     if (remoteQuoteRequested) {
-      if (service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'طلب تسعير الإدارة بالصور متاح فقط للخدمات من نوع معاينة ثم سعر',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
       if (!dto.problem_image_ids?.length) {
         throw new ApiException(ErrorCode.VAL_001, 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر', HttpStatus.BAD_REQUEST);
       }
-      if (!service.remoteAssessmentEnabled || service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'التقييم بالصور غير متاح لهذه الخدمة — يلزم حجز معاينة في الموقع',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+      const rejection = assessmentRouteRejection(service, 'remote');
+      if (rejection) throw new ApiException(ErrorCode.VAL_001, rejection, HttpStatus.BAD_REQUEST);
       if (originalOrder || bookingMode === BookingMode.EMERGENCY || dto.repeat_frequency) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -1644,7 +1634,7 @@ export class OrdersService {
             // بيتوزّع عادي زي أي طلب.
             requestedTechnicianId: order.requestedTechnicianId,
             requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
-            // انتماء العمارة (migration 0257، docs/08 §122، طلب مالك صريح) — بلاغ: الطلب الأصلي
+            // انتماء العمارة (migration 0257، docs/08 §125، طلب مالك صريح) — بلاغ: الطلب الأصلي
             // معمول بكود عمارة، ولازم النوبات الجاية تفضل مستفيدة من خصم العمارة مش تفقده بمجرد
             // إنه اتحوّل لقالب متكرر. `order.buildingId` هنا هو نفس المعرّف اللي اتحل من
             // `dto.building_code` فوق في نفس الدالة — مفيش استعلام إضافي.
@@ -1792,14 +1782,10 @@ export class OrdersService {
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const remoteAssessmentRequested = dto.request_remote_quote === true;
+    // نفس الحارس اللي `create()` بيستخدمه بالحرف — نداء واحد لمنطق واحد، مش نسختين بتفرقوا.
+    const previewRejection = assessmentRouteRejection(service, remoteAssessmentRequested ? 'remote' : 'onsite');
+    if (previewRejection) throw new ApiException(ErrorCode.VAL_001, previewRejection, HttpStatus.BAD_REQUEST);
     if (remoteAssessmentRequested) {
-      if (
-        service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE ||
-        !service.remoteAssessmentEnabled ||
-        service.assessmentRoutePolicy === AssessmentRoutePolicy.ONSITE_ONLY
-      ) {
-        throw new ApiException(ErrorCode.VAL_001, 'التقييم بالصور غير متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
-      }
       if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
         throw new ApiException(
           ErrorCode.VAL_001,

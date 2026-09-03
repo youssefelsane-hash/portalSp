@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/app_motion.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'models.dart';
@@ -64,7 +65,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final order = _orders![index];
-                            return Card(
+                            // docs/08 §122 — دخول متدرّج خفيف بعد التحميل: بيوضّح إن دي قايمة
+                            // وصلت دلوقتي، بدل ما تظهر دفعة واحدة فجأة. التدرّج بيقف عند
+                            // العنصر الثامن (motionListDelay) عشان مايتحوّلش لانتظار.
+                            return MotionReveal(
+                              delay: motionListDelay(index),
+                              child: Card(
                               child: ListTile(
                                 title: Text(order.orderNumber),
                                 subtitle: Text(
@@ -75,6 +81,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                 trailing: Text(_formatEgp(order.totalAmountCents)),
                                 onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
+                                ),
                                 ),
                               ),
                             );

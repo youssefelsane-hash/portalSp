@@ -82,7 +82,7 @@ class PushNotificationService {
     // iOS بيسجّل فئات الأزرار **مرة واحدة وقت التهيئة**، مش مع كل رسالة زي أندرويد — فأسماء
     // الأزرار هنا ثابتة ومطابقة للافتراضي في migration 0097 (`{"accept":"قبول","reject":"رفض"}`).
     // نتيجة مقصودة: `action_labels` اللي الأدمن بيعدّلها بتأثر على أندرويد بس؛ موثّقة في
-    // docs/08 §124 كقيد منصة مش كفجوة.
+    // docs/08 §127 كقيد منصة مش كفجوة.
     final iosInit = DarwinInitializationSettings(
       notificationCategories: <DarwinNotificationCategory>[
         DarwinNotificationCategory(

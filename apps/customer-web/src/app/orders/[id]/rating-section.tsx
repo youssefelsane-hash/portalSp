@@ -7,7 +7,7 @@ import { ApiError } from '@/lib/api-client';
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
 /**
- * تقييم الطلب بعد اكتماله (docs/08 §125) — كان موجود في `apps/customer-app` بس.
+ * تقييم الطلب بعد اكتماله (docs/08 §128) — كان موجود في `apps/customer-app` بس.
  *
  * الأبعاد الخمسة الاختيارية مطابقة بالحرف لـ`rating_dialog.dart` ولـ`CreateRatingDto`: التقييم
  * العام إجباري، والباقي بيتبعت بس لو العميل حدده فعلاً (مش صفر ولا 1 افتراضية — إرسال قيمة

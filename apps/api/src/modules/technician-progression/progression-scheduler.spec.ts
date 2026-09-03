@@ -1,7 +1,7 @@
 import { TechnicianProgressionService } from './technician-progression.service';
 
 /**
- * جدولة تقييم الترقية (docs/08 §126).
+ * جدولة تقييم الترقية (docs/08 §129).
  *
  * **الفجوة اللي الاختبار ده بيقفلها**: `calculateAll()` مكانش ليها أي مُشغّل تلقائي، و
  * `GET /technician/progression` بتقرا صف محفوظ — فالفني كان بيشوف شاشة فاضية للأبد (اتأكد على

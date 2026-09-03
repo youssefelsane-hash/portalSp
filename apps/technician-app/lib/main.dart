@@ -224,8 +224,9 @@ class _VerificationGateState extends State<_VerificationGate> {
       final me = await OnboardingRepository(
         context.read<AuthRepository>(),
       ).fetchMe();
-      if (mounted)
+      if (mounted) {
         setState(() => _needsOnboarding = me.verificationStatus != 'approved');
+      }
     } on ApiException {
       // فشل آمن — راجع تعليق الكلاس فوق.
     } finally {

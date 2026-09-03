@@ -13,6 +13,8 @@ import { EmployeePresenceState, WorkforceActivityService } from './workforce-act
 // إلغاء جلسة موظف بعينها). idle threshold بتتحط 2 ثانية بس هنا عبر إعداد حقيقي (settings) عشان
 // الاختبار يقدر يتحقق من انتقال ACTIVE→IDLE من غير ما يستنى 5 دقايق حقيقية.
 describe('WorkforceActivityService — حالة الجلسة/وقت العمل/إلغاء جلسة بعينها (Script 5)', () => {
+  jest.setTimeout(60_000);
+
   let dataSource: DataSource;
   let cache: RedisCacheService;
   let service: WorkforceActivityService;

@@ -3,7 +3,7 @@ import { validate } from 'class-validator';
 import { CreateRatingDto } from './dto/create-rating.dto';
 
 /**
- * عقد تقييم العميل بين الواجهات (docs/08 §125).
+ * عقد تقييم العميل بين الواجهات (docs/08 §128).
  *
  * `apps/customer-web` كان **مفيهوش تقييم خالص** — عميل الويب عمره ما قدر يقيّم طلب، رغم إن
  * الـendpoint موجود ومتستخدم من `apps/customer-app` من زمان. بعد ما اتضاف التقييم للويب بقى فيه

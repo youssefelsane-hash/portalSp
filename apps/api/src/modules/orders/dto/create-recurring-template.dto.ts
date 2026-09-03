@@ -24,7 +24,7 @@ export class CreateRecurringTemplateDto {
   @IsUUID()
   requested_technician_company_id?: string;
 
-  // انتماء العمارة (migration 0257، docs/08 §122) — نفس دلالة CreateOrderDto.building_code:
+  // انتماء العمارة (migration 0257، docs/08 §125) — نفس دلالة CreateOrderDto.building_code:
   // خصم العمارة مش لمرة واحدة زي promo_code، فمسموح يتحفظ مع القالب ويتكرر مع كل نوبة. الخدمة
   // بتتحقق من الكود وقت الإنشاء (404 واضح لو غلط)، وكل نوبة بعد كده بتقرا نسبة الخصم الحالية.
   @IsOptional()

@@ -121,7 +121,7 @@ export class FcmPushDispatcher {
       //
       // الحل: نبعت لـiOS تنبيه حقيقي بفئة أزرار مسجّلة على الجهاز (`ORDER_OFFER_ACTIONS`) —
       // النظام بيعرضه بنفسه بأزراره، تسليم مضمون بلا اعتماد على صحيان التطبيق. المقابل إن
-      // أسماء الأزرار على iOS ثابتة من وقت التهيئة (قيد منصة، docs/08 §124).
+      // أسماء الأزرار على iOS ثابتة من وقت التهيئة (قيد منصة، docs/08 §127).
       return {
         tokens: input.targets,
         data: { ...baseData, title: input.titleAr, body: input.bodyAr },

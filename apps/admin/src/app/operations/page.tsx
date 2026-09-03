@@ -40,6 +40,7 @@ import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
 import { formatEgp } from '@/lib/format';
+import { LiveValue } from '@/components/live-value';
 import {
   VERIFICATION_STATUS_LABELS,
   LEVEL_LABELS,
@@ -80,7 +81,7 @@ function KpiCard({
             <CardDescription>{title}</CardDescription>
             <Icon className="size-4 text-muted-foreground" />
           </div>
-          <CardTitle className="text-2xl">{value}</CardTitle>
+          <CardTitle className="text-2xl"><LiveValue value={value} /></CardTitle>
         </CardHeader>
         {description && (
           <CardContent>
@@ -106,7 +107,7 @@ function CapacityTierRow({ label, value, tone }: { label: string; value: number;
           : 'text-muted-foreground';
   return (
     <div className="flex flex-1 flex-col items-center gap-1 rounded-lg border p-3">
-      <span className={`text-2xl font-semibold ${toneClass}`}>{value}</span>
+      <LiveValue value={value} className={`text-2xl font-semibold ${toneClass}`} />
       <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   );
@@ -239,7 +240,7 @@ function ExceptionGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div className={`rounded-lg border border-s-4 p-4 ${tone === 'danger' ? 'border-s-danger' : 'border-s-warning'}`}>
+    <div className={`motion-rise rounded-lg border border-s-4 p-4 ${tone === 'danger' ? 'border-s-danger' : 'border-s-warning'}`}>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium">
           {title} ({count})
@@ -363,7 +364,7 @@ function ExceptionCenterSection({
       )}
 
       {!error && data && totalCount > 0 && (
-        <div className="flex flex-col gap-4">
+        <div className="motion-list flex flex-col gap-4">
           {/* ترتيب مقصود (docs/08 §56 بند 4): شغلانة معادها عدّى ولسه ما بدأتش هي أعجل حاجة. */}
           {overdueCount > 0 && (
             <ExceptionGroup title="شغلانة معادها عدّى ولسه ما بدأتش" count={overdueCount} tone="danger">
@@ -1401,7 +1402,7 @@ function OrderTraceCard({ trace }: { trace: OrderTraceDto }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-lg border">
+    <div className="motion-rise motion-press rounded-lg border">
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
@@ -1428,7 +1429,7 @@ function OrderTraceCard({ trace }: { trace: OrderTraceDto }) {
       </button>
 
       {expanded && (
-        <div className="border-t px-3 pb-3">
+        <div className="motion-rise border-t px-3 pb-3">
           {trace.rounds.length === 0 ? (
             <p className="py-3 text-sm text-muted-foreground">لسه ما اتبعتش لأي فني — البث الأول ما حصلش.</p>
           ) : (
@@ -1528,7 +1529,7 @@ function OrderTraceSection({ authedFetch }: { authedFetch: ReturnType<typeof use
         <EmptyState icon={Compass} title="مفيش طلبات بتدوّر على فني دلوقتي" description="كل الطلبات المفتوحة اتعيّنت أو خرجت من مرحلة البحث." />
       )}
       {!error && items.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="motion-list flex flex-col gap-2">
           {items.map((trace) => (
             <OrderTraceCard key={trace.order_id} trace={trace} />
           ))}
@@ -1689,22 +1690,22 @@ function OperationsOverviewPage() {
 
             <p className="mt-2 text-xs text-muted-foreground">{OPERATIONS_TABS.find((t) => t.value === activeTab)?.hint}</p>
 
-            <TabsContent value="exceptions" className="mt-4">
+            <TabsContent value="exceptions" className="mt-4 motion-rise">
               <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} hasPermission={hasPermission} />
             </TabsContent>
-            <TabsContent value="workforce" className="mt-4">
+            <TabsContent value="workforce" className="mt-4 motion-rise">
               <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
             </TabsContent>
-            <TabsContent value="workload" className="mt-4">
+            <TabsContent value="workload" className="mt-4 motion-rise">
               <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
             </TabsContent>
-            <TabsContent value="delivery" className="mt-4">
+            <TabsContent value="delivery" className="mt-4 motion-rise">
               <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
             </TabsContent>
-            <TabsContent value="trace" className="mt-4">
+            <TabsContent value="trace" className="mt-4 motion-rise">
               <OrderTraceSection authedFetch={authedFetch} />
             </TabsContent>
-            <TabsContent value="coverage" className="mt-4">
+            <TabsContent value="coverage" className="mt-4 motion-rise">
               <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
             </TabsContent>
           </Tabs>

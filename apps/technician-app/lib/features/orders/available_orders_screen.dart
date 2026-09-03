@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/app_motion.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
@@ -110,10 +111,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Future<bool> _captureLocationOnce({bool showFeedback = false}) async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        if (showFeedback)
+        if (showFeedback) {
           _showLocationSnack(
             'لازم تفعّل GPS/خدمة الموقع من إعدادات الجهاز الأول',
           );
+        }
         return false;
       }
       var permission = await Geolocator.checkPermission();
@@ -122,10 +124,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        if (showFeedback)
+        if (showFeedback) {
           _showLocationSnack(
             'محتاجين إذن الموقع عشان الطلبات توصلك — فعّله من إعدادات التطبيق',
           );
+        }
         return false;
       }
       final position = await Geolocator.getCurrentPosition(
@@ -141,10 +144,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       if (showFeedback) _showLocationSnack('تم تحديث موقعك بنجاح ✓');
       return true;
     } catch (_) {
-      if (showFeedback)
+      if (showFeedback) {
         _showLocationSnack(
           'فشلت المحاولة — تأكد إن الجي بي إس مفعّل وحاول تاني',
         );
+      }
       return false;
     }
   }
@@ -297,10 +301,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
       // الفرصة ممكن تكون اتقفلت من مكان تاني (فني تاني قبلها/الطلب اتغطى) — نحدّث القايمة عشان
       // تختفي فورًا بدل ما تفضل ظاهرة وهي بقت مش صالحة.
       await _loadWorkOpportunities();
@@ -315,10 +320,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -339,10 +345,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.acceptCrewOpportunity(invite.id);
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
       // ممكن تكون اتقفلت من مكان تاني (العدد المطلوب اكتمل قبل ما توصل) — نحدّث القايمة عشان تختفي.
       await _loadCrewOpportunities();
     } finally {
@@ -356,10 +363,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineCrewOpportunity(invite.id);
       await _loadCrewOpportunities();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -583,9 +591,16 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in activeOrders) ...[
-            _ActiveOrderCard(
-              order: order,
-              onTap: () => _openActiveOrder(order),
+            // docs/08 §122 — الكارت بيدخل بحركة خفيفة بدل ما يظهر فجأة. الشاشة دي
+            // بتتحدّث لحظيًا، فشغلانة جديدة كانت بتنطّ في نص القايمة بلا أي إشارة
+            // إنها **جديدة**. الـValueKey هو اللي بيخلّي الكارت الجديد يتركّب من
+            // أول وجديد فالحركة تشتغل له هو بس — مش لكل القايمة في كل تحديث.
+            MotionReveal(
+              key: ValueKey('active-${order.id}'),
+              child: _ActiveOrderCard(
+                order: order,
+                onTap: () => _openActiveOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -600,10 +615,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in overdue) ...[
-            _OverdueJobCard(
-              order: order,
-              dayLabel: formatScheduledDayAr(order.scheduledAt),
-              onTap: () => _openUpcomingOrder(order),
+            MotionReveal(
+              key: ValueKey('overdue-${order.id}'),
+              child: _OverdueJobCard(
+                order: order,
+                dayLabel: formatScheduledDayAr(order.scheduledAt),
+                onTap: () => _openUpcomingOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -621,11 +639,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in emergencyPending) ...[
-            _EmergencyRequestCard(
-              order: order,
-              busy: _isActing,
-              onAccept: () => _accept(order),
-              onReject: () => _reject(order),
+            MotionReveal(
+              key: ValueKey('emergency-${order.assignmentId}'),
+              child: _EmergencyRequestCard(
+                order: order,
+                busy: _isActing,
+                onAccept: () => _accept(order),
+                onReject: () => _reject(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -638,11 +659,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in scheduledPending) ...[
-            _NearTermRequestCard(
-              order: order,
-              busy: _isActing,
-              onAccept: () => _accept(order),
-              onReject: () => _reject(order),
+            MotionReveal(
+              key: ValueKey('near-${order.assignmentId}'),
+              child: _NearTermRequestCard(
+                order: order,
+                busy: _isActing,
+                onAccept: () => _accept(order),
+                onReject: () => _reject(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -655,10 +679,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in upcoming) ...[
-            _UpcomingJobCard(
-              order: order,
-              dayLabel: formatScheduledDayAr(order.scheduledAt),
-              onTap: () => _openUpcomingOrder(order),
+            MotionReveal(
+              key: ValueKey('upcoming-${order.id}'),
+              child: _UpcomingJobCard(
+                order: order,
+                dayLabel: formatScheduledDayAr(order.scheduledAt),
+                onTap: () => _openUpcomingOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -680,11 +707,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final opportunity in workOpportunities) ...[
-            _WorkOpportunityCard(
-              opportunity: opportunity,
-              busy: _isActing,
-              onAccept: () => _acceptWorkOpportunity(opportunity),
-              onDecline: () => _declineWorkOpportunity(opportunity),
+            MotionReveal(
+              key: ValueKey('opportunity-${opportunity.id}'),
+              child: _WorkOpportunityCard(
+                opportunity: opportunity,
+                busy: _isActing,
+                onAccept: () => _acceptWorkOpportunity(opportunity),
+                onDecline: () => _declineWorkOpportunity(opportunity),
+              ),
             ),
             const SizedBox(height: 8),
           ],

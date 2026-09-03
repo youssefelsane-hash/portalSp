@@ -8,7 +8,7 @@ import { ApiError } from '@/lib/api-client';
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
 /**
- * طلب إعادة زيارة تحت الضمان (docs/08 §125، §7) — كان في `apps/customer-app` بس.
+ * طلب إعادة زيارة تحت الضمان (docs/08 §128، §7) — كان في `apps/customer-app` بس.
  *
  * مفيش endpoint خاص بإعادة الزيارة: الباك-إند بياخدها كطلب عادي فيه `original_order_id`
  * (`CreateOrderDto`)، وهو اللي بيصفّر السعر وبيرجّع لنفس الفني الأصلي (ADR-0051). يعني الويب

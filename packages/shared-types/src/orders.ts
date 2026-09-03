@@ -210,7 +210,7 @@ export interface RecurringTemplateResponseDto {
   booking_mode: string;
   requested_technician_id: string | null;
   requested_technician_company_id: string | null;
-  // انتماء العمارة (migration 0257، docs/08 §122) — العميل بيشوف إنه لسه مربوط بالعمارة، بلا
+  // انتماء العمارة (migration 0257، docs/08 §125) — العميل بيشوف إنه لسه مربوط بالعمارة، بلا
   // أي رقم خصم (النسبة بتتحسب فريش وقت كل نوبة، مش بتتخزن).
   building_id: string | null;
   frequency: RecurringOrderFrequency;

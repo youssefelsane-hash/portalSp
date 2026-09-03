@@ -111,7 +111,7 @@ export default function RecurringOrdersPage() {
                   <TableCell>{plan.service_name_ar}</TableCell>
                   <TableCell>
                     {plan.address_label ?? <span className="text-muted-foreground">—</span>}
-                    {/* انتماء العمارة (migration 0257، docs/08 §122) — بيفضل مربوط بالطلب المتكرر
+                    {/* انتماء العمارة (migration 0257، docs/08 §125) — بيفضل مربوط بالطلب المتكرر
                         مش الطلب الأول بس، فالأدمن لازم يشوفه هنا عشان يعرف ليه خصم النوبات بتتغيّر
                         مع تغيير نسبة العمارة من صفحة العمائر. */}
                     {plan.building_code && (

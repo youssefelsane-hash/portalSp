@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../../design/app_motion.dart';
+import 'assessment_route.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -166,9 +168,33 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool _uploadingProblemImages = false;
   bool _requestRemoteQuote = false;
 
-  bool get _canRequestRemoteQuote =>
-      widget.service.pricingModel == 'inspection_then_quote' &&
-      widget.bookingMode != BookingMode.emergency;
+  // المسارات المتاحة فعلاً حسب إعدادات الأدمن — نفس قواعد الباك-إند بالحرف
+  // (assessment-route-guard.ts). قبل كده الشرط كان `pricingModel == inspection_then_quote`
+  // وبس، فالتطبيق كان بيعرض رفع الصور لخدمة الأدمن قافل فيها التقييم بالصور، والعميل يرفع
+  // ويترفض عند الإنشاء: طريق مسدود (بلاغ مالك، docs/08 §124).
+  AssessmentRoutes get _routes => AssessmentRoutes.forService(widget.service);
+
+  /// الطوارئ مستثناة من التقييم بالصور: مفيش وقت لدورة مراجعة إدارة في طلب عاجل.
+  bool get _remoteRouteAvailable =>
+      _routes.remote && widget.bookingMode != BookingMode.emergency;
+
+  bool get _onsiteRouteAvailable => _routes.onsite;
+
+  /// خدمة مسارها الوحيد المتاح هو الصور — العميل مايقدرش يحجز معاينة، فالاختيار مش اختيار.
+  bool get _remoteRouteForced => _remoteRouteAvailable && !_onsiteRouteAvailable;
+
+
+  /// رسم التقييم بالصور — بيتحصّل وقت إرسال الصور، فلازم العميل يشوفه **قبل** ما يبعت.
+  /// كان مخفي تمامًا عن العميل (الحقل مكانش بيوصل التطبيق أصلاً)، فلو الأدمن حاطط رسم،
+  /// الباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم» والعميل مش فاهم رسم إيه.
+  String get _remoteFeeSuffix => widget.service.remoteAssessmentFeeCents > 0
+      ? ' — رسم التقييم ${_formatEgp(widget.service.remoteAssessmentFeeCents)}'
+      : '';
+
+  /// لما مسار الصور هو الوحيد المتاح، الطلب لازم يتبعت كطلب تقييم بالصور — مش كطلب معاينة.
+  /// بعد إصلاح خرق `remote_only` في الباك-إند، طلب المعاينة لخدمة زي دي بيترفض صراحة، فلو
+  /// التطبيق ساب الاختيار مقفول كان هيبعت طلب مرفوض حتمًا.
+  bool get _effectiveRemoteQuote => _remoteRouteForced ? true : _requestRemoteQuote;
 
   Future<void> _pickProblemImages() async {
     if (_uploadingProblemImages || _problemImages.length >= 10) return;
@@ -189,10 +215,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
       }
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _uploadingProblemImages = false);
     }
@@ -255,8 +282,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _requestedAt = widget.requestedAt;
     _requestedAtRangeEnd = widget.requestedAtRangeEnd;
     _preciseTime = widget.requestedPreciseTime;
-    if (widget.initialFieldValues != null)
+    if (widget.initialFieldValues != null) {
       _fieldValues.addAll(widget.initialFieldValues!);
+    }
     _loadAddons();
     if (_showsDynamicForm) {
       _loadPricingFields();
@@ -496,11 +524,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         });
       }
     } on ApiException catch (err) {
-      if (mounted && generation == _previewRequestGeneration)
+      if (mounted && generation == _previewRequestGeneration) {
         setState(() => _previewError = err.message);
+      }
     } finally {
-      if (mounted && generation == _previewRequestGeneration)
+      if (mounted && generation == _previewRequestGeneration) {
         setState(() => _previewLoading = false);
+      }
     }
   }
 
@@ -580,7 +610,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (at == null) return 'فوري';
     final rangeEnd = _requestedAtRangeEnd;
     if (rangeEnd != null) {
-      final two = (int n) => n.toString().padLeft(2, '0');
+      String two(int n) => n.toString().padLeft(2, '0');
       return 'مرن: ${two(at.day)}/${two(at.month)} — ${two(rangeEnd.day)}/${two(rangeEnd.month)}';
     }
     final today = DateTime.now();
@@ -593,7 +623,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         at.day == tomorrow.day;
     if (isToday) return 'النهاردة';
     if (isTomorrow) return 'بكرة';
-    final two = (int n) => n.toString().padLeft(2, '0');
+    String two(int n) => n.toString().padLeft(2, '0');
     return '${two(at.day)}/${two(at.month)}/${at.year}';
   }
 
@@ -713,10 +743,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     } on ApiException catch (err) {
       // مش هيمنع الانتقال لـOrderDetailScreen — العميل يقدر يعيد المحاولة من هناك لو الأزرار
       // موجودة، أو الطلب هيتلغى تلقائيًا لو ماكملش خلال المهلة (راجع تعليق _submit فوق).
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     }
   }
 
@@ -770,10 +801,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       ?.toUtc()
                       .toIso8601String(),
             fieldValues: _showsDynamicForm ? _fieldValues : null,
-            promoCode: _requestRemoteQuote ? null : _promoCodeToSend,
-            buildingCode: _requestRemoteQuote ? null : _buildingCodeToSend,
-            addonIds: _requestRemoteQuote ? null : _selectedAddonIds.toList(),
-            warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
+            promoCode: _effectiveRemoteQuote ? null : _promoCodeToSend,
+            buildingCode: _effectiveRemoteQuote ? null : _buildingCodeToSend,
+            addonIds: _effectiveRemoteQuote ? null : _selectedAddonIds.toList(),
+            warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
             standardDataId: _selectedStandardData?.id,
             requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
           );
@@ -808,11 +839,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
-    if (!_requestRemoteQuote && _pricePreview == null) {
+    if (!_effectiveRemoteQuote && _pricePreview == null) {
       setState(() => _error = 'استنى لحد ما السعر يتحسب');
       return;
     }
-    if (_requestRemoteQuote && _problemImages.isEmpty) {
+    if (_effectiveRemoteQuote && _problemImages.isEmpty) {
       setState(
         () => _error = 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر',
       );
@@ -852,23 +883,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()
             : null,
         problemDescription: _descriptionController.text.trim(),
-        promoCode: _requestRemoteQuote ? '' : _promoCodeToSend,
-        buildingCode: _requestRemoteQuote ? '' : _buildingCodeToSend,
-        addonIds: _requestRemoteQuote ? const [] : _selectedAddonIds.toList(),
+        promoCode: _effectiveRemoteQuote ? '' : _promoCodeToSend,
+        buildingCode: _effectiveRemoteQuote ? '' : _buildingCodeToSend,
+        addonIds: _effectiveRemoteQuote ? const [] : _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _showsDynamicForm ? _fieldValues : null,
         problemImageIds: _problemImages.map((item) => item.id).toList(),
-        requestRemoteQuote: _requestRemoteQuote,
+        requestRemoteQuote: _effectiveRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         paymentMethod:
-            _requestRemoteQuote || _selectedPaymentMethod == 'installment'
+            _effectiveRemoteQuote || _selectedPaymentMethod == 'installment'
             ? null
             : _selectedPaymentMethod,
-        warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
+        warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
-        repeatFrequency: _requestRemoteQuote
+        repeatFrequency: _effectiveRemoteQuote
             ? null
             : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
@@ -924,7 +955,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             child: Text(label, style: style, overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
-          Text(value, style: style),
+          // docs/08 §122 — الرقم بيتبدّل بتلاشٍ قصير بدل ما ينطّ رقم مكان رقم. النقطة دي
+          // بتغطّي **كل** سطور السعر في شاشة الحجز (أساسي/إضافات/خصم/ضمان/إجمالي/إيداع)
+          // بتعديل واحد، فالعميل بيلاحظ إن اختياره أثّر في السعر مهما كان البند اللي اتغيّر.
+          MotionValueText(value, style: style),
         ],
       ),
     );
@@ -946,12 +980,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         (_checkoutOptionsError != null
             ? 'تعذر التحقق من جاهزية الطريقة'
             : 'جاري التحقق من الجاهزية');
+    // `enabled` بدل `onChanged: null` (Flutter شال groupValue/onChanged من Radio لصالح
+    // RadioGroup الأب). نفس السلوك بالظبط: الطريقة غير المتاحة مايتضغطش عليها وبتوضّح السبب.
     return RadioListTile<String?>(
       value: method,
-      groupValue: _selectedPaymentMethod,
-      onChanged: available
-          ? (value) => setState(() => _selectedPaymentMethod = value)
-          : null,
+      enabled: available,
       secondary: Icon(icon),
       title: Text(title),
       subtitle: Text(available ? subtitle : reason),
@@ -986,8 +1019,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return Text(_previewError!, style: const TextStyle(color: Colors.red));
     }
     final preview = _pricePreview;
-    if (preview == null)
+    if (preview == null) {
       return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1156,8 +1190,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         _durationEstimate = null;
                         _durationError = null;
                       });
-                      if (_requestedUnitsController.text.trim().isNotEmpty)
+                      if (_requestedUnitsController.text.trim().isNotEmpty) {
                         _refreshDurationEstimate();
+                      }
                     },
                   ),
                 ),
@@ -1387,8 +1422,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                                 ? null
                                 : () => setState(() {
                                     _problemImages.removeAt(index);
-                                    if (_problemImages.isEmpty)
+                                    if (_problemImages.isEmpty) {
                                       _requestRemoteQuote = false;
+                                    }
                                   }),
                             icon: const Icon(Icons.close, size: 16),
                           ),
@@ -1413,36 +1449,92 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 _uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور',
               ),
             ),
-            if (_canRequestRemoteQuote) ...[
-              const SizedBox(height: 10),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: SwitchListTile(
-                  value: _requestRemoteQuote,
-                  onChanged: _problemImages.isEmpty
-                      ? null
-                      : (value) => setState(() {
-                          _requestRemoteQuote = value;
-                          if (value) {
-                            _selectedAddonIds.clear();
-                            _codeController.clear();
-                            _resolvedCodeKind = null;
-                            _selectedWarrantyPlanId = null;
-                            _repeatFrequency = null;
-                            _selectedPaymentMethod = null;
-                          }
-                        }),
-                  title: const Text('خلّي الإدارة تحدد السعر من الصور'),
-                  subtitle: Text(
-                    _problemImages.isEmpty
-                        ? 'ارفع صورة واحدة على الأقل لتفعيل الاختيار'
-                        : 'هتستلم عرض سعر، وتقدر توافق أو ترفض قبل ما نرسل فني.',
-                  ),
-                  secondary: const Icon(Icons.request_quote_outlined),
-                ),
+            // ── اختيار مسار التقييم (docs/08 §124) ──────────────────────────────────────
+            // قبل كده كان switch واحد «خلّي الإدارة تحدد السعر من الصور»، وحالته المقفولة
+            // كانت **ضمنيًا** معاينة في الموقع من غير ما حاجة تقول كده — فالمالك قال بالحرف
+            // «مش عارف إن أعمل معاينة لوحدها». دلوقتي المسارين مسمّيين صراحة، وبيظهر منهم
+            // اللي سياسة الأدمن سامحة بيه بس.
+            if (_remoteRouteAvailable || _onsiteRouteAvailable) ...[
+              const SizedBox(height: 16),
+              Text(
+                'إزاي نحدد السعر؟',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
+              const SizedBox(height: 8),
+              if (_remoteRouteAvailable && _onsiteRouteAvailable)
+                RadioGroup<bool>(
+                  groupValue: _requestRemoteQuote,
+                  onChanged: (value) {
+                    if (value == null) return;
+                    // منع اختيار مسار الصور قبل رفع صورة: الباك-إند بيرفض بلا صور،
+                    // فأحسن نمنع الاختيار بدل ما العميل يوصل لرسالة خطأ.
+                    if (value && _problemImages.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('ارفع صورة واحدة على الأقل الأول')),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _requestRemoteQuote = value;
+                      if (value) {
+                        _selectedAddonIds.clear();
+                        _codeController.clear();
+                        _resolvedCodeKind = null;
+                        _selectedWarrantyPlanId = null;
+                        _repeatFrequency = null;
+                        _selectedPaymentMethod = null;
+                      }
+                    });
+                  },
+                  child: Card(
+                    child: Column(
+                      children: [
+                        RadioListTile<bool>(
+                          value: true,
+                          title: const Text('الإدارة تحدد السعر من الصور'),
+                          subtitle: Text(
+                            _problemImages.isEmpty
+                                ? 'ارفع صورة واحدة على الأقل الأول$_remoteFeeSuffix'
+                                : 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني$_remoteFeeSuffix',
+                          ),
+                          secondary: const Icon(Icons.photo_camera_outlined),
+                        ),
+                        RadioListTile<bool>(
+                          value: false,
+                          title: const Text('معاينة في الموقع'),
+                          subtitle: Text(
+                            'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
+                            '${_formatEgp(widget.service.inspectionFeeCents)}',
+                          ),
+                          secondary: const Icon(Icons.home_repair_service_outlined),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                // مسار واحد متاح — بيتعرض كمعلومة، مش كاختيار وهمي.
+                Card(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: ListTile(
+                    leading: Icon(
+                      _remoteRouteAvailable
+                          ? Icons.photo_camera_outlined
+                          : Icons.home_repair_service_outlined,
+                    ),
+                    title: Text(
+                      _remoteRouteAvailable ? 'الإدارة تحدد السعر من الصور' : 'معاينة في الموقع',
+                    ),
+                    subtitle: Text(
+                      _remoteRouteAvailable
+                          ? 'الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر$_remoteFeeSuffix'
+                          : 'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
+                                '${_formatEgp(widget.service.inspectionFeeCents)}',
+                    ),
+                  ),
+                ),
             ],
-            if (_addons.isNotEmpty && !_requestRemoteQuote) ...[
+            if (_addons.isNotEmpty && !_effectiveRemoteQuote) ...[
               const SizedBox(height: 16),
               Text(
                 'إضافات اختيارية',
@@ -1474,9 +1566,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            if (!_requestRemoteQuote) const SizedBox(height: 16),
+            if (!_effectiveRemoteQuote) const SizedBox(height: 16),
             // حقل كود واحد (docs/08 §77-B4) — شوف تعليق `_codeController` للسبب الكامل.
-            if (!_requestRemoteQuote)
+            if (!_effectiveRemoteQuote)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1543,31 +1635,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              Card(
+              RadioGroup<String?>(
+                groupValue: _repeatFrequency,
+                onChanged: (value) => setState(() => _repeatFrequency = value),
+                child: Card(
                 child: Column(
                   children: [
                     RadioListTile<String?>(
                       value: null,
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('مرة واحدة'),
+                      title: Text('مرة واحدة'),
                     ),
                     RadioListTile<String?>(
                       value: 'weekly',
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
+                      title: Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
                     ),
                     RadioListTile<String?>(
                       value: 'monthly',
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('شهري — نفس اليوم كل شهر'),
+                      title: Text('شهري — نفس اليوم كل شهر'),
                     ),
                   ],
+                ),
                 ),
               ),
               if (_repeatFrequency != null)
@@ -1594,62 +1681,47 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 8),
-              Card(
-                child: Column(
-                  children: [
-                    RadioListTile<String?>(
-                      value: null,
-                      groupValue: _selectedWarrantyPlanId,
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedWarrantyPlanId = value;
-                          if (value != null) _repeatFrequency = null;
-                        });
-                        _refreshPreview(
-                          promoCode: _promoCodeToSend.isEmpty
-                              ? null
-                              : _promoCodeToSend,
-                          buildingCode: _buildingCodeToSend.isEmpty
-                              ? null
-                              : _buildingCodeToSend,
-                        );
-                      },
-                      title: const Text('بدون ضمان إضافي'),
-                      subtitle: Text(
-                        widget.service.warrantyDays > 0
-                            ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
-                            : 'لن تضاف تكلفة ضمان',
-                      ),
-                    ),
-                    ..._optionalWarranties.map(
-                      (plan) => RadioListTile<String?>(
-                        value: plan.id,
-                        groupValue: _selectedWarrantyPlanId,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedWarrantyPlanId = value;
-                            if (value != null) _repeatFrequency = null;
-                          });
-                          _refreshPreview(
-                            promoCode: _promoCodeToSend.isEmpty
-                                ? null
-                                : _promoCodeToSend,
-                            buildingCode: _buildingCodeToSend.isEmpty
-                                ? null
-                                : _buildingCodeToSend,
-                          );
-                        },
-                        title: Text(
-                          '${plan.nameAr} — ${plan.coverageMonths} شهر',
-                        ),
+              // نفس المعالج كان مكرّر حرفيًا على كل خيار ضمان؛ RadioGroup بيخلّيه مرة واحدة
+              // على المجموعة — أقل تكرار وأقل فرصة إن نسخة منهم تتعدّل وتنسى التانية.
+              RadioGroup<String?>(
+                groupValue: _selectedWarrantyPlanId,
+                onChanged: (value) {
+                  setState(() {
+                    _selectedWarrantyPlanId = value;
+                    if (value != null) _repeatFrequency = null;
+                  });
+                  _refreshPreview(
+                    promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
+                    buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
+                  );
+                },
+                child: Card(
+                  child: Column(
+                    children: [
+                      RadioListTile<String?>(
+                        value: null,
+                        title: const Text('بدون ضمان إضافي'),
                         subtitle: Text(
-                          plan.pricingModel == 'fixed'
-                              ? '+${_formatEgp(plan.priceValue.round())}'
-                              : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                          widget.service.warrantyDays > 0
+                              ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
+                              : 'لن تضاف تكلفة ضمان',
                         ),
                       ),
-                    ),
-                  ],
+                      ..._optionalWarranties.map(
+                        (plan) => RadioListTile<String?>(
+                          value: plan.id,
+                          title: Text(
+                            '${plan.nameAr} — ${plan.coverageMonths} شهر',
+                          ),
+                          subtitle: Text(
+                            plan.pricingModel == 'fixed'
+                                ? '+${_formatEgp(plan.priceValue.round())}'
+                                : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1721,22 +1793,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
               const SizedBox(height: 8),
             ],
-            Card(
+            // الحارس `__electronic_required__` اتنقل لمستوى المجموعة بدل ما يتكرر على كل
+            // خيار: لما الخدمة تفرض دفع إلكتروني، «ادفع بعد الخدمة» لازم يبان **غير مختار**
+            // مش مختار-ومعطّل. القيمة دي ما بتطابقش أي خيار فمفيش حاجة بتتحدد.
+            RadioGroup<String?>(
+              groupValue: _requiresElectronicPayment && _selectedPaymentMethod == null
+                  ? '__electronic_required__'
+                  : _selectedPaymentMethod,
+              onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+              child: Card(
               child: Column(
                 children: [
                   RadioListTile<String?>(
                     value: null,
-                    groupValue: _requiresElectronicPayment
-                        ? '__electronic_required__'
-                        : _selectedPaymentMethod,
-                    onChanged:
+                    enabled:
                         !_requiresElectronicPayment &&
-                            ((_paymentChannels['cash']?.available ?? false) ||
-                                (_paymentChannels['wallet']?.available ??
-                                    false))
-                        ? (value) =>
-                              setState(() => _selectedPaymentMethod = value)
-                        : null,
+                        ((_paymentChannels['cash']?.available ?? false) ||
+                            (_paymentChannels['wallet']?.available ?? false)),
                     secondary: const Icon(Icons.payments_outlined),
                     title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
                     subtitle: Text(
@@ -1784,6 +1857,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     icon: Icons.storefront_outlined,
                   ),
                 ],
+              ),
               ),
             ),
             const SizedBox(height: 16),

@@ -33,7 +33,7 @@ export class RecurringOrderTemplate {
   @Column({ name: 'requested_technician_company_id', type: 'uuid', nullable: true })
   requestedTechnicianCompanyId: string | null;
 
-  // انتماء العمارة (migration 0257، docs/08 §122) — مختلف جوهريًا عن promo_code/addon_ids تحت:
+  // انتماء العمارة (migration 0257، docs/08 §125) — مختلف جوهريًا عن promo_code/addon_ids تحت:
   // العمارة مش خصم لمرة واحدة، هي انتماء دائم للعنوان. بنخزّن المعرّف بس، مش نسبة الخصم —
   // كل نوبة بتقرا الخصم الحالي وقت التوليد (نفس مسار الطلب العادي بالحرف)، فتغيير الإدارة
   // للنسبة بينعكس على النوبة الجديدة تلقائيًا من غير أي تدخل هنا.

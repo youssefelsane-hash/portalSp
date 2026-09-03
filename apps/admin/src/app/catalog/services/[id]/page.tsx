@@ -30,6 +30,7 @@ import type {
   ServiceLevelPricingResponseDto,
   ServicePricingTierPricingResponseDto,
   ServiceProductivityActualResponseDto,
+  PricingRuleResponseDto,
   ServiceProductivitySuggestionResponseDto,
   ServiceStandardDataResponseDto,
   ServiceZonePricingResponseDto,
@@ -71,6 +72,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { formatEgp } from '@/lib/format';
 import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 import { PricingBuilder } from './pricing-builder';
+import { ServiceSetupRail, type ServiceStage } from '@/components/service-setup-rail';
 
 
 /** شرح الطريقتين الباقيتين (ADR-0060 §1). */
@@ -145,6 +147,10 @@ export default function ServiceDetailPage() {
   const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
   const [actualsByStandardData, setActualsByStandardData] = useState<Record<string, ServiceProductivityActualResponseDto[]>>({});
   const [pendingSuggestions, setPendingSuggestions] = useState<ServiceProductivitySuggestionResponseDto[] | null>(null);
+  // عدد قواعد التسعير — الإشارة الوحيدة المتاحة اللي بتقول «الخدمة دي اتبنالها معادلة فعلاً
+  // ولا لسه». محتاجينها عشان شريط المراحل يفرّق بين «بناء السعر ناقص» و«مش مطلوب أصلاً»
+  // (خدمة كشف-ثم-سعر ملهاش معادلة وقت الحجز، فمش صح تبان ناقصة).
+  const [pricingRules, setPricingRules] = useState<PricingRuleResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showNewAddon, setShowNewAddon] = useState(false);
@@ -205,6 +211,9 @@ export default function ServiceDetailPage() {
     authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`)
       .then(setPricingTierPricing)
       .catch(() => setPricingTierPricing([]));
+    authedFetch<PricingRuleResponseDto[]>(`/admin/services/${id}/pricing-rules`)
+      .then(setPricingRules)
+      .catch(() => setPricingRules([]));
     authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`)
       .then(setAddons)
       .catch(() => setAddons([]));
@@ -590,6 +599,110 @@ export default function ServiceDetailPage() {
     }
   }
 
+  // ── مراحل إعداد الخدمة (docs/08 §123) ───────────────────────────────────────────────────
+  // كل حالة تحت مشتقّة من **شرط حقيقي موجود في الكود** — مفيش قاعدة جاهزية مخترعة هنا:
+  //   * «مسار تقييم واحد على الأقل» مكتوب حرفيًا في نص الصفحة نفسها كشرط لقابلية الحجز.
+  //   * «مجدول أو طوارئ» — خدمة مش الاتنين مايوصلهاش أي طلب أصلاً.
+  //   * «معادلة» مطلوبة لـformula وبس؛ خدمة كشف-ثم-سعر ملهاش سعر وقت الحجز (ADR-0060 §1)،
+  //     فبانِي المعادلة عندها **غير مطلوب** مش ناقص — وده بالظبط اللي المالك طلبه.
+  //   * كلمات البحث: البحث في تطبيق العميل يدوي بالكامل (catalog/README) — خدمة من غيرها
+  //     موجودة بس العميل مش هيلاقيها.
+  const stages: ServiceStage[] = service
+    ? [
+        {
+          id: 'stage-identity',
+          label: 'تعريف الخدمة',
+          status: (service.search_keywords?.length ?? 0) > 0 ? 'ready' : 'needs_setup',
+          hint: (service.search_keywords?.length ?? 0) > 0
+            ? 'الاسم والوصف والصور وكلمات البحث'
+            : 'مفيش كلمات بحث — العميل مش هيلاقي الخدمة في البحث',
+        },
+        {
+          id: 'stage-pricing-method',
+          label: 'طريقة تحديد السعر',
+          status: 'ready',
+          hint:
+            pricingModelLive === 'inspection_then_quote'
+              ? 'كشف ثم عرض سعر — مفيش سعر وقت الحجز'
+              : 'معادلة ديناميكية + السعر الأساسي وحدوده والعمولة',
+        },
+        {
+          id: 'stage-formula',
+          label: 'بناء السعر',
+          status:
+            pricingModelLive !== 'formula'
+              ? 'not_applicable'
+              : pricingRules === null
+                ? 'optional'
+                : pricingRules.length > 0
+                  ? 'ready'
+                  : 'needs_setup',
+          blocking: pricingModelLive === 'formula',
+          hint:
+            pricingModelLive !== 'formula'
+              ? 'الخدمة دي سعرها بيتحدد بعد المعاينة — مالهاش معادلة'
+              : pricingRules === null
+                ? 'بيحمّل…'
+                : pricingRules.length > 0
+                  ? `${pricingRules.length} قاعدة تسعير + حقول الفورم والثوابت والجداول`
+                  : 'مفيش معادلة لسه — ابدأ من قالب جاهز',
+        },
+        {
+          id: 'stage-assessment',
+          label: 'المعاينة وسياسة السعر',
+          status:
+            priceCertaintyMode !== 'assessment_required'
+              ? 'ready'
+              : remoteAssessmentEnabled || onsiteAssessmentEnabled
+                ? 'ready'
+                : 'needs_setup',
+          blocking: priceCertaintyMode === 'assessment_required',
+          hint:
+            priceCertaintyMode === 'confirmed_price'
+              ? 'سعر مؤكد قبل الحجز'
+              : priceCertaintyMode === 'estimated_range'
+                ? 'نطاق تقديري بيتعرض للعميل'
+                : remoteAssessmentEnabled || onsiteAssessmentEnabled
+                  ? 'مسار التقييم والرسوم وخصمها وصلاحية العرض'
+                  : 'لازم تفعّل مسار تقييم واحد على الأقل وإلا الخدمة مش هتتحجز',
+        },
+        {
+          id: 'stage-booking',
+          label: 'الحجز والتنفيذ',
+          status: service.allows_scheduling || service.allows_emergency ? 'ready' : 'needs_setup',
+          blocking: true,
+          hint:
+            service.allows_scheduling || service.allows_emergency
+              ? 'التوفر ودقة الموعد وطريقة التنفيذ والضمان والمستوى'
+              : 'لا مجدول ولا طوارئ مفعّل — مفيش طريقة أصلاً لحجز الخدمة',
+        },
+        {
+          id: 'stage-price-modifiers',
+          label: 'تعديلات السعر',
+          status:
+            (zonePricing?.length ?? 0) + (levelPricing?.length ?? 0) + (pricingTierPricing?.length ?? 0) > 0
+              ? 'ready'
+              : 'optional',
+          hint: 'تسعير المناطق ومستوى الفني وفئة التسعير — بتعدّل السعر الأساسي',
+        },
+        {
+          id: 'stage-addons',
+          label: 'الإضافات الاختيارية',
+          status: (addons?.length ?? 0) > 0 ? 'ready' : 'optional',
+          hint: 'بنود العميل بيزوّدها على الطلب، وبتتحسب فوق السعر',
+        },
+        {
+          id: 'stage-standard-data',
+          label: 'البيانات القياسية',
+          status: (standardData?.length ?? 0) > 0 ? 'ready' : 'needs_setup',
+          hint:
+            (standardData?.length ?? 0) > 0
+              ? 'أجور يومية وإنتاجية — محرك تقدير المدة شغّال'
+              : 'من غيرها محرك تقدير المدة مش هيشتغل للخدمة دي',
+        },
+      ]
+    : [];
+
   if (!service) {
     return (
       <AppShell>
@@ -610,7 +723,14 @@ export default function ServiceDetailPage() {
       />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
-      <Card className="mb-6">
+      {/* الشريط في العمود الأول (يمين في RTL) والمحتوى في التاني — بتحديد `col-start` صريح مش
+          بـ`order`: مع `order` الـtracks كانت بتتوزّع بالعكس فعمود المحتوى بياخد عرض الشريط
+          (اتقاس حي: 320px للمحتوى مقابل 288px للشريط). التحديد الصريح بيثبّت التوزيع في
+          الاتجاهين، ويسيب المحتوى أول حاجة في الـDOM لقارئ الشاشة والكيبورد. */}
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start">
+        <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+
+      <Card id="stage-identity" className="mb-6 scroll-mt-6">
         <CardHeader>
           <CardTitle className="text-base">تفاصيل الخدمة</CardTitle>
         </CardHeader>
@@ -701,6 +821,7 @@ export default function ServiceDetailPage() {
             <Separator />
 
             <CatalogConfigSection
+              id="stage-pricing-method"
               title="التسعير والدفع"
               description="السعر الأساسي وحدوده وسياسة تحصيل المبلغ من العميل في مكان واحد."
               icon={BadgeDollarSign}
@@ -829,6 +950,7 @@ export default function ServiceDetailPage() {
             <Separator />
 
             <CatalogConfigSection
+              id="stage-booking"
               title="الحجز والجدولة"
               description="حدد أين تظهر الخدمة، من ينفذها، ومدى المرونة المتاحة للعميل عند اختيار الموعد."
               icon={CalendarClock}
@@ -931,6 +1053,7 @@ export default function ServiceDetailPage() {
             <Separator />
 
             <CatalogConfigSection
+              id="stage-assessment"
               title="سياسة تحديد السعر والمعاينة"
               description="إمتى السعر مؤكد قبل الحجز، وإمتى محتاج تقييم بالصور أو معاينة في الموقع — ورسوم كل مسار وخصمها."
               icon={ClipboardCheck}
@@ -961,7 +1084,7 @@ export default function ServiceDetailPage() {
                 </div>
 
                 {priceCertaintyMode === 'estimated_range' && (
-                  <div className="grid gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2">
+                  <div className="motion-rise grid gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2">
                     <div className="sm:col-span-2">
                       <p className="text-xs leading-5 text-muted-foreground">
                         النطاق المعروض للعميل — <strong>غير</strong> حدود قصّ المعادلة (min/max فوق). ده رقم بيتقال للعميل، وده حارس على ناتج الحساب.
@@ -1042,7 +1165,7 @@ export default function ServiceDetailPage() {
                 )}
 
                 {priceCertaintyMode === 'assessment_required' && (
-                  <div className="space-y-3 rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                  <div className="motion-rise space-y-3 rounded-xl border border-amber-200/70 bg-background/85 p-4">
                     <div>
                       <p className="text-sm font-semibold">مسار التقييم</p>
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -1139,213 +1262,7 @@ export default function ServiceDetailPage() {
                         </div>
                       </div>
                       {assessmentFeeCreditMode === 'percentage' && (
-                        <div className="flex flex-col gap-1">
-                          <Label htmlFor="svc_credit_bps">نسبة الخصم (bps)</Label>
-                          <Input
-                            id="svc_credit_bps"
-                            name="assessment_fee_credit_bps"
-                            type="number"
-                            min="0"
-                            max="10000"
-                            defaultValue={service.assessment_fee_credit_bps}
-                          />
-                          <p className="text-[11px] text-muted-foreground">10000 = 100%.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {priceCertaintyMode !== 'confirmed_price' && (
-                  <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
-                    <div className="flex flex-col gap-1 sm:max-w-xs">
-                      <Label htmlFor="svc_quote_validity">صلاحية عرض السعر (دقيقة)</Label>
-                      <Input
-                        id="svc_quote_validity"
-                        name="quote_validity_minutes"
-                        type="number"
-                        min="1"
-                        defaultValue={service.quote_validity_minutes}
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        بعد المدة دي العرض بيبقى منتهي والعميل محتاج عرض جديد. 2880 = يومين.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CatalogConfigSection>
-
-            <Separator />
-
-            <CatalogConfigSection
-              title="سياسة تحديد السعر والمعاينة"
-              description="إمتى السعر مؤكد قبل الحجز، وإمتى محتاج تقييم بالصور أو معاينة في الموقع — ورسوم كل مسار وخصمها."
-              icon={ClipboardCheck}
-              tone="amber"
-            >
-              <div className="space-y-4">
-                <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
-                  <p className="text-sm font-semibold">وضع يقين السعر</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    ده اللي بيحدد شكل الخطوة الأولى عند العميل: يأكّد على سعر، أو يشوف نطاق، أو يبعت صور للتقييم.
-                  </p>
-                  <div className="mt-3 grid gap-2 md:grid-cols-3">
-                    {PRICE_CERTAINTY_MODES.map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setPriceCertaintyMode(mode)}
-                        className={`rounded-lg border p-3 text-right text-sm transition ${
-                          priceCertaintyMode === mode
-                            ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
-                            : 'border-border hover:border-amber-300'
-                        }`}
-                      >
-                        {PRICE_CERTAINTY_MODE_LABELS_AR[mode]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {priceCertaintyMode === 'estimated_range' && (
-                  <div className="grid gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2">
-                    <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
-                      النطاق المعروض للعميل — <strong>غير</strong> حدود قصّ المعادلة (min/max فوق). ده رقم بيتقال للعميل، وده حارس على ناتج الحساب.
-                    </p>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="svc_display_min">أقل سعر معروض (ج)</Label>
-                      <Input
-                        id="svc_display_min"
-                        name="display_price_min"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={service.display_price_min_cents !== null ? service.display_price_min_cents / 100 : ''}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="svc_display_max">أعلى سعر معروض (ج)</Label>
-                      <Input
-                        id="svc_display_max"
-                        name="display_price_max"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={service.display_price_max_cents !== null ? service.display_price_max_cents / 100 : ''}
-                      />
-                    </div>
-                    <CatalogToggle
-                      name="require_admin_review_above_range"
-                      title="مراجعة إدارة فوق النطاق"
-                      description="أي سعر نهائي فوق النطاق المعروض بيقف لمراجعة قبل ما يوصل العميل."
-                      icon={Eye}
-                      defaultChecked={service.require_admin_review_above_range}
-                    />
-                    <div className="flex flex-col gap-1">
-                      <Label htmlFor="svc_max_increase">أقصى زيادة بلا مراجعة (bps)</Label>
-                      <Input
-                        id="svc_max_increase"
-                        name="max_quote_increase_bps"
-                        type="number"
-                        min="0"
-                        defaultValue={service.max_quote_increase_without_admin_review_bps}
-                      />
-                      <p className="text-[11px] text-muted-foreground">2000 = 20%. صفر = أي زيادة تحتاج مراجعة.</p>
-                    </div>
-                  </div>
-                )}
-
-                {priceCertaintyMode === 'assessment_required' && (
-                  <div className="space-y-3 rounded-xl border border-amber-200/70 bg-background/85 p-4">
-                    <div>
-                      <p className="text-sm font-semibold">مسار التقييم</p>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        لازم تفعّل مسار واحد على الأقل، وإلا الخدمة هتبقى غير قابلة للحجز خالص.
-                      </p>
-                    </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {ASSESSMENT_ROUTE_POLICIES.map((policy) => (
-                        <button
-                          key={policy}
-                          type="button"
-                          onClick={() => setAssessmentRoutePolicy(policy)}
-                          className={`rounded-lg border p-3 text-right text-sm transition ${
-                            assessmentRoutePolicy === policy
-                              ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
-                              : 'border-border hover:border-amber-300'
-                          }`}
-                        >
-                          {ASSESSMENT_ROUTE_POLICY_LABELS_AR[policy]}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => setRemoteAssessmentEnabled(!remoteAssessmentEnabled)}
-                        className={`rounded-lg border p-3 text-right text-sm transition ${
-                          remoteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
-                        }`}
-                      >
-                        تقييم بالصور {remoteAssessmentEnabled ? '— مفعّل' : '— مقفول'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOnsiteAssessmentEnabled(!onsiteAssessmentEnabled)}
-                        className={`rounded-lg border p-3 text-right text-sm transition ${
-                          onsiteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
-                        }`}
-                      >
-                        معاينة في الموقع {onsiteAssessmentEnabled ? '— مفعّلة' : '— مقفولة'}
-                      </button>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {remoteAssessmentEnabled && (
-                        <div className="flex flex-col gap-1">
-                          <Label htmlFor="svc_remote_fee">رسوم التقييم بالصور (ج)</Label>
-                          <Input
-                            id="svc_remote_fee"
-                            name="remote_assessment_fee"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            defaultValue={service.remote_assessment_fee_cents / 100}
-                          />
-                        </div>
-                      )}
-                      {onsiteAssessmentEnabled && (
-                        <CatalogToggle
-                          name="onsite_assessor_executes_work"
-                          title="المعاين هو اللي ينفّذ"
-                          description="لو مقفول، العميل بيختار منفّذ تاني بعد ما يوافق على السعر."
-                          icon={Camera}
-                          defaultChecked={service.onsite_assessor_executes_work}
-                        />
-                      )}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="flex flex-col gap-1 sm:col-span-2">
-                        <Label>خصم رسوم التقييم من سعر التنفيذ</Label>
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          {ASSESSMENT_FEE_CREDIT_MODES.map((mode) => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => setAssessmentFeeCreditMode(mode)}
-                              className={`rounded-lg border p-2 text-sm transition ${
-                                assessmentFeeCreditMode === mode
-                                  ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
-                                  : 'border-border hover:border-amber-300'
-                              }`}
-                            >
-                              {ASSESSMENT_FEE_CREDIT_MODE_LABELS_AR[mode]}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {assessmentFeeCreditMode === 'percentage' && (
-                        <div className="flex flex-col gap-1">
+                        <div className="motion-rise flex flex-col gap-1">
                           <Label htmlFor="svc_credit_bps">نسبة الخصم (bps)</Label>
                           <Input
                             id="svc_credit_bps"
@@ -1437,7 +1354,7 @@ export default function ServiceDetailPage() {
       </Card>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Card>
+        <Card id="stage-price-modifiers" className="scroll-mt-6">
           <CardHeader>
             <CardTitle className="text-base">تسعير حسب المنطقة</CardTitle>
           </CardHeader>
@@ -1645,7 +1562,7 @@ export default function ServiceDetailPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card id="stage-addons" className="scroll-mt-6">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">الإضافات الاختيارية</CardTitle>
             <Button size="sm" variant="outline" onClick={() => setShowNewAddon((s) => !s)}>
@@ -1694,7 +1611,7 @@ export default function ServiceDetailPage() {
         </Card>
 
         {/* بيانات قياسية + محرك الإنتاجية — صُنّاع (docs/06 §3.1-§3.6) */}
-        <Card className="xl:col-span-2">
+        <Card id="stage-standard-data" className="scroll-mt-6 xl:col-span-2">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">بيانات قياسية (أجور يومية وإنتاجية)</CardTitle>
             <div className="flex gap-2">
@@ -1897,7 +1814,7 @@ export default function ServiceDetailPage() {
       </div>
 
       {service.pricing_model === 'formula' && (
-        <div className="mt-6">
+        <div id="stage-formula" className="mt-6 scroll-mt-6">
           <h2 className="mb-3 text-lg font-semibold">محرك التسعير الديناميكي</h2>
           {/* ADR-0060 §2 — القوالب مش أوضاع تشغيل: كل زرار بيزرع الحقول ويكتب شجرة `final_price`
               مرة واحدة، وبعدها الخدمة معادلة عادية بيتعدّل عليها من البانِي تحت. */}
@@ -1905,6 +1822,14 @@ export default function ServiceDetailPage() {
           <PricingBuilder serviceId={id} />
         </div>
       )}
+        </div>
+
+        {/* الشريط تاني في ترتيب الـDOM عمدًا: قارئ الشاشة والتنقل بالكيبورد بيوصلوا للمحتوى
+            الأساسي الأول، و`lg:order-none` بيرجّعه لمكانه البصري جنب المحتوى على الشاشات الكبيرة. */}
+        <aside className="lg:sticky lg:top-6 lg:col-start-1 lg:row-start-1">
+          <ServiceSetupRail stages={stages} />
+        </aside>
+      </div>
     </AppShell>
   );
 }

@@ -191,7 +191,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <CancelSection authedFetch={authedFetch} orderId={order.id} onCancelled={setOrder} />
       )}
 
-      {/* بعد الاكتمال — نفس شرطي `apps/customer-app` بالحرف (docs/08 §125): التقييم لأي طلب
+      {/* بعد الاكتمال — نفس شرطي `apps/customer-app` بالحرف (docs/08 §128): التقييم لأي طلب
           مكتمل، وإعادة الزيارة لو الضمان لسه ساري. الاتنين كانوا مفقودين من الويب بالكامل. */}
       {order.order_status === 'completed' && <RatingSection authedFetch={authedFetch} orderId={order.id} />}
 

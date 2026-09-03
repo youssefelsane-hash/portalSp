@@ -20,8 +20,8 @@ class RatingsRepository {
   }) async {
     final data = await auth.authedRequest('POST', '/technician/orders/$orderId/rate', body: {
       'overall_rating': overallRating,
-      if (punctualityRating != null) 'punctuality_rating': punctualityRating,
-      if (professionalismRating != null) 'professionalism_rating': professionalismRating,
+      'punctuality_rating': ?punctualityRating,
+      'professionalism_rating': ?professionalismRating,
       if (comment != null && comment.isNotEmpty) 'comment': comment,
     });
     return data!;
