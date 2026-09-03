@@ -949,6 +949,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               {formatEgp(estimate.display_price_max_cents)}
             </p>
           )}
+        {/* بند 4 — الخصم بيظهر بس لو فيه خصم فعلي (ممنوع «الخصم 0 ج»). كان موجود في
+            الـDTO/customer-app من الأول وناقص هنا بس — فجوة عرض بين الواجهتين مش قصد. */}
+        {activePreview && activePreview.pricing.discount_cents > 0 && (
+          <p className="mt-1 text-sm text-success">
+            خصم {activePreview.pricing.discount_source === 'building' ? 'العمارة' : 'كود الخصم'}: -
+            {formatEgp(activePreview.pricing.discount_cents)}
+          </p>
+        )}
         {service.pricing_model === 'inspection_then_quote' && !requestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
