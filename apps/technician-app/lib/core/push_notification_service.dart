@@ -21,6 +21,12 @@ const _criticalOfferChannelId = 'critical_offer';
 const _actionRequiredChannelId = 'action_required';
 const _generalUpdatesChannelId = 'general_updates';
 
+/// معرّف فئة إشعارات iOS لأزرار قبول/رفض. **ثابت واحد عمدًا**: القيمة دي لازم تتطابق بين مكان
+/// التسجيل (`DarwinInitializationSettings.notificationCategories`) ومكان الاستخدام
+/// (`DarwinNotificationDetails.categoryIdentifier`) — وكانت مكتوبة نصًا في مكان واحد بس والتاني
+/// ناقص خالص، فiOS كان بيتجاهلها بصمت والإشعار يظهر بلا أزرار.
+const _orderOfferCategoryId = 'ORDER_OFFER_ACTIONS';
+
 final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
 // docs/08 §17.16 — إشعارات عرض الطلب actionable بتوصل data-only (بلا notification block،
@@ -73,9 +79,30 @@ class PushNotificationService {
 
   static Future<void> _initLocalNotifications() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
+    // iOS بيسجّل فئات الأزرار **مرة واحدة وقت التهيئة**، مش مع كل رسالة زي أندرويد — فأسماء
+    // الأزرار هنا ثابتة ومطابقة للافتراضي في migration 0097 (`{"accept":"قبول","reject":"رفض"}`).
+    // نتيجة مقصودة: `action_labels` اللي الأدمن بيعدّلها بتأثر على أندرويد بس؛ موثّقة في
+    // docs/08 §127 كقيد منصة مش كفجوة.
+    final iosInit = DarwinInitializationSettings(
+      notificationCategories: <DarwinNotificationCategory>[
+        DarwinNotificationCategory(
+          _orderOfferCategoryId,
+          actions: <DarwinNotificationAction>[
+            DarwinNotificationAction.plain('accept', 'قبول'),
+            DarwinNotificationAction.plain(
+              'reject',
+              'رفض',
+              options: <DarwinNotificationActionOption>{DarwinNotificationActionOption.destructive},
+            ),
+          ],
+          options: <DarwinNotificationCategoryOption>{
+            DarwinNotificationCategoryOption.hiddenPreviewShowTitle,
+          },
+        ),
+      ],
+    );
     await _localNotifications.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
+      InitializationSettings(android: androidInit, iOS: iosInit),
       onDidReceiveNotificationResponse: _handleNotificationAction,
       onDidReceiveBackgroundNotificationResponse: onBackgroundNotificationResponse,
     );
@@ -234,7 +261,7 @@ Future<void> _showActionableNotificationIfNeeded(RemoteMessage message) async {
       if (actionLabels['reject'] is String) AndroidNotificationAction('reject', actionLabels['reject'] as String),
     ],
   );
-  const iosDetails = DarwinNotificationDetails(categoryIdentifier: 'ORDER_OFFER_ACTIONS');
+  const iosDetails = DarwinNotificationDetails(categoryIdentifier: _orderOfferCategoryId);
 
   await _localNotifications.show(
     // hashCode بس ضامن id مختلف تقريبًا لكل رسالة — مفيش معرّف رقمي ثابت في data نفسها.

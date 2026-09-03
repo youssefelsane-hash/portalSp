@@ -48,6 +48,17 @@ export class BuildingsService {
     return building;
   }
 
+  /**
+   * نسخة **بلا throw** من `findActiveByCodeOrThrow` بالمعرّف بدل الكود — لمسارات غير تفاعلية
+   * (توليد الطلبات المتكررة، docs/08 §125) لازم تتعامل مع عمارة اتقفلت/اتحذفت **بأمان**: تكمّل
+   * الطلب من غير خصم بدل ما ترمي وتوقف التوليد أو تحسب خصم غلط. `findOne` من TypeORM بيستبعد
+   * الصفوف الـsoft-deleted تلقائيًا (`@DeleteDateColumn`)، فمفيش حاجة تتفحص هنا غير `isActive`.
+   */
+  async findActiveByIdOrNull(id: string): Promise<Building | null> {
+    const building = await this.buildings.findOne({ where: { id } });
+    return building && building.isActive ? building : null;
+  }
+
   async update(id: string, dto: UpdateBuildingDto): Promise<Building> {
     const building = await this.findByIdOrThrow(id);
     if (dto.name_ar !== undefined) building.nameAr = dto.name_ar;

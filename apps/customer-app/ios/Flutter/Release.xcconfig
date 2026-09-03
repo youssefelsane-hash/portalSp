@@ -1,3 +1,8 @@
 #include "Generated.xcconfig"
 // بوابة P0-2 في docs/23 — راجع تعليق Debug.xcconfig لنفس السبب.
 #include? "Local.xcconfig"
+
+// صلاحية إشعارات APNs (`aps-environment`) — مربوطة من هنا مش من pbxproj عمدًا: الـxcconfig دي
+// مرجع البناء لهدف Runner وحده (هدف RunnerTests مالوش baseConfigurationReference خالص)، فالربط
+// هنا أبسط وأأمن من تعديل project.pbxproj بالإيد. من غير السطر ده الملف بيبقى موجود بلا أثر.
+CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements

@@ -210,6 +210,9 @@ export interface RecurringTemplateResponseDto {
   booking_mode: string;
   requested_technician_id: string | null;
   requested_technician_company_id: string | null;
+  // انتماء العمارة (migration 0257، docs/08 §125) — العميل بيشوف إنه لسه مربوط بالعمارة، بلا
+  // أي رقم خصم (النسبة بتتحسب فريش وقت كل نوبة، مش بتتخزن).
+  building_id: string | null;
   frequency: RecurringOrderFrequency;
   problem_description: string | null;
   // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة: العمود ده اتضاف لـapps/api's
@@ -251,6 +254,9 @@ export interface AdminRecurringPlanResponseDto {
   address_id: string;
   address_label: string | null;
   booking_mode: string;
+  building_id: string | null;
+  building_code: string | null;
+  building_name_ar: string | null;
   frequency: RecurringOrderFrequency;
   payment_method: 'card' | 'instapay' | null;
   next_run_at: string;

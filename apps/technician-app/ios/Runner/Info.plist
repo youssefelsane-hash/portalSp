@@ -34,6 +34,13 @@
 	<string>محتاجين موقعك عشان نشاركه مع العميل وقت تنفيذ الطلب ونوصّلك لعنوانه.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>استخدم Face ID عشان تفتح أسطى بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
+	<!-- FCM على iOS محتاج الوضع ده عشان أي رسالة بيانات توصل والتطبيق في الخلفية (نظير
+	     `onBackgroundMessage`). من غيره الرسالة بتتسقط بصمت — والأندرويد شغال لأن آلية الخلفية
+	     هناك مختلفة تمامًا ومش محتاجة إعلان مقابل. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
