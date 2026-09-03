@@ -437,16 +437,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 children: [
                   if (reasons.isNotEmpty) ...[
                     const Text('اختار سبب الإلغاء:'),
-                    ...reasons.map(
-                      (r) => RadioListTile<String>(
-                        value: r.id,
-                        groupValue: selectedReasonId,
-                        onChanged: (v) => setDialogState(() => selectedReasonId = v),
-                        title: Text(r.reasonAr),
-                        subtitle: r.chargesFee
-                            ? Text('ممكن يترتب عليه رسوم ${r.feePercentage.toStringAsFixed(0)}%')
-                            : null,
-                        dense: true,
+                    RadioGroup<String>(
+                      groupValue: selectedReasonId,
+                      onChanged: (v) => setDialogState(() => selectedReasonId = v),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: reasons
+                            .map(
+                              (r) => RadioListTile<String>(
+                                value: r.id,
+                                title: Text(r.reasonAr),
+                                subtitle: r.chargesFee
+                                    ? Text('ممكن يترتب عليه رسوم ${r.feePercentage.toStringAsFixed(0)}%')
+                                    : null,
+                                dense: true,
+                              ),
+                            )
+                            .toList(),
                       ),
                     ),
                     const SizedBox(height: 8),

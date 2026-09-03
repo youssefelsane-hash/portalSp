@@ -43,8 +43,8 @@ class CompanyRepository {
   }) async {
     final data = await auth.authedRequest('PATCH', '/technician/company/branches/$branchId', body: {
       if (name != null && name.isNotEmpty) 'name': name,
-      if (addressLine != null) 'address_line': addressLine,
-      if (isActive != null) 'is_active': isActive,
+      'address_line': ?addressLine,
+      'is_active': ?isActive,
     });
     return CompanyBranch.fromJson(data!);
   }
@@ -57,7 +57,7 @@ class CompanyRepository {
     final data = await auth.authedRequest('POST', '/technician/company/staff', body: {
       'technician_code': technicianCode,
       'team_role': teamRole,
-      if (branchId != null) 'branch_id': branchId,
+      'branch_id': ?branchId,
     });
     return StaffMember.fromJson(data!);
   }

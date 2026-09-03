@@ -35,7 +35,7 @@ class AddressesRepository {
       if (floorNumber != null && floorNumber.isNotEmpty) 'floor_number': floorNumber,
       if (apartmentNumber != null && apartmentNumber.isNotEmpty) 'apartment_number': apartmentNumber,
       if (landmark != null && landmark.isNotEmpty) 'landmark': landmark,
-      if (isDefault != null) 'is_default': isDefault,
+      'is_default': ?isDefault,
     });
     return Address.fromJson(data!);
   }
@@ -54,14 +54,14 @@ class AddressesRepository {
     String? landmark,
   }) async {
     final data = await auth.authedRequest('PATCH', '/addresses/$addressId', body: {
-      if (cityId != null) 'city_id': cityId,
-      if (areaId != null) 'area_id': areaId,
-      if (streetName != null) 'street_name': streetName,
-      if (latitude != null) 'latitude': latitude,
-      if (longitude != null) 'longitude': longitude,
-      if (label != null) 'label': label,
-      if (buildingNumber != null) 'building_number': buildingNumber,
-      if (landmark != null) 'landmark': landmark,
+      'city_id': ?cityId,
+      'area_id': ?areaId,
+      'street_name': ?streetName,
+      'latitude': ?latitude,
+      'longitude': ?longitude,
+      'label': ?label,
+      'building_number': ?buildingNumber,
+      'landmark': ?landmark,
     });
     return Address.fromJson(data!);
   }

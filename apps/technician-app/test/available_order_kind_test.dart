@@ -18,8 +18,8 @@ void main() {
         'landmark': null,
         'distance_km': '3.2',
         'expires_at': '2026-08-28T12:00:00Z',
-        if (bookingMode != null) 'booking_mode': bookingMode,
-        if (scheduledAt != null) 'scheduled_at': scheduledAt,
+        'booking_mode': ?bookingMode,
+        'scheduled_at': ?scheduledAt,
       };
 
   group('AvailableOrder — التفرقة بين الطوارئ والشغل القريب', () {

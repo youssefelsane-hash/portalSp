@@ -180,7 +180,7 @@ class _RecruitCandidateCard extends StatelessWidget {
           [
             levelLabel,
             'تقييم ${candidate.averageRating.toStringAsFixed(1)}',
-            if (distanceLabel != null) distanceLabel,
+            ?distanceLabel,
             if (needsOffer) 'عنده شغل النهاردة — هيتبعتله عرض بدل إضافة فورية',
           ].join(' — '),
         ),

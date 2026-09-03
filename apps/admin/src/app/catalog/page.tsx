@@ -568,6 +568,16 @@ export default function CatalogPage() {
 
             {showNewService && (
               <form onSubmit={handleCreateService} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
+                {/* docs/08 §123 — الفورم ده بيطلب حاجات أكتر من اللي الـAPI فارضه فعلاً
+                    (`CreateServiceDto`: الفئة والاسم والـslug وطريقة التسعير والسعر الأساسي بس).
+                    الباقي كله اختياري وبيتظبط جوّه الخدمة بعد إنشائها. السطر ده بيقول للأدمن
+                    كده صراحة بدل ما يفتكر إنه لازم يملا كل حاجة من أول مرة — بلا تغيير في أي
+                    حقل ولا في شروط الـAPI. */}
+                <p className="mb-1 rounded-md border border-s-4 border-s-primary bg-muted/30 p-2.5 text-xs leading-5 text-muted-foreground">
+                  المطلوب دلوقتي: <strong className="text-foreground">الفئة، الاسم بالعربي، الـslug، طريقة تحديد السعر، السعر الأساسي</strong>.
+                  باقي الحقول اختيارية، وكل إعدادات التسعير والمعاينة والحجز بتتظبط جوّه صفحة الخدمة بعد ما تتنشئ —
+                  فيها شريط بيوضّح المراحل وإيه اللي ناقص.
+                </p>
                 <Label htmlFor="service_category_id">الفئة</Label>
                 <SelectNative id="service_category_id" name="category_id" required defaultValue="">
                   <option value="" disabled>

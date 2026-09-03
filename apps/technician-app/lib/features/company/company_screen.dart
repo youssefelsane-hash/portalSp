@@ -282,7 +282,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   String _formatOrderDate(DateTime at) {
-    final two = (int n) => n.toString().padLeft(2, '0');
+    String two(int n) => n.toString().padLeft(2, '0');
     return '${two(at.day)}/${two(at.month)} — ${two(at.hour)}:${two(at.minute)}';
   }
 

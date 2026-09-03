@@ -86,10 +86,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
       await _repository.withdraw(category.id);
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
@@ -266,10 +267,11 @@ class _AddSkillScreenState extends State<_AddSkillScreen> {
         Navigator.of(context).pop(true);
       }
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

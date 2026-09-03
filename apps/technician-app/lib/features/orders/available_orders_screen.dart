@@ -111,10 +111,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Future<bool> _captureLocationOnce({bool showFeedback = false}) async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        if (showFeedback)
+        if (showFeedback) {
           _showLocationSnack(
             'لازم تفعّل GPS/خدمة الموقع من إعدادات الجهاز الأول',
           );
+        }
         return false;
       }
       var permission = await Geolocator.checkPermission();
@@ -123,10 +124,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        if (showFeedback)
+        if (showFeedback) {
           _showLocationSnack(
             'محتاجين إذن الموقع عشان الطلبات توصلك — فعّله من إعدادات التطبيق',
           );
+        }
         return false;
       }
       final position = await Geolocator.getCurrentPosition(
@@ -142,10 +144,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       if (showFeedback) _showLocationSnack('تم تحديث موقعك بنجاح ✓');
       return true;
     } catch (_) {
-      if (showFeedback)
+      if (showFeedback) {
         _showLocationSnack(
           'فشلت المحاولة — تأكد إن الجي بي إس مفعّل وحاول تاني',
         );
+      }
       return false;
     }
   }
@@ -298,10 +301,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
       // الفرصة ممكن تكون اتقفلت من مكان تاني (فني تاني قبلها/الطلب اتغطى) — نحدّث القايمة عشان
       // تختفي فورًا بدل ما تفضل ظاهرة وهي بقت مش صالحة.
       await _loadWorkOpportunities();
@@ -316,10 +320,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -340,10 +345,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.acceptCrewOpportunity(invite.id);
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
       // ممكن تكون اتقفلت من مكان تاني (العدد المطلوب اكتمل قبل ما توصل) — نحدّث القايمة عشان تختفي.
       await _loadCrewOpportunities();
     } finally {
@@ -357,10 +363,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineCrewOpportunity(invite.id);
       await _loadCrewOpportunities();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }

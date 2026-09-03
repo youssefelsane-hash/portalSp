@@ -196,11 +196,11 @@ class OrdersRepository {
       body: {
         'service_id': serviceId,
         'address_id': addressId,
-        if (matchPreviewId != null) 'match_preview_id': matchPreviewId,
-        if (standardDataId != null) 'standard_data_id': standardDataId,
-        if (requestedUnits != null) 'requested_units': requestedUnits,
-        if (paymentMethod != null) 'payment_method': paymentMethod,
-        if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+        'match_preview_id': ?matchPreviewId,
+        'standard_data_id': ?standardDataId,
+        'requested_units': ?requestedUnits,
+        'payment_method': ?paymentMethod,
+        'warranty_plan_id': ?warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
         'booking_mode': bookingMode.apiValue,
         if (problemDescription != null && problemDescription.isNotEmpty)
@@ -211,22 +211,19 @@ class OrdersRepository {
         if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
         // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
         // (تفاصيل في apps/api/src/modules/matching/README.md).
-        if (requestedTechnicianId != null)
-          'requested_technician_id': requestedTechnicianId,
+        'requested_technician_id': ?requestedTechnicianId,
         // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
-        if (requestedTechnicianCompanyId != null)
-          'requested_technician_company_id': requestedTechnicianCompanyId,
+        'requested_technician_company_id': ?requestedTechnicianCompanyId,
         if (fieldValues != null && fieldValues.isNotEmpty)
           'field_values': fieldValues,
         if (problemImageIds != null && problemImageIds.isNotEmpty)
           'problem_image_ids': problemImageIds,
         if (requestRemoteQuote) 'request_remote_quote': true,
-        if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
-        if (scheduledAt != null) 'scheduled_at': scheduledAt,
-        if (scheduledAtRangeEnd != null)
-          'scheduled_at_range_end': scheduledAtRangeEnd,
-        if (repeatFrequency != null) 'repeat_frequency': repeatFrequency,
-        if (originalOrderId != null) 'original_order_id': originalOrderId,
+        'schedule_slot_id': ?scheduleSlotId,
+        'scheduled_at': ?scheduledAt,
+        'scheduled_at_range_end': ?scheduledAtRangeEnd,
+        'repeat_frequency': ?repeatFrequency,
+        'original_order_id': ?originalOrderId,
       },
     );
     return Order.fromJson(data!);
@@ -274,10 +271,9 @@ class OrdersRepository {
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
         if (buildingCode != null && buildingCode.isNotEmpty)
           'building_code': buildingCode,
-        if (requestedTechnicianId != null)
-          'requested_technician_id': requestedTechnicianId,
-        if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
-        if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+        'requested_technician_id': ?requestedTechnicianId,
+        'schedule_slot_id': ?scheduleSlotId,
+        'warranty_plan_id': ?warrantyPlanId,
       },
     );
     return OrderPricePreview.fromJson(data!);
@@ -362,8 +358,7 @@ class OrdersRepository {
   }) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,
-      if (cancellationReasonId != null)
-        'cancellation_reason_id': cancellationReasonId,
+      'cancellation_reason_id': ?cancellationReasonId,
     };
     final data = await auth.authedRequest(
       'POST',
