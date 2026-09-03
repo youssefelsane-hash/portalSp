@@ -24,6 +24,7 @@ import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.ent
 import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
 import { realPricingEngineService } from '../pricing/pricing-engine.testing';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
+import { splitOrderRevenue } from '../pricing/commission-base';
 import { City } from '../geo/entities/city.entity';
 import { Area } from '../geo/entities/area.entity';
 import { ServiceZone } from '../geo/entities/service-zone.entity';
@@ -440,9 +441,43 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     await quotes.submitDiagnosisRevision(ids.techUser, orderId, 25_000, 'العطل أبسط من المتوقع');
     await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
 
-    const [row] = await q(`SELECT total_amount_cents, estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
+    const [row] = await q(
+      `SELECT total_amount_cents, estimated_price_cents, commissionable_base_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
     expect(row.total_amount_cents).toBe(25_000);
     expect(row.estimated_price_cents).toBe(25_000);
+    // كان ناقص هنا بالظبط، وده اللي خلّى البَقّة تعيش: الفرق كان بيتطبّق على وعاء العمولة
+    // **مرتين** (مرة جوّه replaceUncommittedPrice ومرة في المنادي) فيطلع 10,000 بدل 25,000.
+    expect(row.commissionable_base_cents).toBe(25_000);
+  });
+
+  /**
+   * بلاغ مالك (2026-09-03): «العميل وافق على السعر، وبعدين الفني بيشوف مستحقك أنت = صفر».
+   *
+   * الفرق كان بيتطبّق مرتين على `commissionable_base_cents`؛ مع تخفيض كبير الوعاء بيوصل صفر
+   * (Math.max(0, …)) — و`splitOrderRevenue` بتحسب نصيب الفني **من الوعاء**، فبيطلع صفر على طلب
+   * سعره شغّال. الاختبار بيقيس الرقم اللي التطبيق بيعرضه فعلاً، مش أعمدة الطلب بس.
+   */
+  it('نصيب الفني بعد تخفيض كبير مايبقاش صفر — وعاء العمولة بيتعدّل مرة واحدة', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 50_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, 5_000, 'الشغل طلع أقل بكتير');
+    await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
+
+    const [row] = await q(
+      `SELECT total_amount_cents, commissionable_base_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    expect(row.total_amount_cents).toBe(5_000);
+    // قبل الإصلاح: max(0, 50000 - 45000 - 45000) = 0.
+    expect(row.commissionable_base_cents).toBe(5_000);
+
+    const { technicianEarningCents } = splitOrderRevenue({
+      totalAmountCents: row.total_amount_cents,
+      commissionableBaseCents: row.commissionable_base_cents ?? row.total_amount_cents,
+      commissionRatePercentage: 20,
+    });
+    expect(technicianEarningCents).toBe(4_000);
   });
 
   it('تخفيض السعر على طلب **مدفوع** بيترفض وقت الإرسال — الاسترداد مسار تاني', async () => {

@@ -45,6 +45,11 @@ const Set<String> _activeTrackingStatuses = {
 const Set<String> _statusListenStatuses = {
   ..._activeTrackingStatuses,
   'awaiting_quote_approval',
+  // بَقّة حقيقية (بلاغ مالك 2026-09-03): تعديل السعر بعد التشخيص بينقل الطلب لـ
+  // `awaiting_initial_quote_approval` مش `awaiting_quote_approval` — الحالة دي كانت ناقصة هنا،
+  // فالفني اللي قفل التطبيق وفتحه وهو مستني رد العميل ماكانش بيتوصل خالص. النتيجة: العميل
+  // يوافق على سعر جديد والشاشة تفضل عارضة أرقام السعر القديم للأبد.
+  'awaiting_initial_quote_approval',
 };
 
 // سياسة إلغاء الفني (docs/10) — نفس TECHNICIAN_CANCELLABLE_STATUSES في orders.service.ts
@@ -85,6 +90,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   List<OrderMediaItem>? _media;
   List<TeamMember>? _teamMembers;
   List<OrderRescheduleRequest> _rescheduleRequests = [];
+  // فشل آخر محاولة تحديث من السيرفر. كان بيتبلع في صمت (catch فاضي)، فالفني بيفضل شايف أرقام
+  // فلوس قديمة **من غير أي علامة** إنها قديمة — أخطر من إظهار خطأ.
+  bool _refreshFailed = false;
 
   @override
   void initState() {
@@ -191,11 +199,22 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   Future<void> _refreshFromServer() async {
     try {
       final order = await _repository.getOne(_order.id);
-      if (mounted) setState(() => _order = order);
+      if (mounted) {
+        setState(() {
+          _order = order;
+          _refreshFailed = false;
+        });
+      }
+      // الحالة الجديدة ممكن تكون دخلت (أو خرجت من) نطاق الاستماع — من غير ده الفني اللي
+      // بعت تعديل سعر وهو في `in_progress` كان بيفضل متوصّل، بس اللي شاشته اتفتحت على حالة
+      // مش في `_statusListenStatuses` عمره ما كان بيتوصّل.
+      _connectTrackingIfActive();
       await _loadCancellationPolicyIfApplicable();
       await _loadRescheduleRequests();
     } on ApiException {
-      // تجاهل — راجع التعليق فوق.
+      // مش بنكسر الشاشة (القيمة المحلية بتفضل شغّالة)، بس بنقول للفني إن الأرقام ممكن تكون
+      // قديمة بدل ما نسيبه واثق في رقم فلوس اتغيّر على السيرفر.
+      if (mounted) setState(() => _refreshFailed = true);
     }
   }
 
@@ -818,7 +837,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // مالية أو أزرار تنفيذ. قبل كده الشاشة كانت بتبدأ بالمبلغ والأزرار على طول.
             _JobBriefCard(order: _order),
             const SizedBox(height: 12),
-            _MoneySummaryCard(order: _order, formatEgp: _formatEgp),
+            _MoneySummaryCard(
+              order: _order,
+              formatEgp: _formatEgp,
+              stale: _refreshFailed,
+              onRetry: _refreshFromServer,
+            ),
             // ADR-0052 (docs/08 §97، طلب مالك) — «لو الشغلانة عدد أفرادها واحد… أحيانًا الصنايعي
             // بيحب ياخد معاه مساعد… لو هو مش عايز يضيف مساعد خلاص مش مهم». كارت **هادي** عمدًا
             // (surfaceContainerHighest مش errorContainer) — ده اختيار مش نقص، فمينفعش يبان
@@ -1333,16 +1357,26 @@ class _OrderProgressCard extends StatelessWidget {
 }
 
 class _MoneySummaryCard extends StatelessWidget {
-  const _MoneySummaryCard({required this.order, required this.formatEgp});
+  const _MoneySummaryCard({
+    required this.order,
+    required this.formatEgp,
+    this.stale = false,
+    this.onRetry,
+  });
 
   final Order order;
   final String Function(int cents) formatEgp;
+  /// آخر تحديث من السيرفر فشل — الأرقام المعروضة ممكن تكون قديمة.
+  final bool stale;
+  final Future<void> Function()? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final cashColor = order.cashToCollectCents > 0
+    final cashColor = !order.hasMoneyView
+        ? theme.disabledColor
+        : order.cashToCollectCents > 0
         ? Colors.orange.shade800
         : Colors.green.shade700;
     return Card(
@@ -1408,22 +1442,55 @@ class _MoneySummaryCard extends StatelessWidget {
                 fullyPaidOnline: order.fullyPaidOnline,
                 isCrewShare: order.isCrewShare,
                 formatEgp: formatEgp,
+                hasMoneyView: order.hasMoneyView,
               ),
               color: cashColor,
             ),
             const Divider(height: 24),
             _MoneyLine(
-              icon: Icons.savings_outlined,
+              // مش `savings` (حصّالة خنزير) — أيقونة مرفوضة صراحة من المالك، وأصلاً مش لايقة
+              // على منتج مصري. المحفظة بتوصّل نفس المعنى بلا أي دلالة تانية.
+              icon: Icons.wallet_outlined,
               label: 'مستحقك أنت',
               value: technicianEarningLabel(
                 myEarningCents: order.myEarningCents,
                 earningPending: order.earningPending,
                 isCrewShare: order.isCrewShare,
                 formatEgp: formatEgp,
+                hasMoneyView: order.hasMoneyView,
               ),
               color: scheme.primary,
               emphasized: true,
             ),
+            if (stale || !order.hasMoneyView) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.sync_problem_outlined,
+                    size: 16,
+                    color: Colors.orange.shade800,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      stale
+                          ? 'مش قادرين نحدّث الأرقام من السيرفر دلوقتي — دي آخر أرقام وصلتنا'
+                          : 'الأرقام دي لسه بتتحدّث',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade900,
+                      ),
+                    ),
+                  ),
+                  if (onRetry != null)
+                    TextButton(
+                      onPressed: () => onRetry!(),
+                      child: const Text('حدّث'),
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

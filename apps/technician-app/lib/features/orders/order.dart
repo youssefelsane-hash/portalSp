@@ -114,6 +114,12 @@ class Order {
   final bool earningPending;
   // الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040).
   final bool isCrewShare;
+  // بَقّة مالية حقيقية (بلاغ مالك 2026-09-03): مش كل رد من الباك-إند بيحمل العقد المالي للفني —
+  // `OrderResponseDto` العام (مسارات مشتركة مع العميل) مافيهوش `my_earning_cents` ولا
+  // `cash_to_collect_cents` خالص. `?? 0` لوحده كان بيحوّل «الحقل مش موجود» لـ«مستحقك أنت صفر»،
+  // وده رقم مالي **كاذب** مش قيمة ناقصة. الفرق ده لازم يوصل للواجهة عشان تعرض «بنحدّث الأرقام»
+  // بدل صفر ما حدّش قاله.
+  final bool hasMoneyView;
   final String paymentStatus;
 
   /// حالة سعر الطلب من الباك-إند (`orders.price_status`) — المصدر الوحيد اللي بيقول
@@ -160,6 +166,7 @@ class Order {
     this.totalAmountCents,
     this.earningPending = false,
     this.isCrewShare = false,
+    this.hasMoneyView = true,
     required this.paymentStatus,
     // قيمة افتراضية مش `required`: حقل جديد، و'confirmed' معناها «سعره مستقر» — وده السلوك
     // الصح لأي طلب قديم أو أي كود بينشئ Order من غير الحقل ده (مفيش زرار تسعير بيظهر).
@@ -191,6 +198,7 @@ class Order {
         totalAmountCents: json['total_amount_cents'] as int?,
         earningPending: json['earning_pending'] as bool? ?? false,
         isCrewShare: json['is_crew_share'] as bool? ?? false,
+        hasMoneyView: json.containsKey('my_earning_cents'),
         paymentStatus: json['payment_status'] as String,
         // الطلبات القديمة قبل ADR-0063 مالهاش الحقل ده — 'confirmed' يعني «سعره مستقر»،
         // وده السلوك الصح ليها: مفيش زرار تسعير بيظهر.
@@ -281,7 +289,11 @@ String technicianEarningLabel({
   required bool earningPending,
   required bool isCrewShare,
   required String Function(int) formatEgp,
+  // الرد اللي بنينا منه الطلب ده مكانش فيه العقد المالي أصلاً — راجع `Order.hasMoneyView`.
+  // «0 ج.م» هنا كانت هتبقى كذبة أسوأ من الصمت.
+  bool hasMoneyView = true,
 }) {
+  if (!hasMoneyView) return 'نصيبك: بنحدّث الرقم…';
   if (earningPending) return 'نصيبك: هيتحدد بعد تسعير الشغلانة';
   final amount = formatEgp(myEarningCents);
   return isCrewShare ? 'نصيبك من الطاقم: $amount' : 'نصيبك: $amount';
@@ -302,7 +314,11 @@ String technicianCashStatusLabel({
   required bool fullyPaidOnline,
   required bool isCrewShare,
   required String Function(int) formatEgp,
+  // نفس سبب `hasMoneyView` في technicianEarningLabel فوق بالحرف: «لا يوجد مبلغ كاش مطلوب»
+  // كذبة خطيرة لو الحقل أصلاً ما جاش في الرد.
+  bool hasMoneyView = true,
 }) {
+  if (!hasMoneyView) return 'التحصيل من العميل: بنحدّث الرقم…';
   if (cashToCollectCents > 0) {
     return 'المطلوب تحصيله كاش: ${formatEgp(cashToCollectCents)}';
   }

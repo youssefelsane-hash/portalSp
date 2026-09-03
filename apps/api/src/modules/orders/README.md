@@ -1815,3 +1815,23 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 
 **نوع القرار بيتسجّل في الـaudit** (`change_kind`: increase/fee_waiver/decrease) — من غيره
 المبلغين لوحدهم بيخلّوا التمييز شغل يدوي وقت المراجعة.
+
+## بَقّة مالية حقيقية اتلقطت واتصلحت — تخفيض السعر بعد التشخيص كان بيصفّر نصيب الفني (بلاغ مالك 2026-09-03، docs/08 §120)
+
+`approveInitialQuote()` في فرع **التخفيض** (`isDiagnosisRevision && deltaCents < 0`) كان بينادي
+`OrderFinancialFinalizationService.replaceUncommittedPrice()` — ودي بتعدّل `commissionable_base_cents`
+بالفرق من جوّاها — وبعدين **بيعيد تطبيق نفس الفرق** على العمود. مع أي تخفيض كبير الوعاء بيوصل
+صفر (`Math.max(0, …)`).
+
+ليه ده كان بيوصل للفني كرقم مالي غلط: `splitOrderRevenue()` بتحسب نصيب الفني **من الوعاء** مش من
+الإجمالي (ADR-0037)، يعني `technician_earning = base − عمولة(base)`. وعاء بصفر = «مستحقك أنت: 0»
+على طلب سعره شغّال، و`earning_pending` مابتتفعّلش لأن شرطها `total_amount_cents <= 0`.
+
+**القاعدة اللي اتثبتت**: `replaceUncommittedPrice()` هي **الكاتب الوحيد** لـ`total_amount_cents`
+و`commissionable_base_cents` مع بعض. أي منادي بيعدّل واحد منهم بعدها بيكسر الاتساق. المناديان
+التانيان (`AdminOrdersService.adjustPrice()` و`LevelPremiumService.reverseOnProviderLost()`) كانوا
+سليمين — واحد بس هو اللي كان مكرر.
+
+الاختبار اللي كان موجود اتحقق من `total_amount_cents` و`estimated_price_cents` بس، فالبَقّة عاشت
+تحته. الاختبارات الجديدة في `assessment-triage.spec.ts` بتقيس `commissionable_base_cents` **ونصيب
+الفني المحسوب منه** — واتأكد إنها بتقع لما البَقّة ترجع.
