@@ -176,6 +176,46 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     );
   }
 
+  /// **بند 12 — الاختيار اليدوي بيتقفل بتذكرة زي التلقائي بالظبط.**
+  ///
+  /// من غير التذكرة، `requested_technician_id` بيفضل **تفضيل** المحرك يقدر يستبدله لو الفني بقى
+  /// مش متاح — يعني نفس باب الاستبدال الصامت اللي ADR-0065 قفله، بس مفتوح من ناحية الواجهة.
+  ///
+  /// الشركات مستثناة: `match-preview` بياخد `technician_id` بس، فالشركة بتفضل على السلوك القديم
+  /// لحد ما الباك-إند يدعمها. مذكور صراحة عشان مايتقريش كسهو.
+  Future<void> _selectManualProvider(String id, bool isCompany, DateTime? effectiveRequestedAt) async {
+    final address = _selectedAddress;
+    if (isCompany || address == null) {
+      _confirmSelection(
+        requestedTechnicianId: isCompany ? null : id,
+        requestedTechnicianCompanyId: isCompany ? id : null,
+        effectiveRequestedAt: effectiveRequestedAt,
+      );
+      return;
+    }
+    try {
+      final preview = await _techniciansRepository.createMatchPreview(
+        serviceId: widget.service.id,
+        addressId: address.id,
+        selectionMode: 'manual',
+        technicianId: id,
+        scheduledAt: (effectiveRequestedAt ?? widget.requestedAt)?.toUtc().toIso8601String(),
+        fieldValues: widget.fieldValues,
+      );
+      if (!mounted) return;
+      _confirmSelection(
+        requestedTechnicianId: id,
+        effectiveRequestedAt: effectiveRequestedAt,
+        matchPreviewId: preview.matchPreviewId,
+      );
+    } on ApiException catch (err) {
+      // الفني اللي اختاره بقى مش متاح — رسالة صريحة، وممنوع نكمّل على تفضيل ممكن يتبدّل.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      }
+    }
+  }
+
   void _openMarketplace() {
     final address = _selectedAddress;
     if (address == null) return;
@@ -188,11 +228,8 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           fieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
           bookingMode: widget.bookingMode,
-          onSelect: (id, isCompany, effectiveRequestedAt) => _confirmSelection(
-            requestedTechnicianId: isCompany ? null : id,
-            requestedTechnicianCompanyId: isCompany ? id : null,
-            effectiveRequestedAt: effectiveRequestedAt,
-          ),
+          onSelect: (id, isCompany, effectiveRequestedAt) =>
+              unawaited(_selectManualProvider(id, isCompany, effectiveRequestedAt)),
         ),
       ),
     );

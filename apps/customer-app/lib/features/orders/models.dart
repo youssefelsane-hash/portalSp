@@ -185,8 +185,18 @@ class OrderPricePreviewAddon {
 class OrderPricePreview {
   final int basePriceCents;
   final int inspectionFeeCents;
+  /// حدود **قصّ** المحرك — مش نطاق بيتعرض للعميل (بند 29). سايبينها في الموديل عشان الحسابات
+  /// والتشخيص، لكن ممنوع ترسمها كـ«نطاق تقديري».
   final int? minPriceCents;
   final int? maxPriceCents;
+
+  /// **نطاق العرض** للعميل — ده اللي بيتعرض فعلاً (ADR-0063، بند 10/29). منفصل تمامًا عن
+  /// حدود القصّ فوق، وبيتحسب في الباك-إند حوالين السعر المحسوب بعد ما القصّ اتطبّق.
+  final int? displayPriceMinCents;
+  final int? displayPriceMaxCents;
+
+  /// وضع يقين السعر — النطاق بيتعرض لـ`estimated_range` بس.
+  final String priceCertaintyMode;
   final int emergencySurchargeCents;
   final int? emergencySlaMinutes;
   final List<OrderPricePreviewAddon> addons;
@@ -209,6 +219,9 @@ class OrderPricePreview {
     required this.inspectionFeeCents,
     required this.minPriceCents,
     required this.maxPriceCents,
+    required this.displayPriceMinCents,
+    required this.displayPriceMaxCents,
+    required this.priceCertaintyMode,
     required this.emergencySurchargeCents,
     required this.emergencySlaMinutes,
     required this.addons,
@@ -229,6 +242,9 @@ class OrderPricePreview {
         inspectionFeeCents: json['inspection_fee_cents'] as int,
         minPriceCents: json['min_price_cents'] as int?,
         maxPriceCents: json['max_price_cents'] as int?,
+        displayPriceMinCents: json['display_price_min_cents'] as int?,
+        displayPriceMaxCents: json['display_price_max_cents'] as int?,
+        priceCertaintyMode: json['price_certainty_mode'] as String? ?? 'confirmed_price',
         emergencySurchargeCents: json['emergency_surcharge_cents'] as int,
         emergencySlaMinutes: json['emergency_sla_minutes'] as int?,
         addons: (json['addons'] as List<dynamic>)

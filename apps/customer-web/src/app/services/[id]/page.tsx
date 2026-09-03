@@ -935,6 +935,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                     : 'يتحدد بعد المعاينة'}
           </span>
         </div>
+        {/* بند 10 — النطاق التقديري بنفس صياغة customer-app بالحرف (Web/Flutter parity).
+            الأرقام من **حقول العرض** مش من min/max_price_cents: دول حدود قصّ للمحرك، وعرضهم
+            كنطاق للعميل ممنوع بالنص في البند 29.
+            لما تبقى في تذكرة مطابقة، السعر بقى مقفول برقم واحد فالنطاق مالوش لازمة. */}
+        {!activePreview &&
+          !requestRemoteQuote &&
+          estimate?.price_certainty_mode === 'estimated_range' &&
+          estimate.display_price_min_cents !== null &&
+          estimate.display_price_max_cents !== null && (
+            <p className="mt-1 text-sm text-muted">
+              نطاق تقديري: {formatEgp(estimate.display_price_min_cents)} –{' '}
+              {formatEgp(estimate.display_price_max_cents)}
+            </p>
+          )}
         {service.pricing_model === 'inspection_then_quote' && !requestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل

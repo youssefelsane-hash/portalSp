@@ -12,7 +12,8 @@ import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
-import { PricingModel, Service } from './entities/service.entity';
+import { PriceCertaintyMode, PricingModel, Service } from './entities/service.entity';
+import { estimatedDisplayRange } from './estimated-display-range';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { BookingModeFilter } from './dto/list-services.dto';
 
@@ -22,8 +23,11 @@ export interface PriceEstimate {
   surge_multiplier: number;
   level_price_multiplier: number;
   estimated_total_cents: number;
-  /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لو مش طلب طوارئ. منفصلة عن estimated_total_cents
-   * عمداً (نفس فلسفة inspection_fee_cents) عشان تتعرض للعميل كبند واضح، مش مدموجة في السعر. */
+  /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لو مش طلب طوارئ. منفصلة عن
+   * estimated_total_cents عمداً عشان الحسابات واللقطة المالية وشاشة الأدمن.
+   *
+   * **مش بند بيتعرض للعميل** (بند 5/13): الواجهات بتستهلكها في الإجمالي بس. التعليق القديم هنا
+   * كان بيقول العكس وبقى مضلّل بعد قرار المالك. */
   emergency_surcharge_cents: number;
   /** الوقت المعلن للعميل بالدقايق ("هيوصلك خلال X دقيقة") — رقم معلن بس، مش ETA محسوب. null لو مش طوارئ. */
   emergency_sla_minutes: number | null;
@@ -31,6 +35,11 @@ export interface PriceEstimate {
    * نماذج التسعير (fixed/hourly/per_unit/inspection_then_quote) لأنها مش جزء من صيغتها أصلاً. */
   min_price_cents: number | null;
   max_price_cents: number | null;
+  /** **نطاق العرض** للعميل (ADR-0063، بند 10) — منفصل تمامًا عن حدود القصّ فوق. null لأي خدمة
+   * مش `estimated_range`. */
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
+  price_certainty_mode: PriceCertaintyMode;
   /** معرّف صف `service_pricing_evaluations` (تدقيق/snapshot تاريخي لمعادلة formula وقت الحساب) —
    * null لأي نموذج تسعير تاني. OrdersService.create() بيربطه بالطلب بعد ما يتأكّد فعلاً
    * (linkEvaluationToOrder) عشان السعر النهائي يفضل قابل للتتبّع حتى لو الأدمن غيّر القواعد بعدين. */
@@ -459,6 +468,12 @@ export class CatalogService {
       emergency_sla_minutes: emergencySlaMinutes,
       min_price_cents: effectiveMinPrice,
       max_price_cents: effectiveMaxPrice,
+      // بند 10/29 — النطاق المعروض للعميل، **منفصل** عن حدود القصّ فوق. كان بيترجع في معاينة
+      // الطلب بس، فشاشات الحجز اللي بتقرا من التقدير ده ماكانش عندها منه حاجة تعرضها —
+      // وcustomer-app كان بيعرض حدود القصّ مكانه، وده اللي البند 29 بيمنعه بالنص.
+      // نفس الدالة الواحدة اللي معاينة الطلب بتستخدمها، مش حساب موازي.
+      ...estimatedDisplayRange(service, estimatedTotalCents),
+      price_certainty_mode: service.priceCertaintyMode,
       pricing_evaluation_id: result.evaluationId,
       estimated_duration_days: result.estimatedDurationDays,
       duration_minutes: result.durationMinutes,
