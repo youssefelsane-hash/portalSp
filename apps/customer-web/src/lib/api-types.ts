@@ -101,6 +101,15 @@ export interface ServiceDto {
   inspection_fee_cents: number;
   min_price_cents: number | null;
   max_price_cents: number | null;
+  // ── سياسة التقييم والمعاينة (docs/08 §124) ────────────────────────────────────────────────
+  // نفس الأعلام اللي apps/customer-app بتاخدها دلوقتي — كانت موجودة في الباك-إند/لوحة الأدمن
+  // بس، فـcustomer-web كانت بتعرض "ابعت صور" لأي خدمة inspection_then_quote حتى لو الأدمن
+  // قافل التقييم بالصور أو ظابط سياسة "معاينة في الموقع فقط" — طريق مسدود لنفس بلاغ المالك.
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+  assessment_route_policy: 'admin_triage' | 'remote_only' | 'onsite_only' | 'customer_choice';
+  remote_assessment_enabled: boolean;
+  onsite_assessment_enabled: boolean;
+  remote_assessment_fee_cents: number;
   unit_name_ar: string | null;
   quantity_min: number | null;
   quantity_max: number | null;
