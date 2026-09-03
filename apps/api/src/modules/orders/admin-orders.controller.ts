@@ -45,10 +45,6 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CatalogService } from '../catalog/catalog.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { AssessmentTriageService } from './assessment-triage.service';
-import {
-  MATCHING_WORKFLOW_PHASE_AR,
-  ORDER_ASSIGNMENT_SOURCE_AR,
-} from '../matching/matching-workflow-state';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PermissionsService } from '../admin/permissions.service';
 import {
@@ -245,52 +241,6 @@ export class AdminOrdersController {
   }
 
   // فانل مطابقة الطلب (docs/08 §35.8، ADR-0021 §4) — "ليه الطلب ده لسه بيدوّر؟" قراءة بس، أي أدمن.
-  // حالة المطابقة التشغيلية (طبقة رؤية العمليات) — الجولات بتفاصيل كل عرض، ومصدر الإسناد،
-  // والخطوة الجاية ووقتها، وهل الـworkflow متأخر. نفس الاشتقاق اللي Operations وException
-  // Center بيقروه (`matching-workflow-state.ts`) — مفيش شاشة بتحسب الحقيقة دي بنفسها.
-  @Get(':id/matching-state')
-  async getMatchingState(@Param('id', ParseUUIDPipe) id: string) {
-    const { order } = await this.adminOrdersService.getDetail(id);
-    const state = await this.matchingExplainabilityService.getOrderMatchingState(order);
-    return {
-      order_id: state.orderId,
-      order_status: state.orderStatus,
-      assignment_source: state.assignmentSource,
-      assignment_source_label_ar: ORDER_ASSIGNMENT_SOURCE_AR[state.assignmentSource],
-      assigned_technician_id: state.assignedTechnicianId,
-      current_round: state.currentRound,
-      max_rounds: state.maxRounds,
-      technicians_contacted: state.techniciansContacted,
-      counts: state.counts,
-      workflow: {
-        phase: state.workflow.phase,
-        phase_label_ar: MATCHING_WORKFLOW_PHASE_AR[state.workflow.phase],
-        next_action_at: state.workflow.nextActionAt,
-        delay_seconds: state.workflow.delaySeconds,
-        is_delayed: state.workflow.isDelayed,
-      },
-      rounds: state.rounds.map((r) => ({
-        round: r.round,
-        started_at: r.startedAt,
-        // مش «انتهاء صلاحية»: العرض بيفضل قابل للقبول بعد الوقت ده (ADR-0018 §5).
-        broadcast_expands_at: r.broadcastExpandsAt,
-        attempts: r.attempts.map((a) => ({
-          assignment_id: a.assignmentId,
-          technician_id: a.technicianId,
-          technician_code: a.technicianCode,
-          full_name: a.fullName,
-          status: a.status,
-          rejection_reason_code: a.rejectionReasonCode,
-          distance_km: a.distanceKm,
-          eta_minutes: a.etaMinutes,
-          sent_at: a.sentAt,
-          viewed_at: a.viewedAt,
-          responded_at: a.respondedAt,
-        })),
-      })),
-    };
-  }
-
   @Get(':id/matching-funnel')
   async getMatchingFunnel(@Param('id', ParseUUIDPipe) id: string) {
     const { order } = await this.adminOrdersService.getDetail(id);

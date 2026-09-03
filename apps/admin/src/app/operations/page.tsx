@@ -12,20 +12,20 @@ import type {
   DispatchDeliveryItemDto,
   DispatchDeliveryResponseDto,
   ExceptionCenterResponseDto,
-  LiveDispatchResponseDto,
   OperationsOverview,
+  OrderTraceDto,
+  OrderTraceListResponseDto,
+  OrderTraceNextActionDto,
   TechnicianLevel,
   TechnicianVerificationStatus,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
-import { AlertTriangle, Bell, ChevronDown, ChevronLeft, ClipboardList, Compass, Radio, Send, Users } from 'lucide-react';
+import { AlertTriangle, Bell, ChevronDown, ChevronLeft, ClipboardList, Compass, Radio, Route, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { useAdminQuery, useFilteredPage } from '@/lib/use-admin-query';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
-import { formatDurationAr } from '@/lib/format';
-import { DISPATCH_STATUS_LABELS_AR, dispatchStatusBadgeClass } from '@/lib/matching-labels';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -39,6 +39,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
+import { formatEgp } from '@/lib/format';
 import {
   VERIFICATION_STATUS_LABELS,
   LEVEL_LABELS,
@@ -46,6 +47,17 @@ import {
   CAPACITY_TIER_LABELS,
   capacityTierBadgeClass,
 } from '@/lib/technician-labels';
+
+/**
+ * تاريخ ووقت بأرقام لاتينية — نقطة واحدة بدل سبع نداءات `toLocaleString` متكررة في الصفحة.
+ *
+ * **بلا أي عزل ثنائي اتجاه عمدًا**: `ar-EG` بيحقن `U+200F` (RLM) بين أجزاء التاريخ بنفسه، وده
+ * اللي بيخلي "2‏/9‏/2026" تتعرض صح كـ2026/9/2 جوّه صفحة RTL. تجربة عملية بمتصفح حقيقي أثبتت إن
+ * لفّها في `\u2066…\u2069` بتكسرها لـ"22026/9/" — العزل بيتعارض مع الـRLM مش بيساعده.
+ */
+function arDateTime(value: string): string {
+  return new Date(value).toLocaleString('ar-EG-u-nu-latn');
+}
 
 function KpiCard({
   title,
@@ -205,6 +217,107 @@ function StaleDispatchReassignAction({
 // §36.11: صف "توزيع متأخر" فيه كمان إجراء سريع (إعادة تعيين) — راجع StaleDispatchReassignAction
 // فوق. صف "نقص طاقم" بيفضل رابط بس (تعديل الطاقم محتاج اختيار دور فني/مساعد، مكانه الطبيعي صفحة
 // الطلب نفسها اللي فيها الأداة دي بالفعل — صفر تكرار UI).
+/** مدة بالثواني في صيغة عربية مقروءة — الاستثناءات بتقيس التأخير بالثانية، والأدمن بيقرا بالدقيقة. */
+function formatDelay(seconds: number): string {
+  if (seconds < 60) return `${seconds} ثانية`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} دقيقة`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ساعة و${minutes % 60} دقيقة`;
+  return `${Math.floor(hours / 24)} يوم و${hours % 24} ساعة`;
+}
+
+function ExceptionGroup({
+  title,
+  count,
+  tone,
+  children,
+}: {
+  title: string;
+  count: number;
+  tone: 'danger' | 'warning';
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-lg border border-s-4 p-4 ${tone === 'danger' ? 'border-s-danger' : 'border-s-warning'}`}>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-medium">
+          {title} ({count})
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const REVISIT_REASON_LABELS: Record<string, string> = {
+  rejected: 'الفني رفض إعادة الزيارة',
+  cancelled_after_accept: 'الفني لغى بعد ما قبل',
+  response_deadline_passed: 'مهلة الرد عدّت بلا رد',
+};
+
+/**
+ * تحرير إعادة زيارة مثبّتة (ADR-0051) — قرار مالي: بيخصم نصيب الفني من الطلب الأصلي ويرجّع
+ * الطلب للمطابقة العامة. الـendpoint عليه step-up MFA، و`authedFetch` بيفتح حوار التأكيد لوحده
+ * ويعيد المحاولة بالتوكن، فمافيش تعامل خاص مطلوب هنا.
+ */
+function ReleaseRevisitAction({
+  orderId,
+  chargebackCents,
+  authedFetch,
+  onReleased,
+}: {
+  orderId: string;
+  chargebackCents: number;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  onReleased: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function handleRelease() {
+    setSaving(true);
+    setActionError(null);
+    try {
+      await authedFetch(`/admin/orders/${orderId}/release-revisit`, { method: 'POST' });
+      setConfirming(false);
+      onReleased();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <button type="button" onClick={() => setConfirming(true)} className="self-start text-xs text-primary hover:underline">
+        تحرير للمطابقة العامة
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {/* المبلغ مكتوب في نص التأكيد نفسه — الأدمن مايضغطش «تأكيد» من غير ما يشوف الخصم. */}
+      <span className="text-xs text-muted-foreground">هيتخصم {formatEgp(chargebackCents)} من محفظة الفني. متأكد؟</span>
+      <button
+        type="button"
+        onClick={handleRelease}
+        disabled={saving}
+        className="rounded-md bg-destructive px-2 py-1 text-xs text-destructive-foreground disabled:opacity-50"
+      >
+        {saving ? 'جاري...' : 'تأكيد التحرير'}
+      </button>
+      <button type="button" onClick={() => setConfirming(false)} className="text-xs text-muted-foreground hover:underline">
+        إلغاء
+      </button>
+      {actionError && <span className="text-xs text-destructive">{actionError}</span>}
+    </div>
+  );
+}
+
 function ExceptionCenterSection({
   categoryId,
   authedFetch,
@@ -224,12 +337,11 @@ function ExceptionCenterSection({
   useAdminLiveRefresh(['orders', 'technicians'], refresh);
 
   const overdueCount = data?.overdue_orders.total ?? 0;
-  const workflowDelayedCount = data?.matching_workflow_delayed.total ?? 0;
+  const workflowCount = data?.matching_workflow_delayed.total ?? 0;
   const crewCount = data?.crew_shortage.total ?? 0;
   const staleCount = data?.stale_dispatch.total ?? 0;
-  // البَقّة اللي كانت هنا: الباك-إند بيرجّع `overdue_orders` من زمان والواجهة ماكانتش بتعدّه ولا
-  // بتعرضه — فالمركز كان بيقول «مفيش استثناءات محتاجة تصرّف دلوقتي» وشغلانة معادها عدّى مستنية.
-  const totalCount = overdueCount + workflowDelayedCount + crewCount + staleCount;
+  const revisitCount = data?.stalled_revisits.total ?? 0;
+  const totalCount = overdueCount + workflowCount + crewCount + staleCount + revisitCount;
 
   return (
     <section>
@@ -252,72 +364,54 @@ function ExceptionCenterSection({
 
       {!error && data && totalCount > 0 && (
         <div className="flex flex-col gap-4">
+          {/* ترتيب مقصود (docs/08 §56 بند 4): شغلانة معادها عدّى ولسه ما بدأتش هي أعجل حاجة. */}
           {overdueCount > 0 && (
-            <div className="rounded-lg border border-s-4 border-s-danger p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">شغلانة معادها عدّى ولسه ما بدأتش ({overdueCount})</span>
-              </div>
+            <ExceptionGroup title="شغلانة معادها عدّى ولسه ما بدأتش" count={overdueCount} tone="danger">
               <ul className="flex flex-col gap-1.5">
                 {data.overdue_orders.items.map((item) => (
                   <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
                     <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
                       {item.order_number}
                     </Link>
-                    {item.technician_id ? (
-                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
-                        {item.full_name}
-                      </Link>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">مفيش فني معيّن</span>
-                    )}
+                    <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
+                      {item.full_name}
+                    </Link>
                     <span className="text-xs text-muted-foreground">
-                      معاده: {new Date(item.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}
+                      معاده: {arDateTime(item.scheduled_at)}
                     </span>
                     <Badge variant="destructive">متأخر {item.days_late} يوم</Badge>
                   </li>
                 ))}
               </ul>
-            </div>
+            </ExceptionGroup>
           )}
 
-          {workflowDelayedCount > 0 && (
-            <div className="rounded-lg border border-s-4 border-s-danger p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">توسيع جولة المطابقة واقف ({workflowDelayedCount})</span>
-              </div>
-              {/* مختلف عن «توزيع متأخر» تحته: ده معناه إن **الجولة الجاية ما اتعملتش** والطلب
-                  لسه بيدوّر وتحت سقف الجولات — يعني النظام نفسه واقف ومحتاج تدخّل، مش مجرد عرض
-                  عدّى وقت توسيعه (اللي هو سلوك طبيعي، ADR-0018 §5). */}
-              <ul className="flex flex-col gap-2">
+          {/* المحرك واقف — مش سلوك فني. عمدًا فوق «توزيع متأخر»: عرض بلا رد حاجة طبيعية،
+              ومهلة جولة عدّت من غير ما جولة جديدة تتفتح حاجة تانية خالص (عطل workflow). */}
+          {workflowCount > 0 && (
+            <ExceptionGroup title="المطابقة نفسها واقفة — مهلة الجولة عدّت بلا توسيع" count={workflowCount} tone="danger">
+              <ul className="flex flex-col gap-1.5">
                 {data.matching_workflow_delayed.items.map((item) => (
-                  <li key={item.order_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
-                        {item.order_number}
-                      </Link>
-                      <span className="text-xs text-muted-foreground">
-                        الجولة {item.current_round} من {item.max_rounds} · {item.technicians_contacted} فني · {item.pending_responses} رد
-                        منتظر
-                      </span>
-                      <Badge variant="destructive">متأخر {formatDurationAr(item.delay_seconds)}</Badge>
-                    </div>
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                      {item.order_number}
+                    </Link>
+                    <Badge variant="outline">
+                      جولة {item.current_round} من {item.max_rounds}
+                    </Badge>
                     <span className="text-xs text-muted-foreground">
-                      كان مفروض يوسّع: {new Date(item.expected_action_at).toLocaleString('ar-EG-u-nu-latn')}
+                      كان المفروض يوسّع: {arDateTime(item.expected_expansion_at)}
                     </span>
-                    {hasPermission('orders.reassign') && (
-                      <StaleDispatchReassignAction orderId={item.order_id} authedFetch={authedFetch} onReassigned={refresh} />
-                    )}
+                    <Badge variant="destructive">متأخر {formatDelay(item.delay_seconds)}</Badge>
+                    <span className="text-xs text-muted-foreground">وصل لـ{item.technicians_contacted} فني</span>
                   </li>
                 ))}
               </ul>
-            </div>
+            </ExceptionGroup>
           )}
 
           {crewCount > 0 && (
-            <div className="rounded-lg border border-s-4 border-s-danger p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">نقص طاقم مصعّد ولسه مفتوح ({crewCount})</span>
-              </div>
+            <ExceptionGroup title="نقص طاقم مصعّد ولسه مفتوح" count={crewCount} tone="danger">
               <ul className="flex flex-col gap-1.5">
                 {data.crew_shortage.items.map((item) => (
                   <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
@@ -325,7 +419,7 @@ function ExceptionCenterSection({
                       {item.order_number}
                     </Link>
                     <span className="text-xs text-muted-foreground">
-                      {new Date(item.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}
+                      {arDateTime(item.scheduled_at)}
                     </span>
                     {item.is_overdue && <Badge variant="destructive">فات معاده</Badge>}
                     {item.missing_technicians > 0 && (
@@ -337,14 +431,11 @@ function ExceptionCenterSection({
                   </li>
                 ))}
               </ul>
-            </div>
+            </ExceptionGroup>
           )}
 
           {staleCount > 0 && (
-            <div className="rounded-lg border border-s-4 border-s-warning p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">توزيع متأخر — لسه «مُرسل» بعد ما فات معاده ({staleCount})</span>
-              </div>
+            <ExceptionGroup title="توزيع متأخر — لسه «مُرسل» بعد ما فات معاده" count={staleCount} tone="warning">
               <ul className="flex flex-col gap-2">
                 {data.stale_dispatch.items.map((item) => (
                   <li key={item.assignment_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
@@ -359,7 +450,7 @@ function ExceptionCenterSection({
                         {item.full_name}
                       </Link>
                       <span className="text-xs text-muted-foreground">
-                        فات معاده: {new Date(item.expires_at).toLocaleString('ar-EG-u-nu-latn')}
+                        فات معاده: {arDateTime(item.expires_at)}
                       </span>
                     </div>
                     {hasPermission('orders.reassign') && (
@@ -368,7 +459,49 @@ function ExceptionCenterSection({
                   </li>
                 ))}
               </ul>
-            </div>
+            </ExceptionGroup>
+          )}
+
+          {/* ADR-0051 — البند ده كان بيتحسب في الباك-إند بالكامل والـcontroller بيرميه قبل ما
+              يوصل لأي واجهة، يعني إعادة زيارة ممكن تفضل معلّقة للأبد ومحدش يشوفها. */}
+          {revisitCount > 0 && (
+            <ExceptionGroup title="إعادة زيارة معلّقة على فني مبقاش عنده الطلب" count={revisitCount} tone="warning">
+              <ul className="flex flex-col gap-2">
+                {data.stalled_revisits.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                        {item.order_number}
+                      </Link>
+                      {item.original_order_id && (
+                        <span className="text-xs text-muted-foreground">
+                          الطلب الأصلي:{' '}
+                          <Link href={`/orders/${item.original_order_id}`} className="hover:underline">
+                            {item.original_order_number}
+                          </Link>
+                        </span>
+                      )}
+                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
+                        {item.full_name}
+                      </Link>
+                      {item.phone && <span className="text-xs text-muted-foreground">{item.phone}</span>}
+                      <Badge variant="outline">{REVISIT_REASON_LABELS[item.reason] ?? item.reason}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        المهلة: {arDateTime(item.deadline_at)}
+                      </span>
+                    </div>
+                    {hasPermission('orders.release_revisit') && (
+                      <ReleaseRevisitAction
+                        orderId={item.order_id}
+                        chargebackCents={item.chargeback_cents}
+                        authedFetch={authedFetch}
+                        onReleased={refresh}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </ExceptionGroup>
           )}
         </div>
       )}
@@ -770,200 +903,6 @@ function NearFutureWorkloadSection({
   );
 }
 
-/**
- * التحكم اللحظي في التوزيع — «إيه اللي واقف دلوقتي؟» بصف لكل طلب بيدوّر على فني.
- *
- * **كل حقيقة عمل في القسم ده جاية جاهزة من الباك-إند**: المرحلة ونصّها العربي، وقت الخطوة الجاية،
- * ثواني التأخير، وهل متأخر فعلاً. الواجهة مابتقارنش أوقات ولا بتحسب «عدّى ولا لأ» — ساعة المتصفح
- * مش ساعة النظام، ومهلة السماح وسقف الجولات إعدادات بتتغير من لوحة التحكم.
- */
-function LiveDispatchSection({
-  categoryId,
-  authedFetch,
-}: {
-  categoryId: string;
-  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
-}) {
-  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
-  const [cityId, setCityId] = useState<string>('');
-  const [zoneId, setZoneId] = useState<string>('');
-  const [onlyDelayed, setOnlyDelayed] = useState(false);
-
-  useEffect(() => {
-    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
-  }, [authedFetch]);
-
-  const zones = useAdminQuery(
-    cityId || null,
-    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
-    'حصل خطأ في تحميل النطاقات',
-  ).data;
-
-  const params = new URLSearchParams();
-  if (categoryId) params.set('category_id', categoryId);
-  if (zoneId) params.set('zone_id', zoneId);
-  if (onlyDelayed) params.set('only_delayed', 'true');
-  const key = params.toString();
-  const { data, loading, error, reload } = useAdminQuery(
-    `live-dispatch|${key}`,
-    () => authedFetch<LiveDispatchResponseDto>(`/admin/operations/live-dispatch${key ? `?${key}` : ''}`),
-    'حصل خطأ في تحميل التحكم اللحظي في التوزيع',
-  );
-  // القسم ده بطبيعته لحظي: كل صف فيه طلب لسه بيدوّر على فني دلوقتي.
-  useAdminLiveRefresh(['orders', 'technicians'], reload);
-
-  // حارس زي حارس جرس الإشعارات وللسبب نفسه بالظبط: القسم ده جوّه صفحة كاملة، وأي مفاجأة في شكل
-  // الرد كانت هتوقّع التبويب كله مش الجدول بس.
-  const items = Array.isArray(data?.orders?.items) ? data.orders.items : [];
-  const delayedCount = items.filter((i) => i.is_delayed).length;
-  const totalSearching = data?.summary?.total_searching ?? items.length;
-  const truncated = data?.summary?.truncated ?? false;
-
-  return (
-    <section>
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <Radio className="size-4" />
-        التحكم اللحظي في التوزيع
-      </h2>
-
-      <div className="mb-4 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Label htmlFor="live_city" className="text-sm text-muted-foreground">
-            المدينة
-          </Label>
-          <SelectNative
-            id="live_city"
-            value={cityId}
-            onChange={(e) => {
-              setCityId(e.target.value);
-              setZoneId('');
-            }}
-            className="max-w-xs"
-          >
-            <option value="">كل المدن</option>
-            {cities?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name_ar}
-              </option>
-            ))}
-          </SelectNative>
-        </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="live_zone" className="text-sm text-muted-foreground">
-            النطاق
-          </Label>
-          <SelectNative
-            id="live_zone"
-            value={zoneId}
-            onChange={(e) => setZoneId(e.target.value)}
-            disabled={!cityId}
-            className="max-w-xs"
-          >
-            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
-            {zones?.map((z) => (
-              <option key={z.id} value={z.id}>
-                {z.name_ar}
-              </option>
-            ))}
-          </SelectNative>
-        </div>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={onlyDelayed}
-            onChange={(e) => setOnlyDelayed(e.target.checked)}
-            className="size-4 accent-[var(--color-danger)]"
-          />
-          <span>المتأخر بس</span>
-        </label>
-      </div>
-
-      {error && <p className="text-destructive">{error}</p>}
-      {!error && loading && !data && <TableSkeleton rows={5} columns={6} />}
-
-      {!error && data && items.length === 0 && (
-        <EmptyState
-          title={onlyDelayed ? 'مفيش توزيع متأخر دلوقتي' : 'مفيش طلبات بتدوّر على فني دلوقتي'}
-          description={onlyDelayed ? 'كل الطلبات اللي بتدوّر ماشية في معادها.' : 'جرّب تغيّر الفئة أو النطاق.'}
-        />
-      )}
-
-      {truncated && (
-        <div className="mb-4 rounded-lg border border-s-4 border-s-warning p-3 text-sm">
-          بيتعرض {items.length} من {totalSearching} طلب بيدوّر — فلتر بالفئة أو النطاق عشان تشوف الباقي.
-          {onlyDelayed && ' فلتر «المتأخر بس» بيشتغل على المعروض دلوقتي، فممكن يكون في متأخر تاني بره القايمة.'}
-        </div>
-      )}
-
-      {!error && data && items.length > 0 && (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {/* العدد الحقيقي من الباك-إند مش `items.length`: الصفوف مقصوصة بسقف، والرقم اللي
-                بيتعرض لازم يكون العدد الفعلي مش حجم النافذة. */}
-            <CapacityTierRow label="طلبات بتدوّر" value={totalSearching} tone="muted" />
-            <CapacityTierRow label="متأخر (النظام واقف)" value={delayedCount} tone={delayedCount > 0 ? 'danger' : 'success'} />
-            <CapacityTierRow
-              label="خلصت جولاته بلا قبول"
-              value={items.filter((i) => i.workflow_phase === 'rounds_exhausted').length}
-              tone="warning"
-            />
-          </div>
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>الطلب</TableHead>
-                <TableHead>الخدمة</TableHead>
-                <TableHead>بيدوّر من</TableHead>
-                <TableHead>الجولة</TableHead>
-                <TableHead>ردود الفنيين</TableHead>
-                <TableHead>الحالة الحالية</TableHead>
-                <TableHead>الخطوة الجاية</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((row) => (
-                <TableRow key={row.order_id} className={row.is_delayed ? 'bg-danger-bg/40' : undefined}>
-                  <TableCell>
-                    <Link href={`/orders/${row.order_id}`} className="font-medium hover:underline">
-                      {row.order_number}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="text-sm">{row.service_name_ar}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{formatDurationAr(row.searching_since_seconds)}</TableCell>
-                  <TableCell className="text-sm">
-                    {row.current_round} / {row.max_rounds}
-                    <span className="ms-2 text-xs text-muted-foreground">({row.technicians_contacted} فني)</span>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <span className="text-muted-foreground">قايم {row.pending}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">شاف {row.viewed}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span className="text-danger">رفض {row.rejected}</span>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {/* النص جاي من الباك-إند — مفيش قاموس ترجمة تاني هنا يفترق عنه مع أول إضافة مرحلة. */}
-                    <span>{row.workflow_phase_ar}</span>
-                    {row.is_delayed && (
-                      <Badge variant="destructive" className="ms-2">
-                        متأخر {formatDurationAr(row.delay_seconds)}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {row.next_action_at ? new Date(row.next_action_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </>
-      )}
-    </section>
-  );
-}
-
 const DELIVERY_PER_PAGE = 15;
 const DELIVERY_HOURS_OPTIONS = [1, 6, 24, 72, 168] as const;
 
@@ -973,14 +912,29 @@ const DELIVERY_KIND_LABELS: Record<string, string> = {
   work_opportunity_crew_recruit: 'تجنيد فريق',
 };
 
+const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  sent: 'مُرسل',
+  viewed: 'تمت المشاهدة',
+  accepted: 'مقبول',
+  rejected: 'مرفوض',
+  timeout: 'انتهت المهلة',
+  cancelled: 'ملغي',
+  offered: 'معروض',
+  declined: 'مرفوض',
+  closed: 'مُغلق',
+};
 
 /** تاريخ/وقت في سطرين ثابتين — بدل سطر واحد طويل بيتلف ويخرّب محاذاة الجدول (docs/08 §72). */
 function DeliveryTimestamp({ value }: { value: string }) {
   const date = new Date(value);
   return (
     <>
-      <div>{date.toLocaleDateString('ar-EG-u-nu-latn')}</div>
-      <div className="text-[10px] text-muted-foreground">
+      {/* `dir="rtl"` مش زخرفة: `ar-EG` بيحقن علامات RLM (U+200F) جوّه التاريخ نفسه، وهي بتترتّب
+          صح في سياق RTL بس. خلايا الجدول دي بتورّث `direction: ltr` فعليًا (اتأكدت بقراءة
+          getComputedStyle من صفحة حية)، فالعلامات كانت بتعكس الأجزاء ويطلع "22026/9/" بدل
+          "2026/9/2" — تاريخ غلط يتقرا، مش مجرد محاذاة. */}
+      <div dir="rtl">{date.toLocaleDateString('ar-EG-u-nu-latn')}</div>
+      <div dir="rtl" className="text-[10px] text-muted-foreground">
         {date.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}
       </div>
     </>
@@ -990,6 +944,13 @@ function DeliveryTimestamp({ value }: { value: string }) {
 function deliveryKindLabel(item: DispatchDeliveryItemDto): string {
   if (item.kind === 'assignment') return DELIVERY_KIND_LABELS.assignment;
   return item.context === 'crew_recruit' ? DELIVERY_KIND_LABELS.work_opportunity_crew_recruit : DELIVERY_KIND_LABELS.work_opportunity_assignment;
+}
+
+function deliveryStatusBadgeClass(status: string): string {
+  if (['accepted'].includes(status)) return 'border-success/40 bg-success/10 text-success';
+  if (['rejected', 'declined', 'timeout', 'cancelled'].includes(status)) return 'border-danger/40 bg-danger/10 text-danger';
+  if (['viewed'].includes(status)) return 'border-warning/40 bg-warning/10 text-warning';
+  return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
 // مراقبة تسليم الطلبات — REQ SENT + حالات حقيقية بس (docs/08 §36.7). صفر حالة توصيل مخترعة: بيعرض
@@ -1131,6 +1092,7 @@ function DispatchDeliverySection({
                     <TableHead>الطلب</TableHead>
                     <TableHead>الحالة</TableHead>
                     <TableHead>اتبعت</TableHead>
+                    <TableHead>فتح العرض</TableHead>
                     <TableHead>اترد عليه</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1154,8 +1116,8 @@ function DispatchDeliverySection({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={dispatchStatusBadgeClass(item.status)}>
-                          {DISPATCH_STATUS_LABELS_AR[item.status] ?? item.status}
+                        <Badge variant="outline" className={deliveryStatusBadgeClass(item.status)}>
+                          {DELIVERY_STATUS_LABELS[item.status] ?? item.status}
                         </Badge>
                         {item.is_stale && <div className="mt-1 text-[10px] text-danger">متأخر عن معاده</div>}
                       </TableCell>
@@ -1163,6 +1125,14 @@ function DispatchDeliverySection({
                           يبان مش متظبط. سطرين ثابتين (تاريخ فوق، وقت باهت تحت) وبلا لف. */}
                       <TableCell className="whitespace-nowrap text-xs">
                         <DeliveryTimestamp value={item.sent_at} />
+                        {item.assignment_round !== null && (
+                          <div className="text-[10px] text-muted-foreground">جولة {item.assignment_round}</div>
+                        )}
+                      </TableCell>
+                      {/* order_assignments.viewed_at (migration 0255) — العمود ده هو الفرق بين
+                          «الفني ما ردّش» و«الفني ما فتحش أصلاً»، واتنين محتاجين تصرّف مختلف. */}
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {item.viewed_at ? <DeliveryTimestamp value={item.viewed_at} /> : '—'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-xs">
                         {item.responded_at ? <DeliveryTimestamp value={item.responded_at} /> : '—'}
@@ -1407,6 +1377,167 @@ function CoverageIntelligenceSection({
   );
 }
 
+// ── تتبّع الطلبات في المطابقة (GET /admin/operations/order-traces) ─────────────────────────────
+// تبويب جوّه نفس مركز العمليات — **مش** لوحة تانية. الفرق عن تبويب «تسليم الطلبات»: هناك feed
+// مسطّح مرتّب زمنيًا («إيه اللي حصل»)، وهنا نفس `order_assignments` مجمّعة حسب الطلب → الجولة →
+// الفني («الطلب ده وصل لمين ومستني إيه دلوقتي»). صفر منطق مطابقة جديد في الواجهة: كل حقل
+// معروض هنا محسوب في `AdminOrderTraceService`.
+
+const NEXT_ACTION_LABELS: Record<OrderTraceNextActionDto, string> = {
+  waiting_technician_response: 'مستني رد الفنيين',
+  expand_next_round: 'المفروض يوسّع لجولة جديدة',
+  matching_exhausted: 'الجولات خلصت بلا قبول',
+  assigned: 'اتعيّن على فني',
+  no_matching_required: 'مش في مرحلة بحث',
+};
+
+function nextActionBadgeClass(action: OrderTraceNextActionDto): string {
+  if (action === 'expand_next_round' || action === 'matching_exhausted') return 'bg-danger-bg text-danger';
+  if (action === 'waiting_technician_response') return 'bg-warning-bg text-warning';
+  return 'bg-success-bg text-success';
+}
+
+function OrderTraceCard({ trace }: { trace: OrderTraceDto }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="flex w-full flex-wrap items-center gap-2 p-3 text-start hover:bg-muted/40"
+      >
+        <ChevronDown className={`size-4 shrink-0 transition-transform ${expanded ? '' : 'rotate-90 rtl:-rotate-90'}`} />
+        <span className="font-medium">{trace.order_number}</span>
+        {trace.is_emergency && <Badge variant="destructive">طارئ</Badge>}
+        <Badge className={nextActionBadgeClass(trace.next_action)} variant="secondary">
+          {NEXT_ACTION_LABELS[trace.next_action]}
+        </Badge>
+        {trace.current_round !== null && (
+          <Badge variant="outline">
+            جولة {trace.current_round} من {trace.max_rounds}
+          </Badge>
+        )}
+        <span className="text-xs text-muted-foreground">وصل لـ{trace.technicians_contacted} فني</span>
+        {/* عدّادات الحالة كسطر واحد — الأدمن بيقرا «اتبعت 8، اتفتح 3، اترفض 2» من غير ما يفتح. */}
+        <span className="text-xs text-muted-foreground">
+          مُرسل {trace.counts.sent} · مشاهدة {trace.counts.viewed} · مرفوض {trace.counts.rejected} · انتهت مهلته{' '}
+          {trace.counts.timeout}
+        </span>
+        {trace.delay_seconds > 0 && <Badge variant="destructive">متأخر {formatDelay(trace.delay_seconds)}</Badge>}
+      </button>
+
+      {expanded && (
+        <div className="border-t px-3 pb-3">
+          {trace.rounds.length === 0 ? (
+            <p className="py-3 text-sm text-muted-foreground">لسه ما اتبعتش لأي فني — البث الأول ما حصلش.</p>
+          ) : (
+            trace.rounds.map((round) => (
+              <div key={round.round} className="pt-3">
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">جولة {round.round}</span>
+                  <span>بدأت: {arDateTime(round.started_at)}</span>
+                  {/* تسمية دقيقة عمدًا: ده معاد **توسيع الجولة**، مش انتهاء صلاحية العرض —
+                      العرض بيفضل قابل للقبول بعده (matching-round-expiry.processor.ts). */}
+                  <span>مهلة التوسيع: {arDateTime(round.expansion_due_at)}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>الفني</TableHead>
+                        <TableHead>الحالة</TableHead>
+                        <TableHead>اتبعت</TableHead>
+                        <TableHead>فتح العرض</TableHead>
+                        <TableHead>ردّ</TableHead>
+                        <TableHead>المسافة</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {round.technicians.map((t) => (
+                        <TableRow key={t.assignment_id}>
+                          <TableCell>
+                            <Link href={`/technicians/${t.technician_id}`} className="hover:underline">
+                              {t.full_name}
+                            </Link>
+                            <div className="text-[10px] text-muted-foreground">{t.technician_code}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={deliveryStatusBadgeClass(t.status)} variant="secondary">
+                              {DELIVERY_STATUS_LABELS[t.status] ?? t.status}
+                            </Badge>
+                            {t.rejection_reason_code && (
+                              <div className="mt-1 text-[10px] text-muted-foreground">{t.rejection_reason_code}</div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <DeliveryTimestamp value={t.sent_at} />
+                          </TableCell>
+                          <TableCell>
+                            {/* order_assignments.viewed_at (migration 0255). قبل كده كانت الحالة
+                                بتتحوّل لـ'viewed' من غير ما حد يسجّل **إمتى** — فمكانش ينفع
+                                تقيس «قد إيه قعد يبص قبل ما يرفض». */}
+                            {t.viewed_at ? <DeliveryTimestamp value={t.viewed_at} /> : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell>
+                            {t.responded_at ? <DeliveryTimestamp value={t.responded_at} /> : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {t.distance_km === null ? '—' : `${t.distance_km.toFixed(1)} كم`}
+                            {t.estimated_eta_minutes !== null && <div>~{t.estimated_eta_minutes} د</div>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderTraceSection({ authedFetch }: { authedFetch: ReturnType<typeof useAuth>['authedFetch'] }) {
+  const { data, loading, error, reload } = useAdminQuery(
+    '',
+    () => authedFetch<OrderTraceListResponseDto>('/admin/operations/order-traces'),
+    'حصل خطأ في تحميل تتبّع الطلبات',
+  );
+  useAdminLiveRefresh(['orders'], reload);
+
+  // الطلبات المعطّلة الأول — «المفروض يوسّع» و«الجولات خلصت» هما اللي محتاجين تدخّل، والأطول
+  // تأخيرًا فيهم قبل الأقصر. الترتيب في الواجهة عشان الباك-إند يفضل feed محايد.
+  const items = [...(data?.items ?? [])].sort((a, b) => {
+    const rank = (t: OrderTraceDto) => (t.next_action === 'expand_next_round' || t.next_action === 'matching_exhausted' ? 0 : 1);
+    return rank(a) - rank(b) || b.delay_seconds - a.delay_seconds;
+  });
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Route className="size-4" />
+        تتبّع الطلبات اللي لسه بتدوّر على فني
+      </h2>
+
+      {error && <p className="text-destructive">{error}</p>}
+      {!error && loading && !data && <Skeleton className="h-40" />}
+      {!error && data && items.length === 0 && (
+        <EmptyState icon={Compass} title="مفيش طلبات بتدوّر على فني دلوقتي" description="كل الطلبات المفتوحة اتعيّنت أو خرجت من مرحلة البحث." />
+      )}
+      {!error && items.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {items.map((trace) => (
+            <OrderTraceCard key={trace.order_id} trace={trace} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // أقسام مركز العمليات كتبويبات (docs/08 §63.ب2) — قبل كده كانت خمس أقسام تقيلة مرصوصة تحت بعض
 // في صفحة واحدة: كلها بتجيب بيانات مع بعض عند الفتح، والأدمن بيلف بالسكرول عشان يوصل لأي حاجة.
 // دلوقتي المؤشرات اللحظية فوق دايمًا (نظرة أول ثانية)، والتفاصيل في تبويب واحد فاتح في المرة —
@@ -1415,8 +1546,8 @@ const OPERATIONS_TABS = [
   { value: 'exceptions', label: 'الاستثناءات', hint: 'طلبات محتاجة تدخّل دلوقتي' },
   { value: 'workforce', label: 'القوى العاملة', hint: 'مين متاح ومستواه وقدرته النهاردة' },
   { value: 'workload', label: 'الحمل القريب', hint: 'ضغط الشغل على 7 أيام' },
-  { value: 'live-dispatch', label: 'التوزيع اللحظي', hint: 'إيه اللي بيدوّر دلوقتي وإيه اللي واقف' },
   { value: 'delivery', label: 'تسليم الطلبات', hint: 'وصلت لمين وردّ ولا لأ' },
+  { value: 'trace', label: 'تتبّع الطلبات', hint: 'الطلب في أنهي جولة ومستني إيه' },
   { value: 'coverage', label: 'التغطية', hint: 'فجوات منطقة × فئة' },
 ] as const;
 
@@ -1567,11 +1698,11 @@ function OperationsOverviewPage() {
             <TabsContent value="workload" className="mt-4">
               <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
             </TabsContent>
-            <TabsContent value="live-dispatch" className="mt-4">
-              <LiveDispatchSection categoryId={categoryId} authedFetch={authedFetch} />
-            </TabsContent>
             <TabsContent value="delivery" className="mt-4">
               <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
+            </TabsContent>
+            <TabsContent value="trace" className="mt-4">
+              <OrderTraceSection authedFetch={authedFetch} />
             </TabsContent>
             <TabsContent value="coverage" className="mt-4">
               <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />

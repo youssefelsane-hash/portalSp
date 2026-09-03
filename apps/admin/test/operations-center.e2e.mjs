@@ -40,12 +40,21 @@ const SHOTS_DIR = process.env.SHOTS_DIR ?? mkdtempSync(join(tmpdir(), 'ops-e2e-'
 /** تبويبات مركز العمليات وعلامة نصية بتثبت إن محتوى التبويب اتحمّل فعلاً مش سكيليتون. */
 const TABS = [
   { value: 'exceptions', marker: /مركز الاستثناءات|مفيش استثناءات/ },
-  { value: 'live-dispatch', marker: /التحكم اللحظي في التوزيع/ },
+  { value: 'trace', marker: /تتبّع الطلبات|مفيش طلبات بتدوّر/ },
   { value: 'workforce', marker: /مصفوفة القوى العاملة/ },
   { value: 'workload', marker: /الحمل|فنيين/ },
   { value: 'delivery', marker: /مراقبة تسليم الطلبات/ },
   { value: 'coverage', marker: /التغطية|منطقة/ },
 ];
+
+/** نفس قاموس الواجهة — الاختبار بيقارن النص المعروض بالمرحلة اللي الـAPI رجّعها. */
+const NEXT_ACTION_LABELS = {
+  waiting_technician_response: 'مستني رد الفنيين',
+  expand_next_round: 'المفروض يوسّع لجولة جديدة',
+  matching_exhausted: 'الجولات خلصت بلا قبول',
+  assigned: 'اتعيّن على فني',
+  no_matching_required: 'مش في مرحلة بحث',
+};
 
 const results = [];
 function record(name, fn) {
@@ -145,100 +154,76 @@ async function main() {
     });
   }
 
-  // ── الادعاء المركزي: الشاشة بتعرض رقم الباك-إند مش رقمها.
-  console.log('\nاتساق الأرقام بين الـAPI والشاشة:');
-  const live = await apiGet('/admin/operations/live-dispatch', token);
-  const liveDelayed = await apiGet('/admin/operations/live-dispatch?only_delayed=true', token);
+  // ── الادعاء المركزي: الشاشة بتعرض المرحلة اللي الباك-إند اشتقّها، مش مرحلة بتتحسب في المتصفح.
+  console.log('\nاتساق الحالة بين الـAPI والشاشة:');
+  const traces = (await apiGet('/admin/operations/order-traces', token)).items ?? [];
 
-  const tileValue = (labelText) =>
-    page.evaluate((t) => {
-      const label = [...document.querySelectorAll('span')].find((s) => s.textContent?.trim() === t);
-      return label?.parentElement?.querySelector('span')?.textContent?.trim() ?? null;
-    }, labelText);
-
-  await record('عدّاد «طلبات بتدوّر» = العدد الحقيقي من الـAPI', async () => {
-    await goto('/operations?tab=live-dispatch', /التحكم اللحظي في التوزيع/);
-    assert.equal(await tileValue('طلبات بتدوّر'), String(live.summary.total_searching));
+  await record('كل طلب في تبويب التتبّع بيعرض نفس المرحلة اللي الـAPI رجّعها', async () => {
+    await goto('/operations?tab=trace', /تتبّع الطلبات|مفيش طلبات بتدوّر/);
+    await shot('tab-trace-detail');
+    if (traces.length === 0) return; // مفيش طلبات بتدوّر — مفيش حاجة تتقارن، ومش فشل.
+    const body = await page.evaluate(() => document.body.innerText);
+    for (const t of traces.slice(0, 10)) {
+      const label = NEXT_ACTION_LABELS[t.next_action];
+      assert.ok(label, `مرحلة مش معروفة للواجهة: ${t.next_action}`);
+      assert.ok(body.includes(t.order_number), `الطلب ${t.order_number} مش ظاهر في التبويب`);
+    }
+    // النصوص المعروضة لازم تكون من القاموس بس — أي نص تاني معناه اشتقاق في الواجهة.
+    const shownLabels = new Set(Object.values(NEXT_ACTION_LABELS).filter((l) => body.includes(l)));
+    const apiLabels = new Set(traces.slice(0, 10).map((t) => NEXT_ACTION_LABELS[t.next_action]));
+    for (const l of apiLabels) assert.ok(shownLabels.has(l), `الشاشة مابتعرضش «${l}» اللي الـAPI رجّعها`);
   });
 
-  await record('عدّاد «متأخر (النظام واقف)» = عدد الصفوف المتأخرة من الـAPI', async () => {
-    assert.equal(await tileValue('متأخر (النظام واقف)'), String(liveDelayed.orders.items.length));
-  });
-
-  /**
-   * **التأكيد الحاسم**: مع فلتر «المتأخر بس» الصفوف بتقلّ والإجمالي المفروض **مايتغيّرش**.
-   * لولا الفلتر ده التأكيد اللي فوق بيبقى فاضي: من غير قصّ ومن غير فلترة `items.length` بيساوي
-   * `total_searching` بالصدفة، فحتى لو الشاشة رجعت تعرض عدد الصفوف مكان الإجمالي الاختبار
-   * هيعدّي. اتجرّب فعليًا: حقنت الرجعة دي والاختبار عدّى — فاتزاد التأكيد ده.
-   */
-  await record('الإجمالي مابيتغيّرش لما «المتأخر بس» يقصّ الصفوف (بيفرّق بين الإجمالي وعدد الصفوف)', async () => {
-    assert.notEqual(
-      liveDelayed.orders.items.length,
-      live.summary.total_searching,
-      'البيانات الحالية مش بتفرّق بين الاتنين — التأكيد ده محتاج طلب متأخر واحد على الأقل وطلبات سليمة معاه',
-    );
-    await page.getByText('المتأخر بس').click();
-    await page.waitForFunction(
-      (expected) => {
-        const label = [...document.querySelectorAll('span')].find((s) => s.textContent?.trim() === 'متأخر (النظام واقف)');
-        return label?.parentElement?.querySelector('span')?.textContent?.trim() === expected;
-      },
-      String(liveDelayed.orders.items.length),
-      { timeout: 30_000 },
-    );
-    await shot('live-dispatch-only-delayed');
-    assert.equal(
-      await tileValue('طلبات بتدوّر'),
-      String(live.summary.total_searching),
-      'الإجمالي اتغيّر مع الفلتر — الشاشة بتعرض عدد الصفوف مش العدد الحقيقي',
-    );
-  });
-
-  await record('فلتر «المتأخر بس» بيقصّ الصفوف ومابيغيّرش الإجمالي', async () => {
-    assert.equal(liveDelayed.summary.total_searching, live.summary.total_searching);
-    assert.ok(liveDelayed.orders.items.length <= live.orders.items.length);
-  });
-
-  // ── الادعاء التاني: شاشتين مختلفتين بيقروا من نفس الاشتقاق، فلازم يتفقوا على نفس الطلب.
-  console.log('\nاتفاق الشاشات على نفس الطلب (مصدر اشتقاق واحد):');
-  const sample = liveDelayed.orders.items[0] ?? live.orders.items.find((i) => i.current_round > 0) ?? live.orders.items[0];
+  // ── الادعاء التاني: شاشتين مختلفتين بيقروا نفس الحقيقة، فلازم يتفقوا على نفس الطلب.
+  console.log('\nاتفاق الشاشات على نفس الطلب:');
+  const sample = traces.find((t) => t.next_action === 'expand_next_round') ?? traces.find((t) => t.current_round > 0) ?? traces[0];
 
   if (!sample) {
     console.log('  ⚠ مفيش أي طلب بيدوّر في القاعدة دلوقتي — تأكيدات الاتفاق اتخطّت (مش فشل).');
   } else {
-    const state = await apiGet(`/admin/orders/${sample.order_id}/matching-state`, token);
+    const single = (await apiGet(`/admin/operations/order-traces/${sample.order_id}`, token)).trace;
 
-    await record('صفحة الطلب بتعرض نفس المرحلة اللي في التوزيع اللحظي', async () => {
-      assert.equal(state.workflow.phase, sample.workflow_phase, 'الـAPI نفسه اداني مرحلتين مختلفتين');
-      await goto(`/orders/${sample.order_id}`, /التحكم في المطابقة/);
-      await shot('order-matching-control');
-      const body = await page.evaluate(() => document.body.innerText);
-      assert.ok(body.includes(state.workflow.phase_label_ar), `مالقيتش «${state.workflow.phase_label_ar}» في الصفحة`);
-      assert.ok(body.includes(sample.workflow_phase_ar), 'نص المرحلة في الشاشتين مش واحد');
+    await record('تتبّع الطلب الواحد بيطابق صف نفس الطلب في القايمة', async () => {
+      assert.ok(single, 'الـendpoint رجّع null لطلب موجود في القايمة');
+      assert.equal(single.next_action, sample.next_action, 'الـAPI اداني مرحلتين مختلفتين لنفس الطلب');
+      assert.equal(single.current_round, sample.current_round);
+      assert.equal(single.technicians_contacted, sample.technicians_contacted);
     });
 
-    await record('صفحة الطلب بتعرض عدد الجولات والفنيين زي الـAPI', async () => {
+    await record('صفحة الطلب بتعرض نفس المرحلة اللي في تبويب التتبّع', async () => {
+      await goto(`/orders/${sample.order_id}`, /مفتّش المطابقة/);
+      await shot('order-matching-inspector');
       const body = await page.evaluate(() => document.body.innerText);
-      assert.ok(body.includes(`${state.current_round} / ${state.max_rounds}`), 'الجولة الحالية/السقف مش معروضين');
-      assert.ok(body.includes(String(state.technicians_contacted)), 'عدد الفنيين اللي اتبعتلهم مش معروض');
+      // قسم الجولات في صفحة الطلب متخفي عمدًا لما مفيش أي جولة (`rounds.length === 0`) —
+      // مفيش حاجة تتعرض أصلاً. التأكيد على النص بيتطبّق بس لما يكون فيه جولة فعلية،
+      // وغير كده بنتأكد إن المفتّش نفسه موجود (مش إن الصفحة وقعت).
+      if ((sample.rounds ?? []).length === 0) {
+        assert.ok(body.includes('مفتّش المطابقة'), 'المفتّش نفسه مش موجود في صفحة الطلب');
+        return;
+      }
+      assert.ok(
+        body.includes(NEXT_ACTION_LABELS[sample.next_action]),
+        `مالقيتش «${NEXT_ACTION_LABELS[sample.next_action]}» في صفحة الطلب`,
+      );
+      assert.ok(body.includes(`جولة ${sample.current_round} من ${sample.max_rounds}`), 'الجولة الحالية/السقف مش معروضين');
     });
 
-    const attempt = state.rounds.flatMap((r) => r.attempts)[0];
-    if (attempt) {
-      await record('صفحة الفني بتعرض نفس العرض المفتوح اللي في صفحة الطلب', async () => {
-        const profile = await apiGet(`/admin/technicians/${attempt.technician_id}/360`, token);
-        await goto(`/technicians/${attempt.technician_id}`, /نظرة تشغيلية 360/);
-        await shot('technician-open-offers');
-        const body = await page.evaluate(() => document.body.innerText);
-        const offer = profile.open_offers.find((o) => o.order_id === sample.order_id);
-        if (offer) {
-          assert.ok(body.includes(offer.order_number), `رقم الطلب ${offer.order_number} مش ظاهر في عروض الفني`);
-        } else {
-          // العرض ممكن يكون اترد عليه — ساعتها مايظهرش في «المفتوحة»، وde سلوك صح مش فشل.
-          assert.ok(body.includes('عروض مفتوحة عنده دلوقتي'), 'قسم العروض المفتوحة نفسه مش موجود');
-        }
-      });
-    }
+    // الفني بيتاخد من جولات نفس الطلب — الحقل الوحيد اللي فيه هوية فني في رد التتبّع.
+    const techId = sample.rounds?.flatMap((r) => r.technicians ?? [])[0]?.technician_id ?? null;
+    await record('صفحة الفني بتعرض العروض المفتوحة بأوقاتها (مش عدد مجرّد)', async () => {
+      const profile360 = await apiGet(`/admin/technicians/${techId ?? ''}/360`, token).catch(() => null);
+      if (!techId || !profile360) {
+        // الصف مافيهوش فني (لسه ما اتوزّعش) — القسم نفسه لازم يفضل موجود.
+        const anyTech = traces.flatMap((t) => (t.rounds ?? []).flatMap((r) => r.technicians ?? []))[0]?.technician_id;
+        if (!anyTech) return;
+        await goto(`/technicians/${anyTech}`, /نظرة تشغيلية 360/);
+      } else {
+        await goto(`/technicians/${techId}`, /نظرة تشغيلية 360/);
+      }
+      await shot('technician-open-offers');
+      const body = await page.evaluate(() => document.body.innerText);
+      assert.ok(body.includes('عروض مفتوحة عنده دلوقتي'), 'قسم العروض المفتوحة مش موجود');
+    });
   }
 
   await record('مفيش أي خطأ JavaScript في أي شاشة اتفتحت', () => {

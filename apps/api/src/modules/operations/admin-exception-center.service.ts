@@ -9,7 +9,6 @@ import {
   type RevisitPinExhaustionReason,
 } from '../orders/revisit-pin';
 import { SettingsService } from '../settings/settings.service';
-import { deriveMatchingWorkflowState } from '../matching/matching-workflow-state';
 
 const EXCEPTION_LIST_LIMIT = 50;
 
@@ -80,44 +79,40 @@ export interface StalledRevisitExceptionItem {
 }
 
 /**
- * **توسيع جولة مطابقة متأخر** — مختلف جوهريًا عن `staleDispatch` تحته.
+ * **المطابقة نفسها اتأخرت** — مش الفني.
  *
- * `staleDispatch` بيولّع على أي عرض عدّى `expires_at` وهو **لسه سليم**: العرض بيفضل قابل للقبول
- * بعد الوقت ده (ADR-0018 §5)، و`expires_at` معناها «وقت توسيع البث» بس. يعني بيولّع حتى والجولة
- * الجاية اتعملت في ميعادها بالظبط.
- *
- * ده بيولّع على الحالة اللي فعلاً غلط: عدّى وقت التوسيع، **والجولة الجاية ما اتعملتش**، والطلب
- * لسه بيدوّر، ولسه تحت سقف الجولات. يعني الـengine نفسه واقف.
+ * مختلف عمدًا عن `staleDispatch` فوق: ده بيقول «عرض معيّن فات معاده بلا رد» (سلوك فني)، وده
+ * بيقول «مهلة الجولة عدّت والمحرك ما فتحش الجولة اللي بعدها» (عطل في الـworkflow نفسه). خلطهم
+ * كان هيخفي أخطر الاتنين: عرض بلا رد حاجة طبيعية، ومحرك واقف حاجة تانية خالص.
  */
 export interface MatchingWorkflowDelayedItem {
   orderId: string;
   orderNumber: string;
-  orderStatus: string;
   currentRound: number;
   maxRounds: number;
-  techniciansContacted: number;
-  pendingResponses: number;
-  /** الخطوة اللي كان مفروض تحصل ووقتها. */
-  expectedActionAt: string;
+  /** المهلة اللي كان المفروض التوسيع يحصل عندها. */
+  expectedExpansionAt: string;
+  /** ثواني التأخير عن المهلة دي. */
   delaySeconds: number;
+  techniciansContacted: number;
 }
 
 export interface AdminExceptionCenterResult {
   crewShortage: { items: CrewShortageExceptionItem[]; total: number };
-  matchingWorkflowDelayed: { items: MatchingWorkflowDelayedItem[]; total: number };
   staleDispatch: { items: StaleDispatchExceptionItem[]; total: number };
   overdueOrders: { items: OverdueOrderExceptionItem[]; total: number };
   stalledRevisits: { items: StalledRevisitExceptionItem[]; total: number };
+  matchingWorkflowDelayed: { items: MatchingWorkflowDelayedItem[]; total: number };
 }
 
-interface RawMatchingWorkflowRow {
-  id: string;
+interface RawWorkflowDelayedRow {
+  order_id: string;
   order_number: string;
-  order_status: string;
   current_round: string;
   technicians_contacted: string;
-  round_expands_at: string;
-  pending_responses: string;
+  expected_expansion_at: string;
+  delay_seconds: string;
+  total_count: string;
 }
 
 interface RawOverdueOrderRow {
@@ -246,73 +241,6 @@ export class AdminExceptionCenterService {
         isOverdue: new Date(r.scheduled_at).getTime() < now,
       };
     });
-    // توسيع جولة متأخر (طبقة رؤية العمليات) — استعلام مجمّع واحد: صف لكل طلب بيدوّر، فيه أعلى
-    // جولة ووقت توسيعها وعدد المعلّقين. **مفيش N+1** مهما كان عدد الطلبات، والاشتقاق نفسه بيتم
-    // بـ`deriveMatchingWorkflowState` — نفس الدالة اللي صفحة الطلب وLive Dispatch بيقروها.
-    const workflowGraceSeconds = await this.settingsService.getNumber(
-      'matching.workflow_delay_grace_seconds',
-      60,
-    );
-    const workflowMaxRounds = await this.settingsService.getNumber('matching.max_rounds', 4);
-    const workflowRows = await this.dataSource.query<RawMatchingWorkflowRow[]>(
-      `
-      WITH current_round AS (
-        SELECT oa.order_id,
-               MAX(oa.assignment_round) AS current_round,
-               COUNT(DISTINCT oa.technician_id) AS technicians_contacted
-          FROM order_assignments oa
-         GROUP BY oa.order_id
-      )
-      SELECT o.id, o.order_number, o.order_status::text AS order_status,
-             cr.current_round, cr.technicians_contacted,
-             MAX(oa.expires_at) AS round_expands_at,
-             COUNT(*) FILTER (WHERE oa.assignment_status IN ('sent', 'viewed')) AS pending_responses
-        FROM orders o
-        JOIN current_round cr ON cr.order_id = o.id
-        JOIN order_assignments oa ON oa.order_id = o.id AND oa.assignment_round = cr.current_round
-        JOIN services s ON s.id = o.service_id
-       WHERE o.order_status = 'searching_technician'
-         AND o.deleted_at IS NULL
-         -- الجولة الجاية ما اتعملتش: مفيش أي صف برقم جولة أعلى من الحالية.
-         AND NOT EXISTS (
-               SELECT 1 FROM order_assignments nx
-                WHERE nx.order_id = o.id AND nx.assignment_round > cr.current_round
-             )
-         AND ($1::uuid IS NULL OR s.category_id = $1)
-         AND ($2::uuid IS NULL OR o.service_zone_id = $2)
-       GROUP BY o.id, o.order_number, o.order_status, cr.current_round, cr.technicians_contacted
-       ORDER BY MAX(oa.expires_at) ASC
-       LIMIT $3
-      `,
-      [categoryId, zoneId, EXCEPTION_LIST_LIMIT],
-    );
-
-    const workflowNow = new Date();
-    const matchingWorkflowDelayedItems: MatchingWorkflowDelayedItem[] = [];
-    for (const r of workflowRows) {
-      const state = deriveMatchingWorkflowState({
-        orderStatus: r.order_status as never,
-        currentRound: Number(r.current_round),
-        roundExpansionDueAt: r.round_expands_at ? new Date(r.round_expands_at) : null,
-        pendingInCurrentRound: Number(r.pending_responses),
-        maxRounds: workflowMaxRounds,
-        graceSeconds: workflowGraceSeconds,
-        now: workflowNow,
-      });
-      // بس اللي اتأكد إنه متأخر فعليًا — الاشتقاق هو اللي بيحكم، مش شرط SQL موازي.
-      if (!state.isDelayed) continue;
-      matchingWorkflowDelayedItems.push({
-        orderId: r.id,
-        orderNumber: r.order_number,
-        orderStatus: r.order_status,
-        currentRound: Number(r.current_round),
-        maxRounds: workflowMaxRounds,
-        techniciansContacted: Number(r.technicians_contacted),
-        pendingResponses: Number(r.pending_responses),
-        expectedActionAt: new Date(r.round_expands_at).toISOString(),
-        delaySeconds: state.delaySeconds,
-      });
-    }
     const staleDispatchRows = await this.dataSource.query<RawStaleDispatchRow[]>(
       `
       SELECT oa.id, oa.order_id, o.order_number, oa.technician_id, tp.technician_code, u.full_name,
@@ -446,7 +374,66 @@ export class AdminExceptionCenterService {
       chargebackCents: Number(r.chargeback_cents ?? 0),
     }));
 
+    // **المطابقة اتأخرت** (Admin Operations Observability) — الطلب لسه بيدوّر، مهلة آخر جولة
+    // عدّت، ومفيش أي عرض في جولة أحدث. يعني المحرك كان المفروض يوسّع وما وسّعش.
+    //
+    // الشرط deterministic بالكامل من الداتابيز: مفيش تخمين ولا عتبة مخترعة — المهلة نفسها
+    // (`expires_at`) هي اللي المحرك كتبها، وإحنا بنقارنها بالساعة وبس.
+    //
+    // الجولة الأخيرة لو وصلت `matching.max_rounds` **مش** تأخير — دي مطابقة استنفدت، وليها
+    // معنى تاني خالص (مفيش فنيين، مش محرك واقف).
+    const maxRoundsForDelay = await this.settingsService.getNumber('matching.max_rounds', 4);
+    const workflowDelayedRows = await this.dataSource.query<RawWorkflowDelayedRow[]>(
+      `
+      WITH last_round AS (
+        SELECT oa.order_id,
+               MAX(oa.assignment_round) AS current_round,
+               COUNT(DISTINCT oa.technician_id) AS technicians_contacted
+        FROM order_assignments oa
+        GROUP BY oa.order_id
+      ),
+      due AS (
+        SELECT lr.order_id, lr.current_round, lr.technicians_contacted,
+               MAX(oa.expires_at) AS expected_expansion_at
+        FROM last_round lr
+        JOIN order_assignments oa
+          ON oa.order_id = lr.order_id AND oa.assignment_round = lr.current_round
+        GROUP BY lr.order_id, lr.current_round, lr.technicians_contacted
+      )
+      SELECT o.id AS order_id, o.order_number, d.current_round, d.technicians_contacted,
+             d.expected_expansion_at,
+             EXTRACT(EPOCH FROM (now() - d.expected_expansion_at))::int AS delay_seconds,
+             COUNT(*) OVER() AS total_count
+      FROM due d
+      JOIN orders o ON o.id = d.order_id
+      JOIN services s ON s.id = o.service_id
+      WHERE o.order_status = 'searching_technician'
+        AND o.deleted_at IS NULL
+        AND d.expected_expansion_at < now()
+        AND d.current_round < $3::int
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY d.expected_expansion_at ASC
+      LIMIT $4
+      `,
+      [categoryId, zoneId, maxRoundsForDelay, EXCEPTION_LIST_LIMIT],
+    );
+
+    const workflowDelayedItems: MatchingWorkflowDelayedItem[] = workflowDelayedRows.map((r) => ({
+      orderId: r.order_id,
+      orderNumber: r.order_number,
+      currentRound: Number(r.current_round),
+      maxRounds: maxRoundsForDelay,
+      expectedExpansionAt: r.expected_expansion_at,
+      delaySeconds: Number(r.delay_seconds),
+      techniciansContacted: Number(r.technicians_contacted),
+    }));
+
     return {
+      matchingWorkflowDelayed: {
+        items: workflowDelayedItems,
+        total: workflowDelayedRows.length > 0 ? Number(workflowDelayedRows[0].total_count) : 0,
+      },
       stalledRevisits: {
         items: stalledRevisitItems,
         total: stalledRevisitRows.length > 0 ? Number(stalledRevisitRows[0].total_count) : 0,
@@ -458,10 +445,6 @@ export class AdminExceptionCenterService {
       crewShortage: {
         items: crewShortageItems,
         total: crewShortageRows.length > 0 ? Number(crewShortageRows[0].total_count) : 0,
-      },
-      matchingWorkflowDelayed: {
-        items: matchingWorkflowDelayedItems,
-        total: matchingWorkflowDelayedItems.length,
       },
       staleDispatch: {
         items: staleDispatchItems,

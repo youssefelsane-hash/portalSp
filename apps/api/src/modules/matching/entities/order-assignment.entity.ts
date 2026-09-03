@@ -46,8 +46,11 @@ export class OrderAssignment {
   sentAt: Date;
 
   /**
-   * أول مشاهدة للعرض — بيتكتب مرة واحدة وماتتغيّرش بعدها (شرط `assignment_status = 'sent'` في
-   * الـUPDATE بيضمن ده بنيويًا). NULL للصفوف اللي اتعملت قبل migration 0255، أو اللي ماتشافتش.
+   * لحظة **أول** مشاهدة للعرض (migration 0255). `null` = ماتشافش.
+   *
+   * لازمة لأن `assignmentStatus` بيتحرّك بعدها (accepted/rejected) فلحظة المشاهدة كانت بتضيع
+   * خالص، والأدمن يشوف «VIEWED» بلا وقت. بتتكتب مرة واحدة بس عشان تفضل «أول مشاهدة» — إعادة
+   * الكتابة كانت هتخليها «آخر مشاهدة» وده سؤال تاني.
    */
   @Column({ name: 'viewed_at', type: 'timestamptz', nullable: true })
   viewedAt: Date | null;

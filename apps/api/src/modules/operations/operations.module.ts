@@ -7,6 +7,7 @@ import { AdminWorkloadForecastService } from './admin-workload-forecast.service'
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
+import { AdminOrderTraceService } from './admin-order-trace.service';
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — موديول جديد مستقل عمدًا (نفس نمط MatchingModule):
 // بيستورد كيانات/ثوابت خام بس من orders (OrderStatus، الثوابت، ESCALATABLE_STATUSES) مش OrdersModule
@@ -20,6 +21,7 @@ import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.
     AdminDispatchDeliveryService,
     AdminExceptionCenterService,
     AdminCoverageIntelligenceService,
+    AdminOrderTraceService,
   ],
 })
 export class OperationsModule {}

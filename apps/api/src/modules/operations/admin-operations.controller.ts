@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { AdminOperationsOverviewService } from './admin-operations-overview.service';
@@ -6,13 +6,49 @@ import { AdminWorkloadForecastService } from './admin-workload-forecast.service'
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
+import { AdminOrderTraceService, OrderTrace } from './admin-order-trace.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
-import { LiveDispatchQueryDto } from './dto/live-dispatch-query.dto';
-import { MATCHING_WORKFLOW_PHASE_AR } from '../matching/matching-workflow-state';
 import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
 import { CoverageIntelligenceQueryDto } from './dto/coverage-intelligence-query.dto';
+
+/**
+ * تحويل تتبّع الطلب لـsnake_case — نفس اتفاقية باقي واجهة الأدمن. مفيش أي منطق هنا: نسخ حقول بس.
+ */
+function serializeOrderTrace(t: OrderTrace) {
+  return {
+    order_id: t.orderId,
+    order_number: t.orderNumber,
+    order_status: t.orderStatus,
+    is_emergency: t.isEmergency,
+    current_round: t.currentRound,
+    max_rounds: t.maxRounds,
+    technicians_contacted: t.techniciansContacted,
+    counts: t.counts,
+    next_action: t.nextAction,
+    next_action_at: t.nextActionAt,
+    delay_seconds: t.delaySeconds,
+    rounds: t.rounds.map((r) => ({
+      round: r.round,
+      started_at: r.startedAt,
+      expansion_due_at: r.expansionDueAt,
+      technicians: r.technicians.map((x) => ({
+        assignment_id: x.assignmentId,
+        technician_id: x.technicianId,
+        technician_code: x.technicianCode,
+        full_name: x.fullName,
+        status: x.status,
+        sent_at: x.sentAt,
+        viewed_at: x.viewedAt,
+        responded_at: x.respondedAt,
+        rejection_reason_code: x.rejectionReasonCode,
+        distance_km: x.distanceKm,
+        estimated_eta_minutes: x.estimatedEtaMinutes,
+      })),
+    })),
+  };
+}
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — بداية قسم جديد كامل بيتوسّع مرحلة بمرحلة (§36.3-14).
 @Controller('admin/operations')
@@ -24,7 +60,40 @@ export class AdminOperationsController {
     private readonly dispatchDeliveryService: AdminDispatchDeliveryService,
     private readonly exceptionCenterService: AdminExceptionCenterService,
     private readonly coverageIntelligenceService: AdminCoverageIntelligenceService,
+    private readonly orderTraceService: AdminOrderTraceService,
   ) {}
+
+  /**
+   * **Live Dispatch Control** — كل الطلبات اللي لسه بتدوّر على فني، مجمّعة حسب الطلب.
+   *
+   * نفس مصدر `dispatch-delivery` بالظبط (`order_assignments`)، بس مقروء بالسؤال التاني: الـfeed
+   * بيقول «إيه اللي حصل زمنيًا»، وده بيقول «الطلب ده فين دلوقتي ومستني إيه». الاتنين فاضلين —
+   * كل واحد بيجاوب سؤال مختلف على نفس البيانات.
+   *
+   * استعلام واحد لكل الطلبات، مش استعلام لكل صف.
+   */
+  @Get('order-traces')
+  async listOrderTraces() {
+    const traces = await this.orderTraceService.listSearchingOrders();
+    // snake_case زي باقي واجهة الأدمن — التحويل هنا مش في الخدمة عشان الخدمة تفضل
+    // قابلة للاستخدام من صفحة الطلب كمان بنفس الأنواع الداخلية.
+    return { items: traces.map(serializeOrderTrace) };
+  }
+
+  /**
+   * تتبّع طلب واحد — بيغذّي «مفتّش المطابقة» في صفحة الطلب.
+   *
+   * المفتّش كان بيعرض عدّادات مسطّحة بس (اتبعت 8، اترفض 3) من غير ما يقول **في أنهي جولة ولمين**،
+   * فالأدمن مايقدرش يفرق بين «جولة واحدة وصلت لـ8» و«تلات جولات لسه بتوسّع». نفس بيانات
+   * العدّادات، مقروءة بالجولة.
+   *
+   * بيرجّع null لطلب مش موجود (مش 404) — المفتّش قسم فرعي في صفحة أكبر، وغيابه مايوقّعش الصفحة.
+   */
+  @Get('order-traces/:orderId')
+  async getOrderTrace(@Param('orderId', ParseUUIDPipe) orderId: string) {
+    const trace = await this.orderTraceService.getForOrder(orderId);
+    return { trace: trace ? serializeOrderTrace(trace) : null };
+  }
 
   @Get('overview')
   async getOverview(@Query() query: OperationsOverviewQueryDto) {
@@ -107,8 +176,12 @@ export class AdminOperationsController {
           status: r.status,
           context: r.context,
           sent_at: r.sentAt,
+          // إمتى الفني فتح العرض فعلاً (migration 0255) — قبل كده الحالة كانت بتتحوّل لـ'viewed'
+          // من غير طابع زمني، فمكانش ينفع تعرف قعد قد إيه قبل ما يرفض.
+          viewed_at: r.viewedAt,
           responded_at: r.respondedAt,
           expires_at: r.expiresAt,
+          assignment_round: r.assignmentRound,
           is_stale: r.isStale,
           // بَقّة حقيقية اتلقطت بلقطة شاشة مالك (docs/08 §90): الخدمة والواجهة كانوا جاهزين من
           // §72 (رقم الطلب + عدد الفنيين اللي اتبعتلهم)، لكن الـmapping هنا نسي الحقلين — يعني
@@ -118,51 +191,6 @@ export class AdminOperationsController {
           order_technician_count: r.orderTechnicianCount,
         })),
         meta: result.feed.meta,
-      },
-    };
-  }
-
-  // التحكم اللحظي في التوزيع — صف لكل طلب لسه بيدوّر على فني (مقابل feed الأحداث المسطح فوق).
-  // نفس الخدمة ونفس الجداول عمدًا: مفيش «مركز مطابقة» موازي. الحالة والخطوة الجاية والتأخير كلهم
-  // مشتقين في الباك-إند بـ`deriveMatchingWorkflowState` — الواجهة **ما بتشتقّش** ولا واحدة منهم.
-  @Get('live-dispatch')
-  async getLiveDispatch(@Query() query: LiveDispatchQueryDto) {
-    const result = await this.dispatchDeliveryService.getLiveDispatch({
-      categoryId: query.category_id ?? null,
-      zoneId: query.zone_id ?? null,
-      onlyDelayed: query.only_delayed ?? false,
-    });
-    // نفس تعشيش `dispatch-delivery` فوق وللسبب نفسه: `items`+`meta` على المستوى الأول بيخلّي
-    // ResponseInterceptor يفردهم لـ`data: items` **ويقطع أي حقل جنبهم بصمت** — يعني
-    // `total_searching`/`truncated` كانوا هيختفوا من الـJSON بالظبط زي بَقّة §90 الحقيقية.
-    return {
-      summary: {
-        // كل الطلبات اللي بتدوّر ومطابقة للفلاتر — قبل السقف وقبل فلتر «المتأخر بس».
-        total_searching: result.totalSearching,
-        truncated: result.truncated,
-      },
-      orders: {
-        items: result.items.map((r) => ({
-          order_id: r.orderId,
-          order_number: r.orderNumber,
-          service_name_ar: r.serviceNameAr,
-          booking_mode: r.bookingMode,
-          order_type: r.orderType,
-          searching_since_seconds: r.searchingSinceSeconds,
-          current_round: r.currentRound,
-          max_rounds: r.maxRounds,
-          technicians_contacted: r.techniciansContacted,
-          pending: r.pending,
-          viewed: r.viewed,
-          rejected: r.rejected,
-          accepted: r.accepted,
-          workflow_phase: r.workflow.phase,
-          workflow_phase_ar: MATCHING_WORKFLOW_PHASE_AR[r.workflow.phase],
-          next_action_at: r.workflow.nextActionAt,
-          delay_seconds: r.workflow.delaySeconds,
-          is_delayed: r.workflow.isDelayed,
-        })),
-        meta: { page: 1, per_page: result.items.length, total: result.items.length },
       },
     };
   }
@@ -190,22 +218,6 @@ export class AdminOperationsController {
         })),
         total: result.overdueOrders.total,
       },
-      // توسيع جولة مطابقة متأخر — الـengine نفسه واقف، مش مجرد عرض عدّى معاده. مختلف عن
-      // `stale_dispatch` تحته اللي بيولّع على سلوك طبيعي كمان (ADR-0018 §5).
-      matching_workflow_delayed: {
-        items: result.matchingWorkflowDelayed.items.map((i) => ({
-          order_id: i.orderId,
-          order_number: i.orderNumber,
-          order_status: i.orderStatus,
-          current_round: i.currentRound,
-          max_rounds: i.maxRounds,
-          technicians_contacted: i.techniciansContacted,
-          pending_responses: i.pendingResponses,
-          expected_action_at: i.expectedActionAt,
-          delay_seconds: i.delaySeconds,
-        })),
-        total: result.matchingWorkflowDelayed.total,
-      },
       crew_shortage: {
         items: result.crewShortage.items.map((i) => ({
           order_id: i.orderId,
@@ -230,6 +242,39 @@ export class AdminOperationsController {
           expires_at: i.expiresAt,
         })),
         total: result.staleDispatch.total,
+      },
+      // إعادة زيارة اتعلّقت على فني مبقاش عنده الطلب (ADR-0051). الخدمة كانت بتحسبه من الأول
+      // (استعلام كامل كل نداء) والـcontroller كان بيرميه قبل ما يوصل لأي واجهة — شغل بيتعمل
+      // ومحدش بيشوف نتيجته. الأدمن بيحرّره بـPOST /admin/orders/:id/release-revisit.
+      stalled_revisits: {
+        items: result.stalledRevisits.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          original_order_id: i.originalOrderId,
+          original_order_number: i.originalOrderNumber,
+          technician_id: i.technicianId,
+          technician_code: i.technicianCode,
+          full_name: i.fullName,
+          phone: i.phone,
+          pinned_at: i.pinnedAt,
+          deadline_at: i.deadlineAt,
+          reason: i.reason,
+          chargeback_cents: i.chargebackCents,
+        })),
+        total: result.stalledRevisits.total,
+      },
+      // «المطابقة نفسها واقفة» — مختلف عن stale_dispatch اللي فوق (ده سلوك محرك، وده سلوك فني).
+      matching_workflow_delayed: {
+        items: result.matchingWorkflowDelayed.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          current_round: i.currentRound,
+          max_rounds: i.maxRounds,
+          expected_expansion_at: i.expectedExpansionAt,
+          delay_seconds: i.delaySeconds,
+          technicians_contacted: i.techniciansContacted,
+        })),
+        total: result.matchingWorkflowDelayed.total,
       },
     };
   }

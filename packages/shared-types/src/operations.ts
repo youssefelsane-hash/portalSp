@@ -68,9 +68,15 @@ export interface DispatchDeliveryItemDto {
   // بس لـkind='work_opportunity' ('assignment' | 'crew_recruit') — null لـkind='assignment'.
   context: string | null;
   sent_at: string;
+  /** إمتى الفني فتح العرض فعلاً (order_assignments.viewed_at، migration 0255). null لـwork_opportunity. */
+  viewed_at: string | null;
   responded_at: string | null;
   // بس لـkind='assignment' (order_assignments عنده expires_at حقيقي) — دايمًا null لـwork_opportunity.
+  // **مهلة توسيع الجولة**، مش انتهاء صلاحية العرض: العرض بيفضل قابل للقبول بعدها لحد ما فني تاني
+  // ياخد الطلب أو الفني ده يرفض صراحة (matching-round-expiry.processor.ts).
   expires_at: string | null;
+  /** جولة المطابقة اللي العرض ده اتبعت فيها. null لـwork_opportunity (مالهاش جولات). */
+  assignment_round: number | null;
   is_stale: boolean;
   order_number: string;
   // كام فني مختلف الطلب اتبعتله إجماليًا (كل الجولات + فرص الشغل، بلا قيد نافذة التبويب الزمنية).
@@ -111,166 +117,60 @@ export interface StaleDispatchExceptionItemDto {
   expires_at: string;
 }
 
-/** شغلانة معادها عدّى والفني لسه ما بدأش — أعجل بند في المركز (docs/08 §56 بند 4). */
+/** شغلانة معادها عدّى ولسه الفني ما بدأش — أعجل بند في المركز (docs/08 §56 بند 4). */
 export interface OverdueOrderExceptionItemDto {
   order_id: string;
   order_number: string;
   scheduled_at: string;
-  technician_id: string | null;
-  technician_code: string | null;
-  full_name: string | null;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
   days_late: number;
 }
 
 /**
- * توسيع جولة مطابقة متأخر — **الـengine نفسه واقف**، مش مجرد عرض عدّى معاده.
+ * إعادة زيارة مثبّتة على فني مبقاش عنده الطلب (ADR-0051، docs/08 §96) — الأدمن هو اللي بيحرّرها
+ * بـ`POST /admin/orders/:id/release-revisit` (قرار مالي: خصم نصيب الفني من الطلب الأصلي).
+ */
+export interface StalledRevisitExceptionItemDto {
+  order_id: string;
+  order_number: string;
+  original_order_id: string | null;
+  original_order_number: string | null;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
+  phone: string | null;
+  pinned_at: string;
+  deadline_at: string;
+  reason: string;
+  /** نصيب الفني من الطلب الأصلي — ده بالظبط اللي هيتخصم لو الأدمن حرّر. */
+  chargeback_cents: number;
+}
+
+/**
+ * **المطابقة نفسها اتأخرت** — مش الفني.
  *
- * الفرق الجوهري عن `stale_dispatch` تحته: `order_assignments.expires_at` معناها «امتى النظام
- * هيوسّع البث» مش «امتى العرض بيبطل» (ADR-0018 §5)، فأي عرض عدّى معاده بيولّع `stale_dispatch`
- * حتى لو الـworkflow سليم تمامًا. البند ده بيولّع بس لما وقت التوسيع عدّى **والجولة الجاية ما
- * اتعملتش** والطلب لسه بيدوّر **وتحت سقف الجولات** — يعني تدخّل بشري مطلوب فعلاً.
- * كل الحقول محسوبة في الباك-إند (`deriveMatchingWorkflowState`) — الواجهة ماتشتقّش أي منها.
+ * مختلف عمدًا عن `stale_dispatch`: ده بيقول «عرض فات معاده بلا رد» (سلوك فني طبيعي)، وده بيقول
+ * «مهلة الجولة عدّت والمحرك ما فتحش الجولة اللي بعدها» (عطل في الـworkflow). خلطهم كان هيخفي
+ * أخطر الاتنين.
  */
 export interface MatchingWorkflowDelayedItemDto {
   order_id: string;
   order_number: string;
-  order_status: string;
   current_round: number;
   max_rounds: number;
-  technicians_contacted: number;
-  pending_responses: number;
-  /** امتى كان **مفروض** التوسيع يحصل. */
-  expected_action_at: string;
+  expected_expansion_at: string;
   delay_seconds: number;
+  technicians_contacted: number;
 }
 
 export interface ExceptionCenterResponseDto {
   overdue_orders: { items: OverdueOrderExceptionItemDto[]; total: number };
-  matching_workflow_delayed: { items: MatchingWorkflowDelayedItemDto[]; total: number };
   crew_shortage: { items: CrewShortageExceptionItemDto[]; total: number };
   stale_dispatch: { items: StaleDispatchExceptionItemDto[]; total: number };
-}
-
-/**
- * مرحلة الـmatching workflow — مصدرها الوحيد `deriveMatchingWorkflowState` في الباك-إند
- * (apps/api/src/modules/matching/matching-workflow-state.ts). ممنوع على أي واجهة تشتق المرحلة
- * دي من مقارنة وقت محلي: الوقت اللي عند المتصفح مش وقت النظام، والقواعد (مهلة السماح، سقف
- * الجولات) إعدادات بتتغير من لوحة التحكم.
- */
-export type MatchingWorkflowPhaseDto =
-  | 'not_matching'
-  | 'not_dispatched'
-  | 'awaiting_technician_response'
-  | 'round_expansion_due'
-  | 'rounds_exhausted';
-
-/** مصدر إسناد الطلب — مشتق في الباك-إند من الحقيقة المحفوظة، مش عمود مستقل. */
-export type OrderAssignmentSourceDto =
-  | 'customer_selected'
-  | 'post_quote_selection'
-  | 'revisit_pinned'
-  | 'admin_assignment'
-  | 'auto_match'
-  | 'not_assigned';
-
-/**
- * التحكم اللحظي في التوزيع (GET /admin/operations/live-dispatch) — صف لكل طلب لسه بيدوّر على
- * فني. مكمّل لـ`DispatchDeliveryResponseDto` فوق (feed أحداث مسطح بالزمن) مش بديل ليه: نفس
- * الجداول، سؤالين مختلفين.
- *
- * الرد متعشّش (`orders: {items, meta}` مش items/meta على المستوى الأول) لنفس سبب
- * `DispatchDeliveryResponseDto`: ResponseInterceptor بيفرد أي رد فيه items+meta فوق **ويقطع
- * `summary` بصمت**.
- */
-export interface LiveDispatchRowDto {
-  order_id: string;
-  order_number: string;
-  service_name_ar: string;
-  booking_mode: string;
-  order_type: string;
-  /** بيدوّر من كام ثانية — محسوبة في الباك-إند بوقت الخادم. */
-  searching_since_seconds: number;
-  current_round: number;
-  max_rounds: number;
-  technicians_contacted: number;
-  pending: number;
-  viewed: number;
-  rejected: number;
-  accepted: number;
-  workflow_phase: MatchingWorkflowPhaseDto;
-  /** النص العربي جاهز من الباك-إند — الواجهة مابتترجمش المرحلة بنفسها. */
-  workflow_phase_ar: string;
-  next_action_at: string | null;
-  delay_seconds: number;
-  is_delayed: boolean;
-}
-
-export interface LiveDispatchSummaryDto {
-  /** كل الطلبات اللي بتدوّر ومطابقة للفلاتر — **قبل** سقف الصفوف وقبل فلتر «المتأخر بس». */
-  total_searching: number;
-  /**
-   * `true` لما العدد الحقيقي عدّى سقف الصفوف، يعني في طلبات بتدوّر **مش معروضة**. الواجهة لازم
-   * تقول ده صراحةً: شاشة شغلها «ورّيني اللي واقف» ممنوع تخبّي طلب واقف في صمت.
-   */
-  truncated: boolean;
-}
-
-export interface LiveDispatchResponseDto {
-  summary: LiveDispatchSummaryDto;
-  orders: { items: LiveDispatchRowDto[]; meta: { page: number; per_page: number; total: number } };
-}
-
-/**
- * حالة مطابقة طلب واحد (GET /admin/orders/:id/matching-state) — «مين استلم، وإمتى، وردّ إيه،
- * والخطوة الجاية إيه».
- *
- * تحذير تسمية مقصود: `broadcast_expands_at` مش «انتهاء صلاحية العرض» — العرض بيفضل قابل للقبول
- * بعدها (ADR-0018 §5). الاسم بيعكس المعنى الحقيقي للعمود عشان الواجهة ما تعرضهوش كـ«انتهى».
- */
-export interface OrderMatchingAttemptDto {
-  assignment_id: string;
-  technician_id: string;
-  technician_code: string;
-  full_name: string;
-  status: string;
-  rejection_reason_code: string | null;
-  distance_km: number | null;
-  eta_minutes: number | null;
-  sent_at: string;
-  /** null للصفوف اللي قبل migration 0255، أو اللي الفني ماشافهاش أصلاً. */
-  viewed_at: string | null;
-  responded_at: string | null;
-}
-
-export interface OrderMatchingRoundDto {
-  round: number;
-  started_at: string;
-  /** وقت **توسيع البث** لفنيين إضافيين — مش انتهاء صلاحية العرض (ADR-0018 §5). */
-  broadcast_expands_at: string;
-  attempts: OrderMatchingAttemptDto[];
-}
-
-export interface OrderMatchingWorkflowDto {
-  phase: MatchingWorkflowPhaseDto;
-  /** النص العربي جاهز من الباك-إند — الواجهة مابتترجمش المرحلة بنفسها. */
-  phase_label_ar: string;
-  next_action_at: string | null;
-  delay_seconds: number;
-  is_delayed: boolean;
-}
-
-export interface OrderMatchingStateDto {
-  order_id: string;
-  order_status: string;
-  assignment_source: OrderAssignmentSourceDto;
-  assignment_source_label_ar: string;
-  assigned_technician_id: string | null;
-  current_round: number;
-  max_rounds: number;
-  technicians_contacted: number;
-  counts: { sent: number; viewed: number; accepted: number; rejected: number; timeout: number; cancelled: number };
-  workflow: OrderMatchingWorkflowDto;
-  rounds: OrderMatchingRoundDto[];
+  stalled_revisits: { items: StalledRevisitExceptionItemDto[]; total: number };
+  matching_workflow_delayed: { items: MatchingWorkflowDelayedItemDto[]; total: number };
 }
 
 // ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10، GET /admin/operations/coverage). صف لكل
@@ -291,4 +191,66 @@ export interface CoverageRowDto {
   technicians_blocked: number;
   dispatch_pending_count: number;
   coverage_status: CoverageStatusDto;
+}
+
+// تتبّع الطلب في المطابقة (GET /admin/operations/order-traces) — نفس `order_assignments` اللي
+// بيغذّي dispatch-delivery، بس مجمّع حسب الطلب → الجولة → الفني بدل feed مسطّح زمني. الـfeed
+// بيجاوب «إيه اللي حصل»، وده بيجاوب «الطلب ده وصل لمين ومستني إيه دلوقتي». مفيش محرك مطابقة
+// تاني هنا: صفر قرار أهلية/ترتيب/جدولة — قراءة وتجميع بس.
+export interface OrderTraceTechnicianDto {
+  assignment_id: string;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
+  status: string;
+  sent_at: string;
+  /** إمتى الفني فتح العرض فعلاً (order_assignments.viewed_at، migration 0255). null = لسه ما فتحوش. */
+  viewed_at: string | null;
+  responded_at: string | null;
+  rejection_reason_code: string | null;
+  distance_km: number | null;
+  estimated_eta_minutes: number | null;
+}
+
+export interface OrderTraceRoundDto {
+  round: number;
+  started_at: string;
+  /**
+   * **مهلة توسيع الجولة** — مش انتهاء صلاحية العرض. العرض بيفضل قابل للقبول بعد الوقت ده لحد
+   * ما فني تاني ياخد الطلب أو الفني ده يرفض صراحة (راجع matching-round-expiry.processor.ts).
+   */
+  expansion_due_at: string;
+  technicians: OrderTraceTechnicianDto[];
+}
+
+export type OrderTraceNextActionDto =
+  | 'waiting_technician_response'
+  | 'expand_next_round'
+  | 'matching_exhausted'
+  | 'assigned'
+  | 'no_matching_required';
+
+export interface OrderTraceDto {
+  order_id: string;
+  order_number: string;
+  order_status: string;
+  is_emergency: boolean;
+  current_round: number | null;
+  max_rounds: number;
+  technicians_contacted: number;
+  counts: { sent: number; viewed: number; rejected: number; accepted: number; timeout: number; cancelled: number };
+  rounds: OrderTraceRoundDto[];
+  next_action: OrderTraceNextActionDto;
+  next_action_at: string | null;
+  /** ثواني التأخير عن `next_action_at`. 0 = مش متأخر. */
+  delay_seconds: number;
+}
+
+export interface OrderTraceListResponseDto {
+  items: OrderTraceDto[];
+}
+
+/** رد تتبّع طلب واحد (GET /admin/operations/order-traces/:orderId) — null لطلب مش موجود. */
+export interface OrderTraceResponseDto {
+  trace: OrderTraceDto | null;
 }

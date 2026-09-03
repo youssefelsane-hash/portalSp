@@ -2445,7 +2445,9 @@ export class OrdersService {
         })
         .execute();
       await this.orders.manager.query(
-        `UPDATE order_assignments SET assignment_status = 'viewed'
+        // `viewed_at` بيتكتب مع الحالة في نفس الجملة — أول مشاهدة بس (`IS NULL`) عشان تفضل
+        // «أول مشاهدة» مش «آخر واحدة» (migration 0255).
+        `UPDATE order_assignments SET assignment_status = 'viewed', viewed_at = COALESCE(viewed_at, now())
          WHERE order_id = $1 AND technician_id = $2 AND assignment_status = 'sent'`,
         [order.id, technicianProfileId],
       );
