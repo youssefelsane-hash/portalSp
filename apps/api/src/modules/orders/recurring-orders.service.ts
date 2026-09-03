@@ -18,6 +18,7 @@ import { PricingModel } from '../catalog/entities/service.entity';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { TechniciansService } from '../technicians/technicians.service';
+import { BuildingsService } from '../buildings/buildings.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
 import { UpdateRecurringTemplateDto } from './dto/update-recurring-template.dto';
@@ -65,6 +66,9 @@ export type AdminRecurringPlanRow = {
   address_id: string;
   address_label: string | null;
   booking_mode: string;
+  building_id: string | null;
+  building_code: string | null;
+  building_name_ar: string | null;
   frequency: string;
   payment_method: 'card' | 'instapay' | null;
   next_run_at: Date;
@@ -106,6 +110,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     private readonly techniciansService: TechniciansService,
     private readonly ordersService: OrdersService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly buildingsService: BuildingsService,
   ) {}
 
   onModuleInit(): void {
@@ -126,6 +131,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     if (dto.requested_technician_id) {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
+
+    // انتماء العمارة (migration 0257، docs/08 §122) — نفس تحقق OrdersService.create() بالحرف:
+    // 404 واضح لو الكود غلط وقت الإنشاء، مش فشل صامت كل موعد بعدين.
+    const building = dto.building_code
+      ? await this.buildingsService.findActiveByCodeOrThrow(dto.building_code)
+      : null;
 
     // قدرة "الحجز المتكرر" لكل خدمة (migration 0176) — نفس نمط بوابة allows_individual/
     // cash_allowed بالحرف: الخدمة مش مفعّل فيها التكرار يعني مفيش قالب متكرر خالص، بدل ما
@@ -192,6 +203,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       bookingMode: dto.booking_mode,
       requestedTechnicianId: dto.requested_technician_id ?? null,
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
+      buildingId: building ? building.id : null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
       pricingQuantity: null,
@@ -231,6 +243,9 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
                 t.address_id,
                 COALESCE(a.label, a.street_name) AS address_label,
                 t.booking_mode,
+                t.building_id,
+                b.code AS building_code,
+                b.name_ar AS building_name_ar,
                 t.frequency,
                 t.payment_method,
                 t.next_run_at,
@@ -249,6 +264,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
          JOIN services s ON s.id = t.service_id
          JOIN addresses a ON a.id = t.address_id
          LEFT JOIN orders o ON o.id = t.last_generated_order_id
+         LEFT JOIN buildings b ON b.id = t.building_id
          WHERE t.deleted_at IS NULL AND ($1::boolean IS NULL OR t.is_active = $1)
          ORDER BY t.next_run_at ASC, t.id ASC
          LIMIT $2 OFFSET $3`,
@@ -452,6 +468,22 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
+    // انتماء العمارة (migration 0257، docs/08 §122) — بيتقرا **فريش** من الداتابيز في كل نوبة،
+    // مش snapshot لنسبة الخصم القديمة: لو الإدارة غيّرت النسبة، النوبة الجديدة بتاخدها تلقائيًا
+    // لأن OrdersService.create() هي اللي بتحسب الخصم من صف العمارة الحالي (نفس مسار الطلب العادي).
+    //
+    // لو العمارة اتقفلت (is_active=false) أو اتحذفت (soft-delete)، findActiveByIdOrNull بترجع
+    // null بهدوء — الطلب بيتولّد **بالسعر الكامل من غير خصم** بدل ما يفشل أو يحسب خصم غلط
+    // (طلب مالك صريح: "تعامل مع الحالة بأمان ومن غير ما تولّد سعر أو خصم خاطئ").
+    const building = template.buildingId
+      ? await this.buildingsService.findActiveByIdOrNull(template.buildingId)
+      : null;
+    if (template.buildingId && !building) {
+      this.logger.warn(
+        `القالب ${template.id} مرتبط بعمارة (${template.buildingId}) بقت غير صالحة — النوبة دي هتتولّد من غير خصم عمارة`,
+      );
+    }
+
     const createOrderDto: CreateOrderDto = {
       service_id: template.serviceId,
       address_id: template.addressId,
@@ -459,6 +491,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       order_type: OrderType.RECURRING,
       requested_technician_id: template.requestedTechnicianId ?? undefined,
       requested_technician_company_id: template.requestedTechnicianCompanyId ?? undefined,
+      building_code: building ? building.code : undefined,
       problem_description: template.problemDescription ?? undefined,
       // occurrence.scheduledFor هو الموعد التجاري الحقيقي، مش metadata فقط. بدونه كان الطلب
       // المتكرر يتحول إلى ASAP ويأخذ رسوم/مطابقة نفس اليوم بالخطأ.

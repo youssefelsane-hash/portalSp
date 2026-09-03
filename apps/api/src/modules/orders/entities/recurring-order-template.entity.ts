@@ -33,11 +33,19 @@ export class RecurringOrderTemplate {
   @Column({ name: 'requested_technician_company_id', type: 'uuid', nullable: true })
   requestedTechnicianCompanyId: string | null;
 
+  // انتماء العمارة (migration 0257، docs/08 §122) — مختلف جوهريًا عن promo_code/addon_ids تحت:
+  // العمارة مش خصم لمرة واحدة، هي انتماء دائم للعنوان. بنخزّن المعرّف بس، مش نسبة الخصم —
+  // كل نوبة بتقرا الخصم الحالي وقت التوليد (نفس مسار الطلب العادي بالحرف)، فتغيير الإدارة
+  // للنسبة بينعكس على النوبة الجديدة تلقائيًا من غير أي تدخل هنا.
+  @Column({ name: 'building_id', type: 'uuid', nullable: true })
+  buildingId: string | null;
+
   // مدخلات التسعير/التوقيت اللي بيتكرروا مع كل طلب متولّد (migration 0176) — القيم دي **مدخلات**
   // مش سعر: السعر بيتحدد من محرك التسعير الحي وقت توليد كل طلب (مفيش تجميد للسعر القديم)، بس
   // المدخلات نفسها هي اختيار العميل الأصلي اللي عايزه يتكرر. بدونهم، أي قالب لخدمة formula بحقول
   // إجبارية أو خدمة بتوقيت دقيق كان هيولّد طلبات بتفشل عند التحقق للأبد.
-  // promo_code/building_code/addon_ids مش بتتخزن عمدًا — خصومات وإضافات لمرة واحدة مش بتتكرر.
+  // promo_code/addon_ids مش بتتخزن عمدًا — خصومات وإضافات لمرة واحدة مش بتتكرر. العمارة استثناء
+  // مقصود (buildingId فوق) لأنها انتماء دائم مش خصم لمرة واحدة — راجع تعليقها.
   @Column({ name: 'field_values', type: 'jsonb', nullable: true })
   fieldValues: Record<string, string | number | boolean> | null;
 

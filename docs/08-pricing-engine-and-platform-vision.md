@@ -12636,3 +12636,70 @@ screenshot المالك: «BOTTOM OVERFLOWED BY 81 PIXELS» في «تعديل ا
   داتابيز الأدمن وإن التطبيق واللوحة كانوا على نفس `API_BASE_URL`.
 - **افتراضي ADR-0069** — هل رسم المعاينة يتحجز بعد زيارة حصلت فعلاً؟ الافتراضي دلوقتي «يرجع كامل».
 - **أرقام الإنتاجية** (حجر/سباكة/كهرباء/جبس) — الحقل بيفضل `NULL` لحد ما الأدمن يدخله.
+
+# §122 — انتماء العمارة يستمر مع الطلبات المتكررة (migration 0257) — ✅ `DONE + LIVE VERIFIED`
+
+## البلاغ
+
+طلب مالك صريح 2026-09-03، جزء من "الفحص الشامل النهائي" للمشروع كواحد متكامل: لو الطلب الأول
+اتعمل بـ`building_code`، القالب المتكرر (`recurring_order_templates`) لازم يفضل مربوط بالعمارة
+دي، وكل نوبة جديدة تاخد **نسبة الخصم الحالية** وقت التوليد (مش قيمة محفوظة وقت الإنشاء)، من غير
+ما يتلمس منطق البرومو كود خالص، ومن غير مسار تسعير مواز خاص بالمتكرر.
+
+## السبب الجذري (اتثبت بمراجعة كود، مش تخمين)
+
+`RecurringOrderTemplate` كان فيه تعليق صريح حاطّ `building_code` في نفس سلة "one-time، مش بيتخزن
+عمدًا" مع `promo_code`. يعني طلب أول بخصم عمارة، وبعدين كل نوبة متكررة بعده كانت بتتولّد **من غير
+الخصم خالص** — فجوة صامتة في نظام (المتكرر + العمارات) الاتنين شغالين ومختبرين لوحدهم بس مش مع
+بعض.
+
+## القرار المعماري
+
+تخزين `building_id` (FK) على القالب — مش `building_code` (نصوص مش مرجع علائقي مباشر)، ومُطلقًا مش
+نسبة الخصم. لو خزّنّا النسبة وقت الإنشاء، تغيير الأدمن للنسبة بعدين مكانش هيوصل للنوبات الجاية.
+تخزين الـid بس + قراءة العمارة **من جديد وقت كل توليد** (`findActiveByIdOrNull`، دالة جديدة آمنة
+مالهاش throw) يضمن القيمة الحالية دايمًا من غير أي snapshot يحتاج invalidation.
+
+| المتطلب | الضمان |
+|---|---|
+| القالب يفضل مربوط بالعمارة | `building_id` على `RecurringOrderTemplate` (migration 0257)، بيتورّث من الطلب الأول (المسار الضمني) أو من `building_code` في `POST /me/recurring-orders` (المسار المستقل) |
+| الخصم دايمًا حالي مش snapshot | `processOccurrence()` بيعمل `findActiveByIdOrNull` قبل كل توليد ويمرّر `building_code` الحالي — مفيش نسبة محفوظة في القالب خالص |
+| البرومو كوده متلمّسش | صفر تغيير في منطق `promo_code` — التغيير مقصور على العمارة بس |
+| تدهور آمن لو العمارة اتقفلت/انمسحت | `findActiveByIdOrNull` بترجّع `null` → الطلب بيتولّد بسعر كامل، القالب يفضل نشط (الاشتراك مش بيتلغي) |
+| مفيش مسار تسعير مواز | `processOccurrence()` بيمرّر `building_code` جوّه نفس `CreateOrderDto` لنفس `OrdersService.create()` — حساب الخصم/التعارض مع البرومو/المعاملة كله نفس الكود الموجود |
+
+## اللي اتعمل
+
+| # | الملف | التغيير |
+|---|---|---|
+| 1 | `infra/migrations/0257_recurring_template_building_affiliation.sql` | عمود `building_id UUID NULL REFERENCES buildings(id)` + index جزئي |
+| 2 | `orders/entities/recurring-order-template.entity.ts` | `buildingId` + تعليق يوضّح إن العمارة استثناء مقصود من قاعدة "مفيش snapshot" |
+| 3 | `buildings/buildings.service.ts` | `findActiveByIdOrNull()` — نسخة آمنة من `findActiveByCodeOrThrow` لسياق الخلفية (سويب) |
+| 4 | `orders/recurring-orders.service.ts` | حل العمارة في `create()` (المسار المستقل) + إعادة القراءة الحية في `processOccurrence()` + عمود العمارة في `listAllForAdmin()` |
+| 5 | `orders/orders.service.ts` | المسار الضمني (طلب فيه `repeat_frequency`) بيورّث `building_id` المتحلّل بالفعل في نفس المعاملة |
+| 6 | `orders/dto/recurring-template-response.dto.ts` | `building_id` (استجابة العميل) + `building_id/building_code/building_name_ar` (استجابة الأدمن) |
+| 7 | `packages/shared-types/src/orders.ts` | نفس الحقول، مبنية (`npm run build`) |
+| 8 | `apps/admin/src/app/recurring-orders/page.tsx` | اسم/كود العمارة المربوطة ظاهر تحت العنوان في كل خطة |
+
+## التحقق
+
+- اختبار حي جديد `recurring-orders-building-affiliation.spec.ts` (6/6 ضد Postgres حقيقي، مش mocks):
+  ربط أول طلب بعمارة، استمرار نفس الربط في النوبة الجاية، انعكاس فوري لتغيير نسبة الخصم من
+  10% لـ15% على نوبة جديدة، عدم تكرار البرومو كود تلقائيًا، رفض `building_code` غلط بمعاملة سليمة
+  (صفر قالب/طلب يتيم)، ومفيش خصم مضاعف (نفس المبلغ بالجنيه في نوبتين متتاليتين على نفس الأساس).
+- 5 ملفات اختبار قديمة اتصلحت لتوقيع الـconstructor الجديد (باراميتر ثامن) وأُعيد التحقق منها —
+  مفيش رجريشن.
+- `npx tsc --noEmit` + `npx nest build` + `npx jest -w=1` (السويت كله، 269 suite / 1608 اختبار) —
+  الثلاثة عدّوا نضاف، صفر رجريشن غير مرتبط.
+- `apps/admin`: `npx tsc --noEmit` نضاف.
+
+## فجوة موثّقة بصراحة (مش سهو)
+
+`packages/shared-types/src/orders.ts` كان فيه انحراف سابق عن الـDTO الحقيقي في الباك-إند (ناقص
+`duration_minutes`/`pricing_quantity`، وفيه `pricing_period_start/end` مش موجودين في الـDTO
+الحالي) — موجود من قبل التغيير ده، مش سببه، ومش جزء من نطاق المهمة دي. اتسجّل هنا عشان القرار
+يبقى موثّق مش متنسّى، ومحتاج مراجعة منفصلة لاحقًا.
+
+`apps/customer-app/lib/features/recurring/models.dart` اتسيب عمدًا من غير `building_id` — شاشة
+قايمة الخطط المتكررة في تطبيق العميل حاليًا مالهاش حاجة تعرض "مربوطة بأي عمارة"، فمفيش داعي
+لحقل مش مستخدم. لو ظهرت حاجة UI تحتاجه لاحقًا، الحقل موجود جاهز في استجابة الـAPI.

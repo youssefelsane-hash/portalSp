@@ -27,3 +27,34 @@ orders WHERE building_id=...` من غير `AND deleted_at IS NULL` — طلب ا
 الحقيقية الظاهرة فعليًا. الإصلاح: `AND deleted_at IS NULL` على الاستعلامين الاتنين.
 
 مرجع كامل: `../../../../docs/08-pricing-engine-and-platform-vision.md` §13 و`../../../../docs/adr/0003-buildings-qr-discount.md`.
+
+## انتماء العمارة يستمر مع الطلبات المتكررة (migration 0257، docs/08 §122، طلب مالك صريح 2026-09-03)
+
+**البلاغ**: العميل اللي عنده اشتراك عمارة ويحجز طلب متكرر بكوده — النوبات اللي بتتولّد بعد
+الأولى كانت بتفقد ارتباطها بالعمارة تمامًا، وترجع تتحصّل بالسعر الكامل. السبب: `RecurringOrderTemplate`
+كان فيه تعليق صريح بيقول «`building_code` مش بتتخزن عمدًا» ضمن نفس جملة استبعاد `promo_code`
+(خصم لمرة واحدة) — بس العمارة مختلفة جوهريًا: هي **انتماء دائم للعنوان**، مش خصم لمرة واحدة.
+
+**الحل**:
+- `recurring_order_templates.building_id` (migration 0257، FK لـ`buildings`) — بيتخزّن **المعرّف
+  بس**، مش نسبة الخصم. كل نوبة متولّدة بتقرا الخصم الحالي من صف العمارة وقت التوليد (نفس مسار
+  الطلب العادي بالحرف عبر `BuildingsService.findActiveByIdOrNull`)، فتغيير الإدارة للنسبة
+  بينعكس فورًا على النوبات الجاية من غير أي تدخل تاني.
+- `OrdersService.create()` — لما `repeat_frequency` + `building_code` مع بعض، القالب المُنشأ
+  جوّه نفس الـtransaction بياخد `buildingId: order.buildingId` (نفس المعرّف اللي اتحل من
+  الكود). ذرّي زي باقي الطلب — لو الكود غلط، الرفض بيحصل **قبل** الـtransaction خالص.
+- `RecurringOrdersService` — عند التوليد، لو العمارة اتقفلت (`is_active=false`) أو اتحذفت
+  (soft-delete)، `findActiveByIdOrNull` بترجع `null` بهدوء والنوبة بتتولّد **بالسعر الكامل من
+  غير خصم** بدل ما تتعلّق أو تحسب خصم غلط — بلاغ مالك صريح: «تعامل مع الحالة بأمان».
+- `promo_code` فضل زي ما هو — **مش بيتخزن مع القالب خالص** (مفيش عمود أصلاً)، فمفيش أي مسار
+  تقني يقدر يكرره. اتفحص صراحةً باختبار حي.
+
+**Admin**: `GET /admin/recurring-orders` بيرجّع `building_id`/`building_code`/`building_name_ar`
+(LEFT JOIN على `buildings`) — الأدمن بيشوف ليه خصم نوبة معيّنة اتغيّر. `apps/admin`'s
+`/recurring-orders` بتعرض اسم العمارة تحت العنوان.
+
+**اختبار حي كامل** (`recurring-orders-building-affiliation.spec.ts`، 6 اختبارات، حي ضد
+Postgres عبر `OrdersService.create()` + `RecurringOrdersService.sweep()` الحقيقيتين): طلب أصلي
+بعمارة → النوبة الجاية بترثها بنفس الخصم بالظبط، تغيير النسبة من 10% لـ25% ينعكس فورًا على
+النوبة الجديدة، قفل العمارة يولّد النوبة بالسعر الكامل بأمان (مش تعليق ولا فشل)، وكود عمارة غلط
++ `repeat_frequency` يترفض قبل أي كتابة (صفر طلب يتيم وصفر قالب يتيم).

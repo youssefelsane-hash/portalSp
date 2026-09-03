@@ -1644,6 +1644,11 @@ export class OrdersService {
             // بيتوزّع عادي زي أي طلب.
             requestedTechnicianId: order.requestedTechnicianId,
             requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
+            // انتماء العمارة (migration 0257، docs/08 §122، طلب مالك صريح) — بلاغ: الطلب الأصلي
+            // معمول بكود عمارة، ولازم النوبات الجاية تفضل مستفيدة من خصم العمارة مش تفقده بمجرد
+            // إنه اتحوّل لقالب متكرر. `order.buildingId` هنا هو نفس المعرّف اللي اتحل من
+            // `dto.building_code` فوق في نفس الدالة — مفيش استعلام إضافي.
+            buildingId: order.buildingId,
             frequency: repeatPlanFrequency,
             fieldValues: dto.field_values ?? null,
             pricingQuantity: order.pricingQuantity,
