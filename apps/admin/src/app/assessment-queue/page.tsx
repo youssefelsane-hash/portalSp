@@ -76,7 +76,12 @@ export default function AssessmentQueuePage() {
   }, [authedFetch, filter]);
 
   useEffect(() => {
-    if (!isLoading) void load();
+    if (isLoading) return;
+    // التحميل جوّه timer مش في جسم الـeffect عمدًا: `load()` بتنادي setState فورًا (setRows(null)
+    // لإظهار السكيليتون)، والقاعدة react-hooks/set-state-in-effect بتمنع ده لأنه بيسبب render
+    // متتالي. نفس العلاج المتبّع في notification-bell.tsx.
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
   }, [isLoading, load]);
 
   const active = FILTERS.find((f) => f.value === filter)!;

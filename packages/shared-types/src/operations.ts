@@ -111,9 +111,147 @@ export interface StaleDispatchExceptionItemDto {
   expires_at: string;
 }
 
+/** شغلانة معادها عدّى والفني لسه ما بدأش — أعجل بند في المركز (docs/08 §56 بند 4). */
+export interface OverdueOrderExceptionItemDto {
+  order_id: string;
+  order_number: string;
+  scheduled_at: string;
+  technician_id: string | null;
+  technician_code: string | null;
+  full_name: string | null;
+  days_late: number;
+}
+
+/**
+ * توسيع جولة مطابقة متأخر — **الـengine نفسه واقف**، مش مجرد عرض عدّى معاده.
+ *
+ * الفرق الجوهري عن `stale_dispatch` تحته: `order_assignments.expires_at` معناها «امتى النظام
+ * هيوسّع البث» مش «امتى العرض بيبطل» (ADR-0018 §5)، فأي عرض عدّى معاده بيولّع `stale_dispatch`
+ * حتى لو الـworkflow سليم تمامًا. البند ده بيولّع بس لما وقت التوسيع عدّى **والجولة الجاية ما
+ * اتعملتش** والطلب لسه بيدوّر **وتحت سقف الجولات** — يعني تدخّل بشري مطلوب فعلاً.
+ * كل الحقول محسوبة في الباك-إند (`deriveMatchingWorkflowState`) — الواجهة ماتشتقّش أي منها.
+ */
+export interface MatchingWorkflowDelayedItemDto {
+  order_id: string;
+  order_number: string;
+  order_status: string;
+  current_round: number;
+  max_rounds: number;
+  technicians_contacted: number;
+  pending_responses: number;
+  /** امتى كان **مفروض** التوسيع يحصل. */
+  expected_action_at: string;
+  delay_seconds: number;
+}
+
 export interface ExceptionCenterResponseDto {
+  overdue_orders: { items: OverdueOrderExceptionItemDto[]; total: number };
+  matching_workflow_delayed: { items: MatchingWorkflowDelayedItemDto[]; total: number };
   crew_shortage: { items: CrewShortageExceptionItemDto[]; total: number };
   stale_dispatch: { items: StaleDispatchExceptionItemDto[]; total: number };
+}
+
+/**
+ * مرحلة الـmatching workflow — مصدرها الوحيد `deriveMatchingWorkflowState` في الباك-إند
+ * (apps/api/src/modules/matching/matching-workflow-state.ts). ممنوع على أي واجهة تشتق المرحلة
+ * دي من مقارنة وقت محلي: الوقت اللي عند المتصفح مش وقت النظام، والقواعد (مهلة السماح، سقف
+ * الجولات) إعدادات بتتغير من لوحة التحكم.
+ */
+export type MatchingWorkflowPhaseDto =
+  | 'not_matching'
+  | 'not_dispatched'
+  | 'awaiting_technician_response'
+  | 'round_expansion_due'
+  | 'rounds_exhausted';
+
+/** مصدر إسناد الطلب — مشتق في الباك-إند من الحقيقة المحفوظة، مش عمود مستقل. */
+export type OrderAssignmentSourceDto =
+  | 'customer_selected'
+  | 'post_quote_selection'
+  | 'revisit_pinned'
+  | 'admin_assignment'
+  | 'auto_match'
+  | 'not_assigned';
+
+/**
+ * التحكم اللحظي في التوزيع (GET /admin/operations/live-dispatch) — صف لكل طلب لسه بيدوّر على
+ * فني. مكمّل لـ`DispatchDeliveryResponseDto` فوق (feed أحداث مسطح بالزمن) مش بديل ليه: نفس
+ * الجداول، سؤالين مختلفين.
+ */
+export interface LiveDispatchRowDto {
+  order_id: string;
+  order_number: string;
+  service_name_ar: string;
+  booking_mode: string;
+  order_type: string;
+  /** بيدوّر من كام ثانية — محسوبة في الباك-إند بوقت الخادم. */
+  searching_since_seconds: number;
+  current_round: number;
+  max_rounds: number;
+  technicians_contacted: number;
+  pending: number;
+  viewed: number;
+  rejected: number;
+  accepted: number;
+  workflow_phase: MatchingWorkflowPhaseDto;
+  /** النص العربي جاهز من الباك-إند — الواجهة مابتترجمش المرحلة بنفسها. */
+  workflow_phase_ar: string;
+  next_action_at: string | null;
+  delay_seconds: number;
+  is_delayed: boolean;
+}
+
+/**
+ * حالة مطابقة طلب واحد (GET /admin/orders/:id/matching-state) — «مين استلم، وإمتى، وردّ إيه،
+ * والخطوة الجاية إيه».
+ *
+ * تحذير تسمية مقصود: `broadcast_expands_at` مش «انتهاء صلاحية العرض» — العرض بيفضل قابل للقبول
+ * بعدها (ADR-0018 §5). الاسم بيعكس المعنى الحقيقي للعمود عشان الواجهة ما تعرضهوش كـ«انتهى».
+ */
+export interface OrderMatchingAttemptDto {
+  assignment_id: string;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
+  status: string;
+  rejection_reason_code: string | null;
+  distance_km: number | null;
+  eta_minutes: number | null;
+  sent_at: string;
+  /** null للصفوف اللي قبل migration 0255، أو اللي الفني ماشافهاش أصلاً. */
+  viewed_at: string | null;
+  responded_at: string | null;
+}
+
+export interface OrderMatchingRoundDto {
+  round: number;
+  started_at: string;
+  /** وقت **توسيع البث** لفنيين إضافيين — مش انتهاء صلاحية العرض (ADR-0018 §5). */
+  broadcast_expands_at: string;
+  attempts: OrderMatchingAttemptDto[];
+}
+
+export interface OrderMatchingWorkflowDto {
+  phase: MatchingWorkflowPhaseDto;
+  /** النص العربي جاهز من الباك-إند — الواجهة مابتترجمش المرحلة بنفسها. */
+  phase_label_ar: string;
+  next_action_at: string | null;
+  delay_seconds: number;
+  is_delayed: boolean;
+}
+
+export interface OrderMatchingStateDto {
+  order_id: string;
+  order_status: string;
+  assignment_source: OrderAssignmentSourceDto;
+  assignment_source_label_ar: string;
+  assigned_technician_id: string | null;
+  current_round: number;
+  max_rounds: number;
+  technicians_contacted: number;
+  counts: { sent: number; viewed: number; accepted: number; rejected: number; timeout: number; cancelled: number };
+  workflow: OrderMatchingWorkflowDto;
+  rounds: OrderMatchingRoundDto[];
 }
 
 // ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10، GET /admin/operations/coverage). صف لكل

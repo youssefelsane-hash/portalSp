@@ -112,6 +112,35 @@ export interface Technician360PayoutRow {
   completedAt: Date | null;
 }
 
+export interface Technician360OpenOfferRow {
+  id: string;
+  kind: 'assignment' | 'work_opportunity';
+  orderId: string;
+  orderNumber: string;
+  serviceNameAr: string;
+  status: string;
+  /** بس لفرص الشغل ('assignment' | 'crew_recruit') — null للتعيين المباشر. */
+  context: string | null;
+  sentAt: Date;
+  /** null للصفوف اللي قبل migration 0255، أو اللي الفني ما فتحهاش. */
+  viewedAt: Date | null;
+  /** وقت **توسيع البث** لفنيين إضافيين — مش انتهاء صلاحية العرض (ADR-0018 §5). null للفرص. */
+  broadcastExpandsAt: Date | null;
+}
+
+interface RawOpenOfferRow {
+  id: string;
+  kind: 'assignment' | 'work_opportunity';
+  order_id: string;
+  order_number: string;
+  service_name_ar: string;
+  status: string;
+  context: string | null;
+  sent_at: Date;
+  viewed_at: Date | null;
+  broadcast_expands_at: Date | null;
+}
+
 export interface Technician360Profile {
   identity: Technician360Identity;
   categories: Technician360CategoryRow[];
@@ -121,6 +150,8 @@ export interface Technician360Profile {
   teamRole: Technician360TeamRole | null;
   currentAndUpcomingJobs: Technician360JobRow[];
   blockedDates: Technician360BlockedDateRow[];
+  /** العروض المفتوحة اللي الفني ماردّش عليها لسه — بأوقاتها الحقيقية، مش عدد مجرّد. */
+  openOffers: Technician360OpenOfferRow[];
   openOpportunitiesCount: number;
   performance: Technician360Performance;
   cancellationBehavior: Technician360CancellationBehavior;
@@ -234,13 +265,31 @@ export class AdminTechnician360Service {
          ORDER BY slot_date ASC LIMIT 20`,
         [technicianProfileId],
       ),
-      this.dataSource.query<{ count: string }[]>(
-        `SELECT COUNT(*) AS count FROM (
+      // العروض المفتوحة **بصفوفها** مش بعدد مجرّد: الأدمن اللي بيسأل «الفني ده ليه ما بيردّش؟»
+      // محتاج يشوف كل عرض بأوقاته (اتبعت/شافه/امتى النظام هيوسّع البث) مش رقم. العدد الحقيقي
+      // بيتحسب بـCOUNT(*) OVER() فوق نفس الاستعلام، فالـLIMIT مابيكدبش على العدّاد.
+      this.dataSource.query<RawOpenOfferRow[]>(
+        `SELECT * FROM (
            -- 'viewed' برضه عرض مفتوح لسه مستني رد (docs/08 §72) — مش رد ولا انتهت مهلته.
-           SELECT 1 FROM order_assignments WHERE technician_id = $1 AND assignment_status IN ('sent', 'viewed')
+           SELECT oa.id, 'assignment'::text AS kind, oa.order_id, o.order_number, s.name_ar AS service_name_ar,
+                  oa.assignment_status::text AS status, oa.sent_at, oa.viewed_at,
+                  -- مش انتهاء صلاحية العرض: وقت توسيع البث لفنيين إضافيين (ADR-0018 §5).
+                  oa.expires_at AS broadcast_expands_at, NULL::text AS context
+             FROM order_assignments oa
+             JOIN orders o ON o.id = oa.order_id
+             JOIN services s ON s.id = o.service_id
+            WHERE oa.technician_id = $1 AND oa.assignment_status IN ('sent', 'viewed')
            UNION ALL
-           SELECT 1 FROM technician_work_opportunities WHERE technician_id = $1 AND status = 'offered' AND deleted_at IS NULL
-         ) t`,
+           SELECT wo.id, 'work_opportunity'::text AS kind, wo.order_id, o.order_number, s.name_ar AS service_name_ar,
+                  wo.status::text AS status, wo.offered_at AS sent_at, NULL::timestamptz AS viewed_at,
+                  -- الفرص مالهاش expires_at أصلاً (migration 0153) — بتفضل صالحة لحد تغطية الطلب.
+                  NULL::timestamptz AS broadcast_expands_at, wo.context::text AS context
+             FROM technician_work_opportunities wo
+             JOIN orders o ON o.id = wo.order_id
+             JOIN services s ON s.id = o.service_id
+            WHERE wo.technician_id = $1 AND wo.status = 'offered' AND wo.deleted_at IS NULL
+         ) t
+         ORDER BY t.sent_at DESC LIMIT 20`,
         [technicianProfileId],
       ),
       this.dataSource.query<{ total: string; recent: string }[]>(
@@ -326,7 +375,19 @@ export class AdminTechnician360Service {
         serviceNameAr: j.service_name_ar,
       })),
       blockedDates: blockedDates.map((b) => ({ slotDate: b.slot_date, startTime: b.start_time, endTime: b.end_time })),
-      openOpportunitiesCount: Number(openRequestRows[0]?.count ?? 0),
+      openOffers: openRequestRows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        orderId: r.order_id,
+        orderNumber: r.order_number,
+        serviceNameAr: r.service_name_ar,
+        status: r.status,
+        context: r.context,
+        sentAt: r.sent_at,
+        viewedAt: r.viewed_at,
+        broadcastExpandsAt: r.broadcast_expands_at,
+      })),
+      openOpportunitiesCount: openRequestRows.length,
       performance: {
         averageRating: Number(identityRow.average_rating),
         totalRatingsCount: identityRow.total_ratings_count,

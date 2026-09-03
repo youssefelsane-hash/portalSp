@@ -11,6 +11,7 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMatchingFunnelDto,
+  OrderMatchingStateDto,
   OrderMediaResponseDto,
   OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
@@ -100,6 +101,7 @@ import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
+import { DISPATCH_STATUS_LABELS_AR, dispatchStatusBadgeClass } from '@/lib/matching-labels';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -135,7 +137,7 @@ import {
   type TechnicianKindCode,
 } from '@/lib/technician-labels';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
-import { formatEgp } from '@/lib/format';
+import { formatDurationAr, formatEgp } from '@/lib/format';
 
 /** إصدار عرض سعر كما بيرجّعه `GET /admin/orders/:id/quotes`. */
 interface AdminOrderQuote {
@@ -273,6 +275,11 @@ export default function OrderDetailPage() {
   // (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. funnelError متوقّع/هادئ لطلبات بلا service_zone_id
   // (400 من الباك-إند نفسه — مش كل الطلبات القديمة عندها نطاق محدد).
   const [matchingFunnel, setMatchingFunnel] = useState<OrderMatchingFunnelDto | null>(null);
+  // حالة المطابقة الحالية — مصدرها الوحيد GET /admin/orders/:id/matching-state. الصفحة **ما بتشتقّش**
+  // الخطوة الجاية ولا «متأخر ولا لأ» من مقارنة وقت محلي: القاعدة دي في الباك-إند
+  // (deriveMatchingWorkflowState) وOperations وException Center بيقروا من نفس الدالة.
+  const [matchingState, setMatchingState] = useState<OrderMatchingStateDto | null>(null);
+  const [matchingStateError, setMatchingStateError] = useState<string | null>(null);
   const [funnelError, setFunnelError] = useState<string | null>(null);
   const [explainTechnicianId, setExplainTechnicianId] = useState('');
   const [explanation, setExplanation] = useState<TechnicianEligibilityExplanationDto | null>(null);
@@ -331,6 +338,13 @@ export default function OrderDetailPage() {
       .catch((err) => {
         setMatchingFunnel(null);
         setFunnelError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل فانل المطابقة');
+      });
+    setMatchingStateError(null);
+    authedFetch<OrderMatchingStateDto>(`/admin/orders/${id}/matching-state`)
+      .then(setMatchingState)
+      .catch((err) => {
+        setMatchingState(null);
+        setMatchingStateError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل حالة المطابقة');
       });
     // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
     authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
@@ -1307,6 +1321,115 @@ export default function OrderDetailPage() {
                 );
               })}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* التحكم في المطابقة — «مين استلم الطلب، وردّ إيه، والخطوة الجاية إيه وامتى».
+          مكمّل لمفتّش المطابقة تحته مش بديل ليه: المفتّش بيقول **ليه** (مجمّع الأهلية وسبب
+          الاستبعاد)، والقسم ده بيقول **إيه اللي حصل فعلًا وإيه اللي جاي**.
+          كل قيمة هنا محسوبة في الباك-إند — الصفحة مابتقارنش أوقات ولا بتقرر «متأخر ولا لأ». */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">التحكم في المطابقة — إيه اللي حصل وإيه اللي جاي</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {matchingStateError && <p className="text-sm text-destructive">{matchingStateError}</p>}
+          {!matchingStateError && !matchingState && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
+          {matchingState && (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <StatusChip tone="neutral">مصدر الإسناد: {matchingState.assignment_source_label_ar}</StatusChip>
+                <StatusChip tone={matchingState.workflow.is_delayed ? 'danger' : 'neutral'}>
+                  {matchingState.workflow.phase_label_ar}
+                </StatusChip>
+                {matchingState.workflow.is_delayed && (
+                  <Badge variant="destructive">متأخر {formatDurationAr(matchingState.workflow.delay_seconds)}</Badge>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">الجولة الحالية</div>
+                  <div className="font-medium">
+                    {matchingState.current_round} / {matchingState.max_rounds}
+                  </div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">فنيين اتبعتلهم</div>
+                  <div className="font-medium">{matchingState.technicians_contacted}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">ردود</div>
+                  <div className="font-medium">
+                    قبول {matchingState.counts.accepted} · رفض {matchingState.counts.rejected}
+                  </div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">الخطوة الجاية</div>
+                  <div className="font-medium">
+                    {matchingState.workflow.next_action_at
+                      ? new Date(matchingState.workflow.next_action_at).toLocaleString('ar-EG-u-nu-latn')
+                      : 'مفيش خطوة تلقائية منتظرة'}
+                  </div>
+                </div>
+              </div>
+
+              {matchingState.rounds.length === 0 && (
+                <p className="text-sm text-muted-foreground">الطلب ده لسه ما اتبعتش لأي فني.</p>
+              )}
+
+              {matchingState.rounds.map((round) => (
+                <div key={round.round} className="rounded-lg border p-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-medium">الجولة {round.round}</span>
+                    <span className="text-xs text-muted-foreground">
+                      بدأت: {new Date(round.started_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                    {/* مش «انتهاء صلاحية»: العرض بيفضل قابل للقبول بعد الوقت ده (ADR-0018 §5) —
+                        الوقت ده هو لحظة توسيع البث لفنيين إضافيين. */}
+                    <span className="text-xs text-muted-foreground">
+                      توسيع البث: {new Date(round.broadcast_expands_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                  </div>
+                  <ul className="flex flex-col gap-1.5">
+                    {round.attempts.map((attempt) => (
+                      <li key={attempt.assignment_id} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Link href={`/technicians/${attempt.technician_id}`} className="font-medium hover:underline">
+                          {attempt.full_name}
+                        </Link>
+                        <Badge variant="outline" className={dispatchStatusBadgeClass(attempt.status)}>
+                          {DISPATCH_STATUS_LABELS_AR[attempt.status] ?? attempt.status}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          اتبعت {new Date(attempt.sent_at).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {/* فرق حقيقي مش تجميلي: «ما شافهاش» ≠ «شافها وسكت». الصفوف اللي قبل
+                            migration 0255 مالهاش viewed_at أصلاً، فبنقول «مش مسجّل» مش «ما شافش». */}
+                        <span className="text-xs text-muted-foreground">
+                          {attempt.viewed_at
+                            ? `شافها ${new Date(attempt.viewed_at).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}`
+                            : attempt.status === 'sent'
+                              ? 'لسه ما شافهاش'
+                              : 'وقت المشاهدة مش مسجّل'}
+                        </span>
+                        {attempt.responded_at && (
+                          <span className="text-xs text-muted-foreground">
+                            ردّ {new Date(attempt.responded_at).toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                        {attempt.rejection_reason_code && (
+                          <span className="text-xs text-danger">سبب الرفض: {attempt.rejection_reason_code}</span>
+                        )}
+                        {attempt.distance_km !== null && (
+                          <span className="text-xs text-muted-foreground">{attempt.distance_km.toFixed(1)} كم</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </>
           )}
         </CardContent>
       </Card>

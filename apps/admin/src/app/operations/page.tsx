@@ -12,6 +12,7 @@ import type {
   DispatchDeliveryItemDto,
   DispatchDeliveryResponseDto,
   ExceptionCenterResponseDto,
+  LiveDispatchRowDto,
   OperationsOverview,
   TechnicianLevel,
   TechnicianVerificationStatus,
@@ -23,6 +24,8 @@ import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { useAdminQuery, useFilteredPage } from '@/lib/use-admin-query';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { formatDurationAr } from '@/lib/format';
+import { DISPATCH_STATUS_LABELS_AR, dispatchStatusBadgeClass } from '@/lib/matching-labels';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -220,9 +223,13 @@ function ExceptionCenterSection({
   // docs/08 §63.ب1 — مركز الاستثناءات لازم يكون حي بطبيعته: كل بند فيه طلب محتاج تدخّل دلوقتي.
   useAdminLiveRefresh(['orders', 'technicians'], refresh);
 
+  const overdueCount = data?.overdue_orders.total ?? 0;
+  const workflowDelayedCount = data?.matching_workflow_delayed.total ?? 0;
   const crewCount = data?.crew_shortage.total ?? 0;
   const staleCount = data?.stale_dispatch.total ?? 0;
-  const totalCount = crewCount + staleCount;
+  // البَقّة اللي كانت هنا: الباك-إند بيرجّع `overdue_orders` من زمان والواجهة ماكانتش بتعدّه ولا
+  // بتعرضه — فالمركز كان بيقول «مفيش استثناءات محتاجة تصرّف دلوقتي» وشغلانة معادها عدّى مستنية.
+  const totalCount = overdueCount + workflowDelayedCount + crewCount + staleCount;
 
   return (
     <section>
@@ -245,6 +252,67 @@ function ExceptionCenterSection({
 
       {!error && data && totalCount > 0 && (
         <div className="flex flex-col gap-4">
+          {overdueCount > 0 && (
+            <div className="rounded-lg border border-s-4 border-s-danger p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">شغلانة معادها عدّى ولسه ما بدأتش ({overdueCount})</span>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {data.overdue_orders.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                      {item.order_number}
+                    </Link>
+                    {item.technician_id ? (
+                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
+                        {item.full_name}
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">مفيش فني معيّن</span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      معاده: {new Date(item.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                    <Badge variant="destructive">متأخر {item.days_late} يوم</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {workflowDelayedCount > 0 && (
+            <div className="rounded-lg border border-s-4 border-s-danger p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">توسيع جولة المطابقة واقف ({workflowDelayedCount})</span>
+              </div>
+              {/* مختلف عن «توزيع متأخر» تحته: ده معناه إن **الجولة الجاية ما اتعملتش** والطلب
+                  لسه بيدوّر وتحت سقف الجولات — يعني النظام نفسه واقف ومحتاج تدخّل، مش مجرد عرض
+                  عدّى وقت توسيعه (اللي هو سلوك طبيعي، ADR-0018 §5). */}
+              <ul className="flex flex-col gap-2">
+                {data.matching_workflow_delayed.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                        {item.order_number}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        الجولة {item.current_round} من {item.max_rounds} · {item.technicians_contacted} فني · {item.pending_responses} رد
+                        منتظر
+                      </span>
+                      <Badge variant="destructive">متأخر {formatDurationAr(item.delay_seconds)}</Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      كان مفروض يوسّع: {new Date(item.expected_action_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                    {hasPermission('orders.reassign') && (
+                      <StaleDispatchReassignAction orderId={item.order_id} authedFetch={authedFetch} onReassigned={refresh} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {crewCount > 0 && (
             <div className="rounded-lg border border-s-4 border-s-danger p-4">
               <div className="mb-2 flex items-center justify-between">
@@ -702,6 +770,187 @@ function NearFutureWorkloadSection({
   );
 }
 
+/**
+ * التحكم اللحظي في التوزيع — «إيه اللي واقف دلوقتي؟» بصف لكل طلب بيدوّر على فني.
+ *
+ * **كل حقيقة عمل في القسم ده جاية جاهزة من الباك-إند**: المرحلة ونصّها العربي، وقت الخطوة الجاية،
+ * ثواني التأخير، وهل متأخر فعلاً. الواجهة مابتقارنش أوقات ولا بتحسب «عدّى ولا لأ» — ساعة المتصفح
+ * مش ساعة النظام، ومهلة السماح وسقف الجولات إعدادات بتتغير من لوحة التحكم.
+ */
+function LiveDispatchSection({
+  categoryId,
+  authedFetch,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+}) {
+  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
+  const [cityId, setCityId] = useState<string>('');
+  const [zoneId, setZoneId] = useState<string>('');
+  const [onlyDelayed, setOnlyDelayed] = useState(false);
+
+  useEffect(() => {
+    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
+  }, [authedFetch]);
+
+  const zones = useAdminQuery(
+    cityId || null,
+    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
+    'حصل خطأ في تحميل النطاقات',
+  ).data;
+
+  const params = new URLSearchParams();
+  if (categoryId) params.set('category_id', categoryId);
+  if (zoneId) params.set('zone_id', zoneId);
+  if (onlyDelayed) params.set('only_delayed', 'true');
+  const key = params.toString();
+  const { data, loading, error, reload } = useAdminQuery(
+    `live-dispatch|${key}`,
+    () => authedFetch<LiveDispatchRowDto[]>(`/admin/operations/live-dispatch${key ? `?${key}` : ''}`),
+    'حصل خطأ في تحميل التحكم اللحظي في التوزيع',
+  );
+  // القسم ده بطبيعته لحظي: كل صف فيه طلب لسه بيدوّر على فني دلوقتي.
+  useAdminLiveRefresh(['orders', 'technicians'], reload);
+
+  const items = data ?? [];
+  const delayedCount = items.filter((i) => i.is_delayed).length;
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Radio className="size-4" />
+        التحكم اللحظي في التوزيع
+      </h2>
+
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="live_city" className="text-sm text-muted-foreground">
+            المدينة
+          </Label>
+          <SelectNative
+            id="live_city"
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setZoneId('');
+            }}
+            className="max-w-xs"
+          >
+            <option value="">كل المدن</option>
+            {cities?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="live_zone" className="text-sm text-muted-foreground">
+            النطاق
+          </Label>
+          <SelectNative
+            id="live_zone"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            disabled={!cityId}
+            className="max-w-xs"
+          >
+            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
+            {zones?.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={onlyDelayed}
+            onChange={(e) => setOnlyDelayed(e.target.checked)}
+            className="size-4 accent-[var(--color-danger)]"
+          />
+          <span>المتأخر بس</span>
+        </label>
+      </div>
+
+      {error && <p className="text-destructive">{error}</p>}
+      {!error && loading && !data && <TableSkeleton rows={5} columns={6} />}
+
+      {!error && data && items.length === 0 && (
+        <EmptyState
+          title={onlyDelayed ? 'مفيش توزيع متأخر دلوقتي' : 'مفيش طلبات بتدوّر على فني دلوقتي'}
+          description={onlyDelayed ? 'كل الطلبات اللي بتدوّر ماشية في معادها.' : 'جرّب تغيّر الفئة أو النطاق.'}
+        />
+      )}
+
+      {!error && data && items.length > 0 && (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <CapacityTierRow label="طلبات بتدوّر" value={items.length} tone="muted" />
+            <CapacityTierRow label="متأخر (النظام واقف)" value={delayedCount} tone={delayedCount > 0 ? 'danger' : 'success'} />
+            <CapacityTierRow
+              label="خلصت جولاته بلا قبول"
+              value={items.filter((i) => i.workflow_phase === 'rounds_exhausted').length}
+              tone="warning"
+            />
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>الطلب</TableHead>
+                <TableHead>الخدمة</TableHead>
+                <TableHead>بيدوّر من</TableHead>
+                <TableHead>الجولة</TableHead>
+                <TableHead>ردود الفنيين</TableHead>
+                <TableHead>الحالة الحالية</TableHead>
+                <TableHead>الخطوة الجاية</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.order_id} className={row.is_delayed ? 'bg-danger-bg/40' : undefined}>
+                  <TableCell>
+                    <Link href={`/orders/${row.order_id}`} className="font-medium hover:underline">
+                      {row.order_number}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-sm">{row.service_name_ar}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{formatDurationAr(row.searching_since_seconds)}</TableCell>
+                  <TableCell className="text-sm">
+                    {row.current_round} / {row.max_rounds}
+                    <span className="ms-2 text-xs text-muted-foreground">({row.technicians_contacted} فني)</span>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span className="text-muted-foreground">قايم {row.pending}</span>
+                    <span className="mx-1 text-muted-foreground">·</span>
+                    <span className="text-muted-foreground">شاف {row.viewed}</span>
+                    <span className="mx-1 text-muted-foreground">·</span>
+                    <span className="text-danger">رفض {row.rejected}</span>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {/* النص جاي من الباك-إند — مفيش قاموس ترجمة تاني هنا يفترق عنه مع أول إضافة مرحلة. */}
+                    <span>{row.workflow_phase_ar}</span>
+                    {row.is_delayed && (
+                      <Badge variant="destructive" className="ms-2">
+                        متأخر {formatDurationAr(row.delay_seconds)}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {row.next_action_at ? new Date(row.next_action_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
+    </section>
+  );
+}
+
 const DELIVERY_PER_PAGE = 15;
 const DELIVERY_HOURS_OPTIONS = [1, 6, 24, 72, 168] as const;
 
@@ -711,17 +960,6 @@ const DELIVERY_KIND_LABELS: Record<string, string> = {
   work_opportunity_crew_recruit: 'تجنيد فريق',
 };
 
-const DELIVERY_STATUS_LABELS: Record<string, string> = {
-  sent: 'مُرسل',
-  viewed: 'تمت المشاهدة',
-  accepted: 'مقبول',
-  rejected: 'مرفوض',
-  timeout: 'انتهت المهلة',
-  cancelled: 'ملغي',
-  offered: 'معروض',
-  declined: 'مرفوض',
-  closed: 'مُغلق',
-};
 
 /** تاريخ/وقت في سطرين ثابتين — بدل سطر واحد طويل بيتلف ويخرّب محاذاة الجدول (docs/08 §72). */
 function DeliveryTimestamp({ value }: { value: string }) {
@@ -739,13 +977,6 @@ function DeliveryTimestamp({ value }: { value: string }) {
 function deliveryKindLabel(item: DispatchDeliveryItemDto): string {
   if (item.kind === 'assignment') return DELIVERY_KIND_LABELS.assignment;
   return item.context === 'crew_recruit' ? DELIVERY_KIND_LABELS.work_opportunity_crew_recruit : DELIVERY_KIND_LABELS.work_opportunity_assignment;
-}
-
-function deliveryStatusBadgeClass(status: string): string {
-  if (['accepted'].includes(status)) return 'border-success/40 bg-success/10 text-success';
-  if (['rejected', 'declined', 'timeout', 'cancelled'].includes(status)) return 'border-danger/40 bg-danger/10 text-danger';
-  if (['viewed'].includes(status)) return 'border-warning/40 bg-warning/10 text-warning';
-  return 'border-muted-foreground/30 bg-muted text-muted-foreground';
 }
 
 // مراقبة تسليم الطلبات — REQ SENT + حالات حقيقية بس (docs/08 §36.7). صفر حالة توصيل مخترعة: بيعرض
@@ -910,8 +1141,8 @@ function DispatchDeliverySection({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={deliveryStatusBadgeClass(item.status)}>
-                          {DELIVERY_STATUS_LABELS[item.status] ?? item.status}
+                        <Badge variant="outline" className={dispatchStatusBadgeClass(item.status)}>
+                          {DISPATCH_STATUS_LABELS_AR[item.status] ?? item.status}
                         </Badge>
                         {item.is_stale && <div className="mt-1 text-[10px] text-danger">متأخر عن معاده</div>}
                       </TableCell>
@@ -1171,6 +1402,7 @@ const OPERATIONS_TABS = [
   { value: 'exceptions', label: 'الاستثناءات', hint: 'طلبات محتاجة تدخّل دلوقتي' },
   { value: 'workforce', label: 'القوى العاملة', hint: 'مين متاح ومستواه وقدرته النهاردة' },
   { value: 'workload', label: 'الحمل القريب', hint: 'ضغط الشغل على 7 أيام' },
+  { value: 'live-dispatch', label: 'التوزيع اللحظي', hint: 'إيه اللي بيدوّر دلوقتي وإيه اللي واقف' },
   { value: 'delivery', label: 'تسليم الطلبات', hint: 'وصلت لمين وردّ ولا لأ' },
   { value: 'coverage', label: 'التغطية', hint: 'فجوات منطقة × فئة' },
 ] as const;
@@ -1321,6 +1553,9 @@ function OperationsOverviewPage() {
             </TabsContent>
             <TabsContent value="workload" className="mt-4">
               <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            </TabsContent>
+            <TabsContent value="live-dispatch" className="mt-4">
+              <LiveDispatchSection categoryId={categoryId} authedFetch={authedFetch} />
             </TabsContent>
             <TabsContent value="delivery" className="mt-4">
               <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
