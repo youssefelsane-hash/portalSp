@@ -26,6 +26,8 @@ import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
 import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
+import { RatingSection } from './rating-section';
+import { WarrantyRevisitSection } from './warranty-revisit-section';
 
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
 const TIMELINE_STATUSES = [
@@ -188,6 +190,16 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {customerCancellableStatuses.has(order.order_status) && (
         <CancelSection authedFetch={authedFetch} orderId={order.id} onCancelled={setOrder} />
       )}
+
+      {/* بعد الاكتمال — نفس شرطي `apps/customer-app` بالحرف (docs/08 §125): التقييم لأي طلب
+          مكتمل، وإعادة الزيارة لو الضمان لسه ساري. الاتنين كانوا مفقودين من الويب بالكامل. */}
+      {order.order_status === 'completed' && <RatingSection authedFetch={authedFetch} orderId={order.id} />}
+
+      {order.order_status === 'completed' &&
+        order.warranty_expires_at !== null &&
+        new Date(order.warranty_expires_at) > new Date() && (
+          <WarrantyRevisitSection authedFetch={authedFetch} order={order} />
+        )}
 
       <ChatSection authedFetch={authedFetch} orderId={order.id} accessToken={accessToken} />
     </div>
