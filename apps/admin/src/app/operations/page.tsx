@@ -12,7 +12,7 @@ import type {
   DispatchDeliveryItemDto,
   DispatchDeliveryResponseDto,
   ExceptionCenterResponseDto,
-  LiveDispatchRowDto,
+  LiveDispatchResponseDto,
   OperationsOverview,
   TechnicianLevel,
   TechnicianVerificationStatus,
@@ -806,14 +806,18 @@ function LiveDispatchSection({
   const key = params.toString();
   const { data, loading, error, reload } = useAdminQuery(
     `live-dispatch|${key}`,
-    () => authedFetch<LiveDispatchRowDto[]>(`/admin/operations/live-dispatch${key ? `?${key}` : ''}`),
+    () => authedFetch<LiveDispatchResponseDto>(`/admin/operations/live-dispatch${key ? `?${key}` : ''}`),
     'حصل خطأ في تحميل التحكم اللحظي في التوزيع',
   );
   // القسم ده بطبيعته لحظي: كل صف فيه طلب لسه بيدوّر على فني دلوقتي.
   useAdminLiveRefresh(['orders', 'technicians'], reload);
 
-  const items = data ?? [];
+  // حارس زي حارس جرس الإشعارات وللسبب نفسه بالظبط: القسم ده جوّه صفحة كاملة، وأي مفاجأة في شكل
+  // الرد كانت هتوقّع التبويب كله مش الجدول بس.
+  const items = Array.isArray(data?.orders?.items) ? data.orders.items : [];
   const delayedCount = items.filter((i) => i.is_delayed).length;
+  const totalSearching = data?.summary?.total_searching ?? items.length;
+  const truncated = data?.summary?.truncated ?? false;
 
   return (
     <section>
@@ -884,10 +888,19 @@ function LiveDispatchSection({
         />
       )}
 
+      {truncated && (
+        <div className="mb-4 rounded-lg border border-s-4 border-s-warning p-3 text-sm">
+          بيتعرض {items.length} من {totalSearching} طلب بيدوّر — فلتر بالفئة أو النطاق عشان تشوف الباقي.
+          {onlyDelayed && ' فلتر «المتأخر بس» بيشتغل على المعروض دلوقتي، فممكن يكون في متأخر تاني بره القايمة.'}
+        </div>
+      )}
+
       {!error && data && items.length > 0 && (
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <CapacityTierRow label="طلبات بتدوّر" value={items.length} tone="muted" />
+            {/* العدد الحقيقي من الباك-إند مش `items.length`: الصفوف مقصوصة بسقف، والرقم اللي
+                بيتعرض لازم يكون العدد الفعلي مش حجم النافذة. */}
+            <CapacityTierRow label="طلبات بتدوّر" value={totalSearching} tone="muted" />
             <CapacityTierRow label="متأخر (النظام واقف)" value={delayedCount} tone={delayedCount > 0 ? 'danger' : 'success'} />
             <CapacityTierRow
               label="خلصت جولاته بلا قبول"

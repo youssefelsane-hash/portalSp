@@ -134,7 +134,7 @@ export class AdminDispatchDeliveryService {
     categoryId: string | null;
     zoneId: string | null;
     onlyDelayed: boolean;
-  }): Promise<LiveDispatchRow[]> {
+  }): Promise<LiveDispatchResult> {
     const [maxRounds, graceSeconds] = await Promise.all([
       this.settingsService.getNumber('matching.max_rounds', 4),
       this.settingsService.getNumber('matching.workflow_delay_grace_seconds', 60),
@@ -162,7 +162,10 @@ export class AdminDispatchDeliveryService {
              COALESCE(po.rejected, 0) AS rejected,
              COALESCE(po.accepted, 0) AS accepted,
              (SELECT MAX(cur.expires_at) FROM order_assignments cur
-               WHERE cur.order_id = o.id AND cur.assignment_round = po.current_round) AS round_expands_at
+               WHERE cur.order_id = o.id AND cur.assignment_round = po.current_round) AS round_expands_at,
+             -- العدد الحقيقي **قبل** الـLIMIT: من غيره الشاشة بتقول «65 طلب بيدوّر» وهي شايفة
+             -- 200 من 400، والأدمن مش هيعرف إن فيه طلبات متخبّية.
+             COUNT(*) OVER() AS total_count
         FROM orders o
         JOIN services s ON s.id = o.service_id
         LEFT JOIN per_order po ON po.order_id = o.id
@@ -170,8 +173,10 @@ export class AdminDispatchDeliveryService {
          AND o.deleted_at IS NULL
          AND ($1::uuid IS NULL OR s.category_id = $1)
          AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+       -- الأقدم الأول: الطلب اللي قاعد بيدوّر من ساعتين أهم من اللي دخل دلوقتي، ولو الحد اتخطى
+       -- فالمقصوص هو الأحدث — أقل ضررًا من قصّ الأقدم.
        ORDER BY o.placed_at ASC
-       LIMIT 200
+       LIMIT ${LIVE_DISPATCH_MAX_ROWS}
       `,
       [filters.categoryId, filters.zoneId],
     );
@@ -205,7 +210,16 @@ export class AdminDispatchDeliveryService {
       };
     });
 
-    return filters.onlyDelayed ? items.filter((i) => i.workflow.isDelayed) : items;
+    // الفلترة على `isDelayed` بتتم هنا مش في SQL عن قصد: القاعدة موجودة في مكان واحد
+    // (`deriveMatchingWorkflowState`)، وكتابتها تاني كـ`WHERE` كانت هترجّعنا لنسختين بتفترقوا مع
+    // أول تعديل في مهلة السماح أو سقف الجولات. الثمن إن الفلتر بيشتغل على النافذة المحمّلة بس —
+    // وعشان كده `totalSearching`/`truncated` بيتقالوا للواجهة صراحةً بدل ما الرقم يكدب.
+    const totalSearching = rows.length > 0 ? Number(rows[0].total_count) : 0;
+    return {
+      items: filters.onlyDelayed ? items.filter((i) => i.workflow.isDelayed) : items,
+      totalSearching,
+      truncated: totalSearching > LIVE_DISPATCH_MAX_ROWS,
+    };
   }
 
   async getDeliveryObservability(filters: DispatchDeliveryFilters): Promise<{
@@ -354,6 +368,22 @@ export class AdminDispatchDeliveryService {
   }
 }
 
+/**
+ * سقف صفوف «التحكم اللحظي». مش ترقيم صفحات: الشاشة دي لمحة تشغيلية، والأدمن بيفلتر بالفئة/النطاق
+ * لما العدد يكبر. بس السقف **مُعلَن** للواجهة (`truncated`) مش مسكوت عنه — شاشة شغلها «ورّيني
+ * اللي واقف» ممنوع تخبّي طلب واقف في صمت.
+ */
+const LIVE_DISPATCH_MAX_ROWS = 200;
+
+/** نتيجة «التحكم اللحظي في التوزيع» — الصفوف + العدد الحقيقي قبل القصّ. */
+export interface LiveDispatchResult {
+  items: LiveDispatchRow[];
+  /** كل الطلبات اللي بتدوّر ومطابقة للفلاتر — **قبل** السقف وقبل فلتر «المتأخر بس». */
+  totalSearching: number;
+  /** `true` لما العدد الحقيقي عدّى السقف، يعني في صفوف مش معروضة. */
+  truncated: boolean;
+}
+
 /** صف «التحكم اللحظي في التوزيع» — طلب واحد بيدوّر، بحالته الكاملة. */
 export interface LiveDispatchRow {
   orderId: string;
@@ -388,4 +418,5 @@ interface RawLiveDispatchRow {
   rejected: string;
   accepted: string;
   round_expands_at: string | null;
+  total_count: string;
 }

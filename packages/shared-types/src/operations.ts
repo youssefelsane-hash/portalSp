@@ -177,6 +177,10 @@ export type OrderAssignmentSourceDto =
  * التحكم اللحظي في التوزيع (GET /admin/operations/live-dispatch) — صف لكل طلب لسه بيدوّر على
  * فني. مكمّل لـ`DispatchDeliveryResponseDto` فوق (feed أحداث مسطح بالزمن) مش بديل ليه: نفس
  * الجداول، سؤالين مختلفين.
+ *
+ * الرد متعشّش (`orders: {items, meta}` مش items/meta على المستوى الأول) لنفس سبب
+ * `DispatchDeliveryResponseDto`: ResponseInterceptor بيفرد أي رد فيه items+meta فوق **ويقطع
+ * `summary` بصمت**.
  */
 export interface LiveDispatchRowDto {
   order_id: string;
@@ -199,6 +203,21 @@ export interface LiveDispatchRowDto {
   next_action_at: string | null;
   delay_seconds: number;
   is_delayed: boolean;
+}
+
+export interface LiveDispatchSummaryDto {
+  /** كل الطلبات اللي بتدوّر ومطابقة للفلاتر — **قبل** سقف الصفوف وقبل فلتر «المتأخر بس». */
+  total_searching: number;
+  /**
+   * `true` لما العدد الحقيقي عدّى سقف الصفوف، يعني في طلبات بتدوّر **مش معروضة**. الواجهة لازم
+   * تقول ده صراحةً: شاشة شغلها «ورّيني اللي واقف» ممنوع تخبّي طلب واقف في صمت.
+   */
+  truncated: boolean;
+}
+
+export interface LiveDispatchResponseDto {
+  summary: LiveDispatchSummaryDto;
+  orders: { items: LiveDispatchRowDto[]; meta: { page: number; per_page: number; total: number } };
 }
 
 /**

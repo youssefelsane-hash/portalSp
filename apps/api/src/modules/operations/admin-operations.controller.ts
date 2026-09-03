@@ -127,33 +127,43 @@ export class AdminOperationsController {
   // مشتقين في الباك-إند بـ`deriveMatchingWorkflowState` — الواجهة **ما بتشتقّش** ولا واحدة منهم.
   @Get('live-dispatch')
   async getLiveDispatch(@Query() query: LiveDispatchQueryDto) {
-    const items = await this.dispatchDeliveryService.getLiveDispatch({
+    const result = await this.dispatchDeliveryService.getLiveDispatch({
       categoryId: query.category_id ?? null,
       zoneId: query.zone_id ?? null,
       onlyDelayed: query.only_delayed ?? false,
     });
+    // نفس تعشيش `dispatch-delivery` فوق وللسبب نفسه: `items`+`meta` على المستوى الأول بيخلّي
+    // ResponseInterceptor يفردهم لـ`data: items` **ويقطع أي حقل جنبهم بصمت** — يعني
+    // `total_searching`/`truncated` كانوا هيختفوا من الـJSON بالظبط زي بَقّة §90 الحقيقية.
     return {
-      items: items.map((r) => ({
-        order_id: r.orderId,
-        order_number: r.orderNumber,
-        service_name_ar: r.serviceNameAr,
-        booking_mode: r.bookingMode,
-        order_type: r.orderType,
-        searching_since_seconds: r.searchingSinceSeconds,
-        current_round: r.currentRound,
-        max_rounds: r.maxRounds,
-        technicians_contacted: r.techniciansContacted,
-        pending: r.pending,
-        viewed: r.viewed,
-        rejected: r.rejected,
-        accepted: r.accepted,
-        workflow_phase: r.workflow.phase,
-        workflow_phase_ar: MATCHING_WORKFLOW_PHASE_AR[r.workflow.phase],
-        next_action_at: r.workflow.nextActionAt,
-        delay_seconds: r.workflow.delaySeconds,
-        is_delayed: r.workflow.isDelayed,
-      })),
-      meta: { page: 1, perPage: items.length, total: items.length },
+      summary: {
+        // كل الطلبات اللي بتدوّر ومطابقة للفلاتر — قبل السقف وقبل فلتر «المتأخر بس».
+        total_searching: result.totalSearching,
+        truncated: result.truncated,
+      },
+      orders: {
+        items: result.items.map((r) => ({
+          order_id: r.orderId,
+          order_number: r.orderNumber,
+          service_name_ar: r.serviceNameAr,
+          booking_mode: r.bookingMode,
+          order_type: r.orderType,
+          searching_since_seconds: r.searchingSinceSeconds,
+          current_round: r.currentRound,
+          max_rounds: r.maxRounds,
+          technicians_contacted: r.techniciansContacted,
+          pending: r.pending,
+          viewed: r.viewed,
+          rejected: r.rejected,
+          accepted: r.accepted,
+          workflow_phase: r.workflow.phase,
+          workflow_phase_ar: MATCHING_WORKFLOW_PHASE_AR[r.workflow.phase],
+          next_action_at: r.workflow.nextActionAt,
+          delay_seconds: r.workflow.delaySeconds,
+          is_delayed: r.workflow.isDelayed,
+        })),
+        meta: { page: 1, per_page: result.items.length, total: result.items.length },
+      },
     };
   }
 
