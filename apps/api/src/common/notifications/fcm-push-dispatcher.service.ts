@@ -11,6 +11,25 @@ const HIGH_PRIORITY_TIERS: NotificationPriorityTier[] = [
 ];
 
 /**
+ * فئة أزرار قبول/رفض على iOS — لازم تطابق `_orderOfferCategoryId` المسجّلة في
+ * `apps/technician-app/lib/core/push_notification_service.dart` بالحرف. iOS بيتجاهل أي فئة
+ * مش مسجّلة على الجهاز بصمت (الإشعار بيظهر بلا أزرار)، فالتطابق ده هو كل اللي بيخلي الأزرار تبان.
+ */
+const IOS_ORDER_OFFER_CATEGORY = 'ORDER_OFFER_ACTIONS';
+
+/**
+ * الصوت المبعوت لـAPNs. **مقصود إنه `default` دايمًا** مش `sound_key` القادم من الإعدادات:
+ * `aps.sound` على iOS اسم **ملف متبنّي جوّه التطبيق**، ومفيش أي ملف صوت متبنّي في المشروع
+ * (لا في `ios/` ولا في `android/res/raw`). إرسال اسم زي `critical_offer_alert` كان معناه إن iOS
+ * مايلاقيش الملف فما بيشغّلش صوت **خالص** — أخطر إشعار في المنتج (عرض طوارئ) كان بيوصل صامت.
+ * أندرويد مكانش متأثر لأن الصوت هناك بيجي من القناة نفسها (`playSound: true`) مش من الحمولة.
+ *
+ * `sound_key` لسه بيتبعت جوّه `data` زي ما هو، فلما تتبنّى ملفات صوت حقيقية يتعمل mapping هنا
+ * بدل الثابت ده — القيمة مش ضايعة، بس مش بتتبعت لـAPNs كاسم ملف وهمي.
+ */
+const IOS_DEFAULT_SOUND = 'default';
+
+/**
  * إشعارات push حقيقية عبر Firebase Cloud Messaging — نفس فلسفة كل الـ adapters التانية في
  * الجلسة دي (Paymob، S3): تفعيلها = ملء `FIREBASE_SERVICE_ACCOUNT_JSON` في `.env` (محتوى ملف
  * مفتاح خدمة Firebase الكامل كـJSON، تفاصيل الحصول عليه في docs/03-external-integrations.md)
@@ -92,14 +111,30 @@ export class FcmPushDispatcher {
     };
 
     if (input.isActionable) {
-      // data-only — العميل هو المسؤول عن بناء الإشعار المحلي بالأزرار (title/body مبعوتين جوّه data).
+      // data-only **لأندرويد بس** — هناك التطبيق بيبني إشعار محلي بأزرار من `action_labels`.
+      //
+      // iOS مايقدرش يعمل كده: الحمولة اللي كانت بتتبعت (`content-available` بلا `alert` مع
+      // `apns-push-type: alert` و`apns-priority: 10`) تركيبة **غير صالحة** عند APNs — نوع الدفع
+      // لازم يطابق المحتوى، والدفع الصامت ممنوع أصلاً بأولوية 10. النتيجة إن عرض الشغل كان
+      // بيتأخّر أو يتسقط تمامًا على iOS. وحتى لو وصل، الإشعار المحلي مكانش هيتبني لأن iOS
+      // مابيصحّيش التطبيق من غير وضع الخلفية (اتضاف دلوقتي في Info.plist).
+      //
+      // الحل: نبعت لـiOS تنبيه حقيقي بفئة أزرار مسجّلة على الجهاز (`ORDER_OFFER_ACTIONS`) —
+      // النظام بيعرضه بنفسه بأزراره، تسليم مضمون بلا اعتماد على صحيان التطبيق. المقابل إن
+      // أسماء الأزرار على iOS ثابتة من وقت التهيئة (قيد منصة، docs/08 §124).
       return {
         tokens: input.targets,
         data: { ...baseData, title: input.titleAr, body: input.bodyAr },
         android: { priority: androidPriority },
         apns: {
           headers: { 'apns-priority': apnsPriority, 'apns-push-type': 'alert' },
-          payload: { aps: { 'content-available': 1, sound: input.soundKey ?? 'default' } },
+          payload: {
+            aps: {
+              alert: { title: input.titleAr, body: input.bodyAr },
+              category: IOS_ORDER_OFFER_CATEGORY,
+              sound: IOS_DEFAULT_SOUND,
+            },
+          },
         },
       };
     }
@@ -123,7 +158,7 @@ export class FcmPushDispatcher {
       },
       apns: {
         headers: { 'apns-priority': apnsPriority },
-        payload: { aps: { sound: input.soundKey ?? 'default' } },
+        payload: { aps: { sound: IOS_DEFAULT_SOUND } },
       },
     };
   }

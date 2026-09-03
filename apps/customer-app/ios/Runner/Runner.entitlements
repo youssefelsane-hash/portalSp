@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- من غير الصلاحية دي التطبيق مش بيقدر يسجّل في APNs أصلاً: getToken() بترجع null،
+	     فالجهاز عمره ما بيتسجّل في POST /devices، والباك-إند عمره ما بيبعتله حاجة. كل إعدادات
+	     FCM التانية بتفضل بلا أي أثر من غيرها. الأندرويد كان شغال لأن FCM هناك مالوش نظير
+	     للصلاحية دي — وده سبب إن الفجوة عاشت من غير ما حد ياخد باله.
+
+	     القيمة `development` هي المتّبعة في المستودع: وقت تصدير الأرشيف للتوزيع (App Store /
+	     Ad Hoc) Xcode بيستبدلها بـ`production` تلقائيًا حسب بروفايل التوزيع. لازم كمان تفعيل
+	     Push Notifications للـApp ID في حساب Apple Developer — راجع docs/03 §4.1. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

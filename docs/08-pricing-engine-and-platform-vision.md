@@ -12788,3 +12788,113 @@ customer-app بالحرف، بند 4: ممنوع «الخصم 0 ج»)، جنب �
 سطر عرض الخصم. الشريحة الجاية: الاستمرار في المسح دومين-بدومين (Matching/Payments/Technician
 ecosystem) زي ما طلب المالك، والتعامل مع فجوة كود العمارة في customer-web كبند منفصل محتاج جلسة
 تصميم مخصصة.
+
+# §124 — تكافؤ iOS مع أندرويد للتطبيقين (فحص المالك الشامل، 2026-09-03)
+
+**سبب الفحص**: المالك جرّب التطبيقين على أندرويد أكتر بكتير من iOS، وطلب مراجعة صريحة لـiOS بدل
+افتراض إن «Flutter يعني المنصتين شغالين تلقائيًا». الافتراض ده طلع **غلط**: أربع فجوات حقيقية،
+كلها iOS-only، وكلها من نفس النوع — الجزء الأندرويدي من الميزة اتعمل واتجرّب، والنص التاني
+(إعداد/حمولة iOS) ما اتعملش، ومحدش لاحظ لأن الاختبار كان على أندرويد.
+
+## ⚠️ حدود التحقق في السيشن دي (مهم — مفيش استنتاج وهمي)
+
+البيئة **Linux بلا Xcode**، فـ**مفيش أي بناء أو تشغيل iOS حقيقي اتعمل**. اللي اتعمل فعلاً:
+
+| اتأكد فعليًا | الطريقة |
+|---|---|
+| صحة كل ملفات plist بعد التعديل | `plistlib.load()` على الأربع ملفات — كلها بتتقرا صح |
+| `CODE_SIGN_ENTITLEMENTS` بيوصل لهدف Runner وحده | `baseConfigurationReference` في الـpbxproj بيشاور على Debug/Release.xcconfig من **تلات** تكوينات بس، كلها Runner؛ هدف RunnerTests مالوش أي مرجع |
+| حمولة APNs الجديدة | 5 اختبارات jest حقيقية (`fcm-apns-payload.spec.ts`) |
+| كود Dart | `flutter analyze` (صفر error/warning، صفر ملاحظة في الملف المتغيّر) + `flutter test` (35/35) |
+| الباك-إند | `tsc --noEmit` + `nest build` نضاف |
+
+| **لسه محتاج macOS + Xcode + جهاز حقيقي** |
+|---|
+| بناء/أرشفة iOS فعليًا بالـentitlements الجديدة |
+| ظهور إشعار عرض الشغل على جهاز iOS حقيقي بزراري قبول/رفض |
+| إن تاب على زرار من إشعار APNs (اللي النظام رسمه) بيوصل لـ`onDidReceiveNotificationResponse` — في تطبيق فيه `firebase_messaging` و`flutter_local_notifications` مع بعض، الاتنين بيتنازعوا على `UNUserNotificationCenter.delegate`؛ الترتيب الحالي بيخلي flutter_local_notifications الأخير فالمفروض يكسب، بس **ده استنتاج من قراءة الكود مش قياس** |
+| اختيار الصور فعليًا من المعرض بعد إضافة `NSPhotoLibraryUsageDescription` |
+
+**الخلاصة**: iOS **مش** `LIVE VERIFIED`. التصنيف الصح: `CONFIG FIXED — DEVICE RUN PENDING`.
+
+## الفجوات الأربعة
+
+### 1. `NSPhotoLibraryUsageDescription` ناقص في تطبيق العميل — كراش مش رفض صلاحية
+
+تطبيق العميل بينادي المعرض في **أربع شاشات**: صور المشكلة وقت الحجز (`create_order_screen.dart`)،
+صور حقول التسعير (`pricing_field_widgets.dart`)، الشات، والشكاوى. و`image_picker` افتراضيًا
+`requestFullMetadata: true` اللي بيقرا `PHPhotoLibrary`. iOS **بيقفل التطبيق فورًا** (SIGABRT) لو
+اتطلبت صلاحية بلا مفتاح وصفها — مش رفض بهدوء. وهدف النشر `13.0` يعني على أجهزة iOS 13 بيستخدم
+`UIImagePickerController` اللي بيطلب الصلاحية دايمًا.
+
+**الأثر الأخطر**: مسار «تقييم بالصور» (`assessment_required`) كله متوقف على رفع صور — يعني طريقة
+تسعير كاملة كانت مستحيلة على iOS.
+
+تطبيق **الفني** كان عنده المفتاحين (كاميرا + معرض) صح — نفس الفجوة بالظبط: مكان اتعمل ومكان اتنسي.
+
+### 2. مفيش صلاحية `aps-environment` خالص — الإشعارات مستحيلة على iOS من الأساس
+
+مفيش ملف `.entitlements` في أي من التطبيقين، ومفيش `CODE_SIGN_ENTITLEMENTS` في الـpbxproj
+(العدد صفر في الاتنين). من غيرها التسجيل في APNs بيفشل، `getToken()` بترجع `null`،
+`POST /devices` عمره ما بيتنادى، والباك-إند عمره ما بيعرف إن فيه جهاز iOS أصلاً.
+
+**ملحوظة مهمة**: غياب `GoogleService-Info.plist` **مش** فجوة — هو متجاهَل في git عمدًا زي
+`google-services.json` بالظبط (`.gitignore` سطر 50 في التطبيقين)، والمالك بيحطه بنفسه حسب
+docs/03 §4.1. ده بالظبط النوع اللي المالك حذّر منه: «مش كل اختلاف بَقّة».
+
+### 3. حمولة APNs للإشعارات actionable كانت **غير صالحة** أصلاً
+
+الباك-إند بيبعت عرض الشغل **data-only** عمدًا (§17.16) عشان أندرويد يبني إشعار بأزرار من
+`action_labels`. بس نص iOS من الحمولة كان:
+
+```
+headers: { 'apns-push-type': 'alert', 'apns-priority': '10' }
+payload: { aps: { 'content-available': 1, sound: 'critical_offer_alert' } }
+```
+
+تلات مشاكل في سطرين: نوع الدفع `alert` بلا `alert` في الحمولة (APNs بيطلب تطابق النوع مع
+المحتوى)، ودفع صامت بأولوية 10 (ممنوع)، ولو وصل أصلاً مكانش هيتعرض لأن التطبيق مش هيتصحّى بلا
+وضع خلفية.
+
+**الإصلاح (الجذر مش العَرَض)**: iOS بياخد تنبيه حقيقي بفئة أزرار مسجّلة — النظام بيعرضه بنفسه،
+تسليم مضمون بلا اعتماد على صحيان التطبيق. أندرويد **مالوش أي تغيير** (لسه data-only بالحرف).
+التنازل المقصود: أسماء الأزرار على iOS ثابتة وقت التهيئة، فـ`action_labels` اللي الأدمن بيعدّلها
+بتأثر على أندرويد بس — **قيد منصة، مش فجوة**.
+
+### 4. فئة أزرار iOS كانت مُشار إليها ومش مسجّلة + الصوت كان بيتبعت اسم ملف مش موجود
+
+`DarwinNotificationDetails(categoryIdentifier: 'ORDER_OFFER_ACTIONS')` كانت بتشاور على فئة
+**مش متسجّلة** في `DarwinInitializationSettings` — وiOS بيتجاهل أي فئة مش معروفة بصمت، يعني إشعار
+بلا أزرار. النص كان مكتوب مرة واحدة بس في مكان واحد؛ دلوقتي بقى ثابت واحد (`_orderOfferCategoryId`)
+والباك-إند عنده نظيره (`IOS_ORDER_OFFER_CATEGORY`) واختبار بيقارنهم.
+
+و`aps.sound` كان بياخد `sound_key` من الإعدادات (`critical_offer_alert`) كاسم ملف — و**مفيش أي
+ملف صوت متبنّي في المشروع** لا في `ios/` ولا في `android/res/raw`. iOS مايلاقيش الملف = **مايشغّلش
+صوت خالص**. أخطر إشعار في المنتج (عرض طوارئ) كان بيوصل صامت على iOS، وأندرويد مكانش متأثر لأن
+الصوت هناك بيجي من القناة نفسها. دلوقتي `default` دايمًا (نفس سلوك أندرويد فعليًا)، و`sound_key`
+لسه في `data` عشان الـmapping لما تتبنّى ملفات حقيقية.
+
+## اللي اتغيّر
+
+| الملف | التغيير |
+|---|---|
+| `customer-app/ios/Runner/Info.plist` | `NSPhotoLibraryUsageDescription` + `UIBackgroundModes: remote-notification` |
+| `technician-app/ios/Runner/Info.plist` | `UIBackgroundModes: remote-notification` |
+| `*/ios/Runner/Runner.entitlements` | جديد — `aps-environment` |
+| `*/ios/Flutter/{Debug,Release}.xcconfig` | `CODE_SIGN_ENTITLEMENTS` (من xcconfig مش pbxproj عمدًا — أأمن) |
+| `technician-app/.../push_notification_service.dart` | تسجيل فئة `ORDER_OFFER_ACTIONS` بأزرارها + ثابت واحد بدل نص مكرر |
+| `api/.../fcm-push-dispatcher.service.ts` | حمولة APNs صحيحة للactionable + صوت `default` |
+| `api/.../fcm-apns-payload.spec.ts` | جديد — 5 اختبارات تقفل التلات مشاكل كregression |
+
+## مطلوب من المالك قبل أول بناء iOS
+
+تفعيل **Push Notifications** للـApp ID في حساب Apple Developer (وإلا التوقيع هيفشل برسالة
+«Provisioning profile doesn't include the aps-environment entitlement»). قيمة الصلاحية
+`development` في المستودع؛ Xcode بيبدلها بـ`production` تلقائيًا وقت تصدير أرشيف التوزيع.
+
+## توصية مؤجَّلة (مش متعمولة — محتاجة قرار)
+
+إشعارات **Time Sensitive** على iOS 15+ (بتخترق وضع التركيز/Focus) محتاجة صلاحية
+`com.apple.developer.usernotifications.time-sensitive` + `interruption-level` في الحمولة. ده
+هيفيد عروض الطوارئ فعليًا، لكنه **إضافة سلوك** مش سد فجوة — متكتب هنا كتوصية عشان المالك يقرر،
+مش متعمولة من عندي.

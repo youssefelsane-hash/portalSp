@@ -3,3 +3,8 @@
 // متتبَّع في git. انسخ Local.xcconfig.example لـLocal.xcconfig وحط فيه المفتاح الحقيقي.
 // `?` يخلي الـinclude اختياري عشان البناء ميفشلش لو الملف مش موجود (الخرائط بس هتفضل معطّلة).
 #include? "Local.xcconfig"
+
+// صلاحية إشعارات APNs (`aps-environment`) — مربوطة من هنا مش من pbxproj عمدًا: الـxcconfig دي
+// مرجع البناء لهدف Runner وحده (هدف RunnerTests مالوش baseConfigurationReference خالص)، فالربط
+// هنا أبسط وأأمن من تعديل project.pbxproj بالإيد. من غير السطر ده الملف بيبقى موجود بلا أثر.
+CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements
