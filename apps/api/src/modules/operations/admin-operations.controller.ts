@@ -9,6 +9,8 @@ import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
+import { LiveDispatchQueryDto } from './dto/live-dispatch-query.dto';
+import { MATCHING_WORKFLOW_PHASE_AR } from '../matching/matching-workflow-state';
 import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
 import { CoverageIntelligenceQueryDto } from './dto/coverage-intelligence-query.dto';
 
@@ -117,6 +119,41 @@ export class AdminOperationsController {
         })),
         meta: result.feed.meta,
       },
+    };
+  }
+
+  // التحكم اللحظي في التوزيع — صف لكل طلب لسه بيدوّر على فني (مقابل feed الأحداث المسطح فوق).
+  // نفس الخدمة ونفس الجداول عمدًا: مفيش «مركز مطابقة» موازي. الحالة والخطوة الجاية والتأخير كلهم
+  // مشتقين في الباك-إند بـ`deriveMatchingWorkflowState` — الواجهة **ما بتشتقّش** ولا واحدة منهم.
+  @Get('live-dispatch')
+  async getLiveDispatch(@Query() query: LiveDispatchQueryDto) {
+    const items = await this.dispatchDeliveryService.getLiveDispatch({
+      categoryId: query.category_id ?? null,
+      zoneId: query.zone_id ?? null,
+      onlyDelayed: query.only_delayed ?? false,
+    });
+    return {
+      items: items.map((r) => ({
+        order_id: r.orderId,
+        order_number: r.orderNumber,
+        service_name_ar: r.serviceNameAr,
+        booking_mode: r.bookingMode,
+        order_type: r.orderType,
+        searching_since_seconds: r.searchingSinceSeconds,
+        current_round: r.currentRound,
+        max_rounds: r.maxRounds,
+        technicians_contacted: r.techniciansContacted,
+        pending: r.pending,
+        viewed: r.viewed,
+        rejected: r.rejected,
+        accepted: r.accepted,
+        workflow_phase: r.workflow.phase,
+        workflow_phase_ar: MATCHING_WORKFLOW_PHASE_AR[r.workflow.phase],
+        next_action_at: r.workflow.nextActionAt,
+        delay_seconds: r.workflow.delaySeconds,
+        is_delayed: r.workflow.isDelayed,
+      })),
+      meta: { page: 1, perPage: items.length, total: items.length },
     };
   }
 

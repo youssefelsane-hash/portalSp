@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { SettingsService } from '../settings/settings.service';
+import {
+  deriveMatchingWorkflowState,
+  MatchingWorkflowState,
+} from '../matching/matching-workflow-state';
 import { DataSource } from 'typeorm';
 import { AssignmentStatus } from '../matching/entities/order-assignment.entity';
 import { WorkOpportunityContext, WorkOpportunityStatus } from '../technicians/technician-work-opportunities.service';
@@ -107,7 +112,101 @@ interface SummaryRow {
  */
 @Injectable()
 export class AdminDispatchDeliveryService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly settingsService: SettingsService,
+  ) {}
+
+  /**
+   * **التحكم اللحظي في التوزيع** — كل طلب لسه بيدوّر على فني، بجولته الحالية وعدّاداته والخطوة
+   * الجاية وحالته الصحية.
+   *
+   * موجودة هنا مش في خدمة جديدة لأن الملف ده هو بالفعل «مراقبة تسليم الطلبات» — الفرق إن
+   * `getDeliveryObservability()` بترجّع **feed مسطح بالزمن** (مفيد لمتابعة الأحداث لحظة بلحظة)،
+   * ودي بترجّع **صف لكل طلب** (مفيد للسؤال «إيه اللي واقف دلوقتي»). نفس الجداول، نفس الحقيقة،
+   * سؤالين مختلفين — فالاتنين فاضلين.
+   *
+   * **استعلام واحد مجمّع**: صف لكل طلب فيه كل العدّادات. مفيش نداء لكل طلب مهما كان العدد.
+   * والاشتقاق (الخطوة الجاية/التأخير) بيتم بنفس `deriveMatchingWorkflowState` اللي صفحة الطلب
+   * وException Center بيستخدموها.
+   */
+  async getLiveDispatch(filters: {
+    categoryId: string | null;
+    zoneId: string | null;
+    onlyDelayed: boolean;
+  }): Promise<LiveDispatchRow[]> {
+    const [maxRounds, graceSeconds] = await Promise.all([
+      this.settingsService.getNumber('matching.max_rounds', 4),
+      this.settingsService.getNumber('matching.workflow_delay_grace_seconds', 60),
+    ]);
+
+    const rows = await this.dataSource.query<RawLiveDispatchRow[]>(
+      `
+      WITH per_order AS (
+        SELECT oa.order_id,
+               MAX(oa.assignment_round) AS current_round,
+               COUNT(DISTINCT oa.technician_id) AS technicians_contacted,
+               COUNT(*) FILTER (WHERE oa.assignment_status IN ('sent', 'viewed')) AS pending,
+               COUNT(*) FILTER (WHERE oa.viewed_at IS NOT NULL OR oa.assignment_status = 'viewed') AS viewed,
+               COUNT(*) FILTER (WHERE oa.assignment_status = 'rejected') AS rejected,
+               COUNT(*) FILTER (WHERE oa.assignment_status = 'accepted') AS accepted
+          FROM order_assignments oa
+         GROUP BY oa.order_id
+      )
+      SELECT o.id, o.order_number, o.order_status::text AS order_status, o.booking_mode::text AS booking_mode,
+             o.order_type::text AS order_type, o.placed_at, s.name_ar AS service_name_ar,
+             COALESCE(po.current_round, 0) AS current_round,
+             COALESCE(po.technicians_contacted, 0) AS technicians_contacted,
+             COALESCE(po.pending, 0) AS pending,
+             COALESCE(po.viewed, 0) AS viewed,
+             COALESCE(po.rejected, 0) AS rejected,
+             COALESCE(po.accepted, 0) AS accepted,
+             (SELECT MAX(cur.expires_at) FROM order_assignments cur
+               WHERE cur.order_id = o.id AND cur.assignment_round = po.current_round) AS round_expands_at
+        FROM orders o
+        JOIN services s ON s.id = o.service_id
+        LEFT JOIN per_order po ON po.order_id = o.id
+       WHERE o.order_status = 'searching_technician'
+         AND o.deleted_at IS NULL
+         AND ($1::uuid IS NULL OR s.category_id = $1)
+         AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+       ORDER BY o.placed_at ASC
+       LIMIT 200
+      `,
+      [filters.categoryId, filters.zoneId],
+    );
+
+    const now = new Date();
+    const items: LiveDispatchRow[] = rows.map((r) => {
+      const workflow = deriveMatchingWorkflowState({
+        orderStatus: r.order_status as never,
+        currentRound: Number(r.current_round),
+        roundExpansionDueAt: r.round_expands_at ? new Date(r.round_expands_at) : null,
+        pendingInCurrentRound: Number(r.pending),
+        maxRounds,
+        graceSeconds,
+        now,
+      });
+      return {
+        orderId: r.id,
+        orderNumber: r.order_number,
+        serviceNameAr: r.service_name_ar,
+        bookingMode: r.booking_mode,
+        orderType: r.order_type,
+        searchingSinceSeconds: Math.max(0, Math.floor((now.getTime() - new Date(r.placed_at).getTime()) / 1000)),
+        currentRound: Number(r.current_round),
+        maxRounds,
+        techniciansContacted: Number(r.technicians_contacted),
+        pending: Number(r.pending),
+        viewed: Number(r.viewed),
+        rejected: Number(r.rejected),
+        accepted: Number(r.accepted),
+        workflow,
+      };
+    });
+
+    return filters.onlyDelayed ? items.filter((i) => i.workflow.isDelayed) : items;
+  }
 
   async getDeliveryObservability(filters: DispatchDeliveryFilters): Promise<{
     summary: DispatchDeliverySummary;
@@ -253,4 +352,40 @@ export class AdminDispatchDeliveryService {
 
     return { summary, feed: { items, meta: { page: filters.page, perPage: filters.perPage, total } } };
   }
+}
+
+/** صف «التحكم اللحظي في التوزيع» — طلب واحد بيدوّر، بحالته الكاملة. */
+export interface LiveDispatchRow {
+  orderId: string;
+  orderNumber: string;
+  serviceNameAr: string;
+  bookingMode: string;
+  orderType: string;
+  /** بيدوّر من كام ثانية — الواجهة بتحوّلها لعدّاد، مابتحسبش وقت من عندها. */
+  searchingSinceSeconds: number;
+  currentRound: number;
+  maxRounds: number;
+  techniciansContacted: number;
+  pending: number;
+  viewed: number;
+  rejected: number;
+  accepted: number;
+  workflow: MatchingWorkflowState;
+}
+
+interface RawLiveDispatchRow {
+  id: string;
+  order_number: string;
+  order_status: string;
+  booking_mode: string;
+  order_type: string;
+  placed_at: string;
+  service_name_ar: string;
+  current_round: string;
+  technicians_contacted: string;
+  pending: string;
+  viewed: string;
+  rejected: string;
+  accepted: string;
+  round_expands_at: string | null;
 }

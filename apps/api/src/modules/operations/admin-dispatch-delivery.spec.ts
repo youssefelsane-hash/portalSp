@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
+import { SettingsService } from '../settings/settings.service';
+
+// الإعدادات بترجّع الـfallback — نفس نمط باقي سبيكات Operations.
+const settingsServiceStub = {
+  getNumber: async (_key: string, fallback: number) => fallback,
+} as unknown as SettingsService;
 
 // اختبار حي — مراقبة تسليم الطلبات (docs/08 §36.7). بيتحقّق من order_assignments +
 // technician_work_opportunities الحقيقيين، بلا أي بيانات تسليم مصطنعة.
@@ -32,7 +38,7 @@ describe('AdminDispatchDeliveryService.getDeliveryObservability() (docs/08 §36.
   }
 
   function service() {
-    return new AdminDispatchDeliveryService(dataSource);
+    return new AdminDispatchDeliveryService(dataSource, settingsServiceStub);
   }
 
   async function insertTechnician(label: string) {
@@ -66,12 +72,13 @@ describe('AdminDispatchDeliveryService.getDeliveryObservability() (docs/08 §36.
     status: 'sent' | 'viewed' | 'accepted' | 'rejected' | 'timeout' | 'cancelled';
     sentAgoMinutes: number;
     expiresInMinutes: number;
+    round?: number;
   }) {
     const [row] = await q(
       `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
-       VALUES ($1,$2,1,$3, now() - ($4::text || ' minutes')::interval, now() + ($5::text || ' minutes')::interval)
+       VALUES ($1,$2,$6,$3, now() - ($4::text || ' minutes')::interval, now() + ($5::text || ' minutes')::interval)
        RETURNING id`,
-      [opts.orderId, opts.technicianId, opts.status, opts.sentAgoMinutes, opts.expiresInMinutes],
+      [opts.orderId, opts.technicianId, opts.status, opts.sentAgoMinutes, opts.expiresInMinutes, opts.round ?? 1],
     );
     assignmentIds.push(row.id);
     return row.id as string;
@@ -331,5 +338,85 @@ describe('AdminDispatchDeliveryService.getDeliveryObservability() (docs/08 §36.
     const paged = await service().getDeliveryObservability({ categoryId: ids.categoryA, hours: 24, page: 1, perPage: 1 });
     expect(paged.feed.meta.total).toBe(full.feed.meta.total);
     expect(paged.feed.items).toHaveLength(1);
+  });
+
+  /**
+   * التحكم اللحظي في التوزيع — صف لكل طلب بيدوّر. الاختبارات هنا بتقفل الفرق اللي بيغلط فيه أي
+   * تنفيذ متسرّع: «عدّى الوقت» ≠ «متأخر»، و«خلصت الجولات» ≠ «متأخر». الـstub بيرجّع الـfallbacks
+   * (max_rounds=4، grace=60ث) فالحدود دي هي اللي بنختبر عليها.
+   */
+  describe('getLiveDispatch() — صف لكل طلب بيدوّر', () => {
+    it('جولة قايمة ومعادها لسه جاي: مستني رد الفنيين بعدّادات حقيقية، مش متأخر', async () => {
+      const techA = await insertTechnician('ld-a');
+      const techB = await insertTechnician('ld-b');
+      const order = await insertOrder(ids.categoryA, ids.serviceA, ids.zoneA);
+      await insertAssignment({ orderId: order, technicianId: techA, status: 'viewed', sentAgoMinutes: 3, expiresInMinutes: 10 });
+      await insertAssignment({ orderId: order, technicianId: techB, status: 'rejected', sentAgoMinutes: 3, expiresInMinutes: 10 });
+
+      const rows = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: false });
+      const row = rows.find((r) => r.orderId === order)!;
+      expect(row).toBeDefined();
+      expect(row.currentRound).toBe(1);
+      expect(row.maxRounds).toBe(4);
+      expect(row.techniciansContacted).toBe(2);
+      expect(row.pending).toBe(1);
+      expect(row.viewed).toBe(1);
+      expect(row.rejected).toBe(1);
+      expect(row.workflow.phase).toBe('awaiting_technician_response');
+      expect(row.workflow.isDelayed).toBe(false);
+      expect(row.workflow.nextActionAt).not.toBeNull();
+    });
+
+    it('عدّى وقت التوسيع بعد مهلة السماح والجولة الجاية ما اتعملتش: متأخر، وonly_delayed بيرجّعه', async () => {
+      const tech = await insertTechnician('ld-late');
+      const order = await insertOrder(ids.categoryA, ids.serviceA, ids.zoneA);
+      await insertAssignment({ orderId: order, technicianId: tech, status: 'sent', sentAgoMinutes: 30, expiresInMinutes: -12 });
+
+      const rows = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: false });
+      const row = rows.find((r) => r.orderId === order)!;
+      expect(row.workflow.phase).toBe('round_expansion_due');
+      expect(row.workflow.isDelayed).toBe(true);
+      expect(row.workflow.delaySeconds).toBeGreaterThan(60);
+
+      const delayedOnly = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: true });
+      expect(delayedOnly.map((r) => r.orderId)).toContain(order);
+    });
+
+    it('وصل سقف الجولات: exhausted مش متأخر — وonly_delayed بيستبعده رغم إن معاده عدّى بساعات', async () => {
+      const tech = await insertTechnician('ld-max');
+      const order = await insertOrder(ids.categoryA, ids.serviceA, ids.zoneA);
+      await insertAssignment({ orderId: order, technicianId: tech, status: 'timeout', sentAgoMinutes: 400, expiresInMinutes: -380, round: 4 });
+
+      const rows = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: false });
+      const row = rows.find((r) => r.orderId === order)!;
+      expect(row.currentRound).toBe(4);
+      expect(row.workflow.phase).toBe('rounds_exhausted');
+      expect(row.workflow.isDelayed).toBe(false);
+
+      const delayedOnly = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: true });
+      expect(delayedOnly.map((r) => r.orderId)).not.toContain(order);
+    });
+
+    it('طلب مابيدوّرش (اتعيّن فعلاً) مش بيظهر في القايمة أصلاً', async () => {
+      const tech = await insertTechnician('ld-done');
+      const order = await insertOrder(ids.categoryA, ids.serviceA, ids.zoneA);
+      await insertAssignment({ orderId: order, technicianId: tech, status: 'accepted', sentAgoMinutes: 5, expiresInMinutes: 10 });
+      await q(`UPDATE orders SET order_status = 'technician_assigned' WHERE id = $1`, [order]);
+
+      const rows = await service().getLiveDispatch({ categoryId: ids.categoryA, zoneId: ids.zoneA, onlyDelayed: false });
+      expect(rows.map((r) => r.orderId)).not.toContain(order);
+    });
+
+    it('طلب بيدوّر بلا أي توزيع: not_dispatched — مش متأخر ولا بيتحسبله وقت خطوة جاية', async () => {
+      const order = await insertOrder(ids.categoryB, ids.serviceB, ids.zoneB);
+
+      const rows = await service().getLiveDispatch({ categoryId: ids.categoryB, zoneId: ids.zoneB, onlyDelayed: false });
+      const row = rows.find((r) => r.orderId === order)!;
+      expect(row.currentRound).toBe(0);
+      expect(row.techniciansContacted).toBe(0);
+      expect(row.workflow.phase).toBe('not_dispatched');
+      expect(row.workflow.isDelayed).toBe(false);
+      expect(row.workflow.nextActionAt).toBeNull();
+    });
   });
 });
