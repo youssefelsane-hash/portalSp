@@ -348,3 +348,43 @@ partial indexes موجودة بالفعل بلا حاجة لمigration جديد�
 **الإصلاح**: سطرين ناقصين في `admin-operations.controller.ts`'s mapping. اختبار حي جديد
 `admin-operations.controller.spec.ts` على مستوى الـcontroller نفسه — اتأكد إنه بيمسك الرجعة
 فعليًا (تجربة يدوية: رجّعت التعديل للخلف بـ`git stash`، الاختبار فشل بوضوح، رجّعت التعديل، عدّى).
+
+## `matching_workflow_delayed` — التنبيه اللي `stale_dispatch` مش قادر يديه
+
+`stale_dispatch` بيولّع على **أي** عرض عدّى `expires_at`. بس `expires_at` معناها «امتى النظام
+هيوسّع البث» مش «امتى العرض بيبطل» (ADR-0018 §5)، فعرض عدّى معاده والنظام وسّع الجولة بعده
+**سلوك طبيعي تمامًا** وبيولّع البند القديم برضه. النتيجة: البند ضوضاء بطبيعته، والتنبيه الحقيقي
+بيتدفن جواه.
+
+`matchingWorkflowDelayed` بيولّع بس لما الأربعة يتحققوا سوا: وقت التوسيع عدّى **و** الجولة الجاية
+ما اتعملتش (`NOT EXISTS assignment بجولة أعلى`) **و** الطلب لسه `searching_technician` **و**
+تحت `matching.max_rounds` — بعد مهلة سماح (`matching.workflow_delay_grace_seconds`، migration
+0256). الاشتقاق نفسه بـ`deriveMatchingWorkflowState` المشتركة، مش قاعدة تانية.
+
+**الفرق مقيس على بيانات حقيقية** (قاعدة التطوير المحلية، `GET /admin/operations/exceptions`):
+`stale_dispatch = 22` مقابل `matching_workflow_delayed = 9`. تلتاتين البنود القديمة كانت
+سلوك سليم. الاختبار `admin-exception-center.spec.ts` بيثبت الفرق ده صراحةً: نفس الطلب **مش**
+بيظهر في البند الجديد وبيظهر في القديم.
+
+## `getLiveDispatch()` — صف لكل طلب بيدوّر (مش feed أحداث)
+
+جوّه `AdminDispatchDeliveryService` نفسها عمدًا، مش خدمة جديدة: `getDeliveryObservability()`
+بترجّع **feed مسطح بالزمن** (متابعة الأحداث لحظة بلحظة)، و`getLiveDispatch()` بترجّع **صف لكل
+طلب** (السؤال «إيه اللي واقف دلوقتي»). نفس الجداول ونفس الحقيقة، سؤالين مختلفين — فالاتنين
+فاضلين.
+
+استعلام واحد مجمّع (`WITH per_order`) بيرجّع كل العدّادات ووقت التوسيع للجولة الحالية في نداء
+واحد — **مفيش N+1 مهما كان عدد الطلبات**، وde شرط صريح في متطلبات المالك. الفلتر `only_delayed`
+بيتنفّذ على الحالة المشتقة مش على وقت خام.
+
+**الواجهة ماتشتقّش حقيقة عمل**: الـcontroller بيرجّع `workflow_phase` **ونصّها العربي جاهز**
+(`MATCHING_WORKFLOW_PHASE_AR`) و`next_action_at` و`delay_seconds` و`is_delayed` — عشان ساعة
+المتصفح مش ساعة النظام، ومهلة السماح وسقف الجولات إعدادات بتتغير من لوحة التحكم.
+
+## بَقّة حقيقية في الواجهة: مركز الاستثناءات كان بيقول «مفيش استثناءات» وهو كاذب
+
+`getExceptions()` بيرجّع `overdue_orders` من وقت §56 بند 4، لكن `ExceptionCenterSection` في
+`apps/admin` كانت بتحسب `totalCount = crewCount + staleCount` بس ومابتعرضش البند خالص. يعني
+شغلانة معادها عدّى والفني ما بدأش كانت بتخلي المركز يقول «مفيش استثناءات محتاجة تصرّف دلوقتي».
+اتصلحت مع إضافة `matching_workflow_delayed`، والنوع المشترك `ExceptionCenterResponseDto` بقى
+مطابق للـcontroller بالأربع بنود.

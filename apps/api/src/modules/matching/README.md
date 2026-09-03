@@ -866,3 +866,38 @@ rank_score = … − distance_km × effective_distance_weight
 اترجّع والفني اللي ضاع. `AuditLogService` حُقن `@Optional()` عمدًا — عشرات السبيكات بتبني
 `MatchingService` بـpositional args؛ في الإنتاج الـDI بيوفّرها دايمًا، و
 `provider-lock-no-silent-replacement.spec.ts` بيثبت الكتابة الفعلية.
+
+## مصدر واحد لسؤال «الخطوة الجاية إيه؟» و«الـworkflow متأخر؟» — `matching-workflow-state.ts`
+
+وحدة **نقية** (بلا DB ولا حقن) بتتنادى من تلات مسارات مختلفة تمامًا: تفاصيل الطلب الواحد
+(`getOrderMatchingState`)، واستعلام Operations المجمّع (`getLiveDispatch`)، وException Center
+(`matchingWorkflowDelayed`). التلاتة **بيستدعوا نفس الدالة** — مش بينسخوا نفس القاعدة. الدرس
+المتكرر في المشروع ده: تعليق بيقول «نفس المنطق» مش ضمانة؛ الضمانة الوحيدة هي نداء نفس الدالة.
+
+المراحل الخمسة: `not_matching` / `not_dispatched` / `awaiting_technician_response` /
+`round_expansion_due` / `rounds_exhausted`. الحدود اللي بتفرق فعلًا:
+
+| الحالة | متأخر؟ | ليه |
+|---|---|---|
+| عدّى وقت التوسيع بأقل من `matching.workflow_delay_grace_seconds` (60ث) | ❌ | الـqueue لسه ليها فرصة تنفّذ |
+| عدّى بعد مهلة السماح والجولة الجاية ما اتعملتش | ✅ | ده تدخّل بشري مطلوب فعلاً |
+| `currentRound >= matching.max_rounds` | ❌ | وضع **نهائي** (محدش قبل)، مش تأخير — خلطهم كان هيدفن التنبيه الحقيقي |
+| مفيش وقت توسيع مسجّل | ❌ | مانقولش «متأخر» على أساس بيانات ناقصة |
+
+**تحذير دلالي بيتكرر في كل الأسماء** (ADR-0018 §5): `order_assignments.expires_at` **مش** انتهاء
+صلاحية العرض — العرض بيفضل قابل للقبول بعدها. هي وقت **توسيع البث** لفنيين إضافيين، وعشان كده
+الـAPI بيسمّيها `broadcast_expands_at` مش `expires_at`.
+
+### `viewed_at` (migration 0255)
+
+موقع كتابة واحد بس: نفس الـUPDATE اللي بيحوّل `sent → viewed` في `markAssignmentsViewed`، وشرط
+`assignment_status = 'sent'` جوّه نفس الجملة بيخلّيها **أول** مشاهدة بنيويًا مش بالاتفاق. الصفوف
+اللي قبل الـmigration بتفضل `null` — والواجهات بتفرّق صراحةً بين «لسه ما شافهاش» (الحالة لسه
+`sent`) و«وقت المشاهدة مش مسجّل» (صف قديم). الفرق ده هو تشخيص سبب عدم الرد.
+
+### `deriveAssignmentSource` — مشتق، مش عمود جديد
+
+كل قيمة ليها إثبات محفوظ أصلاً: `provider_lock_source` (ADR-0065)،
+`revisit_pinned_technician_id` (ADR-0051)، و`order_status_history.change_source='admin'`. إضافة
+عمود `assignment_source` كانت هتبقى نسخة تالتة من معلومة متخزّنة مرتين. الترتيب مقصود: الأدمن
+بيغلب أي إسناد سابق لأنه **آخر** قرار حصل فعليًا.
