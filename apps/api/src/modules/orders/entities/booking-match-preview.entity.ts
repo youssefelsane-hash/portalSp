@@ -36,6 +36,14 @@ export class BookingMatchPreview {
   @Column({ name: 'booking_context_hash', type: 'varchar', length: 64, nullable: true })
   bookingContextHash: string | null;
 
+  /**
+   * المدخلات اللي `context_hash` اتحسب منها (migration 0256) — عشان رفض التذكرة يقدر يقول
+   * **إيه** الحقل اللي اتغيّر بدل «تفاصيل الحجز تغيّرت» المبهمة. حقول تسعير/مطابقة بس، بلا
+   * أي بيانات شخصية.
+   */
+  @Column({ name: 'fingerprint_input', type: 'jsonb', nullable: true })
+  fingerprintInput: Record<string, unknown> | null;
+
   @Column({ name: 'pricing_snapshot', type: 'jsonb' })
   pricingSnapshot: Record<string, unknown>;
 

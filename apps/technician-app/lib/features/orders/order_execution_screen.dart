@@ -2039,7 +2039,12 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.titleAr),
-      content: Column(
+      // بَقّة حقيقية من screenshot المالك (2026-09-03): «BOTTOM OVERFLOWED BY 81 PIXELS»
+      // والأزرار بتركب فوق حقل السبب. الحوار فيه حقلين نص، فأول ما الكيبورد يطلع على شاشة
+      // قصيرة المحتوى بيعدّي المساحة المتاحة. AlertDialog **مابيعملش scroll لمحتواه** —
+      // لازم SingleChildScrollView صراحة. أي حوار فيه TextField لازم يتلف بيها.
+      content: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2063,6 +2068,7 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
             Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
           ],
         ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => _close(null), child: const Text('إلغاء')),

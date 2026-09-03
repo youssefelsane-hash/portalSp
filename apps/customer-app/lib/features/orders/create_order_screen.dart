@@ -19,6 +19,7 @@ import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
+import '../technicians/technicians_repository.dart';
 import 'schedule_selection_screen.dart';
 
 class CreateOrderScreen extends StatefulWidget {
@@ -736,6 +737,54 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
   }
 
+  /// **تذكرة السعر لازم تتبنى على المدخلات النهائية، مش على اللي كان معروف وقت اختيار الفني.**
+  ///
+  /// بَقّة حقيقية اتلقطت باختبار حي (بلاغ مالك 2026-09-03، docs/08 §121-ب): شاشة اختيار الفني
+  /// بتعمل التذكرة وهي عارفة الموعد والفورم بس — الإضافات وخطة الضمان وعدد الوحدات بيتحددوا
+  /// **هنا** بعد كده. الباك-إند بيقارن بصمة المدخلات، فأي إضافة العميل يختارها بعد اختيار الفني
+  /// كانت بتخلي الحجز يترفض بلا مخرج: العميل يرجع، يختار الفني تاني، يختار الإضافة تاني، ويترفض
+  /// تاني للأبد.
+  ///
+  /// الحل مش تجاهل البصمة (دي اللي بتمنع استبدال الفني/السعر في صمت — ADR-0065): بنعيد إصدار
+  /// التذكرة بـ`manual` على **نفس الفني** بالمدخلات الكاملة، فالسعر بيتحسب من جديد على نفس
+  /// المنفّذ والعميل بيتحاسب على اللي شافه. لو الفني بقى مش متاح فعلاً، الباك-إند بيرفض برسالة
+  /// صريحة — وده الصح، مش استبدال صامت.
+  Future<String?> _refreshedMatchPreviewId() async {
+    final previewId = widget.matchPreviewId;
+    final technicianId = widget.requestedTechnicianId;
+    if (previewId == null || technicianId == null || _selectedAddress == null) {
+      return previewId;
+    }
+    try {
+      final refreshed = await TechniciansRepository(context.read<AuthRepository>())
+          .createMatchPreview(
+            serviceId: widget.service.id,
+            addressId: _selectedAddress!.id,
+            selectionMode: 'manual',
+            technicianId: technicianId,
+            scheduledAt: widget.scheduleSlotId != null
+                ? null
+                : (widget.service.requiresStartTime
+                          ? _combinedPreciseScheduledAt()
+                          : _requestedAt)
+                      ?.toUtc()
+                      .toIso8601String(),
+            fieldValues: _showsDynamicForm ? _fieldValues : null,
+            promoCode: _requestRemoteQuote ? null : _promoCodeToSend,
+            buildingCode: _requestRemoteQuote ? null : _buildingCodeToSend,
+            addonIds: _requestRemoteQuote ? null : _selectedAddonIds.toList(),
+            warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
+            standardDataId: _selectedStandardData?.id,
+            requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
+          );
+      return refreshed.matchPreviewId;
+    } on ApiException {
+      // إعادة الإصدار فشلت (الفني بقى مشغول مثلاً) — بنكمّل بالتذكرة القديمة عشان الباك-إند
+      // هو اللي يقول السبب برسالته الصريحة، بدل ما نبلع الخطأ هنا ونخفي إيه اللي حصل.
+      return previewId;
+    }
+  }
+
   Future<void> _submit() async {
     if (_selectedAddress == null) {
       _failValidation('اختار عنوان الأول', _addressSectionKey);
@@ -782,6 +831,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _error = null;
     });
     try {
+      final effectiveMatchPreviewId = await _refreshedMatchPreviewId();
       final order = await _repository.create(
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
@@ -823,7 +873,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
         // بند 12 — قفل السعر: نفس التذكرة اللي العميل شاف عليها الفني وسعره.
-        matchPreviewId: widget.matchPreviewId,
+        matchPreviewId: effectiveMatchPreviewId,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
       // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.
