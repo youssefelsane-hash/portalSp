@@ -96,6 +96,20 @@ interface Technician360Response {
     service_name_ar: string;
   }[];
   blocked_dates: { slot_date: string; start_time: string; end_time: string }[];
+  /** العروض المفتوحة اللي الفني ماردّش عليها لسه — بأوقاتها الحقيقية، مش عدد مجرّد. */
+  open_offers: {
+    id: string;
+    kind: 'assignment' | 'work_opportunity';
+    order_id: string;
+    order_number: string;
+    service_name_ar: string;
+    status: string;
+    context: string | null;
+    sent_at: string;
+    viewed_at: string | null;
+    /** وقت **توسيع البث** لفنيين إضافيين — مش انتهاء صلاحية العرض (ADR-0018 §5). */
+    broadcast_expands_at: string | null;
+  }[];
   open_opportunities_count: number;
   cancellation_behavior: { total_cancellations: number; recent_cancellations: number };
   complaints: {
@@ -862,6 +876,44 @@ export default function TechnicianDetailPage() {
                     )}
                   </div>
 
+                  <div>
+                    {/* «ليه الفني ده ماخدش الشغل؟» — العدد لوحده مابيجاوبش. الصفوف دي بتقول
+                        العرض راح امتى، وهل اتفتح، وامتى النظام هيوسّع البث لغيره. */}
+                    <p className="mb-2 font-medium">عروض مفتوحة عنده دلوقتي</p>
+                    {profile360.open_offers.length === 0 ? (
+                      <p className="text-muted-foreground">مفيش عروض مستنية رده</p>
+                    ) : (
+                      <ul className="flex flex-col gap-2">
+                        {profile360.open_offers.map((o) => (
+                          <li key={o.id} className="border-b pb-2 last:border-0">
+                            <Link href={`/orders/${o.order_id}`} className="underline">
+                              #{o.order_number} — {o.service_name_ar}
+                            </Link>
+                            <p className="text-muted-foreground">
+                              {o.kind === 'assignment' ? 'تعيين مباشر' : o.context === 'crew_recruit' ? 'تجنيد فريق' : 'فرصة تولّي طلب'}
+                              {' · '}
+                              اتبعت {new Date(o.sent_at).toLocaleString('ar-EG-u-nu-latn')}
+                              {' · '}
+                              {/* «ما شافهاش» ≠ «شافها وسكت» — فرق حقيقي في تشخيص سبب عدم الرد. */}
+                              {o.viewed_at
+                                ? `شافها ${new Date(o.viewed_at).toLocaleString('ar-EG-u-nu-latn')}`
+                                : o.status === 'sent'
+                                  ? 'لسه ما شافهاش'
+                                  : 'وقت المشاهدة مش مسجّل'}
+                            </p>
+                            {o.broadcast_expands_at && (
+                              <p className="text-muted-foreground">
+                                توسيع البث لغيره: {new Date(o.broadcast_expands_at).toLocaleString('ar-EG-u-nu-latn')}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <p className="mb-2 font-medium">أيام محجوبة قادمة</p>
                     {profile360.blocked_dates.length === 0 ? (

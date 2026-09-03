@@ -10,7 +10,8 @@
     "start": "next start -p 3001",
     "lint": "eslint",
     "pretypecheck": "npm --prefix ../../packages/shared-types run build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e:operations": "node test/operations-center.e2e.mjs"
   },
   "dependencies": {
     "@baytak/shared-types": "*",

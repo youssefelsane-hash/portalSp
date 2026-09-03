@@ -166,6 +166,19 @@ export class AdminTechniciansController {
         service_name_ar: j.serviceNameAr,
       })),
       blocked_dates: p.blockedDates.map((b) => ({ slot_date: b.slotDate, start_time: b.startTime, end_time: b.endTime })),
+      open_offers: p.openOffers.map((o) => ({
+        id: o.id,
+        kind: o.kind,
+        order_id: o.orderId,
+        order_number: o.orderNumber,
+        service_name_ar: o.serviceNameAr,
+        status: o.status,
+        context: o.context,
+        sent_at: o.sentAt,
+        viewed_at: o.viewedAt,
+        // مش «انتهاء صلاحية»: وقت توسيع البث لفنيين إضافيين (ADR-0018 §5).
+        broadcast_expands_at: o.broadcastExpandsAt,
+      })),
       open_opportunities_count: p.openOpportunitiesCount,
       performance: {
         average_rating: p.performance.averageRating,
