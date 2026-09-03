@@ -178,8 +178,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     // زرار "شارك موقعك" الصريح) من غير ما تأثر على _activeTrackingStatuses نفسها (لسه بتتحكم في
     // ظهور زرار المشاركة والملاحة، مالهاش لازمة في الحالة دي).
     if (_trackingConnected ||
-        !_statusListenStatuses.contains(_order.orderStatus))
+        !_statusListenStatuses.contains(_order.orderStatus)) {
       return;
+    }
     _trackingClient.connect(
       accessToken: _accessToken,
       orderId: _order.id,
@@ -392,11 +393,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     if (mounted) setState(() => _error = null);
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        if (mounted)
+        if (mounted) {
           setState(
             () => _error =
                 'خدمة تحديد الموقع مقفولة على جهازك، شغّلها الأول وحاول تاني',
           );
+        }
         return;
       }
       var permission = await Geolocator.checkPermission();
@@ -444,8 +446,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         ).showSnackBar(const SnackBar(content: Text('اتبعت موقعك للعميل')));
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'مقدرناش نحدد موقعك الحالي، حاول تاني');
+      }
     }
   }
 
@@ -1571,8 +1574,9 @@ class _JobBriefCard extends StatelessWidget {
     if (at == null) return 'في أقرب وقت (فوري)';
     final day =
         '${at.year}/${at.month.toString().padLeft(2, '0')}/${at.day.toString().padLeft(2, '0')}';
-    if (at.hour == 0 && at.minute == 0)
+    if (at.hour == 0 && at.minute == 0) {
       return '$day (اليوم كله — مفيش ساعة محددة)';
+    }
     return '$day الساعة ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
   }
 
@@ -2137,8 +2141,9 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
           qty == null ||
           qty <= 0 ||
           priceEgp == null ||
-          priceEgp < 0)
+          priceEgp < 0) {
         continue;
+      }
       result.add(
         _QuoteItemDraft(
           itemType: _drafts[i].itemType,
@@ -2373,19 +2378,26 @@ class _CancelOrderDialogState extends State<_CancelOrderDialog> {
               'مفيش أسباب إلغاء متاحة دلوقتي — تواصل مع الدعم',
               style: TextStyle(color: Colors.red),
             ),
-          for (final reason in widget.reasons)
-            RadioListTile<CancellationReason>(
-              value: reason,
-              groupValue: _selected,
-              onChanged: (v) => setState(() => _selected = v),
-              title: Text(reason.reasonAr),
-              subtitle: reason.chargesFee
-                  ? Text(
-                      'رسوم إلغاء ${reason.feePercentage.toStringAsFixed(0)}%',
-                    )
-                  : null,
-              dense: true,
+          RadioGroup<CancellationReason>(
+            groupValue: _selected,
+            onChanged: (v) => setState(() => _selected = v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final reason in widget.reasons)
+                  RadioListTile<CancellationReason>(
+                    value: reason,
+                    title: Text(reason.reasonAr),
+                    subtitle: reason.chargesFee
+                        ? Text(
+                            'رسوم إلغاء ${reason.feePercentage.toStringAsFixed(0)}%',
+                          )
+                        : null,
+                    dense: true,
+                  ),
+              ],
             ),
+          ),
           if (_selected?.requiresFreeText == true) ...[
             const SizedBox(height: 8),
             TextField(
@@ -2496,14 +2508,21 @@ class _ReportFailedVisitDialogState extends State<_ReportFailedVisitDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('السبب:'),
-                for (final entry in _failedVisitReasonLabelsAr.entries)
-                  RadioListTile<String>(
-                    value: entry.key,
-                    groupValue: _reason,
-                    onChanged: (v) => setState(() => _reason = v!),
-                    title: Text(entry.value),
-                    dense: true,
+                RadioGroup<String>(
+                  groupValue: _reason,
+                  onChanged: (v) => setState(() => _reason = v!),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final entry in _failedVisitReasonLabelsAr.entries)
+                        RadioListTile<String>(
+                          value: entry.key,
+                          title: Text(entry.value),
+                          dense: true,
+                        ),
+                    ],
                   ),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _descriptionController,

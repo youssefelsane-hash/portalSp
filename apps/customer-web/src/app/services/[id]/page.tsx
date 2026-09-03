@@ -284,7 +284,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       setSubmitted(true);
       if (!requestRemoteQuote && paymentMethod === 'card') {
         const cardResult = await payWithCard(authedFetch, order.id);
-        window.location.href = cardResult.redirect_url;
+        // `assign()` مش `location.href = ...`: قاعدة react-hooks/immutability بتعتبر الإسناد
+        // على كائن برّه المكوّن تعديلًا ممنوعًا (خطأ lint حقيقي كان واقف في المشروع). الاتنين
+        // نفس السلوك بالظبط — تنقّل بيتسجّل في تاريخ المتصفح — فده تصليح مش التفاف.
+        window.location.assign(cardResult.redirect_url);
         return;
       }
       router.push(`/orders/${order.id}`);

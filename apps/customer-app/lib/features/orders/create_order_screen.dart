@@ -190,10 +190,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
       }
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _uploadingProblemImages = false);
     }
@@ -256,8 +257,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _requestedAt = widget.requestedAt;
     _requestedAtRangeEnd = widget.requestedAtRangeEnd;
     _preciseTime = widget.requestedPreciseTime;
-    if (widget.initialFieldValues != null)
+    if (widget.initialFieldValues != null) {
       _fieldValues.addAll(widget.initialFieldValues!);
+    }
     _loadAddons();
     if (_showsDynamicForm) {
       _loadPricingFields();
@@ -497,11 +499,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         });
       }
     } on ApiException catch (err) {
-      if (mounted && generation == _previewRequestGeneration)
+      if (mounted && generation == _previewRequestGeneration) {
         setState(() => _previewError = err.message);
+      }
     } finally {
-      if (mounted && generation == _previewRequestGeneration)
+      if (mounted && generation == _previewRequestGeneration) {
         setState(() => _previewLoading = false);
+      }
     }
   }
 
@@ -581,7 +585,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (at == null) return 'فوري';
     final rangeEnd = _requestedAtRangeEnd;
     if (rangeEnd != null) {
-      final two = (int n) => n.toString().padLeft(2, '0');
+      String two(int n) => n.toString().padLeft(2, '0');
       return 'مرن: ${two(at.day)}/${two(at.month)} — ${two(rangeEnd.day)}/${two(rangeEnd.month)}';
     }
     final today = DateTime.now();
@@ -594,7 +598,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         at.day == tomorrow.day;
     if (isToday) return 'النهاردة';
     if (isTomorrow) return 'بكرة';
-    final two = (int n) => n.toString().padLeft(2, '0');
+    String two(int n) => n.toString().padLeft(2, '0');
     return '${two(at.day)}/${two(at.month)}/${at.year}';
   }
 
@@ -714,10 +718,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     } on ApiException catch (err) {
       // مش هيمنع الانتقال لـOrderDetailScreen — العميل يقدر يعيد المحاولة من هناك لو الأزرار
       // موجودة، أو الطلب هيتلغى تلقائيًا لو ماكملش خلال المهلة (راجع تعليق _submit فوق).
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     }
   }
 
@@ -950,12 +955,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         (_checkoutOptionsError != null
             ? 'تعذر التحقق من جاهزية الطريقة'
             : 'جاري التحقق من الجاهزية');
+    // `enabled` بدل `onChanged: null` (Flutter شال groupValue/onChanged من Radio لصالح
+    // RadioGroup الأب). نفس السلوك بالظبط: الطريقة غير المتاحة مايتضغطش عليها وبتوضّح السبب.
     return RadioListTile<String?>(
       value: method,
-      groupValue: _selectedPaymentMethod,
-      onChanged: available
-          ? (value) => setState(() => _selectedPaymentMethod = value)
-          : null,
+      enabled: available,
       secondary: Icon(icon),
       title: Text(title),
       subtitle: Text(available ? subtitle : reason),
@@ -990,8 +994,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return Text(_previewError!, style: const TextStyle(color: Colors.red));
     }
     final preview = _pricePreview;
-    if (preview == null)
+    if (preview == null) {
       return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1160,8 +1165,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         _durationEstimate = null;
                         _durationError = null;
                       });
-                      if (_requestedUnitsController.text.trim().isNotEmpty)
+                      if (_requestedUnitsController.text.trim().isNotEmpty) {
                         _refreshDurationEstimate();
+                      }
                     },
                   ),
                 ),
@@ -1391,8 +1397,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                                 ? null
                                 : () => setState(() {
                                     _problemImages.removeAt(index);
-                                    if (_problemImages.isEmpty)
+                                    if (_problemImages.isEmpty) {
                                       _requestRemoteQuote = false;
+                                    }
                                   }),
                             icon: const Icon(Icons.close, size: 16),
                           ),
@@ -1547,31 +1554,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              Card(
+              RadioGroup<String?>(
+                groupValue: _repeatFrequency,
+                onChanged: (value) => setState(() => _repeatFrequency = value),
+                child: Card(
                 child: Column(
                   children: [
                     RadioListTile<String?>(
                       value: null,
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('مرة واحدة'),
+                      title: Text('مرة واحدة'),
                     ),
                     RadioListTile<String?>(
                       value: 'weekly',
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
+                      title: Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
                     ),
                     RadioListTile<String?>(
                       value: 'monthly',
-                      groupValue: _repeatFrequency,
-                      onChanged: (value) =>
-                          setState(() => _repeatFrequency = value),
-                      title: const Text('شهري — نفس اليوم كل شهر'),
+                      title: Text('شهري — نفس اليوم كل شهر'),
                     ),
                   ],
+                ),
                 ),
               ),
               if (_repeatFrequency != null)
@@ -1598,62 +1600,47 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 8),
-              Card(
-                child: Column(
-                  children: [
-                    RadioListTile<String?>(
-                      value: null,
-                      groupValue: _selectedWarrantyPlanId,
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedWarrantyPlanId = value;
-                          if (value != null) _repeatFrequency = null;
-                        });
-                        _refreshPreview(
-                          promoCode: _promoCodeToSend.isEmpty
-                              ? null
-                              : _promoCodeToSend,
-                          buildingCode: _buildingCodeToSend.isEmpty
-                              ? null
-                              : _buildingCodeToSend,
-                        );
-                      },
-                      title: const Text('بدون ضمان إضافي'),
-                      subtitle: Text(
-                        widget.service.warrantyDays > 0
-                            ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
-                            : 'لن تضاف تكلفة ضمان',
-                      ),
-                    ),
-                    ..._optionalWarranties.map(
-                      (plan) => RadioListTile<String?>(
-                        value: plan.id,
-                        groupValue: _selectedWarrantyPlanId,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedWarrantyPlanId = value;
-                            if (value != null) _repeatFrequency = null;
-                          });
-                          _refreshPreview(
-                            promoCode: _promoCodeToSend.isEmpty
-                                ? null
-                                : _promoCodeToSend,
-                            buildingCode: _buildingCodeToSend.isEmpty
-                                ? null
-                                : _buildingCodeToSend,
-                          );
-                        },
-                        title: Text(
-                          '${plan.nameAr} — ${plan.coverageMonths} شهر',
-                        ),
+              // نفس المعالج كان مكرّر حرفيًا على كل خيار ضمان؛ RadioGroup بيخلّيه مرة واحدة
+              // على المجموعة — أقل تكرار وأقل فرصة إن نسخة منهم تتعدّل وتنسى التانية.
+              RadioGroup<String?>(
+                groupValue: _selectedWarrantyPlanId,
+                onChanged: (value) {
+                  setState(() {
+                    _selectedWarrantyPlanId = value;
+                    if (value != null) _repeatFrequency = null;
+                  });
+                  _refreshPreview(
+                    promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
+                    buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
+                  );
+                },
+                child: Card(
+                  child: Column(
+                    children: [
+                      RadioListTile<String?>(
+                        value: null,
+                        title: const Text('بدون ضمان إضافي'),
                         subtitle: Text(
-                          plan.pricingModel == 'fixed'
-                              ? '+${_formatEgp(plan.priceValue.round())}'
-                              : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                          widget.service.warrantyDays > 0
+                              ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
+                              : 'لن تضاف تكلفة ضمان',
                         ),
                       ),
-                    ),
-                  ],
+                      ..._optionalWarranties.map(
+                        (plan) => RadioListTile<String?>(
+                          value: plan.id,
+                          title: Text(
+                            '${plan.nameAr} — ${plan.coverageMonths} شهر',
+                          ),
+                          subtitle: Text(
+                            plan.pricingModel == 'fixed'
+                                ? '+${_formatEgp(plan.priceValue.round())}'
+                                : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1725,22 +1712,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
               const SizedBox(height: 8),
             ],
-            Card(
+            // الحارس `__electronic_required__` اتنقل لمستوى المجموعة بدل ما يتكرر على كل
+            // خيار: لما الخدمة تفرض دفع إلكتروني، «ادفع بعد الخدمة» لازم يبان **غير مختار**
+            // مش مختار-ومعطّل. القيمة دي ما بتطابقش أي خيار فمفيش حاجة بتتحدد.
+            RadioGroup<String?>(
+              groupValue: _requiresElectronicPayment && _selectedPaymentMethod == null
+                  ? '__electronic_required__'
+                  : _selectedPaymentMethod,
+              onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+              child: Card(
               child: Column(
                 children: [
                   RadioListTile<String?>(
                     value: null,
-                    groupValue: _requiresElectronicPayment
-                        ? '__electronic_required__'
-                        : _selectedPaymentMethod,
-                    onChanged:
+                    enabled:
                         !_requiresElectronicPayment &&
-                            ((_paymentChannels['cash']?.available ?? false) ||
-                                (_paymentChannels['wallet']?.available ??
-                                    false))
-                        ? (value) =>
-                              setState(() => _selectedPaymentMethod = value)
-                        : null,
+                        ((_paymentChannels['cash']?.available ?? false) ||
+                            (_paymentChannels['wallet']?.available ?? false)),
                     secondary: const Icon(Icons.payments_outlined),
                     title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
                     subtitle: Text(
@@ -1788,6 +1776,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     icon: Icons.storefront_outlined,
                   ),
                 ],
+              ),
               ),
             ),
             const SizedBox(height: 16),

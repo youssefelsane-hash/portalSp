@@ -27,7 +27,7 @@ class SupportRepository {
     required String description,
   }) async {
     final data = await auth.authedRequest('POST', '/complaints', body: {
-      if (orderId != null) 'order_id': orderId,
+      'order_id': ?orderId,
       'category': category.apiValue,
       'title': title,
       'description': description,

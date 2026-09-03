@@ -23,11 +23,11 @@ class RatingsRepository {
   }) async {
     final data = await auth.authedRequest('POST', '/orders/$orderId/rate', body: {
       'overall_rating': overallRating,
-      if (punctualityRating != null) 'punctuality_rating': punctualityRating,
-      if (qualityRating != null) 'quality_rating': qualityRating,
-      if (professionalismRating != null) 'professionalism_rating': professionalismRating,
-      if (priceFairnessRating != null) 'price_fairness_rating': priceFairnessRating,
-      if (cleanlinessRating != null) 'cleanliness_rating': cleanlinessRating,
+      'punctuality_rating': ?punctualityRating,
+      'quality_rating': ?qualityRating,
+      'professionalism_rating': ?professionalismRating,
+      'price_fairness_rating': ?priceFairnessRating,
+      'cleanliness_rating': ?cleanlinessRating,
       if (comment != null && comment.isNotEmpty) 'comment': comment,
       if (afterPhotoMediaIds != null && afterPhotoMediaIds.isNotEmpty) 'after_photo_media_ids': afterPhotoMediaIds,
     });

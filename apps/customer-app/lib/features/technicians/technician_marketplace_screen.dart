@@ -210,11 +210,12 @@ class _TechnicianMarketplaceScreenState
   }
 
   Widget _buildBody() {
-    if (_loading)
+    if (_loading) {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: LoadingList(itemCount: 4),
       );
+    }
     if (_error != null) {
       return Padding(
         padding: const EdgeInsets.all(16),

@@ -25,7 +25,7 @@ Future<http.Response> _send(
   final headers = {
     'Content-Type': 'application/json',
     if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-    if (extraHeaders != null) ...extraHeaders,
+    ...?extraHeaders,
   };
 
   switch (method) {
