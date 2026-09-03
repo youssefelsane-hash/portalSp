@@ -78,11 +78,41 @@ export interface StalledRevisitExceptionItem {
   chargebackCents: number;
 }
 
+/**
+ * **المطابقة نفسها اتأخرت** — مش الفني.
+ *
+ * مختلف عمدًا عن `staleDispatch` فوق: ده بيقول «عرض معيّن فات معاده بلا رد» (سلوك فني)، وده
+ * بيقول «مهلة الجولة عدّت والمحرك ما فتحش الجولة اللي بعدها» (عطل في الـworkflow نفسه). خلطهم
+ * كان هيخفي أخطر الاتنين: عرض بلا رد حاجة طبيعية، ومحرك واقف حاجة تانية خالص.
+ */
+export interface MatchingWorkflowDelayedItem {
+  orderId: string;
+  orderNumber: string;
+  currentRound: number;
+  maxRounds: number;
+  /** المهلة اللي كان المفروض التوسيع يحصل عندها. */
+  expectedExpansionAt: string;
+  /** ثواني التأخير عن المهلة دي. */
+  delaySeconds: number;
+  techniciansContacted: number;
+}
+
 export interface AdminExceptionCenterResult {
   crewShortage: { items: CrewShortageExceptionItem[]; total: number };
   staleDispatch: { items: StaleDispatchExceptionItem[]; total: number };
   overdueOrders: { items: OverdueOrderExceptionItem[]; total: number };
   stalledRevisits: { items: StalledRevisitExceptionItem[]; total: number };
+  matchingWorkflowDelayed: { items: MatchingWorkflowDelayedItem[]; total: number };
+}
+
+interface RawWorkflowDelayedRow {
+  order_id: string;
+  order_number: string;
+  current_round: string;
+  technicians_contacted: string;
+  expected_expansion_at: string;
+  delay_seconds: string;
+  total_count: string;
 }
 
 interface RawOverdueOrderRow {
@@ -344,7 +374,66 @@ export class AdminExceptionCenterService {
       chargebackCents: Number(r.chargeback_cents ?? 0),
     }));
 
+    // **المطابقة اتأخرت** (Admin Operations Observability) — الطلب لسه بيدوّر، مهلة آخر جولة
+    // عدّت، ومفيش أي عرض في جولة أحدث. يعني المحرك كان المفروض يوسّع وما وسّعش.
+    //
+    // الشرط deterministic بالكامل من الداتابيز: مفيش تخمين ولا عتبة مخترعة — المهلة نفسها
+    // (`expires_at`) هي اللي المحرك كتبها، وإحنا بنقارنها بالساعة وبس.
+    //
+    // الجولة الأخيرة لو وصلت `matching.max_rounds` **مش** تأخير — دي مطابقة استنفدت، وليها
+    // معنى تاني خالص (مفيش فنيين، مش محرك واقف).
+    const maxRoundsForDelay = await this.settingsService.getNumber('matching.max_rounds', 4);
+    const workflowDelayedRows = await this.dataSource.query<RawWorkflowDelayedRow[]>(
+      `
+      WITH last_round AS (
+        SELECT oa.order_id,
+               MAX(oa.assignment_round) AS current_round,
+               COUNT(DISTINCT oa.technician_id) AS technicians_contacted
+        FROM order_assignments oa
+        GROUP BY oa.order_id
+      ),
+      due AS (
+        SELECT lr.order_id, lr.current_round, lr.technicians_contacted,
+               MAX(oa.expires_at) AS expected_expansion_at
+        FROM last_round lr
+        JOIN order_assignments oa
+          ON oa.order_id = lr.order_id AND oa.assignment_round = lr.current_round
+        GROUP BY lr.order_id, lr.current_round, lr.technicians_contacted
+      )
+      SELECT o.id AS order_id, o.order_number, d.current_round, d.technicians_contacted,
+             d.expected_expansion_at,
+             EXTRACT(EPOCH FROM (now() - d.expected_expansion_at))::int AS delay_seconds,
+             COUNT(*) OVER() AS total_count
+      FROM due d
+      JOIN orders o ON o.id = d.order_id
+      JOIN services s ON s.id = o.service_id
+      WHERE o.order_status = 'searching_technician'
+        AND o.deleted_at IS NULL
+        AND d.expected_expansion_at < now()
+        AND d.current_round < $3::int
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY d.expected_expansion_at ASC
+      LIMIT $4
+      `,
+      [categoryId, zoneId, maxRoundsForDelay, EXCEPTION_LIST_LIMIT],
+    );
+
+    const workflowDelayedItems: MatchingWorkflowDelayedItem[] = workflowDelayedRows.map((r) => ({
+      orderId: r.order_id,
+      orderNumber: r.order_number,
+      currentRound: Number(r.current_round),
+      maxRounds: maxRoundsForDelay,
+      expectedExpansionAt: r.expected_expansion_at,
+      delaySeconds: Number(r.delay_seconds),
+      techniciansContacted: Number(r.technicians_contacted),
+    }));
+
     return {
+      matchingWorkflowDelayed: {
+        items: workflowDelayedItems,
+        total: workflowDelayedRows.length > 0 ? Number(workflowDelayedRows[0].total_count) : 0,
+      },
       stalledRevisits: {
         items: stalledRevisitItems,
         total: stalledRevisitRows.length > 0 ? Number(stalledRevisitRows[0].total_count) : 0,
