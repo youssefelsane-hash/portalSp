@@ -11,6 +11,8 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMatchingFunnelDto,
+  OrderTraceDto,
+  OrderTraceResponseDto,
   OrderMediaResponseDto,
   OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
@@ -168,6 +170,104 @@ const QUOTE_SOURCE_LABELS: Record<string, string> = {
   technician_diagnosis: 'الفني — بعد التشخيص',
 };
 
+const TRACE_STATUS_LABELS: Record<string, string> = {
+  sent: 'مُرسل',
+  viewed: 'تمت المشاهدة',
+  accepted: 'مقبول',
+  rejected: 'مرفوض',
+  timeout: 'انتهت المهلة',
+  cancelled: 'ملغي',
+};
+
+const TRACE_NEXT_ACTION_LABELS: Record<OrderTraceDto['next_action'], string> = {
+  waiting_technician_response: 'مستني رد الفنيين',
+  expand_next_round: 'المفروض يوسّع لجولة جديدة',
+  matching_exhausted: 'الجولات خلصت بلا قبول',
+  assigned: 'اتعيّن على فني',
+  no_matching_required: 'مش في مرحلة بحث',
+};
+
+/** وقت قصير في سطر واحد — الجدول ده جوّه كارت، فالتاريخ الكامل بياخد عرض من غير فايدة. */
+function traceTime(value: string | null): string {
+  if (!value) return '—';
+  // بلا عزل ثنائي اتجاه عمدًا: `ar-EG` بيحقن RLM بين الأجزاء بنفسه وده اللي بيظبط العرض جوّه
+  // صفحة RTL؛ لفّه في `\u2066…\u2069` بيكسره (اتأكدت بتجربة عملية بمتصفح حقيقي).
+  return new Date(value).toLocaleString('ar-EG-u-nu-latn', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * جولات المطابقة للطلب — توسيع للعدّادات المسطّحة اللي فوقه في نفس الكارت، مش قسم منفصل.
+ *
+ * بيقرا `GET /admin/operations/order-traces/:id` (نفس `order_assignments`). صفر منطق مطابقة هنا.
+ */
+function OrderTraceRounds({ trace }: { trace: OrderTraceDto | null }) {
+  if (!trace || trace.rounds.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant="outline">
+          جولة {trace.current_round} من {trace.max_rounds}
+        </Badge>
+        <StatusChip tone={trace.next_action === 'expand_next_round' || trace.next_action === 'matching_exhausted' ? 'danger' : 'neutral'}>
+          {TRACE_NEXT_ACTION_LABELS[trace.next_action]}
+        </StatusChip>
+        {trace.delay_seconds > 0 && (
+          <span className="text-destructive">متأخر {Math.floor(trace.delay_seconds / 60)} دقيقة</span>
+        )}
+      </div>
+
+      {trace.rounds.map((round) => (
+        <div key={round.round}>
+          <p className="mb-1 text-xs text-muted-foreground">
+            جولة {round.round} — بدأت {traceTime(round.started_at)} · مهلة التوسيع {traceTime(round.expansion_due_at)}
+          </p>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>الفني</TableHead>
+                  <TableHead>الحالة</TableHead>
+                  <TableHead>اتبعت</TableHead>
+                  <TableHead>فتح العرض</TableHead>
+                  <TableHead>ردّ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {round.technicians.map((t) => (
+                  <TableRow key={t.assignment_id}>
+                    <TableCell className="text-xs">
+                      <Link href={`/technicians/${t.technician_id}`} className="hover:underline">
+                        {t.full_name}
+                      </Link>
+                      {t.distance_km !== null && (
+                        <span className="text-muted-foreground"> · {t.distance_km.toFixed(1)} كم</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {TRACE_STATUS_LABELS[t.status] ?? t.status}
+                      {t.rejection_reason_code && <div className="text-[10px] text-muted-foreground">{t.rejection_reason_code}</div>}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{traceTime(t.sent_at)}</TableCell>
+                    {/* الفرق بين «ما ردّش» و«ما فتحش أصلاً» (order_assignments.viewed_at، migration 0255). */}
+                    <TableCell className="whitespace-nowrap text-xs">{traceTime(t.viewed_at)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{traceTime(t.responded_at)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
@@ -273,6 +373,8 @@ export default function OrderDetailPage() {
   // (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. funnelError متوقّع/هادئ لطلبات بلا service_zone_id
   // (400 من الباك-إند نفسه — مش كل الطلبات القديمة عندها نطاق محدد).
   const [matchingFunnel, setMatchingFunnel] = useState<OrderMatchingFunnelDto | null>(null);
+  // تتبّع جولات المطابقة — نفس order_assignments اللي الفانل بيعدّها، بس مجمّعة بالجولة والفني.
+  const [orderTrace, setOrderTrace] = useState<OrderTraceDto | null>(null);
   const [funnelError, setFunnelError] = useState<string | null>(null);
   const [explainTechnicianId, setExplainTechnicianId] = useState('');
   const [explanation, setExplanation] = useState<TechnicianEligibilityExplanationDto | null>(null);
@@ -332,6 +434,10 @@ export default function OrderDetailPage() {
         setMatchingFunnel(null);
         setFunnelError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل فانل المطابقة');
       });
+    // جولات المطابقة للطلب ده — مسار منفصل عمداً: لو وقع، الفانل بعدّاداته بيفضل ظاهر.
+    authedFetch<OrderTraceResponseDto>(`/admin/operations/order-traces/${id}`)
+      .then(({ trace }) => setOrderTrace(trace))
+      .catch(() => setOrderTrace(null));
     // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
     authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
       .then(setInternalNotes)
@@ -1348,6 +1454,10 @@ export default function OrderDetailPage() {
                   {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
                   {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
                 </p>
+                {/* العدّادات فوق مسطّحة: «اتبعت 8» ما بتقولش لو دي جولة واحدة وصلت لـ8 ولا تلات
+                    جولات لسه بتوسّع، ولا مين منهم فتح العرض أصلاً. نفس البيانات بالظبط مقروءة
+                    بالجولة (GET /admin/operations/order-traces/:id) — مفيش استعلام تشخيصي جديد. */}
+                <OrderTraceRounds trace={orderTrace} />
               </div>
               {matchingFunnel.crew_recruit_opportunities && (
                 <div>

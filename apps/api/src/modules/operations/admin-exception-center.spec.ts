@@ -325,6 +325,104 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     expect(result.staleDispatch.items.find((i) => i.assignmentId === row.id)).toBeUndefined();
   });
 
+  // **المطابقة اتأخرت مقابل التوزيع المتأخر** — الاتنين بيقروا نفس الجدول، بس بيجاوبوا سؤالين
+  // مختلفين تمامًا: `staleDispatch` بيقول «عرض فات معاده بلا رد» (سلوك فني)، و
+  // `matchingWorkflowDelayed` بيقول «المحرك كان المفروض يفتح جولة جديدة وما فتحش» (عطل نظام).
+  // الاختبارات دي بتثبت إنهم فعلاً مش نفس الحاجة.
+  describe('المطابقة اتأخرت (workflow) مقابل التوزيع المتأخر (assignment)', () => {
+    async function seedSearchingOrderWithRound(round: number, expansionMinutesAgo: number) {
+      const tech = await insertTechnician(`wf${round}${expansionMinutesAgo}`);
+      const orderId = await insertTeamOrder({
+        leaderId: tech,
+        categoryId: ids.categoryA,
+        serviceId: ids.serviceA,
+        zoneId: ids.zoneA,
+        requiredTechnicians: 1,
+        requiredAssistants: 0,
+        escalated: false,
+        scheduledAgoHours: 1,
+        orderStatus: 'searching_technician',
+      });
+      const [row] = await q(
+        `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+         VALUES ($1,$2,$3,'sent', now() - interval '30 minutes', now() - ($4::text || ' minutes')::interval)
+         RETURNING id`,
+        [orderId, tech, round, expansionMinutesAgo],
+      );
+      assignmentIds.push(row.id);
+      return { orderId, tech };
+    }
+
+    it('مهلة الجولة عدّت ومفيش جولة جديدة → الطلب بيظهر كمطابقة متأخرة بمقدار التأخير', async () => {
+      const { orderId } = await seedSearchingOrderWithRound(1, 5);
+
+      const result = await service().getExceptions({ categoryId: ids.categoryA });
+      const item = result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId);
+
+      expect(item).toBeDefined();
+      expect(item!.currentRound).toBe(1);
+      // 5 دقايق ≈ 300 ثانية (بهامش للتنفيذ).
+      expect(item!.delaySeconds).toBeGreaterThanOrEqual(290);
+      expect(item!.techniciansContacted).toBe(1);
+    });
+
+    it('الجولة الأخيرة وصلت الحد الأقصى → **مش** تأخير، دي مطابقة استنفدت', async () => {
+      // الـstub بيرجّع الافتراضي 4 لأي إعداد، فجولة 4 = الحد الأقصى.
+      const { orderId } = await seedSearchingOrderWithRound(4, 5);
+
+      const result = await service().getExceptions({ categoryId: ids.categoryA });
+      expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+    });
+
+    it('المهلة لسه ما عدّتش → مفيش تأخير', async () => {
+      const tech = await insertTechnician('wffuture');
+      const orderId = await insertTeamOrder({
+        leaderId: tech,
+        categoryId: ids.categoryA,
+        serviceId: ids.serviceA,
+        zoneId: ids.zoneA,
+        requiredTechnicians: 1,
+        requiredAssistants: 0,
+        escalated: false,
+        scheduledAgoHours: 1,
+        orderStatus: 'searching_technician',
+      });
+      const [row] = await q(
+        `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+         VALUES ($1,$2,1,'sent', now(), now() + interval '10 minutes') RETURNING id`,
+        [orderId, tech],
+      );
+      assignmentIds.push(row.id);
+
+      const result = await service().getExceptions({ categoryId: ids.categoryA });
+      expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+    });
+
+    it('المحرك وسّع فعلاً (جولة 2 موجودة) → مفيش تأخير حتى لو مهلة جولة 1 عدّت', async () => {
+      const { orderId, tech } = await seedSearchingOrderWithRound(1, 20);
+      const tech2 = await insertTechnician('wfr2');
+      const [row] = await q(
+        `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+         VALUES ($1,$2,2,'sent', now(), now() + interval '10 minutes') RETURNING id`,
+        [orderId, tech2],
+      );
+      assignmentIds.push(row.id);
+      expect(tech).toBeTruthy();
+
+      const result = await service().getExceptions({ categoryId: ids.categoryA });
+      // الجولة الحالية بقت 2 ومهلتها لسه جاية — المحرك شغّال.
+      expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+    });
+
+    it('الطلب اللي اتقفل على فني مابيظهرش كتأخير حتى لو المهلة عدّت', async () => {
+      const { orderId } = await seedSearchingOrderWithRound(1, 15);
+      await q(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [orderId]);
+
+      const result = await service().getExceptions({ categoryId: ids.categoryA });
+      expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+    });
+  });
+
   it('فلتر category_id بيقصر الاتنين (crew_shortage/stale_dispatch) على فئة الطلب المرتبط بس', async () => {
     const leaderA = await insertTechnician('cat-a');
     const orderA = await insertTeamOrder({

@@ -44,8 +44,18 @@ export interface DispatchDeliveryRow {
   status: AssignmentStatus | WorkOpportunityStatus;
   context: WorkOpportunityContext | null;
   sentAt: string;
+  /** لحظة أول مشاهدة (migration 0255). null = ماتشافش، أو فرصة شغل (مالهاش مشاهدة). */
+  viewedAt: string | null;
   respondedAt: string | null;
+  /**
+   * **مهلة توسيع الجولة**، مش انتهاء صلاحية العرض.
+   *
+   * العرض بيفضل قابل للقبول بعد الوقت ده لحد ما فني تاني ياخد الطلب أو الفني ده يرفض صراحة —
+   * راجع `matching-round-expiry.processor.ts`. تسميته «منتهي» في أي واجهة غلط.
+   */
   expiresAt: string | null;
+  /** رقم جولة المطابقة. null لفرص الشغل (مالهاش جولات). */
+  assignmentRound: number | null;
   isStale: boolean;
   /** رقم الطلب الإنساني — الأدمن كان بيشوف "عرض الطلب" بس بلا أي هوية للطلب. */
   orderNumber: string;
@@ -64,8 +74,10 @@ interface RawRow {
   status: string;
   context: string | null;
   sent_at: string;
+  viewed_at: string | null;
   responded_at: string | null;
   expires_at: string | null;
+  assignment_round: number | null;
   is_stale: boolean;
   order_number: string;
   order_technician_count: string;
@@ -157,7 +169,7 @@ export class AdminDispatchDeliveryService {
       `
       WITH assignments_filtered AS (
         SELECT oa.id, oa.order_id, oa.technician_id, oa.assignment_status::text AS status,
-               oa.sent_at, oa.responded_at, oa.expires_at,
+               oa.sent_at, oa.viewed_at, oa.responded_at, oa.expires_at, oa.assignment_round,
                (oa.assignment_status IN ('sent', 'viewed') AND oa.expires_at < now()) AS is_stale
         FROM order_assignments oa
         JOIN orders o ON o.id = oa.order_id
@@ -178,15 +190,17 @@ export class AdminDispatchDeliveryService {
       ),
       feed AS (
         SELECT id, 'assignment'::text AS kind, order_id, technician_id, status, NULL::text AS context,
-               sent_at, responded_at, expires_at, is_stale
+               sent_at, viewed_at, responded_at, expires_at, assignment_round, is_stale
         FROM assignments_filtered
         UNION ALL
         SELECT id, 'work_opportunity'::text AS kind, order_id, technician_id, status, context,
-               sent_at, responded_at, NULL::timestamptz AS expires_at, false AS is_stale
+               sent_at, NULL::timestamptz AS viewed_at, responded_at, NULL::timestamptz AS expires_at,
+               NULL::smallint AS assignment_round, false AS is_stale
         FROM wo_filtered
       )
       SELECT f.id, f.kind, f.order_id, f.technician_id, tp.technician_code, u.full_name,
-             f.status, f.context, f.sent_at, f.responded_at, f.expires_at, f.is_stale,
+             f.status, f.context, f.sent_at, f.viewed_at, f.responded_at, f.expires_at,
+             f.assignment_round, f.is_stale,
              ord.order_number,
              -- "اتبعت لكام فني" على مستوى الطلب: فنيين **مختلفين** عبر كل الجولات وكل فرص الشغل،
              -- **بلا** قيد النافذة الزمنية للتبويب — السؤال إجماليّ عن الطلب نفسه، مش عن آخر N
@@ -221,8 +235,10 @@ export class AdminDispatchDeliveryService {
       status: r.status as AssignmentStatus | WorkOpportunityStatus,
       context: (r.context as WorkOpportunityContext | null) ?? null,
       sentAt: r.sent_at,
+      viewedAt: r.viewed_at,
       respondedAt: r.responded_at,
       expiresAt: r.expires_at,
+      assignmentRound: r.assignment_round === null ? null : Number(r.assignment_round),
       isStale: r.is_stale,
       orderNumber: r.order_number,
       orderTechnicianCount: Number(r.order_technician_count),

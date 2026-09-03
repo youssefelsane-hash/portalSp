@@ -1463,7 +1463,7 @@ export class MatchingService {
     if (rows.length > 0) {
       try {
         await this.dataSource.query(
-          `UPDATE order_assignments SET assignment_status = 'viewed'
+          `UPDATE order_assignments SET assignment_status = 'viewed', viewed_at = COALESCE(viewed_at, now())
             WHERE id = ANY($1::uuid[]) AND assignment_status = 'sent'`,
           [rows.map((r) => r.assignment_id)],
         );
