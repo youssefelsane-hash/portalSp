@@ -45,6 +45,13 @@ export class OrderAssignment {
   @Column({ name: 'sent_at', type: 'timestamptz' })
   sentAt: Date;
 
+  /**
+   * أول مشاهدة للعرض — بيتكتب مرة واحدة وماتتغيّرش بعدها (شرط `assignment_status = 'sent'` في
+   * الـUPDATE بيضمن ده بنيويًا). NULL للصفوف اللي اتعملت قبل migration 0255، أو اللي ماتشافتش.
+   */
+  @Column({ name: 'viewed_at', type: 'timestamptz', nullable: true })
+  viewedAt: Date | null;
+
   @Column({ name: 'responded_at', type: 'timestamptz', nullable: true })
   respondedAt: Date | null;
 

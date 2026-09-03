@@ -1463,7 +1463,9 @@ export class MatchingService {
     if (rows.length > 0) {
       try {
         await this.dataSource.query(
-          `UPDATE order_assignments SET assignment_status = 'viewed'
+          // `viewed_at` بيتكتب في نفس الـUPDATE: شرط `assignment_status = 'sent'` بيخلّي الصف
+          // مايتحدّثش تاني بعد أول مشاهدة، فالوقت ده **أول** مشاهدة مضمونة بنيويًا مش آخر واحدة.
+          `UPDATE order_assignments SET assignment_status = 'viewed', viewed_at = NOW()
             WHERE id = ANY($1::uuid[]) AND assignment_status = 'sent'`,
           [rows.map((r) => r.assignment_id)],
         );

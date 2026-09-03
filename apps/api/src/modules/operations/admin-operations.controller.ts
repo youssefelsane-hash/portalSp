@@ -143,6 +143,22 @@ export class AdminOperationsController {
         })),
         total: result.overdueOrders.total,
       },
+      // توسيع جولة مطابقة متأخر — الـengine نفسه واقف، مش مجرد عرض عدّى معاده. مختلف عن
+      // `stale_dispatch` تحته اللي بيولّع على سلوك طبيعي كمان (ADR-0018 §5).
+      matching_workflow_delayed: {
+        items: result.matchingWorkflowDelayed.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          order_status: i.orderStatus,
+          current_round: i.currentRound,
+          max_rounds: i.maxRounds,
+          technicians_contacted: i.techniciansContacted,
+          pending_responses: i.pendingResponses,
+          expected_action_at: i.expectedActionAt,
+          delay_seconds: i.delaySeconds,
+        })),
+        total: result.matchingWorkflowDelayed.total,
+      },
       crew_shortage: {
         items: result.crewShortage.items.map((i) => ({
           order_id: i.orderId,

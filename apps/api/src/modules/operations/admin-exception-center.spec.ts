@@ -108,6 +108,44 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     return row.id as string;
   }
 
+  /** طلب بيدوّر على فني بجولة معيّنة عدّى وقت توسيعها — الحالة اللي بنكشفها. */
+  async function insertSearchingOrderWithRound(opts: {
+    technicianId: string;
+    serviceId: string;
+    zoneId: string;
+    round: number;
+    expandsMinutesAgo: number;
+    /** لو true بنضيف جولة تالية — يعني الـworkflow اشتغل صح ومفيش تأخير. */
+    withNextRound?: boolean;
+  }) {
+    const [order] = await q(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+         payment_status, booking_mode, required_technicians, required_assistants, total_amount_cents,
+         technician_earning_cents, scheduled_at)
+       VALUES ($1,$2,$3,$4,$5,'searching_technician','pending','individual',1,0,50000,0, now() + interval '2 hours')
+       RETURNING id`,
+      [`TESTWF-${randomUUID().slice(0, 8)}`, ids.customerProfile, opts.serviceId, ids.address, opts.zoneId],
+    );
+    orderIds.push(order.id);
+    const [a] = await q(
+      `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+       VALUES ($1,$2,$3,'sent', now() - interval '30 minutes', now() - ($4::text || ' minutes')::interval)
+       RETURNING id`,
+      [order.id, opts.technicianId, opts.round, opts.expandsMinutesAgo],
+    );
+    assignmentIds.push(a.id);
+    if (opts.withNextRound) {
+      const [next] = await q(
+        `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+         VALUES ($1,$2,$3,'sent', now() - interval '1 minute', now() + interval '9 minutes')
+         RETURNING id`,
+        [order.id, opts.technicianId, opts.round + 1],
+      );
+      assignmentIds.push(next.id);
+    }
+    return order.id as string;
+  }
+
   beforeAll(async () => {
     dataSource = new DataSource({ type: 'postgres', url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak' });
     await dataSource.initialize();
@@ -354,4 +392,64 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     expect(orderIdsInResult).toContain(orderA);
     expect(orderIdsInResult).not.toContain(orderB);
   });
+
+  // ── توسيع جولة مطابقة متأخر (طبقة رؤية العمليات) ──────────────────────────
+  // الفرق الجوهري عن `stale_dispatch` فوق: ده بيولّع بس لما الـengine **فعليًا** ما نفّذش
+  // الخطوة التالية — مش لمجرد إن عرض عدّى معاده (وده سلوك طبيعي، ADR-0018 §5).
+
+  it('عدّى وقت التوسيع والجولة الجاية ما اتعملتش ⇒ يظهر كـworkflow متأخر بمقدار التأخير', async () => {
+    const tech = await insertTechnician('WF1');
+    const orderId = await insertSearchingOrderWithRound({
+      technicianId: tech,
+      serviceId: ids.serviceA,
+      zoneId: ids.zoneA,
+      round: 1,
+      expandsMinutesAgo: 5,
+    });
+
+    const result = await service().getExceptions({ categoryId: ids.categoryA });
+    const item = result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId);
+
+    expect(item).toBeDefined();
+    expect(item?.currentRound).toBe(1);
+    expect(item?.pendingResponses).toBe(1);
+    expect(item?.techniciansContacted).toBe(1);
+    // 5 دقايق تأخير — أكبر بكتير من مهلة السماح (60 ثانية).
+    expect(item?.delaySeconds).toBeGreaterThanOrEqual(240);
+  });
+
+  it('الجولة الجاية اتعملت في ميعادها ⇒ مفيش تأخير، رغم إن العرض القديم لسه عدّى معاده', async () => {
+    const tech = await insertTechnician('WF2');
+    const orderId = await insertSearchingOrderWithRound({
+      technicianId: tech,
+      serviceId: ids.serviceA,
+      zoneId: ids.zoneA,
+      round: 1,
+      expandsMinutesAgo: 5,
+      withNextRound: true,
+    });
+
+    const result = await service().getExceptions({ categoryId: ids.categoryA });
+
+    expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+    // وده بالظبط الفرق: نفس الطلب **بيظهر** في stale_dispatch القديم رغم إن الـworkflow سليم.
+    expect(result.staleDispatch.items.some((i) => i.orderId === orderId)).toBe(true);
+  });
+
+  it('وصل سقف الجولات ⇒ مش «متأخر» — ده وضع نهائي محتاج تدخّل مش بطء في الـengine', async () => {
+    const tech = await insertTechnician('WF3');
+    const orderId = await insertSearchingOrderWithRound({
+      technicianId: tech,
+      serviceId: ids.serviceA,
+      zoneId: ids.zoneA,
+      // الـstub بيرجّع الـfallback (4) لـmatching.max_rounds.
+      round: 4,
+      expandsMinutesAgo: 90,
+    });
+
+    const result = await service().getExceptions({ categoryId: ids.categoryA });
+    expect(result.matchingWorkflowDelayed.items.find((i) => i.orderId === orderId)).toBeUndefined();
+  });
+
+
 });
