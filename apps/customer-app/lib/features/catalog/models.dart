@@ -84,6 +84,15 @@ class CatalogService {
   final String pricingModel;
   final int basePriceCents;
   final int inspectionFeeCents;
+  // ── سياسة التقييم والمعاينة (docs/08 §124) ────────────────────────────────────────────────
+  // الأعلام دي كانت موجودة في الباك-إند وفي لوحة الأدمن **بس** — التطبيق مكانش بياخدها خالص،
+  // فكان بيعرض «ابعت صور» لأي خدمة معاينة-ثم-سعر حتى لو الأدمن قافل التقييم بالصور. العميل
+  // يرفع صور والباك-إند يرفض: طريق مسدود. دلوقتي التطبيق بيقرا نفس القواعد اللي الأدمن ظبطها.
+  final String priceCertaintyMode;
+  final String assessmentRoutePolicy;
+  final bool remoteAssessmentEnabled;
+  final bool onsiteAssessmentEnabled;
+  final int remoteAssessmentFeeCents;
   final String? unitNameAr;
   final double? quantityMin;
   final double? quantityMax;
@@ -125,6 +134,11 @@ class CatalogService {
     this.featuredIconUrl,
     this.featuredNameAr,
     required this.pricingModel,
+    this.priceCertaintyMode = 'confirmed_price',
+    this.assessmentRoutePolicy = 'admin_triage',
+    this.remoteAssessmentEnabled = false,
+    this.onsiteAssessmentEnabled = false,
+    this.remoteAssessmentFeeCents = 0,
     required this.basePriceCents,
     required this.inspectionFeeCents,
     this.unitNameAr,
@@ -157,6 +171,11 @@ class CatalogService {
     pricingModel: json['pricing_model'] as String,
     basePriceCents: json['base_price_cents'] as int,
     inspectionFeeCents: json['inspection_fee_cents'] as int,
+    priceCertaintyMode: json['price_certainty_mode'] as String? ?? 'confirmed_price',
+    assessmentRoutePolicy: json['assessment_route_policy'] as String? ?? 'admin_triage',
+    remoteAssessmentEnabled: json['remote_assessment_enabled'] as bool? ?? false,
+    onsiteAssessmentEnabled: json['onsite_assessment_enabled'] as bool? ?? false,
+    remoteAssessmentFeeCents: json['remote_assessment_fee_cents'] as int? ?? 0,
     unitNameAr: json['unit_name_ar'] as String?,
     quantityMin: (json['quantity_min'] as num?)?.toDouble(),
     quantityMax: (json['quantity_max'] as num?)?.toDouble(),

@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../design/app_motion.dart';
+import 'assessment_route.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -167,9 +168,33 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool _uploadingProblemImages = false;
   bool _requestRemoteQuote = false;
 
-  bool get _canRequestRemoteQuote =>
-      widget.service.pricingModel == 'inspection_then_quote' &&
-      widget.bookingMode != BookingMode.emergency;
+  // المسارات المتاحة فعلاً حسب إعدادات الأدمن — نفس قواعد الباك-إند بالحرف
+  // (assessment-route-guard.ts). قبل كده الشرط كان `pricingModel == inspection_then_quote`
+  // وبس، فالتطبيق كان بيعرض رفع الصور لخدمة الأدمن قافل فيها التقييم بالصور، والعميل يرفع
+  // ويترفض عند الإنشاء: طريق مسدود (بلاغ مالك، docs/08 §124).
+  AssessmentRoutes get _routes => AssessmentRoutes.forService(widget.service);
+
+  /// الطوارئ مستثناة من التقييم بالصور: مفيش وقت لدورة مراجعة إدارة في طلب عاجل.
+  bool get _remoteRouteAvailable =>
+      _routes.remote && widget.bookingMode != BookingMode.emergency;
+
+  bool get _onsiteRouteAvailable => _routes.onsite;
+
+  /// خدمة مسارها الوحيد المتاح هو الصور — العميل مايقدرش يحجز معاينة، فالاختيار مش اختيار.
+  bool get _remoteRouteForced => _remoteRouteAvailable && !_onsiteRouteAvailable;
+
+
+  /// رسم التقييم بالصور — بيتحصّل وقت إرسال الصور، فلازم العميل يشوفه **قبل** ما يبعت.
+  /// كان مخفي تمامًا عن العميل (الحقل مكانش بيوصل التطبيق أصلاً)، فلو الأدمن حاطط رسم،
+  /// الباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم» والعميل مش فاهم رسم إيه.
+  String get _remoteFeeSuffix => widget.service.remoteAssessmentFeeCents > 0
+      ? ' — رسم التقييم ${_formatEgp(widget.service.remoteAssessmentFeeCents)}'
+      : '';
+
+  /// لما مسار الصور هو الوحيد المتاح، الطلب لازم يتبعت كطلب تقييم بالصور — مش كطلب معاينة.
+  /// بعد إصلاح خرق `remote_only` في الباك-إند، طلب المعاينة لخدمة زي دي بيترفض صراحة، فلو
+  /// التطبيق ساب الاختيار مقفول كان هيبعت طلب مرفوض حتمًا.
+  bool get _effectiveRemoteQuote => _remoteRouteForced ? true : _requestRemoteQuote;
 
   Future<void> _pickProblemImages() async {
     if (_uploadingProblemImages || _problemImages.length >= 10) return;
@@ -776,10 +801,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       ?.toUtc()
                       .toIso8601String(),
             fieldValues: _showsDynamicForm ? _fieldValues : null,
-            promoCode: _requestRemoteQuote ? null : _promoCodeToSend,
-            buildingCode: _requestRemoteQuote ? null : _buildingCodeToSend,
-            addonIds: _requestRemoteQuote ? null : _selectedAddonIds.toList(),
-            warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
+            promoCode: _effectiveRemoteQuote ? null : _promoCodeToSend,
+            buildingCode: _effectiveRemoteQuote ? null : _buildingCodeToSend,
+            addonIds: _effectiveRemoteQuote ? null : _selectedAddonIds.toList(),
+            warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
             standardDataId: _selectedStandardData?.id,
             requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
           );
@@ -814,11 +839,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
-    if (!_requestRemoteQuote && _pricePreview == null) {
+    if (!_effectiveRemoteQuote && _pricePreview == null) {
       setState(() => _error = 'استنى لحد ما السعر يتحسب');
       return;
     }
-    if (_requestRemoteQuote && _problemImages.isEmpty) {
+    if (_effectiveRemoteQuote && _problemImages.isEmpty) {
       setState(
         () => _error = 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر',
       );
@@ -858,23 +883,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()
             : null,
         problemDescription: _descriptionController.text.trim(),
-        promoCode: _requestRemoteQuote ? '' : _promoCodeToSend,
-        buildingCode: _requestRemoteQuote ? '' : _buildingCodeToSend,
-        addonIds: _requestRemoteQuote ? const [] : _selectedAddonIds.toList(),
+        promoCode: _effectiveRemoteQuote ? '' : _promoCodeToSend,
+        buildingCode: _effectiveRemoteQuote ? '' : _buildingCodeToSend,
+        addonIds: _effectiveRemoteQuote ? const [] : _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _showsDynamicForm ? _fieldValues : null,
         problemImageIds: _problemImages.map((item) => item.id).toList(),
-        requestRemoteQuote: _requestRemoteQuote,
+        requestRemoteQuote: _effectiveRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         paymentMethod:
-            _requestRemoteQuote || _selectedPaymentMethod == 'installment'
+            _effectiveRemoteQuote || _selectedPaymentMethod == 'installment'
             ? null
             : _selectedPaymentMethod,
-        warrantyPlanId: _requestRemoteQuote ? null : _selectedWarrantyPlanId,
+        warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
-        repeatFrequency: _requestRemoteQuote
+        repeatFrequency: _effectiveRemoteQuote
             ? null
             : (_canRepeat ? _repeatFrequency : null),
         idempotencyKey: _orderIdempotencyKey,
@@ -1424,36 +1449,92 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 _uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور',
               ),
             ),
-            if (_canRequestRemoteQuote) ...[
-              const SizedBox(height: 10),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: SwitchListTile(
-                  value: _requestRemoteQuote,
-                  onChanged: _problemImages.isEmpty
-                      ? null
-                      : (value) => setState(() {
-                          _requestRemoteQuote = value;
-                          if (value) {
-                            _selectedAddonIds.clear();
-                            _codeController.clear();
-                            _resolvedCodeKind = null;
-                            _selectedWarrantyPlanId = null;
-                            _repeatFrequency = null;
-                            _selectedPaymentMethod = null;
-                          }
-                        }),
-                  title: const Text('خلّي الإدارة تحدد السعر من الصور'),
-                  subtitle: Text(
-                    _problemImages.isEmpty
-                        ? 'ارفع صورة واحدة على الأقل لتفعيل الاختيار'
-                        : 'هتستلم عرض سعر، وتقدر توافق أو ترفض قبل ما نرسل فني.',
-                  ),
-                  secondary: const Icon(Icons.request_quote_outlined),
-                ),
+            // ── اختيار مسار التقييم (docs/08 §124) ──────────────────────────────────────
+            // قبل كده كان switch واحد «خلّي الإدارة تحدد السعر من الصور»، وحالته المقفولة
+            // كانت **ضمنيًا** معاينة في الموقع من غير ما حاجة تقول كده — فالمالك قال بالحرف
+            // «مش عارف إن أعمل معاينة لوحدها». دلوقتي المسارين مسمّيين صراحة، وبيظهر منهم
+            // اللي سياسة الأدمن سامحة بيه بس.
+            if (_remoteRouteAvailable || _onsiteRouteAvailable) ...[
+              const SizedBox(height: 16),
+              Text(
+                'إزاي نحدد السعر؟',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
+              const SizedBox(height: 8),
+              if (_remoteRouteAvailable && _onsiteRouteAvailable)
+                RadioGroup<bool>(
+                  groupValue: _requestRemoteQuote,
+                  onChanged: (value) {
+                    if (value == null) return;
+                    // منع اختيار مسار الصور قبل رفع صورة: الباك-إند بيرفض بلا صور،
+                    // فأحسن نمنع الاختيار بدل ما العميل يوصل لرسالة خطأ.
+                    if (value && _problemImages.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('ارفع صورة واحدة على الأقل الأول')),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _requestRemoteQuote = value;
+                      if (value) {
+                        _selectedAddonIds.clear();
+                        _codeController.clear();
+                        _resolvedCodeKind = null;
+                        _selectedWarrantyPlanId = null;
+                        _repeatFrequency = null;
+                        _selectedPaymentMethod = null;
+                      }
+                    });
+                  },
+                  child: Card(
+                    child: Column(
+                      children: [
+                        RadioListTile<bool>(
+                          value: true,
+                          title: const Text('الإدارة تحدد السعر من الصور'),
+                          subtitle: Text(
+                            _problemImages.isEmpty
+                                ? 'ارفع صورة واحدة على الأقل الأول$_remoteFeeSuffix'
+                                : 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني$_remoteFeeSuffix',
+                          ),
+                          secondary: const Icon(Icons.photo_camera_outlined),
+                        ),
+                        RadioListTile<bool>(
+                          value: false,
+                          title: const Text('معاينة في الموقع'),
+                          subtitle: Text(
+                            'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
+                            '${_formatEgp(widget.service.inspectionFeeCents)}',
+                          ),
+                          secondary: const Icon(Icons.home_repair_service_outlined),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                // مسار واحد متاح — بيتعرض كمعلومة، مش كاختيار وهمي.
+                Card(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: ListTile(
+                    leading: Icon(
+                      _remoteRouteAvailable
+                          ? Icons.photo_camera_outlined
+                          : Icons.home_repair_service_outlined,
+                    ),
+                    title: Text(
+                      _remoteRouteAvailable ? 'الإدارة تحدد السعر من الصور' : 'معاينة في الموقع',
+                    ),
+                    subtitle: Text(
+                      _remoteRouteAvailable
+                          ? 'الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر$_remoteFeeSuffix'
+                          : 'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
+                                '${_formatEgp(widget.service.inspectionFeeCents)}',
+                    ),
+                  ),
+                ),
             ],
-            if (_addons.isNotEmpty && !_requestRemoteQuote) ...[
+            if (_addons.isNotEmpty && !_effectiveRemoteQuote) ...[
               const SizedBox(height: 16),
               Text(
                 'إضافات اختيارية',
@@ -1485,9 +1566,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            if (!_requestRemoteQuote) const SizedBox(height: 16),
+            if (!_effectiveRemoteQuote) const SizedBox(height: 16),
             // حقل كود واحد (docs/08 §77-B4) — شوف تعليق `_codeController` للسبب الكامل.
-            if (!_requestRemoteQuote)
+            if (!_effectiveRemoteQuote)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
