@@ -782,14 +782,17 @@ export class InspectionQuoteService {
       if (isDiagnosisRevision && deltaCents < 0) {
         // التخفيض اتمنع وقت الإرسال لو الطلب مدفوع؛ الطلب غير المدفوع بيتصحّح سعره كاملاً بدل
         // ما يتزوّد بفرق سالب (increasePrice بترفض السالب أصلاً وده مقصود).
+        //
+        // بَقّة مالية حقيقية (بلاغ مالك 2026-09-03): كان بعد النداء ده سطر بيعدّل
+        // `commissionable_base_cents` بنفس الفرق تاني — و`replaceUncommittedPrice` بتعدّله من
+        // جوّاها أصلاً، فالفرق كان **بيتطبّق مرتين** وينزّل الوعاء لصفر (Math.max(0, …)). ووعاء
+        // بصفر معناه `technician_earning = base - عمولة(base) = 0`، فالفني كان بيشوف «مستحقك
+        // أنت: 0» على طلب سعره شغّال. مصدر واحد لتعديل الوعاء = الخدمة المالية، وبس.
         await this.orderFinancials.replaceUncommittedPrice(
           manager,
           order,
           order.totalAmountCents + deltaCents,
         );
-        if (order.commissionableBaseCents !== null) {
-          order.commissionableBaseCents = Math.max(0, order.commissionableBaseCents + deltaCents);
-        }
       } else {
         await this.orderFinancials.increasePrice(manager, order, {
           amountCents: deltaCents,

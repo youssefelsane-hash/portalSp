@@ -175,4 +175,68 @@ void main() {
     expect(order.hasOnlinePayment, isFalse);
     expect(order.totalAmountCents, isNull);
   });
+
+  // بلاغ مالك (2026-09-03): «مستحقك أنت زيرو» على طلب سعره شغّال. جزء من السبب كان في التطبيق
+  // نفسه — `?? 0` على حقل **غايب** بيحوّل «ما وصلنيش الرقم» لـ«الرقم صفر»، والاتنين مختلفين
+  // تمامًا بالنسبة للفني. الردود العامة (OrderResponseDto) مالهاش الحقول دي أصلاً.
+  test('رد بلا العقد المالي للفني: الأرقام مش بتتقال كصفر، بتتقال كـ«لسه بتتحدّث»', () {
+    final order = Order.fromJson({
+      'id': 'order-2',
+      'order_number': 'ORD-6201',
+      'order_status': 'in_progress',
+      'problem_description': null,
+      'total_amount_cents': 50000,
+      'payment_status': 'pending',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.hasMoneyView, isFalse);
+    expect(
+      technicianEarningLabel(
+        myEarningCents: order.myEarningCents,
+        earningPending: order.earningPending,
+        isCrewShare: order.isCrewShare,
+        formatEgp: (c) => '${c ~/ 100} ج.م',
+        hasMoneyView: order.hasMoneyView,
+      ),
+      'نصيبك: بنحدّث الرقم…',
+    );
+    expect(
+      technicianCashStatusLabel(
+        cashToCollectCents: order.cashToCollectCents,
+        cashCollectedCents: order.cashCollectedCents,
+        hasOnlinePayment: order.hasOnlinePayment,
+        fullyPaidOnline: order.fullyPaidOnline,
+        isCrewShare: order.isCrewShare,
+        formatEgp: (c) => '${c ~/ 100} ج.م',
+        hasMoneyView: order.hasMoneyView,
+      ),
+      'التحصيل من العميل: بنحدّث الرقم…',
+    );
+  });
+
+  test('رد فيه العقد المالي: الأرقام بتتعرض عادي', () {
+    final order = Order.fromJson({
+      'id': 'order-3',
+      'order_number': 'ORD-6202',
+      'order_status': 'in_progress',
+      'problem_description': null,
+      'cash_to_collect_cents': 500000,
+      'my_earning_cents': 400000,
+      'payment_status': 'pending',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.hasMoneyView, isTrue);
+    expect(
+      technicianEarningLabel(
+        myEarningCents: order.myEarningCents,
+        earningPending: order.earningPending,
+        isCrewShare: order.isCrewShare,
+        formatEgp: (c) => '${c ~/ 100} ج.م',
+        hasMoneyView: order.hasMoneyView,
+      ),
+      'نصيبك: 4000 ج.م',
+    );
+  });
 }
