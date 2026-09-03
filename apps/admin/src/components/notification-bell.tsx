@@ -39,7 +39,7 @@ const POLL_INTERVAL_MS = 60_000;
  * (push/email) محتاجاه كامل.
  */
 export function NotificationBell() {
-  const { authedFetch, authedFetchPaginated } = useAuth();
+  const { authedFetch, authedFetchPaginated, isLoading } = useAuth();
   const router = useRouter();
   const [items, setItems] = useState<AdminNotification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -70,14 +70,19 @@ export function NotificationBell() {
 
   // التحميل الأول والتحديث الدوري الاتنين بيتنفذوا من نفس المؤقّت (النظام الخارجي)، مش من جسم
   // الـeffect — نداء setState مباشرة جوّه الـeffect بيعمل cascading renders (react-hooks/set-state-in-effect).
+  //
+  // `isLoading` شرط مش تجميل: الجرس بيتركّب مع القشرة قبل ما استعادة الجلسة تخلص، فكان بيضرب
+  // الـAPI بلا توكن ويرجع 401 (اتلقط بالمتصفح، مش نظريًا). الخطأ متبلوع فالجرس كان بيفضل فاضي
+  // لحد الدورة اللي بعدها — دقيقة كاملة من غير إشعارات بعد كل فتح صفحة.
   useEffect(() => {
+    if (isLoading) return;
     const first = setTimeout(() => void load(), 0);
     const timer = setInterval(() => void load(), POLL_INTERVAL_MS);
     return () => {
       clearTimeout(first);
       clearInterval(timer);
     };
-  }, [load]);
+  }, [isLoading, load]);
 
   async function openNotification(notification: AdminNotification) {
     setOpen(false);
