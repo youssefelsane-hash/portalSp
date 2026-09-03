@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -18,9 +18,18 @@ export interface ListProgressionStatusParams {
   perPage: number;
 }
 
+// مقاييس الترقية كلها "طول العمر" (all-time) وبتتحرك ببطء، فكل 6 ساعات أكتر من كفاية — الهدف
+// إن الشاشة تبقى حيّة مش إنها تبقى لحظية.
+const PROGRESSION_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// أول تشغيل بعد الإقلاع بدقيقة: نشر جديد أو قاعدة فاضية بتتملي من غير ما حد يستنى 6 ساعات.
+const PROGRESSION_FIRST_RUN_DELAY_MS = 60_000;
+
 @Injectable()
-export class TechnicianProgressionService {
+export class TechnicianProgressionService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TechnicianProgressionService.name);
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private firstRunTimer: ReturnType<typeof setTimeout> | null = null;
+  private sweepRunning = false;
 
   constructor(
     @InjectRepository(TechnicianProgressionRule) private readonly rules: Repository<TechnicianProgressionRule>,
@@ -31,6 +40,57 @@ export class TechnicianProgressionService {
     private readonly auditLog: AuditLogService,
     private readonly notifications: NotificationsService,
   ) {}
+
+  /**
+   * **فجوة حقيقية اتقفلت (docs/08 §126)**: `calculateAll()` كانت **مالهاش أي مُشغّل تلقائي خالص** —
+   * لا cron ولا interval ولا listener. المدخل الوحيد كان `POST /admin/technician-progression/calculate`.
+   *
+   * لكن `getTechnicianSummary()` (اللي `GET /technician/progression` بينادي عليها) بتقرا **صف
+   * محفوظ** من `technician_progression_status`. يعني من غير الضغطة اليدوية دي الصف مش موجود
+   * أصلاً، والفني بيشوف شاشة تقدّم فاضية **للأبد** مهما نفّذ شغل. اتأكد على قاعدة التطوير:
+   * 66 فني معتمد، **صفر صف تقدّم**.
+   *
+   * ليه الجدولة دي آمنة ومش تغيير سلوك منتج: `calculateAll()` بتحسب الأهلية والتقدّم بس، والترقية
+   * الفعلية بتحصل **لو وبس لو** `rule.auto_promote = true` — وهي `false` على كل القواعد الأربعة
+   * الحالية، والقيمة دي قرار أدمن أصلاً مش قرارنا. يعني الجدولة بتخلي إعداد موجود يشتغل فعلاً
+   * بدل ما يفضل ميّت، من غير ما تغيّر مستوى أي فني ولا سعر أي خدمة.
+   *
+   * `setInterval` مش BullMQ — نفس قرار `RecurringOrdersService`/`OrderAutoCancelService` بالحرف
+   * (بَقّة تعافي الـWorker بعد انقطاع Redis طويل، موثّقة في `technicians/README.md`).
+   */
+  onModuleInit(): void {
+    this.firstRunTimer = setTimeout(() => void this.runScheduledSweep(), PROGRESSION_FIRST_RUN_DELAY_MS);
+    this.firstRunTimer.unref?.();
+    this.timer = setInterval(() => void this.runScheduledSweep(), PROGRESSION_SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+    if (this.firstRunTimer) clearTimeout(this.firstRunTimer);
+  }
+
+  /**
+   * غلاف الجدولة: بيمنع التداخل لو دورة اتأخرت، وبيبلع أي استثناء بدل ما يفرتك الـprocess —
+   * تقييم الترقية مالوش أي أثر على عملية جارية لمستخدم حقيقي، فالفشل هنا لوج وبس.
+   */
+  private async runScheduledSweep(): Promise<void> {
+    if (this.sweepRunning) {
+      this.logger.warn('دورة تقييم الترقية السابقة لسه شغالة — بنعدّي الدورة دي');
+      return;
+    }
+    this.sweepRunning = true;
+    try {
+      const { evaluated, autoPromoted } = await this.calculateAll();
+      if (evaluated > 0) {
+        this.logger.log(`تقييم ترقية مجدول: ${evaluated} فني اتقيّم، ${autoPromoted} ترقية آلية`);
+      }
+    } catch (err) {
+      this.logger.error('فشل تقييم الترقية المجدول', err instanceof Error ? err.stack : err);
+    } finally {
+      this.sweepRunning = false;
+    }
+  }
 
   // ── إعدادات القواعد ──────────────────────────────────────────────
   listRules(): Promise<TechnicianProgressionRule[]> {
