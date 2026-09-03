@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 // معنى واحد ثابت عبر كل الصفحات (نجاح=أخضر، تحذير=كهرماني، خطر=أحمر، معلومة=أزرق، محايد=رمادي)،
 // بدل ما كل صفحة تختار ألوان Badge افتراضية عشوائيًا (كان معظم الحالات بتظهر بنفس لون primary
 // الأزرق بغض النظر عن معناها — "ملغي" و"مكتمل" بنفس اللون بالظبط).
-const statusChipVariants = cva('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap', {
+const statusChipVariants = cva('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium w-fit whitespace-nowrap transition-colors', {
   variants: {
     tone: {
       success: 'bg-success-bg text-success',

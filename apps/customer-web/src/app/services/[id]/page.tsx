@@ -17,6 +17,7 @@ import {
   type BookingMatchPreviewDto,
 } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
+import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
@@ -420,7 +421,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         ].map((s) => (
           <li key={s.n} className="flex flex-1 items-center gap-2">
             <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
                 step === s.n
                   ? 'bg-primary text-primary-foreground'
                   : step > s.n
@@ -430,7 +431,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             >
               {step > s.n ? '✓' : s.n}
             </span>
-            <span className={`truncate ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
+            <span className={`truncate transition-colors duration-200 ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
               {s.label}
             </span>
           </li>
@@ -442,7 +443,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           يختار النهارده. */}
 
       {step === 1 && needsSchedule && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">الموعد</h2>
           <div className="flex gap-2">
             <button
@@ -521,7 +522,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
           <div className="space-y-4">
             {pricingFields
@@ -541,7 +542,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6">
+      <section className="motion-rise mt-6">
         <h2 className="mb-3 font-semibold">العنوان</h2>
         {addresses === null ? (
           <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
@@ -603,7 +604,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 3 && selectedAddressId && !requestRemoteQuote && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
@@ -683,7 +684,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           )}
 
           {technicianChoiceMode === 'manual' && (
-            <div className="mt-3 space-y-2">
+            <div className="motion-list mt-3 space-y-2">
               {technicians === null ? (
                 <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
               ) : technicians.length === 0 ? (
@@ -721,7 +722,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
       {step === 2 && !requestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
             {(
@@ -751,7 +752,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6">
+      <section className="motion-rise mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
           value={problemDescription}
@@ -765,7 +766,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+      <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
         <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
         {problemImages.length > 0 && (
@@ -853,7 +854,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && !requestRemoteQuote && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
           <input
             value={promoCode}
@@ -866,7 +867,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && !requestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
-        <section className="mt-6">
+        <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex gap-2">
             <button
@@ -888,7 +889,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
           مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
       {step === 2 && postpaidPolicies.length > 0 && (
-        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+        <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">شروط الدفع</h2>
           {postpaidPolicies.map((policy) => {
             const checked = acceptedPolicyVersions.has(policy.currentVersionId);
@@ -922,18 +923,22 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       <section className="mt-8 rounded-xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between">
           <span className="text-muted">{requestRemoteQuote ? 'السعر' : 'السعر المتوقع'}</span>
-          <span className="text-xl font-bold text-primary">
-            {requestRemoteQuote
-              ? 'الإدارة هتحدده من الصور'
-              : activePreview
-                ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
-                  formatEgp(activePreview.pricing.total_amount_cents)
-                : estimating
-                  ? '...'
-                  : totalCents !== null
-                    ? formatEgp(totalCents)
-                    : 'يتحدد بعد المعاينة'}
-          </span>
+          {/* بيومض عند كل تغيّر — العميل يعرف إن اختياره أثّر في السعر من غير ما يدوّر (§122). */}
+          <LiveAmount
+            className="text-xl font-bold text-primary"
+            value={
+              requestRemoteQuote
+                ? 'الإدارة هتحدده من الصور'
+                : activePreview
+                  ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
+                    formatEgp(activePreview.pricing.total_amount_cents)
+                  : estimating
+                    ? '...'
+                    : totalCents !== null
+                      ? formatEgp(totalCents)
+                      : 'يتحدد بعد المعاينة'
+            }
+          />
         </div>
         {/* بند 10 — النطاق التقديري بنفس صياغة customer-app بالحرف (Web/Flutter parity).
             الأرقام من **حقول العرض** مش من min/max_price_cents: دول حدود قصّ للمحرك، وعرضهم
@@ -1294,7 +1299,7 @@ function IndividualCard({
   const conflicted = t.availability_status === 'schedule_conflicted';
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${
+      className={`motion-rise motion-press flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
         selected ? 'border-primary bg-primary/5' : 'border-border'
       } ${conflicted ? 'opacity-70' : ''}`}
     >
@@ -1354,7 +1359,7 @@ function CompanyCard({
 }) {
   return (
     <label
-      className={`block cursor-pointer overflow-hidden rounded-xl border-2 ${
+      className={`motion-rise motion-press block cursor-pointer overflow-hidden rounded-xl border-2 transition-colors ${
         selected ? 'border-primary' : 'border-primary/40'
       }`}
     >

@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/app_motion.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
@@ -583,9 +584,16 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in activeOrders) ...[
-            _ActiveOrderCard(
-              order: order,
-              onTap: () => _openActiveOrder(order),
+            // docs/08 §122 — الكارت بيدخل بحركة خفيفة بدل ما يظهر فجأة. الشاشة دي
+            // بتتحدّث لحظيًا، فشغلانة جديدة كانت بتنطّ في نص القايمة بلا أي إشارة
+            // إنها **جديدة**. الـValueKey هو اللي بيخلّي الكارت الجديد يتركّب من
+            // أول وجديد فالحركة تشتغل له هو بس — مش لكل القايمة في كل تحديث.
+            MotionReveal(
+              key: ValueKey('active-${order.id}'),
+              child: _ActiveOrderCard(
+                order: order,
+                onTap: () => _openActiveOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -600,10 +608,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in overdue) ...[
-            _OverdueJobCard(
-              order: order,
-              dayLabel: formatScheduledDayAr(order.scheduledAt),
-              onTap: () => _openUpcomingOrder(order),
+            MotionReveal(
+              key: ValueKey('overdue-${order.id}'),
+              child: _OverdueJobCard(
+                order: order,
+                dayLabel: formatScheduledDayAr(order.scheduledAt),
+                onTap: () => _openUpcomingOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -621,11 +632,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in emergencyPending) ...[
-            _EmergencyRequestCard(
-              order: order,
-              busy: _isActing,
-              onAccept: () => _accept(order),
-              onReject: () => _reject(order),
+            MotionReveal(
+              key: ValueKey('emergency-${order.assignmentId}'),
+              child: _EmergencyRequestCard(
+                order: order,
+                busy: _isActing,
+                onAccept: () => _accept(order),
+                onReject: () => _reject(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -638,11 +652,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in scheduledPending) ...[
-            _NearTermRequestCard(
-              order: order,
-              busy: _isActing,
-              onAccept: () => _accept(order),
-              onReject: () => _reject(order),
+            MotionReveal(
+              key: ValueKey('near-${order.assignmentId}'),
+              child: _NearTermRequestCard(
+                order: order,
+                busy: _isActing,
+                onAccept: () => _accept(order),
+                onReject: () => _reject(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -655,10 +672,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final order in upcoming) ...[
-            _UpcomingJobCard(
-              order: order,
-              dayLabel: formatScheduledDayAr(order.scheduledAt),
-              onTap: () => _openUpcomingOrder(order),
+            MotionReveal(
+              key: ValueKey('upcoming-${order.id}'),
+              child: _UpcomingJobCard(
+                order: order,
+                dayLabel: formatScheduledDayAr(order.scheduledAt),
+                onTap: () => _openUpcomingOrder(order),
+              ),
             ),
             const SizedBox(height: 8),
           ],
@@ -680,11 +700,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ),
           const SizedBox(height: 8),
           for (final opportunity in workOpportunities) ...[
-            _WorkOpportunityCard(
-              opportunity: opportunity,
-              busy: _isActing,
-              onAccept: () => _acceptWorkOpportunity(opportunity),
-              onDecline: () => _declineWorkOpportunity(opportunity),
+            MotionReveal(
+              key: ValueKey('opportunity-${opportunity.id}'),
+              child: _WorkOpportunityCard(
+                opportunity: opportunity,
+                busy: _isActing,
+                onAccept: () => _acceptWorkOpportunity(opportunity),
+                onDecline: () => _declineWorkOpportunity(opportunity),
+              ),
             ),
             const SizedBox(height: 8),
           ],

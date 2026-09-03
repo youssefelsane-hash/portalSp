@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/app_motion.dart';
 import '../../design/empty_state.dart';
 import 'earnings_repository.dart';
 import 'models.dart';
@@ -94,7 +95,10 @@ class _WalletScreenState extends State<WalletScreen> {
                               children: [
                                 Text('الرصيد المتاح', style: Theme.of(context).textTheme.titleMedium),
                                 const SizedBox(height: 8),
-                                Text(
+                                // docs/08 §122 — الرصيد بيتبدّل بتلاشٍ قصير بدل ما ينطّ رقم
+                                // مكان رقم. ده أهم رقم في التطبيق بالنسبة للفني، والحركة هنا
+                                // بتخلّيه **يلاحظ** إن أرباحه اتحدّثت بعد ما شغلانة اتقفلت.
+                                MotionValueText(
                                   _formatEgp(wallet.balanceCents),
                                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                                     color: wallet.balanceCents < 0

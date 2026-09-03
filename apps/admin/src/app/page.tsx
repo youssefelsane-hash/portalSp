@@ -31,6 +31,7 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { LiveValue } from '@/components/live-value';
 import { formatEgp } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -57,7 +58,7 @@ function StatCard({ title, value, description, icon: Icon, tone = 'primary' }: {
       <CardHeader className="flex-row items-start justify-between gap-3 pb-2">
         <div>
           <CardDescription>{title}</CardDescription>
-          <CardTitle className="mt-2 text-2xl tabular-nums">{value}</CardTitle>
+          <CardTitle className="mt-2 text-2xl"><LiveValue value={value} /></CardTitle>
         </div>
         <span className={cn('flex size-10 items-center justify-center rounded-xl', TONE_CLASSES[tone])}>
           <Icon className="size-5" />
@@ -91,7 +92,7 @@ function AttentionCard({ title, count, description, href, icon: Icon, tone }: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">{count}</span>
+          <LiveValue value={count} className="text-2xl font-semibold" />
           <span className="text-sm font-semibold">{title}</span>
         </div>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{isClear ? 'لا توجد حالات معلّقة حاليًا' : description}</p>

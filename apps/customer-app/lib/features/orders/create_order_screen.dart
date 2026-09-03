@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../../design/app_motion.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -924,7 +925,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             child: Text(label, style: style, overflow: TextOverflow.ellipsis),
           ),
           const SizedBox(width: 8),
-          Text(value, style: style),
+          // docs/08 §122 — الرقم بيتبدّل بتلاشٍ قصير بدل ما ينطّ رقم مكان رقم. النقطة دي
+          // بتغطّي **كل** سطور السعر في شاشة الحجز (أساسي/إضافات/خصم/ضمان/إجمالي/إيداع)
+          // بتعديل واحد، فالعميل بيلاحظ إن اختياره أثّر في السعر مهما كان البند اللي اتغيّر.
+          MotionValueText(value, style: style),
         ],
       ),
     );

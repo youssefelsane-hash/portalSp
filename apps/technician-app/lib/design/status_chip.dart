@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_motion.dart';
 import 'app_theme.dart';
 
 /// نغمة دلالية للحالة — نفس الخمس نغمات المستخدمة في apps/admin (StatusChip): نجاح/تحذير/خطر/
@@ -15,10 +16,18 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (fg, bg) = _colors(context);
-    return Container(
+    // docs/08 §122 — تغيير الحالة بيتلوّن بتدرّج والنص بيتبدّل بتلاشٍ، بدل ما الشارة تنطّ لون
+    // ونص تانيين في إطار واحد. الحالة هي أهم معلومة في الشاشة، والانتقال الناعم هو اللي
+    // بيخلّي المستخدم **يلاحظ** إنها اتغيّرت بدل ما يكتشف بعدين إنه بيبص على حالة جديدة.
+    return AnimatedContainer(
+      duration: AppMotion.durationFor(context, AppMotion.slow),
+      curve: AppMotion.ease,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
-      child: Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: fg, fontWeight: FontWeight.w600)),
+      child: MotionValueText(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: fg, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
