@@ -175,6 +175,8 @@ export default function TechnicianDetailPage() {
   const [trustBadgeNote, setTrustBadgeNote] = useState('');
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  /** الفني لسه مالوش محفظة (مفيش حركة مالية) — حالة فاضية طبيعية مش خطأ. */
+  const [walletMissing, setWalletMissing] = useState(false);
 
   const [productivity, setProductivity] = useState<ProductivityReport | null>(null);
   const [productivityError, setProductivityError] = useState<string | null>(null);
@@ -197,7 +199,16 @@ export default function TechnicianDetailPage() {
   function loadWallet(userId: string) {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
       .then(setWallet)
-      .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
+      .catch((err) => {
+        // 404 معناها «الفني ده لسه مالوش محفظة» مش عطل — المحافظ بتتعمل **كسول** عند أول حركة
+        // مالية (`getOrCreateWallet`)، ففني لسه ماخدش أي طلب مالوش صف أصلاً. عرضها كخطأ أحمر
+        // كان بيخلّي كل فني جديد يبان كأن فيه حاجة مكسورة في حسابه.
+        if (err instanceof ApiError && err.status === 404) {
+          setWalletMissing(true);
+          return;
+        }
+        setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة');
+      });
   }
 
   function load() {
@@ -1485,7 +1496,10 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             {walletError && <p className="text-destructive">{walletError}</p>}
-            {!wallet && !walletError && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {walletMissing && (
+              <p className="text-muted-foreground">لسه مفيش محفظة — بتتفتح تلقائيًا مع أول حركة مالية.</p>
+            )}
+            {!wallet && !walletError && !walletMissing && <p className="text-muted-foreground">جاري التحميل…</p>}
             {wallet && (
               <>
                 <div className="flex items-center gap-2">

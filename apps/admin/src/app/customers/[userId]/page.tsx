@@ -100,6 +100,8 @@ export default function CustomerDetailPage() {
   const [detail, setDetail] = useState<AdminCustomerResponseDto | null>(null);
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  /** العميل لسه مالوش محفظة (مفيش حركة مالية) — حالة فاضية طبيعية مش خطأ. */
+  const [walletMissing, setWalletMissing] = useState(false);
   const [profile360, setProfile360] = useState<Customer360Response | null>(null);
   const [profile360Error, setProfile360Error] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +128,16 @@ export default function CustomerDetailPage() {
   function loadWallet() {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
       .then(setWallet)
-      .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
+      .catch((err) => {
+        // 404 معناها «العميل ده لسه مالوش محفظة» مش عطل — المحافظ بتتعمل **كسول** عند أول
+        // حركة مالية (`getOrCreateWallet`)، فعميل لسه مادفعش ولا كسب حاجة مالوش صف أصلاً.
+        // عرضها كخطأ أحمر كان بيخلّي كل عميل جديد يبان كأن فيه حاجة مكسورة في حسابه.
+        if (err instanceof ApiError && err.status === 404) {
+          setWalletMissing(true);
+          return;
+        }
+        setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة');
+      });
   }
 
   function load360() {
@@ -408,7 +419,10 @@ export default function CustomerDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             {walletError && <p className="text-destructive">{walletError}</p>}
-            {!wallet && !walletError && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {walletMissing && (
+              <p className="text-muted-foreground">لسه مفيش محفظة — بتتفتح تلقائيًا مع أول حركة مالية.</p>
+            )}
+            {!wallet && !walletError && !walletMissing && <p className="text-muted-foreground">جاري التحميل…</p>}
             {wallet && (
               <>
                 <div className="flex items-center gap-2">
