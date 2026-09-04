@@ -129,7 +129,10 @@ export class OrdersController {
       order.technicianId && TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
         ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
         : null;
-    return toOrderResponseDto(order, address, technicianContact);
+    // ADR-0071 — رسايل الإدارة بتتقرا هنا مرة واحدة، فـ`getOne()` وكل الـmutations اللي
+    // بتستخدم الـhelper ده بيرجّعوها زي بعض.
+    const customerNotices = await this.ordersService.listCustomerNotices(order.id);
+    return toOrderResponseDto(order, address, technicianContact, { customerNotices });
   }
 
   @Post()

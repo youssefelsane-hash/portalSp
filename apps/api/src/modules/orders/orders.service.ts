@@ -70,6 +70,7 @@ import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recu
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
+import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
@@ -303,6 +304,21 @@ export class OrdersService {
     return this.customerProfiles.findByUserIdOrThrow(userId).then((profile) =>
       this.orders.find({ where: { customerId: profile.id }, order: { createdAt: 'DESC' } }),
     );
+  }
+
+  /**
+   * رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول.
+   *
+   * بتتنادى من مسار **تفاصيل الطلب** بس، مش من القوايم: استعلام لكل صف في قايمة بيكلّف N+1 مقابل
+   * معلومة مالهاش مكان في كارت القايمة أصلاً.
+   */
+  listCustomerNotices(orderId: string): Promise<OrderCustomerNotice[]> {
+    // بنقرا من الـDataSource مش من repository محقون: إضافة parameter للـconstructor كانت
+    // هتكسر ٢٤ spec بتبني الخدمة يدويًا مقابل صفر مكسب — الكيان مسجّل في `forFeature` عادي.
+    return this.dataSource.getRepository(OrderCustomerNotice).find({
+      where: { orderId, deletedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   async findOneOwnedOrThrow(userId: string, orderId: string): Promise<Order> {

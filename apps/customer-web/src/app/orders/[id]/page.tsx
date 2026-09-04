@@ -24,6 +24,7 @@ import {
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
+import { formatWorkDuration, formatWorkforce } from '@/lib/work-scope';
 import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
@@ -118,6 +119,39 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </li>
           ))}
         </ol>
+      )}
+
+      {/* رسايل الإدارة (ADR-0071، بلاغ مالك 2026-09-04) — نفس القسم بالحرف اللي في
+          `apps/customer-app`'s order_detail_screen.dart. قبل كده كان النص في الإشعار بس. */}
+      {order.customer_notices.map((notice) => (
+        <section
+          key={notice.id}
+          className="mt-6 rounded-xl border border-primary/25 bg-primary/5 p-4"
+        >
+          <h2 className="mb-1 font-semibold text-primary">
+            {notice.notice_type === 'routed_to_onsite_assessment'
+              ? 'الطلب اتحوّل لمعاينة في الموقع'
+              : 'الإدارة طلبت تفاصيل إضافية'}
+          </h2>
+          <p className="text-sm leading-6">{notice.message}</p>
+        </section>
+      ))}
+
+      {/* المدة المتوقعة وعدد الأفراد — نفس الصياغة المشتركة (`lib/work-scope.ts`). كانت
+          معروضة في تطبيق العميل بس رغم إن الحقول راجعة في نفس الرد. */}
+      {(formatWorkDuration(order.duration_minutes, order.estimated_duration_days) !== null ||
+        formatWorkforce(order.required_technicians, order.required_assistants) !== null) && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-1 font-semibold">حجم الشغلانة</h2>
+          <p className="text-sm text-muted">
+            {[
+              formatWorkDuration(order.duration_minutes, order.estimated_duration_days),
+              formatWorkforce(order.required_technicians, order.required_assistants),
+            ]
+              .filter(Boolean)
+              .join(' — ')}
+          </p>
+        </section>
       )}
 
       {order.address && (

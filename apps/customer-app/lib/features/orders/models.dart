@@ -23,6 +23,32 @@ class OrderAddress {
   );
 }
 
+/// رسالة من الإدارة للعميل مربوطة بالطلب (ADR-0071).
+///
+/// قبلها كان نص الأدمن بيعيش في الإشعار بس — العميل يفتح الطلب ويلاقي «محتاجين تفاصيل أكتر»
+/// بلا أي تفاصيل. مطابق لـ`OrderCustomerNoticeDto` في `order-response.dto.ts`.
+class OrderCustomerNotice {
+  final String id;
+  /// `info_requested` | `routed_to_onsite_assessment`
+  final String noticeType;
+  final String message;
+  final DateTime createdAt;
+
+  const OrderCustomerNotice({
+    required this.id,
+    required this.noticeType,
+    required this.message,
+    required this.createdAt,
+  });
+
+  factory OrderCustomerNotice.fromJson(Map<String, dynamic> json) => OrderCustomerNotice(
+    id: json['id'] as String,
+    noticeType: json['notice_type'] as String,
+    message: json['message'] as String,
+    createdAt: DateTime.parse(json['created_at'] as String),
+  );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts
 class Order {
   final String id;
@@ -64,6 +90,10 @@ class Order {
   final int? requiredTechnicians;
   final int? requiredAssistants;
   final int? estimatedDurationDays;
+  /// مدة الشغلانة بالدقايق (`duration_minutes`) — بتتعرض بدل «يوم واحد» للشغل الأقصر من يوم.
+  final int? durationMinutes;
+  /// رسايل الإدارة للعميل (ADR-0071) — الأحدث الأول. فاضية في قايمة الطلبات.
+  final List<OrderCustomerNotice> customerNotices;
   // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
   // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
   final String? requestedTechnicianId;
@@ -110,6 +140,8 @@ class Order {
     this.requiredTechnicians,
     this.requiredAssistants,
     this.estimatedDurationDays,
+    this.durationMinutes,
+    this.customerNotices = const [],
     this.requestedTechnicianId,
     this.technicianName,
     this.technicianPhone,
@@ -161,6 +193,10 @@ class Order {
     requiredTechnicians: json['required_technicians'] as int?,
     requiredAssistants: json['required_assistants'] as int?,
     estimatedDurationDays: json['estimated_duration_days'] as int?,
+    durationMinutes: (json['duration_minutes'] as num?)?.round(),
+    customerNotices: ((json['customer_notices'] as List<dynamic>?) ?? const [])
+        .map((e) => OrderCustomerNotice.fromJson(e as Map<String, dynamic>))
+        .toList(),
     requestedTechnicianId: json['requested_technician_id'] as String?,
     technicianName: json['technician_name'] as String?,
     technicianPhone: json['technician_phone'] as String?,
@@ -221,6 +257,12 @@ class OrderPricePreview {
   final String? discountSource;
   final int totalAmountCents;
   final double? estimatedDurationDays;
+  /// مدة الشغلانة بالدقايق زي ما محرك التسعير طلّعها (`duration_minutes`). أدق من الأيام
+  /// للشغل الأقل من يوم — راجع `core/work_scope_label.dart` للسبب.
+  final int? durationMinutes;
+  /// وضع الحجز المشتق في الباك-إند (ADR-0048): `individual` / `team` / `emergency`.
+  /// الواجهة محتاجاه عشان تخفي الكلام اللي مالوش معنى في الطوارئ (مفيش اختيار فني أصلاً).
+  final String bookingMode;
   // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — كانت فجوة موثّقة صراحة: الباك-إند بيرجّعها
   // من زمان (PreviewOrderResponseDto) بس مش مقروءة هنا خالص، فالعميل ما كانش يعرف إن الخدمة
   // محتاجة إيداع غير بعد ما يحاول يدفع كاش ويترفض. null يعني مفيش إيداع مطلوب.
@@ -246,6 +288,8 @@ class OrderPricePreview {
     required this.discountSource,
     required this.totalAmountCents,
     required this.estimatedDurationDays,
+    required this.durationMinutes,
+    required this.bookingMode,
     required this.depositAmountCents,
     required this.dueNowCents,
     required this.remainingAmountCents,
@@ -275,6 +319,8 @@ class OrderPricePreview {
     totalAmountCents: json['total_amount_cents'] as int,
     estimatedDurationDays: (json['estimated_duration_days'] as num?)
         ?.toDouble(),
+    durationMinutes: (json['duration_minutes'] as num?)?.round(),
+    bookingMode: json['booking_mode'] as String? ?? 'individual',
     depositAmountCents: json['deposit_amount_cents'] as int?,
     dueNowCents:
         json['due_now_cents'] as int? ?? json['total_amount_cents'] as int,

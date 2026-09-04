@@ -33,6 +33,7 @@ import { AssessmentTriageService } from './assessment-triage.service';
 import { QuoteExpiryService } from './quote-expiry.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
+import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { PricingFieldImagesService } from './pricing-field-images.service';
 import { ProblemImagesService } from './problem-images.service';
 import { OrderTeamService } from './order-team.service';
@@ -58,6 +59,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
       Order,
       OrderStatusHistory,
       OrderMedia,
+      OrderCustomerNotice,
       OrderItem,
       OrderInternalNote,
       OrderTeamMember,

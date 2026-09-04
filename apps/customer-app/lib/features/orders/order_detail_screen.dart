@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
+import '../../core/work_scope_label.dart';
 import '../../core/auth_repository.dart';
 import '../../core/media_url.dart';
 import '../catalog/catalog_repository.dart';
@@ -856,13 +857,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               // محرك الإنتاجية (docs/06 §3.3-§3.6) — كانت فجوة موثّقة صراحة:
                               // العميل كان بيشوف معاينة المدة قبل الحجز بس، مش القيم اللي
                               // اتسجلت فعليًا على طلبه بعد التأكيد.
-                              if (order.estimatedDurationDays != null) ...[
+                              // نفس صياغة شاشة الحجز بالحرف (`core/work_scope_label.dart`) —
+                              // الشاشتين كانوا بيكتبوا المدة بطريقتين مختلفتين، والاتنين
+                              // بيقولوا «يوم» حتى لشغلانة ساعتين. وكلمة «صنايعي» اتشالت لأن
+                              // المنصة فيها خدمات مش حرفية (جليسة أطفال، تنظيف، رعاية).
+                              if (formatWorkDuration(minutes: order.durationMinutes, days: order.estimatedDurationDays) != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'المدة المتوقعة: ${order.estimatedDurationDays} يوم'
-                                  '${order.requiredTechnicians != null ? ' — ${order.requiredTechnicians} صنايعي' : ''}'
-                                  '${(order.requiredAssistants ?? 0) > 0 ? ' + ${order.requiredAssistants} مساعد' : ''}',
+                                  'المدة المتوقعة: ${formatWorkDuration(minutes: order.durationMinutes, days: order.estimatedDurationDays)}'
+                                  '${formatWorkforce(technicians: order.requiredTechnicians, assistants: order.requiredAssistants) != null ? ' — ${formatWorkforce(technicians: order.requiredTechnicians, assistants: order.requiredAssistants)}' : ''}',
                                 ),
+                              ],
+                              // رسايل الإدارة (ADR-0071، بلاغ مالك 2026-09-04) — النص اللي
+                              // الأدمن كتبه كان بيوصل في الإشعار وبس، والعميل يفتح الطلب
+                              // يلاقيه فاضي من أي تفاصيل. دلوقتي بيتقرا مع الطلب نفسه.
+                              for (final notice in order.customerNotices) ...[
+                                const SizedBox(height: 10),
+                                _AdminNoticeCard(notice: notice),
                               ],
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
@@ -1505,6 +1516,59 @@ class _AwaitingTechnicianCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// كارت رسالة الإدارة داخل تفاصيل الطلب (ADR-0071).
+///
+/// اللون **إعلامي مش تحذيري** عمدًا: دي معلومة العميل محتاج يقراها ويتصرّف عليها، مش خطأ حصل.
+class _AdminNoticeCard extends StatelessWidget {
+  const _AdminNoticeCard({required this.notice});
+
+  final OrderCustomerNotice notice;
+
+  static const _titles = {
+    'info_requested': 'الإدارة طلبت تفاصيل إضافية',
+    'routed_to_onsite_assessment': 'الطلب اتحوّل لمعاينة في الموقع',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                notice.noticeType == 'routed_to_onsite_assessment'
+                    ? Icons.engineering_outlined
+                    : Icons.info_outline,
+                size: 18,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _titles[notice.noticeType] ?? 'رسالة من الإدارة',
+                  style: TextStyle(fontWeight: FontWeight.w600, color: scheme.primary),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(notice.message, style: const TextStyle(height: 1.45)),
+        ],
       ),
     );
   }

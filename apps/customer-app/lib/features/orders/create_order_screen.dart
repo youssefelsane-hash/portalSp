@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../../core/work_scope_label.dart';
 import '../../design/app_motion.dart';
 import 'assessment_route.dart';
 import '../../core/auth_repository.dart';
@@ -1174,11 +1175,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             '+${_formatEgp(preview.warrantyPriceCents)}',
             color: Colors.blue,
           ),
-        if (preview.estimatedDurationDays != null)
+        // بلاغ مالك: شغلانة ساعتين كانت بتتعرض «يوم واحد». الدقايق كانت راجعة من الـAPI من
+        // الأول — الواجهة بس كانت بتتجاهلها وتكتب «يوم» جنب الرقم. الصياغة بقت في مكان واحد.
+        if (formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays) != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: Text(
-              'المدة المتوقعة: ${preview.estimatedDurationDays! % 1 == 0 ? preview.estimatedDurationDays!.toStringAsFixed(0) : preview.estimatedDurationDays!.toStringAsFixed(1)} يوم',
+              'المدة المتوقعة: ${formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays)}',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
@@ -1188,9 +1191,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           _formatEgp(preview.totalAmountCents),
           bold: true,
         ),
+        // الطوارئ مستثناة: العميل مابيختارش فني فيها أصلاً (النظام بيبعت موجات وأول فني يقبل
+        // ياخدها)، فجملة «قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة» كانت بتوعده
+        // بمقارنة مش موجودة وتخوّفه بزيادة مالهاش سياق. بلاغ مالك 2026-09-04.
         if (widget.requestedTechnicianId == null &&
             widget.requestedTechnicianCompanyId == null &&
-            widget.scheduleSlotId == null)
+            widget.scheduleSlotId == null &&
+            preview.bookingMode != 'emergency')
           Container(
             margin: const EdgeInsets.only(top: 8, bottom: 4),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

@@ -152,6 +152,14 @@ export const uploadProblemImage = (authedFetch: AuthedFetch, serviceId: string, 
   });
 };
 
+/** رسالة من الإدارة للعميل — مطابقة لـ`OrderCustomerNoticeDto` في الباك-إند. */
+export interface OrderCustomerNoticeDto {
+  id: string;
+  notice_type: 'info_requested' | 'routed_to_onsite_assessment';
+  message: string;
+  created_at: string;
+}
+
 export interface OrderAddressResponseDto {
   street_name: string;
   landmark: string | null;
@@ -192,6 +200,10 @@ export interface OrderResponseDto {
   required_technicians: number | null;
   required_assistants: number | null;
   estimated_duration_days: number | null;
+  /** مدة الشغلانة بالدقايق — أدق من الأيام للشغل الأقصر من يوم (`lib/work-scope.ts`). */
+  duration_minutes: number | null;
+  /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول، فاضية في القوايم. */
+  customer_notices: OrderCustomerNoticeDto[];
   address?: OrderAddressResponseDto;
   technician_name?: string;
   technician_phone?: string;

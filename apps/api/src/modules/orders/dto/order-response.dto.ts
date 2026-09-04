@@ -1,5 +1,6 @@
 import { Address } from '../../customers/entities/address.entity';
 import { Order } from '../entities/order.entity';
+import { OrderCustomerNotice, OrderCustomerNoticeType } from '../entities/order-customer-notice.entity';
 
 export interface OrderAddressResponseDto {
   street_name: string;
@@ -40,6 +41,8 @@ export interface OrderResponseDto {
   pricing_period_end: string | null;
   /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
   duration_minutes: number | null;
+  /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول. فاضية في القوايم. */
+  customer_notices: OrderCustomerNoticeDto[];
   estimated_price_cents: number | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
   initial_quote_note: string | null;
@@ -158,6 +161,14 @@ export interface OrderResponseDto {
 // تفاصيل الطلب الفردي بس (GET /orders/:id، GET /technician/orders/:id|active) بتمرره.
 // technicianContact اختياري كمان — الكولر بيحسب شرط الظهور (TECHNICIAN_CONTACT_VISIBLE_STATUSES)
 // قبل ما يجيب البيانات أصلاً، فمفيش استعلام إضافي لو الطلب لسه مش وصل لحالة مسموحة.
+/** رسالة إدارة واحدة زي ما العميل بيقراها — بلا هوية كاتبها (خصوصية الموظفين، docs/08 §60.2). */
+export interface OrderCustomerNoticeDto {
+  id: string;
+  notice_type: OrderCustomerNoticeType;
+  message: string;
+  created_at: string;
+}
+
 export function toOrderResponseDto(
   order: Order,
   address?: Address | null,
@@ -166,6 +177,9 @@ export function toOrderResponseDto(
     customerContact?: { name: string; phone: string; userId?: string } | null;
     serviceNameAr?: string | null;
     isNewForTechnician?: boolean;
+    /** رسايل الإدارة للعميل على الطلب ده (ADR-0071) — بتتمرّر في مسار تفاصيل الطلب بس،
+     * مش في القوايم (استعلام إضافي لكل صف بلا فايدة عرض). */
+    customerNotices?: OrderCustomerNotice[];
   },
 ): OrderResponseDto {
   return {
@@ -188,6 +202,15 @@ export function toOrderResponseDto(
     pricing_period_start: order.pricingPeriodStart ? order.pricingPeriodStart.toISOString() : null,
     pricing_period_end: order.pricingPeriodEnd ? order.pricingPeriodEnd.toISOString() : null,
     duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
+    // ADR-0071 — رسايل الإدارة زي «محتاجين تفاصيل أكتر» و«حوّلناه لمعاينة في الموقع». `[]` في
+    // القوايم ومسارات الأدمن اللي مابتمرّرهاش، مش `undefined`، عشان العميل مايحتاجش يفرّق بين
+    // «مفيش رسايل» و«الحقل مش موجود».
+    customer_notices: (viewerExtras?.customerNotices ?? []).map((n) => ({
+      id: n.id,
+      notice_type: n.noticeType,
+      message: n.message,
+      created_at: n.createdAt.toISOString(),
+    })),
     estimated_price_cents: order.estimatedPriceCents,
     initial_quote_source: order.initialQuoteSource,
     initial_quote_note: order.initialQuoteNote,
@@ -294,6 +317,8 @@ export interface TechnicianOrderResponseDto
     | 'refunded_amount_cents'
     | 'installment_outstanding_cents'
     | 'amount_due_to_technician_cents'
+    // ADR-0071 — رسايل الإدارة للعميل مش من شأن الفني (ممكن تحتوي كلام تسعير/سبب تحويل).
+    | 'customer_notices'
   > {
   /** المطلوب تحصيله من العميل كاش. صفر لأي عضو طاقم مش القائد (docs/08 §108-B) — القائد
    * (أو الفني الوحيد لو مفيش طاقم) بس اللي بيشوف الرقم الحقيقي، هو اللي فعليًا بيحصّله. */
@@ -340,6 +365,9 @@ export function toTechnicianOrderResponseDto(
     refunded_amount_cents: _refunded,
     installment_outstanding_cents: _installmentOutstanding,
     amount_due_to_technician_cents: _amountDue,
+    // ADR-0071 — رسايل الإدارة **للعميل**. الفني مالوش أي شأن بيها (ممكن تحتوي كلام عن التسعير
+    // أو سبب التحويل)، فبتتشال من عقد الفني زي البنود المالية بالظبط.
+    customer_notices: _customerNotices,
     ...visible
   } = base;
 
