@@ -171,6 +171,10 @@ export interface PriceEstimateDto {
   price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
   pricing_evaluation_id: string | null;
   estimated_duration_days: number | null;
+  /** المدة التشغيلية بالدقايق الناتجة من المعادلة (ADR-0061 §1) — `null` يعني المعادلة مش
+   * بتحددها. `POST /services/:id/estimate` بيرجّعها من الأول؛ النوع هنا كان ناقصها بس،
+   * فالويب كان بيعرض «يوم» لشغلانة ساعتين أو مايعرضش المدة خالص. */
+  duration_minutes: number | null;
 }
 
 // AddressDto الصحيح موجود في geo-addresses.ts (مطابق لـ AddressResponseDto الحقيقي بالباك-إند).

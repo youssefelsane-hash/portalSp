@@ -21,6 +21,7 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
 import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderCustomerNotice, OrderCustomerNoticeType } from './entities/order-customer-notice.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
 
@@ -138,6 +139,17 @@ export class AssessmentTriageService {
           },
         }),
       );
+      // ADR-0071 — نفس النص اللي بيروح في الإشعار بيتخزّن على الطلب كمان. قبل كده كان في
+      // `order_status_history.reason` بس، وده مسار أدمن مش معروض للعميل خالص — فالعميل كان
+      // بيفتح الطلب ويلاقي إنه اتحوّل لمعاينة بلا أي سبب مكتوب (بلاغ مالك 2026-09-04).
+      await manager.save(
+        manager.create(OrderCustomerNotice, {
+          orderId: order.id,
+          noticeType: OrderCustomerNoticeType.ROUTED_TO_ONSITE_ASSESSMENT,
+          message: reason,
+          createdByUserId: adminUserId,
+        }),
+      );
       await this.auditLog.record(
         {
           actorUserId: adminUserId,
@@ -205,6 +217,17 @@ export class AssessmentTriageService {
       if (locked.orderStatus !== OrderStatus.AWAITING_ADMIN_QUOTE) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب مش في مرحلة فرز الصور', HttpStatus.CONFLICT);
       }
+      // ADR-0071 — الفعل ده **مافيهوش انتقال حالة عمدًا**، فماكانش له ولا حتى صف في
+      // `order_status_history`: نص الأدمن كان بيعيش في `audit_logs` والإشعار وبس. العميل يفتح
+      // الطلب فيلاقي «محتاجين تفاصيل أكتر» بلا أي تفاصيل (بلاغ مالك 2026-09-04).
+      await manager.save(
+        manager.create(OrderCustomerNotice, {
+          orderId: locked.id,
+          noticeType: OrderCustomerNoticeType.INFO_REQUESTED,
+          message,
+          createdByUserId: adminUserId,
+        }),
+      );
       await this.auditLog.record(
         {
           actorUserId: adminUserId,

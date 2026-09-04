@@ -152,6 +152,14 @@ export const uploadProblemImage = (authedFetch: AuthedFetch, serviceId: string, 
   });
 };
 
+/** رسالة من الإدارة للعميل — مطابقة لـ`OrderCustomerNoticeDto` في الباك-إند. */
+export interface OrderCustomerNoticeDto {
+  id: string;
+  notice_type: 'info_requested' | 'routed_to_onsite_assessment';
+  message: string;
+  created_at: string;
+}
+
 export interface OrderAddressResponseDto {
   street_name: string;
   landmark: string | null;
@@ -177,6 +185,14 @@ export interface OrderResponseDto {
   inspection_fee_cents: number;
   surge_amount_cents: number;
   discount_amount_cents: number;
+  // تكافؤ مع تطبيق العميل — الحقول دي راجعة في نفس الرد وكانت مقروءة في التطبيق بس
+  // (اتلقطت بـ`scripts/check-contract-drift.js`).
+  level_premium_cents: number;
+  warranty_price_cents: number;
+  deposit_amount_cents: number | null;
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
   promo_code_id: string | null;
   total_amount_cents: number;
   payment_status: string;
@@ -192,6 +208,10 @@ export interface OrderResponseDto {
   required_technicians: number | null;
   required_assistants: number | null;
   estimated_duration_days: number | null;
+  /** مدة الشغلانة بالدقايق — أدق من الأيام للشغل الأقصر من يوم (`lib/work-scope.ts`). */
+  duration_minutes: number | null;
+  /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول، فاضية في القوايم. */
+  customer_notices: OrderCustomerNoticeDto[];
   address?: OrderAddressResponseDto;
   technician_name?: string;
   technician_phone?: string;

@@ -69,16 +69,28 @@ function technicianCommittedOrdersSource(technicianIdExpr: string, alias: string
  * — نفس شرط الطوارئ بالظبط)، بس مطبّق كمان لغير الطوارئ **لو اليوم المطلوب هو النهاردة**
  * (لطلب مجدول ليوم بعيد، انشغال الفني دلوقتي مالوش أي معنى).
  *
- * القاعدة الكاملة دلوقتي:
- *  1. طلب طوارئ (بلا `scheduled_at` بالتعريف) — استبعاد بس لو الفني *منشغل جسديًا فعليًا دلوقتي*
- *     (`ENGAGED_TECHNICIAN_ORDER_STATUSES`).
- *  2. أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، "اليوم المطلوب" = النهاردة لـASAP):
- *     استبعاد لو (أ) الفني منشغل جسديًا فعليًا دلوقتي **واليوم المطلوب هو النهاردة**، أو (ب) فيه
- *     طلب تاني بموعد **نفس اليوم المطلوب بتوقيت مصر** والشغل ده (القديم أو الجديد) "شاغل يوم
- *     كامل". طلب `accepted` قصير لسه ما بدأش مايستبعدش — الفني يقدر ياخد أكتر من شغلانة قصيرة
- *     في نفس اليوم.
+ * **تصحيح تالت جوهري (ADR-0070، طلب مالك صريح 2026-09-04)** — «الفني شغّال دلوقتي» بطل يكون
+ * سبب استبعاد أصلاً. الحالة اللي المالك وصفها: «طالما الشغلانة جارية هو ما ينفعش يقبل شغل تاني،
+ * فدي مشكلة». قاعدة ENGAGED القديمة كانت بتخفي الفني اللي في الشارع عن **كل** فرص نفس اليوم
+ * حتى لو الشغلانة الجديدة معادها بعد ما يخلص، وحتى لو يومه فاضي بالكامل بعدها. القاعدة اللي
+ * حلّت محلها هي بالظبط اللي المالك نطقها: «لو جاله شغلانة تانية ما بتتعارضش مع مواعيده في نفس
+ * اليوم، ومجموع الشغل أقل من عدد الساعات المسموح أو يساويه — مفيش مشكلة».
+ *
+ * القاعدة الكاملة دلوقتي — **واحدة لكل أوضاع الحجز، بلا استثناء للطوارئ**:
+ *  1. **تعارض وقت حقيقي**: الخدمات ذات الوقت الدقيق بتحجز نافذة فعلية، والتقاطع بينها بيستبعد
+ *     (نطاق نصف مفتوح، فموعدين متجاورين مسموحين). الطلب بلا موعد محدد (ASAP/طوارئ) مالوش نافذة
+ *     يتقارن بيها، فالفرع ده مابينطبقش عليه.
+ *  2. **السقف اليومي** (`matching.daily_capacity_minutes`، افتراضي 720 = 12 ساعة): مجموع دقايق
+ *     الشغل الملتزم بيه في كل يوم من أيام الطلب الجديد + دقايق الطلب الجديد لازم يفضل ≤ السقف.
+ *     ده بقى الحارس الوحيد ضد التحميل الزايد، وهو نفسه **الزرار اللي الأدمن بيضبطه** لو عايز
+ *     يشدّد أو يوسّع. الطوارئ بقت داخلة تحته زي أي شغل تاني (كانت مستثناة).
  *  3. الفني حدد بنفسه استثناء `blocked` (يوم كامل أو ساعات مخصصة) بيتقاطع مع وقت الطلب —
- *     لطلب ASAP/طوارئ، "وقت الطلب" = دلوقتي (`now()`)، بتوقيت مصر.
+ *     لطلب ASAP/طوارئ، "وقت الطلب" = دلوقتي (`now()`)، بتوقيت مصر. **مايتجاهلش أبدًا.**
+ *
+ * **الأثر المقصود والمقايضة الصريحة**: فني `in_progress` دلوقتي بقى يقدر ياخد شغل تاني نفس
+ * اليوم طالما السقف مسمح. للخدمات اللي بتتحجز باليوم (بلا وقت بداية) مفيش معلومة وقت تفرّق بين
+ * «دلوقتي» و«بعد ساعتين»، فالسقف اليومي هو الضمانة الوحيدة — وده مقبول بقرار المالك. الفني
+ * كمان بيقدر يرفض أي عرض، والاستثناء الصريح (`blocked`) لسه شغّال بالكامل.
  *
  * الـcaller بيبعت أسماء الـparameters الجاهزة ($N) المتوافقة مع مصفوفة قيم الاستعلام بتاعته،
  * وتعبير SQL لمعرّف الفني ولمدة الخدمة المقدّرة للطلب المرشّح نفسه.
@@ -182,69 +194,47 @@ function activeOrderConflictExistsExpr(opts: {
     serviceDefaultMinutesExpr: 'NULL',
   };
   return `
-    -- اليوم المطلوب للطلب المرشّح نفسه (ASAP = النهاردة، مجدول = يوم scheduled_at) — بتوقيت مصر.
+    -- اليوم المطلوب للطلب المرشّح نفسه (ASAP/طوارئ = النهاردة، مجدول = يوم scheduled_at) —
+    -- بتوقيت مصر. قاعدة واحدة لكل أوضاع الحجز (ADR-0070): تعارض وقت حقيقي، أو تجاوز السقف
+    -- اليومي. مفيش استبعاد لمجرد إن الفني «شغّال دلوقتي».
     (
-      -- (1) طوارئ: تعارض بس لو الفني منشغل جسديًا فعليًا دلوقتي (ADR-0018 §9 — طلب مقبول
-      -- لسه ما بدأش مش "شغل" لغرض الطوارئ).
-      (
-        ${isEmergencyParam}::boolean IS TRUE
-        AND EXISTS (
-          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'bo')}
-          WHERE bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
-            AND bo.order_status = ANY(${engagedStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
-        )
+      -- (1) تعارض **وقت** حقيقي في نفس اليوم — بيسري بس على الخدمات ذات الوقت الدقيق (اللي
+      -- بتحجز نافذة فعلية). النطاق نصف مفتوح بيسمح بموعدين متجاورين ويرفض التقاطع الحقيقي بس.
+      -- طلب الطوارئ بلا scheduled_at بالتعريف، فالفرع ده مابينطبقش عليه — وده مقصود: مفيش
+      -- نافذة معلومة تتقارن بيها.
+      EXISTS (
+        SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'co')}
+        JOIN services cs ON cs.id = co.service_id
+        WHERE co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+          AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
+          AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
+              = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
+          AND ${scheduledAtParam}::timestamptz IS NOT NULL
+          AND (${preciseDurationHoursExpr}) IS NOT NULL
+          AND co.scheduled_at IS NOT NULL
+          AND COALESCE(co.duration_minutes, co.duration_hours * 60) IS NOT NULL
+          AND co.scheduled_at < ${scheduledAtParam}::timestamptz
+              + ((${preciseDurationHoursExpr}) || ' hours')::interval
+          AND co.scheduled_at + (COALESCE(co.duration_minutes, co.duration_hours * 60) || ' minutes')::interval
+              > ${scheduledAtParam}::timestamptz
       )
       OR
-      -- (2) تعارض **وقت** حقيقي في نفس اليوم: إما نافذة زمنية متقاطعة فعليًا (خدمات الوقت
-      -- الدقيق)، أو الفني منشغل جسديًا دلوقتي واليوم المطلوب هو النهاردة. قاعدة «شاغل يوم كامل»
-      -- القديمة اتشالت من هنا بالكامل — بقت مسؤولية السقف اليومي في (3) تحت (ADR-0059).
-      (
-        ${isEmergencyParam}::boolean IS NOT TRUE
-        AND EXISTS (
-          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'co')}
-          JOIN services cs ON cs.id = co.service_id
-          WHERE co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
-            AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
-            AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
-                = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
-            AND (
-              -- الخدمات ذات الوقت الدقيق تحجز نافذة فعلية. النطاق نصف مفتوح يسمح بموعدين
-              -- متجاورين، ويرفض فقط التقاطع الحقيقي حتى لو كانت الخدمتان قصيرتين.
-              (
-                ${scheduledAtParam}::timestamptz IS NOT NULL
-                AND (${preciseDurationHoursExpr}) IS NOT NULL
-                AND co.scheduled_at IS NOT NULL
-                AND COALESCE(co.duration_minutes, co.duration_hours * 60) IS NOT NULL
-                AND co.scheduled_at < ${scheduledAtParam}::timestamptz
-                    + ((${preciseDurationHoursExpr}) || ' hours')::interval
-                AND co.scheduled_at + (COALESCE(co.duration_minutes, co.duration_hours * 60) || ' minutes')::interval
-                    > ${scheduledAtParam}::timestamptz
-              )
-              OR
-              (
-                (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
-                  = (now() AT TIME ZONE 'Africa/Cairo')::date
-                AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
-              )
-            )
-        )
-      )
-      OR
-      -- (3) **ADR-0059 — السقف اليومي بالساعات**. ده اللي بدّل قاعدة «شاغل يوم كامل» القديمة:
-      -- بدل بوليان بيسأل «الطلب القديم كبير؟» (وبيدّي إجابة مختلفة حسب مين بيسأل)، بنجمع
-      -- الدقايق المشغولة فعلاً في كل يوم من أيام الطلب الجديد ونقارنها بالسقف. متماثل بالبناء،
-      -- وبيشوف الشغل الممتد على أيامه كلها مش يوم بدايته بس.
-      (
-        ${isEmergencyParam}::boolean IS NOT TRUE
-        AND ${dailyCapacityExceededExpr({
-          technicianIdExpr,
-          activeStatusesParam,
-          excludeOrderIdParam,
-          dailyCapacityParam: dailyCapacityMinutesParam,
-          scheduledAtParam,
-          candidateLoad: candidateLoadSource,
-        })}
-      )
+      -- (2) **السقف اليومي بالساعات** (ADR-0059) — دلوقتي بيسري على **كل** أوضاع الحجز بما فيها
+      -- الطوارئ (ADR-0070). ده الحارس الوحيد المتبقي ضد التحميل الزايد، وهو بالظبط القاعدة اللي
+      -- المالك طلبها: «مجموع الشغل أقل من عدد الساعات المسموح أو يساويه».
+      ${dailyCapacityExceededExpr({
+        technicianIdExpr,
+        activeStatusesParam,
+        excludeOrderIdParam,
+        dailyCapacityParam: dailyCapacityMinutesParam,
+        scheduledAtParam,
+        candidateLoad: candidateLoadSource,
+      })}
+      -- الـparameters دي بقت غير مستخدمة في القاعدة (ADR-0070 شال قاعدة ENGAGED)، بس بتفضل
+      -- مربوطة بتعبير دايمًا صحيح: كل الكولرز بيبعتوا مصفوفة قيم بترتيب ثابت، وشيلها كان
+      -- هيعيد ترقيم كل الـ$N في أربع استعلامات كبيرة مقابل صفر مكسب سلوكي.
+      OR (${engagedStatusesParam}::order_status[] IS NOT NULL AND FALSE)
+      OR (${isEmergencyParam}::boolean IS NOT NULL AND FALSE)
     )`;
 }
 

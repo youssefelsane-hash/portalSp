@@ -24,7 +24,10 @@ require('fs').mkdirSync(SP, { recursive: true });
 const PHONE = process.env.ADMIN_PHONE || '+201555000999';
 const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2'; // = 123456
 
-const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d','baytak_main','-Atc',q],
+// اسم قاعدة البيانات كان مكتوب بالإيد (`baytak_main`) — الأداة كانت بتفشل من أول استعلام على
+// أي جهاز اسم قاعدته مختلف (الجهاز ده اسمها `baytak`). بيتقرا من البيئة دلوقتي.
+const DB = process.env.PGDATABASE || (process.env.DATABASE_URL || '').split('/').pop() || 'baytak';
+const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,'-Atc',q],
   { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' }).trim();
 
 
@@ -67,9 +70,37 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d','ba
 
   // بدل تخمين الروابط: بنزحف على **كل لينك موجود في قائمة الأدمن فعلاً** — كده أي عنصر
   // قائمة بيودّي لـ404 بيتكشف، وده بلاغ حقيقي مش افتراضي.
-  const links = await page.evaluate(() =>
+  const navLinks = await page.evaluate(() =>
     [...new Set([...document.querySelectorAll('nav a[href^="/"]')].map((a) => a.getAttribute('href')))]);
-  console.log(`\nزاحف على ${links.length} لينك من القائمة:`);
+
+  // **صفحات التفاصيل مكانتش بتتزار خالص** — الزحف كان على عناصر القائمة بس، وعناصر القائمة
+  // كلها قوايم. صفحات التفاصيل (طلب، فني، خدمة، عميل، موظف، تذكرة) هي أغنى الصفحات وأكترها
+  // عرضة للبَقّات، وهي اللي بلاغات المالك بتيجي منها. بنجيب **معرّفات حقيقية** من قاعدة
+  // البيانات بدل UUIDs مخترعة (اللي كانت هتدّي 404 مالهاش معنى).
+  const first = (q) => (sql(q).split('\n')[0] || '').trim();
+  const detail = [
+    ['/orders', `SELECT id FROM orders WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`],
+    ['/technicians', `SELECT id FROM technician_profiles WHERE deleted_at IS NULL LIMIT 1`],
+    // KPI: لازم فني **عنده سنابشوت** فعلاً — الصفحة بتقرا السنابشوت مش الفني.
+    ['/technician-kpi', `SELECT technician_id FROM technician_kpi_snapshots LIMIT 1`],
+    ['/catalog/services', `SELECT id FROM services WHERE deleted_at IS NULL LIMIT 1`],
+    // المعرّفات لازم تتجاب **بنفس الـjoin اللي القايمة بتلينك بيه**، مش بأول صف في `users`:
+    // صفحة العملاء بتلينك بـ`customer.user_id` الجاي من `customer_profiles`، فمستخدم بلا
+    // بروفايل بيدّي 404 صحيح — بَقّة في الأداة مش في المنتج.
+    ['/customers', `SELECT u.id FROM users u JOIN customer_profiles cp ON cp.user_id=u.id
+                    WHERE u.deleted_at IS NULL AND cp.deleted_at IS NULL LIMIT 1`],
+    // الموظفين: القايمة مبنية على `employee_profiles` (inner join)، فالتفاصيل بتطلب بروفايل
+    // موجود. مستخدم أدمن بلا بروفايل بيدّي 404 صحيح ومستحيل يظهر في القايمة أصلاً.
+    ['/employees', `SELECT user_id FROM employee_profiles LIMIT 1`],
+    ['/roles', `SELECT id FROM roles LIMIT 1`],
+    ['/technician-companies', `SELECT id FROM technician_companies WHERE deleted_at IS NULL LIMIT 1`],
+    ['/support-tickets', `SELECT id FROM support_tickets LIMIT 1`],
+  ]
+    .map(([base, q]) => { try { const id = first(q); return id ? `${base}/${id}` : null; } catch { return null; } })
+    .filter(Boolean);
+
+  const links = [...navLinks, ...detail];
+  console.log(`\nزاحف على ${navLinks.length} لينك من القائمة + ${detail.length} صفحة تفاصيل بمعرّفات حقيقية:`);
   const problems = [];
   for (const path of links) {
     const errors = [], failed = [];

@@ -24,6 +24,7 @@ import {
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
+import { formatWorkDuration, formatWorkforce } from '@/lib/work-scope';
 import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
@@ -109,6 +110,41 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </span>
       </div>
 
+      {/* الخصم المطبّق — نفس سطر تطبيق العميل بالحرف. كان بيتعرض في المعاينة قبل التأكيد وبس،
+          وبعد الحجز يختفي من سجل الطلب، فالعميل اللي دخّل كود خصم مكانش يقدر يتأكد إنه اتطبّق. */}
+      {order.discount_amount_cents > 0 && (
+        <p className="mt-1 text-sm text-success">
+          الخصم المطبّق: -{formatEgp(order.discount_amount_cents)}
+        </p>
+      )}
+
+      {/* تكافؤ مع تطبيق العميل (اتلقط بـ`scripts/check-contract-drift.js`): كل الأرقام دي
+          راجعة في نفس الرد وكانت معروضة في التطبيق بس. أهمها `level_premium_cents` — docs/08
+          §60.3 بيفرض إن زيادة سعر «الفني المميّز» تبان **بسببها مكتوب** مش كرقم بيتغيّر لوحده. */}
+      {order.level_premium_cents > 0 && (
+        <p className="mt-1 text-sm font-medium text-primary">
+          منها {formatEgp(order.level_premium_cents)} — فني Premium
+        </p>
+      )}
+      {order.warranty_price_cents > 0 && (
+        <p className="mt-1 text-sm text-muted">
+          الضمان الاختياري: {formatEgp(order.warranty_price_cents)} ضمن الإجمالي
+        </p>
+      )}
+      {order.deposit_amount_cents !== null && order.deposit_amount_cents > 0 && (
+        <p className="mt-1 text-sm text-muted">
+          الإيداع المدفوع عند الحجز: {formatEgp(order.deposit_amount_cents)} — الباقي بعد ما الشغل يخلص
+        </p>
+      )}
+      {order.price_certainty_mode === 'estimated_range' &&
+        order.display_price_min_cents !== null &&
+        order.display_price_max_cents !== null && (
+          <p className="mt-1 text-sm text-muted">
+            نطاق تقديري وقت الحجز: {formatEgp(order.display_price_min_cents)} –{' '}
+            {formatEgp(order.display_price_max_cents)}
+          </p>
+        )}
+
       {!isBad && currentStepIndex >= 0 && (
         <ol className="mt-6 space-y-2">
           {TIMELINE_STATUSES.map((s, i) => (
@@ -118,6 +154,39 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </li>
           ))}
         </ol>
+      )}
+
+      {/* رسايل الإدارة (ADR-0071، بلاغ مالك 2026-09-04) — نفس القسم بالحرف اللي في
+          `apps/customer-app`'s order_detail_screen.dart. قبل كده كان النص في الإشعار بس. */}
+      {order.customer_notices.map((notice) => (
+        <section
+          key={notice.id}
+          className="mt-6 rounded-xl border border-primary/25 bg-primary/5 p-4"
+        >
+          <h2 className="mb-1 font-semibold text-primary">
+            {notice.notice_type === 'routed_to_onsite_assessment'
+              ? 'الطلب اتحوّل لمعاينة في الموقع'
+              : 'الإدارة طلبت تفاصيل إضافية'}
+          </h2>
+          <p className="text-sm leading-6">{notice.message}</p>
+        </section>
+      ))}
+
+      {/* المدة المتوقعة وعدد الأفراد — نفس الصياغة المشتركة (`lib/work-scope.ts`). كانت
+          معروضة في تطبيق العميل بس رغم إن الحقول راجعة في نفس الرد. */}
+      {(formatWorkDuration(order.duration_minutes, order.estimated_duration_days) !== null ||
+        formatWorkforce(order.required_technicians, order.required_assistants) !== null) && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-1 font-semibold">حجم الشغلانة</h2>
+          <p className="text-sm text-muted">
+            {[
+              formatWorkDuration(order.duration_minutes, order.estimated_duration_days),
+              formatWorkforce(order.required_technicians, order.required_assistants),
+            ]
+              .filter(Boolean)
+              .join(' — ')}
+          </p>
+        </section>
       )}
 
       {order.address && (

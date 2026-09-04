@@ -447,12 +447,12 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
          AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianBProfile],
     );
-    // docs/08 §32 (طلب مالك صريح 2026-08-20) — ASAP بقى يتبع نفس قاعدة الطلب المجدول: طلب
-    // accepted قصير لسه ما بدأش الفني ميستبعدش تاني من شغلانة قصيرة تانية في نفس اليوم (الفني
-    // يقدر ياخد أكتر من شغلانة قصيرة). "منشغل فعليًا" دلوقتي (technician_on_way فما بعده) هي
-    // الحالة الحقيقية اللي لسه بتستبعد — technicianAvailabilityCondition()'s ENGAGED_TECHNICIAN
-    // _ORDER_STATUSES. status=ACCEPTED هنا كان بيعتمد على القاعدة القديمة (اتشالت في §32).
-    await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.TECHNICIAN_ON_WAY);
+    // **اتحدّث مع ADR-0070**: «منشغل جسديًا دلوقتي = مستبعد» اتشالت بقرار مالك صريح، فطلب
+    // `technician_on_way` قصير مابقاش تعارض. الخاصية الأمنية اللي الاختبار ده موجود عشانها —
+    // إن الأدمن **مايقدرش يتجاوز** فحص الأهلية — لسه هي هي، فالتعارض هنا بقى بالقاعدة السارية:
+    // يوم الفني مليان (`estimated_duration_days = 1` ⇒ السقف اليومي اتخطى).
+    const busyOrder = await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.TECHNICIAN_ON_WAY);
+    await dataSource.query(`UPDATE orders SET estimated_duration_days = 1 WHERE id = $1`, [busyOrder]);
     const targetOrder = await insertOrder('admin-target');
     await expect(adminOrdersService.reassign(ids.adminUser, targetOrder, ids.technicianBProfile)).rejects.toThrow(
       'الفني غير متاح في الوقت المطلوب لهذا الطلب',
@@ -471,6 +471,9 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       ids.technicianBProfile,
       OrderStatus.AWAITING_QUOTE_APPROVAL,
     );
+    // ADR-0070 — نفس السبب زي الاختبار اللي فوق: العرض المعلّق نفسه مابقاش «ماسك» المورد بحكم
+    // حالته، هو بياخد من **قدرة اليوم**. الشغلانة دي شاغلة اليوم كله، فالمورد فعلاً متحجوز.
+    await dataSource.query(`UPDATE orders SET estimated_duration_days = 1 WHERE id = $1`, [quoteOrder]);
 
     const acceptTarget = await insertOrder('quote-accept-target');
     await insertAssignment(acceptTarget, ids.technicianBProfile);

@@ -4,6 +4,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { AssessmentTriageService } from './assessment-triage.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { QuoteExpiryService } from './quote-expiry.service';
@@ -99,7 +100,7 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
       entities: [
-        Order, OrderStatusHistory, OrderQuote, User, Address, CustomerProfile,
+        Order, OrderStatusHistory, OrderQuote, OrderCustomerNotice, User, Address, CustomerProfile,
         ServiceCategory, Service, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData,
         TechnicianProfile, TechnicianCompany, City, Area, ServiceZone,
         Setting, ServicePricingField, ServicePricingRule, ServicePricingEvaluation,
@@ -209,6 +210,7 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
     try {
       await q(`DELETE FROM order_quotes WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_customer_notices WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);

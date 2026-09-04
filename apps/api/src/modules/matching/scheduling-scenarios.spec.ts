@@ -60,14 +60,18 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     status: OrderStatus;
     scheduledAt: string | null;
     durationMinutes?: number | null;
+    /** شغل بيشغّل اليوم كله (ADR-0059) — بيستهلك السقف اليومي بالكامل. */
+    estimatedDurationDays?: number | null;
   }): Promise<string> {
     const [row] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
-                           order_status, total_amount_cents, technician_id, scheduled_at, duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9) RETURNING id`,
+                           order_status, total_amount_cents, technician_id, scheduled_at, duration_minutes,
+                           estimated_duration_days)
+       VALUES ($1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9,$10) RETURNING id`,
       [
         `SCN-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
         opts.status, ids.techProfile, opts.scheduledAt, opts.durationMinutes ?? null,
+        opts.estimatedDurationDays ?? null,
       ],
     );
     orderIds.push(row.id as string);
@@ -261,10 +265,22 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     expect(await isEligible(tomorrow)).toBe(true);
   });
 
-  it('A2 — الشغل النشط بيمنع طلب **نفس اليوم** بس (الفرق الحقيقي)', async () => {
+  it('A2 (ADR-0070) — الشغل الجاري دلوقتي **مايمنعش** شغلانة تانية نفس اليوم مالهاش تداخل', async () => {
+    // النسخة القديمة كانت بتتوقّع `false` هنا اعتمادًا على قاعدة «منشغل جسديًا + نفس اليوم =
+    // مستبعد». المالك شال القاعدة دي بالنص: «لو جاله شغلانة تانية ما بتتعارضش مع مواعيده في نفس
+    // اليوم، ومجموع الشغل أقل من عدد الساعات المسموح أو يساويه — مفيش مشكلة».
+    // الحسبة هنا: ١١:٠٠–١٤:٠٠ (١٨٠ د) + ٢٠:٠٠–٢٢:٠٠ (١٢٠ د) = ٣٠٠ دقيقة ≤ ٧٢٠ (السقف)، وصفر
+    // تداخل زمني ⇒ مؤهّل.
     await insertOrder({ label: 'engaged', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
     const sameDay = await candidateOrder(await cairoAt(0, 20), 120);
-    expect(await isEligible(sameDay)).toBe(false);
+    expect(await isEligible(sameDay)).toBe(true);
+  });
+
+  it('A3 (ADR-0070) — نفس الحالة بس بتداخل زمني حقيقي: بيتمنع', async () => {
+    // الحارس اللي لسه قايم: تقاطع نافذة فعلية. ١١:٠٠–١٤:٠٠ مقابل ١٣:٠٠–١٥:٠٠ ⇒ تداخل ⇒ مستبعد.
+    await insertOrder({ label: 'engaged', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
+    const overlapping = await candidateOrder(await cairoAt(0, 13), 120);
+    expect(await isEligible(overlapping)).toBe(false);
   });
 
   it('B — تعارض مستقبلي حقيقي (بكرة ١٤–١٦ ثم ١٥–١٧) بيتمنع', async () => {
@@ -292,8 +308,19 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     expect(await isEligible(urgent)).toBe(true);
   });
 
-  it('D2 — طلب طوارئ: الفني اللي **شغّال فعليًا دلوقتي** يتستبعد', async () => {
+  it('D2 (ADR-0070) — طلب طوارئ: الفني اللي **شغّال فعليًا دلوقتي** بقى مؤهّل طالما يومه مش مليان', async () => {
+    // ده **بالظبط** البلاغ اللي المالك رفعه (2026-09-04): «أعتقد إن حاليًا أصلاً الصنايعي ما
+    // ينفعش يقبل وهو في شغلانة — طالما الشغلانة جارية هو ما ينفعش يقبل شغل تاني، فدي مشكلة».
+    // ١٨٠ دقيقة مشغولة + شغلانة الطوارئ ≤ ٧٢٠ ⇒ مؤهّل.
     await insertOrder({ label: 'in-progress', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
+    const urgent = await candidateOrder(null, null, true);
+    expect(await isEligible(urgent)).toBe(true);
+  });
+
+  it('D4 (ADR-0070) — طلب طوارئ: الفني اللي يومه **مليان** بقى يتستبعد (السقف اليومي بقى يسري على الطوارئ)', async () => {
+    // الوجه التاني لنفس القاعدة: قبل ADR-0070 السقف اليومي مكانش بيسري على الطوارئ خالص، فالفني
+    // اللي محجوز يوم كامل كان لسه بياخد طوارئ. دلوقتي «مجموع الشغل ≤ المسموح» بيسري على الكل.
+    await insertOrder({ label: 'full-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 60, estimatedDurationDays: 1 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(false);
   });

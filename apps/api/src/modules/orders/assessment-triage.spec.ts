@@ -4,6 +4,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { AssessmentTriageService } from './assessment-triage.service';
 import { prepaidOrderNextStatus } from './prepaid-order-next-status';
 import { canTransition } from './order-state-machine';
@@ -106,7 +107,7 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
       entities: [
-        Order, OrderStatusHistory, OrderQuote, User, Address, CustomerProfile,
+        Order, OrderStatusHistory, OrderQuote, OrderCustomerNotice, User, Address, CustomerProfile,
         ServiceCategory, Service, ServiceZonePricing, ServiceLevelPricing, ServiceAddon, ServiceStandardData,
         TechnicianProfile, TechnicianCompany, City, Area, ServiceZone,
         Setting, ServicePricingField, ServicePricingRule, ServicePricingEvaluation,
@@ -218,6 +219,7 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     try {
       await q(`DELETE FROM order_quotes WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_customer_notices WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
@@ -314,6 +316,14 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(order.priceStatus).toBe(OrderPriceStatus.WAITING_ASSESSMENT);
     // من غير الحدث ده الطلب بيقف في SEARCHING_TECHNICIAN للأبد.
     expect(emitted.filter((e) => e.event === 'order.created')).toHaveLength(1);
+
+    // ADR-0071 (بلاغ مالك 2026-09-04) — السبب لازم يبقى **على الطلب** مش في الإشعار وسجل
+    // الحالات بس. قبل كده العميل كان بيفتح الطلب فيلاقيه اتحوّل لمعاينة بلا أي سبب مكتوب.
+    const notices = await dataSource.query(
+      `SELECT notice_type, message FROM order_customer_notices WHERE order_id = $1 AND deleted_at IS NULL`,
+      [orderId],
+    );
+    expect(notices).toEqual([{ notice_type: 'routed_to_onsite_assessment', message: 'الصور مش واضحة' }]);
   });
 
   it('التحويل لمعاينة من حالة غلط بيترفض', async () => {
@@ -333,6 +343,15 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(info[0].payload).toMatchObject({ orderId, message: 'ابعتلنا صورة للعداد من قريب' });
     // مفيش انتقال حالة، فمايصحش يتبعت إشعار حالة.
     expect(emitted.filter((e) => e.event === 'order.status_changed')).toHaveLength(0);
+
+    // ADR-0071 — الفعل ده مافيهوش انتقال حالة عمدًا، يعني ماكانش له ولا صف في
+    // `order_status_history`: نص الأدمن كان بيعيش في `audit_logs` والإشعار وبس. دلوقتي له
+    // مصدر دايم العميل بيقراه مع الطلب.
+    const notices = await dataSource.query(
+      `SELECT notice_type, message FROM order_customer_notices WHERE order_id = $1 AND deleted_at IS NULL`,
+      [orderId],
+    );
+    expect(notices).toEqual([{ notice_type: 'info_requested', message: 'ابعتلنا صورة للعداد من قريب' }]);
   });
 
   // ===== بند 8: إعادة إصدار عرض منتهي =====
