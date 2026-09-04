@@ -212,11 +212,17 @@ export default function TechnicianDetailPage() {
   }
 
   function loadZones() {
-    authedFetch<TechnicianZoneResponseDto[]>(`/admin/technicians/${id}/zones`).then(setZones);
+    authedFetch<TechnicianZoneResponseDto[]>(`/admin/technicians/${id}/zones`).then(setZones)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }
 
   function loadCategories() {
-    authedFetch<TechnicianCategoryResponseDto[]>(`/admin/technicians/${id}/categories`).then(setCategories);
+    authedFetch<TechnicianCategoryResponseDto[]>(`/admin/technicians/${id}/categories`).then(setCategories)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     authedFetch<TechnicianServicePermissionRow[]>(`/admin/technicians/${id}/service-permissions`)
       .then(setServicePermissions)
       // القسم ده تحسين تشغيلي — فشل تحميله مايكسرش صفحة الفني كلها.
@@ -229,8 +235,14 @@ export default function TechnicianDetailPage() {
     loadZones();
     loadCategories();
     load360();
-    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones);
-    authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories);
+    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+    authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 

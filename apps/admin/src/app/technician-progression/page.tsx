@@ -137,15 +137,24 @@ export default function TechnicianProgressionPage() {
   }
 
   function handleApprove(id: string) {
-    runAction(() => authedFetch(`/admin/technician-progression/${id}/approve`, { method: 'PATCH', body: JSON.stringify({}) }));
+    runAction(() => authedFetch(`/admin/technician-progression/${id}/approve`, { method: 'PATCH', body: JSON.stringify({}) }))
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }
 
   function handleOverride(id: string, reason: string) {
-    runAction(() => authedFetch(`/admin/technician-progression/${id}/override`, { method: 'PATCH', body: JSON.stringify({ reason }) }));
+    runAction(() => authedFetch(`/admin/technician-progression/${id}/override`, { method: 'PATCH', body: JSON.stringify({ reason }) }))
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }
 
   function handleReject(id: string, reason: string) {
-    runAction(() => authedFetch(`/admin/technician-progression/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason }) }));
+    runAction(() => authedFetch(`/admin/technician-progression/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason }) }))
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }
 
   return (

@@ -19,7 +19,9 @@ export default function OrdersPage() {
     if (isAuthenticated) {
       listMyOrders(authedFetch).then((list) =>
         setOrders([...list].sort((a, b) => (b.placed_at ?? '').localeCompare(a.placed_at ?? ''))),
-      );
+      )
+        // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+        .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, authLoading]);

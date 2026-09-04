@@ -269,7 +269,9 @@ export const fetchCustomerCancellationReasons = () =>
 export const createOrder = (authedFetch: AuthedFetch, body: CreateOrderBody, idempotencyKey: string) =>
   authedFetch<OrderResponseDto>('/orders', {
     method: 'POST',
-    headers: { 'Idempotency-Key': idempotencyKey },
+    // `X-Client-Channel` (docs/08 §133) — من غيره الباك-إند بيسجّل كل طلب ويب على إنه من
+    // تطبيق الموبايل، فأي تقرير «الطلبات جاية منين» بيدّي رقم غلط.
+    headers: { 'Idempotency-Key': idempotencyKey, 'X-Client-Channel': 'web' },
     body: JSON.stringify(body),
   });
 

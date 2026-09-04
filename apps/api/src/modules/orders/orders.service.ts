@@ -544,6 +544,9 @@ export class OrdersService {
     // مش بيبعته، عنده حماية تانية أصلاً). لو اتبعت، أي نداء تاني بنفس المفتاح لنفس العميل بيرجّع
     // نفس الطلب الأصلي فورًا بدل ما ينشئ نسخة جديدة (double-click/retry شبكة).
     idempotencyKey?: string,
+    // القناة اللي الطلب جه منها — بتتحدد من هيدر `X-Client-Channel` اللي كل كلاينت بيبعته
+    // (docs/08 §133). الافتراضي `customer_app` بيحافظ على سلوك أي كلاينت قديم مش بيبعت الهيدر.
+    sourceChannel: OrderSourceChannel = OrderSourceChannel.CUSTOMER_APP,
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -1360,7 +1363,10 @@ export class OrdersService {
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
-        sourceChannel: callCenterContext ? OrderSourceChannel.CALL_CENTER : OrderSourceChannel.CUSTOMER_APP,
+        // **بَقّة بيانات حقيقية (docs/08 §133)**: القيمة كانت مثبّتة على `customer_app` لأي طلب
+        // مش مركز اتصال — يعني **كل طلب جاي من الويب كان بيتسجّل إنه من تطبيق الموبايل**،
+        // والـenum فيه `web` محدش بيستخدمه. أي تقرير «الطلبات جاية منين» كان بيكدب.
+        sourceChannel: callCenterContext ? OrderSourceChannel.CALL_CENTER : sourceChannel,
         createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,

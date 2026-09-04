@@ -287,7 +287,14 @@ function QuoteApprovalSection({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listQuoteItems(authedFetch, orderId).then(setItems);
+    listQuoteItems(authedFetch, orderId)
+      .then(setItems)
+      // الفشل كان بيضيع كـunhandled rejection والقسم يفضل في حالة تحميل للأبد (docs/08 §133).
+      // القايمة الفاضية بتخلّي القسم يقفل بدل ما يعلّق، والخطأ بيتسجّل للتشخيص.
+      .catch((err: unknown) => {
+        console.error('فشل تحميل بنود عرض السعر', err);
+        setItems([]);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -366,7 +373,10 @@ function CancelSection({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open && reasons === null) fetchCustomerCancellationReasons().then(setReasons);
+    if (open && reasons === null) fetchCustomerCancellationReasons().then(setReasons)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }, [open, reasons]);
 
   const selectedReason = reasons?.find((r) => r.id === selectedReasonId);
@@ -475,7 +485,10 @@ function ChatSection({
   // الرسايل بـREST مرة واحدة، الرسايل الجديدة بتوصل فورًا عبر السوكيت بدل بولينج (كان فجوة موثّقة).
   useEffect(() => {
     if (!threadId || !accessToken) return;
-    listMessages(authedFetch, threadId).then(setMessages);
+    listMessages(authedFetch, threadId)
+      .then(setMessages)
+      // تاريخ الرسايل فشل — السوكيت لسه هيشتغل للرسايل الجديدة، فالشات مايتعطّلش (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل تاريخ رسايل الشات', err));
 
     const client = new ChatSocketClient();
     clientRef.current = client;

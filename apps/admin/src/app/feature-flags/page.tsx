@@ -41,7 +41,10 @@ export default function FeatureFlagsPage() {
   useEffect(() => {
     if (isLoading) return;
     load();
-    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones);
+    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 

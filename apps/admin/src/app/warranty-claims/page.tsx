@@ -95,7 +95,10 @@ export default function AdminWarrantyClaimsPage() {
       const params = new URLSearchParams({ page: String(page), per_page: '20' });
       if (statusFilter !== 'all') params.set('status', statusFilter);
       authedFetchPaginated<ClaimRow>(`/admin/warranty-claims?${params.toString()}`)
-        .then(({ items, meta }) => { setClaims(items); setTotal(meta.total ?? items.length); });
+        .then(({ items, meta }) => { setClaims(items); setTotal(meta.total ?? items.length); })
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) { setError(err instanceof ApiError ? err.message : 'خطأ'); }
   }
 

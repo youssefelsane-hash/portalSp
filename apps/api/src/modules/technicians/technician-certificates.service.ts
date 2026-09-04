@@ -11,7 +11,10 @@ import { AddCertificateDto } from './dto/add-certificate.dto';
 import { ReviewCertificateDto } from './dto/review-certificate.dto';
 import { DocumentReviewStatus } from './entities/technician-document.entity';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
-import { IncomingFile } from './technician-documents.service';
+// `import type` مش تجميل: من غيرها بتتكوّن دايرة اعتماد وقت التشغيل
+// (technicians → certificates → documents → technicians) اتلقطت بـmadge. `IncomingFile`
+// نوع بس، فالاستيراد النوعي بيقطع الحافة تمامًا بلا أي تغيير في السلوك (docs/08 §133).
+import type { IncomingFile } from './technician-documents.service';
 
 const MAX_CERTIFICATES_PER_TECHNICIAN = 20;
 

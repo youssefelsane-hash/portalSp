@@ -142,7 +142,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     // ADR-0050 §6 — الفورم الديناميكي مابقاش حكر على `formula`: خدمة «كشف ثم عرض سعر» بتنزل
     // بلا سعر ومحتاجة نفس «الفلتر» عشان الإدارة تقدر تسعّر (طلب مالك صريح).
     if (service?.pricing_model === 'formula' || service?.pricing_model === 'inspection_then_quote') {
-      fetchPricingFields(id).then(setPricingFields);
+      fetchPricingFields(id).then(setPricingFields)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     }
   }, [id, service]);
 
@@ -153,8 +156,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         const def = list.find((a) => a.is_default) ?? list[0];
         if (def) setSelectedAddressId(def.id);
         else setShowNewAddressForm(true);
-      });
-      fetchPaymentChannels(authedFetch).then(setPaymentChannels);
+      })
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+      fetchPaymentChannels(authedFetch).then(setPaymentChannels)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
@@ -198,7 +207,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     fetchTechniciansForService(id, selectedAddressId, {
       bookingMode,
       fieldValues: service?.pricing_model === 'formula' ? debouncedFieldValues : undefined,
-    }).then(setTechnicians);
+    }).then(setTechnicians)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [technicianChoiceMode, selectedAddressId, id, bookingMode, debouncedFieldValues]);
 
@@ -1278,12 +1290,18 @@ function NewAddressForm({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchCities().then(setCities);
+    fetchCities().then(setCities)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }, []);
 
   useEffect(() => {
     if (cityId) {
-      fetchAreas(cityId).then(setAreas);
+      fetchAreas(cityId).then(setAreas)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } else {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAreas(null);
