@@ -46,7 +46,7 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
     if (this.timer) clearInterval(this.timer);
   }
 
-  async sweep(): Promise<number> {
+  async sweep(options?: { installmentIds?: string[] }): Promise<number> {
     const enabled = await this.settingsService.getBoolean('installments.auto_collection_enabled', false);
     if (!enabled) return 0;
     const maxAttemptsSetting = await this.settingsService.getNumber('installments.max_auto_attempts', 3);
@@ -58,7 +58,7 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
 
     // claim ذرّي — scheduled → processing. الفشل المبكر (بلا كارت/بوابة غير مدعومة) بينزل
     // الحالة failed داخل attemptInstallmentCharge نفسه؛ الـretry بيرجع عبر الـbackoff تحت.
-    const claimed = await this.claimDue(SWEEP_BATCH_SIZE, maxAttempts, backoffDays);
+    const claimed = await this.claimDue(SWEEP_BATCH_SIZE, maxAttempts, backoffDays, options?.installmentIds);
 
     let dispatched = 0;
     for (const row of claimed) {
@@ -82,7 +82,7 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
     return dispatched;
   }
 
-  private async claimDue(limit: number, maxAttempts: number, backoffDays: number): Promise<{ id: string }[]> {
+  private async claimDue(limit: number, maxAttempts: number, backoffDays: number, installmentIds?: string[]): Promise<{ id: string }[]> {
     // المستحقات: مجدولة وصل موعدها، أو فاشلة خلصت مهلة الـbackoff — الاتنين بشرط المحاولات < السقف.
     // attempt_count بيترفع هنا (جوه نفس قفل الـclaim) عشان العد دقيق حتى لو النداء انهار بعده.
     const result = await this.dataSource.query<{ id: string }[] | [{ id: string }[], number]>(
@@ -91,6 +91,10 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
          FROM installments i
          JOIN installment_applications a ON a.id = i.application_id
          WHERE i.attempt_count < $2
+           -- $4 نطاق اختياري للاختبارات بس (NULL في الإنتاج) — نفس نمط باقي الـsweeps في
+           -- المشروع. من غيره، spec متوازي بيسحب أقساط spec تاني فعدّاد المحاولات بيطلع
+           -- 3 بدل 2، والفشل بيتقري كأنه كسر في ضمان SKIP LOCKED وهو تلوّث بين الاختبارات.
+           AND ($4::uuid[] IS NULL OR i.id = ANY($4::uuid[]))
            AND a.status = 'approved'
            AND a.deleted_at IS NULL
            AND (
@@ -111,7 +115,7 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
            updated_at = now()
        WHERE id IN (SELECT id FROM candidates)
        RETURNING id`,
-      [limit, maxAttempts, backoffDays],
+      [limit, maxAttempts, backoffDays, installmentIds ?? null],
     );
     return Array.isArray(result[0]) ? (result[0] as { id: string }[]) : (result as { id: string }[]);
   }

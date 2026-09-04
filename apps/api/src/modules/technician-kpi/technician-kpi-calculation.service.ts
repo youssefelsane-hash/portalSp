@@ -106,6 +106,12 @@ export class TechnicianKpiCalculationService {
       )
       SELECT
         COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
+        -- **مفيش GREATEST هنا — وده مقصود، مش سهو.** الترقية بتقصّ الطلب الخسران على صفر
+        -- (technician-progression-calculation.service.ts) لأن سؤالها «الفني استحقّ إيه؟»،
+        -- والفني مايترجّعش لورا بسبب خصم المنصّة موّلته. أما الرقم ده فسؤاله مختلف: «المنصّة
+        -- كسبت كام فعلًا من الفني ده؟» — وده رقم **تقريري** بيتعرض زي ما هو، فطرح الطلب
+        -- الخسران منه هو **الحقيقة** مش عقوبة. ومابيدخلش في حساب أي درجة: بُعد الإيراد في
+        -- الـKPI بيتحسب من technicianEarningsCents ومقصوص على [0,100].
         COALESCE(SUM(CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
           THEN ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents)
           ELSE 0 END), 0) AS platform_revenue_cents,

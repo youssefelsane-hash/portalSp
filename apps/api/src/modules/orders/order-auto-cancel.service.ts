@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, LessThan, Repository } from 'typeorm';
+import { DataSource, LessThan, Like, Repository } from 'typeorm';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { SettingsService } from '../settings/settings.service';
@@ -71,20 +71,35 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
   // أكّد إن ده مش المطلوب: عميل طلب كاش (أو أي طريقة دفع) لازم طلبه يتقبل ويفضل قايم، مش يتلغى
   // بصمت لمجرد مفيش فني متاح دلوقتي. مسار PENDING_PAYMENT (دفع إلكتروني اتبدأ ومخلّصش) مختلف
   // تمامًا وفاضل شغال زي ما هو — ده مش عن توفر فني، ده عن دفع فعليًا ماتمش.
-  async sweep(): Promise<number> {
-    return this.sweepPendingPayment();
+  /**
+   * `options.orderNumberPrefix` — **نطاق اختياري للاختبارات بس**، نفس نمط
+   * `RecurringOrdersService.sweep({ templateIds })` الموجود أصلاً في نفس الموديول.
+   *
+   * السبب: الـsweep دي بتلغي **أي** طلب `pending_payment` قديم في القاعدة كلها — وده الصح في
+   * الإنتاج. لكن في الاختبارات المتوازية بقت بتلغي طلبات specs تانية، فـspec بيتوقّع
+   * `manual_review` كان بيلاقي `cancelled` بسبب spec تاني خالص شغّال جنبه. فشل بيتقري كأنه
+   * بَقّة في الكود وهو تلوّث بين الاختبارات.
+   *
+   * الإنتاج بينادي `sweep()` بلا معاملات فالسلوك مايتغيّرش بأي شكل.
+   */
+  async sweep(options?: { orderNumberPrefix?: string }): Promise<number> {
+    return this.sweepPendingPayment(options?.orderNumberPrefix);
   }
 
   // طلبات PENDING_PAYMENT قديمة (docs/08 §19 بند 3) — العميل بدأ دفع إلكتروني بس مخلّصش. مفيش
   // فني اتوزّع عليها أصلاً (pay-before-dispatch، ADR-0013)، فمفيش استرداد مطلوب هنا — الدفع نفسه
   // لسه مكملش (paymentStatus لسه UNPAID)، مفيش فلوس اتاخدت أصلاً عشان ترجع.
-  private async sweepPendingPayment(): Promise<number> {
+  private async sweepPendingPayment(orderNumberPrefix?: string): Promise<number> {
     const minutes = await this.settingsService.getNumber('orders.payment_timeout_minutes', PAYMENT_TIMEOUT_MINUTES_FALLBACK);
     const cutoff = new Date(Date.now() - minutes * 60 * 1000);
 
     const staleOrders = await this.orders.find({
       select: ['id'],
-      where: { orderStatus: OrderStatus.PENDING_PAYMENT, placedAt: LessThan(cutoff) },
+      where: {
+        orderStatus: OrderStatus.PENDING_PAYMENT,
+        placedAt: LessThan(cutoff),
+        ...(orderNumberPrefix ? { orderNumber: Like(`${orderNumberPrefix}%`) } : {}),
+      },
       order: { placedAt: 'ASC' },
       take: SWEEP_BATCH_SIZE,
     });

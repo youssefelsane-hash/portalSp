@@ -107,8 +107,8 @@ flowchart LR
 | `campaigns/campaign-sweep.service.ts` | إنهاء الحملات المنتهية | — |
 
 > ⚠️ راجع [02 §6](./02-ORDER-LIFECYCLE.md): طلب `searching_technician` **مابيتلغيش تلقائيًا
-> خالص** — قرار مالك صريح. `orders.auto_cancel_after_minutes` موجود في الإعدادات لكنه **غير
-> مستخدَم**.
+> خالص** — قرار مالك صريح. الإعداد الميت `orders.auto_cancel_after_minutes` **اتحذف نهائيًا**
+> من `settings` (migration 0262) عشان مايوهمش الأدمن بسلوك مش موجود.
 
 ### ج) خدمات التوليد الدوري
 

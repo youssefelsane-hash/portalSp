@@ -167,7 +167,7 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
       minutesAgo: OLD_MINUTES_AGO,
     });
 
-    const cancelledCount = await service.sweep();
+    const cancelledCount = await service.sweep({ orderNumberPrefix: 'TESTAC-' });
     expect(cancelledCount).toBeGreaterThanOrEqual(1);
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
@@ -187,7 +187,7 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
     });
     const paymentId = await insertSucceededPayment(orderId, `pd-${runId}`, PaymentMethod.CARD);
 
-    await service.sweep();
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
@@ -209,7 +209,7 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
       minutesAgo: OLD_MINUTES_AGO,
     });
 
-    await service.sweep();
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);

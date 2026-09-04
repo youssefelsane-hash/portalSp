@@ -212,7 +212,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
 
   it('مطفي افتراضيًا — مفيش أي دفعة بتنشأ من غير تشغيل صريح (BLOCKED by default)', async () => {
     await flushSettingCache('false');
-    await collectionService.sweep();
+    await collectionService.sweep({ installmentIds: ids.installmentIds });
     const inst = await q<{ status: string }[]>(
       `SELECT status::text AS status FROM installments WHERE id=$1`,
       [ids.installmentIds[0]],
@@ -229,8 +229,8 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
     await flushSettingCache('true');
     await q(`UPDATE installments SET status='scheduled', attempt_count=0, last_attempt_at=NULL WHERE id=$1`, [ids.installmentIds[0]]);
 
-    await collectionService.sweep();
-    await collectionService.sweep(); // التاني ملقاش حاجة جديدة (failed بعد الـbackoff لسه ما عداش)
+    await collectionService.sweep({ installmentIds: ids.installmentIds });
+    await collectionService.sweep({ installmentIds: ids.installmentIds }); // التاني ملقاش حاجة جديدة (failed بعد الـbackoff لسه ما عداش)
 
     const inst = await q<{ attempt_count: number; status: string; last_error: string | null }[]>(
       `SELECT attempt_count, status::text AS status, last_error FROM installments WHERE id = $1`,
@@ -257,7 +257,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       `UPDATE installments SET status='scheduled', last_attempt_at = now() - interval '30 days' WHERE id=$1`,
       [ids.installmentIds[0]],
     );
-    await Promise.all([collectionService.sweep(), secondCollectionService.sweep()]);
+    await Promise.all([collectionService.sweep({ installmentIds: ids.installmentIds }), secondCollectionService.sweep({ installmentIds: ids.installmentIds })]);
     const [{ attempts }] = await q<{ attempts: number }[]>(
       `SELECT attempt_count AS attempts FROM installments WHERE id=$1`,
       [ids.installmentIds[0]],
