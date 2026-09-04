@@ -62,7 +62,10 @@ export default function RoleDetailPage() {
   useEffect(() => {
     if (isLoading) return;
     load();
-    authedFetch<PermissionResponseDto[]>('/admin/permissions').then(setCatalog);
+    authedFetch<PermissionResponseDto[]>('/admin/permissions').then(setCatalog)
+      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+      // والمستخدم مش عارف ليه (docs/08 §133).
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 

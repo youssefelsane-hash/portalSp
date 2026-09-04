@@ -66,7 +66,18 @@ export function AdminRealtimeProvider({ children }: { children: ReactNode }) {
   return <AdminRealtimeContext.Provider value={subscribe}>{children}</AdminRealtimeContext.Provider>;
 }
 
-export function useAdminLiveRefresh(topics: readonly AdminTopic[], refresh: (event: AdminLiveEvent) => void): void {
+/**
+ * تحديث حي لصفحة أدمن عند وصول حدث على مواضيع محددة.
+ *
+ * **`Promise<void>` مقبولة عمدًا في `refresh`** (docs/08 §133): كل الـ30 صفحة اللي بتستخدم
+ * الهوك دي بتمرّر دالة `load()` غير متزامنة. التوقيع القديم كان `=> void` بس، فالـPromise
+ * كانت بتضيع — أي فشل في تحديث حي (توكن انتهى، السيرفر رجّع 500) بيبقى unhandled rejection
+ * والصفحة بتفضل على بيانات قديمة بلا أي إشارة. المعالجة هنا في مكان واحد بدل 30.
+ */
+export function useAdminLiveRefresh(
+  topics: readonly AdminTopic[],
+  refresh: (event: AdminLiveEvent) => void | Promise<void>,
+): void {
   const subscribe = useContext(AdminRealtimeContext);
   const onLiveEvent = useEffectEvent(refresh);
   const topicKey = topics.join(',');
@@ -75,7 +86,11 @@ export function useAdminLiveRefresh(topics: readonly AdminTopic[], refresh: (eve
     if (!subscribe) return;
     const allowedTopics = new Set<AdminTopic>(topicKey.split(',').filter(Boolean) as AdminTopic[]);
     return subscribe((event) => {
-      if (allowedTopics.has(event.topic)) onLiveEvent(event);
+      if (!allowedTopics.has(event.topic)) return;
+      const result = onLiveEvent(event);
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => console.error('فشل التحديث الحي للصفحة', err));
+      }
     });
   }, [subscribe, topicKey]);
 }

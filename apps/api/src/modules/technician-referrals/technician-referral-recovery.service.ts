@@ -15,8 +15,10 @@ export class TechnicianReferralRecoveryService implements OnModuleInit, OnModule
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(async () => {
-      await this.sweep().catch((err) =>
+    // نفس القاعدة: الـcallback يرجّع void، و`void` بتعلن إن الإطلاق-والنسيان مقصود
+    // والرفض متعامل معاه بالـ.catch اللي جنبه.
+    this.timer = setInterval(() => {
+      void this.sweep().catch((err) =>
         this.logger.error('فشل استرداد مكافآت ترشيح الفنيين', err instanceof Error ? err.stack : err),
       );
     }, SWEEP_INTERVAL_MS);

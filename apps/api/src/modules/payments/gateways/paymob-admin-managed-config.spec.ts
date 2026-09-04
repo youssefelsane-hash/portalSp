@@ -71,6 +71,11 @@ describe('PaymobProvider — encrypted admin-managed configuration (PostgreSQL)'
       config,
     );
     provider = new PaymobProvider(config, settings);
+    // إرجاع الـPromise هنا **مقصود ومطلوب**: `SettingsService.update()` بينادي `emitAsync`،
+    // واللي بيستنى ما يرجّعه كل listener. لفّها في قوس معقوف (أو `void`) بتخلّي التحديث
+    // fire-and-forget فالاختبار بيقرا `isConfigured` قبل ما الـhandler يخلص — اتأكد بفشل
+    // حقيقي في jest، مش استنتاج.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     events.on(SETTING_UPDATED_EVENT, (event: SettingUpdatedEvent) => provider.handleSettingUpdated(event));
     await provider.onModuleInit();
   });

@@ -110,7 +110,7 @@ describe('TechnicianScheduleService.bulkSetAvailability — تعديل جماع�
   it('block بيستبدل سلوتات available جزئية موجودة بصف blocked كامل اليوم واحد', async () => {
     await service.createSlot(ids.technician, { slot_date: '2099-07-30', start_time: '09:00', end_time: '12:00' });
     await service.createSlot(ids.technician, { slot_date: '2099-07-30', start_time: '13:00', end_time: '17:00' });
-    let count = await dataSource
+    const count = await dataSource
       .getRepository(TechnicianScheduleSlot)
       .count({ where: { technicianId: ids.technician, slotDate: '2099-07-30' } });
     expect(count).toBe(2);

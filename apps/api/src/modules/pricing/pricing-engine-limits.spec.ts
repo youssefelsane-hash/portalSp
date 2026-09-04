@@ -6,7 +6,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Address } from '../customers/entities/address.entity';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
-import { ServicePricingField, PricingFieldType } from './entities/service-pricing-field.entity';
+import { ServicePricingField } from './entities/service-pricing-field.entity';
 import { ServicePricingRule, PricingRuleType } from './entities/service-pricing-rule.entity';
 import { ServicePricingRuleTest } from './entities/service-pricing-rule-test.entity';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
@@ -41,7 +41,7 @@ describe('Price Engine — حدود العمق/التعقيد والتحقق م�
     order: '',
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }

@@ -54,7 +54,6 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
-import { PricingEngineService } from '../pricing/pricing-engine.service';
 
 /**
  * الدورة الكاملة حي ضد Postgres حقيقي: خطة متكررة → sweep → طلب **عادي** حقيقي عبر

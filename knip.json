@@ -1,0 +1,67 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    "apps/api": {
+      "entry": [
+        "src/main.ts",
+        "src/**/*.spec.ts",
+        "src/**/*.module.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "apps/admin": {
+      "entry": [
+        "src/app/**/{page,layout,route,loading,error,not-found,template,default}.tsx",
+        "src/proxy.ts",
+        "src/app/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "apps/customer-web": {
+      "entry": [
+        "src/app/**/{page,layout,route,loading,error,not-found,template,default}.tsx",
+        "src/app/**/*.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/shared-types": {
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "infra/migrations": {
+      "entry": [
+        "migrate.js",
+        "check-script1-invariants.js"
+      ],
+      "project": [
+        "*.js"
+      ]
+    },
+    ".": {
+      "entry": [
+        "scripts/*.js",
+        "scripts/*.sh"
+      ],
+      "project": [
+        "scripts/**"
+      ]
+    }
+  },
+  "ignore": [
+    "apps/*/src/components/ui/**"
+  ],
+  "ignoreDependencies": [
+    "tw-animate-css",
+    "tailwindcss"
+  ]
+}

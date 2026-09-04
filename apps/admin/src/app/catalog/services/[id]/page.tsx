@@ -271,7 +271,10 @@ export default function ServiceDetailPage() {
       });
       (e.target as HTMLFormElement).reset();
       setZpMode('override');
-      authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
+      authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -286,7 +289,10 @@ export default function ServiceDetailPage() {
       await authedFetch(`/admin/services/zone-pricing/${pricingId}`, {
         method: 'DELETE',
       });
-      authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
+      authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -309,7 +315,10 @@ export default function ServiceDetailPage() {
         body: JSON.stringify(body),
       });
       (e.target as HTMLFormElement).reset();
-      authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing);
+      authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -334,7 +343,10 @@ export default function ServiceDetailPage() {
         body: JSON.stringify(body),
       });
       (e.target as HTMLFormElement).reset();
-      authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`).then(setPricingTierPricing);
+      authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`).then(setPricingTierPricing)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -357,7 +369,10 @@ export default function ServiceDetailPage() {
         body: JSON.stringify(body),
       });
       setShowNewAddon(false);
-      authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons);
+      authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -373,7 +388,10 @@ export default function ServiceDetailPage() {
         method: 'PATCH',
         body: JSON.stringify({ is_active: !addon.is_active }),
       });
-      authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons);
+      authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -402,7 +420,10 @@ export default function ServiceDetailPage() {
         body: JSON.stringify(body),
       });
       setShowNewStandardData(false);
-      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -418,7 +439,10 @@ export default function ServiceDetailPage() {
         method: 'PATCH',
         body: JSON.stringify({ is_active: !row.is_active }),
       });
-      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -433,7 +457,10 @@ export default function ServiceDetailPage() {
       await authedFetch(`/admin/services/standard-data/${standardDataId}`, {
         method: 'DELETE',
       });
-      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -497,7 +524,10 @@ export default function ServiceDetailPage() {
     try {
       await authedFetch(`/admin/services/productivity-suggestions/${suggestionId}/${decision}`, { method: 'POST' });
       loadPendingSuggestions();
-      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {

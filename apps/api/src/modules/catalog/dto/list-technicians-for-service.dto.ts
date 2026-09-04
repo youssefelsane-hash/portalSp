@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsDateString, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsUUID } from 'class-validator';
+import { IsDateString, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { BOOKING_MODE_FILTER_VALUES, BookingModeFilter } from './list-services.dto';
 
 export class ListTechniciansForServiceDto {

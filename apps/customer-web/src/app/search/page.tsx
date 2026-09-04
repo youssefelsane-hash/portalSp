@@ -16,7 +16,9 @@ function SearchResults() {
 
   useEffect(() => {
     if (initialQuery.trim().length >= 2) {
-      searchServices(initialQuery).then(setResults);
+      searchServices(initialQuery).then(setResults)
+        // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+        .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
     }
     // مقصود مرة واحدة بس مع query الأولي من الرابط.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -25,7 +27,9 @@ function SearchResults() {
   function runSearch(e: React.FormEvent) {
     e.preventDefault();
     setSearched(true);
-    searchServices(query).then(setResults);
+    searchServices(query).then(setResults)
+      // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
   }
 
   return (

@@ -436,7 +436,7 @@ export class CatalogService {
       : [0, null];
 
     let zoneAdjustedBaseCents = result.priceCents;
-    let surgeMultiplier = 1;
+    const surgeMultiplier = 1;
     let inspectionFeeCents = service.inspectionFeeCents;
     if (zoneOverride) {
       inspectionFeeCents = zoneOverride.inspectionFeeCents;

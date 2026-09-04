@@ -36,11 +36,29 @@
 - Migrations: SQL خام في `infra/migrations/`، `synchronize:false` دايماً، ما تعدّلش migration اتعمل commit — دايماً ملف جديد برقم تالي.
 - كود التعليقات: عربي، وبس لما السبب مش واضح من الاسم نفسه (مش شرح "بيعمل ايه").
 
+## أدوات جاهزة تحت `scripts/` — استخدمها بدل ما تعيد اختراعها (docs/08 §132)
+
+- **`scripts/flutter-visual.sh <customer-app|technician-app> out.png`** — بيبني التطبيق،
+  يشغّله على شاشة وهمية (Xvfb + fluxbox)، وياخد لقطة. **ده الطريقة الوحيدة لمسك بلاغات
+  المالك البصرية** (overflow، شاشة بيضا، زرار متغطّي) — `flutter test` بيختبر المنطق مش
+  الرندر. لو البيئة جديدة: `scripts/flutter-visual.sh --deps` بيسطّب اللي ناقص
+  (gtk+3، libsecret، fluxbox، xdotool، imagemagick). التطبيق بيفضل شغّال بعد اللقطة
+  فتقدر تتفاعل بـ`DISPLAY=:99 xdotool ...`.
+- **`node scripts/clean-test-data.js --service <uuid> | --order <uuid> | --order-number-like 'P7-%'`**
+  — بيمسح طلبات الاختبار بترتيب آمن للمفاتيح الأجنبية، بيسأل `pg_constraint` عن الجداول
+  المرتبطة فعلاً بدل قايمة مكتوبة بالإيد بتقدم. (التنظيف اليدوي كان بيفشل كل مرة على FK مختلف.)
+- **`node scripts/check-migrations.js`** — بيمنع رقمين migration متكررين. حصلت فعلاً لما
+  سيشنين متوازيين خدوا `0257`. شغّال في CI قبل تطبيق الـmigrations.
+- **لينت الباك-إند**: `cd apps/api && npx eslint src --max-warnings 0` — لازم يفضل صفر،
+  وهو في CI. أهم قاعدة فيه `no-floating-promises` (فئة البَقّة اللي علّقت طلب حقيقي وقت
+  انقطاع Redis). `eslint` و`typescript-eslint` موجودين في `node_modules` بتاع الجذر أصلاً،
+  فمفيش أي إضافة على `package-lock.json`.
+
 ## طريقة العمل المتّبعة في السيشنز اللي فاتت (اتّبعها)
 
 1. مفيش توقف للتأكيد بين المهام — اختار المهمة الجاية، ابنيها، اختبرها حي (مش mocks) على Postgres/Redis حقيقيين شغالين فعلاً، لو لقيت بَقّة حقيقية اتعامل معاها، وثّق بصراحة (حتى الفجوات والقصور)، commit + push، كمّل.
 2. أي فشل في cache/queue/infra لازم يتلقّط ويتعامل معاه بأمان (يرجع null/يسجّل تحذير/يرجع للـ DB) — أبداً ميكسرش أو يعلّق العملية الحقيقية للمستخدم. الدرس المكلف من السيشن ده: `queue.add()` كانت بتعلّق طلب حقيقي (تقييم/دفع) لدقايق وقت انقطاع Redis قبل ما نكتشف ونصلح.
-3. قبل أي commit: `npx tsc --noEmit` ثم `npx nest build` ثم `npx jest` في `apps/api` — الثلاثة لازم يعدّوا نضيف.
+3. قبل أي commit: `npx tsc --noEmit` ثم **`npx eslint src --max-warnings 0`** ثم `npx nest build` ثم `npx jest -w=1` في `apps/api` — الأربعة لازم يعدّوا نضيف.
 4. كل موديول له `README.md` بيوثّق القرارات والفجوات بصراحة — حدّثه لما تلمس الموديول.
 
 ## فريق العمل الحالي

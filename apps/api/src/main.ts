@@ -11,7 +11,7 @@ import { configureHttpLayer } from './http-bootstrap';
 // تشخيص بَقّة "الـ Worker مابيرجعش يشتغل بعد رجوع Redis" جداً. دلوقتي أي rejection غير متوقعة
 // بتتسجّل صريح بدل ما تختفي.
 process.on('unhandledRejection', (reason) => {
-  // eslint-disable-next-line no-console
+   
   console.error('Unhandled Rejection:', reason);
 });
 
@@ -39,4 +39,9 @@ async function bootstrap() {
   console.log(`baytak api شغال على http://localhost:${port}/${config.get<string>('apiPrefix')}`);
 }
 
-bootstrap();
+// `bootstrap()` بلا معالجة كان بيخلّي أي فشل إقلاع (Postgres واقع، بورت مشغول، إعداد ناقص)
+// يطلع كـunhandled rejection بستاك خام. الرسالة الواضحة + خروج بكود ١ أنفع لأي مشغّل/CI.
+bootstrap().catch((err) => {
+  console.error('فشل إقلاع baytak api:', err instanceof Error ? err.stack : err);
+  process.exit(1);
+});

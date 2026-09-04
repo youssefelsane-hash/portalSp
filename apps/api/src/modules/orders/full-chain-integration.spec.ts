@@ -84,7 +84,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     company: '',
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }

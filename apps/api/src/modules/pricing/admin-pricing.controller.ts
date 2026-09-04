@@ -151,8 +151,8 @@ export class AdminPricingController {
     const detailed = await this.pricingEngineService.evaluateDraftDetailed(id, dto.field_values, dto.formula_payload);
     // حقول اختيارية إضافية للإدارة فقط (docs/01B §5/§6) — ما تكسرش أي مستهلك قديم.
     // لو مفيش override، الـtrace/الشرح بيترسموا ضد القاعدة الحية المحفوظة نفسها.
-    let trace = detailed.trace;
-    let explanation = detailed.explanation;
+    const trace = detailed.trace;
+    const explanation = detailed.explanation;
     return { ...toPricingEvaluationResponseDto(detailed.result), trace, explanation };
   }
 

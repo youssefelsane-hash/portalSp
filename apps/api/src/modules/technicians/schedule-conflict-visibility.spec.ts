@@ -7,7 +7,7 @@ import { User } from '../auth/entities/user.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechniciansService } from './technicians.service';
 import { Service } from '../catalog/entities/service.entity';
-import { Order, OrderStatus } from '../orders/entities/order.entity';
+import { Order } from '../orders/entities/order.entity';
 
 /**
  * ADR-0030 — سياسة إظهار المرشّحين المتعارضين جدوليًا. الاختبار ده بيغطي:

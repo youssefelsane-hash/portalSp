@@ -28,7 +28,7 @@ function linkedServiceId(plan: WarrantyPlanRow): string {
 }
 
 export default function AdminWarrantyPlansPage() {
-  const { authedFetch } = useAuth();
+  const { isLoading, authedFetch } = useAuth();
   const [plans, setPlans] = useState<WarrantyPlanRow[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,11 +38,20 @@ export default function AdminWarrantyPlansPage() {
     authedFetch<WarrantyPlanRow[]>('/admin/warranty-plans').then(setPlans).catch((e) => setError(e instanceof ApiError ? e.message : 'خطأ'));
   };
   useEffect(() => {
+    // **بَقّة حقيقية اتلقطت بزحف بصري على كل لينكات القائمة (docs/08 §133)**: الصفحة دي كانت
+    // الوحيدة من ٤٤ صفحة اللي بترجع 401 على كل تحميل. السبب إنها بتنادي الـAPI **قبل ما
+    // التوكن يجهز** — كل الصفحات التانية بتستنى `isLoading`. والأسوأ إن الـdeps فاضية
+    // (`[]`) فالمحاولة مابتتكررش لما التوكن يوصل: الجدول يفضل فاضي وقايمة الخدمات فاضية
+    // والرسالة الوحيدة «خطأ» بلا أي تفسير.
+    if (isLoading) return;
     load();
     authedFetch<ServicesResponse>('/admin/services?per_page=200&is_active=true')
       .then((result) => setServices(normalizeServiceOptions(result)))
-      .catch(() => setServices([]));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      .catch((err: unknown) => {
+        console.error('فشل تحميل الخدمات لخطط الضمان', err);
+        setServices([]);
+      });
+  }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggleActive(plan: WarrantyPlanRow) {
     try {

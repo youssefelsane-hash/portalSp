@@ -7,7 +7,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
 import { WORK_OPPORTUNITY_OFFERED_EVENT } from '../../common/events/work-opportunity-offered.event';
-import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
+import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 

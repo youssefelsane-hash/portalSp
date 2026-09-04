@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { ProjectsService } from './projects.service';
-import { Project, ProjectStatus } from './entities/project.entity';
+import { Project } from './entities/project.entity';
 import { ProjectQuote } from './entities/project-quote.entity';
 import { ProjectMilestone } from './entities/project-milestone.entity';
 import { User } from '../auth/entities/user.entity';
@@ -31,7 +31,7 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     address: '', city: '', zone: '', project: '', adminUser: '', otherUser: '', otherProfile: '',
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }

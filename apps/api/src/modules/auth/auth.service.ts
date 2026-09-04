@@ -452,7 +452,7 @@ export class AuthService {
    * "مفيش Passkey" العادي (mfa_required + ceremony=registration) — إعادة استخدام كاملة لمسار
    * enrollment الموجود، مفيش رد جديد منفصل.
    */
-  async recoveryLogin(dto: RecoveryVerifyDto, ip: string | null): Promise<MfaRequiredResponse> {
+  async recoveryLogin(dto: RecoveryVerifyDto, _ip: string | null): Promise<MfaRequiredResponse> {
     await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.LOGIN);
 
     const user = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });

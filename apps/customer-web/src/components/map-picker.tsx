@@ -66,7 +66,9 @@ export function MapPicker({
         placeMarker(e.latlng.lat, e.latlng.lng);
         onChangeRef.current(e.latlng.lat, e.latlng.lng);
       });
-    });
+    })
+      // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
 
     return () => {
       cancelled = true;

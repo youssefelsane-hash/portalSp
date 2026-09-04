@@ -48,6 +48,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 import { CreateBookingMatchPreviewDto } from './dto/create-booking-match-preview.dto';
 import { BookingMatchPreviewService } from './booking-match-preview.service';
+import { resolveClientChannel } from './client-channel';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -139,9 +140,15 @@ export class OrdersController {
     // الدفع اللي بتفرضه إجباري) عشان مانكسرش الأكلاينتات القديمة اللي لسه ما بعتوش الهيدر ده،
     // لكن أي كلاينت يبعته بيدّيه حماية idempotency حقيقية ضد double-click/retry شبكة.
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    // قناة العميل (docs/08 §133) — اختياري، والافتراضي `customer_app` بيحافظ على سلوك أي
+    // كلاينت قديم. من غيره كل طلب ويب كان بيتسجّل إنه من تطبيق الموبايل.
+    @Headers('x-client-channel') clientChannel: string | undefined,
   ) {
     const key = idempotencyKey?.trim() || undefined;
-    return this.enrichedResponse(user.sub, await this.ordersService.create(user.sub, dto, undefined, undefined, key));
+    return this.enrichedResponse(
+      user.sub,
+      await this.ordersService.create(user.sub, dto, undefined, undefined, key, resolveClientChannel(clientChannel)),
+    );
   }
 
   // معاينة السعر الكامل قبل التأكيد (docs/08 §1/§2) — read-only، نفس منطق create() بالحرف.

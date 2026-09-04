@@ -4,7 +4,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { User } from '../auth/entities/user.entity';
 import { RecurringOrdersService } from './recurring-orders.service';
-import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { BookingMode, Order, OrderType } from './entities/order.entity';
 import type { CreateOrderDto } from './dto/create-order.dto';
 

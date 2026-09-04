@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, IsNull, LessThan, LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -54,13 +54,13 @@ import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-re
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
-import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
+import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import {
   BookingMode,
   Order,
   OrderCustomerInput,
   OrderPaymentStatus,
-  OrderPriceStatus,
+  
   OrderSourceChannel,
   OrderStatus,
   OrderType,
@@ -544,6 +544,9 @@ export class OrdersService {
     // مش بيبعته، عنده حماية تانية أصلاً). لو اتبعت، أي نداء تاني بنفس المفتاح لنفس العميل بيرجّع
     // نفس الطلب الأصلي فورًا بدل ما ينشئ نسخة جديدة (double-click/retry شبكة).
     idempotencyKey?: string,
+    // القناة اللي الطلب جه منها — بتتحدد من هيدر `X-Client-Channel` اللي كل كلاينت بيبعته
+    // (docs/08 §133). الافتراضي `customer_app` بيحافظ على سلوك أي كلاينت قديم مش بيبعت الهيدر.
+    sourceChannel: OrderSourceChannel = OrderSourceChannel.CUSTOMER_APP,
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -820,7 +823,7 @@ export class OrdersService {
       }
       for (let offset = 0; offset <= rangeDays; offset += 1) {
         const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
-        // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا، مش كل الأيام دايمًا.
+         
         const eligible = await this.techniciansService.hasEligibleTechnicianForDate(service.id, zone.id, address.id, candidateDay);
         if (eligible) {
           resolvedScheduledAtIso = candidateDay.toISOString();
@@ -1360,7 +1363,10 @@ export class OrdersService {
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
-        sourceChannel: callCenterContext ? OrderSourceChannel.CALL_CENTER : OrderSourceChannel.CUSTOMER_APP,
+        // **بَقّة بيانات حقيقية (docs/08 §133)**: القيمة كانت مثبّتة على `customer_app` لأي طلب
+        // مش مركز اتصال — يعني **كل طلب جاي من الويب كان بيتسجّل إنه من تطبيق الموبايل**،
+        // والـenum فيه `web` محدش بيستخدمه. أي تقرير «الطلبات جاية منين» كان بيكدب.
+        sourceChannel: callCenterContext ? OrderSourceChannel.CALL_CENTER : sourceChannel,
         createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,
@@ -2509,7 +2515,7 @@ export class OrdersService {
     const options: { date: string; available: boolean }[] = [];
     for (let offset = 0; offset < days; offset += 1) {
       const day = new Date(startOfToday.getTime() + offset * 24 * 60 * 60 * 1000);
-      // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: نفس نمط findNextAvailableDateForTechnician() بالحرف، استعلام رخيص محدود بـdays.
+       
       const available = await this.techniciansService.hasEligibleTechnicianForDate(
         order.serviceId,
         zone.id,

@@ -6,7 +6,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment, PaymentGatewayStatus } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
-import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
@@ -49,7 +49,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
     installmentIds: [] as string[],
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }
@@ -200,14 +200,6 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       await dataSource.destroy();
     }
   });
-
-  function resetInstallmentToScheduled(): void {
-    void q(
-      `UPDATE installments SET status='scheduled', attempt_count=0, last_attempt_at=NULL, last_error=NULL,
-             paid_at=NULL, updated_at=now() WHERE id=$1`,
-      [ids.installmentIds[0]],
-    ).then(() => undefined);
-  }
 
   async function flushSettingCache(value: string): Promise<void> {
     await q(`UPDATE settings SET value = $1 WHERE key = 'installments.auto_collection_enabled'`, [value]);

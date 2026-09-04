@@ -75,7 +75,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } finally {
         setIsLoading(false);
       }
-    })();
+    })()
+      // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
     // مقصود مرة واحدة بس وقت التحميل — doRefresh/fetchMe stable (useCallback بلا dependencies متغيرة).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

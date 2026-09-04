@@ -71,7 +71,9 @@ export function ZoneBoundaryMap({ center, initialPoints, isSaving, onSave, onCan
           return next;
         });
       });
-    });
+    })
+      // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
 
     return () => {
       cancelled = true;
@@ -113,7 +115,9 @@ export function ZoneBoundaryMap({ center, initialPoints, isSaving, onSave, onCan
         L.circleMarker([p.lat, p.lng], { radius: 5, color: '#2563eb', fillColor: '#2563eb', fillOpacity: 1 }).addTo(map),
       );
       layerRef.current = { polygon, markers };
-    });
+    })
+      // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
+      .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
   }
 
   return (

@@ -8,7 +8,7 @@ import { Wallet } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { ComplaintAttachment } from './entities/complaint-attachment.entity';
-import { Complaint, ComplaintResolutionType, ComplaintStatus } from './entities/complaint.entity';
+import { Complaint, ComplaintResolutionType } from './entities/complaint.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { SupportService } from './support.service';
 import { AuditLogService } from '../audit/audit-log.service';

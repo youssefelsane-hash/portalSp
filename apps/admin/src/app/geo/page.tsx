@@ -306,7 +306,10 @@ export default function GeoPage() {
                         disabled={isSaving}
                         onClick={(e) => {
                           e.stopPropagation();
-                          toggleCityActive(city);
+                          toggleCityActive(city)
+                            // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+                            // والمستخدم مش عارف ليه (docs/08 §133).
+                            .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
                         }}
                         className="cursor-pointer"
                       >

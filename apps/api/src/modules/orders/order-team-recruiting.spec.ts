@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
-import { Order, BookingMode } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { User } from '../auth/entities/user.entity';
@@ -12,7 +12,7 @@ import {
   TechnicianKind,
   TechnicianProfile,
   TechnicianLevel,
-  TechnicianVerificationStatus,
+  
 } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';

@@ -6,7 +6,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
-import { Order, OrderStatus, OrderType } from './entities/order.entity';
+import { Order, OrderType } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
@@ -21,7 +21,6 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { Address } from '../customers/entities/address.entity';
 import { AddressesService } from '../customers/addresses.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
 import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';

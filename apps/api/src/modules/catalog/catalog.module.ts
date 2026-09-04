@@ -48,7 +48,10 @@ import { TechnicianService } from './entities/technician-service.entity';
     SettingsModule,
     // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — CatalogService.estimate() بينادي
     // PricingEngineService.evaluate() لخدمات pricing_model=formula. مفيش استيراد دائري:
-    // PricingModule بيستورد TypeOrmModule+AuditModule بس، مش CatalogModule.
+    // **تصحيح تعليق قديم (docs/08 §133)**: كان مكتوب هنا إن «PricingModule بيستورد
+    // TypeOrmModule+AuditModule بس، مش CatalogModule» — وده مابقاش صح؛ `PricingModule`
+    // بيستورد `CatalogModule` بـ`forwardRef`. الدايرة مقصودة ومتعامَل معاها بالطريقة
+    // القياسية في NestJS، بس التعليق كان بيقول العكس ويضلّل أي حد بيقرا.
     PricingModule,
   ],
   controllers: [CatalogController, AdminCatalogController],

@@ -183,6 +183,7 @@ class OrdersRepository {
     // payments_repository.dart بالحرف) ويتبعت هنا — أي retry (double-tap، timeout شبكة) بنفس
     // المفتاح يرجّع نفس الطلب الأصلي من الباك-إند بدل ما ينشئ نسخة جديدة.
     required String idempotencyKey,
+
     /// تذكرة معاينة المطابقة (ADR-0063 §6، بند 11/12).
     ///
     /// لما تتبعت، الباك-إند بيعيد التحقق من نفس الفني ونفس السعر ونفس المدخلات قبل الإنشاء،
@@ -192,7 +193,12 @@ class OrdersRepository {
     final data = await auth.authedRequest(
       'POST',
       '/orders',
-      extraHeaders: {'Idempotency-Key': idempotencyKey},
+      // `X-Client-Channel` صريح (docs/08 §133) — الباك-إند افتراضيه `customer_app` أصلاً،
+      // بس التصريح بيخلّي المصدر واضح ومايعتمدش على افتراض ممكن يتغيّر.
+      extraHeaders: {
+        'Idempotency-Key': idempotencyKey,
+        'X-Client-Channel': 'customer_app',
+      },
       body: {
         'service_id': serviceId,
         'address_id': addressId,

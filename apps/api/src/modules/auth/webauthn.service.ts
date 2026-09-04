@@ -266,11 +266,11 @@ export class WebAuthnService {
   async consumeRecoveryCode(userId: string, plainCode: string): Promise<boolean> {
     const unused = await this.recoveryCodes.find({ where: { userId, usedAt: IsNull() } });
     for (const row of unused) {
-      // eslint-disable-next-line no-await-in-loop
+       
       const matches = await bcrypt.compare(plainCode, row.codeHash);
       if (!matches) continue;
 
-      // eslint-disable-next-line no-await-in-loop
+       
       const result = await this.recoveryCodes
         .createQueryBuilder()
         .update(AdminMfaRecoveryCode)

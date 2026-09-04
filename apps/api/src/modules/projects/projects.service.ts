@@ -7,7 +7,6 @@ import { Project, ProjectStatus, canTransitionProject } from './entities/project
 import { ProjectQuote } from './entities/project-quote.entity';
 import { ProjectMilestone } from './entities/project-milestone.entity';
 
-const PROJECT_NUMBER_PREFIX = 'PRJ';
 
 @Injectable()
 export class ProjectsService {

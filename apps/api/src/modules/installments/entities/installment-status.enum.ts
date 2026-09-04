@@ -1,4 +1,3 @@
-import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 // حالة طلب التقسيط — التقديم **طلب مراجعة** مش موافقة ذاتية: pending_review لحد ما أدمن مخوّل
 // يعتمد/يرفض. approved = العقد والجدولة نشطة (الصفوف بتتعمل في نفس transaction الموافقة).

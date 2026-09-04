@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
-import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
+import { Order } from '../orders/entities/order.entity';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';

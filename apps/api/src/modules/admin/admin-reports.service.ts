@@ -3,21 +3,17 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, MoreThanOrEqual, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { Payout, PayoutStatus } from '../payments/entities/payout.entity';
-import { Complaint, ComplaintStatus } from '../support/entities/complaint.entity';
+import { Complaint } from '../support/entities/complaint.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { RevenueReportQueryDto } from './dto/revenue-report-query.dto';
 import { TechniciansReportQueryDto, TechniciansReportSortBy } from './dto/technicians-report-query.dto';
 import { ZonesReportQueryDto } from './dto/zones-report-query.dto';
-
-const OPEN_COMPLAINT_STATUSES = [
-  ComplaintStatus.OPEN,
-  ComplaintStatus.UNDER_INVESTIGATION,
-  ComplaintStatus.AWAITING_CUSTOMER,
-  ComplaintStatus.AWAITING_TECHNICIAN,
-  ComplaintStatus.ESCALATED,
-];
+// **مصدر حقيقة واحد** (docs/08 §133): الملف ده كان معامل نسخته الخاصة من نفس المجموعة —
+// أي حالة شكوى جديدة تتضاف للمصدر الأصلي وماتتضافش هنا كانت هتخلّي عدّاد «الشكاوى
+// المفتوحة» في تقارير الأدمن ينقص في صمت. اتلقطت بـknip (المجموعة الأصلية «بلا مستخدم»).
+import { OPEN_COMPLAINT_STATUSES } from '../support/complaint-state-machine';
 
 const IN_VERIFICATION_STATUSES = [
   TechnicianVerificationStatus.PENDING,
@@ -163,7 +159,7 @@ export class AdminReportsService {
       this.technicianProfiles.count({
         where: { verificationStatus: TechnicianVerificationStatus.APPROVED, isAvailable: true, isOnDuty: true },
       }),
-      this.complaints.count({ where: { complaintStatus: In(OPEN_COMPLAINT_STATUSES) } }),
+      this.complaints.count({ where: { complaintStatus: In([...OPEN_COMPLAINT_STATUSES]) } }),
       this.ratings
         .createQueryBuilder('r')
         .select('AVG(r.overall_rating)', 'avg')

@@ -4,7 +4,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { User } from '../auth/entities/user.entity';
 import { RecurringOrdersService } from './recurring-orders.service';
-import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { Order } from './entities/order.entity';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح فجوة حقيقية (docs/08 §19 بند 20): كانت

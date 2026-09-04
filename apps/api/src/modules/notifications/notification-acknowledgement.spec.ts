@@ -6,7 +6,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
 import { User } from '../auth/entities/user.entity';
 import { Notification, NotificationChannel } from './entities/notification.entity';
-import { NotificationTypeConfig, NotificationPriorityTier } from './entities/notification-type-config.entity';
+import { NotificationTypeConfig } from './entities/notification-type-config.entity';
 import { NotificationWorkflow } from './entities/notification-workflow.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
@@ -22,7 +22,7 @@ async function safeStep(label: string, fn: () => Promise<unknown>): Promise<void
   try {
     await fn();
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.error(`[notification-acknowledgement.spec] فشلت خطوة التنضيف "${label}":`, err);
   }
 }

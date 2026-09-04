@@ -135,7 +135,7 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
   });
 
   afterAll(async () => {
-    ioServer.close();
+    await ioServer.close(); // `close()` بيرجع Promise في socket.io v4 — من غير await الـteardown بيسيب socket مفتوح
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     await sessionRegistry.onModuleDestroy();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
