@@ -22,7 +22,7 @@
 
 | | العدد |
 |---|-------|
-| الجداول | **160** |
+| الجداول | **158** |
 | الأنواع المُعدَّدة (enums) | **96** |
 | مفاتيح الإعدادات (`settings`) | **180** |
 
@@ -54,7 +54,7 @@ flowchart TB
   end
 
   subgraph Data["البيانات"]
-    PG[("PostgreSQL<br/>+ PostGIS<br/>160 جدول")]
+    PG[("PostgreSQL<br/>+ PostGIS<br/>158 جدول")]
     RD[("Redis<br/>cache + queues")]
     S3[("S3<br/>الوسائط")]
   end
@@ -229,18 +229,40 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 
 ## 7. دليل المستندات
 
-| # | المستند | الحالة |
-|---|---------|--------|
+| # | المستند | المحتوى |
+|---|---------|---------|
 | 00 | خريطة النظام | ✅ هذا المستند |
-| 02 | [دورة حياة الطلب](./02-ORDER-LIFECYCLE.md) | ✅ |
-| 03 | [محرك التسعير](./03-PRICING-ENGINE.md) | ✅ |
-| 04 | [محرك المطابقة](./04-MATCHING-ENGINE.md) | ✅ |
-| 05 | [الجدولة والإتاحة](./05-SCHEDULING-AVAILABILITY.md) | ✅ |
-| 06 | [الطلبات العاجلة ونفس اليوم](./06-SAME-DAY-URGENT-ORDERS.md) | ✅ |
-| 10 | [تدفّق الأموال](./10-FINANCE-MONEY-FLOW.md) | ✅ |
-| 19 | [المهام الخلفية والأحداث](./19-BACKGROUND-JOBS-EVENTS.md) | ✅ |
-| 20 | [الأمان والصلاحيات](./20-SECURITY-PERMISSIONS.md) | ✅ |
-| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | ✅ |
+| 01 | [دليل العمليات للأدمن](./01-ADMIN-OPERATIONS-HANDBOOK.md) | مين بيعمل إيه، والمهام اليومية خطوة بخطوة |
+| 02 | [دورة حياة الطلب](./02-ORDER-LIFECYCLE.md) | 21 حالة، الانتقالات، الإلغاء والرسوم |
+| 03 | [محرك التسعير](./03-PRICING-ENGINE.md) | المعادلات، الأمان، تركيب السعر، التتبّع |
+| 04 | [محرك المطابقة](./04-MATCHING-ENGINE.md) | الأهلية، الجولات، صيغة الترتيب |
+| 05 | [الجدولة والإتاحة](./05-SCHEDULING-AVAILABILITY.md) | السلوتات، التعارض، السقف اليومي |
+| 06 | [الطلبات العاجلة ونفس اليوم](./06-SAME-DAY-URGENT-ORDERS.md) | الاستعجال مشتق من التاريخ |
+| 07 | [المتكررة والمشاريع](./07-RECURRING-ORDERS.md) | القوالب والمناسبات، المراحل والاحتجاز |
+| 08 | [إدارة العملاء](./08-CUSTOMER-MANAGEMENT.md) | الطبقات الأربع، الولاء، الإحالة |
+| 09 | [إدارة الفنيين](./09-TECHNICIAN-MANAGEMENT.md) | المستويات، الترقية، الاعتماد |
+| 10 | [تدفّق الأموال](./10-FINANCE-MONEY-FLOW.md) | القيد المزدوج، العمولة، الصرف |
+| 11 | [مؤشّرات الأداء](./11-KPI-ANALYTICS.md) | الأبعاد الستة والمكافآت |
+| 12 | [كتالوج الإعدادات](./12-SETTINGS-CATALOG.md) | 180 مفتاح مُولَّد من القاعدة |
+| 13 | [الإشعارات والتتبّع](./13-NOTIFICATIONS-REALTIME.md) | القنوات، ساعات الهدوء، Socket.IO |
+| 14 | [الدعم والشكاوى](./14-SUPPORT-CHAT-COMPLAINTS.md) | آلة حالات الشكوى، المحادثات |
+| 15 | [الشركات والفرق والمساعدون](./15-COMPANIES-TEAMS-ASSISTANTS-PROJECTS.md) | أربعة مفاهيم متشابهة الاسم |
+| 16 | [كتالوج الميزات](./16-FEATURE-CATALOG.md) | مصفوفة الحالة الحقيقية لكل ميزة |
+| 17 | [خريطة قاعدة البيانات](./17-DATABASE-MAP.md) | 158 جدول مصنَّفة + القيود |
+| 18 | [خريطة الـAPI](./18-API-MAP.md) | 591 مسار مُستخرَج آليًا |
+| 19 | [المهام الخلفية والأحداث](./19-BACKGROUND-JOBS-EVENTS.md) | الطوابير، المؤقّتات، التعويض |
+| 20 | [الأمان والصلاحيات](./20-SECURITY-PERMISSIONS.md) | البوابات الأربع، MFA، Step-Up |
+| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | 16 بَقّة بإثبات + 4 نفيات بدليل |
+
+**ابدأ من فين؟**
+
+| لو إنت… | اقرأ |
+|---------|------|
+| أدمن جديد | [01](./01-ADMIN-OPERATIONS-HANDBOOK.md) ثم [16](./16-FEATURE-CATALOG.md) |
+| مطوّر جديد | هذا المستند ثم [02](./02-ORDER-LIFECYCLE.md) و[17](./17-DATABASE-MAP.md) |
+| بتراجع المال | [10](./10-FINANCE-MONEY-FLOW.md) ثم [03](./03-PRICING-ENGINE.md) |
+| بتشخّص «مفيش فنيين» | [04](./04-MATCHING-ENGINE.md) و[05](./05-SCHEDULING-AVAILABILITY.md) |
+| بتدوّر على بَقّة معروفة | [BROKEN_FLOWS_FIXED](./BROKEN_FLOWS_FIXED.md) |
 
 **مراجع خارج هذا المجلد**: `docs/01-master-plan.md` (الخطة) · `docs/02-data-dictionary.md`
 (قاموس البيانات وعقد الـAPI) · `docs/03-external-integrations.md` (تفعيل الخدمات الخارجية) ·
