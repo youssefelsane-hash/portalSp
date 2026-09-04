@@ -69,9 +69,25 @@ describe('AdminReportsService.techniciansReport() sort_by=cancelled_orders — �
     await dataSource.destroy();
   });
 
+  /**
+   * بيلمّ **كل** الصفحات مش الأولى بس.
+   *
+   * النسخة القديمة كانت بتقرا `page: 1, per_page: 100` وتفترض إن الفنيين بتوع الـfixture هيكونوا
+   * جواها. الافتراض ده مربوط بعدد الفنيين الموجودين في قاعدة البيانات وقت التشغيل — أول ما العدد
+   * عدّى ١٠٠، اختبار `asc` بقى بيفشل بـ`-1` (الفني صاحب الـ٩ إلغاءات بيترتّب آخر واحد فبيقع بره
+   * الصفحة الأولى). ده كان فشل بيئة مش فشل منتج، والترتيب نفسه سليم.
+   */
+  async function allRowsSorted(order: 'asc' | 'desc'): Promise<string[]> {
+    const ids: string[] = [];
+    for (let page = 1; ; page += 1) {
+      const result = await service.techniciansReport({ sort_by: 'cancelled_orders', order, page, per_page: 100 });
+      ids.push(...result.items.map((r) => r.technician_id));
+      if (ids.length >= result.meta.total || result.items.length === 0) return ids;
+    }
+  }
+
   it('desc — الفني الأكتر إلغاءً بيطلع الأول', async () => {
-    const result = await service.techniciansReport({ sort_by: 'cancelled_orders', order: 'desc', page: 1, per_page: 100 });
-    const ids = result.items.map((r) => r.technician_id);
+    const ids = await allRowsSorted('desc');
     const lowIndex = ids.indexOf(techLowId);
     const highIndex = ids.indexOf(techHighId);
     expect(highIndex).toBeGreaterThanOrEqual(0);
@@ -80,11 +96,28 @@ describe('AdminReportsService.techniciansReport() sort_by=cancelled_orders — �
   });
 
   it('asc — الفني الأقل إلغاءً بيطلع الأول', async () => {
-    const result = await service.techniciansReport({ sort_by: 'cancelled_orders', order: 'asc', page: 1, per_page: 100 });
-    const ids = result.items.map((r) => r.technician_id);
+    const ids = await allRowsSorted('asc');
     const lowIndex = ids.indexOf(techLowId);
     const highIndex = ids.indexOf(techHighId);
+    expect(lowIndex).toBeGreaterThanOrEqual(0);
+    expect(highIndex).toBeGreaterThanOrEqual(0);
     expect(lowIndex).toBeLessThan(highIndex);
+  });
+
+  it('الترتيب حتمي: صفحتان متتاليتان مافيهمش تكرار ولا صف ضايع', async () => {
+    // الكاسر الحتمي (`tp.id ASC`) — من غيره الصفوف المتساوية (أغلب الفنيين عندهم صفر إلغاء)
+    // بترجع بترتيب غير محدد، فنفس الفني يظهر في صفحتين أو يختفي مع تغيير الصفحة.
+    const first = await service.techniciansReport({ sort_by: 'cancelled_orders', order: 'asc', page: 1, per_page: 5 });
+    const second = await service.techniciansReport({ sort_by: 'cancelled_orders', order: 'asc', page: 2, per_page: 5 });
+    const firstIds = first.items.map((r) => r.technician_id);
+    const secondIds = second.items.map((r) => r.technician_id);
+    expect(firstIds.filter((id) => secondIds.includes(id))).toEqual([]);
+
+    const combined = [...firstIds, ...secondIds];
+    const wideIds = (
+      await service.techniciansReport({ sort_by: 'cancelled_orders', order: 'asc', page: 1, per_page: 10 })
+    ).items.map((r) => r.technician_id);
+    expect(combined).toEqual(wideIds);
   });
 
   it('الرقم المرجوع مطابق تمامًا للمخزّن — صفر تحويل غلط', async () => {

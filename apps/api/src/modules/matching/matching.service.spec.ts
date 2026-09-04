@@ -327,6 +327,11 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   // دورة طلب/رد فعلية — مطابق تمامًا لسلوك autoConfirmScheduledOrder الموثّق والمُختبر في الاختبار
   // اللي فوق ده بالحرف)، مش صفر assignments زي ما كان متوقّع هنا غلط في نسخة سابقة من الاختبار ده.
   it('dispatchOrAutoConfirm: طوارئ = دورة قبول/رفض (order_assignments بحالة sent)، مجدول بعد 3 أيام = تأكيد مباشر (order_assignments بحالة accepted فورًا)', async () => {
+    // ADR-0070 — الاختبار ده بيقيس **مسار التوزيع** (موجات مقابل تأكيد تلقائي)، مش الأهلية.
+    // `ids.blockingOrder` المشترك شاغل اليوم كله (`estimated_duration_days = 1`)، وبعد ما بقى
+    // السقف اليومي يسري على الطوارئ كمان، الفني الوحيد في الـfixture مابقاش عنده متسع — فمكانش
+    // هيترشّح أصلاً ومكانش الاختبار هيقيس اللي اتعمل عشانه. بنفضّي يومه مؤقتًا هنا صراحةً.
+    await dataSource.query(`UPDATE orders SET estimated_duration_days = NULL WHERE id = $1`, [ids.blockingOrder]);
     const [emergencyOrder] = await dataSource.query(
       `INSERT INTO orders
          (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
@@ -357,6 +362,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       scheduledOrder.id,
     ]);
     expect(scheduledAssignments).toEqual([{ assignment_status: 'accepted' }]);
+    await dataSource.query(`UPDATE orders SET estimated_duration_days = 1 WHERE id = $1`, [ids.blockingOrder]);
     await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [scheduledOrder.id]);
     await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [scheduledOrder.id]);
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [scheduledOrder.id]);
@@ -410,53 +416,59 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [farOrder.id]);
   });
 
-  // ADR-0018 §9 (طلب صريح من المالك 2026-08-19) — طلب طوارئ "إضافي" مش شاغل يوم كامل: فني عنده
-  // طلب accepted (مقبول بس لسه ما بداش يتحرّك ليه) لازم يفضل مؤهّل لطوارئ جديدة، بس فني منشغل
-  // جسديًا فعليًا (technician_on_way/arrived/in_progress) لازم يتستبعد. الاختبار بيثبت الاتنين
-  // معًا (A/B على نفس الفني، بس بحالة الطلب المختلفة) — ده الفرق الجوهري بين
-  // ACTIVE_TECHNICIAN_ORDER_STATUSES وENGAGED_TECHNICIAN_ORDER_STATUSES.
-  it('طوارئ إضافي مش شاغل يوم كامل: accepted بيفضل مؤهّل، technician_on_way بيتستبعد (§9)', async () => {
-    // في اللحظة دي ids.blockingOrder فعلاً 'accepted' بلا scheduled_at (نفس حالة الاختبار
-    // اللي فات) — طلب طوارئ جديد لازم يلاقي الفني ده مؤهّل.
-    const [acceptedStateOrder] = await dataSource.query(
+  // **ADR-0070 (طلب مالك صريح 2026-09-04) — بيستبدل ADR-0018 §9 هنا.**
+  //
+  // النسخة القديمة من الاختبار ده كانت بتثبت الفرق بين ACTIVE وENGAGED: «فني accepted يفضل
+  // مؤهّل للطوارئ، وفني technician_on_way يتستبعد». المالك شال النص التاني بالحرف: «طالما
+  // الشغلانة جارية هو ما ينفعش يقبل شغل تاني، فدي مشكلة». وكمان كان في تناقض داخلي في الاختبار
+  // القديم: عنوانه بيقول «مش شاغل يوم كامل» بينما الـfixture المشترك (`ids.blockingOrder`)
+  // معمول بـ`estimated_duration_days = 1` — يعني شاغل اليوم كله بالتعريف. كان بيعدّي بس لأن
+  // الطوارئ وقتها كانت **بتتخطى السقف اليومي تمامًا**.
+  //
+  // الفرق اللي بقى ذا معنى دلوقتي مش «حالة الطلب» — هو «فيه متسع في اليوم ولا لأ»، والاختبار
+  // بيثبت الاتنين على نفس الفني بنفس الحالة الجسدية (`technician_on_way`):
+  it('ADR-0070 — الطوارئ: الفني الشغّال دلوقتي مؤهّل لو يومه فيه متسع، ومستبعد لو مليان', async () => {
+    // (أ) شغّال دلوقتي بشغلانة **قصيرة** ⇒ لسه فيه متسع ⇒ مؤهّل. ده بالظبط اللي المالك طلبه.
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'technician_on_way', estimated_duration_days = NULL WHERE id = $1`,
+      [ids.blockingOrder],
+    );
+    const [roomLeftOrder] = await dataSource.query(
       `INSERT INTO orders
          (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
        VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
-      [`EMG9A-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      [`EMG70A-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
-    await matchingService.dispatchOrAutoConfirm(acceptedStateOrder.id);
-    const acceptedStateAssignments = await dataSource.query(
+    await matchingService.dispatchOrAutoConfirm(roomLeftOrder.id);
+    const roomLeftAssignments = await dataSource.query(
       `SELECT technician_id FROM order_assignments WHERE order_id = $1`,
-      [acceptedStateOrder.id],
+      [roomLeftOrder.id],
     );
-    expect(acceptedStateAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(
-      true,
-    );
-    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [acceptedStateOrder.id]);
-    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [acceptedStateOrder.id]);
+    expect(roomLeftAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(true);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [roomLeftOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [roomLeftOrder.id]);
 
-    // نفس الفني، بس دلوقتي منشغل جسديًا فعليًا (technician_on_way) — طلب طوارئ جديد لازم يستبعده.
-    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [ids.blockingOrder]);
-    const [engagedStateOrder] = await dataSource.query(
+    // (ب) نفس الفني ونفس الحالة الجسدية، بس الشغلانة بقت **شاغلة اليوم كله** ⇒ السقف اتخطى ⇒
+    // مستبعد. قبل ADR-0070 كان بياخد الطوارئ دي عادي لأن السقف مكانش بيسري عليها خالص.
+    await dataSource.query(`UPDATE orders SET estimated_duration_days = 1 WHERE id = $1`, [ids.blockingOrder]);
+    const [fullDayOrder] = await dataSource.query(
       `INSERT INTO orders
          (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
        VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
-      [`EMG9B-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      [`EMG70B-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
-    await matchingService.dispatchOrAutoConfirm(engagedStateOrder.id);
-    const engagedStateAssignments = await dataSource.query(
+    await matchingService.dispatchOrAutoConfirm(fullDayOrder.id);
+    const fullDayAssignments = await dataSource.query(
       `SELECT technician_id FROM order_assignments WHERE order_id = $1`,
-      [engagedStateOrder.id],
+      [fullDayOrder.id],
     );
-    expect(engagedStateAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(
-      false,
-    );
-    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [engagedStateOrder.id]);
-    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [engagedStateOrder.id]);
+    expect(fullDayAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(false);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [fullDayOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [fullDayOrder.id]);
 
-    // نرجّع الحالة الأصلية (accepted) عشان باقي الاختبارات في الملف ده تفضل تلاقي نفس الافتراض.
+    // نرجّع الحالة الأصلية عشان باقي الاختبارات في الملف تفضل تلاقي نفس الافتراض.
     await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [ids.blockingOrder]);
   });
 

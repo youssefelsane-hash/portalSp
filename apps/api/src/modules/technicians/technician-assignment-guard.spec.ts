@@ -247,10 +247,18 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     });
   });
 
-  it('ASAP لسه بيترفض صح لو الفني منشغل جسديًا فعليًا دلوقتي (technician_on_way) — الحماية الحقيقية اتحافظ عليها', async () => {
-    // نفس طلب "active-today" بس بقى في الطريق فعليًا دلوقتي — ده الحالة الوحيدة اللي المفروض
-    // تستبعد فني من طلب ASAP جديد (ازدواج حجز حقيقي: فني واحد ياخد شغلانتين فوريتين في نفس اللحظة).
-    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [activeTodayOrderId]);
+  it('ASAP بيترفض صح لما يوم الفني يبقى مليان (السقف اليومي) — الحماية الحقيقية اتحافظ عليها', async () => {
+    // **اتحدّث مع ADR-0070**: النسخة القديمة كانت بتقلب الطلب لـ`technician_on_way` وتتوقّع رفض،
+    // لأن «منشغل جسديًا = مستبعد» كانت قاعدة قايمة. المالك شال القاعدة دي صراحةً (الفني الشغّال
+    // لازم يقدر ياخد شغل تاني مايتعارضش)، فالحالة دي بقت **مقبولة** ومش دليل على أي حماية.
+    //
+    // اللي الاختبار ده بيثبته فعلاً هو الخاصية الأمنية الأهم اللي لسه قايمة: `assertEligible()`
+    // مش شكلي — بيرفض فعلاً لما يكون فيه تعارض حقيقي. فبدّلنا شرط التعارض للقاعدة السارية
+    // دلوقتي: يوم الفني مليان (شغل شاغل اليوم كله ⇒ السقف اتخطى).
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'technician_on_way', estimated_duration_days = 1 WHERE id = $1`,
+      [activeTodayOrderId],
+    );
     try {
       const candidate = await insertOrder({
         label: 'asap-engaged',
@@ -261,6 +269,27 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       await dataSource.manager.transaction(async (manager) => {
         const technician = await guard.lockTechnician(manager, ids.technicianProfile);
         await expect(guard.assertEligible(manager, technician, candidate)).rejects.toBeInstanceOf(ApiException);
+      });
+    } finally {
+      await dataSource.query(
+        `UPDATE orders SET order_status = 'accepted', estimated_duration_days = NULL WHERE id = $1`,
+        [activeTodayOrderId],
+      );
+    }
+  });
+
+  it('ADR-0070 — الفني الشغّال دلوقتي (technician_on_way) بشغلانة قصيرة بيفضل مؤهّل لطلب ASAP تاني', async () => {
+    // الحالة اللي المالك وصفها بالحرف: «طالما الشغلانة جارية هو ما ينفعش يقبل شغل تاني، فدي مشكلة».
+    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [activeTodayOrderId]);
+    try {
+      const candidate = await insertOrder({
+        label: 'asap-while-working',
+        orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        scheduledAt: null,
+      });
+      await dataSource.manager.transaction(async (manager) => {
+        const technician = await guard.lockTechnician(manager, ids.technicianProfile);
+        await expect(guard.assertEligible(manager, technician, candidate)).resolves.toBeUndefined();
       });
     } finally {
       await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [activeTodayOrderId]);

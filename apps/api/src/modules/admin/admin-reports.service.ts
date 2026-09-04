@@ -398,7 +398,10 @@ export class AdminReportsService {
        FROM technician_profiles tp
        JOIN users u ON u.id = tp.user_id
        WHERE tp.deleted_at IS NULL
-       ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
+       -- كاسر تعادل حتمي: من غيره ترتيب الصفوف المتساوية (وده الوضع الغالب — أغلب الفنيين
+       -- عندهم نفس العدد، صفر غالبًا) بيبقى غير محدد، فنفس الفني ممكن يظهر في صفحتين أو يختفي
+       -- تمامًا مع تغيير الصفحة. نفس قاعدة الترتيب الحتمي المطبّقة على قايمة الطلبات.
+       ORDER BY ${sortColumn} ${sortDirection} NULLS LAST, tp.id ASC
        LIMIT $1 OFFSET $2`,
       [perPage, (page - 1) * perPage],
     );
