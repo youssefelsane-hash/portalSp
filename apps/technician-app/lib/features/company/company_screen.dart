@@ -6,6 +6,7 @@ import '../../design/empty_state.dart';
 import '../onboarding/onboarding_repository.dart';
 import 'company_repository.dart';
 import 'models.dart';
+import '../../design/confirm_dialog.dart';
 
 // شركتي/فريقي (docs/06 §3.8) — كانت فجوة موثّقة صراحة: كل الـAPI (إنشاء/فروع/أعضاء/نقل ملكية)
 // كان موجود ومختبر حي في الباك-إند من زمان، بس مفيش أي شاشة في التطبيق كانت بتستخدمه خالص —
@@ -57,11 +58,14 @@ class _CompanyScreenState extends State<CompanyScreen> {
       final detail = await _repository.fetchMine();
       if (mounted) setState(() => _detail = detail);
       // مساحة عمل الشركة — تحميل مستقل عمدًا (لا يعطّل عرض باقي تفاصيل الشركة لو فشل).
-      _repository.fetchOrders().then((orders) {
-        if (mounted) setState(() => _orders = orders);
-      }).catchError((_) {
-        if (mounted) setState(() => _orders = []);
-      });
+      _repository
+          .fetchOrders()
+          .then((orders) {
+            if (mounted) setState(() => _orders = orders);
+          })
+          .catchError((_) {
+            if (mounted) setState(() => _orders = []);
+          });
     } on ApiException catch (err) {
       if (err.statusCode == 404) {
         if (mounted) setState(() => _notMember = true);
@@ -118,7 +122,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
       _error = null;
     });
     try {
-      await _repository.createBranch(name: name, addressLine: _branchAddressController.text.trim());
+      await _repository.createBranch(
+        name: name,
+        addressLine: _branchAddressController.text.trim(),
+      );
       _branchNameController.clear();
       _branchAddressController.clear();
       await _load();
@@ -133,7 +140,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
   // company_repository.dart). نفس نمط _addBranch بالحرف، بس بيبدأ من قيم الفرع الحالية.
   Future<void> _editBranch(CompanyBranch branch) async {
     final nameController = TextEditingController(text: branch.name);
-    final addressController = TextEditingController(text: branch.addressLine ?? '');
+    final addressController = TextEditingController(
+      text: branch.addressLine ?? '',
+    );
     var isActive = branch.isActive;
     final result = await showDialog<bool>(
       context: context,
@@ -145,19 +154,27 @@ class _CompanyScreenState extends State<CompanyScreen> {
             // نفس بَقّة الـoverflow في حوار السعر — حقول نص + كيبورد على شاشة قصيرة.
             content: SingleChildScrollView(
               child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: nameController, decoration: const InputDecoration(labelText: 'اسم الفرع')),
-                const SizedBox(height: 8),
-                TextField(controller: addressController, decoration: const InputDecoration(labelText: 'العنوان (اختياري)')),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('نشط'),
-                  value: isActive,
-                  onChanged: (v) => setDialogState(() => isActive = v),
-                ),
-              ],
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'اسم الفرع'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: addressController,
+                    decoration: const InputDecoration(
+                      labelText: 'العنوان (اختياري)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('نشط'),
+                    value: isActive,
+                    onChanged: (v) => setDialogState(() => isActive = v),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -253,18 +270,15 @@ class _CompanyScreenState extends State<CompanyScreen> {
   // §24 — كانت فجوة موثّقة: نقل الملكية موجود ومختبر بالباك-إند (المالك بس) بلا أي زرار في
   // الشاشة — المالك مالوش طريقة يسلّم الشركة لحد تاني غير API مباشر.
   Future<void> _transferOwnership(StaffMember newOwner) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('نقل ملكية الشركة'),
-        content: Text('متأكد إنك عايز تنقل ملكية الشركة/الفريق لـ ${newOwner.fullName}؟ الإجراء ده مش هينعمل تلقائيًا.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('إلغاء')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('تأكيد النقل')),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'نقل ملكية الشركة',
+      message:
+          'متأكد إنك عايز تنقل ملكية الشركة/الفريق لـ ${newOwner.fullName}؟ الإجراء ده مش هينعمل تلقائيًا.',
+      confirmLabel: 'تأكيد النقل',
+      destructive: true,
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
     setState(() {
       _acting = true;
       _error = null;
@@ -297,12 +311,12 @@ class _CompanyScreenState extends State<CompanyScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _notMember
-                  ? _buildCreateForm(context)
-                  : _error != null && _detail == null
-                      ? Center(child: Text(_error!))
-                      : _detail == null
-                          ? const SizedBox.shrink()
-                          : _buildDetail(context, _detail!),
+              ? _buildCreateForm(context)
+              : _error != null && _detail == null
+              ? Center(child: Text(_error!))
+              : _detail == null
+              ? const SizedBox.shrink()
+              : _buildDetail(context, _detail!),
         ),
       ),
     );
@@ -312,35 +326,57 @@ class _CompanyScreenState extends State<CompanyScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('لسه مش عضو في أي شركة/فريق', style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          'لسه مش عضو في أي شركة/فريق',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
-        const Text('تقدر تنشئ شركة/فريق وتضيف زمايلك فيه — محتاج مستواك يكون مؤهل لقيادة فريق.'),
+        const Text(
+          'تقدر تنشئ شركة/فريق وتضيف زمايلك فيه — محتاج مستواك يكون مؤهل لقيادة فريق.',
+        ),
         const SizedBox(height: 16),
         TextField(
           controller: _createNameController,
-          decoration: const InputDecoration(labelText: 'اسم الشركة/الفريق', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            labelText: 'اسم الشركة/الفريق',
+            border: OutlineInputBorder(),
+          ),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: _createCrController,
-          decoration: const InputDecoration(labelText: 'رقم السجل التجاري (اختياري)', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            labelText: 'رقم السجل التجاري (اختياري)',
+            border: OutlineInputBorder(),
+          ),
         ),
         if (_error != null) ...[
           const SizedBox(height: 8),
-          Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         ],
         const SizedBox(height: 12),
         FilledButton(
           onPressed: _acting ? null : _createCompany,
           child: _acting
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('إنشاء'),
         ),
       ],
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, IconData icon, String title) {
+  Widget _buildSectionHeader(
+    BuildContext context,
+    IconData icon,
+    String title,
+  ) {
     return Row(
       children: [
         Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
@@ -356,25 +392,39 @@ class _CompanyScreenState extends State<CompanyScreen> {
   Widget _buildOrdersOverview(BuildContext context) {
     final orders = _orders;
     if (orders == null) {
-      return const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LinearProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(),
+      );
     }
-    final activeCount = orders.where((o) => activeCompanyOrderStatuses.contains(o.orderStatus)).length;
-    final completedCount = orders.where((o) => o.orderStatus == 'completed').length;
-    final totalCents = orders.fold<int>(0, (sum, o) => sum + o.totalAmountCents);
+    final activeCount = orders
+        .where((o) => activeCompanyOrderStatuses.contains(o.orderStatus))
+        .length;
+    final completedCount = orders
+        .where((o) => o.orderStatus == 'completed')
+        .length;
+    final totalCents = orders.fold<int>(
+      0,
+      (sum, o) => sum + o.totalAmountCents,
+    );
     Widget stat(String label, String value) => Expanded(
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-              child: Column(
-                children: [
-                  Text(value, style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 2),
-                  Text(label, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
-                ],
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          child: Column(
+            children: [
+              Text(value, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
               ),
-            ),
+            ],
           ),
-        );
+        ),
+      ),
+    );
     return Row(
       children: [
         stat('إجمالي الطلبات', '${orders.length}'),
@@ -392,7 +442,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
     final orders = _orders;
     if (orders == null) return const SizedBox.shrink();
     if (orders.isEmpty) {
-      return const EmptyState(icon: Icons.work_outline, title: 'مفيش طلبات اتعيّنت للشركة دي لسه');
+      return const EmptyState(
+        icon: Icons.work_outline,
+        title: 'مفيش طلبات اتعيّنت للشركة دي لسه',
+      );
     }
     return Column(
       children: [
@@ -404,7 +457,8 @@ class _CompanyScreenState extends State<CompanyScreen> {
                 [
                   order.orderNumber,
                   if (order.technicianName != null) order.technicianName!,
-                  if (order.scheduledAt != null) _formatOrderDate(order.scheduledAt!),
+                  if (order.scheduledAt != null)
+                    _formatOrderDate(order.scheduledAt!),
                 ].join(' — '),
               ),
               trailing: Column(
@@ -413,14 +467,18 @@ class _CompanyScreenState extends State<CompanyScreen> {
                 children: [
                   Chip(
                     label: Text(
-                      orderStatusLabelsAr[order.orderStatus] ?? order.orderStatus,
+                      orderStatusLabelsAr[order.orderStatus] ??
+                          order.orderStatus,
                       style: const TextStyle(fontSize: 11),
                     ),
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   const SizedBox(height: 4),
-                  Text(_formatEgp(order.totalAmountCents), style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    _formatEgp(order.totalAmountCents),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),
@@ -439,16 +497,26 @@ class _CompanyScreenState extends State<CompanyScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(detail.company.name, style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  detail.company.name,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 4),
-                Chip(label: Text(teamRoleLabelsAr[_myMembership?.teamRole] ?? 'عضو')),
+                Chip(
+                  label: Text(
+                    teamRoleLabelsAr[_myMembership?.teamRole] ?? 'عضو',
+                  ),
+                ),
               ],
             ),
           ),
         ),
         if (_error != null) ...[
           const SizedBox(height: 8),
-          Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         ],
         const SizedBox(height: 16),
         _buildOrdersOverview(context),
@@ -459,16 +527,26 @@ class _CompanyScreenState extends State<CompanyScreen> {
         const SizedBox(height: 24),
         _buildSectionHeader(context, Icons.store_outlined, 'الفروع'),
         const SizedBox(height: 8),
-        if (detail.branches.isEmpty) const EmptyState(icon: Icons.store_outlined, title: 'مفيش فروع مضافة لسه'),
+        if (detail.branches.isEmpty)
+          const EmptyState(
+            icon: Icons.store_outlined,
+            title: 'مفيش فروع مضافة لسه',
+          ),
         for (final branch in detail.branches)
           Card(
             child: ListTile(
               title: Text(branch.name),
-              subtitle: branch.addressLine != null ? Text(branch.addressLine!) : null,
+              subtitle: branch.addressLine != null
+                  ? Text(branch.addressLine!)
+                  : null,
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!branch.isActive) const Padding(padding: EdgeInsets.only(left: 8), child: Text('غير نشط')),
+                  if (!branch.isActive)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Text('غير نشط'),
+                    ),
                   if (_canManage)
                     IconButton(
                       icon: const Icon(Icons.edit_outlined),
@@ -483,15 +561,24 @@ class _CompanyScreenState extends State<CompanyScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _branchNameController,
-            decoration: const InputDecoration(labelText: 'اسم فرع جديد', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'اسم فرع جديد',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _branchAddressController,
-            decoration: const InputDecoration(labelText: 'العنوان (اختياري)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'العنوان (اختياري)',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 8),
-          OutlinedButton(onPressed: _acting ? null : _addBranch, child: const Text('إضافة فرع')),
+          OutlinedButton(
+            onPressed: _acting ? null : _addBranch,
+            child: const Text('إضافة فرع'),
+          ),
         ],
         const SizedBox(height: 24),
         _buildSectionHeader(context, Icons.people_outline, 'الأعضاء'),
@@ -500,7 +587,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
           Card(
             child: ListTile(
               title: Text(member.fullName),
-              subtitle: Text('${member.technicianCode} — ${teamRoleLabelsAr[member.teamRole] ?? member.teamRole}'),
+              subtitle: Text(
+                '${member.technicianCode} — ${teamRoleLabelsAr[member.teamRole] ?? member.teamRole}',
+              ),
               trailing: _canManage && member.teamRole != 'owner'
                   ? PopupMenuButton<String>(
                       onSelected: (value) {
@@ -515,9 +604,19 @@ class _CompanyScreenState extends State<CompanyScreen> {
                       itemBuilder: (context) => [
                         for (final role in assignableTeamRoles)
                           if (role != member.teamRole)
-                            PopupMenuItem(value: role, child: Text('تغيير لـ ${teamRoleLabelsAr[role]}')),
-                        const PopupMenuItem(value: 'remove', child: Text('إزالة من الفريق')),
-                        if (_isOwner) const PopupMenuItem(value: 'transfer_ownership', child: Text('نقل الملكية له')),
+                            PopupMenuItem(
+                              value: role,
+                              child: Text('تغيير لـ ${teamRoleLabelsAr[role]}'),
+                            ),
+                        const PopupMenuItem(
+                          value: 'remove',
+                          child: Text('إزالة من الفريق'),
+                        ),
+                        if (_isOwner)
+                          const PopupMenuItem(
+                            value: 'transfer_ownership',
+                            child: Text('نقل الملكية له'),
+                          ),
                       ],
                     )
                   : null,
@@ -527,7 +626,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _staffCodeController,
-            decoration: const InputDecoration(labelText: 'كود الفني المُضاف', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'كود الفني المُضاف',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
@@ -535,12 +637,19 @@ class _CompanyScreenState extends State<CompanyScreen> {
             decoration: const InputDecoration(border: OutlineInputBorder()),
             items: [
               for (final role in assignableTeamRoles)
-                DropdownMenuItem(value: role, child: Text(teamRoleLabelsAr[role] ?? role)),
+                DropdownMenuItem(
+                  value: role,
+                  child: Text(teamRoleLabelsAr[role] ?? role),
+                ),
             ],
-            onChanged: (value) => setState(() => _staffRole = value ?? 'worker'),
+            onChanged: (value) =>
+                setState(() => _staffRole = value ?? 'worker'),
           ),
           const SizedBox(height: 8),
-          OutlinedButton(onPressed: _acting ? null : _addStaff, child: const Text('إضافة عضو')),
+          OutlinedButton(
+            onPressed: _acting ? null : _addStaff,
+            child: const Text('إضافة عضو'),
+          ),
         ],
       ],
     );

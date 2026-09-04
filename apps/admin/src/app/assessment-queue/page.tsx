@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Image as ImageIcon } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -38,6 +39,7 @@ interface AssessmentQueueRow {
   latest_quote_status: string | null;
   latest_quote_amount_cents: number | null;
   latest_quote_valid_until: string | null;
+  problem_photo_count: number;
 }
 
 const PRICE_STATUS_LABELS: Record<string, string> = {
@@ -123,6 +125,7 @@ export default function AssessmentQueuePage() {
                 <TableHead>العميل</TableHead>
                 <TableHead>حالة السعر</TableHead>
                 <TableHead>نوع التقييم</TableHead>
+                <TableHead>الصور</TableHead>
                 <TableHead>آخر عرض</TableHead>
                 <TableHead />
               </TableRow>
@@ -138,6 +141,21 @@ export default function AssessmentQueuePage() {
                   </TableCell>
                   <TableCell>
                     {row.assessment_type === 'remote' ? 'بالصور' : row.assessment_type === 'onsite' ? 'في الموقع' : '—'}
+                  </TableCell>
+                  {/* بلاغ المالك «الصور ما بتطلعش من الطلب» (docs/08 §125): الطابور مكانش بيقول
+                      إن الطلب أصلاً وصله صور، فالأدمن مضطر يفتح كل طلب عشان يعرف. طلب «تقييم
+                      بالصور» بصفر صور حالة شاذة تستاهل تحذير مش رقم عادي. */}
+                  <TableCell>
+                    {row.problem_photo_count > 0 ? (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap text-sm">
+                        <ImageIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                        {row.problem_photo_count}
+                      </span>
+                    ) : row.assessment_type === 'remote' ? (
+                      <span className="whitespace-nowrap text-xs text-destructive">مفيش صور</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {row.latest_quote_status ? (

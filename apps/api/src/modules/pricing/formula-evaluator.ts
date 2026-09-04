@@ -333,47 +333,6 @@ export function validateFinalPriceFormulaPayload(payload: Record<string, unknown
   }
 }
 
-/** عدد العقد الكلي في payload معادلة (لعرضه في واجهة الأدمن) — نفس عدّاد التحقق. */
-export function countFormulaNodes(payload: FinalPriceFormulaPayload): number {
-  let count = 0;
-  const walk = (node: unknown): void => {
-    if (typeof node !== 'object' || node === null || Array.isArray(node)) return;
-    const candidate = node as Record<string, unknown>;
-    if (typeof candidate.type !== 'string' || !ALLOWED_NODE_TYPES.has(candidate.type as FormulaNode['type'])) return;
-    count += 1;
-    switch (candidate.type as FormulaNode['type']) {
-      case 'literal':
-      case 'field_ref':
-      case 'constant_ref':
-      case 'lookup_ref':
-        return;
-      case 'percentage':
-        walk(candidate.base);
-        walk(candidate.percent);
-        return;
-      case 'round':
-      case 'ceil':
-      case 'floor':
-        walk(candidate.value);
-        return;
-      case 'if':
-        walk(candidate.then);
-        walk(candidate.else);
-        return;
-      case 'date_diff':
-      case 'distance':
-        // عقد ورقية — مصادرها وصف مش شجرة فرعية، فمفيش حاجة تتمشى فيها.
-        return;
-      default:
-        for (const operand of (candidate.operands ?? []) as unknown[]) walk(operand);
-    }
-  };
-  for (const key of ['price_cents', ...OPTIONAL_FORMULA_OUTPUT_KEYS] as (keyof FinalPriceFormulaPayload)[]) {
-    if (payload[key] !== undefined) walk(payload[key]);
-  }
-  return count;
-}
-
 function toComparableNumber(value: string | number | boolean): number | string {
   if (typeof value === 'boolean') return value ? 1 : 0;
   return value;

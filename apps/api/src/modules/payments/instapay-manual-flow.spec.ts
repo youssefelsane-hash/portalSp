@@ -160,9 +160,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       {} as never,
       {} as never,
       {} as never,
-      // settingsService — لازم getNumber() حقيقي (مش {} فاضية) لأن confirmInstaPayPayment()
-      // بينادي emitPaymentConfirmedEvents() اللي بيقرا matching.deferred_dispatch_lead_hours.
-      { getNumber: async () => 4 } as never,
+      { getNumber: async () => 4 } as never, // settingsService
       { record: auditRecord } as never,
       // events — emitAsync() كمان بيتنادى (مش emit() بس) جوّه emitPaymentConfirmedEvents()
       // لحدث ORDER_CREATED_EVENT.

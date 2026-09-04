@@ -77,7 +77,6 @@ import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, orderPriceIsProviderBound } 
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
-import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -700,11 +699,10 @@ export class OrdersService {
     }
 
     // Script 7 Phase 7 كان بيرفض هنا أي `scheduled_at` مع وضع طوارئ، عشان طلب طوارئ بموعد
-    // مستقبلي كان بيتأجّل بثه (`computeDispatchDeferredUntil()`) والعميل دافع رسوم استعجال
-    // بينتظر بلا استجابة فورية. **الفحص ده بقى بلا معنى بعد ADR-0048**: الطوارئ مابقاش اختيار
-    // ممكن يتناقض مع التاريخ — هي **نتيجة** إن التاريخ هو النهارده. "طوارئ بموعد مستقبلي" بقت
-    // حالة مستحيلة بالبناء نفسه، مش حالة بترفض. الحماية الفعلية اللي حلّت محله: البث الفوري
-    // المفروض على كل طلب مستعجل تحت (`dispatchDeferredUntil = undefined`).
+    // مستقبلي كان بيتأجّل بثه (آلية تأجيل ADR-0009، اتشالت في docs/08 §125) والعميل دافع رسوم
+    // استعجال بينتظر بلا استجابة فورية. **الفحص ده بقى بلا معنى بعد ADR-0048**: الطوارئ مابقاش
+    // اختيار ممكن يتناقض مع التاريخ — هي **نتيجة** إن التاريخ هو النهارده. "طوارئ بموعد مستقبلي"
+    // بقت حالة مستحيلة بالبناء نفسه، مش حالة بترفض. والبث بقى فوري لكل طلب بلا استثناء.
 
     // ADR-0042 (docs/08 §64.و) — معامل سعر الشركة بيتحمّل هنا مرة واحدة عشان يدخل التسعير تحت.
     //
@@ -1708,30 +1706,13 @@ export class OrdersService {
     }
 
     // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — الطلب PENDING_PAYMENT: مفيش توزيع خالص لسه، فمفيش
-    // داعي نحسب dispatchDeferredUntil ولا نصدّر ORDER_CREATED_EVENT دلوقتي. التصدير بيحصل لاحقًا
-    // (نفس الحدث بالظبط، مع dispatchDeferredUntil محسوبة وقتها) من PaymentsService.emitPaymentConfirmedEvents()
-    // بعد ما الدفع (كارت/InstaPay) يتأكد فعليًا — طلب لسه مش مدفوع مش "اتعمل" فعليًا بالمعنى
-    // التجاري، ممكن ميتدفعش خالص. باقي أحداث النظام (إشعارات "طلبك اتسجّل"، إحصائيات) هتنتظر برضو.
+    // داعي نصدّر ORDER_CREATED_EVENT دلوقتي. التصدير بيحصل لاحقًا (نفس الحدث بالظبط) من
+    // PaymentsService.emitPaymentConfirmedEvents() بعد ما الدفع (كارت/InstaPay) يتأكد فعليًا —
+    // طلب لسه مش مدفوع مش "اتعمل" فعليًا بالمعنى التجاري، ممكن ميتدفعش خالص. باقي أحداث النظام
+    // (إشعارات "طلبك اتسجّل"، إحصائيات) هتنتظر برضو.
     if (createdOrder.orderStatus === OrderStatus.PENDING_PAYMENT) {
       return createdOrder;
     }
-
-    // تأجيل بث المطابقة لطلب مجدول "بعيد" (ADR-0009 بند 1-2، P0-9) — بيتحسب هنا بالظبط (مش وقت
-    // معالجة الحدث لاحقًا) عشان dto.schedule_slot_id متاح مباشرة هنا؛ requestedTechnicianId على
-    // الطلب مش دليل كافي على وجود سلوت صريح (بيتحط من إعادة الزيارة والتفضيل العادي كمان). سلوت
-    // الجدولة الصريح (scheduleSlot) مستثنى دايمًا — الفني نفسه أعلن توافره في الوقت ده صراحة.
-    const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
-    // طلب مستعجل (نفس اليوم) بيتبثّ **فورًا** مهما كانت الحسابات (ADR-0048): العميل دافع رسوم
-    // استعجال، فتأجيل البث لحظة واحدة يناقض اللي دفع عشانه. عمليًا `computeDispatchDeferredUntil`
-    // بترجّع `undefined` أصلاً لموعد النهارده (بداية اليوم عدّت)، بس التصريح هنا حزام أمان: أي
-    // تغيير مستقبلي في `leadHours` أو في شكل `scheduled_at` مايقدرش يأجّل طلب مدفوع كطوارئ.
-    const dispatchDeferredUntil = urgent
-      ? undefined
-      : computeDispatchDeferredUntil({
-          scheduleSlotBooked: !!scheduleSlot,
-          scheduledAt: createdOrder.scheduledAt,
-          leadHours,
-        });
 
     // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
     // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي
@@ -1742,11 +1723,9 @@ export class OrdersService {
     // (نداءين متتاليين من غير أي تأخير) قبل ما نلاقيها كمان في اختبار Dart حي جديد. emitAsync
     // بتستنى كل الـ listeners (بما فيهم OrderDispatchListener) يخلّصوا قبل ما create() ترجع —
     // لطلب فوري/قريب من الموعد ده معناه التوزيع للفنيين المؤهلين خلص فعلاً وقت الرد؛ لطلب "بعيد"
-    // (dispatchDeferredUntil موجودة) OrderDispatchListener بيجدول job مؤجّل بدل ما يبث فورًا،
-    // فالرد بيرجع بسرعة برضو من غير ما ينتظر بث حقيقي هيحصل بعدين. باقي أحداث النظام (إشعارات،
-    // إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن قرار التوزيع/التأجيل ده جزء
-    // أساسي من دورة الطلب مش side effect.
-    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(createdOrder.id, dispatchDeferredUntil));
+    // باقي أحداث النظام (إشعارات، إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن
+    // قرار التوزيع ده جزء أساسي من دورة الطلب مش side effect.
+    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(createdOrder.id));
 
     return createdOrder;
   }

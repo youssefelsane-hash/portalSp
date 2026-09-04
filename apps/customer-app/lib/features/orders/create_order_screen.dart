@@ -154,7 +154,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// بالسعر». يعني خدمة «كشف ثم عرض سعر» محتاجة نفس الفورم — بس **إجاباته مابتسعّرش حاجة**،
   /// هي بيانات للإدارة/الفني عشان يقدروا يحطوا السعر.
   bool get _showsDynamicForm =>
-      _isFormulaPricing || widget.service.pricingModel == 'inspection_then_quote';
+      _isFormulaPricing ||
+      widget.service.pricingModel == 'inspection_then_quote';
 
   /// ADR-0060 §2 — الكمية والفترة **مابقوش أوضاع تسعير**، بقوا حقول عادية جوّه الفورم
   /// الديناميكي (قالب «بالقطعة» بيزرع حقل رقم، وقالب «بالشهر» بيزرع حقلين تاريخ). كل الحالة
@@ -181,8 +182,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool get _onsiteRouteAvailable => _routes.onsite;
 
   /// خدمة مسارها الوحيد المتاح هو الصور — العميل مايقدرش يحجز معاينة، فالاختيار مش اختيار.
-  bool get _remoteRouteForced => _remoteRouteAvailable && !_onsiteRouteAvailable;
+  bool get _remoteRouteForced =>
+      _remoteRouteAvailable && !_onsiteRouteAvailable;
 
+  /// العميل جه من شاشة اختيار فني/شركة/سلوت — يعني عنده منفّذ متوقّع.
+  bool get _hasPreselectedProvider =>
+      widget.requestedTechnicianId != null ||
+      widget.requestedTechnicianCompanyId != null ||
+      widget.scheduleSlotId != null;
 
   /// رسم التقييم بالصور — بيتحصّل وقت إرسال الصور، فلازم العميل يشوفه **قبل** ما يبعت.
   /// كان مخفي تمامًا عن العميل (الحقل مكانش بيوصل التطبيق أصلاً)، فلو الأدمن حاطط رسم،
@@ -191,10 +198,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       ? ' — رسم التقييم ${_formatEgp(widget.service.remoteAssessmentFeeCents)}'
       : '';
 
+  /// رسم المعاينة في الموقع **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
+  ///
+  /// بَقّة مالية حقيقية اتلقطت بلقطة شاشة مالك: كارت «معاينة في الموقع» كان بيعرض
+  /// `service.inspectionFeeCents` (0 ج) وملخص السعر تحته مباشرة بيعرض 150 ج — نفس الشاشة،
+  /// رقمين مختلفين لنفس الرسم. السبب إن `service_zone_pricing.inspection_fee_cents` بيستبدل
+  /// رسم الخدمة حسب منطقة العنوان (`CatalogService.estimate()`)، والكارت مكانش عارف بده.
+  ///
+  /// المصدر الوحيد للرقم اللي العميل هيدفعه هو معاينة السعر الحية. الكتالوج بيفضل احتياطي
+  /// للحظة اللي المعاينة لسه بتتحمّل فيها بس.
+  int get _resolvedInspectionFeeCents =>
+      _pricePreview?.inspectionFeeCents ?? widget.service.inspectionFeeCents;
+
   /// لما مسار الصور هو الوحيد المتاح، الطلب لازم يتبعت كطلب تقييم بالصور — مش كطلب معاينة.
   /// بعد إصلاح خرق `remote_only` في الباك-إند، طلب المعاينة لخدمة زي دي بيترفض صراحة، فلو
   /// التطبيق ساب الاختيار مقفول كان هيبعت طلب مرفوض حتمًا.
-  bool get _effectiveRemoteQuote => _remoteRouteForced ? true : _requestRemoteQuote;
+  bool get _effectiveRemoteQuote =>
+      _remoteRouteForced ? true : _requestRemoteQuote;
+
+  /// رسم التقييم بالصور المستحق **على الطلب ده** — صفر لو المسار مش مسار صور أصلاً.
+  int get _dueRemoteAssessmentFeeCents =>
+      _effectiveRemoteQuote ? widget.service.remoteAssessmentFeeCents : 0;
+
+  /// **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §125)**: التطبيق كان بيبعت `paymentMethod: null`
+  /// لأي طلب تقييم بالصور بلا استثناء، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم
+  /// قبل إرسال الصور» لو الخدمة عليها رسم. يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور
+  /// **مستحيل تتحجز من التطبيق خالص** — الزرار شغّال والطلب بيترفض في كل مرة.
+  ///
+  /// والاتجاه التاني من نفس القاعدة مطلوب برضه: رسم = صفر، وبعت طريقة دفع → رفض بـ«الدفع يتم
+  /// بعد ما الإدارة تحدد السعر». فالقرار هنا ثنائي مش «ابعت اللي مختار».
+  bool get _remoteAssessmentFeeDue => _dueRemoteAssessmentFeeCents > 0;
 
   Future<void> _pickProblemImages() async {
     if (_uploadingProblemImages || _problemImages.length >= 10) return;
@@ -298,7 +331,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
   // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
   bool get _requiresElectronicPayment =>
-      !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
+      !widget.service.cashAllowed ||
+      _pricePreview?.depositAmountCents != null ||
+      _remoteAssessmentFeeDue;
 
   // "كرّر الحجز ده" (migration 0176) — الاختيار بيظهر بس لما التكرار ممكن فعلاً: خدمة مفعّل
   // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد).
@@ -508,8 +543,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
         bookingMode: widget.bookingMode,
-        requestedTechnicianId: widget.requestedTechnicianId,
-        scheduleSlotId: widget.scheduleSlotId,
+        // كل الحقول اللي بتربط الطلب بمنفّذ بعينه بتتسقط مع التقييم بالصور — الباك-إند
+        // بيرفض أي واحدة فيهم مع `request_remote_quote`، والمنطق نفسه: مفيش منفّذ متحدد
+        // قبل ما السعر يتحدد ويوافق عليه العميل.
+        requestedTechnicianId: _effectiveRemoteQuote
+            ? null
+            : widget.requestedTechnicianId,
+        scheduleSlotId: _effectiveRemoteQuote ? null : widget.scheduleSlotId,
         fieldValues: _showsDynamicForm ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         promoCode: promoCode,
@@ -781,14 +821,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// المنفّذ والعميل بيتحاسب على اللي شافه. لو الفني بقى مش متاح فعلاً، الباك-إند بيرفض برسالة
   /// صريحة — وده الصح، مش استبدال صامت.
   Future<String?> _refreshedMatchPreviewId() async {
+    // التقييم بالصور مالوش فني وقت الحجز أصلاً: الإدارة بتحدد السعر الأول والتوزيع بيحصل
+    // بعد ما العميل يوافق. الباك-إند بيرفض تذكرة فني مع `request_remote_quote` صراحة
+    // (`معاينة الفني لا تُجمع مع تقييم الصور...`)، فلازم نسقّطها من هنا — مش نبعتها وننتظر
+    // الرفض. ده كان طريق مسدود حقيقي: العميل يختار «اختاروا لي الأنسب» فيتعمل تذكرة، بعدين
+    // يختار «الإدارة تحدد السعر من الصور»، فيتقفل عند التأكيد بخطأ مايقدرش يحله.
+    if (_effectiveRemoteQuote) return null;
     final previewId = widget.matchPreviewId;
     final technicianId = widget.requestedTechnicianId;
     if (previewId == null || technicianId == null || _selectedAddress == null) {
       return previewId;
     }
     try {
-      final refreshed = await TechniciansRepository(context.read<AuthRepository>())
-          .createMatchPreview(
+      final refreshed =
+          await TechniciansRepository(
+            context.read<AuthRepository>(),
+          ).createMatchPreview(
             serviceId: widget.service.id,
             addressId: _selectedAddress!.id,
             selectionMode: 'manual',
@@ -804,7 +852,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             promoCode: _effectiveRemoteQuote ? null : _promoCodeToSend,
             buildingCode: _effectiveRemoteQuote ? null : _buildingCodeToSend,
             addonIds: _effectiveRemoteQuote ? null : _selectedAddonIds.toList(),
-            warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
+            warrantyPlanId: _effectiveRemoteQuote
+                ? null
+                : _selectedWarrantyPlanId,
             standardDataId: _selectedStandardData?.id,
             requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
           );
@@ -849,6 +899,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       );
       return;
     }
+    // رسم التقييم بيتحصّل وقت إرسال الصور، والكاش مش خيار فيه (مفيش فني رايح يستلمه). التحقق
+    // هنا بيوقف الطلب قبل ما يروح للسيرفر ويرجع برسالة حمرا العميل مش فاهم سببها.
+    if (_remoteAssessmentFeeDue &&
+        !kElectronicPaymentMethods.contains(_selectedPaymentMethod)) {
+      setState(
+        () => _error =
+            'رسم التقييم ${_formatEgp(_dueRemoteAssessmentFeeCents)} بيتدفع دلوقتي — اختار بطاقة أو InstaPay أو فوري',
+      );
+      return;
+    }
     // ADR-0060 §4 — تحقق واحد بس: وضع `start_time` محتاج تاريخ + ساعة. الفرعين التانيين
     // (بداية ونهاية / عدد ساعات) اتشالوا مع الأوضاع نفسها.
     if (widget.scheduleSlotId == null &&
@@ -863,15 +923,32 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     });
     try {
       final effectiveMatchPreviewId = await _refreshedMatchPreviewId();
+      // **كل الحقول اللي بتربط الطلب بمنفّذ بعينه بتتسقط مع التقييم بالصور.**
+      //
+      // الباك-إند بيرفض أي واحدة فيهم مع `request_remote_quote` برسالة «معاينة الفني لا
+      // تُجمع مع تقييم الصور...» — والمنطق نفسه: في التقييم بالصور الإدارة بتحدد السعر
+      // الأول، العميل يوافق، **وبعدين** التوزيع بيبدأ. مفيش منفّذ متحدد وقت الحجز أصلاً.
+      //
+      // ده كان طريق مسدود حقيقي عند العميل: يختار «اختاروا لي الأنسب» (فتتعمل تذكرة فني)،
+      // بعدين يختار «الإدارة تحدد السعر من الصور»، فيتقفل عند التأكيد بخطأ مايقدرش يحله —
+      // مفيش زرار في الشاشة بيلغي التذكرة.
+      final binding = BookingProviderBinding.resolve(
+        remoteQuote: _effectiveRemoteQuote,
+        technicianId: widget.requestedTechnicianId,
+        companyId: widget.requestedTechnicianCompanyId,
+        scheduleSlotId: widget.scheduleSlotId,
+        matchPreviewId: effectiveMatchPreviewId,
+      );
+      final effectiveSlotId = binding.scheduleSlotId;
       final order = await _repository.create(
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
         bookingMode: widget.bookingMode,
-        requestedTechnicianId: widget.requestedTechnicianId,
-        scheduleSlotId: widget.scheduleSlotId,
+        requestedTechnicianId: binding.technicianId,
+        scheduleSlotId: binding.scheduleSlotId,
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
         // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
-        scheduledAt: widget.scheduleSlotId != null
+        scheduledAt: effectiveSlotId != null
             ? null
             : (widget.service.requiresStartTime
                       ? _combinedPreciseScheduledAt()
@@ -879,23 +956,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   ?.toUtc()
                   .toIso8601String(),
         // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد.
-        scheduledAtRangeEnd: widget.scheduleSlotId == null
+        scheduledAtRangeEnd: effectiveSlotId == null
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()
             : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _effectiveRemoteQuote ? '' : _promoCodeToSend,
         buildingCode: _effectiveRemoteQuote ? '' : _buildingCodeToSend,
         addonIds: _effectiveRemoteQuote ? const [] : _selectedAddonIds.toList(),
-        requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
+        requestedTechnicianCompanyId: binding.companyId,
         fieldValues: _showsDynamicForm ? _fieldValues : null,
         problemImageIds: _problemImages.map((item) => item.id).toList(),
         requestRemoteQuote: _effectiveRemoteQuote,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
-        paymentMethod:
-            _effectiveRemoteQuote || _selectedPaymentMethod == 'installment'
-            ? null
-            : _selectedPaymentMethod,
+        paymentMethod: bookingPaymentMethod(
+          remoteQuote: _effectiveRemoteQuote,
+          remoteAssessmentFeeCents: _dueRemoteAssessmentFeeCents,
+          selected: _selectedPaymentMethod,
+        ),
         warrantyPlanId: _effectiveRemoteQuote ? null : _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
@@ -1018,6 +1096,30 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_previewError != null && _pricePreview == null) {
       return Text(_previewError!, style: const TextStyle(color: Colors.red));
     }
+    // مسار الصور: مفيش سعر خدمة أصلاً وقت الحجز — ده تعريف المسار نفسه. عرض تفصيلة سعر
+    // محسوبة هنا بيدّي العميل رقم مش هيتحاسب عليه، فبنعرض الحقيقة: الرسم بس (أو لا شيء).
+    if (_effectiveRemoteQuote) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_remoteAssessmentFeeDue)
+            _buildPriceLine(
+              'رسم التقييم (يتدفع دلوقتي)',
+              _formatEgp(_dueRemoteAssessmentFeeCents),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _remoteAssessmentFeeDue
+                  ? 'سعر الشغل نفسه هيوصلك بعد ما الإدارة تشوف الصور — وموافقتك عليه شرط قبل أي دفع تاني.'
+                  : 'مفيش أي مبلغ بيتدفع دلوقتي. الإدارة هتشوف الصور وتبعتلك السعر، وإنت توافق أو ترفض.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      );
+    }
+
     final preview = _pricePreview;
     if (preview == null) {
       return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
@@ -1470,7 +1572,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     // فأحسن نمنع الاختيار بدل ما العميل يوصل لرسالة خطأ.
                     if (value && _problemImages.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('ارفع صورة واحدة على الأقل الأول')),
+                        const SnackBar(
+                          content: Text('ارفع صورة واحدة على الأقل الأول'),
+                        ),
                       );
                       return;
                     }
@@ -1495,6 +1599,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           subtitle: Text(
                             _problemImages.isEmpty
                                 ? 'ارفع صورة واحدة على الأقل الأول$_remoteFeeSuffix'
+                                // العميل اللي جه من شاشة اختيار الفني لازم يعرف إن اختياره
+                                // مش هيتطبّق هنا — المسار ده الإدارة بتسعّر فيه الأول
+                                // والتوزيع بيحصل بعد الموافقة. من غير السطر ده الاختيار
+                                // بيتلغى في صمت والعميل يفتكر إن الفني اللي اختاره جايله.
+                                : _hasPreselectedProvider
+                                ? 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني — '
+                                      'الفني اللي اخترته مش هيتثبّت في المسار ده$_remoteFeeSuffix'
                                 : 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني$_remoteFeeSuffix',
                           ),
                           secondary: const Icon(Icons.photo_camera_outlined),
@@ -1504,9 +1615,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           title: const Text('معاينة في الموقع'),
                           subtitle: Text(
                             'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                            '${_formatEgp(widget.service.inspectionFeeCents)}',
+                            '${_formatEgp(_resolvedInspectionFeeCents)}',
                           ),
-                          secondary: const Icon(Icons.home_repair_service_outlined),
+                          secondary: const Icon(
+                            Icons.home_repair_service_outlined,
+                          ),
                         ),
                       ],
                     ),
@@ -1523,13 +1636,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           : Icons.home_repair_service_outlined,
                     ),
                     title: Text(
-                      _remoteRouteAvailable ? 'الإدارة تحدد السعر من الصور' : 'معاينة في الموقع',
+                      _remoteRouteAvailable
+                          ? 'الإدارة تحدد السعر من الصور'
+                          : 'معاينة في الموقع',
                     ),
                     subtitle: Text(
                       _remoteRouteAvailable
                           ? 'الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر$_remoteFeeSuffix'
                           : 'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                                '${_formatEgp(widget.service.inspectionFeeCents)}',
+                                '${_formatEgp(_resolvedInspectionFeeCents)}',
                     ),
                   ),
                 ),
@@ -1639,22 +1754,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 groupValue: _repeatFrequency,
                 onChanged: (value) => setState(() => _repeatFrequency = value),
                 child: Card(
-                child: Column(
-                  children: [
-                    RadioListTile<String?>(
-                      value: null,
-                      title: Text('مرة واحدة'),
-                    ),
-                    RadioListTile<String?>(
-                      value: 'weekly',
-                      title: Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
-                    ),
-                    RadioListTile<String?>(
-                      value: 'monthly',
-                      title: Text('شهري — نفس اليوم كل شهر'),
-                    ),
-                  ],
-                ),
+                  child: Column(
+                    children: [
+                      RadioListTile<String?>(
+                        value: null,
+                        title: Text('مرة واحدة'),
+                      ),
+                      RadioListTile<String?>(
+                        value: 'weekly',
+                        title: Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
+                      ),
+                      RadioListTile<String?>(
+                        value: 'monthly',
+                        title: Text('شهري — نفس اليوم كل شهر'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               if (_repeatFrequency != null)
@@ -1691,8 +1806,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     if (value != null) _repeatFrequency = null;
                   });
                   _refreshPreview(
-                    promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
-                    buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
+                    promoCode: _promoCodeToSend.isEmpty
+                        ? null
+                        : _promoCodeToSend,
+                    buildingCode: _buildingCodeToSend.isEmpty
+                        ? null
+                        : _buildingCodeToSend,
                   );
                 },
                 child: Card(
@@ -1739,7 +1858,32 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             const SizedBox(height: 8),
             // طلب مالك مباشر (2026-08-22) — رسالة واضحة قبل ما العميل يحاول يدفع، بدل ما يختار
             // "بعد الخدمة" ويترفض برسالة حمرا بعد ما يدوس "تأكيد الطلب".
-            if (_pricePreview?.depositAmountCents != null) ...[
+            // مسار الصور بياخد الأولوية في الشرح: اللي بيتدفع دلوقتي هو رسم التقييم بس، مش
+            // سعر الخدمة (اللي لسه مش معروف أصلاً لحد ما الإدارة تشوف الصور).
+            if (_remoteAssessmentFeeDue) ...[
+              Card(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'اللي هيتدفع دلوقتي هو رسم التقييم '
+                          '${_formatEgp(_dueRemoteAssessmentFeeCents)} بس — سعر الشغل نفسه '
+                          'هيوصلك بعد ما الإدارة تشوف الصور، وتوافق عليه قبل أي دفع تاني. '
+                          'الدفع لازم يكون بالبطاقة أو InstaPay أو فوري.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ] else if (_pricePreview?.depositAmountCents != null) ...[
               Card(
                 color: Theme.of(context).colorScheme.secondaryContainer,
                 child: Padding(
@@ -1797,67 +1941,71 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             // خيار: لما الخدمة تفرض دفع إلكتروني، «ادفع بعد الخدمة» لازم يبان **غير مختار**
             // مش مختار-ومعطّل. القيمة دي ما بتطابقش أي خيار فمفيش حاجة بتتحدد.
             RadioGroup<String?>(
-              groupValue: _requiresElectronicPayment && _selectedPaymentMethod == null
+              groupValue:
+                  _requiresElectronicPayment && _selectedPaymentMethod == null
                   ? '__electronic_required__'
                   : _selectedPaymentMethod,
-              onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+              onChanged: (value) =>
+                  setState(() => _selectedPaymentMethod = value),
               child: Card(
-              child: Column(
-                children: [
-                  RadioListTile<String?>(
-                    value: null,
-                    enabled:
-                        !_requiresElectronicPayment &&
-                        ((_paymentChannels['cash']?.available ?? false) ||
-                            (_paymentChannels['wallet']?.available ?? false)),
-                    secondary: const Icon(Icons.payments_outlined),
-                    title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
-                    subtitle: Text(
-                      _requiresElectronicPayment
-                          ? 'غير متاح لأن الخدمة تتطلب دفعًا إلكترونيًا مقدمًا'
-                          : ((_paymentChannels['cash']?.available ?? false) ||
-                                (_paymentChannels['wallet']?.available ??
-                                    false))
-                          ? 'تدفع بعد ما الفني يخلّص الشغل'
-                          : 'مش متاح للخدمة دي دلوقتي',
+                child: Column(
+                  children: [
+                    RadioListTile<String?>(
+                      value: null,
+                      enabled:
+                          !_requiresElectronicPayment &&
+                          ((_paymentChannels['cash']?.available ?? false) ||
+                              (_paymentChannels['wallet']?.available ?? false)),
+                      secondary: const Icon(Icons.payments_outlined),
+                      title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
+                      subtitle: Text(
+                        _requiresElectronicPayment
+                            ? 'غير متاح لأن الخدمة تتطلب دفعًا إلكترونيًا مقدمًا'
+                            : ((_paymentChannels['cash']?.available ?? false) ||
+                                  (_paymentChannels['wallet']?.available ??
+                                      false))
+                            ? 'تدفع بعد ما الفني يخلّص الشغل'
+                            : 'مش متاح للخدمة دي دلوقتي',
+                      ),
                     ),
-                  ),
-                  _paymentOption(
-                    method: 'card',
-                    title: 'بطاقة بنكية — فيزا أو ماستركارد',
-                    subtitle:
-                        'تحويل آمن لصفحة الدفع، والتنفيذ بيبدأ بعد تأكيد العملية',
-                    icon: Icons.credit_card_outlined,
-                  ),
-                  _paymentOption(
-                    method: 'installment',
-                    title: 'التقسيط',
-                    subtitle:
-                        'أنشئ الطلب ثم اختر الخطة وقدّمها لمراجعة الإدارة',
-                    icon: Icons.calendar_month_outlined,
-                    extraAllowed:
-                        !_requiresElectronicPayment && _hasInstallmentPlans,
-                    extraUnavailableReason: _requiresElectronicPayment
-                        ? 'التقسيط الحالي يحتاج مراجعة إدارة ولا يغطي الإيداع الفوري لهذه الخدمة'
-                        : _paymentChannels['installment']?.available == true &&
-                              !_hasInstallmentPlans
-                        ? 'مفيش خطة تقسيط متاحة للخدمة دي'
-                        : null,
-                  ),
-                  _paymentOption(
-                    method: 'instapay',
-                    title: 'الدفع عبر InstaPay',
-                    subtitle: 'تحويل بكود مرجعي وتأكيد يدوي من فريق المالية',
-                    icon: Icons.send_outlined,
-                  ),
-                  _paymentOption(
-                    method: 'fawry_reference',
-                    title: 'الدفع في فوري',
-                    subtitle: 'تحصل على كود مرجعي صالح للدفع في أقرب منفذ فوري',
-                    icon: Icons.storefront_outlined,
-                  ),
-                ],
-              ),
+                    _paymentOption(
+                      method: 'card',
+                      title: 'بطاقة بنكية — فيزا أو ماستركارد',
+                      subtitle:
+                          'تحويل آمن لصفحة الدفع، والتنفيذ بيبدأ بعد تأكيد العملية',
+                      icon: Icons.credit_card_outlined,
+                    ),
+                    _paymentOption(
+                      method: 'installment',
+                      title: 'التقسيط',
+                      subtitle:
+                          'أنشئ الطلب ثم اختر الخطة وقدّمها لمراجعة الإدارة',
+                      icon: Icons.calendar_month_outlined,
+                      extraAllowed:
+                          !_requiresElectronicPayment && _hasInstallmentPlans,
+                      extraUnavailableReason: _requiresElectronicPayment
+                          ? 'التقسيط الحالي يحتاج مراجعة إدارة ولا يغطي الإيداع الفوري لهذه الخدمة'
+                          : _paymentChannels['installment']?.available ==
+                                    true &&
+                                !_hasInstallmentPlans
+                          ? 'مفيش خطة تقسيط متاحة للخدمة دي'
+                          : null,
+                    ),
+                    _paymentOption(
+                      method: 'instapay',
+                      title: 'الدفع عبر InstaPay',
+                      subtitle: 'تحويل بكود مرجعي وتأكيد يدوي من فريق المالية',
+                      icon: Icons.send_outlined,
+                    ),
+                    _paymentOption(
+                      method: 'fawry_reference',
+                      title: 'الدفع في فوري',
+                      subtitle:
+                          'تحصل على كود مرجعي صالح للدفع في أقرب منفذ فوري',
+                      icon: Icons.storefront_outlined,
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 16),

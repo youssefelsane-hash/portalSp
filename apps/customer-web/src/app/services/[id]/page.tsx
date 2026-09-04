@@ -274,16 +274,24 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: effectiveRequestRemoteQuote ? undefined : promoCode || undefined,
           field_values: showsDynamicForm ? fieldValues : undefined,
-          payment_method: !effectiveRequestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
+          payment_method:
+            remoteAssessmentFeeDueCents > 0
+              ? 'card'
+              : !effectiveRequestRemoteQuote && paymentMethod === 'card'
+                ? 'card'
+                : undefined,
           // بند 12 — قفل السعر: التذكرة اللي العميل شاف عليها الفني والسعر هي نفسها اللي
           // الباك-إند بيعيد التحقق منها. لو المدخلات اتغيّرت أو الفني بقى مش متاح، الإنشاء
           // بيترفض بوضوح بدل ما يستبدل حد في صمت.
-          match_preview_id: activePreview?.match_preview_id,
+          // نفس قاعدة الباك-إند: تذكرة الفني لا تُجمع مع التقييم بالصور. مع المسار البعيد
+          // الإدارة بتحدد السعر الأول والتوزيع بيحصل بعد الموافقة، فمفيش منفّذ مقفول وقت
+          // الحجز — وإرسال التذكرة كان بيرجّع 400 يقفل العميل عند التأكيد.
+          match_preview_id: effectiveRequestRemoteQuote ? undefined : activePreview?.match_preview_id,
         },
         orderIdempotencyKey,
       );
       setSubmitted(true);
-      if (!effectiveRequestRemoteQuote && paymentMethod === 'card') {
+      if (remoteAssessmentFeeDueCents > 0 || (!effectiveRequestRemoteQuote && paymentMethod === 'card')) {
         const cardResult = await payWithCard(authedFetch, order.id);
         // `assign()` مش `location.href = ...`: قاعدة react-hooks/immutability بتعتبر الإسناد
         // على كائن برّه المكوّن تعديلًا ممنوعًا (خطأ lint حقيقي كان واقف في المشروع). الاتنين
@@ -348,7 +356,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const remoteRouteAvailable = routes.remote && bookingMode !== 'emergency';
   const onsiteRouteAvailable = routes.onsite;
   const remoteRouteForced = remoteRouteAvailable && !onsiteRouteAvailable;
+  // رسم المعاينة **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
+  // `service_zone_pricing.inspection_fee_cents` بيستبدل رسم الخدمة حسب منطقة العنوان، فقراءة
+  // `service.inspection_fee_cents` مباشرة كانت بتعرض للعميل رقم **مش اللي هيدفعه** (اتلقطت
+  // بلقطة شاشة مالك: الكارت 0 ج وملخص السعر تحته 150 ج على نفس الشاشة). المعاينة الحية هي
+  // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
+  const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
   const effectiveRequestRemoteQuote = remoteRouteForced ? true : requestRemoteQuote;
+  // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §125)**: الصفحة كانت بتبعت `payment_method: undefined`
+  // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
+  // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
+  // والاتجاه التاني مطلوب برضه: رسم = صفر مع طريقة دفع بيترفض بـ«الدفع يتم بعد ما الإدارة
+  // تحدد السعر». فالقرار ثنائي: الرسم موجود → بطاقة إجباري؛ مش موجود → مفيش دفع خالص.
+  const remoteAssessmentFeeDueCents =
+    effectiveRequestRemoteQuote && service ? service.remote_assessment_fee_cents : 0;
 
   const showsDynamicForm =
     service.pricing_model === 'formula' || service.pricing_model === 'inspection_then_quote';
@@ -885,7 +906,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               <span>
                 <span className="block font-medium">معاينة في الموقع</span>
                 <span className="mt-1 block text-sm text-muted">
-                  فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(service.inspection_fee_cents)}
+                  فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(resolvedInspectionFeeCents)}
                 </span>
               </span>
             </label>
@@ -906,7 +927,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           <div className="mt-4 rounded-xl border border-border bg-surface-variant p-3">
             <p className="font-medium">معاينة في الموقع</p>
             <p className="mt-1 text-sm text-muted">
-              فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(service.inspection_fee_cents)}
+              فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة {formatEgp(resolvedInspectionFeeCents)}
             </p>
           </div>
         )}
@@ -923,6 +944,19 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             dir="ltr"
             className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
           />
+        </section>
+      )}
+
+      {/* مسار الصور برسم: مفيش اختيار طريقة دفع أصلاً — الكاش ممنوع (مفيش فني رايح يستلمه)
+          والدفع بيتم دلوقتي على الرسم بس. القسم بيشرح ده بدل ما العميل يوصل للتأكيد ويترفض. */}
+      {step === 2 && remoteAssessmentFeeDueCents > 0 && (
+        <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-2 font-semibold">رسم التقييم</h2>
+          <p className="text-sm text-muted">
+            اللي هيتدفع دلوقتي هو رسم التقييم {formatEgp(remoteAssessmentFeeDueCents)} بس — سعر الشغل نفسه
+            هيوصلك بعد ما الإدارة تشوف الصور، وموافقتك عليه شرط قبل أي دفع تاني. هتتحوّل لصفحة الدفع
+            بالبطاقة بعد ما تأكّد الطلب.
+          </p>
         </section>
       )}
 
@@ -1016,7 +1050,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           )}
         {service.pricing_model === 'inspection_then_quote' && !effectiveRequestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
-            رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
+            رسوم المعاينة {formatEgp(resolvedInspectionFeeCents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
         )}
         {technicianChoiceMode === 'auto' && !activePreview && service.pricing_model !== 'inspection_then_quote' && (

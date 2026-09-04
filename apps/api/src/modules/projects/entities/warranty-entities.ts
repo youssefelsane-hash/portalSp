@@ -1,53 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
-@Entity('customer_warranties')
-export class CustomerWarranty {
-  @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
-  id: string;
-
-  @Column({ name: 'plan_id', type: 'uuid' })
-  planId: string;
-  @Column({ name: 'plan_version', type: 'integer' })
-  planVersion: number;
-
-  @Column({ name: 'order_id', type: 'uuid', nullable: true })
-  orderId: string | null;
-  @Column({ name: 'project_id', type: 'uuid', nullable: true })
-  projectId: string | null;
-  @Column({ name: 'customer_id', type: 'uuid' })
-  customerId: string;
-
-  // Immutable snapshot
-  @Column({ name: 'name_ar', type: 'varchar', length: 200 })
-  nameAr: string;
-  @Column({ name: 'warranty_type', type: 'varchar', length: 40 })
-  warrantyType: string;
-  @Column({ name: 'price_paid_cents', type: 'integer' })
-  pricePaidCents: number;
-  @Column({ name: 'coverage_months', type: 'integer' })
-  coverageMonths: number;
-  @Column({ name: 'coverage_days', type: 'integer', nullable: true })
-  coverageDays: number | null;
-  @Column({ name: 'max_coverage_cents', type: 'integer', nullable: true })
-  maxCoverageCents: number | null;
-  @Column({ name: 'max_claims', type: 'integer' })
-  maxClaims: number;
-  @Column({ name: 'terms_ar', type: 'text', nullable: true })
-  termsAr: string | null;
-  @Column({ name: 'exclusions_ar', type: 'text', nullable: true })
-  exclusionsAr: string | null;
-
-  @Column({ name: 'starts_at', type: 'timestamptz', nullable: true })
-  startsAt: Date | null;
-  @Column({ name: 'expires_at', type: 'timestamptz' })
-  expiresAt: Date;
-  @Column({ name: 'claims_used', type: 'integer', default: 0 })
-  claimsUsed: number;
-
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
-  createdAt: Date;
-}
-
 @Entity('warranty_claims')
 export class WarrantyClaim {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })

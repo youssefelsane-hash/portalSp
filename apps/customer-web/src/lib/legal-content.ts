@@ -469,7 +469,3 @@ export const PRIVACY_DOCUMENT: LegalDocument = {
   ],
 };
 
-export const LEGAL_DOCUMENTS: Record<LegalDocument['slug'], LegalDocument> = {
-  terms: TERMS_DOCUMENT,
-  privacy: PRIVACY_DOCUMENT,
-};

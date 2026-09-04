@@ -43,6 +43,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     adminUser: '',
   };
   const orderIds: string[] = [];
+  let orderSeq = 0;
 
   async function insertOrder(
     label: string,
@@ -58,7 +59,12 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
           total_amount_cents, estimated_duration_days, scheduled_at, duration_hours)
        VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9,$10) RETURNING id`,
       [
-        `P7-${label}-${runId}`.slice(0, 24),
+        // **بَقّة تنظيف حقيقية**: الصيغة القديمة كانت `P7-${label}-${runId}`.slice(0, 24) —
+        // والقص من الآخر بياكل الـ`runId` نفسه لأي label أطول من ١٢ حرف، فطلبين من تشغيلتين
+        // مختلفتين بيطلعوا بنفس الرقم ويصطدموا في `orders_order_number_key`. ده مكانش بيبان
+        // إلا لما تنظيف تشغيلة سابقة يفشل ويسيب صفوف وراه. العدّاد بيضمن التفرد جوّه التشغيلة،
+        // والـrunId قبل الـlabel بيضمنه بين التشغيلات — والـlabel فاضل للقراءة بس، القص بياكله هو.
+        `P7-${runId}-${orderSeq++}-${label}`.slice(0, 24),
         ids.customerProfile,
         technicianId ?? null,
         ids.service,
@@ -247,6 +253,13 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
       await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
+      // قبول الفني بينشئ محادثة للطلب (`ChatService`) — تنظيف كان ناسيها، فالحذف بيفشل بـ
+      // `chat_threads_order_id_fkey` وقت ما القبول ينجح فعلاً.
+      await q(
+        `DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`,
+        [orderIds],
+      );
+      await q(`DELETE FROM chat_threads WHERE order_id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM technician_zones WHERE technician_id IN ($1,$2)`, [ids.technicianAProfile, ids.technicianBProfile]);
       await q(`DELETE FROM technician_services WHERE technician_id IN ($1,$2)`, [ids.technicianAProfile, ids.technicianBProfile]);

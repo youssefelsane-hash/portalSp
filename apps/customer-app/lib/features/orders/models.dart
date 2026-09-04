@@ -1,3 +1,5 @@
+import '../../design/status_chip.dart';
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts (OrderAddressResponseDto)
 // موجود بس في ردود تفاصيل الطلب الفردي (GET /orders/:id)، مش في قوائم الطلبات — لخرائط التتبع.
 class OrderAddress {
@@ -14,11 +16,11 @@ class OrderAddress {
   });
 
   factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
-        streetName: json['street_name'] as String,
-        landmark: json['landmark'] as String?,
-        latitude: (json['latitude'] as num).toDouble(),
-        longitude: (json['longitude'] as num).toDouble(),
-      );
+    streetName: json['street_name'] as String,
+    landmark: json['landmark'] as String?,
+    latitude: (json['latitude'] as num).toDouble(),
+    longitude: (json['longitude'] as num).toDouble(),
+  );
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts
@@ -37,6 +39,7 @@ class Order {
   final String? initialQuoteNote;
   final int totalAmountCents;
   final int warrantyPriceCents;
+
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
   /// مستواه بيزوّد السعر. 0 لو العميل اختار الفني بنفسه (الفرق داخل السعر أصلاً).
   /// الواجهة بتعرضه كسطر مستقل مكتوب جنبه "فني Premium" عشان العميل يفهم الزيادة جاية منين.
@@ -119,50 +122,55 @@ class Order {
   });
 
   bool get isUnderWarranty =>
-      warrantyExpiresAt != null && DateTime.parse(warrantyExpiresAt!).isAfter(DateTime.now());
+      warrantyExpiresAt != null &&
+      DateTime.parse(warrantyExpiresAt!).isAfter(DateTime.now());
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
-        id: json['id'] as String,
-        orderNumber: json['order_number'] as String,
-        serviceId: json['service_id'] as String,
-        addressId: json['address_id'] as String,
-        technicianId: json['technician_id'] as String?,
-        orderType: json['order_type'] as String,
-        bookingMode: json['booking_mode'] as String,
-        orderStatus: json['order_status'] as String,
-        problemDescription: json['problem_description'] as String?,
-        estimatedPriceCents: json['estimated_price_cents'] as int?,
-        initialQuoteSource: json['initial_quote_source'] as String?,
-        initialQuoteNote: json['initial_quote_note'] as String?,
-        totalAmountCents: json['total_amount_cents'] as int,
-        warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
-        levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
-        optionalWarrantyNameAr: (json['optional_warranty'] as Map<String, dynamic>?)?['name_ar'] as String?,
-        optionalWarrantyCoverageMonths:
-            (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months'] as int?,
-        paymentStatus: json['payment_status'] as String,
-        placedAt: json['placed_at'] as String?,
-        cancelledAt: json['cancelled_at'] as String?,
-        cancellationReasonId: json['cancellation_reason_id'] as String?,
-        cancellationFeeCents: json['cancellation_fee_cents'] as int? ?? 0,
-        createdAt: json['created_at'] as String,
-        address: json['address'] != null
-            ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
-            : null,
-        warrantyExpiresAt: json['warranty_expires_at'] as String?,
-        originalOrderId: json['original_order_id'] as String?,
-        requiredTechnicians: json['required_technicians'] as int?,
-        requiredAssistants: json['required_assistants'] as int?,
-        estimatedDurationDays: json['estimated_duration_days'] as int?,
-        requestedTechnicianId: json['requested_technician_id'] as String?,
-        technicianName: json['technician_name'] as String?,
-        technicianPhone: json['technician_phone'] as String?,
-        customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
-        technicianCashNotReceivedAt: json['technician_cash_not_received_at'] as String?,
-        scheduledAt: json['scheduled_at'] as String?,
-        recurringTemplateId: json['recurring_template_id'] as String?,
-        recurringOccurrenceAt: json['recurring_occurrence_at'] as String?,
-      );
+    id: json['id'] as String,
+    orderNumber: json['order_number'] as String,
+    serviceId: json['service_id'] as String,
+    addressId: json['address_id'] as String,
+    technicianId: json['technician_id'] as String?,
+    orderType: json['order_type'] as String,
+    bookingMode: json['booking_mode'] as String,
+    orderStatus: json['order_status'] as String,
+    problemDescription: json['problem_description'] as String?,
+    estimatedPriceCents: json['estimated_price_cents'] as int?,
+    initialQuoteSource: json['initial_quote_source'] as String?,
+    initialQuoteNote: json['initial_quote_note'] as String?,
+    totalAmountCents: json['total_amount_cents'] as int,
+    warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
+    levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
+    optionalWarrantyNameAr:
+        (json['optional_warranty'] as Map<String, dynamic>?)?['name_ar']
+            as String?,
+    optionalWarrantyCoverageMonths:
+        (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months']
+            as int?,
+    paymentStatus: json['payment_status'] as String,
+    placedAt: json['placed_at'] as String?,
+    cancelledAt: json['cancelled_at'] as String?,
+    cancellationReasonId: json['cancellation_reason_id'] as String?,
+    cancellationFeeCents: json['cancellation_fee_cents'] as int? ?? 0,
+    createdAt: json['created_at'] as String,
+    address: json['address'] != null
+        ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
+        : null,
+    warrantyExpiresAt: json['warranty_expires_at'] as String?,
+    originalOrderId: json['original_order_id'] as String?,
+    requiredTechnicians: json['required_technicians'] as int?,
+    requiredAssistants: json['required_assistants'] as int?,
+    estimatedDurationDays: json['estimated_duration_days'] as int?,
+    requestedTechnicianId: json['requested_technician_id'] as String?,
+    technicianName: json['technician_name'] as String?,
+    technicianPhone: json['technician_phone'] as String?,
+    customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
+    technicianCashNotReceivedAt:
+        json['technician_cash_not_received_at'] as String?,
+    scheduledAt: json['scheduled_at'] as String?,
+    recurringTemplateId: json['recurring_template_id'] as String?,
+    recurringOccurrenceAt: json['recurring_occurrence_at'] as String?,
+  );
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/preview-order-response.dto.ts — تفصيل السعر
@@ -173,9 +181,14 @@ class OrderPricePreviewAddon {
   final String nameAr;
   final int priceCents;
 
-  OrderPricePreviewAddon({required this.id, required this.nameAr, required this.priceCents});
+  OrderPricePreviewAddon({
+    required this.id,
+    required this.nameAr,
+    required this.priceCents,
+  });
 
-  factory OrderPricePreviewAddon.fromJson(Map<String, dynamic> json) => OrderPricePreviewAddon(
+  factory OrderPricePreviewAddon.fromJson(Map<String, dynamic> json) =>
+      OrderPricePreviewAddon(
         id: json['id'] as String,
         nameAr: json['name_ar'] as String,
         priceCents: json['price_cents'] as int,
@@ -185,6 +198,7 @@ class OrderPricePreviewAddon {
 class OrderPricePreview {
   final int basePriceCents;
   final int inspectionFeeCents;
+
   /// حدود **قصّ** المحرك — مش نطاق بيتعرض للعميل (بند 29). سايبينها في الموديل عشان الحسابات
   /// والتشخيص، لكن ممنوع ترسمها كـ«نطاق تقديري».
   final int? minPriceCents;
@@ -237,30 +251,35 @@ class OrderPricePreview {
     required this.remainingAmountCents,
   });
 
-  factory OrderPricePreview.fromJson(Map<String, dynamic> json) => OrderPricePreview(
-        basePriceCents: json['base_price_cents'] as int,
-        inspectionFeeCents: json['inspection_fee_cents'] as int,
-        minPriceCents: json['min_price_cents'] as int?,
-        maxPriceCents: json['max_price_cents'] as int?,
-        displayPriceMinCents: json['display_price_min_cents'] as int?,
-        displayPriceMaxCents: json['display_price_max_cents'] as int?,
-        priceCertaintyMode: json['price_certainty_mode'] as String? ?? 'confirmed_price',
-        emergencySurchargeCents: json['emergency_surcharge_cents'] as int,
-        emergencySlaMinutes: json['emergency_sla_minutes'] as int?,
-        addons: (json['addons'] as List<dynamic>)
-            .map((e) => OrderPricePreviewAddon.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        addonsTotalCents: json['addons_total_cents'] as int,
-        warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
-        subtotalBeforeDiscountCents: json['subtotal_before_discount_cents'] as int,
-        discountCents: json['discount_cents'] as int,
-        discountSource: json['discount_source'] as String?,
-        totalAmountCents: json['total_amount_cents'] as int,
-        estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toDouble(),
-        depositAmountCents: json['deposit_amount_cents'] as int?,
-        dueNowCents: json['due_now_cents'] as int? ?? json['total_amount_cents'] as int,
-        remainingAmountCents: json['remaining_amount_cents'] as int?,
-      );
+  factory OrderPricePreview.fromJson(
+    Map<String, dynamic> json,
+  ) => OrderPricePreview(
+    basePriceCents: json['base_price_cents'] as int,
+    inspectionFeeCents: json['inspection_fee_cents'] as int,
+    minPriceCents: json['min_price_cents'] as int?,
+    maxPriceCents: json['max_price_cents'] as int?,
+    displayPriceMinCents: json['display_price_min_cents'] as int?,
+    displayPriceMaxCents: json['display_price_max_cents'] as int?,
+    priceCertaintyMode:
+        json['price_certainty_mode'] as String? ?? 'confirmed_price',
+    emergencySurchargeCents: json['emergency_surcharge_cents'] as int,
+    emergencySlaMinutes: json['emergency_sla_minutes'] as int?,
+    addons: (json['addons'] as List<dynamic>)
+        .map((e) => OrderPricePreviewAddon.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    addonsTotalCents: json['addons_total_cents'] as int,
+    warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
+    subtotalBeforeDiscountCents: json['subtotal_before_discount_cents'] as int,
+    discountCents: json['discount_cents'] as int,
+    discountSource: json['discount_source'] as String?,
+    totalAmountCents: json['total_amount_cents'] as int,
+    estimatedDurationDays: (json['estimated_duration_days'] as num?)
+        ?.toDouble(),
+    depositAmountCents: json['deposit_amount_cents'] as int?,
+    dueNowCents:
+        json['due_now_cents'] as int? ?? json['total_amount_cents'] as int,
+    remainingAmountCents: json['remaining_amount_cents'] as int?,
+  );
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts
@@ -277,7 +296,8 @@ class CancellationReason {
     required this.feePercentage,
   });
 
-  factory CancellationReason.fromJson(Map<String, dynamic> json) => CancellationReason(
+  factory CancellationReason.fromJson(Map<String, dynamic> json) =>
+      CancellationReason(
         id: json['id'] as String,
         reasonAr: json['reason_ar'] as String,
         chargesFee: json['charges_fee'] as bool,
@@ -311,6 +331,36 @@ const Map<String, String> orderStatusLabelsAr = {
   // سياسة إلغاء الفني (docs/10) — الفني اعتذر عن طلب كنت اختاره بنفسك، محتاج تختار بديل.
   'awaiting_technician_reselection': 'محتاج تختار فني بديل',
 };
+
+/// نغمة الحالة للعرض (docs/08 §125) — تطبيق الفني بيعرض حالاته كـ`StatusChip` ملوّن بينما
+/// تطبيق العميل كان بيعرض نفس النوع من المعلومة كنص رمادي. الخريطة دي هي القرار الوحيد
+/// «أنهي حالة أنهي نغمة» عند العميل، جنب التسميات بالظبط عشان أي حالة جديدة تتضاف مرة واحدة.
+StatusTone orderStatusTone(String status) {
+  switch (status) {
+    case 'completed':
+    case 'work_completed':
+      return StatusTone.success;
+    case 'cancelled_by_customer':
+    case 'cancelled_by_technician':
+    case 'cancelled_by_system':
+    case 'expired':
+    case 'disputed':
+      return StatusTone.danger;
+    // كل حالة بتستنى قرار أو دفع **من العميل** — دي اللي المفروض تلفت نظره.
+    case 'pending_payment':
+    case 'awaiting_payment':
+    case 'awaiting_quote_approval':
+    case 'awaiting_initial_quote_approval':
+    case 'awaiting_technician_reselection':
+      return StatusTone.warning;
+    case 'draft':
+    case 'refunded':
+      return StatusTone.neutral;
+    // الباقي شغل ماشي: بيدوّر على فني، اتعيّن، في الطريق، وصل، شغّال، الإدارة بتسعّر.
+    default:
+      return StatusTone.info;
+  }
+}
 
 // مطابق لـ CUSTOMER_CANCELLABLE_STATUSES في order-state-machine.ts بالظبط — awaiting_quote_approval
 // اتضافت مع مسار عرض السعر (order-items.service.ts): العميل يقدر يلغي الطلب كله بدل ما يوافق/يرفض
@@ -352,15 +402,15 @@ class OrderItem {
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
-        id: json['id'] as String,
-        itemType: json['item_type'] as String,
-        nameAr: json['name_ar'] as String,
-        quantity: (json['quantity'] as num).toDouble(),
-        unitName: json['unit_name'] as String?,
-        unitPriceCents: json['unit_price_cents'] as int,
-        totalPriceCents: json['total_price_cents'] as int,
-        isCustomerApproved: json['is_customer_approved'] as bool,
-      );
+    id: json['id'] as String,
+    itemType: json['item_type'] as String,
+    nameAr: json['name_ar'] as String,
+    quantity: (json['quantity'] as num).toDouble(),
+    unitName: json['unit_name'] as String?,
+    unitPriceCents: json['unit_price_cents'] as int,
+    totalPriceCents: json['total_price_cents'] as int,
+    isCustomerApproved: json['is_customer_approved'] as bool,
+  );
 }
 
 const Map<String, String> orderItemTypeLabelsAr = {
@@ -378,14 +428,19 @@ class OrderMedia {
   final String fileUrl;
   final String? caption;
 
-  OrderMedia({required this.id, required this.mediaType, required this.fileUrl, required this.caption});
+  OrderMedia({
+    required this.id,
+    required this.mediaType,
+    required this.fileUrl,
+    required this.caption,
+  });
 
   factory OrderMedia.fromJson(Map<String, dynamic> json) => OrderMedia(
-        id: json['id'] as String,
-        mediaType: json['media_type'] as String,
-        fileUrl: json['file_url'] as String,
-        caption: json['caption'] as String?,
-      );
+    id: json['id'] as String,
+    mediaType: json['media_type'] as String,
+    fileUrl: json['file_url'] as String,
+    caption: json['caption'] as String?,
+  );
 }
 
 // توزيع أدوار الفريق (docs/08 §5) — كانت فجوة موثّقة صراحة: GET /orders/:id/team-members موجود
@@ -407,12 +462,12 @@ class TeamMember {
   });
 
   factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
-        id: json['id'] as String,
-        technicianId: json['technician_id'] as String,
-        fullName: json['full_name'] as String,
-        avatarUrl: json['avatar_url'] as String?,
-        roleLabel: json['role_label'] as String,
-      );
+    id: json['id'] as String,
+    technicianId: json['technician_id'] as String,
+    fullName: json['full_name'] as String,
+    avatarUrl: json['avatar_url'] as String?,
+    roleLabel: json['role_label'] as String,
+  );
 }
 
 class OrderRescheduleRequest {
@@ -424,11 +479,20 @@ class OrderRescheduleRequest {
   final String status;
   final DateTime createdAt;
 
-  OrderRescheduleRequest({required this.id, required this.proposedSlotId, required this.proposedAt, required this.proposedEndAt, required this.reason, required this.status, required this.createdAt});
+  OrderRescheduleRequest({
+    required this.id,
+    required this.proposedSlotId,
+    required this.proposedAt,
+    required this.proposedEndAt,
+    required this.reason,
+    required this.status,
+    required this.createdAt,
+  });
 
   bool get isPending => status == 'pending';
 
-  factory OrderRescheduleRequest.fromJson(Map<String, dynamic> json) => OrderRescheduleRequest(
+  factory OrderRescheduleRequest.fromJson(Map<String, dynamic> json) =>
+      OrderRescheduleRequest(
         id: json['id'] as String,
         proposedSlotId: json['proposed_slot_id'] as String,
         proposedAt: DateTime.parse(json['proposed_at'] as String),
@@ -445,7 +509,8 @@ class RescheduleDateOption {
 
   const RescheduleDateOption({required this.date, required this.available});
 
-  factory RescheduleDateOption.fromJson(Map<String, dynamic> json) => RescheduleDateOption(
+  factory RescheduleDateOption.fromJson(Map<String, dynamic> json) =>
+      RescheduleDateOption(
         date: json['date'] as String,
         available: json['available'] as bool? ?? false,
       );

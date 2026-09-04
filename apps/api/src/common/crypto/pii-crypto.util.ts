@@ -1,5 +1,5 @@
 import { HttpStatus } from '@nestjs/common';
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 import { ApiException, ErrorCode } from '../exceptions/api.exception';
 
 /**
@@ -92,13 +92,6 @@ export function decryptPii(value: string | null): string | null {
 /** الفهرس الأعمى — hex، حتمي، هو اللي بيتخزّن في `national_id_hash` ويتعمل عليه UNIQUE. */
 export function blindIndex(normalizedValue: string): string {
   return createHmac('sha256', hmacKey()).update(normalizedValue).digest('hex');
-}
-
-/** مقارنة هاشين بزمن ثابت — القيم دي بتتقارن في مسارات تحقق، فمفيش داعي نسرّب فرق توقيت. */
-export function blindIndexEquals(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
 }
 
 /** آخر 4 أرقام بس للعرض في السجلات/الواجهات اللي مش محتاجة الرقم كامل. */

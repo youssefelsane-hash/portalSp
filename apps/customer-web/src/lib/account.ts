@@ -104,8 +104,6 @@ export interface NotificationDto {
 
 export const fetchNotifications = (authedFetch: AuthedFetch) =>
   apiFetchListVia<NotificationDto>(authedFetch, '/notifications');
-export const markNotificationRead = (authedFetch: AuthedFetch, id: string) =>
-  authedFetch<null>(`/notifications/${id}/read`, { method: 'PATCH' });
 export const markAllNotificationsRead = (authedFetch: AuthedFetch) =>
   authedFetch<null>('/notifications/read-all', { method: 'PATCH' });
 
