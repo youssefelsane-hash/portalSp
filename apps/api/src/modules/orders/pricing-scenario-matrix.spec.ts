@@ -240,9 +240,32 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
     });
     await dataSource.initialize();
 
+    // `RUN_TAG` ثابت مش مولّد لكل تشغيلة، فالـslug فريد وثابت — ولو `afterAll` ماخلصش مرة واحدة
+    // (الـprocess اتقتل في نص التشغيل مثلاً)، الصف بيفضل في القاعدة والسبيك **مايقدرش يشتغل تاني
+    // أبدًا** بـduplicate key، ويحتاج تدخّل يدوي في قاعدة البيانات. حصل فعلاً. البذر بقى يمسح أي
+    // بقايا تشغيلة سابقة الأول، فالسبيك بيشفي نفسه بدل ما يستنى حد يفتح psql.
+    const slug = `matrix-${RUN_TAG.toLowerCase()}`;
+    const stale: { id: string }[] = await q(`SELECT id FROM service_categories WHERE slug = $1`, [slug]);
+    if (stale.length > 0) {
+      const staleIds = stale.map((row) => row.id);
+      const staleServices: { id: string }[] = await q(
+        `SELECT id FROM services WHERE category_id = ANY($1::uuid[])`,
+        [staleIds],
+      );
+      if (staleServices.length > 0) {
+        const ids = staleServices.map((row) => row.id);
+        await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1::uuid[])`, [ids]);
+        await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1::uuid[])`, [ids]);
+        await q(`DELETE FROM service_zone_pricing WHERE service_id = ANY($1::uuid[])`, [ids]);
+        await q(`DELETE FROM service_level_pricing WHERE service_id = ANY($1::uuid[])`, [ids]);
+        await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [ids]);
+      }
+      await q(`DELETE FROM service_categories WHERE id = ANY($1::uuid[])`, [staleIds]);
+    }
+
     const [category] = await q(
       `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
-      [`فئة مصفوفة ${RUN_TAG}`, `Matrix ${RUN_TAG}`, `matrix-${RUN_TAG.toLowerCase()}`],
+      [`فئة مصفوفة ${RUN_TAG}`, `Matrix ${RUN_TAG}`, slug],
     );
     categoryId = category.id;
 
