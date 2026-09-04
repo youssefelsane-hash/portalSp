@@ -15,7 +15,7 @@
 | `apps/customer-app` | Flutter | **159 ملف Dart** |
 | `apps/technician-app` | Flutter | **119 ملف Dart** |
 | `packages/` | `shared-types` · `shared-ui` · `config` | أنواع وثوابت وقت-تشغيل مشتركة |
-| `infra/migrations/` | SQL خام | **260 migration** (بفحص checksum) |
+| `infra/migrations/` | SQL خام | **261 migration** (بفحص checksum) |
 | `docs/adr/` | قرارات معمارية | **72 ADR** |
 
 ### قاعدة البيانات
@@ -24,7 +24,7 @@
 |---|-------|
 | الجداول | **159** |
 | الأنواع المُعدَّدة (enums) | **96** |
-| مفاتيح الإعدادات (`settings`) | **180** |
+| مفاتيح الإعدادات (`settings`) | **179** |
 
 ### التغطية الاختبارية
 
@@ -243,7 +243,7 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 | 09 | [إدارة الفنيين](./09-TECHNICIAN-MANAGEMENT.md) | المستويات، الترقية، الاعتماد |
 | 10 | [تدفّق الأموال](./10-FINANCE-MONEY-FLOW.md) | القيد المزدوج، العمولة، الصرف |
 | 11 | [مؤشّرات الأداء](./11-KPI-ANALYTICS.md) | الأبعاد الستة والمكافآت |
-| 12 | [كتالوج الإعدادات](./12-SETTINGS-CATALOG.md) | 180 مفتاح مُولَّد من القاعدة |
+| 12 | [كتالوج الإعدادات](./12-SETTINGS-CATALOG.md) | مفاتيح مُولَّدة من القاعدة |
 | 13 | [الإشعارات والتتبّع](./13-NOTIFICATIONS-REALTIME.md) | القنوات، ساعات الهدوء، Socket.IO |
 | 14 | [الدعم والشكاوى](./14-SUPPORT-CHAT-COMPLAINTS.md) | آلة حالات الشكوى، المحادثات |
 | 15 | [الشركات والفرق والمساعدون](./15-COMPANIES-TEAMS-ASSISTANTS-PROJECTS.md) | أربعة مفاهيم متشابهة الاسم |

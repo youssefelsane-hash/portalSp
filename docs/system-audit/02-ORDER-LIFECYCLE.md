@@ -247,9 +247,10 @@ flowchart TD
 دلوقتي** — وده مش سبب لإلغاء طلب عميل بصمت. الطلب يفضل «جاري البحث» والأدمن يتصرف يدويًا
 (تعيين قسري أو إلغاء إداري).
 
-> ⚠️ الإعداد `orders.auto_cancel_after_minutes` (٢٠ دقيقة) **موجود في `settings` لكن مش
-> مستخدَم** في مسار `searching_technician` بعد القرار ده. أي حد بيقرا الإعدادات لوحدها هيستنتج
-> سلوك غلط. اتوثّق هنا وفي `order-auto-cancel.service.ts` صراحة.
+> ✅ **اتقفل نهائيًا (migration 0262)**: الإعداد `orders.auto_cancel_after_minutes` كان فاضل
+> في `settings` بقيمة ٢٠ دقيقة ومفيش كود بيقراه — يعني الأدمن يشوف «إلغاء تلقائي بعد ٢٠ دقيقة»
+> ويستنتج سلوكًا مش موجود، والأسوأ إنه لو غيّر القيمة يفتكر إنه عمل حاجة وهو **ما عملش**.
+> **اتحذف الصف** بدل ما يتعطّل: إعداد بلا قارئ هو توثيق كاذب مخزَّن في قاعدة البيانات.
 
 الـsweep بيشتغل كل دورة بحد `SWEEP_BATCH_SIZE` صف، مع `pessimistic_write` وإعادة تحقق من الحالة
 قبل كل إلغاء.
@@ -263,7 +264,7 @@ flowchart TD
 | `orders.payment_timeout_minutes` | `15` | مهلة إتمام الدفع الإلكتروني |
 | `orders.cancellation_free_window_min` | `5` | نافذة إلغاء بلا رسوم من `placed_at` |
 | `orders.no_show_visit_fee_cents` | `5000` | رسم زيارة افتراضي (٥٠ ج) عند زيارة فاشلة |
-| `orders.auto_cancel_after_minutes` | `20` | **غير مستخدَم** — §6 |
+
 | `orders.max_work_sessions_per_order` | `3` | حد جلسات العمل |
 | `orders.technician_reschedule_max_requests` | `2` | حد طلبات إعادة الجدولة من الفني |
 | `orders.crew_shortage_escalation_hours_before` | `24` | تصعيد نقص الطاقم قبل الموعد |

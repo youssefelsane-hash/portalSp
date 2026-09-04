@@ -32,6 +32,13 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
+  /**
+   * نطاق الدورة على مستخدمي الـspec ده بس — الدورة في الإنتاج بتستهدف كل العملاء المؤهّلين،
+   * وفي التشغيل المتوازي كانت بتبعت حملات لمستخدمي specs تانية وتسيب صفوف
+   * `notification_campaign_sends` مربوطة بيهم، فتنظيفهم يفشل على مفتاح أجنبي.
+   */
+  const sweepScope = (): string[] => Object.values(ids).filter((v): v is string => typeof v === 'string' && v.length > 0);
+
   async function insertCustomer(label: string): Promise<{ userId: string; profileId: string }> {
     const [user] = await q(
       `INSERT INTO users (phone_number, full_name, user_type, phone_verified_at, last_login_at)
@@ -200,7 +207,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
   // ── الإعلان الدوري ─────────────────────────────────────────────────────────
 
   it('الإعلان الدوري بيوصل لعميل مؤهل بخدمة مسموح الإعلان عنها', async () => {
-    const sent = await service.sweep();
+    const sent = await service.sweep({ userIds: sweepScope() });
     expect(sent).toBeGreaterThanOrEqual(1);
 
     const mine = sentNotifications.filter((n) => n.userId === ids.customerUser);
@@ -223,13 +230,13 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
   it('العميل اللي قافل الإعلانات ما بياخدش حاجة', async () => {
     await q(`DELETE FROM notification_campaign_sends WHERE user_id = $1`, [ids.customerUser]);
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     expect(sentNotifications.some((n) => n.userId === ids.optedOutUser)).toBe(false);
   });
 
   it('الفاصل الدوري بيمنع إعلان تاني لنفس العميل قبل معاده', async () => {
     // في الاختبار اللي فات اتبعتله إعلان لسه، فالدورة دي المفروض تتخطاه.
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     expect(sentNotifications.some((n) => n.userId === ids.customerUser)).toBe(false);
   });
 
@@ -241,7 +248,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
        VALUES ($1,$2, now() - interval '1 day'), ($1,$2, now() - interval '2 days')`,
       [ids.campaignIntent, ids.customerUser],
     );
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     expect(sentNotifications.some((n) => n.userId === ids.customerUser)).toBe(false);
 
     await q(`DELETE FROM notification_campaign_sends WHERE user_id = $1`, [ids.customerUser]);
@@ -253,7 +260,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
        VALUES ($1,$2,$3,$4,$5,'in_progress','pending',30000,0) RETURNING id`,
       [`CMPG-${runId}`.slice(0, 24), ids.customerProfile, ids.servicePromotable, ids.address, ids.zone],
     );
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     expect(sentNotifications.some((n) => n.userId === ids.customerUser)).toBe(false);
 
     // **يتشال مش يتقفل**: الطلب ده على نفس الخدمة، ووجوده بعد وقت الاهتمام بيلغي التذكير في
@@ -267,7 +274,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
     settingsValues.set('campaigns.quiet_hours_start', `${String(nowHour).padStart(2, '0')}:00`);
     settingsValues.set('campaigns.quiet_hours_end', `${String((nowHour + 2) % 24).padStart(2, '0')}:00`);
 
-    expect(await service.sweep()).toBe(0);
+    expect(await service.sweep({ userIds: sweepScope() })).toBe(0);
     expect(sentNotifications).toHaveLength(0);
 
     settingsValues.set('campaigns.quiet_hours_start', '00:00');
@@ -276,7 +283,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
   it('إقفال المحرك بيوقّف كل حاجة فورًا', async () => {
     settingsValues.set('campaigns.enabled', false);
-    expect(await service.sweep()).toBe(0);
+    expect(await service.sweep({ userIds: sweepScope() })).toBe(0);
     settingsValues.set('campaigns.enabled', true);
   });
 
@@ -289,7 +296,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
       ids.customerUser,
     ]);
 
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     const mine = sentNotifications.filter((n) => n.userId === ids.customerUser);
     expect(mine.length).toBeGreaterThanOrEqual(1);
     expect(mine[0].titleAr).toContain(`تسليك مواسير ${runId}`);
@@ -307,7 +314,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
     await q(`DELETE FROM customer_service_intents WHERE user_id = $1`, [ids.customerUser]);
     await service.recordIntent(ids.customerUser, ids.servicePromotable, 'started_booking');
 
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     const [{ count }] = await q(
       `SELECT COUNT(*) AS count FROM customer_service_intents WHERE user_id = $1 AND processed_at IS NULL`,
       [ids.customerUser],
@@ -328,7 +335,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
       [`CMPB-${runId}`.slice(0, 24), ids.customerProfile, ids.servicePromotable, ids.address, ids.zone],
     );
 
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     // ممكن ياخد إعلان دوري (وده مقبول)، بس مش تذكير بالخدمة اللي حجزها بالفعل.
     const reminders = sentNotifications.filter(
       (n) => n.userId === ids.customerUser && n.titleAr.startsWith('لسه فاكر'),
@@ -346,7 +353,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
       ids.customerUser,
     ]);
 
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
     const reminders = sentNotifications.filter(
       (n) => n.userId === ids.customerUser && n.titleAr.startsWith('لسه فاكر'),
     );
@@ -356,7 +363,7 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
   it('كل إرسال بيتسجّل في السجل الدائم — هو نفسه مصدر الحواجز والتحليل', async () => {
     await q(`DELETE FROM notification_campaign_sends WHERE user_id = $1`, [ids.customerUser]);
     await q(`DELETE FROM customer_service_intents WHERE user_id = $1`, [ids.customerUser]);
-    await service.sweep();
+    await service.sweep({ userIds: sweepScope() });
 
     const rows = await q(
       `SELECT send.campaign_id, send.service_id, service.is_promotable, service.is_active, service.deleted_at

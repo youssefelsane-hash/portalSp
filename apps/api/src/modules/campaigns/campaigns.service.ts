@@ -87,8 +87,20 @@ export class CampaignsService {
 
   // ── الدورة الرئيسية ───────────────────────────────────────────────────────
 
-  /** بترجّع عدد الإشعارات اللي اتبعتت فعلاً في الدورة دي. */
-  async sweep(): Promise<number> {
+  /**
+   * بترجّع عدد الإشعارات اللي اتبعتت فعلاً في الدورة دي.
+   *
+   * `options.userIds` — **نطاق اختياري للاختبارات بس**، نفس نمط
+   * `RecurringOrdersService.sweep({ templateIds })` و`OrderAutoCancelService.sweep({ orderNumberPrefix })`.
+   *
+   * السبب: الدورة دي بتستهدف **كل** العملاء المؤهّلين في القاعدة — وده الصح في الإنتاج. لكن في
+   * الاختبارات المتوازية بقت بتبعت حملات لمستخدمي specs تانية، وبتسيب صفوف في
+   * `notification_campaign_sends` مربوطة بيهم — فتنظيف الـspec التاني بيفشل على مفتاح أجنبي
+   * وبيسقط الـsuite كلها بلا أي تأكيد فاشل حقيقي.
+   *
+   * الإنتاج بينادي `sweep()` بلا معاملات فالسلوك مايتغيّرش بأي شكل.
+   */
+  async sweep(options?: { userIds?: string[] }): Promise<number> {
     if (!(await this.settings.getBoolean('campaigns.enabled', true))) return 0;
 
     // ساعات الهدوء بتتفحص مرة واحدة للدورة كلها — الوقت مابيتغيرش جوّه دورة واحدة، ومفيش داعي
@@ -102,8 +114,8 @@ export class CampaignsService {
 
     // الاسترجاع الأول: نية صريحة من عميل حقيقي أثمن بكتير من إعلان عشوائي، فبياخد نصيبه من
     // الدفعة الأول.
-    const abandoned = await this.sweepAbandonedIntents(batchSize);
-    const promo = await this.sweepPeriodicPromos(Math.max(0, batchSize - abandoned));
+    const abandoned = await this.sweepAbandonedIntents(batchSize, options?.userIds);
+    const promo = await this.sweepPeriodicPromos(Math.max(0, batchSize - abandoned), options?.userIds);
 
     await this.purgeOldIntents();
     return abandoned + promo;
@@ -111,7 +123,7 @@ export class CampaignsService {
 
   // ── استرجاع الحجز المتروك ────────────────────────────────────────────────
 
-  private async sweepAbandonedIntents(limit: number): Promise<number> {
+  private async sweepAbandonedIntents(limit: number, userIds?: string[]): Promise<number> {
     if (limit <= 0) return 0;
     const campaigns = await this.activeCampaigns('abandoned_intent');
     if (campaigns.length === 0) return 0;
@@ -133,6 +145,7 @@ export class CampaignsService {
         JOIN services s ON s.id = i.service_id
         JOIN service_categories sc ON sc.id = s.category_id
        WHERE i.processed_at IS NULL
+         AND ($3::uuid[] IS NULL OR i.user_id = ANY($3::uuid[]))
          AND i.occurred_at <= now() - make_interval(mins => $1::int)
          AND u.is_blocked = false AND u.is_active = true AND u.deleted_at IS NULL
          AND cp.marketing_opt_out = false
@@ -149,7 +162,7 @@ export class CampaignsService {
        ORDER BY i.occurred_at ASC
        LIMIT $2
       `,
-      [minDelay, limit],
+      [minDelay, limit, userIds ?? null],
     );
 
     let sent = 0;
@@ -187,7 +200,7 @@ export class CampaignsService {
 
   // ── الإعلان الدوري ────────────────────────────────────────────────────────
 
-  private async sweepPeriodicPromos(limit: number): Promise<number> {
+  private async sweepPeriodicPromos(limit: number, userIds?: string[]): Promise<number> {
     if (limit <= 0) return 0;
     const campaigns = await this.activeCampaigns('periodic_promo');
     if (campaigns.length === 0) return 0;
@@ -205,6 +218,7 @@ export class CampaignsService {
           FROM users u
           JOIN customer_profiles cp ON cp.user_id = u.id
          WHERE u.user_type = 'customer'
+           AND ($5::uuid[] IS NULL OR u.id = ANY($5::uuid[]))
            AND u.is_blocked = false AND u.is_active = true AND u.deleted_at IS NULL
            AND cp.marketing_opt_out = false
            -- حساب ميت: الإرسال ليه بيضر سمعة المُرسِل (وبيرفع bounce rate عند FCM).
@@ -235,7 +249,7 @@ export class CampaignsService {
        ORDER BY ec.user_id, random()
        LIMIT $3
       `,
-      [inactiveDays, intervalDays, limit, CUSTOMER_BUSY_ORDER_STATUSES],
+      [inactiveDays, intervalDays, limit, CUSTOMER_BUSY_ORDER_STATUSES, userIds ?? null],
     );
 
     let sent = 0;

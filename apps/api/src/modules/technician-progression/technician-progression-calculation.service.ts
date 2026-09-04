@@ -67,9 +67,23 @@ export class TechnicianProgressionCalculationService {
       )
       SELECT
         COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
+        -- **GREATEST(..., 0) لكل طلب على حدة — مش على المجموع** (ADR-0038، إصلاح تدقيق النظام).
+        --
+        -- platform_commission_cents بيطلع **سالب** بتصميم لما خصم كبير يخلّي اللي العميل دفعه
+        -- أقل من مستحق الفني: «العميل يستفيد من الخصم، المنصة تتحمل تكلفته، والفني ياخد مستحقه
+        -- كامل» (نص المالك). من غير القصّ ده، الطلب الخسران كان **بيخصم** من عدّاد ترقية الفني —
+        -- يعني الفني بيترجّع لورا في مساره الوظيفي بسبب حملة تسويق **المنصّة** هي اللي قررتها.
+        --
+        -- اتثبت بفحص حي: طلب بعمولة +2000 وطلب بعمولة -1000 كانوا بيدّوا 1000 بدل 2000 — نُص
+        -- التقدّم اتمسح. ده نفس خطأ «الفني بيموّل حملة المنصة من جيبه» اللي ADR-0038 قفله في
+        -- مسار الفلوس، لكنه فضل مفتوح في مسار الترقية.
+        --
+        -- القصّ عند صفر بيحفظ المبدأين مع بعض: المنصّة مابتحسبش إيرادًا ما استلمتهوش (الطلب
+        -- بصفر)، والفني مابيترجّعش لورا. **مقصود إنه لكل طلب**: القصّ على المجموع كان هيسمح
+        -- لطلب خسران إنه يبلع ربح طلب تاني.
         COALESCE(SUM(
           CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
-            THEN ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents)
+            THEN GREATEST(ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents), 0)
             ELSE 0 END
         ), 0) AS platform_revenue_cents
       FROM participation
