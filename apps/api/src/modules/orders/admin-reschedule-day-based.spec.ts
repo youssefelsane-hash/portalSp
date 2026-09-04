@@ -181,6 +181,12 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
   afterEach(async () => {
     await q(`DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
+    // محادثة الطلب بتتعمل من مستمع وقت إعادة الجدولة — من غير مسحها الـFK بيفشّل حذف
+    // الطلبات، فطلبات الاختبار الأول بتفضل مربوطة بالفني وتخلّي كل اختبار بعده يترفض
+    // بـ«الفني مش متاح».
+    
+    await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%'))`);
+    await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
     await q(`DELETE FROM orders WHERE order_number LIKE 'TESTRSDB-%'`);
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
   });
@@ -189,6 +195,8 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
     try {
       await q(`DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
+      await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%'))`);
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
       await q(`DELETE FROM orders WHERE order_number LIKE 'TESTRSDB-%'`);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
       await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.techProfile]);

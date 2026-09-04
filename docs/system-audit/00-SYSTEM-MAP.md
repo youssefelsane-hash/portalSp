@@ -252,7 +252,7 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 | 18 | [خريطة الـAPI](./18-API-MAP.md) | 591 مسار مُستخرَج آليًا |
 | 19 | [المهام الخلفية والأحداث](./19-BACKGROUND-JOBS-EVENTS.md) | الطوابير، المؤقّتات، التعويض |
 | 20 | [الأمان والصلاحيات](./20-SECURITY-PERMISSIONS.md) | البوابات الأربع، MFA، Step-Up |
-| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | 16 بَقّة بإثبات + 4 نفيات بدليل |
+| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | 17 بَقّة بإثبات + 4 نفيات بدليل |
 
 **ابدأ من فين؟**
 

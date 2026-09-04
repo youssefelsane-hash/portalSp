@@ -40,13 +40,18 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   let seq = 0;
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-  /** يوم/ساعة بتوقيت مصر → timestamptz. `dayOffset` بالأيام من النهاردة. */
-  function cairoAt(dayOffset: number, hour: number): string {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() + dayOffset);
-    // مصر UTC+2/+3؛ الاختبار بيستعمل نفس التحويل اللي الاستعلام بيستعمله، فبنبني النص بتوقيت
-    // مصر ونسيب Postgres يحوّله — كده مفيش انحراف بين الاختبار والمحرك.
-    const day = d.toISOString().slice(0, 10);
+  /**
+   * يوم/ساعة بتوقيت مصر → نص timestamptz. `dayOffset` بالأيام من **يوم مصر النهاردة**.
+   *
+   * **بيسأل Postgres عن التاريخ مش بيحسبه من `toISOString()`** — الأخير بيدّي تاريخ **UTC**،
+   * واللي بيختلف عن تاريخ القاهرة كل يوم بين ٢٢:٠٠ و٢٤:٠٠ UTC (يعني ٠٠:٠٠–٠٢:٠٠ بتوقيت مصر).
+   * جوّه النافذة دي كان `cairoAt(0, ...)` بيرجّع **إمبارح** بمقياس القاهرة، فالطلب النشط
+   * «النهاردة» يقع في يوم تاني والتعارض ما يتلقطش — والاختبارات تفشل ساعتين كل يوم بلا أي
+   * تغيير في الكود. نفس فئة البَقّة اللي المحرك نفسه اتصلح منها (كل مقارناته بقت
+   * `AT TIME ZONE 'Africa/Cairo'` صراحة) — المِنصّة كانت لسه واقعة فيها.
+   */
+  async function cairoAt(dayOffset: number, hour: number): Promise<string> {
+    const day = await cairoDate(dayOffset);
     return `${day} ${String(hour).padStart(2, '0')}:00:00 Africa/Cairo`;
   }
 
@@ -233,7 +238,7 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   });
 
   it('خط الأساس — فني فاضي تمامًا مؤهّل (لو ده فشل، المِنصّة نفسها غلط مش المحرك)', async () => {
-    const plain = await candidateOrder(cairoAt(1, 16), 120);
+    const plain = await candidateOrder(await cairoAt(1, 16), 120);
     const rows = await matchingService.findEligibleTechnicians(plain, 50);
     // طباعة تشخيصية عند الفشل: مين رجع فعلاً؟
     if (!rows.some((r) => r.technician_id === ids.techProfile)) {
@@ -250,52 +255,52 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
 
   it('A — شغل نشط دلوقتي **مايمنعش** حجز مستقبلي بكرة (شكّ المالك المباشر)', async () => {
     // الفني شغّال فعلاً دلوقتي (in_progress، النهاردة).
-    await insertOrder({ label: 'active-now', status: OrderStatus.IN_PROGRESS, scheduledAt: cairoAt(0, 11), durationMinutes: 180 });
+    await insertOrder({ label: 'active-now', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
     // طلب بكرة الساعة ٤ عصرًا — مفيش أي تداخل.
-    const tomorrow = await candidateOrder(cairoAt(1, 16), 120);
+    const tomorrow = await candidateOrder(await cairoAt(1, 16), 120);
     expect(await isEligible(tomorrow)).toBe(true);
   });
 
   it('A2 — الشغل النشط بيمنع طلب **نفس اليوم** بس (الفرق الحقيقي)', async () => {
-    await insertOrder({ label: 'engaged', status: OrderStatus.IN_PROGRESS, scheduledAt: cairoAt(0, 11), durationMinutes: 180 });
-    const sameDay = await candidateOrder(cairoAt(0, 20), 120);
+    await insertOrder({ label: 'engaged', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
+    const sameDay = await candidateOrder(await cairoAt(0, 20), 120);
     expect(await isEligible(sameDay)).toBe(false);
   });
 
   it('B — تعارض مستقبلي حقيقي (بكرة ١٤–١٦ ثم ١٥–١٧) بيتمنع', async () => {
-    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(1, 14), durationMinutes: 120 });
-    const overlapping = await candidateOrder(cairoAt(1, 15), 120);
+    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(1, 14), durationMinutes: 120 });
+    const overlapping = await candidateOrder(await cairoAt(1, 15), 120);
     expect(await isEligible(overlapping)).toBe(false);
   });
 
   it('C — نفس اليوم بلا تداخل (بكرة ١٤–١٦ ثم ١٧–١٩) مسموح', async () => {
-    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(1, 14), durationMinutes: 120 });
-    const later = await candidateOrder(cairoAt(1, 17), 120);
+    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(1, 14), durationMinutes: 120 });
+    const later = await candidateOrder(await cairoAt(1, 17), 120);
     expect(await isEligible(later)).toBe(true);
   });
 
   it('C2 — موعدان متجاوران تمامًا (١٤–١٦ ثم ١٦–١٨) مسموحان — النطاق نصف مفتوح', async () => {
-    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(1, 14), durationMinutes: 120 });
-    const adjacent = await candidateOrder(cairoAt(1, 16), 120);
+    await insertOrder({ label: 'tomorrow-14', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(1, 14), durationMinutes: 120 });
+    const adjacent = await candidateOrder(await cairoAt(1, 16), 120);
     expect(await isEligible(adjacent)).toBe(true);
   });
 
   it('D — طلب طوارئ: الفني اللي **قَبِل بس لسه ما بدأش** يفضل مؤهّل', async () => {
     // `accepted` مش ضمن ENGAGED — الفني اتأكّد على شغل بس مش منشغل جسديًا دلوقتي.
-    await insertOrder({ label: 'accepted-not-started', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(0, 18), durationMinutes: 120 });
+    await insertOrder({ label: 'accepted-not-started', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 18), durationMinutes: 120 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(true);
   });
 
   it('D2 — طلب طوارئ: الفني اللي **شغّال فعليًا دلوقتي** يتستبعد', async () => {
-    await insertOrder({ label: 'in-progress', status: OrderStatus.IN_PROGRESS, scheduledAt: cairoAt(0, 11), durationMinutes: 180 });
+    await insertOrder({ label: 'in-progress', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(false);
   });
 
   it('D3 — الشغل النشط **النهاردة** مايمنعش طلب طوارئ لو الفني مش منشغل جسديًا', async () => {
     // نفس الحالة زي D بس بحالة تانية من ACTIVE-لكن-مش-ENGAGED.
-    await insertOrder({ label: 'awaiting-approval', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(0, 9), durationMinutes: 60 });
+    await insertOrder({ label: 'awaiting-approval', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 60 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(true);
   });
@@ -303,35 +308,35 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   describe('E — الإجازة الصريحة (`blocked`) لازم تُحترم على كل يوم من أيام الشغل', () => {
     it('E1 — إجازة يوم كامل في **يوم بداية** الطلب بتمنعه (خط الأساس)', async () => {
       await blockDay(await cairoDate(3));
-      const onBlockedDay = await candidateOrder(cairoAt(3, 10), 120);
+      const onBlockedDay = await candidateOrder(await cairoAt(3, 10), 120);
       expect(await isEligible(onBlockedDay)).toBe(false);
     });
 
     it('E2 — إجازة في **نص** شغل ممتد (٥ أيام، الإجازة في اليوم التالت) لازم تمنعه برضه', async () => {
       await blockDay(await cairoDate(5));
       // شغل ٥ أيام مبتدي بعد ٣ أيام ⇒ بيغطي الأيام ٣،٤،٥،٦،٧ — الإجازة في نصه بالظبط.
-      const multiDay = await candidateOrder(cairoAt(3, 10), null, false, 5);
+      const multiDay = await candidateOrder(await cairoAt(3, 10), null, false, 5);
       expect(await isEligible(multiDay)).toBe(false);
     });
 
     it('E3 — إجازة بساعات آخر الليل مع شغل بيعدّي نص الليل لازم تتحسب', async () => {
       // الشغل ٢٢:٠٠ + ٤ ساعات ⇒ ٢٢:٠٠–٠٢:٠٠ اليوم اللي بعده. الإجازة ٢٣:٠٠–٢٣:٥٩ متقاطعة فعليًا.
       await blockDay(await cairoDate(3), '23:00:00', '23:59:59');
-      const overnight = await candidateOrder(cairoAt(3, 22), 240);
+      const overnight = await candidateOrder(await cairoAt(3, 22), 240);
       expect(await isEligible(overnight)).toBe(false);
     });
 
     it('E4 — إجازة **مش** متقاطعة مع الشغل مابتمنعش (ضد الإفراط في التقييد)', async () => {
       await blockDay(await cairoDate(3), '06:00:00', '09:00:00');
-      const afternoon = await candidateOrder(cairoAt(3, 14), 120);
+      const afternoon = await candidateOrder(await cairoAt(3, 14), 120);
       expect(await isEligible(afternoon)).toBe(true);
     });
   });
 
   it('السقف اليومي: شغل يتعدّى `daily_capacity_minutes` بيمنع طلب تاني نفس اليوم', async () => {
     // ٦٦٠ دقيقة (١١ ساعة) + مرشّح ١٢٠ دقيقة = ٧٨٠ > ٧٢٠ (السقف الافتراضي).
-    await insertOrder({ label: 'long-day', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(2, 8), durationMinutes: 660 });
-    const extra = await candidateOrder(cairoAt(2, 20), 120);
+    await insertOrder({ label: 'long-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(2, 8), durationMinutes: 660 });
+    const extra = await candidateOrder(await cairoAt(2, 20), 120);
     expect(await isEligible(extra)).toBe(false);
   });
 });
