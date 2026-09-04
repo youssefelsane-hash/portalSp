@@ -48,21 +48,56 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
   await page.fill('#phone_number', PHONE);
   await page.click('button[type="submit"]');
   await page.waitForSelector('#otp_code', { timeout: 20000 });
-  sql(`UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false WHERE id=(SELECT id FROM otp_codes WHERE phone_number='${PHONE}' ORDER BY created_at DESC LIMIT 1)`);
+  // **كل** الصفوف الصالحة للرقم ده، مش الأحدث بس. السبب سباق حقيقي اتلقط: الواجهة ممكن
+  // تطلب OTP تاني (إعادة إرسال/إعادة رندر) **بعد** ما نحدّث الهاش، فالصف اللي عدّلناه يبقى
+  // مش اللي السيرفر بيتحقق منه — والدخول بيفشل بشكل متقطّع بلا سبب ظاهر. تحديث كل الصفوف
+  // الصالحة بيخلّي النتيجة واحدة مهما كان الصف اللي هيتقارن بيه.
+  sql(`UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false WHERE phone_number='${PHONE}' AND expires_at > now()`);
+  // حارس صريح: لو مفيش صف OTP صالح بعد ما شاشة الكود ظهرت، يبقى الواجهة بتكلّم **API تاني**
+  // غير اللي إحنا بنعدّل قاعدته (شائع لما تفضل عمليات dev قديمة ماسكة بورت 3000). الرسالة دي
+  // بتوفّر نص ساعة تشخيص: الفشل بيبان كأنه «كود غلط» وهو أصلاً «إحنا بنعدّل قاعدة تانية».
+  const otpRows = Number(sql(`SELECT count(*) FROM otp_codes WHERE phone_number='${PHONE}' AND expires_at > now()`));
+  if (otpRows === 0) {
+    console.log('❌ مفيش صف OTP صالح في قاعدة البيانات دي رغم إن شاشة الكود ظهرت.');
+    console.log('   يعني الأدمن بيكلّم API تاني (بورت 3000 ماسكه process قديم؟) أو قاعدة تانية.');
+    console.log('   اتأكد: DATABASE_URL بتاع الـAPI الشغّال فعلاً = القاعدة اللي السكربت بيعدّلها.');
+    await browser.close();
+    return;
+  }
   await page.fill('#otp_code', '123456');
   await page.click('button[type="submit"]');
   await page.waitForTimeout(4500);
   await page.screenshot({ path: `${SP}/admin-after-otp.png` });
-  // خطوة MFA: تسجيل Passkey (المصادق الافتراضي بيوافق تلقائيًا) ثم إقرار حفظ أكواد الاسترجاع
+  // خطوة MFA: تسجيل Passkey (المصادق الافتراضي بيوافق تلقائيًا) ثم إقرار حفظ أكواد الاسترجاع.
+  //
+  // **الضغط بالاسم الصريح مش `.first()`** — النسخة القديمة كانت بتضغط أول زرار في الصفحة أيًا
+  // كان. لو الفلو كان لسه على خطوة الـOTP (أو رجعلها)، أول زرار هو «دخول» — فالحلقة كانت
+  // بتعيد طلب OTP جديد كل دورة (٣ أكواد لتسجيل دخول واحد)، والهاش اللي حطيناه يبقى على صف
+  // قديم، والدخول يفشل بسبب **الأداة نفسها** مش بسبب التطبيق. اتلقطت لما عدّ صفوف `otp_codes`
+  // طلع ٣ لتشغيلة واحدة.
   for (let i = 0; i < 4; i++) {
     if (!page.url().includes('/login')) break;
+
+    // إقرار أكواد الاسترجاع (بيظهر بعد تسجيل الـPasskey بنجاح)
     if (await page.locator('#ack').count()) {
       await page.check('#ack');
-      await page.getByRole('button', { name: /كمّل|الإدارة/ }).click().catch(()=>{});
-    } else {
-      await page.getByRole('button').first().click().catch(()=>{});
+      await page.getByRole('button', { name: /كمّل|الإدارة/ }).click().catch(() => {});
+      await page.waitForTimeout(4000);
+      continue;
     }
-    await page.waitForTimeout(4000);
+
+    // زرار الـMFA نفسه — بالاسم اللي الصفحة بتعرضه فعلاً في الحالتين (تسجيل/تأكيد)
+    const mfaButton = page.getByRole('button', { name: /سجّل Passkey دلوقتي|تأكيد بـ ?Passkey/ });
+    if (await mfaButton.count()) {
+      await mfaButton.first().click().catch(() => {});
+      await page.waitForTimeout(4000);
+      continue;
+    }
+
+    // مفيش زرار MFA ولا إقرار ⇒ إحنا مش في خطوة MFA أصلاً (غالبًا الـOTP فشل). نوقف بدل ما
+    // نضغط عشوائي ونطلب OTP جديد — الفشل هنا لازم يبان زي ما هو مش يتحوّل لسبب تاني مضلّل.
+    console.log('⚠️ مش في خطوة MFA — الفلو واقف عند:', await page.locator('h1, [class*="CardTitle"]').first().textContent().catch(() => '?'));
+    break;
   }
   await page.screenshot({ path: `${SP}/admin-after-mfa.png` });
   console.log('URL بعد الدخول:', page.url());
