@@ -75,7 +75,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         child: ListTile(
                           title: Text(order.orderNumber),
                           // الحالة كـ«شريحة» ملوّنة زي تطبيق الفني بالظبط، مش نص رمادي
-                          // وسط باقي السطر (docs/08 §125): «مستني موافقتك على السعر»
+                          // وسط باقي السطر (docs/08 §131): «مستني موافقتك على السعر»
                           // و«اتلغى» كانوا بيتعرضوا بنفس الشكل تمامًا.
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

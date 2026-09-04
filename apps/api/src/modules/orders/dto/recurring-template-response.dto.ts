@@ -8,6 +8,9 @@ export interface RecurringTemplateResponseDto {
   booking_mode: string;
   requested_technician_id: string | null;
   requested_technician_company_id: string | null;
+  // انتماء العمارة (migration 0257، docs/08 §125) — العميل شايف إنه لسه مربوط بالعمارة بلا
+  // أي رقم خصم (نسبة الخصم بتتحسب فريش وقت كل نوبة، مش بتتخزن هنا).
+  building_id: string | null;
   frequency: string;
   problem_description: string | null;
   payment_method: 'card' | 'instapay' | null;
@@ -37,6 +40,7 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     booking_mode: template.bookingMode,
     requested_technician_id: template.requestedTechnicianId,
     requested_technician_company_id: template.requestedTechnicianCompanyId,
+    building_id: template.buildingId,
     frequency: template.frequency,
     problem_description: template.problemDescription,
     payment_method: template.paymentMethod,
@@ -67,6 +71,9 @@ export interface AdminRecurringPlanResponseDto {
   address_id: string;
   address_label: string | null;
   booking_mode: string;
+  building_id: string | null;
+  building_code: string | null;
+  building_name_ar: string | null;
   frequency: string;
   payment_method: 'card' | 'instapay' | null;
   next_run_at: string;
@@ -95,6 +102,9 @@ export function toAdminRecurringPlanResponseDto(row: AdminRecurringPlanRow): Adm
     address_id: row.address_id,
     address_label: row.address_label,
     booking_mode: row.booking_mode,
+    building_id: row.building_id,
+    building_code: row.building_code,
+    building_name_ar: row.building_name_ar,
     frequency: row.frequency,
     payment_method: row.payment_method,
     next_run_at: iso(row.next_run_at)!,

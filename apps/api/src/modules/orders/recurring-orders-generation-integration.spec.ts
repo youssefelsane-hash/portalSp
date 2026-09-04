@@ -289,6 +289,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       techniciansService,
       ordersService,
       events,
+      {} as never, // buildingsService — انتماء العمارة مغطّى في recurring-orders-building-affiliation.spec.ts
     );
   });
 

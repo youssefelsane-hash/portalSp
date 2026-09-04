@@ -1,4 +1,4 @@
--- docs/08 §125 — «التقييم بالصور» مقصور على `inspection_then_quote`، مفروض على مستوى القاعدة.
+-- docs/08 §131 — «التقييم بالصور» مقصور على `inspection_then_quote`، مفروض على مستوى القاعدة.
 --
 -- **البَقّة اللي بيقفلها (اتأكدت بفحص حي على الـAPI)**: `assessmentRouteRejection()` في
 -- `apps/api/src/modules/orders/assessment-route-guard.ts` بترفض `request_remote_quote` لأي خدمة

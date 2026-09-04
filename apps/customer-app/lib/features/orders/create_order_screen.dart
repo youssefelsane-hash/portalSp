@@ -220,7 +220,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   int get _dueRemoteAssessmentFeeCents =>
       _effectiveRemoteQuote ? widget.service.remoteAssessmentFeeCents : 0;
 
-  /// **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §125)**: التطبيق كان بيبعت `paymentMethod: null`
+  /// **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: التطبيق كان بيبعت `paymentMethod: null`
   /// لأي طلب تقييم بالصور بلا استثناء، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم
   /// قبل إرسال الصور» لو الخدمة عليها رسم. يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور
   /// **مستحيل تتحجز من التطبيق خالص** — الزرار شغّال والطلب بيترفض في كل مرة.

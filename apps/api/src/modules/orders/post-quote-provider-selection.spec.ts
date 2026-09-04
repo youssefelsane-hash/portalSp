@@ -118,7 +118,7 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     const [service_] = await q(
       // المسار هنا هو **المعاينة في الموقع** — الفني بيعاين ويبعت السعر والعميل يختار المنفّذ
       // بعد كده. التقييم بالصور مالوش أي دور في الاختبار ده، وتفعيله كان غلط ساكت: مسار الصور
-      // مقصور على `inspection_then_quote` (docs/08 §125، migration 0257)، فخدمة `formula`
+      // مقصور على `inspection_then_quote` (docs/08 §131، migration 0259)، فخدمة `formula`
       // معاها العلم ده كانت **مش قابلة للحجز بأي مسار**.
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes,
                               price_certainty_mode, onsite_assessment_enabled)

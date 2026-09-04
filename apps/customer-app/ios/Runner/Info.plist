@@ -28,8 +28,21 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>محتاجين موقعك عشان نحدد عنوانك بدقة على الخريطة.</string>
+	<!-- image_picker بينادي pickMultiImage/pickImage(gallery) في أربع شاشات (صور المشكلة وقت
+	     الحجز، صور حقول التسعير، الشات، الشكاوى) و`requestFullMetadata` الافتراضية `true` بتقرا
+	     PHPhotoLibrary — من غير المفتاح ده iOS بيقفل التطبيق فورًا بدل ما يرفض الصلاحية بهدوء.
+	     الأندرويد مالوش نظير لأن قارئ المعرض هناك مابيحتاجش إعلان. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>محتاجين نوصل لمكتبة الصور عشان ترفع صور المشكلة مع طلبك.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>استخدم Face ID عشان تفتح أسطى بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
+	<!-- FCM على iOS محتاج الوضع ده عشان أي رسالة بيانات توصل والتطبيق في الخلفية (نظير
+	     `onBackgroundMessage`). من غيره الرسالة بتتسقط بصمت — والأندرويد شغال لأن آلية الخلفية
+	     هناك مختلفة تمامًا ومش محتاجة إعلان مقابل. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

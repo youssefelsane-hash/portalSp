@@ -91,6 +91,7 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
       {} as never,
       { create: createSpy } as never,
       { emit: emitSpy } as never,
+      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة
     );
   });
 

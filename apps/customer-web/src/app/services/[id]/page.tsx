@@ -363,7 +363,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
   const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
   const effectiveRequestRemoteQuote = remoteRouteForced ? true : requestRemoteQuote;
-  // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §125)**: الصفحة كانت بتبعت `payment_method: undefined`
+  // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `payment_method: undefined`
   // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
   // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
   // والاتجاه التاني مطلوب برضه: رسم = صفر مع طريقة دفع بيترفض بـ«الدفع يتم بعد ما الإدارة
@@ -1048,6 +1048,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               {formatEgp(estimate.display_price_max_cents)}
             </p>
           )}
+        {/* بند 4 — الخصم بيظهر بس لو فيه خصم فعلي (ممنوع «الخصم 0 ج»). كان موجود في
+            الـDTO/customer-app من الأول وناقص هنا بس — فجوة عرض بين الواجهتين مش قصد. */}
+        {activePreview && activePreview.pricing.discount_cents > 0 && (
+          <p className="mt-1 text-sm text-success">
+            خصم {activePreview.pricing.discount_source === 'building' ? 'العمارة' : 'كود الخصم'}: -
+            {formatEgp(activePreview.pricing.discount_cents)}
+          </p>
+        )}
         {service.pricing_model === 'inspection_then_quote' && !effectiveRequestRemoteQuote && (
           <p className="mt-1 text-sm text-muted">
             رسوم المعاينة {formatEgp(resolvedInspectionFeeCents)} — السعر النهائي بعد ما الفني يشوف الشغل

@@ -109,7 +109,17 @@ export default function RecurringOrdersPage() {
                     </div>
                   </TableCell>
                   <TableCell>{plan.service_name_ar}</TableCell>
-                  <TableCell>{plan.address_label ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                  <TableCell>
+                    {plan.address_label ?? <span className="text-muted-foreground">—</span>}
+                    {/* انتماء العمارة (migration 0257، docs/08 §125) — بيفضل مربوط بالطلب المتكرر
+                        مش الطلب الأول بس، فالأدمن لازم يشوفه هنا عشان يعرف ليه خصم النوبات بتتغيّر
+                        مع تغيير نسبة العمارة من صفحة العمائر. */}
+                    {plan.building_code && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        عمارة: {plan.building_name_ar ?? plan.building_code}
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {RECURRING_FREQUENCY_LABELS[plan.frequency] ?? plan.frequency}
                     <div className="text-xs text-muted-foreground">

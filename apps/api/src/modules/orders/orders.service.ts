@@ -699,7 +699,7 @@ export class OrdersService {
     }
 
     // Script 7 Phase 7 كان بيرفض هنا أي `scheduled_at` مع وضع طوارئ، عشان طلب طوارئ بموعد
-    // مستقبلي كان بيتأجّل بثه (آلية تأجيل ADR-0009، اتشالت في docs/08 §125) والعميل دافع رسوم
+    // مستقبلي كان بيتأجّل بثه (آلية تأجيل ADR-0009، اتشالت في docs/08 §131) والعميل دافع رسوم
     // استعجال بينتظر بلا استجابة فورية. **الفحص ده بقى بلا معنى بعد ADR-0048**: الطوارئ مابقاش
     // اختيار ممكن يتناقض مع التاريخ — هي **نتيجة** إن التاريخ هو النهارده. "طوارئ بموعد مستقبلي"
     // بقت حالة مستحيلة بالبناء نفسه، مش حالة بترفض. والبث بقى فوري لكل طلب بلا استثناء.
@@ -1632,6 +1632,11 @@ export class OrdersService {
             // بيتوزّع عادي زي أي طلب.
             requestedTechnicianId: order.requestedTechnicianId,
             requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
+            // انتماء العمارة (migration 0257، docs/08 §125، طلب مالك صريح) — بلاغ: الطلب الأصلي
+            // معمول بكود عمارة، ولازم النوبات الجاية تفضل مستفيدة من خصم العمارة مش تفقده بمجرد
+            // إنه اتحوّل لقالب متكرر. `order.buildingId` هنا هو نفس المعرّف اللي اتحل من
+            // `dto.building_code` فوق في نفس الدالة — مفيش استعلام إضافي.
+            buildingId: order.buildingId,
             frequency: repeatPlanFrequency,
             fieldValues: dto.field_values ?? null,
             pricingQuantity: order.pricingQuantity,

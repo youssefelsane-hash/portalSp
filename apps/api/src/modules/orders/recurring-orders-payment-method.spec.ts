@@ -122,6 +122,7 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
       {} as never, // techniciansService
       { create: createSpy } as never, // ordersService — مزيّف عشان نسجّل الـDTO اللي وصله
       { emit: jest.fn() } as never, // eventEmitter — مش متنادى في المسار السعيد (docs/08 §19 بند 20)
+      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة
     );
   });
 

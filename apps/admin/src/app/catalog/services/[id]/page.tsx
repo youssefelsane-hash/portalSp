@@ -599,8 +599,8 @@ export default function ServiceDetailPage() {
     }
   }
 
-  // نفس شرط `assessmentRouteRejection()` في الباك-إند بالحرف (docs/08 §125): مسار الصور
-  // مقصور على «كشف ثم عرض سعر»، ومقيّد كمان بقيد CHECK في migration 0257.
+  // نفس شرط `assessmentRouteRejection()` في الباك-إند بالحرف (docs/08 §131): مسار الصور
+  // مقصور على «كشف ثم عرض سعر»، ومقيّد كمان بقيد CHECK في migration 0259.
   const photoRouteAvailable = pricingModelLive === 'inspection_then_quote';
   const photoRouteUsable = photoRouteAvailable && remoteAssessmentEnabled && assessmentRoutePolicy !== 'onsite_only';
   const onsiteRouteUsable = onsiteAssessmentEnabled && assessmentRoutePolicy !== 'remote_only';
@@ -659,7 +659,7 @@ export default function ServiceDetailPage() {
           label: 'المعاينة وسياسة السعر',
           // الحالة هنا مبنية على المسارات اللي **الباك-إند** هيقبلها فعلاً، مش على الأعلام
           // المحفوظة. الفرق ده كان بَقّة: علم «تقييم بالصور» مفعّل على خدمة معادلة كان بيتعرض
-          // كـ«مكتمل» والمسار مقفول عند العميل (docs/08 §125).
+          // كـ«مكتمل» والمسار مقفول عند العميل (docs/08 §131).
           status:
             priceCertaintyMode !== 'assessment_required'
               ? 'ready'
@@ -1236,7 +1236,7 @@ export default function ServiceDetailPage() {
                       </button>
                     </div>
                     {/* الرد المباشر على سؤال المالك «مش عارف أخلي اليوزر يبعت الصور للإدارة»
-                        (docs/08 §125): الشرط الناقص مش في القسم ده أصلاً — هو في «طريقة تحديد
+                        (docs/08 §131): الشرط الناقص مش في القسم ده أصلاً — هو في «طريقة تحديد
                         السعر» فوق. من غير السطر ده الأدمن بيدوّس زرار الصور، يتحفظ، ومايحصلش
                         حاجة عند العميل. الزرار نفسه مقفول عشان الحفظ ما يفشلش برسالة سيرفر. */}
                     {!photoRouteAvailable && (
