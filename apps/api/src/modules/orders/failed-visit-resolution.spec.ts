@@ -8,9 +8,9 @@ import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity'
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import type { PaymentProvider, RefundResult } from '../payments/gateways/payment-provider.interface';
-import { Payment, PaymentMethod } from '../payments/entities/payment.entity';
+import { Payment } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
-import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { User, UserType } from '../auth/entities/user.entity';

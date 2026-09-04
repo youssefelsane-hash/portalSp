@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AdminOrdersService } from './admin-orders.service';
-import { Order, BookingMode } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';

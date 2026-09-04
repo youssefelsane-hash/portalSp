@@ -8,7 +8,7 @@ import { StorageService } from '../../common/storage/storage.service';
 import { SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT } from '../../common/events/support-chat-message-received.event';
 import { ChatService } from './chat.service';
 import { ChatMessage } from './entities/chat-message.entity';
-import { ChatThread, ChatThreadType } from './entities/chat-thread.entity';
+import { ChatThread } from './entities/chat-thread.entity';
 
 // اختبار حي ضد Postgres حقيقي — §24: كانت فجوة موثّقة صراحة — صفر حدث بيتصدّر على رسالة شات
 // دعم جديدة، فمفيش طريقة توجيه إشعار لأدمن زي complaint.filed. اتقفلت: chat.support_message_

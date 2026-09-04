@@ -12,7 +12,6 @@ import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { SettingsService } from '../settings/settings.service';
-import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 
 /**

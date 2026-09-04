@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
 import { OtpCode, OtpPurpose } from '../auth/entities/otp-code.entity';

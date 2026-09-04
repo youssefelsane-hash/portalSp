@@ -727,7 +727,6 @@ export class InstallmentsService {
       if (app.downPaymentCents > 0) {
         amounts.push({ seq: 0, amount: app.downPaymentCents, dueAt: new Date() });
       }
-      const base = app.financedBalanceCents;
       const regular = app.regularInstallmentCents;
       const finalAmt = app.finalInstallmentCents;
       for (let i = 1; i <= app.installmentCount; i += 1) {

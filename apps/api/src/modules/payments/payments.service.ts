@@ -85,7 +85,6 @@ export interface TechnicianMoneyView {
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
-const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
 /**

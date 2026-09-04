@@ -655,11 +655,6 @@ export interface FormulaTraceEntry {
   value: number;
 }
 
-interface TracedEvaluation {
-  value: number;
-  entries: FormulaTraceEntry[];
-}
-
 /**
  * تقييم مع تسجيل خطوات الحساب — نفس دلالات evaluateFormulaNode بالحرف (نفس الفروع ونفس
  * رفض الحالات)، بس بيجمع قائمة خطوط "المتغير = قيمة" و"العملية = نتيجة" عشان الأدمن يفهم

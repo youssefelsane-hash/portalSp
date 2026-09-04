@@ -4,7 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { getRedisUrl } from '../../config/redis-url.util';
-import { RECALCULATE_STATS_JOB, RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
+import { RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
 
 /**
  * بيعيد حساب الأعمدة المحسوبة على technician_profiles من مصدر الحقيقة الفعلي (orders, ratings)

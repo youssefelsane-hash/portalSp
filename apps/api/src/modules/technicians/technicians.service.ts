@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
 import { ServiceZone } from '../geo/entities/service-zone.entity';
@@ -983,7 +983,7 @@ export class TechniciansService {
     // اللي العميل رافضه أصلاً، والحارس اللي بعدها (`nextAvailable === dateOnly`) يبلعها فيختفي
     // الزرار. دلوقتي التقويم كله بتوقيت القاهرة عبر نفس دوال ADR-0050 اللي التسعير بيستخدمها.
     for (const candidateDayString of cairoDaySequence(cairoDayString(fromDate), maxDays + 1)) {
-      // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا.
+       
       const eligible = await this.hasEligibleTechnicianForDate(
         serviceId,
         zoneId,

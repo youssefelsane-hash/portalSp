@@ -64,6 +64,11 @@ describe('InstaPayProvider — إعدادات أدمن ديناميكية بدل
     // في التطبيق الحقيقي، NestJS's EventEmitterModule بيربط @OnEvent() تلقائيًا وقت الـbootstrap
     // (DI حقيقي). هنا بننشئ الكلاسات يدويًا بـnew (نفس نمط كل الاختبارات الحية في المشروع ده)،
     // فلازم نربط الحدث يدويًا — نفس الأثر بالظبط، مفيش أي فرق في المنطق المُختبر.
+    // إرجاع الـPromise هنا **مقصود ومطلوب**: `SettingsService.update()` بينادي `emitAsync`،
+    // واللي بيستنى ما يرجّعه كل listener. لفّها في قوس معقوف (أو `void`) بتخلّي التحديث
+    // fire-and-forget فالاختبار بيقرا `isConfigured` قبل ما الـhandler يخلص — اتأكد بفشل
+    // حقيقي في jest، مش استنتاج.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     events.on(SETTING_UPDATED_EVENT, (event: SettingUpdatedEvent) => provider.handleSettingUpdated(event));
 
     await provider.onModuleInit();

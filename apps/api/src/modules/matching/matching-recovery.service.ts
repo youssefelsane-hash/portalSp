@@ -52,16 +52,21 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
       this.logger.error('فشل قراءة زمن استرداد المطابقة؛ تم استخدام القيمة الآمنة', error instanceof Error ? error.stack : error);
     }
 
-    this.timer = setTimeout(async () => {
-      try {
-        await this.sweep();
-      } catch (error) {
-        this.logger.error('فشل reconciliation توزيع الطلبات', error instanceof Error ? error.stack : error);
-      } finally {
-        await this.scheduleNextSweep();
-      }
-    }, intervalSeconds * 1_000);
+    // الـcallback بيفضل متزامن ويرجّع void، والدورة نفسها في دالة مستقلة — كده الرفض
+    // متعامَل معاه جوّه الدالة صراحة، ومفيش Promise بيتسرّب لمكان بيتوقّع void.
+    this.timer = setTimeout(() => void this.runSweepCycle(), intervalSeconds * 1_000);
     this.timer.unref?.();
+  }
+
+  /** دورة sweep واحدة + إعادة جدولة اللي بعدها — بتمسك كل استثناء بنفسها. */
+  private async runSweepCycle(): Promise<void> {
+    try {
+      await this.sweep();
+    } catch (error) {
+      this.logger.error('فشل reconciliation توزيع الطلبات', error instanceof Error ? error.stack : error);
+    } finally {
+      await this.scheduleNextSweep();
+    }
   }
 
   /**

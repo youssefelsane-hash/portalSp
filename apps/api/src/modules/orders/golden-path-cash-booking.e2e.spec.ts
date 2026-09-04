@@ -12,7 +12,7 @@ import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
-import { Wallet, WalletOwnerType, PLATFORM_SYSTEM_USER_ID } from '../payments/entities/wallet.entity';
+import { Wallet, PLATFORM_SYSTEM_USER_ID } from '../payments/entities/wallet.entity';
 import { WalletTransaction, WalletTxDirection, WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { User } from '../auth/entities/user.entity';
@@ -22,7 +22,6 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { Address } from '../customers/entities/address.entity';
 import { AddressesService } from '../customers/addresses.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
 import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';

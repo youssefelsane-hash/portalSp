@@ -14,7 +14,6 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingModel } from '../catalog/entities/service.entity';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -23,7 +22,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
 import { UpdateRecurringTemplateDto } from './dto/update-recurring-template.dto';
 import { BookingMode, OrderType } from './entities/order.entity';
-import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrdersService } from './orders.service';
 
@@ -460,7 +459,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
          WHERE cp.id = $1`,
         [template.customerId],
       );
-      if (Boolean(status?.is_blocked || status?.deleted_at)) {
+      if (status?.is_blocked || status?.deleted_at) {
         throw new Error('العميل متبلوك/محذوف — التوليد موقوف لحد ما الحالة تتغير');
       }
     } catch (err) {

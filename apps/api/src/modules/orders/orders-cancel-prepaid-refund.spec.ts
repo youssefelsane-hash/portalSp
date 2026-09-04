@@ -1,8 +1,7 @@
 import { DataSource } from 'typeorm';
-import { AuditLogService } from '../audit/audit-log.service';
 import { PaymentsService } from '../payments/payments.service';
 import type { PaymentProvider, RefundResult } from '../payments/gateways/payment-provider.interface';
-import { Payment, PaymentMethod } from '../payments/entities/payment.entity';
+import { Payment } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { User } from '../auth/entities/user.entity';

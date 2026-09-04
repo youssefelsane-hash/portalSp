@@ -1,7 +1,7 @@
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { PaymentsService } from './payments.service';
-import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
+import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { Payment } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';

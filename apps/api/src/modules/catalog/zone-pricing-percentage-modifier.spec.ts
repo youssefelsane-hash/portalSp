@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { ServiceCategory } from './entities/service-category.entity';
-import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
+import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';

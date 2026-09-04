@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order, OrderStatus, OrderPaymentStatus } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
-import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
+import { Payment, PaymentGatewayStatus } from './entities/payment.entity';
 import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';

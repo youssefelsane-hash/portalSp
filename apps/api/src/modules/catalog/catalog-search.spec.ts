@@ -22,7 +22,7 @@ describe('CatalogService.searchServices() — بحث بلغة طبيعية بس�
     try {
       await fn();
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.error(`[catalog-search.spec] فشلت خطوة "${label}":`, err);
     }
   }

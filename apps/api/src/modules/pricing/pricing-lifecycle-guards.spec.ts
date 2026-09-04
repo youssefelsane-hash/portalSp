@@ -29,7 +29,7 @@ describe('Price Engine — lifecycle guards + trace/explanation (PostgreSQL)', (
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
   const ids = { adminUser: '', category: '', service: '', fieldUsed: '', constantUsed: '', lookupUsed: '' };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }

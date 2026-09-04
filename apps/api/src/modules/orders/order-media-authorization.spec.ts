@@ -38,7 +38,7 @@ describe('OrderMediaService — حدود تفويض المرفقات (Script 2 P
     try {
       await fn();
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.error(`[order-media-authorization.spec] فشلت خطوة "${label}":`, err);
     }
   }

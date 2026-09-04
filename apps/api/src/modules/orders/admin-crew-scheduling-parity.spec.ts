@@ -4,14 +4,14 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AdminOrdersService } from './admin-orders.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
-import { Order, BookingMode } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { OrderTeamService } from './order-team.service';
 import { User } from '../auth/entities/user.entity';
 import { TechniciansService } from '../technicians/technicians.service';
-import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { SettingsService } from '../settings/settings.service';
 
 /**

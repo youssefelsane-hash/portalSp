@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm';
 import { ApiException } from '../../common/exceptions/api.exception';
 import { blindIndex, normalizeNationalId } from '../../common/crypto/pii-crypto.util';
 import { TechnicianIdentityService } from './technician-identity.service';
-import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianProfile } from './entities/technician-profile.entity';
 import { User, UserType } from '../auth/entities/user.entity';
 
 process.env.PII_ENCRYPTION_KEY = process.env.PII_ENCRYPTION_KEY ?? 'test-pii-encryption-key-32-characters';

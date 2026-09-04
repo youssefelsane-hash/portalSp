@@ -36,7 +36,7 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
     adminUser: '',
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   async function q<T = any>(sql: string, params?: unknown[]): Promise<T> {
     return dataSource.query(sql, params) as Promise<T>;
   }

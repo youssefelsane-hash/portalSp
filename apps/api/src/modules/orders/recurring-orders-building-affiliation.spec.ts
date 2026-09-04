@@ -392,7 +392,6 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
     const generatedCount = await recurringService.sweep({ templateIds: [templateId] });
     expect(generatedCount).toBe(1);
 
-    const templateAfterSweep = await loadTemplate(templateId);
     const [order2Row] = await q(
       `SELECT id FROM orders WHERE recurring_template_id = $1 AND id != $2 ORDER BY created_at DESC LIMIT 1`,
       [templateId, order1.id],

@@ -127,8 +127,8 @@ import {
 import type { InstallmentPaymentResolvedPayload } from '../../common/events/installment.events';
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { TECHNICIAN_VERIFICATION_CHANGED_EVENT, TechnicianVerificationChangedEvent } from '../../common/events/technician-verification-changed.event';
-import { TECHNICIAN_SERVICE_VERIFICATION_CHANGED_EVENT, TechnicianServiceVerificationChangedEvent } from '../../common/events/technician-service-verification-changed.event';
-import { TECHNICIAN_CATEGORY_VERIFICATION_CHANGED_EVENT, TechnicianCategoryVerificationChangedEvent } from '../../common/events/technician-category-verification-changed.event';
+import { TECHNICIAN_SERVICE_VERIFICATION_CHANGED_EVENT } from '../../common/events/technician-service-verification-changed.event';
+import { TECHNICIAN_CATEGORY_VERIFICATION_CHANGED_EVENT } from '../../common/events/technician-category-verification-changed.event';
 import {
   TECHNICIAN_PRESENCE_CHANGED_EVENT,
   TechnicianPresenceChangedEvent,
@@ -187,7 +187,10 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
     });
     try {
       const payload = await client.data.authentication;
-      client.join(userRoom(payload.sub));
+      // `join()` بيرجع Promise مع أي adapter موزّع (Redis) — من غير await بنعلن «اتوصلت»
+      // قبل ما الانضمام للغرفة يتم فعلاً، فأول حدث يتبعت للغرفة ممكن يضيع.
+      await client.join(userRoom(payload.sub));
+      // eslint-disable-next-line no-console -- تشخيص خلف علم بيئة (DEBUG_RT)، مطفي افتراضيًا
       if (process.env.DEBUG_RT) console.log('[DEBUG RT] connected+joined', payload.sub);
       client.emit('admin:connected', { at: new Date().toISOString() });
     } catch {
@@ -230,8 +233,10 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
 
   @SubscribeMessage('admin:subscribe')
   async handleSubscribe(client: AuthenticatedSocket): Promise<unknown> {
+    // eslint-disable-next-line no-console -- تشخيص خلف علم بيئة (DEBUG_RT)، مطفي افتراضيًا
     if (process.env.DEBUG_RT) console.log('[DEBUG RT] subscribe called');
     const payload = await this.activePayload(client);
+    // eslint-disable-next-line no-console -- تشخيص خلف علم بيئة (DEBUG_RT)، مطفي افتراضيًا
     if (process.env.DEBUG_RT) console.log('[DEBUG RT] subscribe payload:', payload?.sub ?? null);
     if (!payload) {
       // ack-based: العميل بيستخدم emitWithAck — رجّع الداتا مباشرة بدون مفتاح event
@@ -244,7 +249,7 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
     for (const topic of ADMIN_TOPICS) {
       // super_admin بيتخطى الفحص عن طريق getUserPermissionNames زي باقي النظام بالظبط.
       if (await this.topicAllowed(payload.sub, topic)) {
-        client.join(room(topic));
+        await client.join(room(topic));
         client.data.topics.add(topic);
         granted.push(topic);
       } else {

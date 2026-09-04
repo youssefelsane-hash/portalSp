@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, IsNull, LessThan, LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -54,13 +54,13 @@ import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-re
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
-import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
+import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import {
   BookingMode,
   Order,
   OrderCustomerInput,
   OrderPaymentStatus,
-  OrderPriceStatus,
+  
   OrderSourceChannel,
   OrderStatus,
   OrderType,
@@ -820,7 +820,7 @@ export class OrdersService {
       }
       for (let offset = 0; offset <= rangeDays; offset += 1) {
         const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
-        // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا، مش كل الأيام دايمًا.
+         
         const eligible = await this.techniciansService.hasEligibleTechnicianForDate(service.id, zone.id, address.id, candidateDay);
         if (eligible) {
           resolvedScheduledAtIso = candidateDay.toISOString();
@@ -2509,7 +2509,7 @@ export class OrdersService {
     const options: { date: string; available: boolean }[] = [];
     for (let offset = 0; offset < days; offset += 1) {
       const day = new Date(startOfToday.getTime() + offset * 24 * 60 * 60 * 1000);
-      // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: نفس نمط findNextAvailableDateForTechnician() بالحرف، استعلام رخيص محدود بـdays.
+       
       const available = await this.techniciansService.hasEligibleTechnicianForDate(
         order.serviceId,
         zone.id,

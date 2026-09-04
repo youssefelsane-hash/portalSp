@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { User, UserType } from '../auth/entities/user.entity';
+import { User } from '../auth/entities/user.entity';
 import { InternalChatService } from './internal-chat.service';
 import { InternalChatThread } from './entities/internal-chat-thread.entity';
 import { InternalMessage } from './entities/internal-message.entity';

@@ -179,7 +179,7 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
   });
 
   afterAll(async () => {
-    ioServer.close();
+    await ioServer.close(); // `close()` بيرجع Promise في socket.io v4 — من غير await الـteardown بيسيب socket مفتوح
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);

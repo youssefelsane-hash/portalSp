@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
-import { Order, OrderStatus } from '../orders/entities/order.entity';
+import { Order } from '../orders/entities/order.entity';
 import { OrderTeamMember } from '../orders/entities/order-team-member.entity';
 import { SettingsService } from '../settings/settings.service';
 import { ProductivityActualSource, ServiceProductivityActual } from './entities/service-productivity-actual.entity';

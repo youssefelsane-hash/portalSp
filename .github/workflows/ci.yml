@@ -60,6 +60,11 @@ jobs:
           sed -i 's#^DATABASE_URL=.*#DATABASE_URL=postgres://baytak:baytak@localhost:5432/baytak#' apps/api/.env
           sed -i 's#^REDIS_URL=.*#REDIS_URL=redis://localhost:6379#' apps/api/.env
 
+      # فحص ترقيم الـmigrations **قبل** تطبيقها: رقمين متكررين معناهم ترتيب تطبيق غير محدد
+      # على أي نشر نضيف. حصلت فعلاً لما سيشنين متوازيين خدوا `0257` (docs/08 §132).
+      - name: فحص ترقيم الـmigrations
+        run: node scripts/check-migrations.js
+
       - name: تطبيق الـmigrations
         run: node infra/migrations/migrate.js
         env:
@@ -68,6 +73,13 @@ jobs:
       - name: TypeScript typecheck
         working-directory: apps/api
         run: npx tsc --noEmit
+
+      # لينت الباك-إند (docs/08 §132) — الموديول ده كان بلا أي lint خالص، فـ`tsc` كان بيمسك
+      # أخطاء الأنواع بس. القواعد المفعّلة بتمسك الفئة اللي فعلاً وجعت المشروع: Promise
+      # مهملة (`queue.add()` بلا await علّقت طلب حقيقي وقت انقطاع Redis).
+      - name: ESLint
+        working-directory: apps/api
+        run: npx eslint src --max-warnings 0
 
       - name: npx nest build
         working-directory: apps/api

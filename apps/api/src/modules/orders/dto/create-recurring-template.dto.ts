@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode } from '../entities/order.entity';
 import { RecurringOrderFrequency } from '../entities/recurring-order-template.entity';
 

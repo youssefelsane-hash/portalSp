@@ -1,5 +1,4 @@
 import { DataSource } from 'typeorm';
-import { ApiException } from '../../common/exceptions/api.exception';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';

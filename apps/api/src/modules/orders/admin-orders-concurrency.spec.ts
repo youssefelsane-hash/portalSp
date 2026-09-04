@@ -10,7 +10,7 @@ import { User } from '../auth/entities/user.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
-import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { OrderAssignment } from '../matching/entities/order-assignment.entity';
 

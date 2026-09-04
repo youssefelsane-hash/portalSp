@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
-import { OrderQuote, OrderQuoteSource, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
 import { AssessmentTriageService } from './assessment-triage.service';
 import { prepaidOrderNextStatus } from './prepaid-order-next-status';
 import { canTransition } from './order-state-machine';
