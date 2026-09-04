@@ -252,7 +252,8 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 | 18 | [خريطة الـAPI](./18-API-MAP.md) | 591 مسار مُستخرَج آليًا |
 | 19 | [المهام الخلفية والأحداث](./19-BACKGROUND-JOBS-EVENTS.md) | الطوابير، المؤقّتات، التعويض |
 | 20 | [الأمان والصلاحيات](./20-SECURITY-PERMISSIONS.md) | البوابات الأربع، MFA، Step-Up |
-| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | 17 بَقّة بإثبات + 4 نفيات بدليل |
+| 21 | [خط أساس صحّة الكود](./21-CODE-HEALTH-BASELINE.md) | نتايج knip/madge/eslint المتوقّعة وليه |
+| — | [البَقّات المكتشفة والمصلَّحة](./BROKEN_FLOWS_FIXED.md) | 19 بَقّة بإثبات + 4 نفيات بدليل |
 
 **ابدأ من فين؟**
 
@@ -263,6 +264,7 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 | بتراجع المال | [10](./10-FINANCE-MONEY-FLOW.md) ثم [03](./03-PRICING-ENGINE.md) |
 | بتشخّص «مفيش فنيين» | [04](./04-MATCHING-ENGINE.md) و[05](./05-SCHEDULING-AVAILABILITY.md) |
 | بتدوّر على بَقّة معروفة | [BROKEN_FLOWS_FIXED](./BROKEN_FLOWS_FIXED.md) |
+| أداة قالتلك «كود ميت» | [21](./21-CODE-HEALTH-BASELINE.md) **قبل** ما تحذف أي حاجة |
 
 **مراجع خارج هذا المجلد**: `docs/01-master-plan.md` (الخطة) · `docs/02-data-dictionary.md`
 (قاموس البيانات وعقد الـAPI) · `docs/03-external-integrations.md` (تفعيل الخدمات الخارجية) ·
