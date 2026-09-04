@@ -15,14 +15,14 @@
 | `apps/customer-app` | Flutter | **159 ملف Dart** |
 | `apps/technician-app` | Flutter | **119 ملف Dart** |
 | `packages/` | `shared-types` · `shared-ui` · `config` | أنواع وثوابت وقت-تشغيل مشتركة |
-| `infra/migrations/` | SQL خام | **259 migration** (بفحص checksum) |
-| `docs/adr/` | قرارات معمارية | **71 ADR** |
+| `infra/migrations/` | SQL خام | **260 migration** (بفحص checksum) |
+| `docs/adr/` | قرارات معمارية | **72 ADR** |
 
 ### قاعدة البيانات
 
 | | العدد |
 |---|-------|
-| الجداول | **158** |
+| الجداول | **159** |
 | الأنواع المُعدَّدة (enums) | **96** |
 | مفاتيح الإعدادات (`settings`) | **180** |
 
@@ -54,7 +54,7 @@ flowchart TB
   end
 
   subgraph Data["البيانات"]
-    PG[("PostgreSQL<br/>+ PostGIS<br/>158 جدول")]
+    PG[("PostgreSQL<br/>+ PostGIS<br/>159 جدول")]
     RD[("Redis<br/>cache + queues")]
     S3[("S3<br/>الوسائط")]
   end
@@ -248,7 +248,7 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 | 14 | [الدعم والشكاوى](./14-SUPPORT-CHAT-COMPLAINTS.md) | آلة حالات الشكوى، المحادثات |
 | 15 | [الشركات والفرق والمساعدون](./15-COMPANIES-TEAMS-ASSISTANTS-PROJECTS.md) | أربعة مفاهيم متشابهة الاسم |
 | 16 | [كتالوج الميزات](./16-FEATURE-CATALOG.md) | مصفوفة الحالة الحقيقية لكل ميزة |
-| 17 | [خريطة قاعدة البيانات](./17-DATABASE-MAP.md) | 158 جدول مصنَّفة + القيود |
+| 17 | [خريطة قاعدة البيانات](./17-DATABASE-MAP.md) | جداول مصنَّفة + القيود |
 | 18 | [خريطة الـAPI](./18-API-MAP.md) | 591 مسار مُستخرَج آليًا |
 | 19 | [المهام الخلفية والأحداث](./19-BACKGROUND-JOBS-EVENTS.md) | الطوابير، المؤقّتات، التعويض |
 | 20 | [الأمان والصلاحيات](./20-SECURITY-PERMISSIONS.md) | البوابات الأربع، MFA، Step-Up |
@@ -266,4 +266,4 @@ cd apps/customer-app && flutter test test_live/ --dart-define=API_BASE_URL=http:
 
 **مراجع خارج هذا المجلد**: `docs/01-master-plan.md` (الخطة) · `docs/02-data-dictionary.md`
 (قاموس البيانات وعقد الـAPI) · `docs/03-external-integrations.md` (تفعيل الخدمات الخارجية) ·
-`docs/08-pricing-engine-and-platform-vision.md` (الـbacklog الحيّ) · `docs/adr/` (71 قرارًا).
+`docs/08-pricing-engine-and-platform-vision.md` (الـbacklog الحيّ) · `docs/adr/` (72 قرارًا).

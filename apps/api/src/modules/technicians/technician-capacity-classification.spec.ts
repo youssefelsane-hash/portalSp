@@ -144,10 +144,15 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     expect(await classify(null)).toBe('MEANINGFUL');
   });
 
-  it('HEAVY — الفني منشغل جسديًا فعليًا دلوقتي (technician_on_way)', async () => {
+  it('MEANINGFUL (ADR-0070) — الفني منشغل جسديًا دلوقتي بس يومه لسه مش مليان', async () => {
+    // الاختبار ده كان بيتوقّع `HEAVY` على أساس قاعدة «منشغل جسديًا = مستبعد». ADR-0070 شال
+    // القاعدة دي بالنص من محرك الأهلية بطلب مالك صريح، فبقى فيه انحراف: المطابقة بتقول «مؤهّل»
+    // والتصنيف بيقول «محمّل» على نفس الفني — وده اللي ADR-0059 اتعمل أصلاً عشان يمنعه.
+    // دلوقتي الاتنين بيتفقوا: عنده شغل تاني نفس اليوم تحت السقف ⇒ `MEANINGFUL`.
+    // الحارس اللي بيقيس الاتفاق نفسه: سيناريو A4 في matching/scheduling-scenarios.spec.ts.
     await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
     await insertOrder(OrderStatus.TECHNICIAN_ON_WAY);
-    expect(await classify(null)).toBe('HEAVY');
+    expect(await classify(null)).toBe('MEANINGFUL');
   });
 
   it('HEAVY — طلب يوم كامل (estimated_duration_days>=1) بيغطي اليوم المطلوب', async () => {

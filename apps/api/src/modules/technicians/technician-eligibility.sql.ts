@@ -397,13 +397,22 @@ export async function classifyTechnicianCapacity(
           serviceDefaultMinutesExpr: 'NULL',
         },
       })}
+      -- **ADR-0070 — فرع «منشغل جسديًا دلوقتي» اتشال من هنا كمان.**
+      --
+      -- ADR-0070 شال القاعدة دي من technicianAvailabilityCondition() وقال بالنص إنها «اتشالت
+      -- بالكامل من الفرعين»، لكن نسخة التصنيف دي فضلت شايلاها — فرجع بالظبط الانحراف اللي
+      -- ADR-0059 اتعمل عشان يمنعه: المحرك بيقول «مؤهّل» والتصنيف بيقول HEAVY على **نفس الفني
+      -- ونفس الطلب**، فكل شاشة أدمن بتعرض القدرة كانت بتقول «محمّل» عن فني المطابقة بتعرض عليه
+      -- شغل فعلًا. اتثبت بالتشغيل الحي (سيناريو A4).
+      --
+      -- الفني الشغّال دلوقتي بقى MEANINGFUL (عنده شغل تاني نفس اليوم تحت السقف) — وده أدق:
+      -- بيقول للأدمن «عنده شغل» من غير ما يدّعي إنه مستبعد.
+      --
+      -- الـparameter بتاع ENGAGED بقى غير مستخدم في القاعدة، وبيفضل مربوط بتعبير دايمًا صحيح
+      -- بنفس نمط activeOrderConflictExistsExpr — عشان Postgres يقدر يستنتج نوعه، ومن غير ما
+      -- نعيد ترقيم باقي الـparameters.
       UNION ALL
-      -- منشغل جسديًا دلوقتي واليوم المطلوب هو النهاردة — ده مش سقف ساعات، ده «مش قادر يتحرك».
-      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'eo')}, target
-      WHERE eo.id IS DISTINCT FROM $3::uuid AND eo.deleted_at IS NULL
-        AND eo.order_status = ANY($7::order_status[])
-        AND target.target_date = (now() AT TIME ZONE 'Africa/Cairo')::date
-      LIMIT 1
+      SELECT 1 WHERE $7::order_status[] IS NOT NULL AND FALSE
     )
     SELECT
       CASE

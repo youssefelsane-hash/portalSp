@@ -8,6 +8,7 @@ import { TechnicianWorkOpportunitiesService } from '../technicians/technician-wo
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 import { MatchingExplainabilityService } from './matching-explainability.service';
+import { classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
 import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 /**
@@ -325,11 +326,32 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     expect(await isEligible(urgent)).toBe(false);
   });
 
-  it('D3 — الشغل النشط **النهاردة** مايمنعش طلب طوارئ لو الفني مش منشغل جسديًا', async () => {
+  it('D3 — الشغل النشط **النهاردة** مايمنعش طلب طوارئ طالما اليوم مش مليان', async () => {
     // نفس الحالة زي D بس بحالة تانية من ACTIVE-لكن-مش-ENGAGED.
     await insertOrder({ label: 'awaiting-approval', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 60 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(true);
+  });
+
+  it('A4 (ADR-0070) — تصنيف القدرة لازم يتفق مع محرك الأهلية على نفس الفني ونفس الطلب', async () => {
+    // ADR-0059 كان هدفه المعلن إن التصنيف والتوزيع مايختلفوش على نفس الفني. الاختبار ده بيقيس
+    // الاتنين على نفس المدخلات بالظبط: لو المحرك قال «مؤهّل» والتصنيف قال `HEAVY`، يبقى الانحراف
+    // رجع — وكل شاشة أدمن هتقول «محمّل» عن فني المطابقة بتعرض عليه شغل فعلًا.
+    await insertOrder({ label: 'engaged', status: OrderStatus.IN_PROGRESS, scheduledAt: await cairoAt(0, 11), durationMinutes: 180 });
+    const sameDay = await candidateOrder(await cairoAt(0, 20), 120);
+
+    const eligible = await isEligible(sameDay);
+    const tier = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.techProfile,
+      scheduledAt: sameDay.scheduledAt,
+      excludeOrderId: sameDay.id,
+      serviceDurationMinutes: 120,
+      dailyCapacityMinutes: 720,
+      candidateEstimatedDurationDays: null,
+    });
+
+    expect(eligible).toBe(true);
+    expect(tier).not.toBe('HEAVY');
   });
 
   describe('E — الإجازة الصريحة (`blocked`) لازم تُحترم على كل يوم من أيام الشغل', () => {
