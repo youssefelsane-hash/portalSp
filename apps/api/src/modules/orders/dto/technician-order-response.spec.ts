@@ -14,6 +14,7 @@ const fullOrder: OrderResponseDto = {
   technician_id: 't1',
   order_type: 'standard',
   booking_mode: 'individual',
+  customer_notices: [],
   requested_technician_id: null,
   requested_technician_company_id: null,
   order_status: 'in_progress',

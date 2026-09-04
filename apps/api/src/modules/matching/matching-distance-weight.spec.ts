@@ -183,6 +183,20 @@ describe('وزن المسافة الديناميكي في المطابقة (ADR-
     expect((await rankedIds(emergency))[0]).toBe(ids.nearProfile);
   });
 
+  it('الطوارئ: **ترتيب الموجات كله** بيتقلب للأقرب مش أول واحد بس (سؤال المالك المباشر)', async () => {
+    // المالك سأل: «الأدمن لو عايز أقرب واحد هو اللي يجيه الطوارئ… بيروح لأول ٣-٤ أشخاص بيكونوا
+    // دول أقرب أشخاص، بعد كده بيبتدي يبعد شوية شوية». الموجات بتاخد أعلى `matching.batch_size`
+    // من **نفس الترتيب** ده، فإثبات إن الترتيب الكامل بالقرب = إثبات إن الموجة الأولى هي الأقرب.
+    settingValues.set('matching.distance_weight_emergency', 5);
+    const emergency = { ...(await loadOrder()), bookingMode: BookingMode.EMERGENCY, scheduledAt: null } as Order;
+    expect(await rankedIds(emergency)).toEqual([ids.nearProfile, ids.farProfile]);
+
+    // وبصفر (الافتراضي الحالي في قاعدة البيانات) الترتيب بيرجع للمستوى/الجودة — يعني الإعداد
+    // فعلاً هو اللي بيتحكم، مش مجرد قيمة متخزّنة مالهاش أثر.
+    settingValues.set('matching.distance_weight_emergency', 0);
+    expect(await rankedIds(emergency)).toEqual([ids.farProfile, ids.nearProfile]);
+  });
+
   it('الشغلانة الرخيصة ليها وزنها الخاص', async () => {
     settingValues.set('matching.distance_weight_low_value', 4);
     // حد «الرخيص» الافتراضي 15000 قرش، والطلب 10000 ⇒ ينطبق.

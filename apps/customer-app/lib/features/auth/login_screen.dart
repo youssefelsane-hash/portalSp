@@ -483,7 +483,7 @@ class _BrandMarkState extends State<_BrandMark> {
         ),
         const SizedBox(height: 4),
         Text(
-          'صنايعية متحقّق منهم، لحد باب بيتك',
+          'متخصصين متحقّق منهم، لحد باب بيتك',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),

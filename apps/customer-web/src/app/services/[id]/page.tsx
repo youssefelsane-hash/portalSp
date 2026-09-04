@@ -22,6 +22,7 @@ import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
+import { formatWorkDuration } from '@/lib/work-scope';
 import { MapPicker } from '@/components/map-picker';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
@@ -466,7 +467,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           { n: 2 as const, label: 'العنوان والتفاصيل' },
           { n: 3 as const, label: 'الفني والتأكيد' },
         ].map((s) => (
-          <li key={s.n} className="flex flex-1 items-center gap-2">
+          // `min-w-0` **ضروري**: بلاها `truncate` جوّه العنصر ده مالهاش أي أثر خالص.
+          // عنصر الـflex افتراضيًا `min-width: auto`، يعني مايقدرش يصغّر تحت عرض محتواه، فالنص
+          // بيفرد العنصر بدل ما يتقص — وشريط الخطوات كان بيتعدّى ٢١ بكسل بره الشاشة عند ٣٩٠
+          // بكسل (اتلقط بـ`scripts/sweep-customer.js`، والصفحة دي هي **صفحة الحجز نفسها**).
+          <li key={s.n} className="flex min-w-0 flex-1 items-center gap-2">
             <span
               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
                 step === s.n
@@ -541,14 +546,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             </div>
           )}
 
-          {/* **التنبيه الأحمر (ADR-0048، طلب مالك صريح)**: «لو اختار الموعد ده النهاردة، السيستم
-              يبعتله رسالة بالأحمر إن طالما اخترت النهاردة فمعناها كأنك طوارئ عشان يجيلك الشخص
-              بسرعة، وبتتحسب عليه رسوم الطوارئ». إخطار مش سؤال — العميل مابيختارش وضع حجز. */}
+          {/* إخطار «طلب النهارده» (ADR-0048) — مش سؤال، العميل مابيختارش وضع حجز.
+              **مراجعة تانية (بلاغ مالك 2026-09-04)**: كان بلون `danger` أحمر وبينص على «رسوم
+              استعجال فوق سعر الخدمة» بلا رقم. المالك: «الشكل نفسه يخلي اللي بيطلب الطارئ ده
+              يخاف». الإجمالي الحقيقي — وهو **شامل رسم الاستعجال أصلاً** — معروض في ملخص السعر
+              تحت في نفس الصفحة وقبل أي تأكيد، فالتحذير بلا رقم كان قلق بلا معلومة. بقى محايد
+              اللون وبيقول اللي بيحصل فعلاً. نفس صياغة تطبيق العميل بالحرف. */}
           {isSameDayBooking && (
-            <p className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
-              طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — وبيتحسب
-              عليه رسوم استعجال فوق سعر الخدمة. لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر
-              يفضل عادي.
+            <p className="mt-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">
+              طلب النهارده — هنبدأ ندوّر لك على متخصص متاح على طول. هتشوف السعر النهائي قدامك قبل
+              ما تأكّد.
             </p>
           )}
 
@@ -1073,14 +1080,28 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             رسوم المعاينة {formatEgp(resolvedInspectionFeeCents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
         )}
-        {technicianChoiceMode === 'auto' && !activePreview && service.pricing_model !== 'inspection_then_quote' && (
-          <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
-            <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
-            <p className="text-muted">
-              قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.
+        {/* الطوارئ مستثناة: العميل مابيختارش فني فيها أصلاً، فالجملة كانت بتوعده بمقارنة مش
+            موجودة وتخوّفه بزيادة مالهاش سياق (بلاغ مالك 2026-09-04). نفس الاستثناء بالحرف في
+            `apps/customer-app`'s create_order_screen.dart. */}
+        {technicianChoiceMode === 'auto' &&
+          !activePreview &&
+          bookingMode !== 'emergency' &&
+          service.pricing_model !== 'inspection_then_quote' && (
+            <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
+              <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
+              <p className="text-muted">
+                قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.
+              </p>
+            </div>
+          )}
+        {/* المدة المتوقعة — كانت فجوة تكافؤ: راجعة في `POST /orders/preview` من الأول ومعروضة
+            في تطبيق العميل بس. نفس الصياغة المشتركة (`lib/work-scope.ts`). */}
+        {estimate &&
+          formatWorkDuration(estimate.duration_minutes, estimate.estimated_duration_days) !== null && (
+            <p className="mt-1 text-sm text-muted">
+              المدة المتوقعة: {formatWorkDuration(estimate.duration_minutes, estimate.estimated_duration_days)}
             </p>
-          </div>
-        )}
+          )}
       </section>
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
