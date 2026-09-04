@@ -1,5 +1,10 @@
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { CandidateLoadSource, dailyCapacityExceededExpr, technicianDayLoadSubquery } from './technician-day-capacity.sql';
+import {
+  CandidateLoadSource,
+  candidateSpanDaysFromSource,
+  dailyCapacityExceededExpr,
+  technicianDayLoadSubquery,
+} from './technician-day-capacity.sql';
 
 /**
  * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
@@ -243,21 +248,45 @@ function activeOrderConflictExistsExpr(opts: {
     )`;
 }
 
-/** تعبير SQL بوليان خام لاستثناء `blocked` الصريح — نفس فلسفة {@link activeOrderConflictExistsExpr} فوق. */
+/**
+ * تعبير SQL بوليان خام لاستثناء `blocked` الصريح — نفس فلسفة {@link activeOrderConflictExistsExpr} فوق.
+ *
+ * **إصلاح مثبت بالتشغيل الحي (docs/system-audit §134، سيناريوهات E2/E3)** — النسخة القديمة كانت
+ * بتقارن `time` مقصوصة على **يوم البداية بس**، فكانت بتسيب تلات ثغرات حقيقية:
+ *
+ *  1. **شغل ممتد على أكتر من يوم**: إجازة الفني في نص المدة (اليوم التالت من خمسة مثلاً) كانت
+ *     **غير مرئية تمامًا** — الفلتر بيبص على `slot_date = يوم البداية` وبس، فالفني بياخد شغل
+ *     جوّه إجازة حدّدها بنفسه. (السقف اليومي في ADR-0059 بيفرد الشغل على أيامه كلها بـ
+ *     `generate_series`، لكن الاستثناء الصريح فضل على يوم واحد — انحراف بين قاعدتين المفروض
+ *     يشوفوا نفس المدة.)
+ *  2. **شغل بيعدّي نص الليل**: `(وقت + مدة)::time` بتلف حوالين ٠٠:٠٠ (٢٢:٠٠ + ٤ ساعات ⇒ ٠٢:٠٠)،
+ *     فالمقارنة `start_time < 02:00` بترفض إجازة ٢٣:٠٠–٢٣:٥٩ رغم إنها متقاطعة فعليًا.
+ *  3. نفس اللفة كانت ممكن تدّي تقاطعًا وهميًا في الاتجاه التاني كمان.
+ *
+ * الإصلاح: تقاطع **timestamps حقيقية** (نصف مفتوح) بدل مقارنة `time`. نافذة الإجازة بتتحوّل من
+ * (تاريخ + وقت محلي) لـ`timestamptz` بتوقيت مصر، ونافذة الشغل المرشّح بتمتد على أيامه كلها
+ * (`spanDays - 1` يوم + مدة اليوم) — فالإجازة في أي يوم من أيام الشغل بتتلقط.
+ */
 function blockedExistsExpr(opts: {
   technicianIdExpr: string;
   scheduledAtParam: string;
   serviceDurationExpr: string;
+  candidateLoad?: CandidateLoadSource;
 }): string {
-  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr } = opts;
+  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, candidateLoad } = opts;
+  const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad) : '1';
+  const candidateStart = `COALESCE(${scheduledAtParam}::timestamptz, now())`;
+  // نهاية النافذة = البداية + (أيام الشغل - 1) + مدة اليوم. لشغل يوم واحد بترجع للسلوك الصح
+  // القديم بالظبط (بداية + المدة)، فمفيش إفراط في التقييد لإجازة مش متقاطعة.
+  const candidateEnd = `(${candidateStart}
+        + ((GREATEST(${spanDaysExpr}, 1) - 1) || ' days')::interval
+        + (${serviceDurationExpr} || ' minutes')::interval)`;
   return `
     EXISTS (
       SELECT 1 FROM technician_schedule_slots tss
       WHERE tss.technician_id = ${technicianIdExpr} AND tss.status = 'blocked' AND tss.deleted_at IS NULL
-        AND tss.slot_date = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
-        AND tss.start_time < ((COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')
-              + (${serviceDurationExpr} || ' minutes')::interval)::time
-        AND tss.end_time > (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
+        AND (tss.slot_date + tss.start_time) AT TIME ZONE 'Africa/Cairo' < ${candidateEnd}
+        AND (tss.slot_date + tss.end_time) AT TIME ZONE 'Africa/Cairo' > ${candidateStart}
     )`;
 }
 
@@ -336,13 +365,18 @@ export async function classifyTechnicianCapacity(
     WITH target AS (
       SELECT (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date AS target_date
     ),
+    -- نفس تقاطع الـtimestamps الحقيقي بتاع blockedExistsExpr بالحرف — بيغطي أيام الشغل
+    -- الممتد كلها وبيعدّي نص الليل صح. (كان هنا نفس بَقّة الـ::time الملفوفة، فالتصنيف كان
+    -- ممكن يقول LIGHT لفني في إجازة صريحة.)
     blocked AS (
-      SELECT 1 FROM technician_schedule_slots tss, target
+      SELECT 1 FROM technician_schedule_slots tss
       WHERE tss.technician_id = $1 AND tss.status = 'blocked' AND tss.deleted_at IS NULL
-        AND tss.slot_date = target.target_date
-        AND tss.start_time < ((COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')
-              + ($5::int || ' minutes')::interval)::time
-        AND tss.end_time > (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
+        AND (tss.slot_date + tss.start_time) AT TIME ZONE 'Africa/Cairo'
+            < (COALESCE($2::timestamptz, now())
+                + ((GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1) || ' days')::interval
+                + ($5::int || ' minutes')::interval)
+        AND (tss.slot_date + tss.end_time) AT TIME ZONE 'Africa/Cairo'
+            > COALESCE($2::timestamptz, now())
       LIMIT 1
     ),
     -- ADR-0059 — نفس حسبة السقف اليومي بالحرف اللي technicianAvailabilityCondition() بتستخدمها.

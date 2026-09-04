@@ -77,18 +77,38 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
    * بيوصلوا `undefined` والاستعلام يفلتر على NULL. ده خلّى **كل** السيناريوهات ترجع «مش
    * مؤهّل»، فاللي متوقع رفضه كان بينجح بالباطل. اتكشف بفحص خط أساس + خدمة التفسير.
    */
-  async function candidateOrder(scheduledAt: string | null, durationMinutes: number | null, emergency = false): Promise<Order> {
+  async function candidateOrder(
+    scheduledAt: string | null,
+    durationMinutes: number | null,
+    emergency = false,
+    estimatedDurationDays: number | null = null,
+  ): Promise<Order> {
     const [row] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
-                           order_status, total_amount_cents, scheduled_at, duration_minutes, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8) RETURNING id`,
+                           order_status, total_amount_cents, scheduled_at, duration_minutes, booking_mode,
+                           estimated_duration_days)
+       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8,$9) RETURNING id`,
       [
         `CND-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
-        scheduledAt, durationMinutes, emergency ? 'emergency' : 'individual',
+        scheduledAt, durationMinutes, emergency ? 'emergency' : 'individual', estimatedDurationDays,
       ],
     );
     orderIds.push(row.id as string);
     return dataSource.getRepository(Order).findOneOrFail({ where: { id: row.id as string } });
+  }
+
+  /** تاريخ اليوم بتوقيت مصر (`YYYY-MM-DD`) بعد `dayOffset` يوم — نفس اللي `slot_date` بيتخزن بيه. */
+  async function cairoDate(dayOffset: number): Promise<string> {
+    const [row] = await q(`SELECT ((now() AT TIME ZONE 'Africa/Cairo')::date + $1::int)::text AS d`, [dayOffset]);
+    return row.d as string;
+  }
+
+  async function blockDay(date: string, startTime = '00:00:00', endTime = '23:59:59'): Promise<void> {
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1,$2,$3,$4,'blocked')`,
+      [ids.techProfile, date, startTime, endTime],
+    );
   }
 
   const isEligible = async (order: Order): Promise<boolean> => {
@@ -190,6 +210,7 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
+    await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
     orderIds.length = 0;
   });
 
@@ -197,6 +218,7 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     if (!dataSource?.isInitialized) return;
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
+    await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
     await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.techProfile]);
     await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.techProfile]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
@@ -276,6 +298,34 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     await insertOrder({ label: 'awaiting-approval', status: OrderStatus.ACCEPTED, scheduledAt: cairoAt(0, 9), durationMinutes: 60 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(true);
+  });
+
+  describe('E — الإجازة الصريحة (`blocked`) لازم تُحترم على كل يوم من أيام الشغل', () => {
+    it('E1 — إجازة يوم كامل في **يوم بداية** الطلب بتمنعه (خط الأساس)', async () => {
+      await blockDay(await cairoDate(3));
+      const onBlockedDay = await candidateOrder(cairoAt(3, 10), 120);
+      expect(await isEligible(onBlockedDay)).toBe(false);
+    });
+
+    it('E2 — إجازة في **نص** شغل ممتد (٥ أيام، الإجازة في اليوم التالت) لازم تمنعه برضه', async () => {
+      await blockDay(await cairoDate(5));
+      // شغل ٥ أيام مبتدي بعد ٣ أيام ⇒ بيغطي الأيام ٣،٤،٥،٦،٧ — الإجازة في نصه بالظبط.
+      const multiDay = await candidateOrder(cairoAt(3, 10), null, false, 5);
+      expect(await isEligible(multiDay)).toBe(false);
+    });
+
+    it('E3 — إجازة بساعات آخر الليل مع شغل بيعدّي نص الليل لازم تتحسب', async () => {
+      // الشغل ٢٢:٠٠ + ٤ ساعات ⇒ ٢٢:٠٠–٠٢:٠٠ اليوم اللي بعده. الإجازة ٢٣:٠٠–٢٣:٥٩ متقاطعة فعليًا.
+      await blockDay(await cairoDate(3), '23:00:00', '23:59:59');
+      const overnight = await candidateOrder(cairoAt(3, 22), 240);
+      expect(await isEligible(overnight)).toBe(false);
+    });
+
+    it('E4 — إجازة **مش** متقاطعة مع الشغل مابتمنعش (ضد الإفراط في التقييد)', async () => {
+      await blockDay(await cairoDate(3), '06:00:00', '09:00:00');
+      const afternoon = await candidateOrder(cairoAt(3, 14), 120);
+      expect(await isEligible(afternoon)).toBe(true);
+    });
   });
 
   it('السقف اليومي: شغل يتعدّى `daily_capacity_minutes` بيمنع طلب تاني نفس اليوم', async () => {

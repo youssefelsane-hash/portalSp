@@ -296,6 +296,12 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [
         [ids.leaderProfile, ids.juniorProfile, ids.assistantProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
       ]);
+      // صفوف التقدّم بتتعمل تلقائيًا من مستمعي الترقية وقت ما الفني ياخد شغل — لازم تتمسح
+      // قبل الملف الشخصي نفسه، وإلا الـFK بيفشّل التنظيف كله (والـspec بيسقط في teardown مش
+      // في تأكيد حقيقي).
+      await q(`DELETE FROM technician_progression_status WHERE technician_id = ANY($1::uuid[])`, [
+        [ids.leaderProfile, ids.juniorProfile, ids.assistantProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
+      ]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [
         [ids.leaderProfile, ids.juniorProfile, ids.assistantProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
       ]);
