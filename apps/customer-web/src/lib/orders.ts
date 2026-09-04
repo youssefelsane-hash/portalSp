@@ -185,6 +185,14 @@ export interface OrderResponseDto {
   inspection_fee_cents: number;
   surge_amount_cents: number;
   discount_amount_cents: number;
+  // تكافؤ مع تطبيق العميل — الحقول دي راجعة في نفس الرد وكانت مقروءة في التطبيق بس
+  // (اتلقطت بـ`scripts/check-contract-drift.js`).
+  level_premium_cents: number;
+  warranty_price_cents: number;
+  deposit_amount_cents: number | null;
+  price_certainty_mode: 'confirmed_price' | 'estimated_range' | 'assessment_required';
+  display_price_min_cents: number | null;
+  display_price_max_cents: number | null;
   promo_code_id: string | null;
   total_amount_cents: number;
   payment_status: string;

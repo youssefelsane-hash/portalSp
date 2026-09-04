@@ -467,7 +467,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           { n: 2 as const, label: 'العنوان والتفاصيل' },
           { n: 3 as const, label: 'الفني والتأكيد' },
         ].map((s) => (
-          <li key={s.n} className="flex flex-1 items-center gap-2">
+          // `min-w-0` **ضروري**: بلاها `truncate` جوّه العنصر ده مالهاش أي أثر خالص.
+          // عنصر الـflex افتراضيًا `min-width: auto`، يعني مايقدرش يصغّر تحت عرض محتواه، فالنص
+          // بيفرد العنصر بدل ما يتقص — وشريط الخطوات كان بيتعدّى ٢١ بكسل بره الشاشة عند ٣٩٠
+          // بكسل (اتلقط بـ`scripts/sweep-customer.js`، والصفحة دي هي **صفحة الحجز نفسها**).
+          <li key={s.n} className="flex min-w-0 flex-1 items-center gap-2">
             <span
               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
                 step === s.n

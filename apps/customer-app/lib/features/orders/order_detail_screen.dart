@@ -805,6 +805,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                         ? 'السعر المقترح: ${_formatEgp(order.estimatedPriceCents ?? 0)}'
                                         : 'السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}',
                               ),
+                              // الخصم بيظهر بس لو فيه خصم فعلي (ممنوع «الخصم 0 ج»). كان
+                              // بيتعرض في المعاينة قبل التأكيد وبس، وبعد الحجز يختفي —
+                              // فالعميل اللي دخّل كود خصم مكانش يقدر يتأكد إنه اتطبّق.
+                              if (order.discountAmountCents > 0)
+                                Text(
+                                  'الخصم المطبّق: -${_formatEgp(order.discountAmountCents)}',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
+                                ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
                               // اتعيّن مستواه أعلى، الزيادة لازم تبان بسببها مكتوب، مش رقم
                               // بيتغيّر من غير تفسير. والسطر التاني تحتها مطمئن ومقصود يكون

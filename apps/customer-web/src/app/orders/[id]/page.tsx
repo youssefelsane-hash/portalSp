@@ -110,6 +110,41 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </span>
       </div>
 
+      {/* الخصم المطبّق — نفس سطر تطبيق العميل بالحرف. كان بيتعرض في المعاينة قبل التأكيد وبس،
+          وبعد الحجز يختفي من سجل الطلب، فالعميل اللي دخّل كود خصم مكانش يقدر يتأكد إنه اتطبّق. */}
+      {order.discount_amount_cents > 0 && (
+        <p className="mt-1 text-sm text-success">
+          الخصم المطبّق: -{formatEgp(order.discount_amount_cents)}
+        </p>
+      )}
+
+      {/* تكافؤ مع تطبيق العميل (اتلقط بـ`scripts/check-contract-drift.js`): كل الأرقام دي
+          راجعة في نفس الرد وكانت معروضة في التطبيق بس. أهمها `level_premium_cents` — docs/08
+          §60.3 بيفرض إن زيادة سعر «الفني المميّز» تبان **بسببها مكتوب** مش كرقم بيتغيّر لوحده. */}
+      {order.level_premium_cents > 0 && (
+        <p className="mt-1 text-sm font-medium text-primary">
+          منها {formatEgp(order.level_premium_cents)} — فني Premium
+        </p>
+      )}
+      {order.warranty_price_cents > 0 && (
+        <p className="mt-1 text-sm text-muted">
+          الضمان الاختياري: {formatEgp(order.warranty_price_cents)} ضمن الإجمالي
+        </p>
+      )}
+      {order.deposit_amount_cents !== null && order.deposit_amount_cents > 0 && (
+        <p className="mt-1 text-sm text-muted">
+          الإيداع المدفوع عند الحجز: {formatEgp(order.deposit_amount_cents)} — الباقي بعد ما الشغل يخلص
+        </p>
+      )}
+      {order.price_certainty_mode === 'estimated_range' &&
+        order.display_price_min_cents !== null &&
+        order.display_price_max_cents !== null && (
+          <p className="mt-1 text-sm text-muted">
+            نطاق تقديري وقت الحجز: {formatEgp(order.display_price_min_cents)} –{' '}
+            {formatEgp(order.display_price_max_cents)}
+          </p>
+        )}
+
       {!isBad && currentStepIndex >= 0 && (
         <ol className="mt-6 space-y-2">
           {TIMELINE_STATUSES.map((s, i) => (

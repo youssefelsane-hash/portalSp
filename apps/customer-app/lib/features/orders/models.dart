@@ -64,6 +64,9 @@ class Order {
   final String? initialQuoteSource;
   final String? initialQuoteNote;
   final int totalAmountCents;
+  /// الخصم المطبّق فعلاً على الطلب (كود خصم أو عمارة). العميل كان بيشوفه في المعاينة قبل
+  /// التأكيد وبعدين يختفي من سجل الطلب تمامًا — فمكانش عنده أي طريقة يتأكد إن الكود اشتغل.
+  final int discountAmountCents;
   final int warrantyPriceCents;
 
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
@@ -125,6 +128,7 @@ class Order {
     this.initialQuoteSource,
     this.initialQuoteNote,
     required this.totalAmountCents,
+    this.discountAmountCents = 0,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
     this.optionalWarrantyCoverageMonths,
@@ -171,6 +175,7 @@ class Order {
     initialQuoteSource: json['initial_quote_source'] as String?,
     initialQuoteNote: json['initial_quote_note'] as String?,
     totalAmountCents: json['total_amount_cents'] as int,
+    discountAmountCents: (json['discount_amount_cents'] as num?)?.round() ?? 0,
     warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
     levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
     optionalWarrantyNameAr:
