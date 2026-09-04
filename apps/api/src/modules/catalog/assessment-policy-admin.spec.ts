@@ -86,8 +86,29 @@ describe('AdminCatalogService — سياسة تحديد السعر والمعا�
     expect(dto.quote_validity_minutes).toBeGreaterThan(0);
   });
 
+  it('«تقييم بالصور» على خدمة معادلة بيترفض — مسار الصور مقصور على «كشف ثم عرض سعر» (docs/08 §131)', async () => {
+    // البَقّة اللي الاختبار ده بيقفلها: الشرط ده كان موجود في `assessmentRouteRejection()` وقت
+    // إنشاء الطلب بس، ومكانش موجود في طبقة الأدمن خالص. النتيجة إن الأدمن يحفظ خدمة `formula`
+    // وعليها «تقييم بالصور — مفعّل»، والعميل مايشوفش المسار أصلاً — الزرار بلا أثر. وأسوأ
+    // تركيبة (formula + assessment_required + remote_only) كانت بتطلّع خدمة مش قابلة للحجز
+    // بأي مسار: الصور مرفوضة لأنها مش كشف-ثم-سعر، والمعاينة مرفوضة لأن السياسة «بالصور فقط».
+    await expect(
+      service.updateService('admin-policy-spec', ids.service, {
+        price_certainty_mode: PriceCertaintyMode.ASSESSMENT_REQUIRED,
+        remote_assessment_enabled: true,
+        onsite_assessment_enabled: true,
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+
+    const [row] = await q(`SELECT pricing_model, remote_assessment_enabled FROM services WHERE id = $1`, [ids.service]);
+    expect(row.pricing_model).toBe('formula');
+    expect(row.remote_assessment_enabled).toBe(false);
+  });
+
   it('تفعيل «محتاج تقييم» بالصور برسوم وخصم بنسبة: بيتحفظ وبيرجع في رد الأدمن كامل', async () => {
     const updated = await service.updateService('admin-policy-spec', ids.service, {
+      // مسار الصور محتاج غياب السعر وقت الحجز — يعني `inspection_then_quote` (ADR-0060 §1).
+      pricing_model: 'inspection_then_quote',
       price_certainty_mode: PriceCertaintyMode.ASSESSMENT_REQUIRED,
       assessment_route_policy: AssessmentRoutePolicy.REMOTE_ONLY,
       remote_assessment_enabled: true,

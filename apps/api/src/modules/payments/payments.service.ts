@@ -34,7 +34,6 @@ import { OrderQuoteSource } from '../orders/entities/order-quote.entity';
 import { prepaidOrderNextStatus } from '../orders/prepaid-order-next-status';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
-import { computeDispatchDeferredUntil } from '../orders/deferred-dispatch.util';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
@@ -1620,16 +1619,8 @@ export class PaymentsService {
   /** بعد نجاح handlePaymentConfirmed — بره أي transaction عمداً (نفس فلسفة باقي أحداث الموديول). */
   private async emitPaymentConfirmedEvents(info: PaymentConfirmedEffects): Promise<void> {
     if (info.dispatchStarted) {
-      // دفع قبل التوزيع اتأكد — التوزيع يبدأ دلوقتي بالظبط زي OrdersService.create() العادية
-      // (نفس منطق تأجيل البث لطلب مجدول "بعيد"، ADR-0009).
-      const order = await this.orders.findOne({ where: { id: info.orderId } });
-      const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
-      const dispatchDeferredUntil = computeDispatchDeferredUntil({
-        scheduleSlotBooked: false,
-        scheduledAt: order?.scheduledAt ?? null,
-        leadHours,
-      });
-      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(info.orderId, dispatchDeferredUntil));
+      // دفع قبل التوزيع اتأكد — التوزيع يبدأ دلوقتي بالظبط زي OrdersService.create() العادية.
+      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(info.orderId));
       this.events.emit(
         ORDER_STATUS_CHANGED_EVENT,
         new OrderStatusChangedEvent(

@@ -8,8 +8,6 @@ import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
 import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor';
 import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
-import { MatchingDeferredDispatchProcessor } from './matching-deferred-dispatch.processor';
-import { MATCHING_DISPATCH_QUEUE } from './matching-dispatch.queue';
 import { MatchingService } from './matching.service';
 import { MatchingExplainabilityService } from './matching-explainability.service';
 import { MatchingRecoveryService } from './matching-recovery.service';
@@ -47,7 +45,7 @@ import { PaymentsModule } from '../payments/payments.module';
     // الـDI الحقيقية) والتطبيق كان بيموت وقت الإقلاع بـ"Nest can't resolve dependencies".
     // الدرس: أي حقن جديد في خدمة لازم يتأكد بإقلاع فعلي، مش بالبناء والاختبارات بس.
     PricingModule,
-    BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }, { name: MATCHING_DISPATCH_QUEUE }),
+    BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }),
   ],
   controllers: [TechnicianOrdersController],
   providers: [
@@ -57,7 +55,6 @@ import { PaymentsModule } from '../payments/payments.module';
     OrderDispatchListener,
     OrderRematchListener,
     MatchingRoundExpiryProcessor,
-    MatchingDeferredDispatchProcessor,
   ],
   exports: [MatchingService, MatchingExplainabilityService],
 })

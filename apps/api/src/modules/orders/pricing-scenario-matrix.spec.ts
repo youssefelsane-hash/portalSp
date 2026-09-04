@@ -193,9 +193,16 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
 
     const slug = `scnmtx-${template}-${certainty}`.toLowerCase();
     const [svc] = await q(
+      // `onsite_assessment_enabled` بيتحط دايمًا مش بس لـ`assessment_required`: خدمة «محتاجة
+      // تقييم» بلا أي مسار مفعّل بقت مرفوضة على مستوى القاعدة نفسها (docs/08 §131،
+      // migration 0259) — دي بالظبط الخدمة اللي العميل مايقدرش يحجزها بأي طريقة. المعاينة
+      // في الموقع هي المسار المناسب لخدمة `formula` (التقييم بالصور مقصور على
+      // `inspection_then_quote`)، والقيمة مالهاش أي أثر على حسابات التسعير اللي المصفوفة
+      // دي بتقيسها.
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents,
-                             price_certainty_mode, range_percent_below, range_percent_above)
-       VALUES ($1,$2,$3,'formula',$4,$5,10,25) RETURNING id`,
+                             price_certainty_mode, range_percent_below, range_percent_above,
+                             onsite_assessment_enabled)
+       VALUES ($1,$2,$3,'formula',$4,$5,10,25,true) RETURNING id`,
       [categoryId, `مصفوفة ${template} ${certainty}`, slug, RATE_CENTS, certainty],
     );
     createdServiceIds.push(svc.id);

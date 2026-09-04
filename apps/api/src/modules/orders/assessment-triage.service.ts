@@ -47,6 +47,8 @@ export interface AssessmentQueueRow {
   latest_quote_status: string | null;
   latest_quote_amount_cents: number | null;
   latest_quote_valid_until: string | null;
+  /** عدد صور المشكلة المربوطة بالطلب — بيخلّي فرز طلبات «التقييم بالصور» ممكن من الطابور نفسه. */
+  problem_photo_count: number;
 }
 
 /**
@@ -377,7 +379,12 @@ export class AssessmentTriageService {
               lq.id                    AS latest_quote_id,
               lq.status                AS latest_quote_status,
               lq.amount_cents          AS latest_quote_amount_cents,
-              lq.valid_until           AS latest_quote_valid_until
+              lq.valid_until           AS latest_quote_valid_until,
+              -- بلاغ المالك «الصور ما بتطلعش من الطلب» (docs/08 §131): الطابور ده هو أول شاشة
+              -- بيشوفها الأدمن لطلب تقييم، ومكانش فيه أي أثر للصور خالص — لا عدد ولا علامة —
+              -- فمافيش طريقة يعرف منها إن الطلب أصلاً وصله صور يسعّر عليها غير إنه يفتح كل طلب
+              -- واحد واحد. العدّاد ده بيخلّي الفرز ممكن من الطابور نفسه.
+              COALESCE(pm.problem_photo_count, 0)::int AS problem_photo_count
          FROM orders o
          JOIN services s ON s.id = o.service_id
          JOIN customer_profiles cp ON cp.id = o.customer_id
@@ -389,6 +396,11 @@ export class AssessmentTriageService {
                ORDER BY q.version DESC
                LIMIT 1
          ) lq ON true
+         LEFT JOIN LATERAL (
+              SELECT count(*) AS problem_photo_count
+                FROM order_media m
+               WHERE m.order_id = o.id AND m.media_type = 'problem_photo'
+         ) pm ON true
         WHERE ${where.join(' AND ')}
         ORDER BY o.created_at ASC
         LIMIT 200`,

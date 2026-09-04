@@ -599,6 +599,13 @@ export default function ServiceDetailPage() {
     }
   }
 
+  // نفس شرط `assessmentRouteRejection()` في الباك-إند بالحرف (docs/08 §131): مسار الصور
+  // مقصور على «كشف ثم عرض سعر»، ومقيّد كمان بقيد CHECK في migration 0259.
+  const photoRouteAvailable = pricingModelLive === 'inspection_then_quote';
+  const photoRouteUsable = photoRouteAvailable && remoteAssessmentEnabled && assessmentRoutePolicy !== 'onsite_only';
+  const onsiteRouteUsable = onsiteAssessmentEnabled && assessmentRoutePolicy !== 'remote_only';
+  const usableAssessmentRoutes = (photoRouteUsable ? 1 : 0) + (onsiteRouteUsable ? 1 : 0);
+
   // ── مراحل إعداد الخدمة (docs/08 §123) ───────────────────────────────────────────────────
   // كل حالة تحت مشتقّة من **شرط حقيقي موجود في الكود** — مفيش قاعدة جاهزية مخترعة هنا:
   //   * «مسار تقييم واحد على الأقل» مكتوب حرفيًا في نص الصفحة نفسها كشرط لقابلية الحجز.
@@ -650,10 +657,13 @@ export default function ServiceDetailPage() {
         {
           id: 'stage-assessment',
           label: 'المعاينة وسياسة السعر',
+          // الحالة هنا مبنية على المسارات اللي **الباك-إند** هيقبلها فعلاً، مش على الأعلام
+          // المحفوظة. الفرق ده كان بَقّة: علم «تقييم بالصور» مفعّل على خدمة معادلة كان بيتعرض
+          // كـ«مكتمل» والمسار مقفول عند العميل (docs/08 §131).
           status:
             priceCertaintyMode !== 'assessment_required'
               ? 'ready'
-              : remoteAssessmentEnabled || onsiteAssessmentEnabled
+              : usableAssessmentRoutes > 0
                 ? 'ready'
                 : 'needs_setup',
           blocking: priceCertaintyMode === 'assessment_required',
@@ -662,9 +672,9 @@ export default function ServiceDetailPage() {
               ? 'سعر مؤكد قبل الحجز'
               : priceCertaintyMode === 'estimated_range'
                 ? 'نطاق تقديري بيتعرض للعميل'
-                : remoteAssessmentEnabled || onsiteAssessmentEnabled
-                  ? 'مسار التقييم والرسوم وخصمها وصلاحية العرض'
-                  : 'لازم تفعّل مسار تقييم واحد على الأقل وإلا الخدمة مش هتتحجز',
+                : usableAssessmentRoutes === 0
+                  ? 'مفيش مسار تقييم شغّال — الخدمة مش هتتحجز خالص'
+                  : `${usableAssessmentRoutes === 2 ? 'المسارين شغّالين' : photoRouteUsable ? 'تقييم بالصور بس' : 'معاينة في الموقع بس'} — الرسوم وخصمها وصلاحية العرض`,
         },
         {
           id: 'stage-booking',
@@ -835,7 +845,17 @@ export default function ServiceDetailPage() {
                     name="pricing_model"
                     defaultValue={service.pricing_model}
                     className="mt-2"
-                    onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
+                    onChange={(e) => {
+                      const next = e.target.value as PricingModel;
+                      setPricingModelLive(next);
+                      // الرجوع لمعادلة بيلغي مسار الصور — الباك-إند وقيد الـDB بيرفضوا الجمع
+                      // بينهم، فالحالة بتتصلّح هنا بدل ما الحفظ يفشل برسالة سيرفر.
+                      if (next !== 'inspection_then_quote') {
+                        setRemoteAssessmentEnabled(false);
+                        setAssessmentRoutePolicy((current) => (current === 'remote_only' ? 'admin_triage' : current));
+                        setOnsiteAssessmentEnabled(true);
+                      }
+                    }}
                   >
                     {(Object.keys(PRICING_MODEL_LABELS) as PricingModel[]).map((value) => (
                       <option key={value} value={value}>
@@ -1173,28 +1193,35 @@ export default function ServiceDetailPage() {
                       </p>
                     </div>
                     <div className="grid gap-2 md:grid-cols-2">
-                      {ASSESSMENT_ROUTE_POLICIES.map((policy) => (
-                        <button
-                          key={policy}
-                          type="button"
-                          onClick={() => setAssessmentRoutePolicy(policy)}
-                          className={`rounded-lg border p-3 text-right text-sm transition ${
-                            assessmentRoutePolicy === policy
-                              ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
-                              : 'border-border hover:border-amber-300'
-                          }`}
-                        >
-                          {ASSESSMENT_ROUTE_POLICY_LABELS_AR[policy]}
-                        </button>
-                      ))}
+                      {ASSESSMENT_ROUTE_POLICIES.map((policy) => {
+                        // «بالصور فقط» على خدمة مش كشف-ثم-سعر = خدمة مش قابلة للحجز بأي مسار.
+                        const blocked = policy === 'remote_only' && !photoRouteAvailable;
+                        return (
+                          <button
+                            key={policy}
+                            type="button"
+                            disabled={blocked}
+                            title={blocked ? 'محتاجة طريقة تسعير «كشف ثم عرض سعر»' : undefined}
+                            onClick={() => setAssessmentRoutePolicy(policy)}
+                            className={`rounded-lg border p-3 text-right text-sm transition ${
+                              assessmentRoutePolicy === policy
+                                ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40'
+                                : 'border-border hover:border-amber-300'
+                            } ${blocked ? 'cursor-not-allowed opacity-45 hover:border-border' : ''}`}
+                          >
+                            {ASSESSMENT_ROUTE_POLICY_LABELS_AR[policy]}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <button
                         type="button"
+                        disabled={!photoRouteAvailable}
                         onClick={() => setRemoteAssessmentEnabled(!remoteAssessmentEnabled)}
                         className={`rounded-lg border p-3 text-right text-sm transition ${
                           remoteAssessmentEnabled ? 'border-amber-400 bg-amber-50 font-semibold dark:bg-amber-950/40' : 'border-border'
-                        }`}
+                        } ${photoRouteAvailable ? '' : 'cursor-not-allowed opacity-45'}`}
                       >
                         تقييم بالصور {remoteAssessmentEnabled ? '— مفعّل' : '— مقفول'}
                       </button>
@@ -1208,6 +1235,27 @@ export default function ServiceDetailPage() {
                         معاينة في الموقع {onsiteAssessmentEnabled ? '— مفعّلة' : '— مقفولة'}
                       </button>
                     </div>
+                    {/* الرد المباشر على سؤال المالك «مش عارف أخلي اليوزر يبعت الصور للإدارة»
+                        (docs/08 §131): الشرط الناقص مش في القسم ده أصلاً — هو في «طريقة تحديد
+                        السعر» فوق. من غير السطر ده الأدمن بيدوّس زرار الصور، يتحفظ، ومايحصلش
+                        حاجة عند العميل. الزرار نفسه مقفول عشان الحفظ ما يفشلش برسالة سيرفر. */}
+                    {!photoRouteAvailable && (
+                      <div className="rounded-lg border border-s-4 border-s-warning bg-background/85 p-3">
+                        <p className="text-sm font-semibold">التقييم بالصور مش متاح لطريقة التسعير الحالية</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          العميل بيبعت صور عشان الإدارة تحدد السعر — ده معناه إن مفيش سعر وقت الحجز، وده تعريف
+                          «كشف ثم عرض سعر» نفسه. الخدمة دي بتحسب سعرها بمعادلة، فمسار الصور مقفول من الباك-إند
+                          حتى لو فعّلته هنا.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('stage-pricing-method')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          className="mt-2 text-xs text-primary underline"
+                        >
+                          روح لطريقة تحديد السعر وغيّرها لـ«كشف ثم عرض سعر»
+                        </button>
+                      </div>
+                    )}
                     <div className="grid gap-3 sm:grid-cols-2">
                       {remoteAssessmentEnabled && (
                         <div className="flex flex-col gap-1">

@@ -166,10 +166,6 @@ export function allPricingTemplates(): PricingTemplateDescriptor[] {
   return Object.values(TEMPLATES);
 }
 
-export function isPricingTemplateKey(value: string): value is PricingTemplateKey {
-  return Object.prototype.hasOwnProperty.call(TEMPLATES, value);
-}
-
 /** حمولة قاعدة `final_price` الجاهزة للحفظ — نفس الشكل اللي البانِي بيحفظه بالظبط. */
 export function pricingTemplateFinalPricePayload(
   key: PricingTemplateKey,

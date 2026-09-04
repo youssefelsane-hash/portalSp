@@ -5,7 +5,6 @@ export const INSTALLMENT_APPLICATION_SUBMITTED_EVENT = 'installment.application_
 export const INSTALLMENTS_APPLICATION_REVIEWED_EVENT = 'installments.application_reviewed';
 export const INSTALLMENT_PAYMENT_SUCCEEDED_EVENT = 'installments.payment_succeeded';
 export const INSTALLMENT_PAYMENT_FAILED_EVENT = 'installment.payment_failed';
-export const INSTALLMENT_OVERDUE_ESCALATION_EVENT = 'installment.overdue_escalation';
 export const INSTALLMENTS_PLAN_COMPLETED_EVENT = 'installments.plan_completed';
 
 export class InstallmentApplicationSubmittedEvent {

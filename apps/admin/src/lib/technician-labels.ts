@@ -1,12 +1,6 @@
 import type { TechnicianCapacityTier, TechnicianLevel, TechnicianPricingTier, TechnicianVerificationStatus } from '@baytak/shared-types';
 
 // تصريح مهارات ذاتي (Script 4 §2-7)
-export const SKILL_LEVEL_LABELS: Record<string, string> = {
-  beginner: 'مبتدئ',
-  standard: 'متوسط',
-  expert: 'خبير',
-};
-
 export const VERIFICATION_STATUS_LABELS: Record<TechnicianVerificationStatus, string> = {
   pending: 'قيد الانتظار',
   documents_submitted: 'مستندات مُرسلة',

@@ -7,6 +7,7 @@ import '../../design/loading_list.dart';
 import '../../design/status_chip.dart';
 import 'models.dart';
 import 'skills_repository.dart';
+import '../../design/confirm_dialog.dart';
 
 // مهاراتي (§29 — بدّل الإصدار القديم خدمة-بخدمة بالكامل، طلب مالك صريح 2026-08-20) — الفني
 // بيصرّح بتخصص/فئة كاملة (سباكة، كهرباء، صيانة...) مش خدمة فردية. أي خدمة جديدة تتضاف تحت الفئة
@@ -49,37 +50,23 @@ class _SkillsScreenState extends State<SkillsScreen> {
 
   Future<void> _openAddSkillFlow() async {
     final declared = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => _AddSkillScreen(repository: _repository)),
+      MaterialPageRoute(
+        builder: (_) => _AddSkillScreen(repository: _repository),
+      ),
     );
     if (declared == true) await _load();
   }
 
   Future<void> _withdraw(TechnicianCategoryDeclaration category) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('سحب التخصص'),
-          content: Text(
-            category.verificationStatus == 'approved'
-                ? 'هتتوقف عن استقبال طلبات التخصص ده — تقدر تطلبه تاني بعدين.'
-                : 'هيتلغى طلبك للتخصص ده.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('رجوع'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('تأكيد'),
-            ),
-          ],
-        ),
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'سحب التخصص',
+      message: category.verificationStatus == 'approved'
+          ? 'هتتوقف عن استقبال طلبات التخصص ده — تقدر تطلبه تاني بعدين.'
+          : 'هيتلغى طلبك للتخصص ده.',
+      cancelLabel: 'رجوع',
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
 
     setState(() => _acting = true);
     try {

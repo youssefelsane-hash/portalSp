@@ -91,8 +91,3 @@ export interface MyInstallmentsEntryDto {
   };
 }
 
-export const listMyInstallments = (authedFetch: AuthedFetch): Promise<MyInstallmentsEntryDto[]> =>
-  authedFetch<MyInstallmentsEntryDto[]>('/me/installments');
-
-export const cancelInstallmentApplication = (authedFetch: AuthedFetch, applicationId: string): Promise<void> =>
-  authedFetch<void>(`/installment-applications/${applicationId}`, { method: 'DELETE' });

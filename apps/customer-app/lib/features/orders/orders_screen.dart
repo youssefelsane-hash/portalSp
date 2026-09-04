@@ -8,6 +8,7 @@ import '../../design/loading_list.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
+import '../../design/status_chip.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -48,46 +49,71 @@ class _OrdersScreenState extends State<OrdersScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _orders == null
-                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                : _orders!.isEmpty
-                    ? const Center(
-                        child: EmptyState(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'لسه ماطلبتش أي حاجة',
-                          description: 'أول ما تحجز خدمة، هتلاقي طلباتك هنا',
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _orders!.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final order = _orders![index];
-                            // docs/08 §122 — دخول متدرّج خفيف بعد التحميل: بيوضّح إن دي قايمة
-                            // وصلت دلوقتي، بدل ما تظهر دفعة واحدة فجأة. التدرّج بيقف عند
-                            // العنصر الثامن (motionListDelay) عشان مايتحوّلش لانتظار.
-                            return MotionReveal(
-                              delay: motionListDelay(index),
-                              child: Card(
-                              child: ListTile(
-                                title: Text(order.orderNumber),
-                                subtitle: Text(
-                                  '${orderStatusLabelsAr[order.orderStatus] ?? order.orderStatus}'
-                                  '${order.recurringTemplateId != null ? '\nحجز متكرر${order.recurringOccurrenceAt != null ? ' · ${order.recurringOccurrenceAt!.substring(0, 10)}' : ''}' : ''}',
-                                ),
-                                isThreeLine: order.recurringTemplateId != null,
-                                trailing: Text(_formatEgp(order.totalAmountCents)),
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
-                                ),
+            ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+            : _orders!.isEmpty
+            ? const Center(
+                child: EmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'لسه ماطلبتش أي حاجة',
+                  description: 'أول ما تحجز خدمة، هتلاقي طلباتك هنا',
+                ),
+              )
+            : RefreshIndicator(
+                onRefresh: _load,
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _orders!.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final order = _orders![index];
+                    // docs/08 §122 — دخول متدرّج خفيف بعد التحميل: بيوضّح إن دي قايمة
+                    // وصلت دلوقتي، بدل ما تظهر دفعة واحدة فجأة. التدرّج بيقف عند
+                    // العنصر الثامن (motionListDelay) عشان مايتحوّلش لانتظار.
+                    return MotionReveal(
+                      delay: motionListDelay(index),
+                      child: Card(
+                        child: ListTile(
+                          title: Text(order.orderNumber),
+                          // الحالة كـ«شريحة» ملوّنة زي تطبيق الفني بالظبط، مش نص رمادي
+                          // وسط باقي السطر (docs/08 §131): «مستني موافقتك على السعر»
+                          // و«اتلغى» كانوا بيتعرضوا بنفس الشكل تمامًا.
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: StatusChip(
+                                  label:
+                                      orderStatusLabelsAr[order.orderStatus] ??
+                                      order.orderStatus,
+                                  tone: orderStatusTone(order.orderStatus),
                                 ),
                               ),
-                            );
-                          },
+                              if (order.recurringTemplateId != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    'حجز متكرر${order.recurringOccurrenceAt != null ? ' · ${order.recurringOccurrenceAt!.substring(0, 10)}' : ''}',
+                                  ),
+                                ),
+                            ],
+                          ),
+                          isThreeLine: order.recurringTemplateId != null,
+                          trailing: Text(_formatEgp(order.totalAmountCents)),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  OrderDetailScreen(orderId: order.id),
+                            ),
+                          ),
                         ),
                       ),
+                    );
+                  },
+                ),
+              ),
       ),
     );
   }

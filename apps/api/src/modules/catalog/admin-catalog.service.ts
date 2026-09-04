@@ -403,6 +403,22 @@ export class AdminCatalogService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    // **الإصلاح الجذري لبلاغ المالك «مش عارف أخلي اليوزر يبعت الصور للإدارة» (docs/08 §131)**:
+    // التقييم بالصور معناه غياب السعر وقت الحجز — ده تعريف `inspection_then_quote` نفسه
+    // (ADR-0060 §1)، والباك-إند بيرفض `request_remote_quote` لأي طريقة تسعير تانية جوّه
+    // `assessmentRouteRejection()`. لكن طبقة الأدمن مكانتش بتشوف `pricing_model` خالص، فكان
+    // ينفع تتحفظ خدمة `formula` وعليها «تقييم بالصور — مفعّل»، والزرار ده **مالوش أي أثر**:
+    // العميل مايشوفش المسار، ولو بعت طلب بيترفض. أسوأ تركيبة اتأكدت بفحص حي:
+    // `formula` + `assessment_required` + `remote_only` = خدمة **مش قابلة للحجز بأي مسار**
+    // (الصور مرفوضة لأنها مش كشف-ثم-سعر، والمعاينة مرفوضة لأن السياسة «بالصور فقط»).
+    // الرفض هنا بيمنع نشوء التركيبة دي من أصلها بدل ما تتكتشف من بلاغ عميل.
+    if (service.remoteAssessmentEnabled && service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'التقييم بالصور متاح لطريقة «كشف ثم عرض سعر» بس — غيّر طريقة تحديد السعر الأول، أو اقفل التقييم بالصور واكتفي بالمعاينة في الموقع',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     // مسار مثبّت على وضع مقفول = نفس السكتة، بس أوضح: السياسة بتقول «بالصور بس» والصور مقفولة.
     if (service.assessmentRoutePolicy === AssessmentRoutePolicy.REMOTE_ONLY && !service.remoteAssessmentEnabled) {
       throw new ApiException(ErrorCode.VAL_001, 'سياسة «تقييم بالصور فقط» محتاجة تفعيل التقييم بالصور', HttpStatus.BAD_REQUEST);

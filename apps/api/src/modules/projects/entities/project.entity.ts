@@ -1,7 +1,5 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
-export type ProjectType = 'finishing' | 'renovation' | 'move_in' | 'multi_service' | 'other';
-
 export type ProjectStatus =
   | 'draft' | 'survey_requested' | 'survey_scheduled' | 'quote_preparing'
   | 'awaiting_customer_approval' | 'awaiting_deposit' | 'active' | 'paused'

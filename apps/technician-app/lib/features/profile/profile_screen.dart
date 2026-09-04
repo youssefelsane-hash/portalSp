@@ -8,6 +8,7 @@ import '../onboarding/models.dart';
 import '../onboarding/onboarding_repository.dart';
 import '../preferred_crew/preferred_crew_screen.dart';
 import '../earnings/monthly_statement_screen.dart';
+import '../../design/confirm_dialog.dart';
 
 // بروفايلي — نوع الفني + "معاه مساعد؟" (docs/06 §3.7-§3.8) — كانت فجوة موثّقة صراحة: الباك-إند
 // بيدعم طلب ربط مساعد بكود موظفه من زمان (الإدارة توافق بعد كده)، بس مفيش شاشة في التطبيق كانت
@@ -140,31 +141,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   /// مسار حذف الحساب موجود داخل إدارة الحساب بدل القائمة الرئيسية، مع تأكيد نهائي واضح.
   Future<void> _confirmDeleteAccount() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('حذف الحساب نهائيًا؟'),
-        content: const Text(
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'حذف الحساب نهائيًا؟',
+      message:
           'هيتم حذف اسمك ورقمك وبريدك ومستندات هويتك من النظام، ومش هتقدر ترجع للحساب ده تاني.\n\n'
           'سجلات الطلبات ومستحقاتك المالية بتتحفظ لمدة يفرضها القانون، بس من غير بياناتك الشخصية.\n\n'
           'لو عندك رصيد في المحفظة أو طلب لسه شغال، لازم تخلّصهم الأول.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('إلغاء'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(dialogContext).colorScheme.error,
-            ),
-            child: const Text('احذف حسابي'),
-          ),
-        ],
-      ),
+      confirmLabel: 'احذف حسابي',
+      destructive: true,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     setState(() => _deletingAccount = true);
     try {

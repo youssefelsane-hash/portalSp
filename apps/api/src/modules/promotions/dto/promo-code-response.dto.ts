@@ -45,8 +45,3 @@ export function toPromoCodeResponseDto(promoCode: PromoCode): PromoCodeResponseD
     created_at: promoCode.createdAt.toISOString(),
   };
 }
-
-export interface PromoValidationResponseDto {
-  promo_code: PromoCodeResponseDto;
-  discount_cents: number;
-}

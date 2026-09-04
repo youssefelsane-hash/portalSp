@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
+import '../orders/assessment_route.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
 import '../orders/schedule_selection_screen.dart';
@@ -17,9 +18,15 @@ import 'models.dart';
 //
 // **وضع الحجز مابقاش بيتسأل خالص (ADR-0048)** — بيتشتق في الباك-إند من اليوم المختار وعدد
 // العمال المطلوب. الخطوة الوحيدة اللي العميل بيشوفها بعد اختيار الخدمة هي **الميعاد**.
-Future<void> navigateToServiceBooking(BuildContext context, CatalogService service) async {
+Future<void> navigateToServiceBooking(
+  BuildContext context,
+  CatalogService service,
+) async {
   final availableModes = service.availableBookingModes;
-  if (availableModes.isEmpty) return; // مفيش وضع حجز مسموح للخدمة دي أصلاً — حالة بيانات غير متوقعة، تجاهل بأمان
+  // مفيش وضع حجز مسموح للخدمة دي أصلاً — حالة بيانات غير متوقعة، تجاهل بأمان
+  if (availableModes.isEmpty) {
+    return;
+  }
   // ملاحظة: `availableBookingModes` بقت تُستخدم هنا كفحص "الخدمة قابلة للحجز أصلاً" بس — مش
   // كقايمة اختيارات تتعرض للعميل (ADR-0048).
 
@@ -37,7 +44,8 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   // الخدمة — «تروح جاي الصفحة أوتوماتيك مرجعة اللي هو كان بيعمله على طول».
   final signedIn = await ensureSignedIn(
     context,
-    reason: 'عشان نحجزلك «${service.nameAr}» محتاجين نعرف عنوانك ونقدر نتواصل معاك.',
+    reason:
+        'عشان نحجزلك «${service.nameAr}» محتاجين نعرف عنوانك ونقدر نتواصل معاك.',
     headline: 'كمّل حجز «${service.nameAr}»',
   );
   if (!signedIn || !context.mounted) return;
@@ -62,7 +70,10 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
       ),
     ),
   );
-  if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
+  // العميل رجع من غير ما يختار — نلغي الحجز كله
+  if (choice == null || !context.mounted) {
+    return;
+  }
   final DateTime scheduledAt = choice.scheduledAt;
   final DateTime? scheduledAtRangeEnd = choice.rangeEnd;
   final TimeOfDay? preciseTime = choice.preciseTime;
@@ -72,7 +83,9 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   // (أول فني يقبل هو اللي بيروح)، بالظبط زي ما الطوارئ كانت بتشتغل قبل كده.
   final BookingMode bookingMode = _isSameDayLocal(scheduledAt)
       ? BookingMode.emergency
-      : (availableModes.contains(BookingMode.individual) ? BookingMode.individual : availableModes.first);
+      : (availableModes.contains(BookingMode.individual)
+            ? BookingMode.individual
+            : availableModes.first);
 
   if (!context.mounted) return;
   Navigator.of(context).push(
@@ -90,21 +103,36 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
             )
+          // **خدمة مسارها الوحيد هو التقييم بالصور مابتعديش على اختيار فني** (docs/08 §131):
+          // في المسار ده الإدارة بتحدد السعر من الصور، العميل يوافق، **وبعدين** التوزيع
+          // بيبدأ — يعني مفيش منفّذ متحدد وقت الحجز أصلاً. الشاشة كانت بتتعرض برضه، فالعميل
+          // يختار فني وتتعمل تذكرة سعر، وبعدين يترفض عند التأكيد بـ«معاينة الفني لا تُجمع مع
+          // تقييم الصور» بلا أي طريقة يرجع منها. خدمة عندها المسارين لسه بتعدّي عادي — هناك
+          // اختيار الفني له معنى للمعاينة في الموقع.
+          : !AssessmentRoutes.forService(service).onsite &&
+                AssessmentRoutes.forService(service).remote
+          ? CreateOrderScreen(
+              service: service,
+              bookingMode: bookingMode,
+              requestedAt: scheduledAt,
+              requestedAtRangeEnd: scheduledAtRangeEnd,
+              requestedPreciseTime: preciseTime,
+            )
           : service.pricingModel == 'formula'
-              ? JobDetailsScreen(
-                  service: service,
-                  bookingMode: bookingMode,
-                  requestedAt: scheduledAt,
-                  requestedAtRangeEnd: scheduledAtRangeEnd,
-                  requestedPreciseTime: preciseTime,
-                )
-              : TechnicianSelectionScreen(
-                  service: service,
-                  bookingMode: bookingMode,
-                  requestedAt: scheduledAt,
-                  requestedAtRangeEnd: scheduledAtRangeEnd,
-                  requestedPreciseTime: preciseTime,
-                ),
+          ? JobDetailsScreen(
+              service: service,
+              bookingMode: bookingMode,
+              requestedAt: scheduledAt,
+              requestedAtRangeEnd: scheduledAtRangeEnd,
+              requestedPreciseTime: preciseTime,
+            )
+          : TechnicianSelectionScreen(
+              service: service,
+              bookingMode: bookingMode,
+              requestedAt: scheduledAt,
+              requestedAtRangeEnd: scheduledAtRangeEnd,
+              requestedPreciseTime: preciseTime,
+            ),
     ),
   );
 }
@@ -117,7 +145,9 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
 bool _isSameDayLocal(DateTime? scheduledAt) {
   if (scheduledAt == null) return true; // بلا تاريخ = دلوقتي
   final now = DateTime.now();
-  return scheduledAt.year == now.year && scheduledAt.month == now.month && scheduledAt.day == now.day;
+  return scheduledAt.year == now.year &&
+      scheduledAt.month == now.month &&
+      scheduledAt.day == now.day;
 }
 
 /// تسجيل اهتمام العميل بخدمة (ADR-0046) — **fire-and-forget بالكامل**.
@@ -126,13 +156,17 @@ bool _isSameDayLocal(DateTime? scheduledAt) {
 /// يتبلع تمامًا. تعطيل حجز حقيقي عشان إعلان ما اتسجّلش هيبقى مقايضة غبية.
 void _recordServiceIntent(BuildContext context, String serviceId) {
   final auth = context.read<AuthRepository>();
-  if (!auth.isAuthenticated) return; // زائر مش مسجّل — مفيش حساب نبعتله إشعار أصلاً
+  // زائر مش مسجّل — مفيش حساب نبعتله إشعار أصلاً
+  if (!auth.isAuthenticated) {
+    return;
+  }
   unawaited(
     auth
-        .authedRequest('POST', '/customer/service-intents', body: {
-          'service_id': serviceId,
-          'intent_stage': 'started_booking',
-        })
+        .authedRequest(
+          'POST',
+          '/customer/service-intents',
+          body: {'service_id': serviceId, 'intent_stage': 'started_booking'},
+        )
         .catchError((_) => null),
   );
 }

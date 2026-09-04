@@ -57,8 +57,8 @@ import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
  * الحرفي (نفس التعريف موثّق في تعليق `schedule_slot_id` جوّه `orders.service.ts`)، لكن الفحص
  * القديم كان بيمنع بس تركيبة `booking_mode=emergency` + `schedule_slot_id` — الحقل الحر
  * `scheduled_at` (بلا سلوت محدد) كان بيعدّي عادي مع الطوارئ، فيتسجّل طلب `orderType=EMERGENCY`
- * بموعد مستقبلي، وبعدين `computeDispatchDeferredUntil()` بيؤجّل بث المطابقة فعليًا لساعات —
- * عميل دافع رسوم طوارئ إضافية بينتظر بلا استجابة "فورية" فعلية، عكس تعريف الوضع تمامًا.
+ * بموعد مستقبلي، وبعدين آلية تأجيل ADR-0009 (اتشالت في docs/08 §131) بتؤجّل بث المطابقة فعليًا
+ * لساعات — عميل دافع رسوم طوارئ إضافية بينتظر بلا استجابة "فورية"، عكس تعريف الوضع تمامًا.
  */
 describe('OrdersService.create() — اشتقاق الاستعجال من التاريخ (ADR-0048، كان Script 7 Phase 7)', () => {
   let dataSource: DataSource;
