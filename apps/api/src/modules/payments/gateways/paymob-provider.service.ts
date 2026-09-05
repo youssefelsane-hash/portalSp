@@ -20,7 +20,11 @@ import {
   WebhookVerificationResult,
 } from './payment-provider.interface';
 import { SettingsService } from '../../settings/settings.service';
-import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../../common/events/setting-updated.event';
+import {
+  SETTING_RELOAD_REQUIRED_EVENT,
+  SETTING_UPDATED_EVENT,
+  SettingUpdatedEvent,
+} from '../../../common/events/setting-updated.event';
 
 const PAYMOB_SETTING_PREFIX = 'payments.paymob.';
 
@@ -165,7 +169,10 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
     if (this.settingsService) await this.reloadFromSettings();
   }
 
+  // الحدث التاني (تدقيق A-3) = التغيير حصل على نسخة تانية. إعادة التحميل idempotent وأثرها
+  // في ذاكرة النسخة دي بس، فالاشتراك في الاتنين آمن ومقصود.
   @OnEvent(SETTING_UPDATED_EVENT)
+  @OnEvent(SETTING_RELOAD_REQUIRED_EVENT)
   async handleSettingUpdated(event: SettingUpdatedEvent): Promise<void> {
     if (!event.key.startsWith(PAYMOB_SETTING_PREFIX)) return;
     await this.reloadFromSettings();
