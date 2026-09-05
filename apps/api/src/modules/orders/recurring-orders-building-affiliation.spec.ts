@@ -314,6 +314,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
       ordersService,
       events,
       buildingsService,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
   });
 

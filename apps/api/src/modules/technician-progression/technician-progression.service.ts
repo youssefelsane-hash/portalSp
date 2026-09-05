@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -39,6 +40,7 @@ export class TechnicianProgressionService implements OnModuleInit, OnModuleDestr
     private readonly calculation: TechnicianProgressionCalculationService,
     private readonly auditLog: AuditLogService,
     private readonly notifications: NotificationsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -59,9 +61,17 @@ export class TechnicianProgressionService implements OnModuleInit, OnModuleDestr
    * (بَقّة تعافي الـWorker بعد انقطاع Redis طويل، موثّقة في `technicians/README.md`).
    */
   onModuleInit(): void {
-    this.firstRunTimer = setTimeout(() => void this.runScheduledSweep(), PROGRESSION_FIRST_RUN_DELAY_MS);
+    // التشغيل الأول جزء من الجدولة زي أي دورة تانية — فمقفول برضه، وإلا كل نسخة بتشغّله عند
+    // الإقلاع في نفس اللحظة تقريبًا (تدقيق A-2).
+    this.firstRunTimer = setTimeout(
+      () => void runExclusiveSweep(this.dataSource, 'technician-progression', () => this.runScheduledSweep(), this.logger),
+      PROGRESSION_FIRST_RUN_DELAY_MS,
+    );
     this.firstRunTimer.unref?.();
-    this.timer = setInterval(() => void this.runScheduledSweep(), PROGRESSION_SWEEP_INTERVAL_MS);
+    this.timer = setInterval(() => {
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس بتشغّل الدورة دي عبر كل الـinstances.
+      void runExclusiveSweep(this.dataSource, 'technician-progression', () => this.runScheduledSweep(), this.logger);
+    }, PROGRESSION_SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }
 

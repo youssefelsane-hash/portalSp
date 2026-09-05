@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { isSuperAdmin, loadEffectivePermissionNames } from '../../common/rbac/effective-permissions';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User, UserType } from '../auth/entities/user.entity';
 import { SecurityEventSeverity, SecurityEventType } from '../security/entities/security-event.entity';
@@ -50,15 +51,8 @@ export class PermissionsService {
     private readonly securityEvents: SecurityEventsService,
   ) {}
 
-  private async isSuperAdminUser(userId: string): Promise<boolean> {
-    const rows = await this.dataSource.query<{ exists: boolean }[]>(
-      `SELECT EXISTS (
-         SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-         WHERE ur.user_id = $1 AND r.is_super_admin = true AND r.is_active = true AND r.deleted_at IS NULL
-       ) AS exists`,
-      [userId],
-    );
-    return rows[0]?.exists === true;
+  private isSuperAdminUser(userId: string): Promise<boolean> {
+    return isSuperAdmin(this.dataSource, userId);
   }
 
   private async getRolePermissionNames(roleId: string): Promise<string[]> {
@@ -163,23 +157,7 @@ export class PermissionsService {
       const all = await this.permissionsRepo.find();
       return new Set(all.map((p) => p.name));
     }
-    const rows = await this.dataSource.query<{ name: string }[]>(
-      `WITH granted AS (
-         SELECT p.name, p.resource
-         FROM user_roles ur
-         JOIN role_permissions rp ON rp.role_id = ur.role_id
-         JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
-         JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active = true
-         WHERE ur.user_id = $1
-       )
-       SELECT name FROM granted
-       UNION
-       SELECT v.name FROM permissions v
-       WHERE v.action = 'view' AND v.deleted_at IS NULL
-         AND v.resource IN (SELECT resource FROM granted)`,
-      [userId],
-    );
-    return new Set(rows.map((r) => r.name));
+    return loadEffectivePermissionNames(this.dataSource, userId);
   }
 
   /**

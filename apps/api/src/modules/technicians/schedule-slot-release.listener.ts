@@ -1,4 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { OrderStatus } from '../orders/entities/order.entity';
@@ -24,13 +27,16 @@ export class ScheduleSlotReleaseListener implements OnModuleInit, OnModuleDestro
   private readonly logger = new Logger(ScheduleSlotReleaseListener.name);
   private timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly scheduleService: TechnicianScheduleService) {}
+  constructor(
+    private readonly scheduleService: TechnicianScheduleService,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((error) =>
-        this.logger.error('فشل فحص تحرير مواعيد الطلبات', error instanceof Error ? error.stack : error),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'schedule-slot-release', () => this.sweep(), this.logger);
     }, 60_000);
     this.timer.unref?.();
   }

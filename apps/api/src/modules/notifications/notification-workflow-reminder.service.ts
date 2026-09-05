@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, LessThanOrEqual, Repository } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
@@ -51,7 +52,9 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) => this.logger.error('فشل sweep تذكيرات الإشعارات', err instanceof Error ? err.stack : err));
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'notification-workflow-reminder', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
   }
 

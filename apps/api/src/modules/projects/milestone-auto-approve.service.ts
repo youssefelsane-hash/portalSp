@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProjectMilestone } from './entities/project-milestone.entity';
@@ -24,8 +25,9 @@ export class MilestoneAutoApproveService implements OnModuleInit, OnModuleDestro
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) =>
-        this.logger.error('فشل sweep الموافقة التلقائية للمراحل', err instanceof Error ? err.stack : err));
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'milestone-auto-approve', () => this.sweep(), this.logger);
     }, 60_000);
     this.timer.unref?.();
   }

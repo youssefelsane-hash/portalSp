@@ -41,6 +41,7 @@ describe('QueueWatchdogService — تدرّج خطورة الطوابير (تد�
       queues.customerStats,
       queues.technicianStats,
       settingsStub as never,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
     built.push(service);
     return service;

@@ -1,4 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
 import { ReferralsService } from './referrals.service';
 
@@ -12,13 +15,14 @@ export class ReferralRecoveryService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly referralsService: ReferralsService,
     private readonly settingsService: SettingsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) =>
-        this.logger.error('فشل استرداد أحداث الترشيح', err instanceof Error ? err.stack : err),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'referral-recovery', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

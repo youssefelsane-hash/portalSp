@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { ChatService } from './chat.service';
 
@@ -22,13 +23,14 @@ export class OrderChatRecoveryService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly chatService: ChatService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((error) =>
-        this.logger.error('فشل reconciliation شات الطلبات', error instanceof Error ? error.stack : error),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'order-chat-recovery', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

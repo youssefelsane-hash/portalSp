@@ -84,7 +84,8 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
       {} as never,
       { create } as never,
       { emit: jest.fn() } as never,
-      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة
+      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
   }
 

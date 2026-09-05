@@ -21,6 +21,14 @@ describe('TechnicianProgressionService — جدولة التقييم التلق�
       firstRunTimer: null,
       sweepRunning: false,
       calculateAll,
+      // الجدولة بقت بتعدّي على قفل استشاري (تدقيق A-2) — الـstub بيقول «القفل معايا».
+      dataSource: {
+        createQueryRunner: () => ({
+          connect: async () => undefined,
+          query: async () => [{ locked: true }],
+          release: async () => undefined,
+        }),
+      },
     });
     return service;
   }
@@ -38,6 +46,8 @@ describe('TechnicianProgressionService — جدولة التقييم التلق�
     // مفيش نداء قبل ما الدقيقة تعدّي — مش عايزين حِمل على الإقلاع نفسه.
     expect(calculateAll).not.toHaveBeenCalled();
     jest.advanceTimersByTime(60_000);
+    await jest.runAllTicks();
+    await Promise.resolve();
     expect(calculateAll).toHaveBeenCalledTimes(1);
 
     // `advanceTimersByTime` بيحرّك المؤقتات بس ومابيفرّغش الـmicrotasks، فقفل `sweepRunning`
@@ -47,6 +57,8 @@ describe('TechnicianProgressionService — جدولة التقييم التلق�
     await Promise.resolve();
 
     jest.advanceTimersByTime(6 * 60 * 60 * 1000);
+    // القفل الاستشاري بيضيف خطوات async قبل النداء الفعلي — لازم نفرّغ الـmicrotasks تاني.
+    for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(calculateAll).toHaveBeenCalledTimes(2);
 
     service.onModuleDestroy();
