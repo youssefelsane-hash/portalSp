@@ -10,7 +10,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import {
@@ -27,6 +27,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { TechniciansService } from '../technicians/technicians.service';
 import { Order } from './entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
+import { OrdersService } from './orders.service';
 import { JoinTrackingOrderDto, TechnicianLocationEventDto } from './dto/tracking-socket.dto';
 
 interface AuthenticatedSocket extends Socket {
@@ -48,6 +49,7 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
+    private readonly ordersService: OrdersService,
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly sessions: RealtimeSessionRegistry,
     private readonly events: EventEmitter2,
@@ -124,9 +126,16 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     const isCustomer =
       payload.userType === UserType.CUSTOMER &&
       (await this.customerProfiles.findByUserIdOrThrow(userId).catch(() => null))?.id === order.customerId;
+    // كان بيقارن `profile.id === order.technicianId` بس — يعني **قائد الطلب لوحده**. في طلب فريق
+    // من تلات أفراد، العضوين التانيين كانوا بياخدوا «الطلب ده مش بتاعك» على الطلب اللي هما شغّالين
+    // عليه فعلاً، فمايشوفوش أي تحديث حالة لحظي ولا موقع القائد. الانتماء بقى بيتسأل من مصدر واحد
+    // (`isTechnicianAssignedToOrder`) بيشمل القائد وطاقمه.
+    const technicianProfile =
+      payload.userType === UserType.TECHNICIAN
+        ? await this.techniciansService.findByUserIdOrThrow(userId).catch(() => null)
+        : null;
     const isTechnician =
-      payload.userType === UserType.TECHNICIAN &&
-      (await this.techniciansService.findByUserIdOrThrow(userId).catch(() => null))?.id === order.technicianId;
+      technicianProfile !== null && (await this.ordersService.isTechnicianAssignedToOrder(technicianProfile.id, order));
 
     if (!isCustomer && !isTechnician) {
       client.emit('error', { code: 'AUTH_001', message: 'الطلب ده مش بتاعك' });
@@ -161,25 +170,23 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     const profile = await this.techniciansService.findByUserIdOrThrow(payload.sub);
     await this.techniciansService.updateLocation(payload.sub, body);
 
-    // بَقّة حقيقية اتلقطت (docs/08 §165، بعد ADR-0017): نفس بَقّة orders.service.ts's
-    // findActiveForTechnician() بالحرف — فني ممكن يكون عنده طلب ASAP شغال فعليًا وطلب مجدول
-    // مستقبلي `ACCEPTED` (مؤكّد تلقائيًا) في نفس الوقت. من غير الفلتر ده، findOne كان ممكن
-    // يرجّع الطلب المجدول الغلط ويبعت تحديث الموقع لغرفة الطلب اللي مش شغال عليه فعليًا دلوقتي.
-    const now = new Date();
-    const activeOrder = await this.orders.findOne({
-      where: [
-        { technicianId: profile.id, orderStatus: In(ACTIVE_TRACKING_STATUSES), scheduledAt: IsNull() },
-        { technicianId: profile.id, orderStatus: In(ACTIVE_TRACKING_STATUSES), scheduledAt: LessThanOrEqual(now) },
-      ],
-    });
-    if (!activeOrder) return;
+    // تعريف «الطلب اللي الفني في طريقه ليه دلوقتي» بقى في `OrdersService` مصدرًا واحدًا
+    // (`findOrdersInTransitForTechnician`) بدل نسخة تانية هنا كانت بتختلف عن نسخة الخدمة في
+    // الشرط **وفي الحتمية**: كانت `findOne` بلا `ORDER BY` على مجموعة ممكن ترجّع أكتر من صف بعد
+    // ADR-0070 (الفني بقى يقدر يمسك أكتر من طلب نشط في نفس اليوم)، فـPostgres كان بيختار صف
+    // بالعشوائي. تفاصيل السبب والنطاق في الدالة نفسها.
+    const inTransit = await this.ordersService.findOrdersInTransitForTechnician(profile.id);
+    if (inTransit.length === 0) return;
 
-    this.server.to(`order:${activeOrder.id}`).emit('order:location_updated', {
-      order_id: activeOrder.id,
-      latitude: body.latitude,
-      longitude: body.longitude,
-      observed_at: new Date().toISOString(),
-    });
+    const observedAt = new Date().toISOString();
+    for (const order of inTransit) {
+      this.server.to(`order:${order.id}`).emit('order:location_updated', {
+        order_id: order.id,
+        latitude: body.latitude,
+        longitude: body.longitude,
+        observed_at: observedAt,
+      });
+    }
   }
 
   // بث لحظي لأي تغيير حالة طلب (docs/08 §15) — كانت فجوة موثّقة صراحة: العميل بيوافق/يرفض عرض

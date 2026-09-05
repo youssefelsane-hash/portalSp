@@ -33,8 +33,16 @@ import '../../design/order_number_title.dart';
 // (assertPayable) أصلاً بيسمح بالتحصيل للحالة دي.
 const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment', 'pending_payment'};
 
-// نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
-const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
+// **زرار «تتبّع الفني لحظياً» بيظهر في `technician_on_way` بس** (تدقيق L-4).
+//
+// كان بيظهر كمان في `accepted`/`technician_arrived`/`in_progress`، وفي الحالات دي الباك-إند
+// مابيبعتش أي إحداثيات — لا قبل ما الفني يتحرّك ولا بعد ما يوصل ويدخل يشتغل (بث موقعه وهو جوّه
+// بيت العميل تسريب خصوصية بلا فايدة). النتيجة كانت شاشة بتفضل على «متصل — في انتظار تحديث موقع
+// الفني» للأبد: زرار بيوعد بحاجة مستحيلة تحصل.
+//
+// القيمة دي لازم تفضل مطابقة لشرط `OrdersService.findOrdersInTransitForTechnician()` — هو
+// المصدر الوحيد اللي بيقرّر البث بيروح لمين.
+const Set<String> _liveTrackingStatuses = {'technician_on_way'};
 
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
@@ -1137,7 +1145,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
-                      if (_activeTrackingStatuses.contains(order.orderStatus)) ...[
+                      if (_liveTrackingStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
                           onPressed: () => Navigator.of(context).push(

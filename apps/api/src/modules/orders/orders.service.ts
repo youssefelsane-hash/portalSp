@@ -3603,6 +3603,53 @@ export class OrdersService {
   }
 
   /**
+   * الطلبات اللي الفني **في طريقه ليها فعليًا دلوقتي** — المصدر الوحيد اللي بث الموقع اللحظي
+   * (`OrderTrackingGateway.handleLocation`) بيعتمد عليه.
+   *
+   * **ليه `TECHNICIAN_ON_WAY` بس، مش كل الحالات النشطة؟** التتبّع اللحظي ليه معنى واحد: «الفني
+   * جاي، هو فين دلوقتي». بعد `TECHNICIAN_ARRIVED` الفني واقف عند عنوان العميل نفسه، وبعد
+   * `IN_PROGRESS` هو بيشتغل جوّه البيت — بث إحداثياته وقتها **تسريب خصوصية بلا أي فايدة** (العميل
+   * عارف هو فين، هو عنده). فالنطاق الأضيق هنا مش تقييد، ده التعريف الصح.
+   *
+   * **وليه قايمة مش `findOne`؟** ADR-0070 فتح للفني إنه يمسك أكتر من طلب نشط في نفس اليوم. الكود
+   * القديم كان `findOne` **بلا `ORDER BY`** على مجموعة ممكن ترجّع أكتر من صف، يعني Postgres
+   * بيختار صف بالعشوائي (حسب خطة التنفيذ) — فعميل الطلب A كان ممكن يشوف الفني بيتحرّك وهو رايح
+   * لـB، أو مايشوفش حاجة خالص. القايمة بترتيب حتمي بتشيل العشوائية من أصلها: البث بيروح لكل غرفة
+   * الفني فعلاً في طريقه ليها.
+   *
+   * بياخد **معرّف بروفايل الفني** (مش `userId`) لأن المنادي الوحيد (الـgateway) عنده البروفايل
+   * أصلاً — تفادي استعلام زيادة على كل تحديث موقع (بيوصل ١٠ في الـ١٠ ثواني لكل فني).
+   */
+  async findOrdersInTransitForTechnician(technicianProfileId: string): Promise<Order[]> {
+    return this.orders.find({
+      where: { technicianId: technicianProfileId, orderStatus: OrderStatus.TECHNICIAN_ON_WAY },
+      order: { scheduledAt: 'ASC', id: 'ASC' },
+    });
+  }
+
+  /**
+   * «الفني ده على الطلب ده؟» — قائدًا أو عضو طاقم. المصدر الوحيد لسؤال الانتماء ده.
+   *
+   * كان كل مستهلك بيسأله بطريقته: `order.technicianId === profile.id` بس (الـgateway)، أو
+   * `order_team_members` بس (`listTeamAssignedForTechnician`). النتيجة إن عضو الطاقم في طلب فريق
+   * كان بياخد «الطلب ده مش بتاعك» لما يحاول يتابع الطلب اللي هو نفسه شغّال عليه.
+   *
+   * `orders.technician_id` = القائد، و`order_team_members` = باقي الطاقم (مساعدين وأعضاء) —
+   * الاتنين مع بعض هما «طاقم الطلب» الكامل.
+   */
+  async isTechnicianAssignedToOrder(technicianProfileId: string, order: Order): Promise<boolean> {
+    if (order.technicianId === technicianProfileId) return true;
+    const [row] = await this.orders.manager.query<{ exists: boolean }[]>(
+      `SELECT EXISTS(
+         SELECT 1 FROM order_team_members
+         WHERE order_id = $1 AND technician_id = $2
+       ) AS exists`,
+      [order.id, technicianProfileId],
+    );
+    return row?.exists === true;
+  }
+
+  /**
    * مقارنة "يوم الجدولة" بيوم النهاردة **بتوقيت مصر**، في SQL مباشرة (الجدولة باليوم مش بالساعة،
    * ADR-0018 §2). عمداً مش بحساب حدود اليوم في JS: أول نسخة هنا كانت بتحسب بداية اليوم بـ
    * `toLocaleString('en-US', {timeZone:'Africa/Cairo'})` + `setHours(0,0,0,0)` — وده بياخد
