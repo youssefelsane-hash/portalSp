@@ -103,7 +103,18 @@ export class NotificationsService {
     const configured = (config?.defaultChannels ?? []).filter((value): value is NotificationChannel =>
       Object.values(NotificationChannel).includes(value as NotificationChannel),
     );
-    return configured.length > 0 ? Array.from(new Set(configured)) : [NotificationChannel.IN_APP];
+    // **`in_app` بتتضاف دايمًا، مابتتستبدلش.** التوثيق فوق `notifyMultiChannel` بيقول الضمان ده
+    // بالحرف («in_app مضمون دايمًا + push/sms إضافي»)، بس مكانش متنفّذ في أي مكان: الإعدادات
+    // كانت **بديل** للقنوات مش إضافة عليها.
+    //
+    // الأثر الحقيقي اتقاس على قاعدة التطوير: ٣٦ نوع من ٣٧ كانوا `["push"]` بالظبط — من ضمنهم
+    // `order_accepted` و`order_awaiting_quote_approval`. يعني صفر صف `in_app` لأي حدث تقريبًا:
+    // صندوق الإشعارات في التطبيق فاضي، والـpush بيفشل في أي بيئة بلا مزوّد، فالإشعار بيختفي
+    // من الوجود. (بلاغ المالك: «حتى لما الطلب بيتقبل ما لهاش أي أصل».)
+    //
+    // القاعدة: `in_app` **سجل دائم** جوّه المنتج، وباقي القنوات **توصيل** فوقه. الأدمن يزوّد
+    // التوصيل، ومايشيلش السجل.
+    return Array.from(new Set([...configured, NotificationChannel.IN_APP])).sort();
   }
 
   /**

@@ -23,6 +23,7 @@ import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
+import { serviceBookabilityIssues } from './service-bookability';
 import { AssessmentFeeCreditMode, AssessmentRoutePolicy, PriceCertaintyMode, PricingModel, Service } from './entities/service.entity';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
@@ -449,6 +450,34 @@ export class AdminCatalogService {
         HttpStatus.BAD_REQUEST,
       );
     }
+
+    this.assertCustomerCanBook(service);
+  }
+
+  /**
+   * **الشبكة الأخيرة قبل الحفظ: هل الإعدادات دي بتسيب للعميل طريق يحجز بيه؟**
+   *
+   * الفحوص اللي فوق كل واحد بيغطي تناقض بعينه في سياسة التقييم. الفحص ده بيغطي السؤال الأشمل
+   * اللي المالك طلبه بالحرف: «السيستم يشوف هل الإعدادات دي هترفليكت عند اليوزر بـerror ولا لأ»
+   * — بما فيه أبعاد مكانش عليها أي تحقق خالص (شكل التنفيذ فردي/فريق، ووقت الحجز جدولة/طوارئ).
+   *
+   * الأبعاد دي كانت بتتحفظ بلا أي اعتراض، والنتيجة عند العميل: خدمة ظاهرة في الكتالوج وبتترفض
+   * عند التأكيد، أو أسوأ — بتعدّي بوضع الأدمن قافله بنفسه.
+   */
+  private assertCustomerCanBook(service: Service): void {
+    const issues = serviceBookabilityIssues({
+      pricingModel: service.pricingModel,
+      priceCertaintyMode: service.priceCertaintyMode,
+      assessmentRoutePolicy: service.assessmentRoutePolicy,
+      remoteAssessmentEnabled: service.remoteAssessmentEnabled,
+      onsiteAssessmentEnabled: service.onsiteAssessmentEnabled,
+      allowsIndividual: service.allowsIndividual,
+      allowsTeam: service.allowsTeam,
+      allowsEmergency: service.allowsEmergency,
+      allowsScheduling: service.allowsScheduling,
+    });
+    if (issues.length === 0) return;
+    throw new ApiException(ErrorCode.VAL_001, issues.join(' · '), HttpStatus.BAD_REQUEST);
   }
 
   async updateService(adminUserId: string, id: string, dto: UpdateServiceDto, meta?: AuditActorMeta): Promise<Service> {
