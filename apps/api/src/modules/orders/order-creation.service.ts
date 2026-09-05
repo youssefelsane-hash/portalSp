@@ -48,7 +48,7 @@ import { assertNoScheduleOverlap } from './order-schedule-interval';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
-import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
@@ -740,6 +740,16 @@ export class OrderCreationService {
     const urgent = !recurringIdentity
       && !scheduleSlot
       && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    // الجهة التانية من نفس البوابة: الأدمن قافل الجدولة (`allows_scheduling = false`) والعميل
+    // اختار يوم جاي. كان إعداد ميت بالكامل — بيتحفظ وماليهوش أي أثر (اتأكد بفحص حي على الـ16
+    // تركيبة قدرات: كلها قبلت حجز «بكرة»).
+    if (!urgent && resolvedScheduledAtIso && !canAcceptScheduled(service)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     if (urgent && !canAcceptSameDay(service)) {
       // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
       // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).
@@ -1695,6 +1705,15 @@ export class OrderCreationService {
     const urgent = !dto.schedule_slot_id && isSameDayUrgent({ scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null });
     if (urgent && !canAcceptSameDay(service)) {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني', HttpStatus.BAD_REQUEST);
+    }
+    // نفس بوابة الجدولة اللي في `create()` — لازم تتفحص هنا كمان، وإلا المعاينة بتعدّي والتأكيد
+    // بيترفض: بالظبط الشكل اللي المالك بيشتكي منه («العميل بيوصل لآخر خطوة وياخد error»).
+    if (!urgent && dto.scheduled_at && !canAcceptScheduled(service)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (!address.cityId) {

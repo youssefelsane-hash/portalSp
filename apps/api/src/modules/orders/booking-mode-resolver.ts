@@ -103,3 +103,17 @@ export function resolveBookingMode(input: BookingModeInput): BookingMode {
 export function canAcceptSameDay(service: ServiceBookingCapabilities): boolean {
   return service.allowsEmergency;
 }
+
+/**
+ * هل نقدر نقبل حجز ليوم جاي للخدمة دي؟
+ *
+ * **`allows_scheduling` كانت إعداد ميت**: الأدمن يقفلها من شاشة الخدمة والعميل يفضل يحجز
+ * مواعيد مستقبلية عادي — اتأكد بفحص حي على المصفوفة كلها (16 تركيبة قدرات، كلها قبلت حجز
+ * «بكرة»). إعداد بيتحفظ وماليهوش أي أثر أسوأ من إعداد مش موجود: الأدمن مطمّن إنه قفل حاجة
+ * وهي مفتوحة.
+ *
+ * نفس منطق `canAcceptSameDay` بالحرف، على الجهة التانية من الزمن.
+ */
+export function canAcceptScheduled(service: { allowsScheduling: boolean }): boolean {
+  return service.allowsScheduling;
+}
