@@ -83,13 +83,15 @@ describe('OrdersService.continueWorkAnotherDay (ADR-0047)', () => {
       settingsService: { getNumber: async (_k: string, fallback: number) => fallback },
       techniciansService: { findByUserIdOrThrow: async () => ({ id: ids.tech }) },
       customerProfiles: { findByProfileIdOrThrow: async () => ({ userId: ids.custUser }) },
-      // الإشعار الدائم بيتكتب جوّه نفس الترانزاكشن — بنموّهه هنا عشان نعزل السلوك اللي
-      // بنختبره (الزيارات + الجدولة)، والتحقق من وصول الإشعار له اختباراته الخاصة.
-      insertDurableInAppNotification: async () => undefined,
     });
   });
 
   afterAll(async () => {
+    // الإشعار الدائم بيتكتب فعلاً جوّه نفس الترانزاكشن (ADR-0047) — الاختبار ده كان بيموّه
+    // الدالة الخاصة اللي بتكتبه، وده كان بيربطه **باسم دالة داخلية** في `OrdersService`. بعد
+    // تقسيم الخدمة (تدقيق A-1) بقت دالة مستقلة، فالتمويه ماكانش هيشتغل — والأصح إن الاختبار
+    // يسيب السلوك الحقيقي يحصل وينضّف وراه، مش يعرف عن دواخل الكود.
+    await q(`DELETE FROM notifications WHERE reference_id = $1`, [ids.order]);
     await q(`DELETE FROM order_work_sessions WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
     await q(

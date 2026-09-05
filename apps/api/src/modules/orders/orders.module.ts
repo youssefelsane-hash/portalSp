@@ -25,6 +25,7 @@ import { TechnicianOrderExecutionController } from './technician-order-execution
 import { RecurringOrdersController } from './recurring-orders.controller';
 import { OrderDisputeService } from './order-dispute.service';
 import { OrderQueriesService } from './order-queries.service';
+import { OrderTechnicianOpsService } from './order-technician-ops.service';
 import { OrderRescheduleService } from './order-reschedule.service';
 import { OrdersService } from './orders.service';
 import { PostQuoteProviderSelectionService } from './post-quote-provider-selection.service';
@@ -102,6 +103,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderQueriesService,
     OrderRescheduleService,
     OrderDisputeService,
+    OrderTechnicianOpsService,
     PostQuoteProviderSelectionService,
     OrderAutoCancelService,
     CrewShortageEscalationService,
@@ -121,6 +123,6 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     BookingMatchPreviewService,
     storageServiceProvider,
   ],
-  exports: [OrdersService, OrderQueriesService, OrderRescheduleService, OrderDisputeService],
+  exports: [OrdersService, OrderQueriesService, OrderRescheduleService, OrderDisputeService, OrderTechnicianOpsService],
 })
 export class OrdersModule {}
