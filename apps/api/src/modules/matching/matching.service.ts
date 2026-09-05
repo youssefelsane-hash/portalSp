@@ -251,6 +251,13 @@ export class MatchingService {
     previewLoad?: CandidateOperationalLoad,
   ): Promise<EligibleTechnicianRow[]> {
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+    // **بث الطوارئ للكل** (طلب مالك صريح 2026-09-05) — نفس محرك التوزيع بنفس كل إعداداته
+    // (حجم الدفعة، المهلة، عدد الجولات، وزن المسافة)، والفرق **الوحيد** إنه بيتجاهل جدول
+    // الفني: بيوصل العرض لكل مؤهّل قريب سواء عنده شغل أو حاطط إجازة، والفني يقبل أو يرفض.
+    // مقصور على طلبات الطوارئ، ومقفول افتراضيًا — السلوك الحالي مابيتغيّرش بلا قرار أدمن.
+    const ignoreScheduleEntirely =
+      order.bookingMode === BookingMode.EMERGENCY &&
+      (await this.settingsService.getBoolean('matching.emergency_ignore_schedule', false));
     const workloadBalanceWeight = await this.settingsService.getNumber(
       'matching.workload_balance_weight',
       WORKLOAD_BALANCE_WEIGHT_FALLBACK,
@@ -396,6 +403,7 @@ export class MatchingService {
             preciseDurationHoursExpr: 'COALESCE($27::numeric / 60.0, (SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid))',
             dailyCapacityMinutesParam: '$13',
             ignoreActiveOrderConflict,
+            ignoreScheduleEntirely,
           })}
       ) company_capacity ON company.id IS NOT NULL
       -- ADR-0018 §7 — حِمل الفني الحالي (عدد الطلبات النشطة عليه دلوقتي) لغرض موازنة التوزيع
@@ -492,6 +500,7 @@ export class MatchingService {
           preciseDurationHoursExpr: 'COALESCE($27::numeric / 60.0, (SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $4::uuid))',
           dailyCapacityMinutesParam: '$13',
           ignoreActiveOrderConflict,
+          ignoreScheduleEntirely,
         })}
       ORDER BY rank_score DESC,
                distance_km ASC
@@ -558,12 +567,14 @@ export class MatchingService {
     reason: LockedProviderLostReason,
   ): Promise<void> {
     const previousStatus = order.orderStatus;
-    // ADR-0066 §2 — كل مصدر قفل بيرجع لبابه: تذكرة الحجز ⇒ معاينة جديدة، اختيار بعد عرض السعر
-    // ⇒ قايمة مرشّحي نفس العرض. إرجاع طلب عرض سعر لـ«اعمل معاينة حجز» كان هيبقى طلب مستحيل.
-    const nextStatus =
-      order.providerLockSource === 'post_quote_selection'
-        ? OrderStatus.AWAITING_TECHNICIAN_SELECTION
-        : OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
+    // ADR-0066 §2 كان بيرجّع قفل «اختيار بعد عرض السعر» لـ`AWAITING_TECHNICIAN_SELECTION` عشان
+    // العميل يختار من قايمة مرشّحي نفس العرض. القاعدة دي اتشالت لما اتأكد إن **مفيش أي شاشة
+    // في تطبيق العميل ولا في الويب بتنده `provider-candidates`/`select-provider`** — يعني
+    // الحالة دي طريق مسدود: رسالة بتطلب فعل مافيش زرار يعمله.
+    //
+    // `AWAITING_TECHNICIAN_RESELECTION` بتعمل نفس الغرض بالظبط (إعادة توزيع) **وليها شاشة
+    // حقيقية** (`order_detail_screen.dart` → `request-rematch`)، فهي الوجهة الصح للحالتين.
+    const nextStatus = OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
     // ADR-0066 §4 — الفرق بتاع المنفّذ اللي ضاع بيترجّع قبل أي حاجة، وإلا حارس التحصيل المزدوج
     // هيمنع فرق المنفّذ الجديد ويسيب الطلب على سعر منفّذ مش هو اللي هينفّذ.
     const reversedPremiumCents = await this.levelPremiumService.reverseOnProviderLost(manager, order);

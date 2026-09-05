@@ -199,6 +199,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       ? ' — رسم التقييم ${_formatEgp(widget.service.remoteAssessmentFeeCents)}'
       : '';
 
+  /// نص مسار «المعاينة في الموقع» — **بيتبع إعداد الأدمن، مش نص ثابت**.
+  ///
+  /// بلاغ مالك (2026-09-05): «مكتوب للعميل إن الفني ممكن يتغيّر، على الرغم إن الأدمن ممكن
+  /// يكون حاطط إن الفني اللي عمل المعاينة هو اللي بينفّذ — ومنطقيًا ده اللي هيحصل في أغلب
+  /// الأحيان». النص اللي بيكذّب إعداد الأدمن أسوأ من نص عام: بيخوّف العميل من حاجة مش هتحصل.
+  ///
+  /// `onsite_assessor_executes_work` افتراضيها `true` في الباك-إند وفي الموديل هنا، فالحالة
+  /// الغالبة بتقول الحقيقة المطمئنة، والحالة التانية بتتقال صراحةً بدل ما تتلمّح.
+  String get _onsiteRouteSubtitle {
+    final fee = _formatEgp(_resolvedInspectionFeeCents);
+    final assessorExecutes = widget.service.onsiteAssessorExecutesWork;
+    return assessorExecutes
+        ? 'فني بيجي يشوف الشغل ويبعتلك السعر، وهو نفسه اللي بينفّذ بعد موافقتك — رسم المعاينة $fee'
+        : 'فني بيجي يشوف الشغل ويبعتلك السعر، والتنفيذ بيتوزّع بعد موافقتك — رسم المعاينة $fee';
+  }
+
   /// رسم المعاينة في الموقع **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
   ///
   /// بَقّة مالية حقيقية اتلقطت بلقطة شاشة مالك: كارت «معاينة في الموقع» كان بيعرض
@@ -1620,10 +1636,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         RadioListTile<bool>(
                           value: false,
                           title: const Text('معاينة في الموقع'),
-                          subtitle: Text(
-                            'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                            '${_formatEgp(_resolvedInspectionFeeCents)}',
-                          ),
+                          subtitle: Text(_onsiteRouteSubtitle),
                           secondary: const Icon(
                             Icons.home_repair_service_outlined,
                           ),
@@ -1650,8 +1663,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     subtitle: Text(
                       _remoteRouteAvailable
                           ? 'الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر$_remoteFeeSuffix'
-                          : 'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                                '${_formatEgp(_resolvedInspectionFeeCents)}',
+                          : _onsiteRouteSubtitle,
                     ),
                   ),
                 ),

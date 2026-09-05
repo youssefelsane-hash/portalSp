@@ -63,6 +63,9 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
         // ADR-0035 — nearTermRoundTimeoutSeconds() بتقرا قايمة الكادينس كنص، فالـstub لازم
         // يغطّي getString كمان مش getNumber بس (وإلا بترمي TypeError جوّه الترانزاكشن).
         getString: jest.fn(async (_key: string, fallback: string) => fallback),
+        // «بث الطوارئ للكل» (`matching.emergency_ignore_schedule`) بيتقرا هنا كمان — الافتراضي
+        // `false` معناه سلوك التوزيع في الاختبارات دي زي ما هو بالحرف.
+        getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
       } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
@@ -519,6 +522,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     const broadenSettingsService = {
       getNumber: jest.fn(async (key: string, fallback: number) => (key === 'matching.broaden_to_busy_after_round' ? 1 : fallback)),
       getString: jest.fn(async (_key: string, fallback: string) => fallback),
+      getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
     };
     const broadenQueueAdd = jest.fn().mockResolvedValue(undefined);
     const broadenMatchingService = new MatchingService(

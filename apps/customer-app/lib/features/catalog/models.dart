@@ -91,6 +91,11 @@ class CatalogService {
   final String priceCertaintyMode;
   final String assessmentRoutePolicy;
   final bool remoteAssessmentEnabled;
+  /// الفني اللي بيعاين هو نفسه اللي بينفّذ؟ (افتراضي true — والحالة الغالبة).
+  ///
+  /// من غيره التطبيق كان بيعرض «الفني ممكن يتغيّر» على طول، حتى والأدمن ضابط العكس
+  /// (بلاغ مالك 2026-09-05). نص بيكذّب إعداد الأدمن أسوأ من نص عام.
+  final bool onsiteAssessorExecutesWork;
   final bool onsiteAssessmentEnabled;
   final int remoteAssessmentFeeCents;
   final String? unitNameAr;
@@ -137,6 +142,7 @@ class CatalogService {
     this.priceCertaintyMode = 'confirmed_price',
     this.assessmentRoutePolicy = 'admin_triage',
     this.remoteAssessmentEnabled = false,
+    this.onsiteAssessorExecutesWork = true,
     this.onsiteAssessmentEnabled = false,
     this.remoteAssessmentFeeCents = 0,
     required this.basePriceCents,
@@ -174,6 +180,8 @@ class CatalogService {
     priceCertaintyMode: json['price_certainty_mode'] as String? ?? 'confirmed_price',
     assessmentRoutePolicy: json['assessment_route_policy'] as String? ?? 'admin_triage',
     remoteAssessmentEnabled: json['remote_assessment_enabled'] as bool? ?? false,
+    onsiteAssessorExecutesWork:
+        json['onsite_assessor_executes_work'] as bool? ?? true,
     onsiteAssessmentEnabled: json['onsite_assessment_enabled'] as bool? ?? false,
     remoteAssessmentFeeCents: json['remote_assessment_fee_cents'] as int? ?? 0,
     unitNameAr: json['unit_name_ar'] as String?,

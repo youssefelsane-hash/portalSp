@@ -239,7 +239,19 @@ export class NotificationsService {
     userId: string,
     params: ListNotificationsParams,
   ): Promise<{ items: Notification[]; meta: { page: number; per_page: number; total: number } }> {
-    const where = params.unreadOnly ? { userId, readAt: IsNull() } : { userId };
+    // **صندوق الإشعارات = صفوف `in_app` بس.**
+    //
+    // الصف بيتعمل لكل قناة على حدة (in_app سجل + push/sms/email توصيل). الاستعلام هنا مكانش
+    // بيفلتر بالقناة خالص، فكان بيرجّع الحدث الواحد مرة لكل قناة. الشكل ده مكانش باين قبل كده
+    // **بالصدفة**: ٣٦ نوع من ٣٧ كانوا `["push"]` بس، فمافيش غير صف واحد أصلاً. أول ما `in_app`
+    // رجعت (migration 0273) بقى كل إشعار بيبان **مرتين** في القايمة — بلاغ المالك مباشرةً.
+    //
+    // القاعدة الصح: صفوف التوصيل سجل تشغيلي (وصلت؟ فشلت ليه؟) مش عناصر في صندوق المستخدم.
+    const where = {
+      userId,
+      channel: NotificationChannel.IN_APP,
+      ...(params.unreadOnly ? { readAt: IsNull() } : {}),
+    };
 
     const [items, total] = await this.notifications.findAndCount({
       where,
@@ -282,8 +294,11 @@ export class NotificationsService {
     return result.affected ?? 0;
   }
 
+  /** نفس قاعدة `listMine` بالحرف — العدّاد لازم يطابق اللي المستخدم هيشوفه لما يفتح الصندوق. */
   unreadCount(userId: string): Promise<number> {
-    return this.notifications.count({ where: { userId, readAt: IsNull() } });
+    return this.notifications.count({
+      where: { userId, channel: NotificationChannel.IN_APP, readAt: IsNull() },
+    });
   }
 
   async markRead(userId: string, notificationId: string): Promise<Notification> {
@@ -311,7 +326,12 @@ export class NotificationsService {
       .createQueryBuilder()
       .update(Notification)
       .set({ readAt: new Date(), deliveryStatus: NotificationDeliveryStatus.READ })
-      .where('user_id = :userId AND read_at IS NULL', { userId })
+      // نفس فلتر القناة بتاع `listMine`/`unreadCount` — «علّم الكل كمقروء» لازم يمس اللي
+      // المستخدم شايفه بالظبط، مش صفوف التوصيل اللي هو مالوش علاقة بيها.
+      .where('user_id = :userId AND read_at IS NULL AND channel = :channel', {
+        userId,
+        channel: NotificationChannel.IN_APP,
+      })
       .returning(['workflowId'])
       .execute();
 

@@ -201,7 +201,16 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     });
     const auditStub = { record: async () => undefined } as never;
 
-    triage = new AssessmentTriageService(dataSource, catalogService, auditStub, emitter);
+    // الخدمة بقت بتمرّر رسم المعاينة من نقطة الدخول المالية الوحيدة (`increasePrice`) بدل ما
+    // تكتبه على الطلب وبس — فلازم تتبنى بالاعتماديتين الحقيقيتين، وإلا الاختبار مايشوفش الفلوس.
+    triage = new AssessmentTriageService(
+      dataSource,
+      catalogService,
+      auditStub,
+      emitter,
+      new OrderFinancialFinalizationService(),
+      { getBoolean: async (_key: string, fallback: boolean) => fallback } as never,
+    );
     quotes = new InspectionQuoteService(
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),
@@ -324,6 +333,37 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
       [orderId],
     );
     expect(notices).toEqual([{ notice_type: 'routed_to_onsite_assessment', message: 'الصور مش واضحة' }]);
+  });
+
+  /**
+   * **بلاغ مالك 2026-09-05: «الفلوس فيها مشكلة… الصنايعي بيبان عنده إن الفلوس كلها بتاعته،
+   * الشركة ما بتاخدش حاجة».**
+   *
+   * الطلب بيتعمل على مسار الصور بإجمالي **صفر**، والتحويل لمعاينة كان بيكتب
+   * `inspection_fee_cents` على الطلب وبس — من غير ما يمس `total_amount_cents` ولا
+   * `commissionable_base_cents`. يعني الرسم اللي العميل بيدفعه بيقع برّه النظام المالي: التسوية
+   * بتشتغل على صفر، وعمولة المنصّة صفر، ومحدش بياخد منه غير الفني.
+   */
+  it('رسم المعاينة بيدخل إجمالي الطلب ووعاء العمولة — مش بيتكتب على الطلب وبس', async () => {
+    const orderId = await seedOrder(OrderStatus.AWAITING_ADMIN_QUOTE, { assessmentType: 'remote' });
+    const [before] = (await dataSource.query(
+      `SELECT total_amount_cents, commissionable_base_cents FROM orders WHERE id = $1`,
+      [orderId],
+    )) as { total_amount_cents: number; commissionable_base_cents: number | null }[];
+    expect(Number(before.total_amount_cents)).toBe(0);
+
+    await triage.routeToOnsiteAssessment(ids.adminUser, orderId, 'الصور مش واضحة');
+
+    const [after] = (await dataSource.query(
+      `SELECT total_amount_cents, commissionable_base_cents, inspection_fee_cents FROM orders WHERE id = $1`,
+      [orderId],
+    )) as { total_amount_cents: number; commissionable_base_cents: number | null; inspection_fee_cents: number }[];
+
+    expect(Number(after.inspection_fee_cents)).toBe(7500);
+    // الرسم دخل الإجمالي — من غير ده التسوية بتشتغل على صفر وعمولة المنصّة بتطلع صفر.
+    expect(Number(after.total_amount_cents)).toBe(Number(before.total_amount_cents) + 7500);
+    // ودخل وعاء العمولة كمان (السياسة الافتراضية `include_inspection_fee = true`).
+    expect(Number(after.commissionable_base_cents)).toBe(Number(before.commissionable_base_cents ?? 0) + 7500);
   });
 
   it('التحويل لمعاينة من حالة غلط بيترفض', async () => {
