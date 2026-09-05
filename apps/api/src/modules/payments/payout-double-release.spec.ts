@@ -12,6 +12,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت واتصلحت في docs/08 §20 بند 9:
 // WalletsService.releaseReservation() (بتنادى من PayoutsService.adminReject()) كانت بتطرح
@@ -115,8 +116,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-      await q(
-        `DELETE FROM audit_logs
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs
          WHERE entity_type = 'payout'
            AND entity_id IN (SELECT id FROM payouts WHERE technician_id = $1)`,
         [ids.techProfile],

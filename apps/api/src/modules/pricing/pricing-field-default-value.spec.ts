@@ -7,6 +7,7 @@ import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
 import { ServicePricingRule, PricingRuleType } from './entities/service-pricing-rule.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — Script 6 Part 3/4 (بَقّة حقيقية: CHECKBOX اختياري متلمسش كان
 // بيكسر تقييم السعر بالكامل بـ400 بدل ما ياخد قيمته الافتراضية). سيناريوهات السكريبت الثلاثة
@@ -114,7 +115,7 @@ describe('PricingEngineService — قيمة افتراضية لحقل CHECKBOX �
     await q(`DELETE FROM service_pricing_evaluations WHERE service_id = ANY($1)`, [[ids.serviceImplicit, ids.serviceExplicit]]);
     await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1)`, [[ids.serviceImplicit, ids.serviceExplicit]]);
     await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1)`, [[ids.serviceImplicit, ids.serviceExplicit]]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.adminUser]);
     await q(`DELETE FROM services WHERE id = ANY($1)`, [[ids.serviceImplicit, ids.serviceExplicit]]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

@@ -8,6 +8,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
 import { EmployeeDailyActivity } from './entities/employee-daily-activity.entity';
 import { EmployeePresenceState, WorkforceActivityService } from './workforce-activity.service';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — Script 5 Part 2/4/6/12/16 (حالة الجلسة الحية، وقت العمل الفعلي،
 // إلغاء جلسة موظف بعينها). idle threshold بتتحط 2 ثانية بس هنا عبر إعداد حقيقي (settings) عشان
@@ -64,7 +65,7 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM employee_daily_activity WHERE user_id = $1`, [ids.user]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = $1 OR entity_id = $1`, [ids.user]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = $1 OR entity_id = $1`, [ids.user]);
     await q(`DELETE FROM refresh_tokens WHERE user_id = $1`, [ids.user]);
     await q(`DELETE FROM employee_profiles WHERE user_id = $1`, [ids.user]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.user]);

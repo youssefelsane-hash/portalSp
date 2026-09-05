@@ -6,6 +6,7 @@ import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32).
 // كانت فجوة موثّقة صراحة: 4 مصادر منفصلة (audit_logs, order_status_history, order_assignments,
@@ -143,7 +144,7 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       await q(`DELETE FROM technician_work_opportunities WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM technician_order_cancellations WHERE order_id = $1`, [ids.order]);
-      await q(`DELETE FROM audit_logs WHERE entity_id = $1`, [ids.order]);
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE entity_id = $1`, [ids.order]);
       await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
       await q(`DELETE FROM cancellation_reasons WHERE id = $1`, [ids.cancellationReason]);

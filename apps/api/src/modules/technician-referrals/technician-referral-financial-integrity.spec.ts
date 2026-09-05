@@ -12,6 +12,7 @@ import { TechnicianReferralBonus, TechnicianReferralBonusStatus } from './entiti
 import { TechnicianReferralsService } from './technician-referrals.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 describe('Technician referral Phase 4 financial integrity', () => {
   let dataSource: DataSource;
@@ -169,8 +170,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-      await q(
-        `DELETE FROM audit_logs
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs
          WHERE entity_type = 'technician_referral_bonus'
            AND entity_id IN (SELECT id FROM technician_referral_bonuses WHERE technician_id = $1)`,
         [ids.techProfile],

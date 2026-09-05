@@ -10,6 +10,7 @@ import { Referral, ReferralStatus } from './entities/referral.entity';
 import { ReferralsService } from './referrals.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   let dataSource: DataSource;
@@ -125,8 +126,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-      await q(
-        `DELETE FROM audit_logs
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs
          WHERE entity_type = 'promo_code'
            AND entity_id IN (SELECT id FROM promo_codes WHERE restricted_to_user_id = $1)`,
         [ids.referrer],

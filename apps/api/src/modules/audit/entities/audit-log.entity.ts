@@ -1,7 +1,9 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
 
-// مطابق لـ infra/migrations/0011_system.sql — REVOKE UPDATE, DELETE محطوطة على القاعدة نفسها،
-// يعني حتى لو حد غلط في الكود مقدرش يعدّل أو يمسح سجل تدقيق موجود.
+// مطابق لـ infra/migrations/0011_system.sql. الـ`REVOKE UPDATE, DELETE ... FROM PUBLIC` اللي هناك
+// **ماكانش بيحمي فعليًا**: التطبيق بيتصل بدور مالك الجداول، والمالك مابيتأثرش بالـREVOKE. الحماية
+// الحقيقية دلوقتي تريجر (migration 0271) بيرفض UPDATE/DELETE/TRUNCATE مهما كان الدور — ومخرجه
+// الوحيد `app.audit_purge` مقصور على أدوات الاختبار ومحروس بـ`audit-logs-immutability.spec.ts`.
 @Entity('audit_logs')
 export class AuditLog {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })

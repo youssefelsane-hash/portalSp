@@ -13,6 +13,7 @@ import { SettingsService } from '../settings/settings.service';
 import { SecurityEventNote } from './entities/security-event-note.entity';
 import { SecurityEvent, SecurityEventSeverity, SecurityEventStatus, SecurityEventType } from './entities/security-event.entity';
 import { SecurityEventsService } from './security-events.service';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — Script 5 Part 4/5/24 (تصعيد صلاحيات + نموذج Security Event).
 // سيناريو #1/#2 صراحة من السكريبت: "Call Center attempts to assign self Super Admin. Expected:
@@ -100,7 +101,7 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
     await q(`DELETE FROM security_events WHERE actor_user_id = ANY($1)`, [[ids.actorLow]]);
     await q(`DELETE FROM employee_daily_activity WHERE user_id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM user_roles WHERE user_id = ANY($1)`, [[ids.actorLow, ids.target]]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [[ids.actorLow, ids.target]]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM roles WHERE id = $1`, [ids.roleLow]);
     await q(`DELETE FROM permissions WHERE id = $1`, [ids.permAlpha]);
