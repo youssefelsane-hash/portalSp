@@ -7,6 +7,13 @@ export default () => ({
 
   database: {
     url: process.env.DATABASE_URL,
+    // **القيم دي كانت افتراضيات مخفية، وواحدة منها كانت سبب تعليق الـAPI بالكامل.**
+    // `poolMax` ١٠ هو نفس الافتراضي القديم — مقصود إننا ما نكبّرهوش، عشان تكبير الـpool
+    // بيداري استنزافًا مش بيمنعه. `acquireTimeoutMs` هو الجديد فعلاً: الافتراضي كان
+    // انتظارًا بلا نهاية.
+    poolMax: parseInt(process.env.DATABASE_POOL_MAX ?? '10', 10),
+    acquireTimeoutMs: parseInt(process.env.DATABASE_ACQUIRE_TIMEOUT_MS ?? '10000', 10),
+    idleTimeoutMs: parseInt(process.env.DATABASE_IDLE_TIMEOUT_MS ?? '30000', 10),
   },
 
   jwt: {

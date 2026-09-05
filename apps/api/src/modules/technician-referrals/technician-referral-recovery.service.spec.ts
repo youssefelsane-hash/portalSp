@@ -11,7 +11,9 @@ describe('TechnicianReferralRecoveryService', () => {
     service = new TechnicianReferralRecoveryService(
       { reconcilePendingBonuses } as never,
       { getNumber } as never,
-      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
+      // الإيجار (ADR-0076) بيتاخد باستعلام قصير على الـDataSource نفسه — مفيش `QueryRunner`
+      // محجوز. صف راجع = الإيجار اتاخد.
+      { query: async () => [{ id: 'lease' }] } as never,
     );
   });
 
@@ -30,8 +32,10 @@ describe('TechnicianReferralRecoveryService', () => {
     const timer = { unref: jest.fn() } as unknown as NodeJS.Timeout;
     // النوع بقى `void`: نداء المؤقّت بيرمي الدورة جوّه القفل ويرجع فورًا، مش بيرجّع وعد.
     let scheduledSweep: (() => void) | undefined;
+    // **أول تسجيل بس**: الدورة نفسها بتسجّل مؤقّت تاني (نبضة تجديد الإيجار) وهي شغّالة، ولو
+    // مسكناه هنا كنا هنستبدل دورة الخدمة بنبضة القفل ونختبر حاجة تانية خالص.
     jest.spyOn(global, 'setInterval').mockImplementation(((callback: () => void) => {
-      scheduledSweep = callback;
+      scheduledSweep ??= callback;
       return timer;
     }) as typeof setInterval);
     const clearIntervalSpy = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
@@ -43,6 +47,9 @@ describe('TechnicianReferralRecoveryService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(reconcilePendingBonuses).toHaveBeenCalledTimes(1);
 
+    // نبضة تجديد الإيجار بتتنضّف كمان في `finally` بتاع الدورة، فالمهم إن مؤقّت الخدمة نفسه
+    // اتنضّف — مش العدد الإجمالي.
+    clearIntervalSpy.mockClear();
     service.onModuleDestroy();
     expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
     expect(clearIntervalSpy).toHaveBeenCalledWith(timer);

@@ -169,15 +169,48 @@ else
   warn "الـAPI رد على /health بس رجّع صفر فئات — شوف $LOGS/api.log"
 fi
 
-( cd apps/admin && npm run dev >"$LOGS/admin.log" 2>&1 & )
-( cd apps/customer-web && npm run dev >"$LOGS/customer-web.log" 2>&1 & )
-printf "   بيستنى اللوحات"
-for i in $(seq 1 90); do
-  if curl -fsS -o /dev/null http://localhost:3001 2>/dev/null && curl -fsS -o /dev/null http://localhost:3002 2>/dev/null; then echo; break; fi
-  printf "."; sleep 1
-  [[ $i -eq 90 ]] && { echo; warn "اللوحات لسه بتقلع — شوف $LOGS/admin.log و $LOGS/customer-web.log"; }
-done
-ok "لوحة الإدارة :3001 · موقع العميل :3002"
+# **كل لوحة بتتفحص لوحدها، وفشلها بيتقال صراحةً.** الإصدار القديم كان بيستنى الاتنين مع بعض
+# وبعدين يطبع «✅ لوحة الإدارة · موقع العميل» **مهما حصل** — فلوحة ماتت وقت الإقلاع كانت بتتقال
+# كأنها نجحت، والمستخدم يروح يدوّر على المشكلة في مكان تاني خالص.
+#
+# **والـfallback**: Next 16 بيستخدم Turbopack افتراضيًا، وعلى ماك ARM بنسخة Node/بيئة معيّنة
+# بيرفض يشتغل خالص (وSWC بيقع على WASM). `next dev --webpack` بيشتغل عادي. مابنفرضش webpack
+# على الكل (Turbopack أسرع وشغّال على Linux/CI)، بس لو اللوحة ماقلعتش بنعيد تشغيلها بيه
+# **ونقول إننا عملنا كده** — بدل ما المستخدم يكتشف لوحده.
+start_panel() {
+  local dir="$1" port="$2" log="$3" label="$4"
+
+  ( cd "$dir" && npm run dev >"$log" 2>&1 & )
+  if wait_for_port "$port" 90; then ok "$label جاهزة على :$port"; return 0; fi
+
+  warn "$label ماقلعتش على :$port — بيجرّب webpack بدل Turbopack…"
+  local pids; pids=$(lsof -ti ":$port" 2>/dev/null || true)
+  [[ -n "$pids" ]] && kill -9 $pids 2>/dev/null || true
+  ( cd "$dir" && npm run dev:webpack >"$log" 2>&1 & )
+  if wait_for_port "$port" 90; then
+    ok "$label جاهزة على :$port ${DIM}(webpack — Turbopack مش شغّال في البيئة دي)${OFF}"
+    return 0
+  fi
+
+  echo "${RED}❌ $label مش قادرة تقلع على :$port بأي من الطريقتين.${OFF}" >&2
+  echo "${DIM}$(tail -20 "$log")${OFF}" >&2
+  return 1
+}
+
+wait_for_port() {
+  local port="$1" tries="$2" i
+  printf "   بيستنى :%s" "$port"
+  for i in $(seq 1 "$tries"); do
+    if curl -fsS -o /dev/null "http://localhost:$port" 2>/dev/null; then echo; return 0; fi
+    printf "."; sleep 1
+  done
+  echo
+  return 1
+}
+
+PANELS_OK=1
+start_panel apps/admin        3001 "$LOGS/admin.log"        "لوحة الإدارة" || PANELS_OK=0
+start_panel apps/customer-web 3002 "$LOGS/customer-web.log" "موقع العميل"  || PANELS_OK=0
 
 LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "<عنوان-الماك>")
 
@@ -190,9 +223,15 @@ TECH_PHONE=$(db_q "SELECT u.phone_number FROM users u JOIN technician_profiles t
 CUST_PHONE=$(db_q "SELECT phone_number FROM users WHERE user_type='customer' AND deleted_at IS NULL AND is_active ORDER BY created_at")
 : "${ADMIN_PHONE:=—}"; : "${TECH_PHONE:=—}"; : "${CUST_PHONE:=—}"
 
+if [[ "$PANELS_OK" -eq 1 ]]; then
+  HEADLINE="${GREEN}═══ كله شغّال ═══${OFF}"
+else
+  HEADLINE="${YELLOW}═══ الـAPI شغّال — وفيه لوحة ماقلعتش (شوف الرسالة فوق) ═══${OFF}"
+fi
+
 cat <<EOF
 
-${GREEN}═══ كله شغّال ═══${OFF}
+$HEADLINE
 
   لوحة الإدارة    http://localhost:3001
   موقع العميل     http://localhost:3002
