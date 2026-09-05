@@ -70,6 +70,15 @@ jobs:
         env:
           DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
 
+      # نظافة مخطّط القاعدة **بعد** تطبيق الـmigrations (لازم القاعدة تكون في حالتها النهائية).
+      # بيمنع رجوع تلات فئات اتلقطوا في التدقيق الشامل ومحدش كان شايفهم: مفتاح أجنبي بلا فهرس
+      # (DELETE على الأب = seq scan على الابن كله)، فهرس مكرّر، ونوع enum يتيم. الفئات دي
+      # اتراكمت بصمت لأن مفيش اختبار ولا لينت بيشوف المخطّط أصلاً.
+      - name: فحص نظافة مخطّط قاعدة البيانات
+        run: node scripts/check-db-hygiene.js
+        env:
+          DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
+
       - name: TypeScript typecheck
         working-directory: apps/api
         run: npx tsc --noEmit
