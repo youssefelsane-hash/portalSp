@@ -99,18 +99,16 @@ DATABASE_URL="$DB_URL" node infra/migrations/migrate.js >>"$LOGS/migrate.log" 2>
 applied=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null || echo 0)
 ok "$applied migration متطبّقة"
 
-# ── 6) فحص البيانات — ده سبب «الكروت الرمادية» الأشهر ──────────────────────────
-step "٦/٧ — بيتأكد إن فيه بيانات فعلاً"
+# ── 6) بيانات التشغيل — ده سبب «الكروت الرمادية» الحقيقي ───────────────────────
+# قاعدة نضيفة بعد الـmigrations فيها فئات وخدمات، بس **صفر مدن وصفر نطاقات خدمة وصفر حساب
+# أدمن تقدر تدخل بيه** (الصف الوحيد في `users` هو حساب المنصّة النظامي و`is_active=false`).
+# يعني كل حاجة «بتشتغل» ومفيش حاجة بتبان — وده بالظبط اللي بيتشاف كصفحات رمادية فاضية.
+step "٦/٧ — بيزرع بيانات التشغيل"
+DATABASE_URL="$DB_URL" node scripts/seed-dev-data.js || die "زرع البيانات فشل."
+
 cats=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM service_categories WHERE deleted_at IS NULL AND is_active" 2>/dev/null || echo 0)
 svcs=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM services WHERE deleted_at IS NULL AND is_active" 2>/dev/null || echo 0)
-if [[ "$cats" -eq 0 ]]; then
-  warn "القاعدة فيها **صفر فئات خدمة** — عشان كده شاشة العميل بتفضل كروت رمادية فاضية."
-  warn "افتح لوحة الأدمن → الكتالوج وضيف فئة وخدمة، أو استورد بياناتك."
-else
-  ok "$cats فئة · $svcs خدمة"
-fi
-admins=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM users WHERE user_type='admin' AND deleted_at IS NULL" 2>/dev/null || echo 0)
-[[ "$admins" -eq 0 ]] && warn "مفيش أي مستخدم أدمن — مش هتقدر تدخل لوحة الإدارة." || ok "$admins مستخدم أدمن"
+ok "$cats فئة · $svcs خدمة"
 
 # ── 7) الخدمات ──────────────────────────────────────────────────────────────────
 step "٧/٧ — بيشغّل الـAPI واللوحات"
@@ -130,6 +128,14 @@ for i in $(seq 1 90); do
 done
 ok "API شغّال على :3000"
 
+# فحص حقيقي: هل الكتالوج بيرجع صفوف فعلاً؟ `/health` بيقول «السيرفر عايش»، مش «فيه بيانات».
+api_cats=$(curl -fsS http://localhost:3000/api/v1/service-categories 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);console.log((j.data??j).length)}catch{console.log(0)}})" 2>/dev/null || echo 0)
+if [[ "$api_cats" -gt 0 ]]; then
+  ok "الـAPI بيرجّع $api_cats فئة فعلاً — البيانات واصلة"
+else
+  warn "الـAPI رد على /health بس رجّع صفر فئات — شوف $LOGS/api.log"
+fi
+
 ( cd apps/admin && npm run dev >"$LOGS/admin.log" 2>&1 & )
 ( cd apps/customer-web && npm run dev >"$LOGS/customer-web.log" 2>&1 & )
 printf "   بيستنى اللوحات"
@@ -139,6 +145,9 @@ for i in $(seq 1 90); do
   [[ $i -eq 90 ]] && { echo; warn "اللوحات لسه بتقلع — شوف $LOGS/admin.log و $LOGS/customer-web.log"; }
 done
 ok "لوحة الإدارة :3001 · موقع العميل :3002"
+
+LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "<عنوان-الماك>")
+ADMIN_PHONE="+201000000001"; TECH_PHONE="+201000000002"; CUST_PHONE="+201000000003"
 
 cat <<EOF
 
@@ -151,7 +160,16 @@ ${GREEN}═══ كله شغّال ═══${OFF}
   اللوجات         tail -f $LOGS/api.log
   القفل           scripts/mac-dev-up.sh --stop
 
-${DIM}تطبيقات Flutter (إيموليتور أندرويد — الـAPI بيتشاف على 10.0.2.2 تلقائيًا):
+  حسابات الدخول   أدمن $ADMIN_PHONE · فني $TECH_PHONE · عميل $CUST_PHONE
+  كود الـOTP      ${DIM}tail -f $LOGS/api.log | grep OTP${OFF}
+
+${DIM}── تطبيقات Flutter ──────────────────────────────────────────────
+إيموليتور (الـAPI بيتشاف على 10.0.2.2 تلقائيًا — مفيش إعداد):
   cd apps/technician-app && flutter run --dart-define=ALLOW_EMULATOR=true
-  cd apps/customer-app    && flutter run${OFF}
+  cd apps/customer-app   && flutter run
+
+موبايل حقيقي بالكابل (لازم تديله عنوان الماك على الشبكة):
+  cd apps/technician-app && flutter run --dart-define=API_BASE_URL=http://$LAN_IP:3000/api/v1
+  cd apps/customer-app   && flutter run --dart-define=API_BASE_URL=http://$LAN_IP:3000/api/v1
+  (الموبايل والماك لازم يكونوا على نفس الواي-فاي)${OFF}
 EOF
