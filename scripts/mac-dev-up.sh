@@ -103,12 +103,29 @@ ok "$applied migration متطبّقة"
 # قاعدة نضيفة بعد الـmigrations فيها فئات وخدمات، بس **صفر مدن وصفر نطاقات خدمة وصفر حساب
 # أدمن تقدر تدخل بيه** (الصف الوحيد في `users` هو حساب المنصّة النظامي و`is_active=false`).
 # يعني كل حاجة «بتشتغل» ومفيش حاجة بتبان — وده بالظبط اللي بيتشاف كصفحات رمادية فاضية.
-step "٦/٧ — بيزرع بيانات التشغيل"
-DATABASE_URL="$DB_URL" node scripts/seed-dev-data.js || die "زرع البيانات فشل."
-
+step "٦/٧ — بيفحص بيانات التشغيل"
 cats=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM service_categories WHERE deleted_at IS NULL AND is_active" 2>/dev/null || echo 0)
-svcs=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM services WHERE deleted_at IS NULL AND is_active" 2>/dev/null || echo 0)
-ok "$cats فئة · $svcs خدمة"
+zones=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM service_zones WHERE deleted_at IS NULL" 2>/dev/null || echo 0)
+
+# **بنزرع بس لو القاعدة فاضية فعلاً.** لو عندك بياناتك (مناطق وأسعار وحسابات بنيتها بنفسك)،
+# الزرع هيبقى تلويث لشغلك — والسكريبت ده مايلمسش حاجة موجودة.
+if [[ "$zones" -eq 0 ]]; then
+  warn "مفيش أي نطاق خدمة — القاعدة دي فاضية، بيزرع الحد الأدنى…"
+  DATABASE_URL="$DB_URL" node scripts/seed-dev-data.js || die "زرع البيانات فشل."
+else
+  ok "بياناتك موجودة ($cats فئة · $zones نطاق) — مفيش زرع، ولا حاجة اتلمست"
+fi
+
+# **الفحص اللي بيمسك «اللوحة فاضية والبيانات موجودة»**: بعد تدقيق S-1 بقى كل مسار أدمن محتاج
+# صلاحية صريحة. حساب دوره مش شايل الصلاحيات الجديدة بيدخل عادي، بس الـsidebar بيخفي كل بند
+# مالوش صلاحيته وكروت اللوحة بترجع 403 — الشكل بالظبط زي «النظام مش شغال».
+supers=$(docker exec baytak-db psql -U baytak -d baytak -tAc "SELECT count(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.is_super_admin AND r.is_active AND r.deleted_at IS NULL" 2>/dev/null || echo 0)
+if [[ "$supers" -eq 0 ]]; then
+  warn "مفيش حساب أدمن بصلاحية كاملة — اللوحة هتبان شبه فاضية حتى لو البيانات موجودة."
+  warn "شوف الحسابات:  node scripts/admin-access.js"
+else
+  ok "$supers حساب بصلاحية كاملة"
+fi
 
 # ── 7) الخدمات ──────────────────────────────────────────────────────────────────
 step "٧/٧ — بيشغّل الـAPI واللوحات"
