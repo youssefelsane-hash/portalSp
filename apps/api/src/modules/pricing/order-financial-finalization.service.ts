@@ -8,7 +8,13 @@ export type OrderPriceIncreaseSource =
   | 'additional_work'
   | 'inspection_quote'
   /** تعديل سعر بعد تشخيص الفني وقبل تنفيذ الشغل — مختلف عن `additional_work` اللي بيحصل أثناء التنفيذ. */
-  | 'diagnosis_revision';
+  | 'diagnosis_revision'
+  /**
+   * رسم معاينة في الموقع اتضاف لما الإدارة حوّلت طلب «تقييم بالصور» لمعاينة على الأرض
+   * (`AssessmentTriageService.routeToOnsiteAssessment`). الطلب اتعمل بإجمالي صفر، فالرسم ده
+   * هو أول مبلغ حقيقي عليه — ولازم يعدّي من هنا زي أي زيادة، وإلا بيقع برّه النظام المالي.
+   */
+  | 'onsite_assessment_fee';
 
 export interface OrderPriceIncrease {
   amountCents: number;

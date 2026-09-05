@@ -57,6 +57,39 @@ describe('ضمان قناة in_app', () => {
     expect(channels).toEqual([NotificationChannel.PUSH, NotificationChannel.IN_APP].sort());
   });
 
+  /**
+   * **الوجه التاني من نفس القاعدة (بلاغ مالك تاني: «الإشعارات بقت بتيجي مرتين»).**
+   *
+   * الصف بيتعمل لكل قناة على حدة، و`listMine` مكانتش بتفلتر بالقناة خالص. الشكل ده مكانش باين
+   * قبل كده **بالصدفة**: ٣٦ نوع من ٣٧ كانوا `["push"]` بس فمافيش غير صف واحد. أول ما `in_app`
+   * رجعت بقى كل حدث بيبان مرتين — نفس الإصلاح كشف العيب اللي تحته.
+   */
+  it('الصندوق بيقرا صفوف in_app بس — صف التوصيل مش عنصر في القايمة', async () => {
+    const captured: Record<string, unknown>[] = [];
+    const service = Object.create(NotificationsService.prototype) as NotificationsService;
+    Object.assign(service, {
+      notifications: {
+        findAndCount: async ({ where }: { where: Record<string, unknown> }) => {
+          captured.push(where);
+          return [[], 0];
+        },
+        count: async ({ where }: { where: Record<string, unknown> }) => {
+          captured.push(where);
+          return 0;
+        },
+      },
+      markDelivered: async () => 0,
+    });
+
+    await service.listMine('user-1', { page: 1, perPage: 20, unreadOnly: false });
+    await service.unreadCount('user-1');
+
+    expect(captured).toHaveLength(2);
+    for (const where of captured) {
+      expect(where.channel).toBe(NotificationChannel.IN_APP);
+    }
+  });
+
   /** نفس القاعدة عند الحفظ: الأدمن مايقدرش يشيل السجل من الشاشة. */
   it('حفظ إعدادات بلا in_app بيرجّعها تلقائيًا بدل ما يقفل الإشعار', () => {
     const normalized = NotificationTypeConfigService.normalizeChannels([NotificationChannel.PUSH]);

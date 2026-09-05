@@ -24,6 +24,8 @@ import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
 import { OrderCustomerNotice, OrderCustomerNoticeType } from './entities/order-customer-notice.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
+import { SettingsService } from '../settings/settings.service';
 
 /** فلاتر طابور «طلبات التقييم» في الأدمن (بند 7). */
 export type AssessmentQueueFilter =
@@ -71,6 +73,8 @@ export class AssessmentTriageService {
     private readonly catalogService: CatalogService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
+    private readonly orderFinancials: OrderFinancialFinalizationService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   private async lockOrderOrThrow(manager: EntityManager, orderId: string): Promise<Order> {
@@ -123,6 +127,33 @@ export class AssessmentTriageService {
       order.priceStatus = OrderPriceStatus.WAITING_ASSESSMENT;
       order.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
       await manager.save(order);
+
+      // **بَقّة مالية حقيقية (بلاغ مالك 2026-09-05: «الفلوس فيها مشكلة… الشركة ما بتاخدش
+      // حاجة»).**
+      //
+      // السطر فوق كان بيكتب `inspection_fee_cents` على الطلب **وبس**: لا `total_amount_cents`
+      // ولا `commissionable_base_cents` بيتغيّروا. والطلب ده اتعمل أصلاً على مسار الصور
+      // بإجمالي صفر (`order-creation.service.ts`: `remoteQuoteRequested ? 0 : …`). النتيجة:
+      //
+      //   • التسوية بتشتغل على إجمالي صفر ⇒ عمولة المنصّة **صفر**،
+      //   • ورسم المعاينة اللي العميل بيدفعه للفني بيقع **برّه النظام المالي بالكامل** —
+      //     مش في إجمالي الطلب، مش في وعاء العمولة، ومحدش بياخد منه نصيب غير الفني.
+      //
+      // ده حرفيًا اللي المالك وصفه. الإصلاح إن الرسم يعدّي من **نفس** نقطة الدخول المالية
+      // الوحيدة (`increasePrice`) زي أي زيادة سعر تانية: بيدخل الإجمالي، وبيدخل وعاء العمولة
+      // **حسب سياسة الأدمن** (`commission_base.include_inspection_fee`) مش بقرار مدفون هنا.
+      if (order.inspectionFeeCents > 0) {
+        const includeInBase = await this.settingsService.getBoolean(
+          'commission_base.include_inspection_fee',
+          true,
+        );
+        await this.orderFinancials.increasePrice(manager, order, {
+          amountCents: order.inspectionFeeCents,
+          source: 'onsite_assessment_fee',
+          includeInCommissionableBase: includeInBase,
+          commissionableAmountCents: order.inspectionFeeCents,
+        });
+      }
 
       await manager.save(
         manager.create(OrderStatusHistory, {

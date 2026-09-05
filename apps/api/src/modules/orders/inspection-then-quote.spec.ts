@@ -384,7 +384,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(addlPayment).toBeUndefined();
   });
 
-  it('الإدارة تسعّر من صور العميل ثم الموافقة تنتظر اختيار الفني بالسعر المعتمد', async () => {
+  it('الإدارة تسعّر من صور العميل، والموافقة بتوّدي الطلب للتوزيع التلقائي بالسعر المعتمد', async () => {
     const orderId = await insertOrder(`remote-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
       totalAmountCents: 0,
       estimatedPriceCents: 0,
@@ -412,7 +412,10 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(quoted.initialQuoteNote).toBe('السعر حسب الصور');
 
     const approved = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'cash');
-    expect(approved.orderStatus).toBe(OrderStatus.AWAITING_TECHNICIAN_SELECTION);
+    // **تغيّر مقصود (طلب مالك 2026-09-05)**: الموافقة بتوّدي الطلب للتوزيع التلقائي على طول.
+    // الحالة القديمة (`AWAITING_TECHNICIAN_SELECTION`) كانت بتقول للعميل «اختار الفني» ومفيش
+    // شاشة في التطبيق ولا الويب بتخليه يختار — طريق مسدود. راجع `post-quote-auto-dispatch.spec.ts`.
+    expect(approved.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     expect(approved.totalAmountCents).toBe(42000);
     expect(approved.commissionableBaseCents).toBe(42000);
   });

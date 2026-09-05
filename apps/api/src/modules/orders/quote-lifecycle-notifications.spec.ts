@@ -191,7 +191,16 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
     });
     const auditStub = { record: async () => undefined } as never;
 
-    triage = new AssessmentTriageService(dataSource, catalogService, auditStub, emitter);
+    // الخدمة بقت بتمرّر رسم المعاينة من نقطة الدخول المالية الوحيدة (`increasePrice`) بدل ما
+    // تكتبه على الطلب وبس — فلازم تتبنى بالاعتماديتين الحقيقيتين، وإلا الاختبار مايشوفش الفلوس.
+    triage = new AssessmentTriageService(
+      dataSource,
+      catalogService,
+      auditStub,
+      emitter,
+      new OrderFinancialFinalizationService(),
+      { getBoolean: async (_key: string, fallback: boolean) => fallback } as never,
+    );
     quotes = new InspectionQuoteService(
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),

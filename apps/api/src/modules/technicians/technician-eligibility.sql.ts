@@ -133,8 +133,26 @@ export function technicianAvailabilityCondition(opts: {
    * مش بث عشوائي لأي حد.
    */
   ignoreActiveOrderConflict?: boolean;
+  /**
+   * **بث الطوارئ للكل** (`matching.emergency_ignore_schedule`، طلب مالك صريح 2026-09-05):
+   * «الطلب يروح لكل الناس بالقرب… يتجاهل الـschedule تمامًا، فاضي بقى شغّال مش شغّال».
+   *
+   * الفرق عن `ignoreActiveOrderConflict`: ده بيتجاهل تعارض الطلبات النشطة بس وبيحترم الاستثناء
+   * الذاتي (`blocked`) دايمًا. العلم ده بيتجاهل **الاتنين** — يعني الجدول كله مش داخل الحساب.
+   *
+   * مقصور على الطوارئ بقرار الأدمن عمدًا: الفني بيفضل حر يرفض العرض، فاللي بيتغيّر هو إن العرض
+   * **يوصله** أصلاً بدل ما يتفلتر قبل ما يشوفه. أي استخدام تاني بيحوّل «إجازة» لكلمة بلا معنى.
+   */
+  ignoreScheduleEntirely?: boolean;
 }): string {
-  const { activeStatusesParam, engagedStatusesParam, isEmergencyParam, dailyCapacityMinutesParam, ignoreActiveOrderConflict } = opts;
+  const {
+    activeStatusesParam,
+    engagedStatusesParam,
+    isEmergencyParam,
+    dailyCapacityMinutesParam,
+    ignoreScheduleEntirely,
+  } = opts;
+  const ignoreActiveOrderConflict = opts.ignoreActiveOrderConflict || ignoreScheduleEntirely;
   const activeOrderConflictConditions = ignoreActiveOrderConflict
     ? // Postgres مايقدرش يستنتج نوع parameter من غير أي إشارة ليه في الاستعلام ("could not
       // determine data type") — تعبيرات دايمًا صحيحة (tautology) لكل الـparameters الجديدة كمان
@@ -150,9 +168,12 @@ export function technicianAvailabilityCondition(opts: {
   // الذاتي الصريح) — لازم يفضل بعد الـreturn المبكّر القديم اللي كان بيتخطاه بالغلط في أول نسخة
   // من الـrefactor ده (اتلقطت حيًا: matching-work-opportunity.spec.ts فشل بمعنى مختلف، "$10" مش
   // مرتبط بأي تعبير — كان دليل غير مباشر إن الشرط (3) اختفى تمامًا مش بس السبب الظاهري).
+  // بث الطوارئ للكل بيشيل الشرط ده كمان — وده **الفرق الوحيد** بينه وبين التوزيع العادي.
+  // باقي بوابة الأهلية (خدمة/فئة/منطقة/اعتماد/موقع) برّه الدالة دي وبتفضل سارية زي ما هي.
+  const blockedCondition = ignoreScheduleEntirely ? '' : `AND NOT (${blockedExistsExpr(opts)})`;
   return `
     ${activeOrderConflictConditions}
-    AND NOT (${blockedExistsExpr(opts)})
+    ${blockedCondition}
   `;
 }
 

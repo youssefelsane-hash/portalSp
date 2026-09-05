@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import {
   ORDER_QUOTE_ABOVE_RANGE_SUBMITTED_EVENT,
@@ -743,7 +744,14 @@ export class InspectionQuoteService {
       if (
         quote?.status === OrderQuoteStatus.APPROVED &&
         quote.customerDecidedByUserId === userId &&
-        [OrderStatus.AWAITING_TECHNICIAN_SELECTION, OrderStatus.IN_PROGRESS].includes(order.orderStatus)
+        // `SEARCHING_TECHNICIAN` هي وجهة الموافقة الجديدة (توزيع تلقائي فورًا)، و
+        // `AWAITING_TECHNICIAN_SELECTION` بتفضل هنا للطلبات اللي اتوافق عليها قبل التغيير —
+        // ضغطة تانية على «موافق» لازم ترجع نفس الطلب بهدوء مش تعارض.
+        [
+          OrderStatus.SEARCHING_TECHNICIAN,
+          OrderStatus.AWAITING_TECHNICIAN_SELECTION,
+          OrderStatus.IN_PROGRESS,
+        ].includes(order.orderStatus)
       ) {
         return { order, previousStatus: order.orderStatus, quotedAmountCents: 0, nextStatus: order.orderStatus, idempotent: true };
       }
@@ -803,14 +811,25 @@ export class InspectionQuoteService {
       }
       if (isDiagnosisRevision) order.estimatedPriceCents = quotedAmountCents;
 
+      // **موافقة العميل على السعر = الطلب يدخل التوزيع التلقائي فورًا** (طلب مالك صريح
+      // 2026-09-05: «طالما وافق على السعر، ينزله على طول في الـauto matching»).
+      //
+      // كان بيروح لـ`AWAITING_TECHNICIAN_SELECTION` — «مستنيك تختار الفني». والحالة دي كانت
+      // **طريق مسدود لكل عميل**: مفيش أي شاشة في `customer-app` ولا `customer-web` بتنده
+      // `provider-candidates` أو `select-provider` (اتأكد بالبحث في التطبيقين). يعني الطلب
+      // بيقف عند رسالة بتطلب فعل مافيش زرار يعمله.
+      //
+      // `SEARCHING_TECHNICIAN` + `ORDER_CREATED_EVENT` تحت هي **نفس** نقطة الدخول اللي أي طلب
+      // عادي بيتوزّع بيها (ADR-0018) — مفيش نظام موازي، ونفس إعدادات المطابقة بالحرف.
+      //
+      // الفرع الوحيد اللي بيفضل `IN_PROGRESS` هو اللي فيه منفّذ في المكان فعلاً: مراجعة تشخيص
+      // لفني واقف عند العميل، أو معاينة في الموقع والأدمن ضابط إن المعاين هو اللي ينفّذ.
       const nextStatus = isDiagnosisRevision
         ? // الفني واقف في المكان ومستني موافقة على سعر شغل لسه ما بدأش — بيكمّل من مكانه.
           OrderStatus.IN_PROGRESS
-        : order.initialQuoteSource === 'admin_remote'
-          ? OrderStatus.AWAITING_TECHNICIAN_SELECTION
-          : order.onsiteAssessorExecutesWorkSnapshot
-            ? OrderStatus.IN_PROGRESS
-            : OrderStatus.AWAITING_TECHNICIAN_SELECTION;
+        : order.initialQuoteSource !== 'admin_remote' && order.onsiteAssessorExecutesWorkSnapshot
+          ? OrderStatus.IN_PROGRESS
+          : OrderStatus.SEARCHING_TECHNICIAN;
       order.orderStatus = nextStatus;
       order.assessmentFeeCreditCents = assessmentCreditCents;
       order.priceStatus = nextStatus === OrderStatus.IN_PROGRESS ? OrderPriceStatus.LOCKED : OrderPriceStatus.CONFIRMED;
@@ -883,6 +902,14 @@ export class InspectionQuoteService {
         `العميل وافق على السعر بعد المعاينة — ${quotedAmountCents} قرش`,
       ),
     );
+
+    // بث نقطة الدخول الموحّدة للتوزيع (ADR-0018) — من غيرها الطلب بيقف في `SEARCHING_TECHNICIAN`
+    // للأبد. بعد الـcommit عمدًا (قاعدة المشروع: مفيش حدث قبل نجاح الـtransaction)، وبـ`emitAsync`
+    // زي `OrdersService.create()` و`PostQuoteProviderSelectionService` بالحرف. الـlistener بيبلع
+    // أخطاءه بنفسه فمفيش خطر على رد العميل.
+    if (nextStatus === OrderStatus.SEARCHING_TECHNICIAN) {
+      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    }
 
     // تحصيل فوري (docs/08 §21 نفس النمط) — برّه الـtransaction عمداً، فشله ميرجّعش خطأ للعميل
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل. batchId هنا مجرد مفتاح idempotency (مش بيتفحص ضد order_items).
