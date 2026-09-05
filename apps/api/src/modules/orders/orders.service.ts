@@ -72,6 +72,12 @@ import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { OrderQueriesService } from './order-queries.service';
+import {
+  assertNoScheduleOverlap,
+  resolveRescheduledInterval,
+  slotEnd,
+  slotStart,
+} from './order-schedule-interval';
 import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
@@ -974,10 +980,15 @@ export class OrdersService {
       preciseConflictMinutes !== null &&
       preciseConflictMinutes > 0
     ) {
-      await this.assertNoPreciseScheduleConflict(
-        preciseScheduleTechnicianId,
-        new Date(dto.scheduled_at),
-        preciseConflictMinutes,
+      const preciseStartsAt = new Date(dto.scheduled_at);
+      await assertNoScheduleOverlap(
+        this.dataSource,
+        {
+          technicianId: preciseScheduleTechnicianId,
+          startsAt: preciseStartsAt,
+          endsAt: new Date(preciseStartsAt.getTime() + preciseConflictMinutes * 60_000),
+        },
+        (orderNumber) => `الفني ده متعارض مع طلب موجود بالفعل (${orderNumber}) في الفترة دي`,
       );
     }
 
@@ -2142,27 +2153,6 @@ export class OrdersService {
    * القديمة (اتلغت مع بنية الشغالة المنفصلة، ADR-0031) بس معمّمة على `orders.technician_id` لأي
    * فني عادي بدل جدول حجوزات منفصل. مقصورة على `orders` بس — الفني هنا فني عادي، مفيش جدول تاني.
    */
-  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationMinutes: number): Promise<void> {
-    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
-    const [conflict] = await this.dataSource.query<{ order_number: string }[]>(
-      `SELECT order_number FROM orders
-       WHERE technician_id = $1
-         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
-         AND scheduled_at IS NOT NULL AND COALESCE(duration_minutes, duration_hours * 60) IS NOT NULL
-         AND scheduled_at < $3
-         AND (scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval) > $2
-       LIMIT 1`,
-      [technicianId, startsAt, endsAt],
-    );
-    if (conflict) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `الفني ده متعارض مع طلب موجود بالفعل (${conflict.order_number}) في الفترة دي`,
-        HttpStatus.CONFLICT,
-      );
-    }
-  }
-
   /**
    * بَقّة حقيقية بلّغها المالك (docs/08 §113، ADR-0060): الشرط هنا كان مكتوب بإيد
    * (`PER_UNIT || MONTHLY`) بدل ما يتقرا من سجل الطرق. ADR-0050 §4 حوّلت `monthly` لفترة
@@ -2246,7 +2236,7 @@ export class OrdersService {
       if (proposedSlot.technicianId !== technician.id) {
         throw new ApiException(ErrorCode.VAL_001, 'تقدر تقترح موعدًا من جدولك أنت فقط', HttpStatus.BAD_REQUEST);
       }
-      const proposedAt = this.slotStart(proposedSlot);
+      const proposedAt = slotStart(proposedSlot);
       if (proposedAt.getTime() <= Date.now()) {
         throw new ApiException(ErrorCode.VAL_001, 'لا يمكن اقتراح موعد انتهى أو بدأ بالفعل', HttpStatus.BAD_REQUEST);
       }
@@ -2594,7 +2584,7 @@ export class OrdersService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      newScheduledAt = this.slotStart(newSlot);
+      newScheduledAt = slotStart(newSlot);
     } else {
       newScheduledAt = new Date(target.newScheduledAt as string);
       if (Number.isNaN(newScheduledAt.getTime())) {
@@ -2615,10 +2605,10 @@ export class OrdersService {
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       this.assertReschedulable(fresh);
-      const interval = this.resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
+      const interval = resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
 
       if (newSlot) {
-        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+        if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
           throw new ApiException(
             ErrorCode.VAL_001,
             'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
@@ -2646,12 +2636,15 @@ export class OrdersService {
           );
         }
         if (interval.durationMinutes != null) {
-          await this.assertNoRescheduleIntervalConflict(
+          await assertNoScheduleOverlap(
             manager,
-            fresh.technicianId!,
-            newScheduledAt,
-            interval.scheduledEndAt ?? new Date(newScheduledAt.getTime() + interval.durationMinutes * 60_000),
-            orderId,
+            {
+              technicianId: fresh.technicianId!,
+              startsAt: newScheduledAt,
+              endsAt: interval.scheduledEndAt ?? new Date(newScheduledAt.getTime() + interval.durationMinutes * 60_000),
+              excludeOrderId: orderId,
+            },
+            (orderNumber) => `الفني ده عنده طلب آخر (${orderNumber}) متعارض مع الفترة الجديدة`,
           );
         }
         await manager
@@ -2730,80 +2723,6 @@ export class OrdersService {
     }
   }
 
-  private slotStart(slot: TechnicianScheduleSlot): Date {
-    return new Date(`${slot.slotDate}T${slot.startTime}Z`);
-  }
-
-  private slotEnd(slot: TechnicianScheduleSlot): Date {
-    return new Date(`${slot.slotDate}T${slot.endTime}Z`);
-  }
-
-  private resolveRescheduledInterval(
-    order: Order,
-    newScheduledAt: Date,
-    explicitEndIso?: string,
-  ): { scheduledEndAt: Date | null; durationMinutes: number | null } {
-    if (explicitEndIso != null && order.scheduledEndAt == null) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'تحديد نهاية جديدة متاح فقط للطلبات التي لها بداية ونهاية أصلًا',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    let scheduledEndAt: Date | null = null;
-    if (explicitEndIso != null) {
-      scheduledEndAt = new Date(explicitEndIso);
-      if (Number.isNaN(scheduledEndAt.getTime())) {
-        throw new ApiException(ErrorCode.VAL_001, 'الموعد النهائي الجديد مش تاريخ صالح', HttpStatus.BAD_REQUEST);
-      }
-    } else if (order.scheduledAt && order.scheduledEndAt) {
-      const previousDurationMs = order.scheduledEndAt.getTime() - order.scheduledAt.getTime();
-      scheduledEndAt = new Date(newScheduledAt.getTime() + previousDurationMs);
-    }
-
-    const durationMinutes = scheduledEndAt
-      ? (scheduledEndAt.getTime() - newScheduledAt.getTime()) / 60_000
-      : (order.durationMinutes ?? (order.durationHours == null ? null : Number(order.durationHours) * 60));
-    if (durationMinutes != null && (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525_600)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'مدة الموعد الجديد لازم تكون عدد دقائق صحيحًا وموجبًا وفي حدود سنة',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    return { scheduledEndAt, durationMinutes };
-  }
-
-  private async assertNoRescheduleIntervalConflict(
-    manager: EntityManager,
-    technicianId: string,
-    startsAt: Date,
-    endsAt: Date,
-    excludedOrderId: string,
-  ): Promise<void> {
-    const [conflict] = await manager.query<{ order_number: string }[]>(
-      `SELECT order_number FROM orders
-       WHERE technician_id = $1 AND id <> $4
-         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
-         AND scheduled_at IS NOT NULL
-         AND scheduled_at < $3
-         AND COALESCE(
-               scheduled_end_at,
-               scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval
-             ) > $2
-       LIMIT 1`,
-      [technicianId, startsAt, endsAt, excludedOrderId],
-    );
-    if (conflict) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `الفني ده عنده طلب آخر (${conflict.order_number}) متعارض مع الفترة الجديدة`,
-        HttpStatus.CONFLICT,
-      );
-    }
-  }
-
   private async rescheduleLockedOrder(
     manager: EntityManager,
     order: Order,
@@ -2842,9 +2761,9 @@ export class OrdersService {
     }
 
     const previousScheduledAt = order.scheduledAt;
-    const newScheduledAt = this.slotStart(newSlot);
-    const interval = this.resolveRescheduledInterval(order, newScheduledAt);
-    if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+    const newScheduledAt = slotStart(newSlot);
+    const interval = resolveRescheduledInterval(order, newScheduledAt);
+    if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
       throw new ApiException(
         ErrorCode.VAL_001,
         'السلوت المقترح أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
@@ -3810,11 +3729,11 @@ export class OrdersService {
       }
       const previousStatus = order.orderStatus;
       const previousScheduledAt = order.scheduledAt;
-      const newScheduledAt = this.slotStart(newSlot);
+      const newScheduledAt = slotStart(newSlot);
       await this.dataSource.transaction(async (manager) => {
         const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
-        const interval = this.resolveRescheduledInterval(fresh, newScheduledAt);
-        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+        const interval = resolveRescheduledInterval(fresh, newScheduledAt);
+        if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
           throw new ApiException(
             ErrorCode.VAL_001,
             'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
