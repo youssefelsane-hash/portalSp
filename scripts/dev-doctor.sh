@@ -28,7 +28,24 @@ echo "${B}═══ فحص بيئة التطوير — $(date '+%H:%M:%S') ═�
 # ── ١) الأساسيات ────────────────────────────────────────────────────────────────
 head2 "١) الأساسيات"
 info "الفرع: $(git rev-parse --abbrev-ref HEAD 2>/dev/null) · آخر كوميت: $(git log -1 --format=%h 2>/dev/null)"
-info "Node: $(node -v 2>/dev/null || echo 'مش متسطّب')"
+# **نسخة Node مش سطر معلومات — دي أول حاجة تكسر كل حاجة.** أول تقرير حقيقي من التقرير ده
+# طبع «Node: v26.8.1» كمعلومة محايدة جنب قاعدة سليمة تمامًا، والسبب الفعلي كان هو ده: Next 16
+# مابيقلعش على 26 خالص (اللوحتين ماتوا)، والـAPI بيطبع «started» وبعدين مابيردش على أي طلب.
+# النطاق المدعوم متسجّل في `engines` في كل package.json — الفحص ده بيقراه من هناك مش بيكرّره.
+if ! command -v node >/dev/null 2>&1; then
+  fail "Node مش متسطّب"
+else
+  NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+  if [[ "$NODE_MAJOR" -lt 20 ]]; then
+    fail "Node $(node -v) قديم — المدعوم 20.9 فأحدث.  الإصلاح: brew install node@22"
+  elif [[ "$NODE_MAJOR" -ge 25 ]]; then
+    fail "Node $(node -v) أحدث من المدعوم (20–24) — ${B}ده بيوقّف اللوحتين ويخلي الـAPI يقلع بلا ما يرد${O}"
+    info "الإصلاح:  brew install node@22 && echo 'export PATH=\"/opt/homebrew/opt/node@22/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+    info "وبعدها امسح الاعتماديات المبنية على النسخة القديمة:  rm -rf node_modules apps/*/node_modules && npm install"
+  else
+    pass "Node $(node -v) مدعوم"
+  fi
+fi
 # **مابنوقفش هنا حتى لو Docker واقع** — التقرير التشخيصي قيمته إنه يكمّل ويوري كل حلقة في
 # السلسلة، مش يقف عند أول واحدة. ممكن يكون Postgres شغّال محليًا من غير Docker أصلاً.
 DOCKER_OK=0

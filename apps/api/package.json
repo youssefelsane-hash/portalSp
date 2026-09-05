@@ -2,6 +2,9 @@
   "name": "@baytak/api",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9 <25"
+  },
   "description": "baytak — NestJS backend (Modular Monolith)",
   "scripts": {
     "build": "nest build",
