@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# **فحص شامل لبيئة التشغيل المحلية — أمر واحد، تقرير واحد.**
+#
+# الغرض إنه يجاوب على السؤال «ليه مفيش بيانات؟» بأدلة بدل تخمين. بيفحص كل حلقة في السلسلة
+# بالترتيب — كونتينرات ⇒ قاعدة ⇒ API ⇒ لوحات ⇒ صلاحيات ⇒ شبكة — وبيوقف عند أول حلقة مكسورة
+# ويقول **إيه بالظبط** اللي فيها.
+#
+#   scripts/dev-doctor.sh
+#
+# قراءة بحتة: مابيغيّرش أي حاجة، مابيشغّلش ولا بيقفل أي خدمة.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+DB="docker exec baytak-db psql -U baytak -d baytak -tAc"
+API="http://localhost:3000/api/v1"
+
+G=$'\033[32m'; R=$'\033[31m'; Y=$'\033[33m'; D=$'\033[2m'; B=$'\033[1m'; O=$'\033[0m'
+pass() { echo "  ${G}✅${O} $*"; }
+fail() { echo "  ${R}❌${O} $*"; }
+warn() { echo "  ${Y}⚠️ ${O} $*"; }
+info() { echo "  ${D}$*${O}"; }
+head2() { echo; echo "${B}$*${O}"; }
+
+echo
+echo "${B}═══ فحص بيئة التطوير — $(date '+%H:%M:%S') ═══${O}"
+
+# ── ١) الأساسيات ────────────────────────────────────────────────────────────────
+head2 "١) الأساسيات"
+info "الفرع: $(git rev-parse --abbrev-ref HEAD 2>/dev/null) · آخر كوميت: $(git log -1 --format=%h 2>/dev/null)"
+info "Node: $(node -v 2>/dev/null || echo 'مش متسطّب')"
+# **مابنوقفش هنا حتى لو Docker واقع** — التقرير التشخيصي قيمته إنه يكمّل ويوري كل حلقة في
+# السلسلة، مش يقف عند أول واحدة. ممكن يكون Postgres شغّال محليًا من غير Docker أصلاً.
+DOCKER_OK=0
+docker info >/dev/null 2>&1 && { pass "Docker شغّال"; DOCKER_OK=1; } || fail "Docker مش شغّال — افتح Docker Desktop"
+
+if [[ "$DOCKER_OK" -eq 1 ]]; then
+  for c in baytak-db baytak-redis; do
+    status=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo "مش موجود")
+    [[ "$status" == "running" ]] && pass "$c شغّال" || fail "$c: $status"
+  done
+fi
+
+# ── ٢) القاعدة ──────────────────────────────────────────────────────────────────
+head2 "٢) القاعدة — إيه اللي جوّاها فعلاً"
+if ! $DB "SELECT 1" >/dev/null 2>&1; then
+  fail "مش قادر أوصل للقاعدة"
+else
+  mig=$($DB "SELECT count(*) FROM schema_migrations" 2>/dev/null)
+  files=$(ls infra/migrations/*.sql 2>/dev/null | wc -l | tr -d ' ')
+  [[ "$mig" == "$files" ]] && pass "migrations: $mig مطبّقة من $files" \
+                           || fail "migrations: $mig مطبّقة بس فيه $files ملف — القاعدة ناقصة!"
+  for pair in "users:مستخدمين" "service_categories:فئات" "services:خدمات" "service_zones:نطاقات" "orders:طلبات" "technician_profiles:فنيين"; do
+    t="${pair%%:*}"; label="${pair##*:}"
+    n=$($DB "SELECT count(*) FROM $t WHERE deleted_at IS NULL" 2>/dev/null || echo "؟")
+    printf "  %s%-12s%s %s\n" "$D" "$label" "$O" "$n"
+  done
+fi
+
+# ── ٣) الـAPI ───────────────────────────────────────────────────────────────────
+head2 "٣) الـAPI (:3000)"
+port3000=$(lsof -ti :3000 2>/dev/null | head -1)
+[[ -n "$port3000" ]] && info "العملية: PID $port3000" || fail "مفيش أي حاجة شغّالة على :3000"
+
+health=$(curl -fsS --max-time 5 "$API/health" 2>/dev/null || echo "")
+if [[ -n "$health" ]]; then
+  pass "health: $health"
+else
+  fail "مش بيرد على $API/health"
+  [[ -f .dev-logs/api.log ]] && { echo; info "آخر ١٥ سطر من لوج الـAPI:"; tail -15 .dev-logs/api.log | sed 's/^/     /'; }
+fi
+
+cats_json=$(curl -fsS --max-time 5 "$API/service-categories" 2>/dev/null || echo "")
+if [[ -n "$cats_json" ]]; then
+  n=$(printf '%s' "$cats_json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);console.log((j.data??j).length)}catch{console.log('؟')}})")
+  [[ "$n" != "0" && "$n" != "؟" ]] && pass "الكتالوج بيرجّع $n فئة — البيانات واصلة للتطبيقات" \
+                                   || fail "الكتالوج رجّع صفر — التطبيقات هتبان فاضية"
+else
+  fail "مسار الكتالوج مش بيرد خالص"
+fi
+
+# طلب OTP حقيقي — ده اللي التطبيقات بتعلّق عليه
+# `|| echo` هنا كان بيضيف "000" تانية جنب اللي curl بيطبعها ⇒ "000000". curl بيطبع الكود
+# دايمًا مع `-w`، فالبديل الوحيد المطلوب هو لو الخرج طلع فاضي أصلاً.
+otp_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "$API/auth/otp/request" \
+  -H 'Content-Type: application/json' -d '{"phone_number":"+201000000003","purpose":"login"}' 2>/dev/null)
+otp_code=${otp_code:-000}
+case "$otp_code" in
+  200|201) pass "طلب OTP رجّع $otp_code — مسار الدخول شغّال" ;;
+  000)     fail "طلب OTP معلّق أو مفيش رد (timeout) — ده سبب اللودينج اللانهائي في التطبيق" ;;
+  *)       fail "طلب OTP رجّع $otp_code" ;;
+esac
+
+# ── ٤) اللوحات ──────────────────────────────────────────────────────────────────
+head2 "٤) اللوحات"
+for pair in "3001:لوحة الإدارة" "3002:موقع العميل"; do
+  p="${pair%%:*}"; label="${pair##*:}"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://localhost:$p" 2>/dev/null); code=${code:-000}
+  if [[ "$code" == "200" ]]; then pass "$label (:$p) بترد 200"
+  elif [[ "$code" == "000" ]]; then
+    fail "$label (:$p) مش بترد خالص"
+    log=".dev-logs/$( [[ $p == 3001 ]] && echo admin || echo customer-web ).log"
+    [[ -f "$log" ]] && { info "آخر ١٠ سطر:"; tail -10 "$log" | sed 's/^/     /'; }
+  else fail "$label (:$p) رجّعت $code"; fi
+done
+
+# ── ٥) الصلاحيات ────────────────────────────────────────────────────────────────
+head2 "٥) صلاحيات الأدمن"
+if $DB "SELECT 1" >/dev/null 2>&1; then
+  supers=$($DB "SELECT count(*) FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE r.is_super_admin AND r.is_active AND r.deleted_at IS NULL" 2>/dev/null || echo 0)
+  if [[ "$supers" -gt 0 ]]; then
+    pass "$supers حساب بصلاحية كاملة"
+    $DB "SELECT '     ' || u.phone_number || '  ' || u.full_name FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE r.is_super_admin AND u.deleted_at IS NULL" 2>/dev/null
+  else
+    fail "مفيش حساب بصلاحية كاملة — السايدبار هيبان شبه فاضي حتى والبيانات موجودة"
+    info "الإصلاح:  node scripts/admin-access.js"
+  fi
+fi
+
+# ── ٦) الشبكة — للموبايل الحقيقي ────────────────────────────────────────────────
+head2 "٦) الشبكة (للموبايل بالكابل)"
+LAN=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
+if [[ -n "$LAN" ]]; then
+  info "عنوان الماك: $LAN"
+  reach=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$LAN:3000/api/v1/health" 2>/dev/null); reach=${reach:-000}
+  if [[ "$reach" == "200" ]]; then
+    pass "الـAPI مسموع على الشبكة — الموبايل هيوصله"
+    echo
+    echo "  ${B}أوامر الموبايل الحقيقي:${O}"
+    echo "  ${D}cd apps/technician-app && flutter run --dart-define=API_BASE_URL=http://$LAN:3000/api/v1${O}"
+    echo "  ${D}cd apps/customer-app   && flutter run --dart-define=API_BASE_URL=http://$LAN:3000/api/v1${O}"
+  else
+    fail "الـAPI مش مسموع على $LAN (رجّع $reach) — الموبايل مش هيوصله حتى بالعنوان الصح"
+    info "غالبًا جدار الحماية في macOS: الإعدادات ← الشبكة ← جدار الحماية"
+  fi
+else
+  warn "مش لاقي عنوان الماك على الشبكة (مفيش واي-فاي؟)"
+fi
+
+# الجهاز الموصول
+if command -v adb >/dev/null 2>&1; then
+  devs=$(adb devices 2>/dev/null | grep -c "device$" || echo 0)
+  [[ "$devs" -gt 0 ]] && pass "$devs جهاز أندرويد موصول" || warn "مفيش جهاز أندرويد موصول (adb مش شايف حاجة)"
+fi
+
+echo
+echo "${D}ابعت التقرير ده كله زي ما هو.${O}"
+echo
