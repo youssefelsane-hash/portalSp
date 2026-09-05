@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { Server as SocketIoServer } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import { OrderTrackingGateway } from './order-tracking.gateway';
+import { ordersServiceForGateway } from './orders.testing';
 import { Order } from './entities/order.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -151,6 +152,7 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
       dataSource.getRepository(Order),
       customerProfilesService,
       techniciansService,
+      ordersServiceForGateway(dataSource),
       new RealtimeAccessService(dataSource.getRepository(User), jwt, configStub),
       {
         register: jest.fn(),
