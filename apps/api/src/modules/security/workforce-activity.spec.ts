@@ -35,10 +35,20 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     service = new WorkforceActivityService(dataSource, dataSource.getRepository(RefreshToken), settings, auditLog);
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    // عتبة idle قصيرة (2 ثانية) بس لهذا الاختبار — بديل حقيقي عن انتظار 5 دقايق فعلية. INSERT
-    // مباشر (مش SettingsService.update()، اللي بيتطلب الصف موجود بالفعل — المفتاح ده مالوش قيمة
-    // مزروعة، getNumber() بيرجع للـfallback الافتراضي (300) لو مفيش صف أصلاً).
-    await q(`INSERT INTO settings (key, value, value_type, group_name) VALUES ('workforce.idle_threshold_seconds', '2', 'number', 'workforce')`);
+    // عتبة idle قصيرة (2 ثانية) بس لهذا الاختبار — بديل حقيقي عن انتظار 5 دقايق فعلية.
+    //
+    // **UPSERT مش INSERT**: المفتاح ده بقى مزروع دايمًا (migration 0264 + سجل الإعدادات) — قبل
+    // كده مكانش ليه صف، فالـINSERT الخام كان بيشتغل. بعد البذر، نفس السطر بقى بيرمي
+    // duplicate key فيسقط `beforeAll` وكل الاختبارات معاه. الـUPSERT بيشتغل في الحالتين.
+    await q(`
+      INSERT INTO settings (key, value, value_type, group_name)
+      VALUES ('workforce.idle_threshold_seconds', '2', 'number', 'workforce')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `);
+    // الكتابة فوق SQL خام بتتخطى كاش `SettingsService` (TTL 60 ثانية) — من غير الإبطال ده،
+    // أي قراءة سابقة للمفتاح (من سبيك تاني في نفس التشغيلة) بتفضل مخبّية 300 والاختبار يستنى
+    // انتقال ACTIVE→IDLE عمره ما هيحصل في 2.5 ثانية. ده كان بيعلّق السبيك مش بس يفشّله.
+    await cache.del('settings:workforce.idle_threshold_seconds');
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`, [
       `+2099${runId}`.slice(0, 15),
       `أدمن اختبار نشاط ${runId}`,
@@ -58,7 +68,11 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     await q(`DELETE FROM refresh_tokens WHERE user_id = $1`, [ids.user]);
     await q(`DELETE FROM employee_profiles WHERE user_id = $1`, [ids.user]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.user]);
-    await q(`DELETE FROM settings WHERE key = 'workforce.idle_threshold_seconds'`);
+    // **ترجيع القيمة المسجّلة مش حذف الصف**: المفتاح ده جزء من سجل الإعدادات دلوقتي، وحذفه
+    // بيكسر ثابتة «كل مفتاح مسجّل له صف» — يعني السبيك ده كان هيفشّل `settings-registry.spec.ts`
+    // لو اتنفّذ قبله. الرقم 300 هو نفس الافتراضي في السجل وفي `DEFAULT_IDLE_THRESHOLD_SECONDS`.
+    await q(`UPDATE settings SET value = '300' WHERE key = 'workforce.idle_threshold_seconds'`);
+    await cache?.del('settings:workforce.idle_threshold_seconds');
     await cache?.onModuleDestroy();
     await dataSource.destroy();
   });
