@@ -21,14 +21,24 @@ export const ADMIN_TOPICS = [
 
 export type AdminTopic = (typeof ADMIN_TOPICS)[number];
 
-/** null = أي حساب أدمن؛ نص = صلاحية مطلوبة (بتتفحص حية وقت الاشتراك). */
+/**
+ * الصلاحية المطلوبة للاشتراك في كل موضوع (بتتفحص حية وقت الاشتراك).
+ *
+ * **القاعدة: الموضوع بيطلب نفس صلاحية الشاشة اللي بيغذّيها.** ستة مواضيع كانوا `null` (أي أدمن)،
+ * وده بقى تناقض صريح بعد تدقيق S-1: `GET /admin/orders` بقى بيطلب `orders.view`، فموظف مالوش
+ * الصلاحية دي كان بياخد 403 على الـREST **و** بيستقبل نفس أحداث الطلبات لحظيًا على السوكِت.
+ * بوابتين لنفس البيانات بمعيارين مختلفين = الأضعف فيهم هو الفعلي.
+ *
+ * `null` لسه ممكن، بس بقى قرار مكتوب مش افتراضي — ومفيش موضوع مستخدمه حاليًا.
+ */
 export const TOPIC_PERMISSIONS: Record<AdminTopic, string | null> = {
-  orders: null,
-  technicians: null,
-  payments: null,
-  refunds: null,
-  support: null,
-  ratings: null,
+  orders: 'orders.view',
+  technicians: 'technicians.view',
+  payments: 'payments.view',
+  refunds: 'refunds.view',
+  support: 'support_tickets.view',
+  // التقييمات بتتعرض جوّه شاشة الطلب وبتشاور على طلب بالاسم — نفس صلاحية الطلبات بالظبط.
+  ratings: 'orders.view',
   payouts: 'payouts.view',
   installments: 'installments.view',
   recurring: 'recurring_orders.view',

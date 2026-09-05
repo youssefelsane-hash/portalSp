@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { isSuperAdmin, loadEffectivePermissionNames } from '../rbac/effective-permissions';
 import { OnEvent } from '@nestjs/event-emitter';
 import { JwtPayload } from '../../modules/auth/types/authenticated-request';
 import {
@@ -204,31 +205,21 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
     this.logger.debug(`admin disconnected: ${client.id}`);
   }
 
-  /** فحص حية من قاعدة البيانات — نفس مسار PermissionsGuard. */
-  private async topicAllowed(userId: string, topic: AdminTopic): Promise<boolean> {
-    const required = TOPIC_PERMISSIONS[topic];
-    if (required === null) return true;
-    // نفس شكل استعلام getUserPermissionNames (super_admin يتخطى بالكامل) بدون استيراد
-    // AdminModule — تفادي الدورة الموثقة في admin.module.ts.
-    const [isSuper] = await this.dataSource.query<{ exists: boolean }[]>(
-      `SELECT EXISTS(
-         SELECT 1 FROM user_roles ur
-         JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.name = 'super_admin'
-         WHERE ur.user_id = $1
-       ) AS exists`,
-      [userId],
-    );
-    if (isSuper?.exists) return true;
-    const rows = await this.dataSource.query<{ name: string; }[]>(
-      `SELECT DISTINCT p.name
-       FROM user_roles ur
-       JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active = true
-       JOIN role_permissions rp ON rp.role_id = r.id
-       JOIN permissions p ON p.id = rp.permission_id
-       WHERE ur.user_id = $1`,
-      [userId],
-    );
-    return new Set(rows.map((row: { name: string }) => row.name)).has(required);
+  /**
+   * صلاحيات المستخدم الفعلية — **استعلام واحد لكل اشتراك** (تدقيق A-4).
+   *
+   * قبل كده كان فيه `topicAllowed()` بتتنادى لكل موضوع على حدة، وكل نداء بيعمل استعلامين
+   * (فحص super_admin + جلب الصلاحيات). ١٣ موضوع = ٢٦ استعلام لكل `admin:subscribe`، وكلهم
+   * بيرجّعوا **نفس** الإجابة. الجلب بقى مرة واحدة والقرار في الذاكرة.
+   *
+   * نفس شكل `PermissionsService.getUserPermissionNames()` بالحرف — بما فيه قاعدة الاشتقاق
+   * (ADR-0074): أي دور عنده أي صلاحية على مورد بياخد `<resource>.view` ضمنيًا. من غير السطر ده
+   * كان هيبقى فيه معيارين مختلفين لنفس البيانات: الـREST بيسمح والسوكِت بيرفض. مش بنستورد
+   * `AdminModule` عشان الدورة الموثّقة في `admin.module.ts`.
+   */
+  private async effectivePermissions(userId: string): Promise<Set<string> | 'all'> {
+    if (await isSuperAdmin(this.dataSource, userId)) return 'all';
+    return loadEffectivePermissionNames(this.dataSource, userId);
   }
 
   @SubscribeMessage('admin:subscribe')
@@ -246,9 +237,12 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
     client.data.topics = new Set();
     const granted: AdminTopic[] = [];
     const denied: AdminTopic[] = [];
+    // جلب واحد لكل اشتراك بدل استعلامين لكل موضوع (تدقيق A-4).
+    const permissions = await this.effectivePermissions(payload.sub);
     for (const topic of ADMIN_TOPICS) {
-      // super_admin بيتخطى الفحص عن طريق getUserPermissionNames زي باقي النظام بالظبط.
-      if (await this.topicAllowed(payload.sub, topic)) {
+      const required = TOPIC_PERMISSIONS[topic];
+      // super_admin بيتخطى الفحص زي باقي النظام بالظبط.
+      if (required === null || permissions === 'all' || permissions.has(required)) {
         await client.join(room(topic));
         client.data.topics.add(topic);
         granted.push(topic);

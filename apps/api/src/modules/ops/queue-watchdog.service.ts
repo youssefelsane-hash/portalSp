@@ -1,4 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SettingsService } from '../settings/settings.service';
@@ -79,6 +82,7 @@ export class QueueWatchdogService implements OnModuleInit, OnModuleDestroy {
     @InjectQueue(CUSTOMER_STATS_QUEUE) customerStatsQueue: Queue,
     @InjectQueue(TECHNICIAN_STATS_QUEUE) technicianStatsQueue: Queue,
     private readonly settings: SettingsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.watchedQueues = [
       { queue: roundsQueue, tier: DISPATCH_CRITICAL },
@@ -96,7 +100,9 @@ export class QueueWatchdogService implements OnModuleInit, OnModuleDestroy {
     }
     const intervalMinutes = await this.settings.getNumber('ops.queue_watchdog_check_interval_minutes', 2);
     this.timer = setInterval(() => {
-      this.checkAllQueues().catch((err) => this.logger.warn(`فحص watchdog فشل (هيتحاول تاني بعد كده): ${err}`));
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'queue-watchdog', () => this.checkAllQueues(), this.logger);
     }, intervalMinutes * 60_000);
     this.timer.unref(); // مايمنعش الـprocess من الخروج الطبيعي (shutdown/tests)
   }

@@ -91,7 +91,8 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
       {} as never,
       { create: createSpy } as never,
       { emit: emitSpy } as never,
-      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة
+      {} as never, // buildingsService — التستات دي مالهاش قوالب مربوطة بعمارة,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
   });
 

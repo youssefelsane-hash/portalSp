@@ -13,6 +13,7 @@ describe('OrderChatRecoveryService', () => {
     const service = new OrderChatRecoveryService(
       { query } as never,
       { createThreadForOrder, scheduleCloseForOrder } as never,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
 
     await expect(service.sweep(100)).resolves.toBe(2);
@@ -26,7 +27,7 @@ describe('OrderChatRecoveryService', () => {
     const timer = { unref } as unknown as ReturnType<typeof setInterval>;
     jest.spyOn(global, 'setInterval').mockReturnValue(timer);
     const clear = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
-    const service = new OrderChatRecoveryService({} as never, {} as never);
+    const service = new OrderChatRecoveryService({} as never, {} as never, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     service.onModuleInit();
     service.onModuleDestroy();

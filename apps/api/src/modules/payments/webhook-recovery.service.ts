@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
 import { PaymentsService } from './payments.service';
@@ -23,11 +24,14 @@ export class WebhookRecoveryService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(WebhookEvent) private readonly webhookEvents: Repository<WebhookEvent>,
     private readonly settingsService: SettingsService,
     private readonly paymentsService: PaymentsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) => this.logger.error('فشل فحص استرداد webhooks', err instanceof Error ? err.stack : err));
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'webhook-recovery', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

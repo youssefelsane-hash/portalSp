@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
@@ -40,9 +41,9 @@ export class QuoteExpiryService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) =>
-        this.logger.error('فشل sweep انتهاء صلاحية العروض', err instanceof Error ? err.stack : err),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'quote-expiry', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

@@ -13,6 +13,7 @@ describe('AssistantMatchingRecoveryService', () => {
     const service = new AssistantMatchingRecoveryService(
       { query } as never,
       { startMatching, handleExpiry } as never,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
 
     await expect(service.sweep(100)).resolves.toBe(2);
@@ -26,7 +27,7 @@ describe('AssistantMatchingRecoveryService', () => {
     const timer = { unref } as unknown as ReturnType<typeof setInterval>;
     jest.spyOn(global, 'setInterval').mockReturnValue(timer);
     const clear = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
-    const service = new AssistantMatchingRecoveryService({} as never, {} as never);
+    const service = new AssistantMatchingRecoveryService({} as never, {} as never, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     service.onModuleInit();
     service.onModuleDestroy();

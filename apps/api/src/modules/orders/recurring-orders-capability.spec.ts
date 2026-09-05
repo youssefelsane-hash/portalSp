@@ -37,7 +37,8 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
       {} as never,
       {} as never,
       { emit: jest.fn(), emitAsync: jest.fn(async () => undefined) } as never,
-      {} as never, // buildingsService — التستات دي مالهاش building_code
+      {} as never, // buildingsService — التستات دي مالهاش building_code,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
     return { service, templatesRepo };
   }

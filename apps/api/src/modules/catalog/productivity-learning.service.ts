@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { MoreThan, Repository, DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Order } from '../orders/entities/order.entity';
@@ -46,13 +47,14 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
     @InjectRepository(ServiceProductivitySuggestion) private readonly suggestions: Repository<ServiceProductivitySuggestion>,
     private readonly settingsService: SettingsService,
     private readonly auditLog: AuditLogService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.generateSuggestions().catch((err) =>
-        this.logger.error('فشل توليد اقتراحات الإنتاجية', err instanceof Error ? err.stack : err),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'productivity-suggestions', () => this.generateSuggestions(), this.logger);
     }, SUGGESTION_SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

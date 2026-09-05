@@ -43,7 +43,7 @@ describe('WebhookRecoveryService', () => {
     const payments = {
       recoverWebhookEvent: jest.fn().mockResolvedValue(undefined),
     } as unknown as PaymentsService;
-    const service = new WebhookRecoveryService(webhookEvents, settings, payments);
+    const service = new WebhookRecoveryService(webhookEvents, settings, payments, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await expect(service.sweep()).resolves.toBe(2);
 
@@ -72,7 +72,7 @@ describe('WebhookRecoveryService', () => {
     const payments = {
       recoverWebhookEvent: jest.fn().mockRejectedValueOnce(new Error('temporary database failure')).mockResolvedValueOnce(undefined),
     } as unknown as PaymentsService;
-    const service = new WebhookRecoveryService(webhookEvents, settings, payments);
+    const service = new WebhookRecoveryService(webhookEvents, settings, payments, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await expect(service.sweep()).resolves.toBe(2);
 

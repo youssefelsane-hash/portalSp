@@ -15,7 +15,7 @@ describe('ScheduleSlotReleaseListener', () => {
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
   ])('releases a booked slot when the order enters %s', async (status) => {
     const release = jest.fn(async () => undefined);
-    const listener = new ScheduleSlotReleaseListener({ releaseSlotForOrder: release } as unknown as TechnicianScheduleService);
+    const listener = new ScheduleSlotReleaseListener({ releaseSlotForOrder: release } as unknown as TechnicianScheduleService, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await listener.handleOrderStatusChanged(event(status));
 
@@ -24,7 +24,7 @@ describe('ScheduleSlotReleaseListener', () => {
 
   it('does not release a slot for an active execution transition', async () => {
     const release = jest.fn(async () => undefined);
-    const listener = new ScheduleSlotReleaseListener({ releaseSlotForOrder: release } as unknown as TechnicianScheduleService);
+    const listener = new ScheduleSlotReleaseListener({ releaseSlotForOrder: release } as unknown as TechnicianScheduleService, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await listener.handleOrderStatusChanged(event(OrderStatus.TECHNICIAN_ON_WAY));
 
@@ -35,7 +35,9 @@ describe('ScheduleSlotReleaseListener', () => {
     const reconcile = jest.fn(async () => 3);
     const listener = new ScheduleSlotReleaseListener({
       reconcileReleasedSlots: reconcile,
-    } as unknown as TechnicianScheduleService);
+    } as unknown as TechnicianScheduleService,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
+    );
 
     await expect(listener.sweep()).resolves.toBe(3);
     expect(reconcile).toHaveBeenCalledWith(25);

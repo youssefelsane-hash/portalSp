@@ -14,7 +14,7 @@ describe('PrepaidOrderSettlementListener', () => {
 
   it('newStatus=WORK_COMPLETED — بينادي settleAlreadyPaidOrder() بالـorderId الصح', async () => {
     const settleSpy = jest.fn(async () => undefined);
-    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService);
+    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await listener.handleOrderStatusChanged(makeEvent(OrderStatus.WORK_COMPLETED));
 
@@ -23,7 +23,7 @@ describe('PrepaidOrderSettlementListener', () => {
 
   it('أي newStatus تاني — مابينادش settleAlreadyPaidOrder() خالص', async () => {
     const settleSpy = jest.fn(async () => undefined);
-    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService);
+    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await listener.handleOrderStatusChanged(makeEvent(OrderStatus.COMPLETED));
     await listener.handleOrderStatusChanged(makeEvent(OrderStatus.CANCELLED_BY_CUSTOMER));
@@ -35,7 +35,7 @@ describe('PrepaidOrderSettlementListener', () => {
     const settleSpy = jest.fn(async () => {
       throw new Error('DB عابر مثلاً');
     });
-    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService);
+    const listener = new PrepaidOrderSettlementListener({ settleAlreadyPaidOrder: settleSpy } as unknown as PaymentsService, { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never);
 
     await expect(listener.handleOrderStatusChanged(makeEvent(OrderStatus.WORK_COMPLETED))).resolves.toBeUndefined();
   });
@@ -44,7 +44,9 @@ describe('PrepaidOrderSettlementListener', () => {
     const reconcile = jest.fn(async () => 2);
     const listener = new PrepaidOrderSettlementListener({
       reconcilePrepaidWorkCompleted: reconcile,
-    } as unknown as PaymentsService);
+    } as unknown as PaymentsService,
+      { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
+    );
 
     await expect(listener.sweep()).resolves.toBe(2);
     expect(reconcile).toHaveBeenCalledWith(25);

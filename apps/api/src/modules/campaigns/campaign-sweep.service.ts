@@ -1,4 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { CampaignsService } from './campaigns.service';
 
 /**
@@ -18,17 +21,23 @@ export class CampaignSweepService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CampaignSweepService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly campaigns: CampaignsService) {}
+  constructor(
+    private readonly campaigns: CampaignsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.campaigns
-        .sweep()
-        .then((sent) => {
+      // القفل الاستشاري (تدقيق A-2): إشعار تسويقي بيتبعت مرة واحدة، مش مرة لكل instance.
+      void runExclusiveSweep(
+        this.dataSource,
+        'campaign-sweep',
+        async () => {
+          const sent = await this.campaigns.sweep();
           if (sent > 0) this.logger.log(`محرك الحملات: اتبعت ${sent} إشعار تسويقي`);
-        })
-        // أي فشل هنا بيتلقّط ويتسجّل بس — ميقدرش يوقّع الـprocess ولا يأثر على أي مسار حقيقي.
-        .catch((err) => this.logger.error('فشلت دورة الحملات', err instanceof Error ? err.stack : err));
+        },
+        this.logger,
+      );
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }

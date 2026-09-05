@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -44,7 +45,11 @@ export class ProjectNotificationOutboxProcessor implements OnModuleInit, OnModul
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => void this.sweep(), 15_000);
+    this.timer = setInterval(() => {
+      // القفل الاستشاري (تدقيق A-2): الصندوق ده بيتعالج من نسخة واحدة بس، وإلا نفس الصف
+      // بيتبعت مرتين لما أكتر من instance تلقطه في نفس الثانية.
+      void runExclusiveSweep(this.dataSource, 'project-notification-outbox', () => this.sweep(), this.logger);
+    }, 15_000);
     this.timer.unref();
   }
 

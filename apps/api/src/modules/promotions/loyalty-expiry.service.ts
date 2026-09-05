@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -58,9 +59,9 @@ export class LoyaltyExpiryService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      this.sweep().catch((err) =>
-        this.logger.error('فشل sweep انتهاء نقاط الولاء', err instanceof Error ? err.stack : err),
-      );
+      // القفل الاستشاري (تدقيق A-2): نسخة واحدة بس هي اللي بتشغّل الدورة دي، حتى لو
+      // التطبيق شغّال على أكتر من instance. `runExclusiveSweep` بتلقّط وتسجّل أي فشل.
+      void runExclusiveSweep(this.dataSource, 'loyalty-expiry', () => this.sweep(), this.logger);
     }, SWEEP_INTERVAL_MS);
     this.timer.unref?.();
   }
