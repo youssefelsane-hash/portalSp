@@ -2,6 +2,9 @@
   "name": "@baytak/admin",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9 <25"
+  },
   "scripts": {
     "predev": "npm --prefix ../../packages/shared-types run build",
     "dev": "next dev -p 3001",

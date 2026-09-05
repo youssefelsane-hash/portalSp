@@ -44,8 +44,24 @@ step "١/٧ — بيتأكد من المتطلبات"
 command -v docker >/dev/null 2>&1 || die "Docker مش متسطّب. سطّب Docker Desktop من docker.com وافتحه."
 docker info >/dev/null 2>&1 || die "Docker متسطّب بس **مش شغّال**. افتح تطبيق Docker Desktop واستنى لحد ما الأيقونة تبقى خضرا، وبعدين شغّل السكريبت تاني."
 command -v node >/dev/null 2>&1 || die "Node مش متسطّب. سطّبه: brew install node"
+# **النسخة الأحدث مش دايمًا الأصلح.** الفحص القديم كان `>= 20` بس، فقَبِل Node 26 — والنتيجة
+# كانت أسوأ من رفض صريح: أدوات البناء (Next 16 SWC/turbopack) مالهاش نسخة native للإصدار ده
+# فبتفشل، والـAPI بيقلع ويطبع «started» بس مابيردش على أي طلب. كل حاجة «شغّالة» ومفيش حاجة
+# بتشتغل. النطاق المدعوم متسجّل دلوقتي في `engines` في كل package.json.
 NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
-[[ "$NODE_MAJOR" -ge 20 ]] || die "Node $NODE_MAJOR قديم — المشروع محتاج 20 أو أحدث (CI بيستخدم 22). حدّثه: brew upgrade node"
+if [[ "$NODE_MAJOR" -lt 20 ]]; then
+  die "Node $(node -v) قديم — المشروع محتاج 20.9 أو أحدث. سطّب النسخة المدعومة: brew install node@22"
+elif [[ "$NODE_MAJOR" -ge 25 ]]; then
+  echo "${RED}❌ Node $(node -v) أحدث من اللي أدوات المشروع بتدعمه (المدعوم: 20–24، وCI بيستخدم 22).${OFF}" >&2
+  echo "${YELLOW}   الأعراض اللي بتيجي من ده بالظبط: Next.js مابيقلعش خالص، والـAPI بيطبع «started»${OFF}" >&2
+  echo "${YELLOW}   وبعدين مابيردش على أي طلب — فالواجهات تبان فاضية والبيانات موجودة.${OFF}" >&2
+  echo "" >&2
+  echo "${BLUE}   الإصلاح:${OFF}" >&2
+  echo "     brew install node@22" >&2
+  echo "     echo 'export PATH=\"/opt/homebrew/opt/node@22/bin:\$PATH\"' >> ~/.zshrc" >&2
+  echo "     source ~/.zshrc && node -v      # لازم تطلع v22.x" >&2
+  exit 1
+fi
 ok "Docker شغّال · Node $(node -v)"
 
 # ── 2) قاعدة البيانات والكاش ────────────────────────────────────────────────────
@@ -164,7 +180,15 @@ done
 ok "لوحة الإدارة :3001 · موقع العميل :3002"
 
 LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "<عنوان-الماك>")
-ADMIN_PHONE="+201000000001"; TECH_PHONE="+201000000002"; CUST_PHONE="+201000000003"
+
+# **الأرقام المعروضة لازم تكون أرقام القاعدة دي فعلاً، مش أرقام الزرع.** لو القاعدة فيها
+# بياناتك أنت (وده الوضع الطبيعي بعد أول تشغيل)، طباعة أرقام الزرع الثابتة بتوديك تجرب تدخل
+# بحساب مش موجود أصلاً وتفتكر إن الدخول مكسور.
+db_q() { docker exec baytak-db psql -U baytak -d baytak -tAc "$1" 2>/dev/null | head -3 | tr '\n' ' ' | sed 's/ *$//'; }
+ADMIN_PHONE=$(db_q "SELECT u.phone_number FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE r.is_super_admin AND u.deleted_at IS NULL AND u.is_active ORDER BY u.created_at")
+TECH_PHONE=$(db_q "SELECT u.phone_number FROM users u JOIN technician_profiles t ON t.user_id=u.id WHERE u.deleted_at IS NULL AND u.is_active ORDER BY u.created_at")
+CUST_PHONE=$(db_q "SELECT phone_number FROM users WHERE user_type='customer' AND deleted_at IS NULL AND is_active ORDER BY created_at")
+: "${ADMIN_PHONE:=—}"; : "${TECH_PHONE:=—}"; : "${CUST_PHONE:=—}"
 
 cat <<EOF
 
@@ -177,7 +201,10 @@ ${GREEN}═══ كله شغّال ═══${OFF}
   اللوجات         tail -f $LOGS/api.log
   القفل           scripts/mac-dev-up.sh --stop
 
-  حسابات الدخول   أدمن $ADMIN_PHONE · فني $TECH_PHONE · عميل $CUST_PHONE
+  حسابات الدخول   ${DIM}(من قاعدتك أنت — أول ٣ في كل نوع)${OFF}
+    أدمن          $ADMIN_PHONE
+    فني           $TECH_PHONE
+    عميل          $CUST_PHONE
   كود الـOTP      ${DIM}tail -f $LOGS/api.log | grep OTP${OFF}
 
 ${DIM}── تطبيقات Flutter ──────────────────────────────────────────────
