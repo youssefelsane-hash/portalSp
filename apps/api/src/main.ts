@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { configureHttpLayer } from './http-bootstrap';
+import { RedisIoAdapter } from './common/websocket/redis-io.adapter';
 
 // شبكة أمان — بدون هيّ أي rejection ملوش .catch (زي اللي كانت بتحصل جوّه BullMQ Worker وقت
 // انقطاع Redis) كانت بتوقف الـ event loop المعني بصمت تام من غير أي أثر في اللوج، وده صعّب
@@ -24,6 +25,15 @@ async function bootstrap() {
   // للإشارة دي افتراضيًا، فsystemd/docker بيضطروا يستنوا TimeoutStopSec كامل ثم SIGKILL قسري
   // بدل إغلاق نظيف. جزء من خطة supervisor/restart الكاملة (infra/systemd/baytak-api.service).
   app.enableShutdownHooks();
+
+  // بث غرف الـWebSocket عبر Redis (تدقيق C-4) — من غيره `server.to(room).emit()` بتوصل
+  // للـsockets المتصلة بنفس الـprocess بس، فتاني instance = تتبّع/شات/لوحة أدمن ساكنة بلا أي
+  // خطأ ظاهر. لو Redis مش متاح بنكمّل بالبث المحلي (سلوك النهارده بالظبط) مش بنوقف الإقلاع —
+  // التفاصيل الكاملة في `common/websocket/redis-io.adapter.ts`.
+  // الاتصالان بيتقفلوا في `RedisIoAdapter.close()` اللي Nest بينديه وقت إغلاق التطبيق.
+  const ioAdapter = new RedisIoAdapter(app, config.get<string>('redis.url')!);
+  await ioAdapter.connect();
+  app.useWebSocketAdapter(ioAdapter);
 
   // كل تركيب طبقة الـHTTP (helmet ← prefix ← CORS ← static ← pipes) في مكان واحد مُختبَر —
   // الترتيب نفسه هو السلوك، راجع http-bootstrap.ts.
