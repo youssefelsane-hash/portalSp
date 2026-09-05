@@ -152,3 +152,18 @@ export const RECURRING_FREQUENCY_LABELS: Record<string, string> = {
   monthly: 'شهريًا',
   yearly: 'سنويًا',
 };
+
+// مسار التوزيع (تدقيق §06 §4) — الفرق بين «الفني بيقبل بنفسه» و«الفني اتعيّن بلا موافقته».
+// النغمة مقصودة: التعيين التلقائي بيتعرض كتحذير لأنه القرار الوحيد اللي بيلزم فني بشغل من غير
+// ما يقول أيوه، فلازم يبان للأدمن مش يتلخبط مع الجولات.
+export const DISPATCH_ROUTE_LABELS: Record<string, string> = {
+  rounds: 'جولات عروض',
+  auto_confirm: 'تأكيد تلقائي',
+  not_dispatchable: 'خارج التوزيع',
+};
+
+export function dispatchRouteBadgeClass(route: string): string {
+  if (route === 'rounds') return 'border-transparent bg-success-bg text-success';
+  if (route === 'auto_confirm') return 'border-transparent bg-warning-bg text-warning';
+  return 'border-transparent bg-muted text-muted-foreground';
+}
