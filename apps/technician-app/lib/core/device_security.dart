@@ -8,6 +8,17 @@ class DeviceSecurityResult {
   const DeviceSecurityResult({required this.isCompromised, this.reasonAr});
 }
 
+/// **تجاوز فحص الإيموليتور — للتطوير المحلي بس** (`--dart-define=ALLOW_EMULATOR=true`).
+///
+/// السبب: تشغيل التطبيقين مع بعض على جهاز أندرويد واحد مش عملي، والتجربة الحقيقية بتحتاج
+/// نسخة أندرويد (مش macOS desktop) عشان تكون مطابقة لللي بيتشحن فعلاً.
+///
+/// **مقفول على `kDebugMode` عمدًا**: في `flutter run --release` أو أي build إنتاجي القيمة دي
+/// **بتتجاهَل تمامًا** — يعني مفيش أي طريقة إن التجاوز ده يوصل لفني حقيقي، حتى لو الفلاج
+/// اتبعت بالغلط في أمر البناء. الجاي-بريك/الروت بيفضل مرفوض في كل الحالات بلا استثناء:
+/// التجاوز ده على **الإيموليتور** بس.
+const bool _allowEmulatorInDebug = bool.fromEnvironment('ALLOW_EMULATOR');
+
 // جزء من متطلبات الأمان الإلزامية §7.3 (كانت فجوة موثّقة صراحة) — كشف الأجهزة المكسورة
 // (root/jailbreak) قبل السماح بأي عملية مالية (أرباح، صرف). فحص واحد وقت فتح التطبيق، مش لكل
 // طلب — SafeDevice بيعمل native calls مش رخيصة تتكرر باستمرار.
@@ -22,7 +33,7 @@ class DeviceSecurityService {
     }
     try {
       final isRealDevice = await SafeDevice.isRealDevice;
-      if (!isRealDevice) {
+      if (!isRealDevice && !(kDebugMode && _allowEmulatorInDebug)) {
         return const DeviceSecurityResult(
           isCompromised: true,
           reasonAr:
