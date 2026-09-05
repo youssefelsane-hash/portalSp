@@ -15,6 +15,7 @@ import { TechnicianLevelConfig } from '../technicians/entities/technician-level-
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { SETTINGS_REGISTRY } from '../settings/settings-registry';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
@@ -225,8 +226,18 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     await q(`DELETE FROM notification_routing_rules WHERE event_type = 'order.emergency_dispatch_struggling'`);
+    // **ترجيع القيمة المسجّلة مش حذف الصف**: المفاتيح دي بقت جزء من سجل الإعدادات
+    // (`settings-registry.ts` + migration 0264)، وحذفها بيكسر ثابتة «كل مفتاح مسجّل له صف» —
+    // يعني السبيك ده كان بيفشّل `settings-registry.spec.ts` لو اتنفّذ قبله، وكمان بيرجّع
+    // ضبط الطوارئ لحالة «الأدمن مش قادر يضبطه» اللي التدقيق قفلها أصلاً.
+    // القيم بتتقرا من السجل نفسه فمستحيل تنحرف عنه.
     for (const key of SETTINGS_KEYS) {
-      await q(`DELETE FROM settings WHERE key = $1`, [key]);
+      const registered = SETTINGS_REGISTRY[key];
+      if (registered) {
+        await q(`UPDATE settings SET value = $2::jsonb WHERE key = $1`, [key, JSON.stringify(registered.default)]);
+      } else {
+        await q(`DELETE FROM settings WHERE key = $1`, [key]);
+      }
       await cache.del(`settings:${key}`);
     }
     await dataSource.destroy();
