@@ -184,6 +184,7 @@ export class OrdersService {
    */
   private get technicianOps(): OrderTechnicianOpsService {
     return (this.technicianOpsInstance ??= new OrderTechnicianOpsService(
+      this.orders,
       this.orderMedia,
       this.dataSource,
       this.queries,
@@ -329,39 +330,8 @@ export class OrdersService {
   }
 
 
-  /**
-   * "الطلب ده اتفتح" (docs/08 §56 بند 2) — بيتعلّم أول مرة بس (`IS NULL` في الـWHERE، فالنداءات
-   * اللي بعدها مابتعملش كتابة أصلاً ولا بتغيّر التوقيت الأصلي). مقصور على الفني المعيّن نفسه —
-   * عضو فريق بيفتح طلب قائده ماينفعش يعلّمه "مقروء" نيابة عنه.
-   *
-   * بيعلّم كمان `order_assignments` المعلّق كـ`viewed`: القيمة دي موجودة في الـenum من زمان
-   * وبتتقرا في 6 أماكن، بس **محدش كان بيكتبها أبدًا** — دلوقتي بقى ليها معنى حقيقي. آمن تمامًا:
-   * كل المسارات بتعامل SENT وVIEWED بنفس الطريقة بالحرف (عرض حي قابل للقبول).
-   *
-   * أي فشل هنا مايكسرش قراءة الطلب — التعليم راحة استخدام، مش جزء من صحة العملية.
-   */
-  async markViewedByTechnician(order: Order, technicianProfileId: string): Promise<void> {
-    if (order.technicianId !== technicianProfileId || order.technicianViewedAt !== null) return;
-    try {
-      await this.orders
-        .createQueryBuilder()
-        .update(Order)
-        .set({ technicianViewedAt: () => 'now()' })
-        .where('id = :orderId AND technician_id = :technicianId AND technician_viewed_at IS NULL', {
-          orderId: order.id,
-          technicianId: technicianProfileId,
-        })
-        .execute();
-      await this.orders.manager.query(
-        // `viewed_at` بيتكتب مع الحالة في نفس الجملة — أول مشاهدة بس (`IS NULL`) عشان تفضل
-        // «أول مشاهدة» مش «آخر واحدة» (migration 0255).
-        `UPDATE order_assignments SET assignment_status = 'viewed', viewed_at = COALESCE(viewed_at, now())
-         WHERE order_id = $1 AND technician_id = $2 AND assignment_status = 'sent'`,
-        [order.id, technicianProfileId],
-      );
-    } catch (error) {
-      this.logger.warn(`فشل تعليم الطلب ${order.id} كمقروء للفني — الطلب نفسه اترجع عادي: ${String(error)}`);
-    }
+  markViewedByTechnician(order: Order, technicianProfileId: string): Promise<void> {
+    return this.technicianOps.markViewedByTechnician(order, technicianProfileId);
   }
 
   private async insertDurableInAppNotification(
