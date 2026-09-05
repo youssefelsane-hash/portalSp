@@ -14,6 +14,7 @@ export class AdminBuildingsController {
   constructor(private readonly buildingsService: BuildingsService) {}
 
   @Get()
+  @RequirePermission('buildings.view')
   async list() {
     const buildings = await this.buildingsService.list();
     const counts = await this.buildingsService.getCurrentMonthOrdersCountBulk(buildings.map((b) => b.id));
@@ -21,6 +22,7 @@ export class AdminBuildingsController {
   }
 
   @Get(':id')
+  @RequirePermission('buildings.view')
   async getOne(@Param('id', ParseUUIDPipe) id: string) {
     const building = await this.buildingsService.findByIdOrThrow(id);
     return toBuildingWithSubscriptionStatusDto(building, await this.buildingsService.getCurrentMonthOrdersCount(building.id));
@@ -43,6 +45,7 @@ export class AdminBuildingsController {
   // JSON عادي (data URI) بدل صورة خام — نفس نمط عقد الـ API {success,data,...} في باقي النظام،
   // مفيش داعي نتجاوز الـ response pipeline لصورة صغيرة. apps/admin يعرضها مباشرة بـ<img src=...>.
   @Get(':id/qr')
+  @RequirePermission('buildings.view')
   async getQrCode(@Param('id', ParseUUIDPipe) id: string) {
     const building = await this.buildingsService.findByIdOrThrow(id);
     const qrDataUri = await this.buildingsService.generateQrPngDataUri(building);

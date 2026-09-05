@@ -69,6 +69,7 @@ export class AdminTechniciansController {
   ) {}
 
   @Get()
+  @RequirePermission('technicians.view')
   async list(@Query() query: ListTechniciansQueryDto) {
     const { items, meta } = await this.adminTechniciansService.list(query);
     const activity = await this.technicianActivityService.getActivitySnapshot(items.map(({ user }) => user.id));
@@ -90,6 +91,7 @@ export class AdminTechniciansController {
   // لـ:id — بَقّة ترتيب routes معروفة سابقًا في المشروع، راجع matching.module.ts للسياق الكامل).
   // بلا RequirePermission مخصوصة — عرض/تشخيص بس، نفس مستوى GET :id العادي.
   @Get('by-category')
+  @RequirePermission('technicians.view')
   async listByCategory(@Query() query: ListCategoryOpsQueryDto) {
     const { items, meta } = await this.categoryOpsService.list({
       categoryId: query.category_id,
@@ -127,6 +129,7 @@ export class AdminTechniciansController {
   // بروفايل فني 360° (docs/08 §35.11، ADR-0021 §5) — تجميعة قراءة بس، صفر منطق مطوّر جديد (كل
   // فعل إداري لسه بيتعمل عبر endpoints الموجودة). بلا RequirePermission مخصوصة — نفس مستوى GET :id.
   @Get(':id/360')
+  @RequirePermission('technicians.view')
   async getProfile360(@Param('id', ParseUUIDPipe) id: string) {
     const p = await this.technician360Service.getProfile(id);
     return {
@@ -238,6 +241,7 @@ export class AdminTechniciansController {
   // سؤال تشخيصي عام، مش قرار مطابقة حقيقي لطلب بعينه (ده لسه بيحصل جوّه matching.service.ts وقت
   // التوزيع الفعلي). بلا RequirePermission مخصوصة — عرض بس، نفس مستوى GET :id العادي.
   @Get(':id/capacity')
+  @RequirePermission('technicians.view')
   async getCapacity(@Param('id', ParseUUIDPipe) id: string, @Query() query: TechnicianCapacityQueryDto) {
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const description = await describeTechnicianCapacity(this.dataSource, {
@@ -261,6 +265,7 @@ export class AdminTechniciansController {
    * عرض بس، نفس مستوى `GET :id/360`.
    */
   @Get(':id/earnings/statement')
+  @RequirePermission('technicians.finance.view')
   async earningsStatement(@Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {
     return this.earningsService.getMonthlyStatement(id, month ?? TechnicianEarningsService.currentMonthCairo());
   }
@@ -272,11 +277,13 @@ export class AdminTechniciansController {
    * الحسابات نفسه، بدل ما الفرق يفضل لغز يبان كأنه خطأ حسابي.
    */
   @Get(':id/earnings/reconciliation')
+  @RequirePermission('technicians.finance.view')
   async earningsReconciliation(@Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {
     return this.earningsService.getBalanceReconciliation(id, month ?? TechnicianEarningsService.currentMonthCairo());
   }
 
   @Get(':id/earnings/months')
+  @RequirePermission('technicians.finance.view')
   async earningsMonths(@Param('id', ParseUUIDPipe) id: string) {
     return { months: await this.earningsService.listAvailableMonths(id) };
   }
@@ -391,6 +398,7 @@ export class AdminTechniciansController {
   // فوق (موافقة/رفض طلب قائم من الفني)، الـ3 دول بيسمحوا للأدمن يعيّن/يشيل فئة لفني مباشرة من
   // غير ما ينتظر تصريح ذاتي. نفس نمط zones تحت بالحرف.
   @Get(':id/categories')
+  @RequirePermission('technicians.view')
   async listCategories(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.technicianCategoriesService.listForTechnician(id);
     return rows.map((row) => toTechnicianCategoryResponseDto(row));
@@ -460,6 +468,7 @@ export class AdminTechniciansController {
   }
 
   @Get(':id')
+  @RequirePermission('technicians.view')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { profile, user, documents } = await this.adminTechniciansService.getDetail(id);
     const certificates = await this.certificatesService.listForTechnician(id);
@@ -476,7 +485,7 @@ export class AdminTechniciansController {
    * بس)، لأن تصحيح غلطة إدخال لازم يفضل ممكن.
    */
   @Patch(':id/national-id')
-  @RequirePermission('technicians.manage')
+  @RequirePermission('technicians.national_id.manage')
   async setNationalId(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -498,7 +507,7 @@ export class AdminTechniciansController {
    * لأي حد بيشوف الصفحة؛ الرقم الصريح بيتطلب صراحةً، فكل كشف بيبقى فعل مقصود.
    */
   @Get(':id/national-id')
-  @RequirePermission('technicians.manage')
+  @RequirePermission('technicians.national_id.view')
   async revealNationalId(@Param('id', ParseUUIDPipe) id: string) {
     return { national_id: await this.identityService.revealNationalId(id) };
   }
@@ -684,6 +693,7 @@ export class AdminTechniciansController {
 
   // كانت فجوة موثّقة صراحة: تعيين مناطق عمل الفني كان يدوي عبر SQL مباشر تماماً.
   @Get(':id/zones')
+  @RequirePermission('technicians.view')
   async listZones(@Param('id', ParseUUIDPipe) id: string) {
     const zones = await this.adminTechniciansService.listZones(id);
     return zones.map(toTechnicianZoneResponseDto);

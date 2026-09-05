@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, DiscoveryModule } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -50,6 +50,7 @@ import { OpsModule } from './modules/ops/ops.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { TechnicianProductivityModule } from './modules/technician-productivity/technician-productivity.module';
 import { SecurityModule } from './modules/security/security.module';
+import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validator';
 
 @Module({
   imports: [
@@ -131,8 +132,11 @@ import { SecurityModule } from './modules/security/security.module';
     BrandingModule,
     TechnicianProductivityModule,
     SecurityModule,
+    // مطلوب لـ AdminRouteRbacValidator — بيمشي على كل الـcontrollers المسجّلة وقت الإقلاع.
+    DiscoveryModule,
   ],
   providers: [
+    AdminRouteRbacValidator,
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_GUARD, useClass: ThrottlerGuard },

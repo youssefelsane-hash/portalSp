@@ -16,6 +16,7 @@ export class AdminCancellationReasonsController {
   constructor(private readonly cancellationReasonsService: CancellationReasonsService) {}
 
   @Get()
+  @RequirePermission('cancellation_reasons.view')
   async list() {
     const reasons = await this.cancellationReasonsService.listAllForAdmin();
     return reasons.map(toCancellationReasonResponseDto);

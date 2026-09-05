@@ -30,6 +30,8 @@ export interface RoleAssignment {
 export interface RoleDetail {
   role: Role;
   permission_names: string[];
+  /** صلاحيات القراءة المشتقّة تلقائيًا (تدقيق S-1) — مش مخزّنة في `role_permissions`. */
+  implied_permission_names: string[];
   users: { user_id: string; full_name: string; phone_number: string; assigned_at: string }[];
 }
 
@@ -147,6 +149,14 @@ export class PermissionsService {
    * بيجمع كل صلاحيات المستخدم من كل أدواره المُعيَّنة — استعلام واحد، مفيش N+1.
    * super_admin (is_super_admin=true) بيتخطى الفحص بالكامل ويرجع كل الكتالوج — يقفل بَقّة
    * "لازم تفتكر تمنح كل صلاحية جديدة لـsuper_admin يدويًا" اللي كانت موجودة من 0020 (ADR-0010 §1).
+   *
+   * **قاعدة الاشتقاق (تدقيق S-1، ADR-0074): مين بيقدر يعمل أي حاجة على مورد، يقدر يقراه.**
+   * أي دور عنده أي صلاحية على مورد بياخد `<resource>.view` بتاعه ضمنيًا. من غير القاعدة دي كان
+   * لازم كل دور جديد يتمنح الاتنين بالإيد — ودور جديد بـ`support_tickets.manage` بس كان هيبقى
+   * عاجز يفتح شاشة التذاكر أصلاً، فخ صامت بيتكرر مع كل دور. القاعدة على `action = 'view'` بالظبط،
+   * مش على أي اسم فيه كلمة view: النطاقات الأضيق زي `technicians.finance.view` (action =
+   * `finance_view`) **مش** بتتشتق — مسؤول التوظيف عنده `technicians.approve` ومايصحّش ياخد كشف
+   * أرباح الفنيين بالوراثة.
    */
   async getUserPermissionNames(userId: string): Promise<Set<string>> {
     if (await this.isSuperAdminUser(userId)) {
@@ -154,15 +164,45 @@ export class PermissionsService {
       return new Set(all.map((p) => p.name));
     }
     const rows = await this.dataSource.query<{ name: string }[]>(
-      `SELECT DISTINCT p.name
-       FROM user_roles ur
-       JOIN role_permissions rp ON rp.role_id = ur.role_id
-       JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
-       JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active = true
-       WHERE ur.user_id = $1`,
+      `WITH granted AS (
+         SELECT p.name, p.resource
+         FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
+         JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active = true
+         WHERE ur.user_id = $1
+       )
+       SELECT name FROM granted
+       UNION
+       SELECT v.name FROM permissions v
+       WHERE v.action = 'view' AND v.deleted_at IS NULL
+         AND v.resource IN (SELECT resource FROM granted)`,
       [userId],
     );
     return new Set(rows.map((r) => r.name));
+  }
+
+  /**
+   * صلاحيات القراءة اللي الدور بياخدها ضمنيًا بقاعدة الاشتقاق فوق — مش مخزّنة في
+   * `role_permissions`. بترجع منفصلة عن `permission_names` عشان محرّر الأدوار يعرضها كـ«مشتقّة»
+   * بدل ما تختفي: لو الواجهة عرضت المخزّن بس، المشغّل هيشوف دور مالوش قراءة وهو فعليًا عنده قراءة.
+   */
+  private async getRoleImpliedPermissionNames(roleId: string): Promise<string[]> {
+    const rows = await this.dataSource.query<{ name: string }[]>(
+      `WITH granted AS (
+         SELECT p.name, p.resource
+         FROM role_permissions rp
+         JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
+         WHERE rp.role_id = $1
+       )
+       SELECT v.name FROM permissions v
+       WHERE v.action = 'view' AND v.deleted_at IS NULL
+         AND v.resource IN (SELECT resource FROM granted)
+         AND v.name NOT IN (SELECT name FROM granted)
+       ORDER BY v.name ASC`,
+      [roleId],
+    );
+    return rows.map((r) => r.name);
   }
 
   async hasPermission(userId: string, permissionName: string): Promise<boolean> {
@@ -203,6 +243,7 @@ export class PermissionsService {
     return {
       role,
       permission_names: permRows.map((r) => r.name),
+      implied_permission_names: await this.getRoleImpliedPermissionNames(roleId),
       users: userRows.map((u) => ({
         user_id: u.user_id,
         full_name: u.full_name,

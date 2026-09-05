@@ -80,6 +80,23 @@ export default function RoleDetailPage() {
     return map;
   }, [catalog]);
 
+  // قاعدة الاشتقاق (تدقيق S-1، ADR-0074): أي دور عنده أي صلاحية على مورد بياخد `<resource>.view`
+  // بتاعه ضمنيًا. السلطة النهائية هي `PermissionsService.getUserPermissionNames()` في الباك-إند —
+  // الحساب هنا بس عشان الشاشة تورّي الأثر **وإنت بتظبّط** بدل ما تستنى الحفظ وتلاقي مربّع
+  // مالوش علامة رغم إن الصلاحية فعليًا شغّالة. `action === 'view'` بالظبط، زي الباك-إند حرفيًا:
+  // النطاقات الأضيق على نفس المورد (`technicians.finance.view` → action `finance_view`) مش مشتقّة.
+  const impliedPermissions = useMemo(() => {
+    if (!catalog) return new Set<string>();
+    const selectedResources = new Set(
+      catalog.filter((p) => selectedPermissions.has(p.name)).map((p) => p.resource),
+    );
+    return new Set(
+      catalog
+        .filter((p) => p.action === 'view' && selectedResources.has(p.resource) && !selectedPermissions.has(p.name))
+        .map((p) => p.name),
+    );
+  }, [catalog, selectedPermissions]);
+
   async function handleUpdate(e: FormEvent) {
     e.preventDefault();
     if (!detail) return;
@@ -272,16 +289,31 @@ export default function RoleDetailPage() {
                         {resource}
                       </h3>
                       <div className="flex flex-wrap gap-x-6 gap-y-1">
-                        {perms.map((p) => (
-                          <label key={p.id} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={selectedPermissions.has(p.name)}
-                              onChange={() => togglePermission(p.name)}
-                            />
-                            <span dir="ltr">{p.name}</span>
-                          </label>
-                        ))}
+                        {perms.map((p) => {
+                          const isImplied = impliedPermissions.has(p.name);
+                          return (
+                            <label
+                              key={p.id}
+                              className="flex items-center gap-2 text-sm"
+                              title={isImplied ? 'مشتقّة تلقائيًا: الدور عنده صلاحية على نفس المورد' : undefined}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedPermissions.has(p.name) || isImplied}
+                                disabled={isImplied}
+                                onChange={() => togglePermission(p.name)}
+                              />
+                              <span dir="ltr" className={isImplied ? 'text-muted-foreground' : undefined}>
+                                {p.name}
+                              </span>
+                              {isImplied && (
+                                <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                                  مشتقّة
+                                </Badge>
+                              )}
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}

@@ -27,11 +27,13 @@ export class AdminGeoController {
   constructor(private readonly adminGeoService: AdminGeoService) {}
 
   @Get('countries')
+  @RequirePermission('geo.view')
   async listCountries() {
     return (await this.adminGeoService.listCountries()).map(toAdminCountryResponseDto);
   }
 
   @Get('cities')
+  @RequirePermission('geo.view')
   async listCities() {
     return (await this.adminGeoService.listCities()).map(toAdminCityResponseDto);
   }
@@ -62,6 +64,7 @@ export class AdminGeoController {
   }
 
   @Get('areas')
+  @RequirePermission('geo.view')
   async listAreas(@Query('city_id') cityId?: string) {
     return (await this.adminGeoService.listAreas(cityId)).map(toAdminAreaResponseDto);
   }
@@ -92,6 +95,7 @@ export class AdminGeoController {
   }
 
   @Get('service-zones')
+  @RequirePermission('geo.view')
   async listServiceZones(@Query('city_id') cityId?: string) {
     return (await this.adminGeoService.listServiceZones(cityId)).map(toAdminServiceZoneResponseDto);
   }
@@ -124,6 +128,7 @@ export class AdminGeoController {
   // بيرجّع النقط الخام لو المضلّع مرسوم (عشان لوحة الرسم في apps/admin تحمّل الحالة الحالية
   // للتعديل)، أو null لو لسه مفيش. قراءة بس — مفتوحة لأي أدمن زي باقي الـ GET هنا.
   @Get('service-zones/:id/boundary')
+  @RequirePermission('geo.view')
   async getServiceZoneBoundary(@Param('id', ParseUUIDPipe) id: string) {
     return { points: await this.adminGeoService.getServiceZoneBoundary(id) };
   }

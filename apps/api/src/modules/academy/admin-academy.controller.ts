@@ -21,6 +21,7 @@ export class AdminAcademyController {
   constructor(private readonly academyService: AcademyService) {}
 
   @Get('courses')
+  @RequirePermission('academy.view')
   async listCourses() {
     const courses = await this.academyService.listAllCoursesForAdmin();
     return courses.map(toAcademyCourseResponseDto);
@@ -50,6 +51,7 @@ export class AdminAcademyController {
   }
 
   @Get('technicians/:technicianId/exam-attempts')
+  @RequirePermission('academy.view')
   async listAttemptsForTechnician(@Param('technicianId', ParseUUIDPipe) technicianId: string) {
     const attempts = await this.academyService.listAttemptsForTechnician(technicianId);
     return attempts.map(toAcademyExamAttemptResponseDto);

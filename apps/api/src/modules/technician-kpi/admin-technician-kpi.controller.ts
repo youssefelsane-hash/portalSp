@@ -25,6 +25,7 @@ export class AdminTechnicianKpiController {
   }
 
   @Get()
+  @RequirePermission('technician_kpi.view')
   async list(@Query() query: AdminListKpiQueryDto) {
     const { items, total } = await this.kpiService.listForAdmin({
       periodYear: query.period_year,
@@ -41,12 +42,14 @@ export class AdminTechnicianKpiController {
   }
 
   @Get(':id')
+  @RequirePermission('technician_kpi.view')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const snapshot = await this.kpiService.getOrThrow(id);
     return toTechnicianKpiSnapshotResponseDto(snapshot);
   }
 
   @Get('technicians/:id/history')
+  @RequirePermission('technician_kpi.view')
   async getTechnicianHistory(@Param('id', ParseUUIDPipe) id: string) {
     const { latest, history } = await this.kpiService.getTechnicianSummary(id);
     return {

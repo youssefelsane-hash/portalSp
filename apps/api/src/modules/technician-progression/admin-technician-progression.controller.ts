@@ -22,6 +22,7 @@ export class AdminTechnicianProgressionController {
   constructor(private readonly progressionService: TechnicianProgressionService) {}
 
   @Get('rules')
+  @RequirePermission('technician_progression.view')
   async listRules() {
     const rules = await this.progressionService.listRules();
     return rules.map(toProgressionRuleResponseDto);
@@ -41,6 +42,7 @@ export class AdminTechnicianProgressionController {
   }
 
   @Get()
+  @RequirePermission('technician_progression.view')
   async list(@Query() query: AdminListProgressionQueryDto) {
     const { items, total } = await this.progressionService.listForAdmin({
       isEligible: query.is_eligible,
@@ -55,6 +57,7 @@ export class AdminTechnicianProgressionController {
   }
 
   @Get(':id')
+  @RequirePermission('technician_progression.view')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const status = await this.progressionService.getOrThrow(id);
     return toProgressionStatusResponseDto(status);

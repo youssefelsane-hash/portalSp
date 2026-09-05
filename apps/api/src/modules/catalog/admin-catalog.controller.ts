@@ -65,6 +65,7 @@ export class AdminCatalogController {
   // ── الفئات ───────────────────────────────────────────────────────────
 
   @Get('service-categories')
+  @RequirePermission('catalog.view')
   async listCategories() {
     const categories = await this.adminCatalogService.listAllCategories();
     return categories.map(toAdminServiceCategoryResponseDto);
@@ -143,6 +144,7 @@ export class AdminCatalogController {
   // ── الخدمات ──────────────────────────────────────────────────────────
 
   @Get('services')
+  @RequirePermission('catalog.view')
   async listServices(@Query('category_id') categoryId?: string) {
     const services = await this.adminCatalogService.listAllServices(categoryId);
     return services.map(toAdminServiceResponseDto);
@@ -180,6 +182,7 @@ export class AdminCatalogController {
   // ── تسعير حسب المنطقة ───────────────────────────────────────────────
 
   @Get('services/:id/zone-pricing')
+  @RequirePermission('catalog.view')
   async listZonePricing(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listZonePricing(id);
     return rows.map(toServiceZonePricingResponseDto);
@@ -211,6 +214,7 @@ export class AdminCatalogController {
   // ── الفنيين المؤهلين ─────────────────────────────────────────────────
 
   @Get('services/:id/technicians')
+  @RequirePermission('catalog.view')
   async listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listEligibleTechnicians(id);
     return rows.map(toEligibleTechnicianResponseDto);
@@ -243,6 +247,7 @@ export class AdminCatalogController {
   // ── تسعير حسب مستوى الفني ────────────────────────────────────────────
 
   @Get('services/:id/level-pricing')
+  @RequirePermission('catalog.view')
   async listLevelPricing(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listLevelPricing(id);
     return rows.map(toServiceLevelPricingResponseDto);
@@ -274,6 +279,7 @@ export class AdminCatalogController {
   // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
 
   @Get('services/:id/pricing-tier-pricing')
+  @RequirePermission('catalog.view')
   async listPricingTierPricing(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listPricingTierPricing(id);
     return rows.map(toServicePricingTierPricingResponseDto);
@@ -305,6 +311,7 @@ export class AdminCatalogController {
   // ── الإضافات الاختيارية ──────────────────────────────────────────────
 
   @Get('services/:id/addons')
+  @RequirePermission('catalog.view')
   async listAddons(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listAddons(id);
     return rows.map(toServiceAddonResponseDto);
@@ -347,6 +354,7 @@ export class AdminCatalogController {
   // ── البيانات القياسية ومحرك الإنتاجية (docs/06 §3.1-§3.6) ────────────────
 
   @Get('services/:id/standard-data')
+  @RequirePermission('catalog.view')
   async listStandardData(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.adminCatalogService.listStandardData(id);
     return rows.map(toServiceStandardDataResponseDto);
@@ -393,6 +401,7 @@ export class AdminCatalogController {
   // ── أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بس ────────
 
   @Get('services/standard-data/:standardDataId/actuals')
+  @RequirePermission('catalog.view')
   async listProductivityActuals(@Param('standardDataId', ParseUUIDPipe) standardDataId: string) {
     const rows = await this.adminCatalogService.listProductivityActuals(standardDataId);
     return rows.map(toServiceProductivityActualResponseDto);
@@ -416,6 +425,7 @@ export class AdminCatalogController {
   // في productivity-learning.service.ts.
 
   @Get('services/productivity-suggestions')
+  @RequirePermission('catalog.view')
   async listProductivitySuggestions(@Query('status') status?: ProductivitySuggestionStatus) {
     const rows = await this.productivityLearningService.listSuggestions(status);
     return rows.map(toServiceProductivitySuggestionResponseDto);

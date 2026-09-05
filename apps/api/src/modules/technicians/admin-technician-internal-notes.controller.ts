@@ -5,6 +5,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AddTechnicianInternalNoteDto } from './dto/add-technician-internal-note.dto';
 import { TechnicianInternalNotesService } from './technician-internal-notes.service';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
@@ -12,6 +13,7 @@ export class AdminTechnicianInternalNotesController {
   constructor(private readonly notes: TechnicianInternalNotesService) {}
 
   @Get(':id/notes')
+  @RequirePermission('technicians.notes.view')
   async list(@Param('id', ParseUUIDPipe) id: string) {
     const notes = await this.notes.list(id);
     return notes.map((note) => ({
@@ -25,6 +27,7 @@ export class AdminTechnicianInternalNotesController {
   }
 
   @Post(':id/notes')
+  @RequirePermission('technicians.notes.add')
   async add(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

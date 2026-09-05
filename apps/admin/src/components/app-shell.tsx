@@ -64,8 +64,13 @@ type NavGroup = { label: string; items: NavItem[] };
 // والصلاحيات" جنب "ترشيح QR الفني"). اتقسّمت هنا لمجموعات بمعنى تشغيلي واحد — بنية معلومات فعلية،
 // نفس مبدأ "console تشغيلي احترافي مش صفحات CRUD متجمّعة" المطلوب صراحة في الطلب الأول.
 //
-// **الصلاحيات (P0-3) محفوظة بالحرف من غير أي تغيير** — كل `permission` هنا مطابق تمامًا لما كان
-// موجود قبل إعادة التجميع؛ إعادة الترتيب مجرد بصري، مالوش أي علاقة بمنطق fail-closed تحت.
+// **الصلاحيات (P0-3)**: القايمة fail-closed — عنصر ليه `permission` بيتخفي إلا لو الصلاحية
+// مؤكّدة (المنطق تحت). بعد تدقيق S-1 كل عنصر هنا `permission` بتاعه **مطابق للصلاحية اللي
+// الـendpoint نفسه بيطلبها** في الباك-إند: قبل كده كانت ١٨ صفحة بلا أي `permission` لأن
+// مسارها ماكانتش بتطلب حاجة أصلاً، وواحدة (`/payouts`) كانت بلا `permission` رغم إن مسارها
+// بيطلب `payouts.view` — يعني الموظف كان بيشوف اللينك وياخد 403 لما يدوس.
+// العنصرين اللي فاضلين بلا `permission` (محادثات الدعم/المحادثات الداخلية) والـ`/security`
+// مقصودين: مسارات مشتركة مع الفني أو بيانات الموظف نفسه (أجهزته وجلساته)، مش عمليات إدارية.
 const NAV_GROUPS: NavGroup[] = [
   {
     label: '',
@@ -74,14 +79,14 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'العمليات',
     items: [
-      { href: '/operations', label: 'مركز العمليات', icon: Activity },
-      { href: '/orders', label: 'الطلبات', icon: ClipboardList },
+      { href: '/operations', label: 'مركز العمليات', icon: Activity, permission: 'operations.view' },
+      { href: '/orders', label: 'الطلبات', icon: ClipboardList, permission: 'orders.view' },
       // بند 7 — الطلبات اللي سعرها لسه مش مستقر لها طابور مخصّص: في قايمة الطلبات العامة بتضيع
       // وسط طلبات مفيش عليها قرار مطلوب.
-      { href: '/assessment-queue', label: 'طلبات التقييم', icon: ClipboardCheck },
+      { href: '/assessment-queue', label: 'طلبات التقييم', icon: ClipboardCheck, permission: 'orders.view' },
       { href: '/recurring-orders', label: 'الحجوزات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
-      { href: '/support', label: 'الشكاوى', icon: Megaphone },
-      { href: '/support-tickets', label: 'تذاكر الدعم', icon: LifeBuoy },
+      { href: '/support', label: 'الشكاوى', icon: Megaphone, permission: 'complaints.view' },
+      { href: '/support-tickets', label: 'تذاكر الدعم', icon: LifeBuoy, permission: 'support_tickets.view' },
       { href: '/support-chat', label: 'محادثات الدعم', icon: MessageSquare },
       { href: '/internal-chat', label: 'المحادثات الداخلية', icon: MessagesSquare },
     ],
@@ -89,32 +94,32 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'الفنيين',
     items: [
-      { href: '/technicians', label: 'الفنيين', icon: Wrench },
+      { href: '/technicians', label: 'الفنيين', icon: Wrench, permission: 'technicians.view' },
       {
         href: '/technicians/category-declarations',
         label: 'طابور تصريحات التخصصات',
         icon: ClipboardCheck,
         permission: 'technicians.approve',
       },
-      { href: '/technician-companies', label: 'شركات/فرق الفنيين', icon: Building2 },
-      { href: '/technician-levels', label: 'مستويات الفنيين والمساعدين', icon: Star },
-      { href: '/technician-referrals', label: 'ترشيح QR الفني', icon: QrCode },
-      { href: '/technician-kpi', label: 'KPI الشهري', icon: BarChart3 },
-      { href: '/technician-progression', label: 'المسار الوظيفي', icon: RouteIcon },
-      { href: '/academy', label: 'الأكاديمية', icon: GraduationCap },
+      { href: '/technician-companies', label: 'شركات/فرق الفنيين', icon: Building2, permission: 'technician_companies.view' },
+      { href: '/technician-levels', label: 'مستويات الفنيين والمساعدين', icon: Star, permission: 'technician_levels.view' },
+      { href: '/technician-referrals', label: 'ترشيح QR الفني', icon: QrCode, permission: 'technician_referrals.view' },
+      { href: '/technician-kpi', label: 'KPI الشهري', icon: BarChart3, permission: 'technician_kpi.view' },
+      { href: '/technician-progression', label: 'المسار الوظيفي', icon: RouteIcon, permission: 'technician_progression.view' },
+      { href: '/academy', label: 'الأكاديمية', icon: GraduationCap, permission: 'academy.view' },
     ],
   },
   {
     label: 'العملاء',
-    items: [{ href: '/customers', label: 'العملاء', icon: Users }],
+    items: [{ href: '/customers', label: 'العملاء', icon: Users, permission: 'customers.view' }],
   },
   {
     label: 'الكتالوج والتسعير',
     items: [
       { href: '/pricing', label: 'محرك التسعير', icon: DollarSign, permission: 'catalog.manage' },
-      { href: '/catalog', label: 'الكتالوج', icon: Package },
-      { href: '/buildings', label: 'العمائر', icon: Building },
-      { href: '/geo', label: 'المدن والمناطق', icon: Map },
+      { href: '/catalog', label: 'الكتالوج', icon: Package, permission: 'catalog.view' },
+      { href: '/buildings', label: 'العمائر', icon: Building, permission: 'buildings.view' },
+      { href: '/geo', label: 'المدن والمناطق', icon: Map, permission: 'geo.view' },
     ],
   },
   {
@@ -125,9 +130,9 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/warranty-plans', label: 'خطط الضمان', icon: ShieldCheck, permission: 'warranty.manage' },
       { href: '/warranty-claims', label: 'مطالبات الضمان', icon: ShieldCheck, permission: 'warranty.view' },
       { href: '/installments', label: 'التقسيط', icon: Landmark, permission: 'installments.view' },
-      { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
+      { href: '/payouts', label: 'طلبات الصرف', icon: Banknote, permission: 'payouts.view' },
       { href: '/instapay-confirmations', label: 'تأكيدات InstaPay', icon: Landmark, permission: 'payments.confirm_manual' },
-      { href: '/promotions', label: 'أكواد الخصم', icon: Tag },
+      { href: '/promotions', label: 'أكواد الخصم', icon: Tag, permission: 'promotions.view' },
       // ADR-0046 — الحملات التسويقية: إشعارات تلقائية بتفكّر العميل بالخدمات.
       { href: '/campaigns', label: 'الحملات التسويقية', icon: Send, permission: 'campaigns.manage' },
     ],
@@ -139,15 +144,15 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'النظام والإعدادات',
     items: [
-      { href: '/employees', label: 'الموظفين', icon: UserCog },
+      { href: '/employees', label: 'الموظفين', icon: UserCog, permission: 'employees.view' },
       { href: '/roles', label: 'الأدوار والصلاحيات', icon: Shield, permission: 'roles.manage' },
-      { href: '/notification-routing', label: 'توجيه الإشعارات', icon: Bell },
-      { href: '/notification-type-configs', label: 'إعدادات أنواع الإشعارات', icon: BellRing },
-      { href: '/cancellation-reasons', label: 'أسباب الإلغاء', icon: ListX },
+      { href: '/notification-routing', label: 'توجيه الإشعارات', icon: Bell, permission: 'notifications.view' },
+      { href: '/notification-type-configs', label: 'إعدادات أنواع الإشعارات', icon: BellRing, permission: 'notifications.view' },
+      { href: '/cancellation-reasons', label: 'أسباب الإلغاء', icon: ListX, permission: 'cancellation_reasons.view' },
       { href: '/settings', label: 'الإعدادات', icon: Settings, permission: 'settings.manage' },
       { href: '/branding', label: 'البراندنج', icon: ImageIcon, permission: 'branding.manage' },
       { href: '/homepage-content', label: 'محتوى الصفحة الرئيسية', icon: Home, permission: 'settings.manage' },
-      { href: '/feature-flags', label: 'Feature Flags', icon: ToggleLeft },
+      { href: '/feature-flags', label: 'Feature Flags', icon: ToggleLeft, permission: 'feature_flags.view' },
       { href: '/audit-log', label: 'سجل النشاط', icon: ScrollText, permission: 'audit.view' },
       { href: '/security', label: 'الأمان والأجهزة', icon: KeyRound },
       { href: '/security-center', label: 'مركز الأمان', icon: ShieldAlert, permission: 'security.alerts.view' },

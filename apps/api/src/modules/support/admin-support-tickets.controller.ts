@@ -16,6 +16,7 @@ export class AdminSupportTicketsController {
   constructor(private readonly supportTicketsService: SupportTicketsService) {}
 
   @Get()
+  @RequirePermission('support_tickets.view')
   async listAll(@Query() query: ListSupportTicketsDto) {
     const tickets = await this.supportTicketsService.listAllForAdmin(query.ticket_status);
     return tickets.map(toSupportTicketResponseDto);

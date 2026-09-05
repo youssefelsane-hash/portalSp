@@ -28,6 +28,12 @@ export interface PermissionResponseDto {
 export interface RoleDetailResponseDto {
   role: RoleResponseDto;
   permission_names: string[];
+  /**
+   * صلاحيات القراءة المشتقّة تلقائيًا (تدقيق S-1، ADR-0074): أي دور عنده أي صلاحية على مورد
+   * بياخد `<resource>.view` بتاعه ضمنيًا. مش مخزّنة في `role_permissions` وماينفعش تتبعت في
+   * `SetRolePermissionsBody` — بترجع منفصلة عشان الواجهة تعرضها كـ«مشتقّة» بدل ما تختفي.
+   */
+  implied_permission_names: string[];
   users: { user_id: string; full_name: string; phone_number: string; assigned_at: string }[];
 }
 

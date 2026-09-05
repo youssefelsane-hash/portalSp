@@ -99,6 +99,7 @@ export class AdminOrdersController {
   }
 
   @Get()
+  @RequirePermission('orders.view')
   async list(@Query() query: ListOrdersQueryDto) {
     const { items, meta } = await this.adminOrdersService.list(query);
     // docs/08 §63.ب5 — معلومات الطاقم جنب كل طلب في القايمة (مين أخدها، معاه مين، الطاقم كامل
@@ -120,6 +121,7 @@ export class AdminOrdersController {
    * `@Get(':id')` كانت `assessment-queue` هتتقري كـid وترجع 400.
    */
   @Get('assessment-queue')
+  @RequirePermission('orders.view')
   async assessmentQueue(@Query() query: AssessmentQueueQueryDto) {
     return this.assessmentTriage.listAssessmentQueue(query.filter);
   }
@@ -129,6 +131,7 @@ export class AdminOrdersController {
    * الأدمن… وعند الأدمن يكون ظهر تفاصيل كتير بحيث يعرف يتراك ويتبع أي شيء».
    */
   @Get(':id/earning-shares')
+  @RequirePermission('orders.view')
   async listEarningShares(@Param('id', ParseUUIDPipe) id: string) {
     const shares = await this.adminOrdersService.listEarningShares(id);
     return shares;
@@ -137,6 +140,7 @@ export class AdminOrdersController {
   // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — العميل/الفني مالهومش أي وصول، جدول مستقل
   // تمامًا عن الشات/الوصف. صفر صلاحية إضافية (نفس مستوى addMessage على الشكاوى — أي أدمن).
   @Get(':id/notes')
+  @RequirePermission('orders.view')
   async listInternalNotes(@Param('id', ParseUUIDPipe) id: string) {
     const notes = await this.orderInternalNotesService.list(id);
     return notes.map((n) => ({
@@ -150,6 +154,7 @@ export class AdminOrdersController {
   }
 
   @Post(':id/notes')
+  @RequirePermission('orders.notes.add')
   async addInternalNote(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -160,6 +165,7 @@ export class AdminOrdersController {
   }
 
   @Get(':id')
+  @RequirePermission('orders.view')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent } =
       await this.adminOrdersService.getDetail(id);
@@ -202,6 +208,7 @@ export class AdminOrdersController {
   // MatchingService.findEligibleTechnicians() الحقيقية بالحرف (صفر خوارزمية تشخيصية موازية).
   // قراءة بس، أي أدمن (نفس نمط getTimeline/listTeamMembers فوق).
   @Get(':id/technicians/:technicianId/explain')
+  @RequirePermission('orders.view')
   async explainTechnicianEligibility(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('technicianId', ParseUUIDPipe) technicianId: string,
@@ -242,6 +249,7 @@ export class AdminOrdersController {
 
   // فانل مطابقة الطلب (docs/08 §35.8، ADR-0021 §4) — "ليه الطلب ده لسه بيدوّر؟" قراءة بس، أي أدمن.
   @Get(':id/matching-funnel')
+  @RequirePermission('orders.view')
   async getMatchingFunnel(@Param('id', ParseUUIDPipe) id: string) {
     const { order } = await this.adminOrdersService.getDetail(id);
     const funnel = await this.matchingExplainabilityService.explainOrderFunnel(order);
@@ -295,6 +303,7 @@ export class AdminOrdersController {
   // الفني محسوبة ومخزّنة على الطلب من زمان (docs/08 §20 بند 1) بس صفر endpoint كان بيرجّعها، ومفيش
   // طريقة تعرف وسيلة الدفع أو تاريخ الاسترداد لطلب معيّن من غير تفتيش يدوي في /admin/wallets.
   @Get(':id/financial-summary')
+  @RequirePermission('orders.view')
   async getFinancialSummary(@Param('id', ParseUUIDPipe) id: string) {
     const summary = await this.paymentsService.getFinancialSummaryForOrder(id);
     return toOrderFinancialSummaryResponseDto(summary);
@@ -304,6 +313,7 @@ export class AdminOrdersController {
   // الأدمن مالوش أي طريقة يشوف صور قبل/بعد لمراجعة جودة أو حل شكوى. نفس OrderMediaService،
   // مسار مختلف بصلاحية مختلفة، مفيش تكرار منطق.
   @Get(':id/media')
+  @RequirePermission('orders.view')
   async listMedia(@Param('id', ParseUUIDPipe) id: string) {
     const media = await this.orderMediaService.listForOrder(id);
     return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
@@ -332,6 +342,7 @@ export class AdminOrdersController {
   // نفس نمط listMedia فوق — الأدمن محتاج يشوف بنود عرض السعر (مقترحة/معتمدة) وقت مراجعة شكوى
   // أو دعم فني، تفاصيل كاملة في order-items.service.ts.
   @Get(':id/quote-items')
+  @RequirePermission('orders.view')
   async listQuoteItems(@Param('id', ParseUUIDPipe) id: string) {
     const items = await this.orderItemsService.listForOrder(id);
     return items.map(toOrderItemResponseDto);
@@ -343,6 +354,7 @@ export class AdminOrdersController {
   // كل واحد بيتعرض لوحده. صفر صلاحية إضافية (نفس listTeamMembers/listMedia/listQuoteItems فوق
   // — قراءة بس، أي أدمن).
   @Get(':id/timeline')
+  @RequirePermission('orders.view')
   async getTimeline(@Param('id', ParseUUIDPipe) id: string) {
     return (await this.adminOrdersService.getTimeline(id)).map(toOrderTimelineEventResponseDto);
   }
@@ -372,6 +384,7 @@ export class AdminOrdersController {
   // matching-funnel/explain-technician اللي بيغذّيهم. **مش** نفس قايمة eligible-technicians
   // فوق: دي بتشمل غير المؤهّل عمدًا، لأن ده بالظبط اللي المفتّش موجود يفسّره.
   @Get(':id/explain-candidates')
+  @RequirePermission('orders.view')
   async listExplainCandidates(@Param('id', ParseUUIDPipe) id: string) {
     const { items } = await this.adminOrdersService.listExplainCandidates(id);
     return {
@@ -390,6 +403,7 @@ export class AdminOrdersController {
   // إضافي اختيارية، بأي تصنيف قدرة استيعابية وقتها، وقرر إيه. منفصل عن eligible-technicians فوق
   // (ده بيسأل "مين مؤهّل دلوقتي"، ده بيسأل "مين اتعرض عليه فعليًا وحصل إيه").
   @Get(':id/work-opportunities')
+  @RequirePermission('orders.view')
   async listWorkOpportunities(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.workOpportunities.listForOrderAdmin(id);
     return {
@@ -506,6 +520,7 @@ export class AdminOrdersController {
   }
 
   @Get(':id/quotes')
+  @RequirePermission('orders.view')
   async listQuotes(@Param('id', ParseUUIDPipe) id: string) {
     return (await this.inspectionQuoteService.listQuotesForOrder(id)).map(toOrderQuoteResponseDto);
   }
@@ -637,6 +652,7 @@ export class AdminOrdersController {
   // ما يعيّن يدوي — نفس OrderTeamService.listForOrder() اللي customer/technician controllers
   // بيستخدموها، مفيش أي endpoint إداري كان بيعرضها قبل كده.
   @Get(':id/team-members')
+  @RequirePermission('orders.view')
   async listTeamMembers(@Param('id', ParseUUIDPipe) id: string) {
     return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
   }
