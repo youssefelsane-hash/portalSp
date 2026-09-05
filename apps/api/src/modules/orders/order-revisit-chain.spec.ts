@@ -195,7 +195,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       dataSource.getRepository(TechnicianLevelConfig),
       {} as unknown as AuditLogService,
     );
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 

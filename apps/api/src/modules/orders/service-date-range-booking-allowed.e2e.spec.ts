@@ -203,7 +203,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       dataSource.getRepository(TechnicianLevelConfig),
       {} as unknown as AuditLogService,
     );
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 

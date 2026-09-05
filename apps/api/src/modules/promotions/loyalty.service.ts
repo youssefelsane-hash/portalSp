@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { SettingsService } from '../settings/settings.service';
 import { LoyaltyDirection, LoyaltySource, LoyaltyTransaction } from './entities/loyalty-transaction.entity';
 
 @Injectable()
@@ -11,7 +12,21 @@ export class LoyaltyService {
     @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
     @InjectRepository(LoyaltyTransaction) private readonly transactions: Repository<LoyaltyTransaction>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * تاريخ انتهاء دفعة نقاط جديدة حسب السياسة الحالية (تدقيق L-6) — `null` يعني «ماتنتهيش»
+   * (`loyalty.points_expiry_months = 0`). بيتحسب مرة واحدة وقت الاكتساب ويتخزّن على الصف:
+   * تغيير السياسة بعد كده مايحرّكش نقاط قديمة العميل شايفها بتاريخ معيّن.
+   */
+  async resolveExpiryForNewPoints(now: Date = new Date()): Promise<Date | null> {
+    const months = await this.settings.getNumber('loyalty.points_expiry_months', 12);
+    if (!Number.isFinite(months) || months <= 0) return null;
+    const expiry = new Date(now.getTime());
+    expiry.setUTCMonth(expiry.getUTCMonth() + Math.floor(months));
+    return expiry;
+  }
 
   async getBalance(userId: string): Promise<number> {
     const profile = await this.customerProfiles.findOne({ where: { userId } });
@@ -48,12 +63,18 @@ export class LoyaltyService {
     points: number,
     source: LoyaltySource,
     referenceId: string | null = null,
-    expiresAt: Date | null = null,
+    /**
+     * `undefined` (الافتراضي) = طبّق سياسة الصلاحية الحالية. `null` = دفعة ماتنتهيش أبدًا،
+     * قرار صريح مش سهو. قبل تدقيق L-6 كل النداءات كانت بتمرّر `null` من غير قصد، فالنقاط
+     * ماكانتش بتنتهي أبدًا رغم إن المخطّط معمول للانتهاء.
+     */
+    expiresAt?: Date | null,
     manager?: EntityManager,
   ): Promise<LoyaltyTransaction> {
     if (points <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'عدد النقاط لازم يكون أكبر من صفر', HttpStatus.BAD_REQUEST);
     }
+    const resolvedExpiry = expiresAt === undefined ? await this.resolveExpiryForNewPoints() : expiresAt;
     const run = async (txManager: EntityManager) => {
       const profile = await this.lockProfile(userId, txManager);
       const balanceAfter = profile.loyaltyPointsBalance + points;
@@ -66,7 +87,7 @@ export class LoyaltyService {
           source,
           referenceId,
           balanceAfter,
-          expiresAt,
+          expiresAt: resolvedExpiry,
         }),
       );
     };

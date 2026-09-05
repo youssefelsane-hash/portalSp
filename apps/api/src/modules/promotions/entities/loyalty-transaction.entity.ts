@@ -40,6 +40,13 @@ export class LoyaltyTransaction {
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
 
+  /**
+   * علامة إن الـsweep فحص الدفعة دي وحسم اللي فضل فيها (تدقيق L-6). بتتحط حتى لو الدفعة كانت
+   * مستهلكة بالكامل — من غير كده الـsweep هيفضل يعيد فحص نفس الصفوف كل يوم للأبد.
+   */
+  @Column({ name: 'expired_at', type: 'timestamptz', nullable: true })
+  expiredAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

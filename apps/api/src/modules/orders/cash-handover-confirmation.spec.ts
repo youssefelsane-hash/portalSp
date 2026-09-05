@@ -196,7 +196,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
       dataSource.getRepository(TechnicianLevelConfig),
       {} as unknown as AuditLogService,
     );
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     const events = new EventEmitter2();
 
     paymentsService = new PaymentsService(

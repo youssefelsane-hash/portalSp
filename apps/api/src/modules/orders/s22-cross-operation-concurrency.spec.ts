@@ -267,7 +267,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       dataSource.getRepository(TechnicianLevelConfig),
       {} as unknown as AuditLogService,
     );
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 

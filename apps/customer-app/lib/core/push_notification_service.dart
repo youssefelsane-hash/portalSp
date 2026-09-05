@@ -93,18 +93,46 @@ class PushNotificationService {
     );
   }
 
+  /// دالة الطلب المُصادَق عليه، متخزّنة من آخر `registerCurrentDevice` — تأكيد الاستلام
+  /// (تدقيق L-7) بيحصل جوّه مستمعي الرسايل اللي مالهمش أي وسيلة توصل بيها للـauth context.
+  static Future<Map<String, dynamic>?> Function(String method, String path, {Map<String, dynamic>? body})?
+      _authedRequest;
+
+  /// تأكيد وصول الإشعار للجهاز فعليًا. نجاح FCM معناه إن جوجل **قبل** الرسالة، مش إنها وصلت —
+  /// فحالة `delivered` في الباك-إند مالهاش مصدر غير الجهاز نفسه. فشل التأكيد مالوش أي أثر على
+  /// المستخدم (الإشعار اتعرض خلاص)، فبيتبلع بصمت مع لوج.
+  static Future<void> _acknowledgeDelivery(RemoteMessage message) async {
+    final notificationId = message.data['notification_id'] as String?;
+    final request = _authedRequest;
+    if (notificationId == null || request == null) return;
+    try {
+      await request('POST', '/notifications/delivered', body: {
+        'notification_ids': [notificationId],
+      });
+    } catch (err) {
+      debugPrint('[push] تعذّر تأكيد استلام الإشعار $notificationId: $err');
+    }
+  }
+
   static Future<void> registerCurrentDevice(
     Future<Map<String, dynamic>?> Function(String method, String path, {Map<String, dynamic>? body}) authedRequest,
   ) async {
+    _authedRequest = authedRequest;
     try {
       if (!_firebaseReady) {
         await Firebase.initializeApp();
         _firebaseReady = true;
         await _initLocalNotifications();
         FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-        FirebaseMessaging.onMessage.listen(_showForegroundNotification);
+        FirebaseMessaging.onMessage.listen((message) {
+          _showForegroundNotification(message);
+          _acknowledgeDelivery(message);
+        });
         // التطبيق كان في الخلفية (مش مقفول) والمستخدم ضغط على الإشعار من الـtray.
-        FirebaseMessaging.onMessageOpenedApp.listen((message) => handleDeepLink(message.data['deep_link'] as String?));
+        FirebaseMessaging.onMessageOpenedApp.listen((message) {
+          _acknowledgeDelivery(message);
+          handleDeepLink(message.data['deep_link'] as String?);
+        });
       }
       final messaging = FirebaseMessaging.instance;
       final settings = await messaging.requestPermission();
@@ -125,6 +153,7 @@ class PushNotificationService {
       // إشعار سبب الفتح، فمفيش أي أثر جانبي لو المستخدم فتح التطبيق عادي).
       final initialMessage = await messaging.getInitialMessage();
       if (initialMessage != null) {
+        await _acknowledgeDelivery(initialMessage);
         handleDeepLink(initialMessage.data['deep_link'] as String?);
       }
     } catch (err) {

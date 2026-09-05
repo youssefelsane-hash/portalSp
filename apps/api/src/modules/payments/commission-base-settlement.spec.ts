@@ -219,7 +219,7 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
     const technicianLevelsService = { getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }) } as never;
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
 
     // محفظة المنصة لازم تكون موجودة فعليًا (findByUserIdOrThrow بترفض لو مش موجودة) — مش مضمونة
     // في قاعدة اختبار جديدة تمامًا، بس migration 0019 المفروض عملتها. نتأكد دفاعيًا.

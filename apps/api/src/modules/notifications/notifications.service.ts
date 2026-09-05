@@ -160,6 +160,7 @@ export class NotificationsService {
 
     try {
       const result = await this.dispatcher.dispatch({
+        notificationId: notification.id,
         userId: input.userId,
         channel,
         titleAr: input.titleAr,
@@ -236,7 +237,38 @@ export class NotificationsService {
       take: params.perPage,
     });
 
+    // تدقيق L-7 — إشعار `in_app` وصل صندوق المستخدم فعليًا بمجرد ما جهازه جابه: مفيش وسيط
+    // خارجي ممكن يضيّعه بعد كده. فالتأكيد هنا من غير أي تعاون من العميل، بعكس `push` اللي
+    // محتاج الجهاز ينده `POST /notifications/delivered` بنفسه.
+    await this.markDelivered(
+      userId,
+      items.filter((n) => n.channel === NotificationChannel.IN_APP).map((n) => n.id),
+    );
+
     return { items, meta: { page: params.page, per_page: params.perPage, total } };
+  }
+
+  /**
+   * تأكيد استلام حقيقي (تدقيق L-7). قبل كده `delivered`/`delivered_at` كانوا موجودين في المخطّط
+   * ومحدش بيكتبهم أبدًا — دورة الحياة كانت `queued → sent → read` وخلاص، يعني `sent` كانت بتعني
+   * «بوابة الإرسال قبلت» مش «وصل»، والفرق ده هو بالظبط اللي بيفرّق بين «الفني مشافش الإشعار»
+   * و«الإشعار ماوصلش أصلاً» وقت أي بلاغ تشغيلي.
+   *
+   * الانتقال **أحادي الاتجاه**: `sent` هي الحالة الوحيدة اللي بتتحوّل. `read` أعلى منها (مش
+   * هنرجّعها لورا)، و`failed`/`queued` أقل منها (تأكيد استلام لحاجة مااتبعتتش = تناقض، بنتجاهله
+   * بدل ما نكذب في السجل).
+   */
+  async markDelivered(userId: string, notificationIds: string[]): Promise<number> {
+    if (notificationIds.length === 0) return 0;
+    const result = await this.notifications
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ deliveryStatus: NotificationDeliveryStatus.DELIVERED, deliveredAt: () => 'now()' })
+      .where('user_id = :userId', { userId })
+      .andWhere('id IN (:...ids)', { ids: notificationIds })
+      .andWhere('delivery_status = :sent', { sent: NotificationDeliveryStatus.SENT })
+      .execute();
+    return result.affected ?? 0;
   }
 
   unreadCount(userId: string): Promise<number> {

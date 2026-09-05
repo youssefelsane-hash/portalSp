@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, ParseEnumPipe, ParseUUIDPipe, Pat
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
+import { MarkNotificationsDeliveredDto } from './dto/mark-notifications-delivered.dto';
 import { toNotificationResponseDto, toUserDeviceResponseDto } from './dto/notification-response.dto';
 import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
@@ -38,6 +39,17 @@ export class NotificationsController {
   @Get('notifications/unread-count')
   async unreadCount(@CurrentUser() user: JwtPayload) {
     return { unread_count: await this.notificationsService.unreadCount(user.sub) };
+  }
+
+  /**
+   * تأكيد استلام من الجهاز (تدقيق L-7) — الجهاز بيرجّع `notification_id` اللي جاله في حمولة
+   * الدفع. مقيّد بـ`user_id` من التوكن، فمينفعش حد يأكّد استلام إشعار حد تاني. بيرجّع عدد
+   * الصفوف اللي اتحوّلت فعلاً: تأكيد مكرر أو لإشعار متقري خلاص بيرجّع صفر من غير خطأ (العملية
+   * idempotent بطبيعتها — الجهاز ممكن يعيد الإرسال بعد انقطاع شبكة).
+   */
+  @Post('notifications/delivered')
+  async markDelivered(@CurrentUser() user: JwtPayload, @Body() dto: MarkNotificationsDeliveredDto) {
+    return { updated: await this.notificationsService.markDelivered(user.sub, dto.notification_ids) };
   }
 
   @Patch('notifications/:id/read')

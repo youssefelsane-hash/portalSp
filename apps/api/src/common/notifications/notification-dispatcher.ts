@@ -2,6 +2,15 @@ import { NotificationChannel } from '../../modules/notifications/entities/notifi
 import { NotificationPriorityTier } from '../../modules/notifications/entities/notification-type-config.entity';
 
 export interface DispatchNotificationInput {
+  /**
+   * معرّف صف `notifications` اللي الإرسال ده بتاعه — بيتبعت مع حمولة الدفع عشان الجهاز يقدر
+   * يأكّد الاستلام (`POST /notifications/delivered`، تدقيق L-7). من غيره الحالة `delivered`
+   * ماكانش ليها أي طريقة تتحقّق: FCM بيأكّد إنه *قبل* الرسالة، مش إنها وصلت الجهاز.
+   *
+   * `null` للإرسال اللي مالوش صف `notifications` أصلاً — حالة واحدة بس: كود التحقق (OTP)
+   * بيتبعت SMS مباشرة قبل ما يكون فيه مستخدم أساسًا، فمفيش استلام يتأكّد.
+   */
+  notificationId: string | null;
   userId: string;
   channel: NotificationChannel;
   titleAr: string;

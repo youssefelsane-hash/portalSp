@@ -106,8 +106,13 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
                             '${loyaltyDirectionLabelsAr[tx.direction] ?? tx.direction} — ${tx.pointsAmount} نقطة',
                           ),
                           subtitle: Text(
-                            '${loyaltySourceLabelsAr[tx.source] ?? tx.source} — ${tx.createdAt.substring(0, 10)}',
+                            tx.direction == 'earn' && tx.expiresAt != null
+                                // النقاط بتنتهي فعلاً دلوقتي (تدقيق L-6) — من غير الميعاد ده
+                                // العميل بيلاقي رصيده نقص فجأة ومش عارف ليه.
+                                ? '${loyaltySourceLabelsAr[tx.source] ?? tx.source} — ${tx.createdAt.substring(0, 10)}\nتنتهي في ${tx.expiresAt!.substring(0, 10)}'
+                                : '${loyaltySourceLabelsAr[tx.source] ?? tx.source} — ${tx.createdAt.substring(0, 10)}',
                           ),
+                          isThreeLine: tx.direction == 'earn' && tx.expiresAt != null,
                           trailing: Text('الرصيد: ${tx.balanceAfter}'),
                         ),
                       ),

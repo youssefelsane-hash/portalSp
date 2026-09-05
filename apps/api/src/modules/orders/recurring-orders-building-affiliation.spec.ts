@@ -230,6 +230,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
       dataSource.getRepository(CustomerProfile),
       dataSource.getRepository(LoyaltyTransaction),
       dataSource,
+      settingsService,
     );
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();

@@ -218,6 +218,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       dataSource.getRepository(CustomerProfile),
       dataSource.getRepository(LoyaltyTransaction),
       dataSource,
+      settingsService,
     );
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
