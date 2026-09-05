@@ -256,6 +256,13 @@ export class AdminOrdersController {
     return {
       order_id: funnel.orderId,
       order_status: funnel.orderStatus,
+      // «ليه ده راح لجولات عروض وده اتعيّنله فني على طول؟» — نفس قرار المحرك، مش إعادة حسابه.
+      dispatch_route: {
+        route: funnel.dispatchRoute.route,
+        reason: funnel.dispatchRoute.reason,
+        near_term_hours: funnel.dispatchRoute.nearTermHours,
+        explanation_ar: funnel.dispatchRoute.explanationAr,
+      },
       pool: {
         category_eligible: funnel.pool.categoryEligible,
         zone_eligible: funnel.pool.zoneEligible,

@@ -87,9 +87,31 @@ export interface OrderMatchingFunnelCrewStatusDto {
 }
 
 // GET /admin/orders/:id/matching-funnel (§35.8)
+/**
+ * مسار التوزيع اللي الطلب واخده — `rounds` (عرض والفني يقبل) مقابل `auto_confirm` (تعيين
+ * مباشر بلا موافقته). الفرق ده كان **غير مرئي**: طلبان بنفس `booking_mode` بياخدوا مسارين
+ * مختلفين حسب بُعد الموعد.
+ */
+export type DispatchRouteDto = 'rounds' | 'auto_confirm' | 'not_dispatchable';
+
+export type DispatchRouteReasonDto =
+  | 'emergency'
+  | 'revisit_pinned'
+  | 'near_term'
+  | 'scheduled_far'
+  | 'not_searching';
+
+export interface OrderDispatchRouteDto {
+  route: DispatchRouteDto;
+  reason: DispatchRouteReasonDto;
+  near_term_hours: number;
+  explanation_ar: string;
+}
+
 export interface OrderMatchingFunnelDto {
   order_id: string;
   order_status: OrderStatus;
+  dispatch_route: OrderDispatchRouteDto;
   pool: OrderMatchingFunnelPoolCountsDto;
   dispatch_assignments: OrderAssignmentStatusCountsDto;
   crew_recruit_opportunities: WorkOpportunityStatusCountsDto | null;

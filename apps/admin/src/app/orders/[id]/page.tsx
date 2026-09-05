@@ -121,6 +121,8 @@ import {
   isOrderReschedulable,
   TIMELINE_SOURCE_LABELS,
   timelineEventSourceTone,
+  DISPATCH_ROUTE_LABELS,
+  dispatchRouteBadgeClass,
 } from '@/lib/order-labels';
 import {
   PAYMENT_GATEWAY_STATUS_LABELS,
@@ -1428,6 +1430,18 @@ export default function OrderDetailPage() {
           {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
           {matchingFunnel && (
             <div className="flex flex-col gap-4 text-sm">
+              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
+                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
+                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
+              <div>
+                <p className="mb-2 font-medium">مسار التوزيع</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
+                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
+                  </Badge>
+                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
+                </div>
+              </div>
               <div>
                 <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
                 <div className="flex flex-wrap gap-2">

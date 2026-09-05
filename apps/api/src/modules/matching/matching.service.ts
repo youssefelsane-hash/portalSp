@@ -48,6 +48,7 @@ import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
 } from '../orders/revisit-pin';
+import { isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
@@ -670,8 +671,10 @@ export class MatchingService {
    * عاجل، ممكن يتطلب بكرة أو الأسبوع الجاي) — بيتبع نموذج الحجز المجدول العادي (تأكيد تلقائي بلا
    * انتظار قبول)، بغض النظر عن قرب/بُعد اليوم المطلوب.
    */
+  // التعريف نفسه عايش في `dispatch-route.ts` عشان الشرح اللي بيتعرض للأدمن يقرا **نفس السطر**
+  // اللي المحرك بيقرا منه، مش نسخة تانية منه.
   private isEmergencyOrder(order: Pick<Order, 'bookingMode'>): boolean {
-    return order.bookingMode === BookingMode.EMERGENCY;
+    return isEmergencyBookingMode(order);
   }
 
   /**
@@ -685,11 +688,11 @@ export class MatchingService {
     if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
       return { dispatched: 0 };
     }
-    // ADR-0051 — إعادة زيارة مثبّتة مبتعدّيش على التأكيد التلقائي أبدًا: التأكيد التلقائي
-    // بيعيّن فني بالقوة، والتثبيت الصح **عرض حصري** الفني يقبله بنفسه مش تعيين قسري.
-    if (this.isEmergencyOrder(order) || isRevisitPinActive(order) || (await this.isNearTermOrder(order.scheduledAt))) {
-      return this.dispatchNextRound(orderId);
-    }
+    // القرار نفسه اتنقل لـ`resolveDispatchRoute()` (دالة خالصة) عشان **شاشة الأدمن تقرا نفس
+    // القرار مش تعيد تنفيذ القاعدة**. طلبان بنفس `booking_mode` بالظبط بياخدوا مسارين مختلفين
+    // حسب بُعد الموعد، وده كان غير مرئي تمامًا للأدمن (docs/system-audit §06 §4).
+    const decision = resolveDispatchRoute(order, await this.nearTermRequestHours());
+    if (decision.route === 'rounds') return this.dispatchNextRound(orderId);
     return this.autoConfirmScheduledOrder(orderId);
   }
 
@@ -700,14 +703,13 @@ export class MatchingService {
    *
    * طلب بلا `scheduled_at` (ASAP) = قريب بالتعريف — أقرب ما يكون فعلاً.
    */
+  /** عتبة «قريب» بالساعات — نقطة القراءة الوحيدة للإعداد ده. */
+  async nearTermRequestHours(): Promise<number> {
+    return this.settingsService.getNumber('matching.near_term_request_hours', NEAR_TERM_REQUEST_HOURS_FALLBACK);
+  }
+
   private async isNearTermOrder(scheduledAt: Date | null): Promise<boolean> {
-    const thresholdHours = await this.settingsService.getNumber(
-      'matching.near_term_request_hours',
-      NEAR_TERM_REQUEST_HOURS_FALLBACK,
-    );
-    if (thresholdHours <= 0) return false;
-    if (!scheduledAt) return true;
-    return scheduledAt.getTime() - Date.now() <= thresholdHours * 60 * 60 * 1000;
+    return isNearTerm(scheduledAt, await this.nearTermRequestHours());
   }
 
   /**
