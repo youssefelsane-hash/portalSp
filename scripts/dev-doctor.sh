@@ -74,6 +74,61 @@ else
   done
 fi
 
+# ── تشخيص «العملية عايشة بس مش بترد» ────────────────────────────────────────────
+#
+# العَرَض ده ليه سببين حقيقيين مختلفين تمامًا، والاتنين اتشافوا على نفس الجهاز:
+#
+#   ١) نسخة Node غير مدعومة (٢٦) — الـAPI بيطبع «started» ومابيخدمش أي طلب. القسم ١ فوق
+#      بيمسكها، وساعتها الفرق إن **مفيش أي اتصال** من التطبيق على القاعدة.
+#   ٢) استنزاف pool القاعدة من الدورات المجدولة — العملية بتشتغل والاتصالات موجودة، بس كلها
+#      مشغولة/مستنية. البصمة المميزة: عدد اتصالات التطبيق = سقف الـpool بالظبط.
+#
+# الدالة دي بتطبع الأدلة اللي بتفرّق بينهم بدل ما تسيب التخمين.
+DIAGNOSED=0
+diagnose_unresponsive_api() {
+  [[ "$DIAGNOSED" -eq 1 ]] && return 0
+  DIAGNOSED=1
+  [[ -f .dev-logs/api.log ]] && { echo; info "آخر ١٥ سطر من لوج الـAPI:"; tail -15 .dev-logs/api.log | sed 's/^/     /'; }
+
+  $DB "SELECT 1" >/dev/null 2>&1 || return 0
+  echo
+  info "اتصالات التطبيق على القاعدة (العملية عايشة — فين الاتصالات؟):"
+
+  local conns states advisory idle_tx
+  conns=$($DB "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND application_name <> 'psql' AND pid <> pg_backend_pid()" 2>/dev/null || echo "؟")
+  advisory=$($DB "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'" 2>/dev/null || echo "؟")
+  idle_tx=$($DB "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'idle in transaction'" 2>/dev/null || echo 0)
+
+  printf "  %s%-28s%s %s\n" "$D" "إجمالي اتصالات التطبيق" "$O" "$conns"
+  printf "  %s%-28s%s %s\n" "$D" "أقفال استشارية" "$O" "$advisory"
+  printf "  %s%-28s%s %s\n" "$D" "idle in transaction" "$O" "$idle_tx"
+
+  states=$($DB "SELECT state || ' × ' || count(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() GROUP BY state ORDER BY count(*) DESC" 2>/dev/null)
+  [[ -n "$states" ]] && echo "$states" | sed "s/^/     /"
+
+  if [[ "$conns" == "0" ]]; then
+    fail "العملية عايشة بس **مفيش ولا اتصال** على القاعدة — الـAPI مش بيوصل لها أصلاً."
+    info "شوف نسخة Node في القسم ١، وسطور الخطأ في اللوج فوق."
+  elif [[ "$conns" =~ ^[0-9]+$ ]] && [[ "$conns" -ge 10 ]]; then
+    fail "عدد الاتصالات ($conns) واصل لسقف الـpool — ${B}استنزاف pool${O}: كل الاتصالات مشغولة ومفيش واحد فاضي لأي طلب."
+    info "أشهر سبب: كود ماسك اتصال وهو مستني اتصال تاني. آخر استعلام لكل اتصال:"
+    $DB "SELECT '     ' || state || '  ' || left(regexp_replace(query, '\s+', ' ', 'g'), 70) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() LIMIT 10" 2>/dev/null
+  fi
+
+  if [[ "$advisory" =~ ^[0-9]+$ ]] && [[ "$advisory" -gt 0 ]]; then
+    warn "فيه $advisory قفل استشاري مأخوذ — الدورات المجدولة مالهاش أقفال استشارية بعد إصلاح 0272؛"
+    warn "لو الرقم ده كبير ومستمر، فيه كود رجع للنمط القديم (قفل على مستوى الجلسة بيحجز اتصال)."
+  fi
+
+  if $DB "SELECT to_regclass('sweep_leases')" 2>/dev/null | grep -q sweep_leases; then
+    echo
+    info "إيجارات الدورات المجدولة (آخر تشغيل لكل دورة):"
+    $DB "SELECT '     ' || rpad(lock_name, 34) || to_char(coalesce(last_released_at, renewed_at), 'HH24:MI:SS') || '  × ' || run_count FROM sweep_leases ORDER BY renewed_at DESC LIMIT 8" 2>/dev/null
+  else
+    warn "جدول sweep_leases مش موجود — الـmigrations ناقصة (0272)."
+  fi
+}
+
 # ── ٣) الـAPI ───────────────────────────────────────────────────────────────────
 head2 "٣) الـAPI (:3000)"
 port3000=$(lsof -ti :3000 2>/dev/null | head -1)
@@ -81,10 +136,20 @@ port3000=$(lsof -ti :3000 2>/dev/null | head -1)
 
 health=$(curl -fsS --max-time 5 "$API/health" 2>/dev/null || echo "")
 if [[ -n "$health" ]]; then
-  pass "health: $health"
+  # الرد بيرجّع أرقام الـpool جوّاه — بنطبعها لأنها اللي بتفرّق بين «الـAPI بخير» و«لسه بيرد
+  # بس فيه طلبات مستنية اتصال» (اللي هي بداية الاستنزاف قبل ما يتحول لتعليق كامل).
+  printf '%s' "$health" | node -e "
+let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+  try{
+    const b=JSON.parse(d); const h=b.data??b; const p=h.pool;
+    console.log('  \x1b[32m✅\x1b[0m health: '+h.status+' · database: '+h.database);
+    if(p) console.log('  \x1b[2m   pool: '+p.total+'/'+p.max+' مفتوح · '+p.idle+' خامل · '+p.waiting+' مستني\x1b[0m');
+    if(p && p.waiting>0) console.log('  \x1b[31m❌\x1b[0m '+p.waiting+' طلب مستني اتصال — الـpool تحت ضغط، ده بداية الاستنزاف');
+  }catch{ console.log('  \x1b[32m✅\x1b[0m health: '+d); }
+})"
 else
   fail "مش بيرد على $API/health"
-  [[ -f .dev-logs/api.log ]] && { echo; info "آخر ١٥ سطر من لوج الـAPI:"; tail -15 .dev-logs/api.log | sed 's/^/     /'; }
+  diagnose_unresponsive_api
 fi
 
 cats_json=$(curl -fsS --max-time 5 "$API/service-categories" 2>/dev/null || echo "")
@@ -104,7 +169,10 @@ otp_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "$API/au
 otp_code=${otp_code:-000}
 case "$otp_code" in
   200|201) pass "طلب OTP رجّع $otp_code — مسار الدخول شغّال" ;;
-  000)     fail "طلب OTP معلّق أو مفيش رد (timeout) — ده سبب اللودينج اللانهائي في التطبيق" ;;
+  000)     fail "طلب OTP معلّق أو مفيش رد (timeout) — ده سبب اللودينج اللانهائي في التطبيق"
+           # ممكن `/health` يعدّي والطلبات الحقيقية تتعلّق: `/health` استعلام واحد قصير، وطلب
+           # الـOTP بيعمل شغل أكتر — فهو أول اللي بيحس بضغط الـpool.
+           diagnose_unresponsive_api ;;
   *)       fail "طلب OTP رجّع $otp_code" ;;
 esac
 
