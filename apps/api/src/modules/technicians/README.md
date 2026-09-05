@@ -1,6 +1,10 @@
 # modules/technicians
 
-الفنيين، المستندات، المستويات (جديد→موثّق→محترف→بريميوم→قائد فريق)، التوافر. جداول: technician_profiles, technician_documents, technician_services, technician_zones, technician_level_history, technician_level_config, technician_availability (قاموس §4.2-4.7).
+الفنيين، المستندات، المستويات (جديد→موثّق→محترف→بريميوم→قائد فريق)، التوافر. جداول: technician_profiles, technician_documents, technician_services, technician_zones, technician_level_history, technician_level_config (قاموس §4.2-4.7).
+
+> **`technician_availability` اتشال** (migration 0265، تدقيق D-1): كان صفر صفوف وصفر مراجع في
+> الكود من ساعة ما ADR-0018 خلّى `technician_schedule_slots` هو مصدر التوافر الوحيد. الاسم كان
+> بيضلّل أي حد بيدوّر على «توافر الفني» فيلاقي الجدول الغلط الأول.
 
 **الحالة: شغال جزئياً (S2 + S4 + بداية S9 — اعتماد الفنيين).**
 - `technician_profiles` بيتعمل تلقائياً لما فني يسجل (مستمع لحدث `user.registered`)، مع `technician_code` مولّد من sequence في الداتابيز (`infra/migrations/0017`, صيغة `TECH-000123` من غير سنة).
