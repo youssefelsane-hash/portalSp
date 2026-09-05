@@ -212,6 +212,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       dataSource.getRepository(CustomerProfile),
       dataSource.getRepository(LoyaltyTransaction),
       dataSource,
+      settingsService,
     );
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     // EventEmitter2 حقيقي + spy — نفس الـemitter اللي create() بيصدّر عليه ORDER_CREATED_EVENT

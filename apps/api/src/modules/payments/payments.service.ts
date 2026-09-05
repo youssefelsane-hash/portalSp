@@ -913,7 +913,7 @@ export class PaymentsService {
     const pointsEarned = Math.floor(order.totalAmountCents / 10000) * earnRatePer100Egp;
     if (pointsEarned > 0) {
       const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
-      await this.loyaltyService.earn(customerProfile.userId, pointsEarned, LoyaltySource.ORDER, order.id, null, manager);
+      await this.loyaltyService.earn(customerProfile.userId, pointsEarned, LoyaltySource.ORDER, order.id, undefined, manager);
     }
 
     return order;

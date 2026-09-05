@@ -29,6 +29,7 @@ describe('FcmPushDispatcher.buildMessage() — صحة حمولة APNs مقابل
   }
 
   const baseInput: DispatchNotificationInput = {
+    notificationId: '01a00000-0000-7000-8000-000000000001',
     userId: 'user-1',
     channel: NotificationChannel.PUSH,
     titleAr: 'عرض شغل جديد',

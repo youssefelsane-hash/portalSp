@@ -124,6 +124,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── loyalty ───────────────────────────────────────────────────────────
   'loyalty.earn_points_per_100_egp_spent': { type: 'number', default: 1, group: 'loyalty', description: 'نقاط الولاء المكتسبة لكل 100 جنيه إنفاق عند اكتمال الطلب' },
+  'loyalty.points_expiry_months': { type: 'number', default: 12, group: 'loyalty', description: 'بعد كام شهر تنتهي نقاط الولاء المكتسبة (0 = ماتنتهيش أبدًا). التغيير بيسري على النقاط الجديدة بس — النقاط القديمة بتحتفظ بتاريخ انتهائها المتسجّل وقت اكتسابها.' },
 
   // ── matching ──────────────────────────────────────────────────────────
   'matching.batch_size': { type: 'number', default: 5, group: 'matching', description: 'عدد الفنيين في كل دفعة توزيع' },

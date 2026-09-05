@@ -103,6 +103,9 @@ export class FcmPushDispatcher {
 
     const baseData: Record<string, string> = {
       type: input.notificationType,
+      // تدقيق L-7 — الجهاز بيرجّع المعرّف ده في `POST /notifications/delivered` فيتحوّل الصف
+      // لـ`delivered`. من غيره مفيش أي مصدر لتأكيد وصول حقيقي (نجاح FCM = قبول عند جوجل بس).
+      ...(input.notificationId ? { notification_id: input.notificationId } : {}),
       ...(input.deepLink ? { deep_link: input.deepLink } : {}),
       ...(input.priorityTier ? { priority_tier: input.priorityTier } : {}),
       ...(input.soundKey ? { sound_key: input.soundKey } : {}),

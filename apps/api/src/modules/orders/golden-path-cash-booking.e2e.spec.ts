@@ -221,7 +221,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     const technicianLevelsService = {
       getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }),
     } as unknown as TechnicianLevelsService;
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
     const statsStub = { enqueueRecalculation: async () => undefined } as never;

@@ -244,7 +244,7 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
     );
     const technicianLevelsService = new TechnicianLevelsService(dataSource.getRepository(TechnicianLevelConfig), auditStub);
     const loyaltyService = new LoyaltyService(
-      dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource,
+      dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService,
     );
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();

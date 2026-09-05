@@ -7,6 +7,10 @@ class LoyaltyTransaction {
   final int balanceAfter;
   final String createdAt;
 
+  /// تاريخ انتهاء الدفعة دي (تدقيق L-6) — `null` يعني ماتنتهيش. النقاط بقت بتنتهي فعلاً،
+  /// فالعميل لازم يشوف الميعاد قبل ما يحصل مش بعده.
+  final String? expiresAt;
+
   LoyaltyTransaction({
     required this.id,
     required this.pointsAmount,
@@ -14,6 +18,7 @@ class LoyaltyTransaction {
     required this.source,
     required this.balanceAfter,
     required this.createdAt,
+    this.expiresAt,
   });
 
   factory LoyaltyTransaction.fromJson(Map<String, dynamic> json) => LoyaltyTransaction(
@@ -23,6 +28,7 @@ class LoyaltyTransaction {
         source: json['source'] as String,
         balanceAfter: json['balance_after'] as int,
         createdAt: json['created_at'] as String,
+        expiresAt: json['expires_at'] as String?,
       );
 }
 

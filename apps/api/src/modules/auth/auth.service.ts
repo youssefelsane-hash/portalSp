@@ -145,6 +145,7 @@ export class AuthService {
     // مظبوطة أو خطأ شبكة) ميرمّيش الطلب — نفس فلسفة "فشل تقني مايكسرش تجربة المستخدم الحقيقي"
     // المتّبعة في كل مكان تاني، وخصوصاً هنا: العميل المحلي بيقدر يكمل التسجيل من اللوج فوق.
     const result = await this.smsDispatcher.send({
+      notificationId: null, // مفيش صف `notifications` لكود التحقق — مفيش استلام يتأكّد (تدقيق L-7)
       userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — TwilioSmsDispatcher.send() مبيقراش الحقل ده أصلاً
       channel: NotificationChannel.SMS,
       titleAr: 'كود التحقق — OSTA',

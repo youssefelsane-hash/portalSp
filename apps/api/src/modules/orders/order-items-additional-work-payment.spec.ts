@@ -194,7 +194,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
       {} as never, // settingsService
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     savedPaymentMethods = new SavedPaymentMethodsService(dataSource.getRepository(SavedPaymentMethod));
 
     fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-token-charge', failureReason: null };

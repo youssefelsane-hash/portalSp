@@ -67,7 +67,7 @@ export class AdminPromotionsController {
       throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
     }
     const transaction = await this.dataSource.transaction(async (manager) => {
-      const earned = await this.loyaltyService.earn(userId, dto.points, LoyaltySource.MANUAL, null, null, manager);
+      const earned = await this.loyaltyService.earn(userId, dto.points, LoyaltySource.MANUAL, null, undefined, manager);
       await this.auditLog.record(
         {
           actorUserId: admin.sub,

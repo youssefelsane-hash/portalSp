@@ -205,7 +205,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     // دفتر القيود هنا مبني على عمولة الخدمة 20%؛ فرق المستوى سياسة مستقلة قابلة للتعديل.
     const technicianLevelsService = { getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }) } as never;
-    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource, settingsService);
     const events = new EventEmitter2();
     const statsStub = { enqueueRecalculation: async () => undefined } as never;
 
