@@ -10,6 +10,7 @@ import { CreateRoleDto } from './dto/create-role.dto';
 import { SetRolePermissionsDto } from './dto/set-role-permissions.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { PermissionsService } from './permissions.service';
+import { AnyAdmin } from '../../common/decorators/any-admin.decorator';
 
 // باني الأدوار الديناميكي (ADR-0010) — نفس فلسفة PermissionsGuard: القراءة مفتوحة لأي أدمن
 // (يشوف كتالوج الصلاحيات وتفاصيل أي دور)، الأفعال المُغيّرة (إنشاء/تعديل/حذف/منح صلاحيات)
@@ -20,6 +21,7 @@ export class AdminRolesController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
   @Get('permissions')
+  @RequirePermission('roles.view')
   listPermissions() {
     return this.permissionsService.listPermissions();
   }
@@ -32,12 +34,14 @@ export class AdminRolesController {
    * هو بس، مش بيانات حساسة عن حد تاني).
    */
   @Get('me/permissions')
+  @AnyAdmin('قراءة ذاتية — الموظف بيقرا صلاحياته هو عشان الواجهة تخفي اللي مش مسموح له')
   async getMyPermissions(@CurrentUser() admin: JwtPayload) {
     const names = await this.permissionsService.getUserPermissionNames(admin.sub);
     return { permission_names: Array.from(names).sort() };
   }
 
   @Get('roles/:id')
+  @RequirePermission('roles.view')
   getRoleDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.permissionsService.getRoleDetail(id);
   }

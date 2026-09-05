@@ -32,6 +32,10 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
     roleHigh: '',
     actorLow: '',
     target: '',
+    // كان ناقص، والنتيجة تسريب حقيقي: كل تشغيلة كانت بتسيب صف `permissions` وراها للأبد
+    // (٢٥٠+ صف `test.sec.alpha.*` اتراكموا في قاعدة التطوير). كتالوج الصلاحيات مش جدول
+    // مؤقت — محرّر الأدوار في لوحة الأدمن بيعرضه كله للمشغّل.
+    permAlpha: '',
   };
 
   beforeAll(async () => {
@@ -68,6 +72,7 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
       `INSERT INTO permissions (name, resource, action) VALUES ($1,'test_resource',$2) RETURNING id`,
       [`test.sec.alpha.${runId}`, `alpha_${runId}`],
     );
+    ids.permAlpha = permA.id;
     const [roleLow] = await q(`INSERT INTO roles (name, display_name) VALUES ($1,$2) RETURNING id`, [
       `role_sec_low_${runId}`,
       'دور منخفض (اختبار أمان)',
@@ -98,6 +103,7 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
     await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM roles WHERE id = $1`, [ids.roleLow]);
+    await q(`DELETE FROM permissions WHERE id = $1`, [ids.permAlpha]);
     await cache?.onModuleDestroy();
     await dataSource.destroy();
   });

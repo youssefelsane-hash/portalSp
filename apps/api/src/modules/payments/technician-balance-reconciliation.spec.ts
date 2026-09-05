@@ -42,6 +42,13 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
     await dataSource.initialize();
     service = new TechnicianEarningsService(dataSource);
 
+    // `iso_code` عمود بحرفين وعليه UNIQUE، يعني مساحة الأسماء ١٢٩٦ قيمة بس. أي تشغيلة اتقطعت
+    // قبل `afterAll` بتسيب صف وراها، وأول ما حرفين يتكرروا السبيك بتفشل بـduplicate key من غير
+    // أي علاقة بالمنطق اللي بتختبره. حصلت فعلاً (صف متروك من 2026-09-02). التنظيف الاستباقي هنا
+    // على أسماء السبيك نفسها بس — مابيلمسش أي دولة حقيقية.
+    await q(`DELETE FROM countries WHERE name_en LIKE 'RecCountry%' AND iso_code = $1`, [
+      runId.slice(-2).toUpperCase(),
+    ]);
     const [country] = await q(
       `INSERT INTO countries (name_ar,name_en,iso_code,phone_prefix,currency_code) VALUES ($1,$2,$3,'+009','EGP') RETURNING id`,
       [`دولة مطابقة ${runId}`, `RecCountry${runId}`, runId.slice(-2).toUpperCase()],

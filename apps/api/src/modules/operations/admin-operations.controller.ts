@@ -12,6 +12,7 @@ import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
 import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
 import { CoverageIntelligenceQueryDto } from './dto/coverage-intelligence-query.dto';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
 /**
  * تحويل تتبّع الطلب لـsnake_case — نفس اتفاقية باقي واجهة الأدمن. مفيش أي منطق هنا: نسخ حقول بس.
@@ -73,6 +74,7 @@ export class AdminOperationsController {
    * استعلام واحد لكل الطلبات، مش استعلام لكل صف.
    */
   @Get('order-traces')
+  @RequirePermission('operations.view')
   async listOrderTraces() {
     const traces = await this.orderTraceService.listSearchingOrders();
     // snake_case زي باقي واجهة الأدمن — التحويل هنا مش في الخدمة عشان الخدمة تفضل
@@ -90,12 +92,14 @@ export class AdminOperationsController {
    * بيرجّع null لطلب مش موجود (مش 404) — المفتّش قسم فرعي في صفحة أكبر، وغيابه مايوقّعش الصفحة.
    */
   @Get('order-traces/:orderId')
+  @RequirePermission('operations.view')
   async getOrderTrace(@Param('orderId', ParseUUIDPipe) orderId: string) {
     const trace = await this.orderTraceService.getForOrder(orderId);
     return { trace: trace ? serializeOrderTrace(trace) : null };
   }
 
   @Get('overview')
+  @RequirePermission('operations.view')
   async getOverview(@Query() query: OperationsOverviewQueryDto) {
     const overview = await this.overviewService.getOverview({ categoryId: query.category_id ?? null });
     return {
@@ -114,6 +118,7 @@ export class AdminOperationsController {
   // عرض الحمل القريب — 7 أيام (docs/08 §36.4). بلا RequirePermission مخصوصة، نفس مستوى overview/
   // by-category (عرض/تشخيص بس).
   @Get('workload-forecast')
+  @RequirePermission('operations.view')
   async getWorkloadForecast(@Query() query: WorkloadForecastQueryDto) {
     const { items, meta } = await this.workloadForecastService.getForecast({
       categoryId: query.category_id,
@@ -139,6 +144,7 @@ export class AdminOperationsController {
   // auto-unwrap لأي رد فيه items+meta على المستوى الأول ويقطع summary بصمت، راجع تعليق
   // admin-dispatch-delivery.service.ts للتفصيل الكامل (بَقّة حقيقية اتلقطت بـcurl حي).
   @Get('dispatch-delivery')
+  @RequirePermission('operations.view')
   async getDispatchDelivery(@Query() query: DispatchDeliveryQueryDto) {
     const result = await this.dispatchDeliveryService.getDeliveryObservability({
       categoryId: query.category_id ?? null,
@@ -199,6 +205,7 @@ export class AdminOperationsController {
   // تصرّف دلوقتي" محدودة (EXCEPTION_LIST_LIMIT)، مش جدول قابل للتصفح — راجع تعليق
   // admin-exception-center.service.ts للتفصيل الكامل (النوعين وسبب اختيارهم).
   @Get('exceptions')
+  @RequirePermission('operations.view')
   async getExceptions(@Query() query: ExceptionCenterQueryDto) {
     const result = await this.exceptionCenterService.getExceptions({
       categoryId: query.category_id ?? null,
@@ -283,6 +290,7 @@ export class AdminOperationsController {
   // (فنيين LIGHT/MEANINGFUL متاحين النهاردة) والطلب (طلبات لسه بتدوّر) — راجع تعليق
   // admin-coverage-intelligence.service.ts للتفصيل الكامل.
   @Get('coverage')
+  @RequirePermission('operations.view')
   async getCoverage(@Query() query: CoverageIntelligenceQueryDto) {
     const { items, meta } = await this.coverageIntelligenceService.getCoverage({
       categoryId: query.category_id ?? null,

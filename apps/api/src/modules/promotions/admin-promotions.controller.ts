@@ -35,6 +35,7 @@ export class AdminPromotionsController {
   }
 
   @Get('promo-codes')
+  @RequirePermission('promotions.view')
   async list(@Query() query: ListPromoCodesQueryDto) {
     const { items, meta } = await this.promoCodesService.list(query);
     return { items: items.map(toPromoCodeResponseDto), meta };

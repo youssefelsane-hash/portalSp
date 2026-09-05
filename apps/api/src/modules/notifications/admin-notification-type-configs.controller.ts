@@ -16,6 +16,7 @@ export class AdminNotificationTypeConfigsController {
   constructor(private readonly service: NotificationTypeConfigService) {}
 
   @Get()
+  @RequirePermission('notifications.view')
   async list() {
     return (await this.service.list()).map(toNotificationTypeConfigResponseDto);
   }

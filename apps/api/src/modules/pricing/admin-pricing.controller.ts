@@ -40,6 +40,7 @@ export class AdminPricingController {
   // عادية بالكامل. مفيش أي فرع في الكود بيسأل «دي كانت أنهي قالب؟» بعد التطبيق.
 
   @Get('pricing-templates')
+  @RequirePermission('catalog.view')
   listTemplates() {
     return allPricingTemplates().map((template) => ({
       key: template.key,
@@ -69,6 +70,7 @@ export class AdminPricingController {
   // ── حقول الفورم الديناميكي ──────────────────────────────────────────
 
   @Get('services/:id/pricing-fields')
+  @RequirePermission('catalog.view')
   async listFields(@Param('id', ParseUUIDPipe) id: string) {
     const fields = await this.fieldsService.listForService(id);
     return fields.map(toPricingFieldResponseDto);
@@ -111,6 +113,7 @@ export class AdminPricingController {
   // ── قواعد التسعير (ثوابت/جداول بحث/المعادلة النهائية) ────────────────
 
   @Get('services/:id/pricing-rules')
+  @RequirePermission('catalog.view')
   async listRules(@Param('id', ParseUUIDPipe) id: string) {
     const rules = await this.rulesService.listForService(id);
     return rules.map(toPricingRuleResponseDto);
@@ -168,6 +171,7 @@ export class AdminPricingController {
   }
 
   @Get('services/:id/pricing-tests')
+  @RequirePermission('catalog.view')
   async listRuleTests(@Param('id', ParseUUIDPipe) id: string) {
     const tests = await this.ruleTestsService.listForService(id);
     return tests.map(toPricingRuleTestResponseDto);

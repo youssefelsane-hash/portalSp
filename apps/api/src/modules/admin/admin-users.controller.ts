@@ -16,11 +16,13 @@ export class AdminUsersController {
   constructor(private readonly permissionsService: PermissionsService) {}
 
   @Get('roles')
+  @RequirePermission('roles.view')
   listRoles() {
     return this.permissionsService.listRoles();
   }
 
   @Get('users/:userId/roles')
+  @RequirePermission('roles.view')
   listUserRoles(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.permissionsService.listUserRoles(userId);
   }

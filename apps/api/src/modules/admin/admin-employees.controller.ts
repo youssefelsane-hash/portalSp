@@ -29,11 +29,13 @@ export class AdminEmployeesController {
   }
 
   @Get()
+  @RequirePermission('employees.view')
   list(@Query() query: ListEmployeesQueryDto) {
     return this.employeesService.list(query);
   }
 
   @Get(':userId')
+  @RequirePermission('employees.view')
   getDetail(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.employeesService.getDetail(userId);
   }

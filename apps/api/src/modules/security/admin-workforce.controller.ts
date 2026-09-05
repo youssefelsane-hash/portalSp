@@ -6,6 +6,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toEmployeeSessionResponseDto } from './dto/employee-session-response.dto';
 import { WorkforceActivityService } from './workforce-activity.service';
+import { AnyAdmin } from '../../common/decorators/any-admin.decorator';
 
 // Script 5 Part 2/12 — رؤية جلسات/نشاط الموظفين. heartbeat مفتوح لأي أدمن (بيسجّل نشاطه هو بس)،
 // باقي الـendpoints محتاجة صلاحيات دقيقة (employees.activity.view/sessions.view، security.sessions.revoke).
@@ -15,6 +16,7 @@ export class AdminWorkforceController {
   constructor(private readonly workforce: WorkforceActivityService) {}
 
   @Post('heartbeat')
+  @AnyAdmin('كتابة ذاتية — الموظف بيسجّل نبضة حضوره هو، مش بيقرا ولا يعدّل حد تاني')
   @HttpCode(HttpStatus.OK)
   async heartbeat(@CurrentUser() admin: JwtPayload) {
     await this.workforce.heartbeat(admin.sub);

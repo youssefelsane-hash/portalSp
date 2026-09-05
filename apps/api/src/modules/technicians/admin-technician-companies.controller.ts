@@ -26,6 +26,7 @@ export class AdminTechnicianCompaniesController {
   constructor(private readonly companiesService: TechnicianCompaniesService) {}
 
   @Get()
+  @RequirePermission('technician_companies.view')
   async list() {
     const rows = await this.companiesService.listForAdmin();
     return rows.map(({ company, branchCount, staffCount }) => ({
@@ -36,6 +37,7 @@ export class AdminTechnicianCompaniesController {
   }
 
   @Get(':id')
+  @RequirePermission('technician_companies.view')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const detail = await this.companiesService.getDetail(id);
     return {
@@ -82,6 +84,7 @@ export class AdminTechnicianCompaniesController {
 
   // مساحة عمل الشركة (ADR-0033) — إشراف read-only، نفس نمط باقي الكونترولر ده.
   @Get(':id/orders')
+  @RequirePermission('technician_companies.view')
   async listOrders(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.companiesService.listOrdersForAdmin(id);
     return rows.map(toCompanyOrderSummaryResponseDto);

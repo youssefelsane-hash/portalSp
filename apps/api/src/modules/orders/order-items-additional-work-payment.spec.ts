@@ -66,7 +66,11 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
        VALUES ($1,$2,$3,$4,$5,$6,'in_progress','paid',$7,0) RETURNING id`,
-      [`TESTAWP-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, totalAmountCents],
+      // `runId` في رقم الطلب مش تجميل: `orders.order_number` عليه UNIQUE، و`TESTAWP-<label>`
+      // الثابت كان معناه إن أي تشغيلة اتقطعت قبل التنظيف بتقفل السبيك **للأبد** على نفس القاعدة
+      // (حصلت فعلاً: صفوف متروكة من 2026-09-02 كانت بتفشّلها بـduplicate key بلا أي علاقة
+      // بالمنطق اللي بتختبره). وكمان بيمنع تصادم تشغيلتين متوازيتين على نفس قاعدة CI.
+      [`TAWP-${runId}-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, totalAmountCents],
     );
     const orderId = order.id as string;
     await q(
@@ -261,6 +265,15 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
       await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-awp-%${runId}%`]);
+      // كانت ناقصة، والنتيجة إن التنظيف بيقع على FK وسط الطريق فيسيب طلبات ورا: تعيين الفني
+      // بينشئ `chat_threads` تلقائيًا، وحذف الطلب قبلها بيرفع
+      // `chat_threads_order_id_fkey`. أي تشغيلة بتفشل هنا بتلوّث قاعدة التطوير للتشغيلة اللي بعدها.
+      await q(
+        `DELETE FROM chat_messages WHERE thread_id IN (
+           SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1))`,
+        [ids.customerProfile],
+      );
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);

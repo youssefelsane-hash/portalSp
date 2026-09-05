@@ -161,9 +161,20 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
-      if (ids.recoveredOrder) await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.recoveredOrder]);
-      if (ids.recoveredOrder) await q(`DELETE FROM orders WHERE id = $1`, [ids.recoveredOrder]);
-      if (ids.blockingOrder) await q(`DELETE FROM orders WHERE id = $1`, [ids.blockingOrder]);
+      // كان بيحذف الطلبين المعروفين بالمعرّف بس، والاختبارات نفسها بتنشئ طلبات تانية كتير
+      // (EMG/FAR/NEAR/SCHED/BROAD…) ماكانتش بتتحذف أبدًا — تسريب صفوف كل تشغيلة. وكمان تعيين
+      // الفني بينشئ `chat_threads`، فحذف الطلب قبلها بيرفع `chat_threads_order_id_fkey` ويوقّف
+      // التنظيف كله في نصّه (حصل فعلاً). التنظيف بقى على مستوى العميل بترتيب يحترم المفاتيح.
+      if (ids.customerProfile) {
+        const scope = `SELECT id FROM orders WHERE customer_id = $1`;
+        await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (${scope}))`, [
+          ids.customerProfile,
+        ]);
+        await q(`DELETE FROM chat_threads WHERE order_id IN (${scope})`, [ids.customerProfile]);
+        await q(`DELETE FROM order_assignments WHERE order_id IN (${scope})`, [ids.customerProfile]);
+        await q(`DELETE FROM order_status_history WHERE order_id IN (${scope})`, [ids.customerProfile]);
+        await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      }
       if (ids.technicianProfile) {
         await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.technicianProfile]);
         await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.technicianProfile]);

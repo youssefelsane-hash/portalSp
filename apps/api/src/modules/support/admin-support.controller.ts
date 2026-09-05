@@ -19,6 +19,7 @@ export class AdminSupportController {
   // order_id اختياري (docs/08 §73 بند 3 المؤجّل) — شاشة تفاصيل الطلب في الأدمن بتستخدمه عشان تعرض
   // الشكاوى المرتبطة بالطلب ده مباشرة، بدل ما مركز الاتصال يدوّر في شاشة الشكاوى العامة.
   @Get()
+  @RequirePermission('complaints.view')
   async listAll(@Query('order_id') orderId?: string) {
     const complaints = await this.supportService.listAllForAdmin(orderId);
     return complaints.map(toComplaintResponseDto);

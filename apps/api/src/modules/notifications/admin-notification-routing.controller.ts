@@ -17,6 +17,7 @@ export class AdminNotificationRoutingController {
   constructor(private readonly routingService: NotificationRoutingService) {}
 
   @Get()
+  @RequirePermission('notifications.view')
   async list() {
     return (await this.routingService.list()).map(toRoutingRuleResponseDto);
   }

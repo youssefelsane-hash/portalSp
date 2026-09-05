@@ -17,6 +17,7 @@ export class AdminTechnicianLevelsController {
   constructor(private readonly levelsService: TechnicianLevelsService) {}
 
   @Get()
+  @RequirePermission('technician_levels.view')
   async list() {
     return (await this.levelsService.list()).map(toTechnicianLevelConfigResponseDto);
   }

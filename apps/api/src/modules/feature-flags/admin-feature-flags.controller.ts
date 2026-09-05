@@ -16,12 +16,14 @@ export class AdminFeatureFlagsController {
   constructor(private readonly featureFlagsService: FeatureFlagsService) {}
 
   @Get()
+  @RequirePermission('feature_flags.view')
   async list() {
     const flags = await this.featureFlagsService.list();
     return flags.map(toFeatureFlagResponseDto);
   }
 
   @Get(':key')
+  @RequirePermission('feature_flags.view')
   async getOne(@Param('key') key: string) {
     return toFeatureFlagResponseDto(await this.featureFlagsService.findOrThrow(key));
   }

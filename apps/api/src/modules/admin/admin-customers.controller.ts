@@ -25,11 +25,13 @@ export class AdminCustomersController {
   ) {}
 
   @Get()
+  @RequirePermission('customers.view')
   list(@Query() query: ListCustomersQueryDto) {
     return this.customersService.list(query);
   }
 
   @Get(':userId')
+  @RequirePermission('customers.view')
   getDetail(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.customersService.getDetail(userId);
   }
@@ -39,6 +41,7 @@ export class AdminCustomersController {
   // زي بروفايل الفني 360° (admin-technicians.controller.ts's getProfile360) — RolesGuard كفاية،
   // مفيش تعديل هنا. نفس أسلوب الماب اليدوي camelCase→snake_case بالظبط.
   @Get(':userId/360')
+  @RequirePermission('customers.view')
   async get360(@Param('userId', ParseUUIDPipe) userId: string) {
     const p = await this.customer360Service.getProfile(userId);
     return {
@@ -92,6 +95,7 @@ export class AdminCustomersController {
   // كل الطلبات اللي هو طلبها كلها، وكل طلب كان بقد إيه والفلوس دخلت إزاي") — بعكس
   // current_and_upcoming_orders فوق (ملخّص مصغّر، حالية/قادمة بس): ده أي حالة، paginated كامل.
   @Get(':userId/orders')
+  @RequirePermission('customers.view')
   async listOrderHistory(@Param('userId', ParseUUIDPipe) userId: string, @Query() query: CustomerOrderHistoryQueryDto) {
     const page = query.page ?? 1;
     const perPage = query.per_page ?? 20;
@@ -115,6 +119,7 @@ export class AdminCustomersController {
   // AddressesService.findAllForUser() اللي العميل نفسه بيستخدمه (GET /addresses) — صفر منطق
   // كتالوج/عناوين تاني منفصل. قراءة بس، صفر إنشاء/تعديل عنوان نيابة عن العميل (خارج نطاق هنا).
   @Get(':userId/addresses')
+  @RequirePermission('customers.view')
   async listAddresses(@Param('userId', ParseUUIDPipe) userId: string) {
     const addresses = await this.addressesService.findAllForUser(userId);
     return addresses.map((address) => toAddressResponseDto(address, false));
