@@ -23,6 +23,7 @@ import { CancellationReasonsService } from './cancellation-reasons.service';
 import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { RecurringOrdersController } from './recurring-orders.controller';
+import { OrderQueriesService } from './order-queries.service';
 import { OrdersService } from './orders.service';
 import { PostQuoteProviderSelectionService } from './post-quote-provider-selection.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
@@ -96,6 +97,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
   ],
   providers: [
     OrdersService,
+    OrderQueriesService,
     PostQuoteProviderSelectionService,
     OrderAutoCancelService,
     CrewShortageEscalationService,
@@ -115,6 +117,6 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     BookingMatchPreviewService,
     storageServiceProvider,
   ],
-  exports: [OrdersService],
+  exports: [OrdersService, OrderQueriesService],
 })
 export class OrdersModule {}

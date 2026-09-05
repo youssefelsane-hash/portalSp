@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -71,13 +71,14 @@ import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
+import { OrderQueriesService } from './order-queries.service';
 import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, orderPriceIsProviderBound } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
+import { CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
 import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -209,6 +210,27 @@ export class OrdersService {
     @Optional() private readonly assignmentGuard?: TechnicianAssignmentGuardService,
   ) {}
 
+  private queriesInstance: OrderQueriesService | null = null;
+
+  /**
+   * شريحة القراءات (تدقيق A-1) — **مبنيّة داخليًا مش محقونة**، وده مقصود.
+   *
+   * حقنها كـparameter تاني وعشرين كان هيكسر ٢٥ spec بتبني `OrdersService` بوسائط ترتيبية،
+   * ويضيف بند تاني لنفس القايمة اللي التقسيم موجود عشان يقصّرها. الشريحة بتاخد نفس
+   * الاعتماديات الأربعة الموجودة هنا أصلاً، فبناؤها هنا **صفر معلومة جديدة**.
+   *
+   * كسول (`??=`) عشان الـspecs اللي بتمرّر `{} as never` لاعتماديات مش مستخدمة في مسارها
+   * ماتدفعش تكلفة بناء حاجة مش هتتنادى.
+   */
+  private get queries(): OrderQueriesService {
+    return (this.queriesInstance ??= new OrderQueriesService(
+      this.orders,
+      this.dataSource,
+      this.customerProfiles,
+      this.techniciansService,
+    ));
+  }
+
   private async resolveOptionalWarranty(
     planId: string | undefined,
     serviceId: string,
@@ -301,33 +323,15 @@ export class OrdersService {
   }
 
   findAllForCustomerUser(userId: string): Promise<Order[]> {
-    return this.customerProfiles.findByUserIdOrThrow(userId).then((profile) =>
-      this.orders.find({ where: { customerId: profile.id }, order: { createdAt: 'DESC' } }),
-    );
+    return this.queries.findAllForCustomerUser(userId);
   }
 
-  /**
-   * رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول.
-   *
-   * بتتنادى من مسار **تفاصيل الطلب** بس، مش من القوايم: استعلام لكل صف في قايمة بيكلّف N+1 مقابل
-   * معلومة مالهاش مكان في كارت القايمة أصلاً.
-   */
   listCustomerNotices(orderId: string): Promise<OrderCustomerNotice[]> {
-    // بنقرا من الـDataSource مش من repository محقون: إضافة parameter للـconstructor كانت
-    // هتكسر ٢٤ spec بتبني الخدمة يدويًا مقابل صفر مكسب — الكيان مسجّل في `forFeature` عادي.
-    return this.dataSource.getRepository(OrderCustomerNotice).find({
-      where: { orderId, deletedAt: IsNull() },
-      order: { createdAt: 'DESC' },
-    });
+    return this.queries.listCustomerNotices(orderId);
   }
 
-  async findOneOwnedOrThrow(userId: string, orderId: string): Promise<Order> {
-    const profile = await this.customerProfiles.findByUserIdOrThrow(userId);
-    const order = await this.orders.findOne({ where: { id: orderId, customerId: profile.id } });
-    if (!order) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-    }
-    return order;
+  findOneOwnedOrThrow(userId: string, orderId: string): Promise<Order> {
+    return this.queries.findOneOwnedOrThrow(userId, orderId);
   }
 
   // قفل تشاؤمي + إعادة تحقق DISPUTED جوّه transaction الكتابة نفسها — يمنع "double admin edit"
@@ -2894,57 +2898,16 @@ export class OrdersService {
 
   // ── دورة عمل الفني: قبل → في الطريق → وصل → بدأ → خلص ───────────────────
 
-  async findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const order = await this.orders.findOne({ where: { id: orderId, technicianId: profile.id } });
-    if (!order) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
-    }
-    return order;
+  findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
+    return this.queries.findOwnedByTechnicianOrThrow(userId, orderId);
   }
 
-  /**
-   * (docs/08 §31) — للقراءة بس (تفاصيل الطلب + قايمة أعضاء الفريق)، مش لأي فعل تنفيذي. عضو فريق
-   * مُضاف (order_team_members، مش قائد الطلب) عنده حق يشوف الطلب دلوقتي — بَقّة حقيقية كانت هنا:
-   * findOwnedByTechnicianOrThrow() القديمة كانت بترفض 404 لعضو الفريق نفسه، فمكانش يقدر أصلاً
-   * يشوف تفاصيل شغلانة اتضاف ليها. أفعال التنفيذ (depart/arrive/start/complete/cancel) لسه
-   * findOwnedByTechnicianOrThrow بس (القائد وحده) — نفس فلسفة "عضو فريق عادي ميقدرش يلغي بنفسه".
-   */
-  async findVisibleForTechnician(userId: string, orderId: string): Promise<Order> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const order = await this.orders.findOne({ where: { id: orderId } });
-    if (!order) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
-    }
-    if (order.technicianId === profile.id) {
-      return order;
-    }
-    const [membership] = await this.orders.manager.query<{ id: string }[]>(
-      `SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2 LIMIT 1`,
-      [orderId, profile.id],
-    );
-    if (!membership) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
-    }
-    return order;
+  findVisibleForTechnician(userId: string, orderId: string): Promise<Order> {
+    return this.queries.findVisibleForTechnician(userId, orderId);
   }
 
-  /** "شغلي كعضو فريق" (docs/08 §31) — عكس findActiveForTechnician() بالظبط: طلبات الفني قائدها فيها فني تاني، وهو بس مضاف كعضو. */
-  async listTeamAssignedForTechnician(userId: string): Promise<Order[]> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    // استعلام خام لمعرّفات الطلبات بس (بلا hydration) — الجلب الفعلي عبر repository.find() تحت
-    // عشان يرجّع كيانات Order مربوطة صح (camelCase)، مش صفوف خام (snake_case) هتكسر toOrderResponseDto.
-    const rows = await this.orders.manager.query<{ order_id: string }[]>(
-      `SELECT DISTINCT otm.order_id FROM order_team_members otm
-       JOIN orders o ON o.id = otm.order_id
-       WHERE otm.technician_id = $1 AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL`,
-      [profile.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
-    );
-    if (rows.length === 0) return [];
-    return this.orders.find({
-      where: { id: In(rows.map((r) => r.order_id)) },
-      order: { updatedAt: 'DESC' },
-    });
+  listTeamAssignedForTechnician(userId: string): Promise<Order[]> {
+    return this.queries.listTeamAssignedForTechnician(userId);
   }
 
   // الحالات اللي الفني يقدر يلغي فيها نفسه — بعد ما الشغل الفعلي يبدأ (in_progress فما بعده)
@@ -3582,121 +3545,28 @@ export class OrdersService {
    * فعليًا (`ENGAGED_TECHNICIAN_ORDER_STATUSES`، نفس تعريف "منشغل جسديًا" اللي محرك الأهلية
    * بيستخدمه بالحرف) أو طلب ASAP (بالتعريف دلوقتي حالاً). الباقي بيتوزّع على "قدامك"/"متأخر".
    */
-  async findActiveOrdersForTechnician(userId: string): Promise<Order[]> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders.find({
-      where: [
-        { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
-        { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
-      ],
-      order: { updatedAt: 'DESC' },
-    });
+  findActiveOrdersForTechnician(userId: string): Promise<Order[]> {
+    return this.queries.findActiveOrdersForTechnician(userId);
   }
 
-  /**
-   * توافق خلفي للنسخ القديمة من تطبيق الفني: المسار القديم بيرجّع طلب واحد فقط. المصدر الحقيقي
-   * بقى القائمة فوق، عشان الطلبات المتزامنة ما تختفيش من النسخ الجديدة.
-   */
-  async findActiveForTechnician(userId: string): Promise<Order | null> {
-    const orders = await this.findActiveOrdersForTechnician(userId);
-    return orders[0] ?? null;
+  findActiveForTechnician(userId: string): Promise<Order | null> {
+    return this.queries.findActiveForTechnician(userId);
   }
 
-  /**
-   * الطلبات اللي الفني **في طريقه ليها فعليًا دلوقتي** — المصدر الوحيد اللي بث الموقع اللحظي
-   * (`OrderTrackingGateway.handleLocation`) بيعتمد عليه.
-   *
-   * **ليه `TECHNICIAN_ON_WAY` بس، مش كل الحالات النشطة؟** التتبّع اللحظي ليه معنى واحد: «الفني
-   * جاي، هو فين دلوقتي». بعد `TECHNICIAN_ARRIVED` الفني واقف عند عنوان العميل نفسه، وبعد
-   * `IN_PROGRESS` هو بيشتغل جوّه البيت — بث إحداثياته وقتها **تسريب خصوصية بلا أي فايدة** (العميل
-   * عارف هو فين، هو عنده). فالنطاق الأضيق هنا مش تقييد، ده التعريف الصح.
-   *
-   * **وليه قايمة مش `findOne`؟** ADR-0070 فتح للفني إنه يمسك أكتر من طلب نشط في نفس اليوم. الكود
-   * القديم كان `findOne` **بلا `ORDER BY`** على مجموعة ممكن ترجّع أكتر من صف، يعني Postgres
-   * بيختار صف بالعشوائي (حسب خطة التنفيذ) — فعميل الطلب A كان ممكن يشوف الفني بيتحرّك وهو رايح
-   * لـB، أو مايشوفش حاجة خالص. القايمة بترتيب حتمي بتشيل العشوائية من أصلها: البث بيروح لكل غرفة
-   * الفني فعلاً في طريقه ليها.
-   *
-   * بياخد **معرّف بروفايل الفني** (مش `userId`) لأن المنادي الوحيد (الـgateway) عنده البروفايل
-   * أصلاً — تفادي استعلام زيادة على كل تحديث موقع (بيوصل ١٠ في الـ١٠ ثواني لكل فني).
-   */
-  async findOrdersInTransitForTechnician(technicianProfileId: string): Promise<Order[]> {
-    return this.orders.find({
-      where: { technicianId: technicianProfileId, orderStatus: OrderStatus.TECHNICIAN_ON_WAY },
-      order: { scheduledAt: 'ASC', id: 'ASC' },
-    });
+  findOrdersInTransitForTechnician(technicianProfileId: string): Promise<Order[]> {
+    return this.queries.findOrdersInTransitForTechnician(technicianProfileId);
   }
 
-  /**
-   * «الفني ده على الطلب ده؟» — قائدًا أو عضو طاقم. المصدر الوحيد لسؤال الانتماء ده.
-   *
-   * كان كل مستهلك بيسأله بطريقته: `order.technicianId === profile.id` بس (الـgateway)، أو
-   * `order_team_members` بس (`listTeamAssignedForTechnician`). النتيجة إن عضو الطاقم في طلب فريق
-   * كان بياخد «الطلب ده مش بتاعك» لما يحاول يتابع الطلب اللي هو نفسه شغّال عليه.
-   *
-   * `orders.technician_id` = القائد، و`order_team_members` = باقي الطاقم (مساعدين وأعضاء) —
-   * الاتنين مع بعض هما «طاقم الطلب» الكامل.
-   */
-  async isTechnicianAssignedToOrder(technicianProfileId: string, order: Order): Promise<boolean> {
-    if (order.technicianId === technicianProfileId) return true;
-    const [row] = await this.orders.manager.query<{ exists: boolean }[]>(
-      `SELECT EXISTS(
-         SELECT 1 FROM order_team_members
-         WHERE order_id = $1 AND technician_id = $2
-       ) AS exists`,
-      [order.id, technicianProfileId],
-    );
-    return row?.exists === true;
+  isTechnicianAssignedToOrder(technicianProfileId: string, order: Order): Promise<boolean> {
+    return this.queries.isTechnicianAssignedToOrder(technicianProfileId, order);
   }
 
-  /**
-   * مقارنة "يوم الجدولة" بيوم النهاردة **بتوقيت مصر**، في SQL مباشرة (الجدولة باليوم مش بالساعة،
-   * ADR-0018 §2). عمداً مش بحساب حدود اليوم في JS: أول نسخة هنا كانت بتحسب بداية اليوم بـ
-   * `toLocaleString('en-US', {timeZone:'Africa/Cairo'})` + `setHours(0,0,0,0)` — وده بياخد
-   * **تاريخ** القاهرة ويحط عليه منتصف ليل **توقيت السيرفر** (UTC عادة)، يعني بيطلع 03:00 بتوقيت
-   * القاهرة. النتيجة بَقّة حقيقية اتلقطت في الاختبار الحي: في أول 3 ساعات من كل يوم مصري، شغل
-   * النهاردة كان بيتحسب "متأخر" ويختفي من "قدامك". نفس تعبير الـSQL المستخدم في
-   * `technician-eligibility.sql.ts` و`admin-exception-center.service.ts` بالحرف — تعريف واحد.
-   */
-  private static readonly CAIRO_DAY_EXPR = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
-  private static readonly CAIRO_TODAY_EXPR = `(now() AT TIME ZONE 'Africa/Cairo')::date`;
-
-  /**
-   * "شغل متأخر" (docs/08 §56 بند 4) — شغلانة اتقبلت، يوم تنفيذها عدّى، والفني **لسه ما بدأش
-   * يتحرّك ليها** (`ACCEPTED` بالظبط، مش أي حالة تنفيذ). دي كانت بتختفي من كل الشاشات: مش
-   * "قدامك" (موعدها فات) ومش "حالي" غير لو الصدفة رجّعتها. لازم تبان بوضوح — وباللون الأحمر.
-   */
-  async findOverdueForTechnician(userId: string): Promise<Order[]> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders
-      .createQueryBuilder('o')
-      .where('o.technician_id = :technicianId', { technicianId: profile.id })
-      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
-      .andWhere('o.scheduled_at IS NOT NULL')
-      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} < ${OrdersService.CAIRO_TODAY_EXPR}`)
-      .orderBy('o.scheduled_at', 'ASC')
-      .getMany();
+  findOverdueForTechnician(userId: string): Promise<Order[]> {
+    return this.queries.findOverdueForTechnician(userId);
   }
 
-  // "الشغل المؤكّد قدامي" (docs/08 §165) — عكس findActiveForTechnician() بالظبط: الطلبات
-  // المجدولة اللي اتأكّدت تلقائيًا (autoConfirmScheduledOrder()) بس لسه معاداش موعدها، عشان
-  // apps/technician-app يعرضها كقايمة منفصلة ("شغل قادم مؤكّد") مش يخلطها مع "طلبات محتاجة قرارك".
-  async findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
-    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    // بَقّة حقيقية (docs/08 §56 بند 4): كانت `MoreThan(now)` — يعني شغل **النهاردة** بيختفي من
-    // القايمة أول ما اليوم يبدأ (`scheduled_at` = بداية اليوم بالظبط بعد ADR-0018 §2، فهي أصغر
-    // من `now` دايمًا). الفني كان بيصحى يلاقي شغل النهاردة مش موجود في "قدامك". الحد الصح هو
-    // **بداية النهاردة** مش اللحظة الحالية.
-    return this.orders
-      .createQueryBuilder('o')
-      .where('o.technician_id = :technicianId', { technicianId: profile.id })
-      // بمجرد ما الفني يبدأ التحرك، الطلب ينتقل لقسم "الشغل الحالي" حتى لو كان مجدولًا؛ إبقاؤه
-      // هنا كان يعرض نفس الطلب مرتين. القادم المؤكد هو المقبول الذي لم يبدأ تنفيذه فقط.
-      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
-      .andWhere('o.scheduled_at IS NOT NULL')
-      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} >= ${OrdersService.CAIRO_TODAY_EXPR}`)
-      .orderBy('o.scheduled_at', 'ASC')
-      .getMany();
+  findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
+    return this.queries.findUpcomingConfirmedForTechnician(userId);
   }
 
   /** مصدر واحد لكل انتقالات الفني — بتحترم الـ state machine وبتسجل التاريخ زي أي انتقال تاني. */
