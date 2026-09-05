@@ -7,6 +7,7 @@ import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
 import { UserRole } from './entities/user-role.entity';
 import { PermissionsService } from './permissions.service';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي (نفس فلسفة المشروع) — بيثبت إصلاح بَقّة تصعيد الصلاحيات الحقيقية
 // (مراجعة أمان شاملة 2026-08-13، بند P0-1 في docs/12): assignRole()/cloneRole() كانوا بيسمحوا
@@ -156,7 +157,7 @@ describe('PermissionsService — منع تصعيد الصلاحيات في assig
     ];
     // audit_logs بتشير لمستخدمينا سواء actor_user_id (كل عملية سجّلناها) أو entity_id (الطلبات
     // اللي كان الهدف فيها مستخدم زي role.assigned/role.revoked) — لازم الاتنين يتنضّفوا قبل users.
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [testUserIds]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [testUserIds]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [testUserIds]);
     await q(`DELETE FROM roles WHERE id = ANY($1)`, [[ids.roleLow, ids.roleHigh, ids.roleUnrestricted, ids.roleSuperTest]]);
     await q(`DELETE FROM permissions WHERE id = ANY($1)`, [[ids.permA, ids.permB]]);

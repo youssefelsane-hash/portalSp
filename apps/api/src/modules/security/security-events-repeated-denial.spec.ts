@@ -9,6 +9,7 @@ import { SettingsService } from '../settings/settings.service';
 import { SecurityEventNote } from './entities/security-event-note.entity';
 import { SecurityEvent, SecurityEventSeverity, SecurityEventStatus, SecurityEventType } from './entities/security-event.entity';
 import { SecurityEventsService } from './security-events.service';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — Script 5 Part 10 (كشف رفض متكرر/تجميع تنبيهات). سيناريوهين
 // مختلفين عمداً عن dedup العادي (اللي بيتحقق منه في security-events-privilege-escalation.spec.ts):
@@ -63,7 +64,7 @@ describe('SecurityEventsService — تصعيد ورفض متكرر (Script 5 Par
     const actors = [ids.actorEscalate, ids.actorBurst];
     await q(`DELETE FROM security_events WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM employee_daily_activity WHERE user_id = ANY($1)`, [actors]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [actors]);
     await cache?.onModuleDestroy();
     await dataSource.destroy();

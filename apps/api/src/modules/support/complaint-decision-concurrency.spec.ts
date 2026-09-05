@@ -15,6 +15,7 @@ import { ComplaintMessage } from './entities/complaint-message.entity';
 import { SupportService } from './support.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 describe('SupportService complaint terminal decision concurrency', () => {
   let dataSource: DataSource;
@@ -103,7 +104,7 @@ describe('SupportService complaint terminal decision concurrency', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-      await q(`DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [
         ids.complaints,
       ]);
       await q(`DELETE FROM wallet_transactions WHERE reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [

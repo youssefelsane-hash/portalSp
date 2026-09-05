@@ -15,6 +15,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { COMPLAINT_MESSAGE_ADDED_EVENT, ComplaintMessageAddedEvent } from '../../common/events/complaint-message-added.event';
 import { COMPLAINT_STATUS_CHANGED_EVENT, ComplaintStatusChangedEvent } from '../../common/events/complaint-status-changed.event';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // بلاغ مالك صريح (docs/08 §73 بند 2): "الأدمن يرد على شكوى، الرسالة توصل، مفيش notification لصاحبها".
 // نفس منهجية complaint-decision-concurrency.spec.ts (DataSource حقيقي، Postgres حي) — بس هنا
@@ -87,7 +88,7 @@ describe('SupportService — إشعارات صاحب الشكوى (رد الأد
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
       await q(`DELETE FROM complaint_messages WHERE complaint_id = ANY($1::uuid[])`, [ids.complaints]);
-      await q(`DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [ids.complaints]);
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [ids.complaints]);
       await q(`DELETE FROM complaints WHERE id = ANY($1::uuid[])`, [ids.complaints]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.customerUser, ids.adminUser]]);

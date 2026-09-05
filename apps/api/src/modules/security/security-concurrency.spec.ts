@@ -16,6 +16,7 @@ import { SecurityEventNote } from './entities/security-event-note.entity';
 import { SecurityEvent, SecurityEventSeverity, SecurityEventStatus, SecurityEventType } from './entities/security-event.entity';
 import { SecurityEventsService } from './security-events.service';
 import { WorkforceActivityService } from './workforce-activity.service';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبارات سباق صريحة (Script 5 Part 20) — Promise.allSettled حقيقي ضد Postgres حقيقي، مش تحقق
 // منطقي بالتتابع (اللي اتعمل في السبِكات التانية بالفعل). 5 سيناريوهات (A-E)، كل واحد بيغطي نقطة
@@ -94,7 +95,7 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
     const actors = [ids.actorEscalate, ids.actorHeartbeat, ids.actorDenial];
     await q(`DELETE FROM security_events WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM employee_daily_activity WHERE user_id = ANY($1)`, [actors]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM refresh_tokens WHERE user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [actors]);
     await cache?.onModuleDestroy();

@@ -7,6 +7,7 @@ import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
 import { ServicePricingRule, PricingRuleType } from './entities/service-pricing-rule.entity';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 /**
  * Script 7 Phase 3 — بَقّة حقيقية اتلقطت أثناء مراجعة `resolveDefaultValue()` (اللي اتضافت في
@@ -128,7 +129,7 @@ describe('PricingEngineService — default_value بتتجاوز فحص min/max �
     ]);
     await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1)`, [[ids.serviceOutOfRange, ids.serviceInvalidOption]]);
     await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1)`, [[ids.serviceOutOfRange, ids.serviceInvalidOption]]);
-    await q(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
+    await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.adminUser]);
     await q(`DELETE FROM services WHERE id = ANY($1)`, [[ids.serviceOutOfRange, ids.serviceInvalidOption]]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

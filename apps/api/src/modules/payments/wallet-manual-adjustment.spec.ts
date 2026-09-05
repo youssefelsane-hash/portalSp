@@ -33,6 +33,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت تصحيح المحفظة اليدوي الجديد (docs/08 §20 بند 5): كانت
 // فجوة حقيقية — AdminWalletController كان قراءة بس، صفر مسار لأدمن/مالية يصحّح رصيد فني (مثلاً
@@ -168,7 +169,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-      await q(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
+      await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
       // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
       // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
       await q(`DELETE FROM wallet_adjustments WHERE actor_user_id = $1`, [ids.adminUser]);
