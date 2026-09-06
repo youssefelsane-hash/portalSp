@@ -15,10 +15,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-export class UpdateFixedCommissionDto {
+export class UpdatePlatformCommissionDto {
   @IsInt()
   @Min(0)
-  platform_commission_cents: number;
+  @Max(10000)
+  platform_commission_bps: number;
 
   @IsString()
   @MinLength(3)
@@ -48,16 +49,6 @@ export class UpdateEarningsSkillPolicyDto {
   @Min(1)
   @Max(30000)
   factor_bps: number;
-
-  @IsString()
-  @MinLength(3)
-  @MaxLength(1000)
-  reason: string;
-}
-
-export class SetEarningsCutoverDto {
-  @IsBoolean()
-  enabled: boolean;
 
   @IsString()
   @MinLength(3)
@@ -115,7 +106,8 @@ export class SimulateEarningsDto {
 
   @IsInt()
   @Min(0)
-  platform_commission_cents: number;
+  @Max(10000)
+  platform_commission_bps: number;
 
   @IsArray()
   @ValidateNested({ each: true })

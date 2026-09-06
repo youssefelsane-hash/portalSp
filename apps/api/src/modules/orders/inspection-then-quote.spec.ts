@@ -455,7 +455,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(approved.commissionableBaseCents).toBe(42000);
   });
 
-  it('يرفض عرض سعر بالصور أقل من عمولة المنصة المثبتة على الطلب', async () => {
+  it('عرض السعر بالصور لا يتعطل بسبب عمولة ثابتة قديمة؛ النسبة المثبتة تتحسب عند التسوية', async () => {
     const orderId = await insertOrder(`remote-low-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
       totalAmountCents: 0,
       estimatedPriceCents: 0,
@@ -467,7 +467,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
           SET technician_id = NULL,
               initial_quote_source = 'admin_remote',
               settlement_policy_version = 2,
-              platform_commission_cents_snapshot = 50000
+              commission_rate_applied = 20
         WHERE id = $1`,
       [orderId],
     );
@@ -477,9 +477,8 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       [orderId, ids.customerUser],
     );
 
-    await expect(inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000)).rejects.toThrow(
-      'السعر لازم يكون على الأقل',
-    );
+    const quoted = await inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000);
+    expect(quoted.estimatedPriceCents).toBe(42000);
   });
 
   it('مسار الرفض — awaiting_initial_quote_approval → cancelled_by_customer مسموح ومُدرج في CUSTOMER_CANCELLABLE_STATUSES (ADR-0044 §4، صفر رسوم إلغاء إضافية)', () => {

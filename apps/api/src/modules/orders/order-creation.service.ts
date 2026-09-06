@@ -1104,18 +1104,15 @@ export class OrderCreationService {
         ? undefined
         : dto.payment_method;
 
-    // Earnings Engine V2 is an explicit cutover for new orders only. The fixed amount is copied
-    // onto the order now, so later catalog edits can never rewrite historical money.
-    const earningsV2Enabled = await this.settingsService.getBoolean('earnings.v2_cutover_enabled', false);
-    const settlementPolicyVersion: 1 | 2 = earningsV2Enabled ? 2 : 1;
-    const platformCommissionCentsSnapshot =
-      settlementPolicyVersion === 2 ? (originalOrder ? 0 : service.platformCommissionCents) : null;
-    if (settlementPolicyVersion === 2 && platformCommissionCentsSnapshot == null) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الخدمة غير جاهزة للتسوية الجديدة: حدد عمولة المنصة الثابتة أولاً',
-        HttpStatus.CONFLICT,
-      );
+    // سياسة المستحقات الموحدة: النسبة تُحفظ لقطة على الطلب، لذلك تعديل الكتالوج لاحقًا لا يبدل
+    // حقيقة مالية تاريخية. مفتاح الترحيل يُبقي السجلات القديمة وأدوات الصيانة متوافقة فقط؛
+    // الترحيل يفعّله في الإنتاج ولا توجد واجهة تشغيل ثانية له.
+    const earningsPolicyEnabled = await this.settingsService.getBoolean('earnings.v2_cutover_enabled', true);
+    const settlementPolicyVersion: 1 | 2 = earningsPolicyEnabled ? 2 : 1;
+    const platformCommissionCentsSnapshot = null;
+    const commissionRateApplied = settlementPolicyVersion === 2 ? (originalOrder ? 0 : Number(service.commissionPercentage)) : null;
+    if (commissionRateApplied !== null && (!Number.isFinite(commissionRateApplied) || commissionRateApplied < 0 || commissionRateApplied > 100)) {
+      throw new ApiException(ErrorCode.VAL_001, 'نسبة عمولة المنصة للخدمة غير صحيحة', HttpStatus.CONFLICT);
     }
 
     const remoteAssessmentFeeCents = remoteQuoteRequested ? service.remoteAssessmentFeeCents : 0;
@@ -1127,17 +1124,6 @@ export class OrderCreationService {
         estimate.inspection_fee_cents +
         estimate.emergency_surcharge_cents +
         addonsTotalCents;
-    if (
-      settlementPolicyVersion === 2 &&
-      initialOrderTotalCents > 0 &&
-      Number(platformCommissionCentsSnapshot) > initialOrderTotalCents
-    ) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'عمولة المنصة الثابتة أكبر من إجمالي الطلب؛ راجع إعداد الخدمة قبل الحجز',
-        HttpStatus.CONFLICT,
-      );
-    }
 
     let createdOrder: Order;
     try {
@@ -1282,6 +1268,7 @@ export class OrderCreationService {
           : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents,
         settlementPolicyVersion,
         platformCommissionCentsSnapshot,
+        commissionRateApplied: commissionRateApplied === null ? null : String(commissionRateApplied),
         // لسه UNPAID عمداً حتى لو صفر جنيه — لازم يعدّي بنفس دورة الدفع العادية (collectCash/
         // payWithWallet → settleAndComplete) عشان الطلب يتقفل صح ويوصل COMPLETED، مش يعلق في
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
@@ -1433,22 +1420,6 @@ export class OrderCreationService {
         lockedMatchPreview.consumedAt = new Date();
         lockedMatchPreview.orderId = order.id;
         await manager.save(lockedMatchPreview);
-      }
-
-      // V2 settles a fixed platform amount exactly once. Promotions/building discounts are applied
-      // after the initial estimate, so validate the final payable total as well. Failing inside the
-      // transaction rolls back the order and any promo usage instead of creating an impossible
-      // settlement that would only fail after the work is complete.
-      if (
-        settlementPolicyVersion === 2 &&
-        !remoteQuoteRequested &&
-        Number(platformCommissionCentsSnapshot) > order.totalAmountCents
-      ) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'الإجمالي بعد الخصم أقل من عمولة المنصة الثابتة؛ راجع إعداد الخدمة أو الخصم',
-          HttpStatus.CONFLICT,
-        );
       }
 
       // وعاء العمولة (ADR-0037 + ADR-0038، docs/08 §60.1/§61.2) — بيتحسب بعد الضمان عشان

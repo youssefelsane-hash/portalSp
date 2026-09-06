@@ -346,20 +346,9 @@ export class AdminOrdersService {
     const order = await this.findOrThrow(orderId);
     if (order.settlementPolicyVersion !== 2 || !order.technicianId) return [];
 
-    // **بلاغ مالك حقيقي (2026-09-06، req_9ebba756)**: صفحة الطلب في الأدمن كانت بتطلع 500
-    // «V2 platform commission cannot exceed the final order total» على أي طلب لسه سعره
-    // النهائي ما اتحددش.
-    //
-    // السبب: في فلو التقييم الطلب بيتعمل بإجمالي = رسم التقييم (أو صفر)، بينما لقطة العمولة
-    // الثابتة (`platform_commission_cents_snapshot`) هي عمولة **الشغلانة كاملة** بعد ما
-    // يتحط سعرها. حارس الإنشاء بيتخطى المقارنة عمدًا وقتها (`initialOrderTotalCents > 0`)،
-    // لكن معاينة الأدمن كانت بتنادي `calculateEarningsV2()` بالإجمالي المؤقت ⇒ العمولة أكبر
-    // من الإجمالي ⇒ الحاسبة بترمي.
-    //
-    // الرمي ده **صح كحارس تسوية** (تسوية بمجمّع سالب غلط)، وغلط تمامًا كـ**معاينة قراءة**:
-    // مفيش حصص أصلاً قبل ما السعر يتحدد. فالمعاينة بترجع فاضية زي أي طلب مالوش حصص لسه.
-    const commissionSnapshot = order.platformCommissionCentsSnapshot;
-    if (commissionSnapshot == null || order.totalAmountCents < Number(commissionSnapshot)) {
+    // الطلب الذي لم يأخذ سعرًا فعليًا لا يملك وعاء مستحقات قابل للتوزيع بعد. النسبة نفسها لا
+    // تجعل الإجمالي سالبًا، لكن إبقاء المعاينة فارغة هنا يمنع إيهام الإدارة بحصة مؤقتة.
+    if (order.commissionRateApplied == null || order.totalAmountCents <= 0) {
       return [];
     }
     if (!this.earningsPolicyService) throw new Error('EarningsPolicyService is required for a V2 admin preview');

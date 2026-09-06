@@ -231,7 +231,7 @@ export class PaymentsService {
 
     if (order.settlementPolicyVersion === 2) {
       if (!this.earningsPolicyService) {
-        throw new Error('EarningsPolicyService is required to settle a V2 order');
+        throw new Error('EarningsPolicyService is required to settle a unified earnings order');
       }
       const calculation = await this.earningsPolicyService.calculateOrder(
         order.id,
@@ -242,7 +242,7 @@ export class PaymentsService {
       return {
         platformCommissionCents: calculation.platformCommissionCents,
         technicianEarningCents: calculation.workerPoolCents,
-        commissionRateApplied: null,
+        commissionRateApplied: order.commissionRateApplied === null ? null : Number(order.commissionRateApplied),
         warrantyDays: service.warrantyDays,
         v2Calculation: calculation,
       };

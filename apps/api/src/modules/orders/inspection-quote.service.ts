@@ -246,17 +246,6 @@ export class InspectionQuoteService {
           HttpStatus.CONFLICT,
         );
       }
-      if (
-        order.settlementPolicyVersion === 2 &&
-        order.platformCommissionCentsSnapshot != null &&
-        order.platformCommissionCentsSnapshot > newAmountCents
-      ) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
-          HttpStatus.BAD_REQUEST,
-        );
-      }
 
       const service = await this.catalogService.findServiceOrThrow(order.serviceId);
       const quoteStatus = await this.resolveQuoteStatus(
@@ -637,17 +626,6 @@ export class InspectionQuoteService {
       );
       if (Number(count) < 1) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب مفيهوش صور مشكلة كفاية للتسعير', HttpStatus.BAD_REQUEST);
-      }
-      if (
-        order.settlementPolicyVersion === 2 &&
-        order.platformCommissionCentsSnapshot != null &&
-        order.platformCommissionCentsSnapshot > quotedAmountCents
-      ) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
-          HttpStatus.BAD_REQUEST,
-        );
       }
 
       const previousStatus = order.orderStatus;
