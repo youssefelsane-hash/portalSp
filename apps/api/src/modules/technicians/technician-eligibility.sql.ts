@@ -406,14 +406,15 @@ export async function classifyTechnicianCapacity(
     -- قبل كده كان هنا **منطق تاني** بقاعدة «شاغل يوم كامل»، فالتصنيف والتوافر كانوا ممكن
     -- يختلفوا على نفس الفني (التصنيف يقول MEANINGFUL والتوزيع يستبعده، أو العكس).
     load_today AS (
-      SELECT COALESCE(dl.busy_minutes, 0) AS busy_minutes
+      SELECT COALESCE(SUM(dl.busy_minutes), 0) AS busy_minutes
       FROM target
       LEFT JOIN ${technicianDayLoadSubquery({
         technicianIdExpr: '$1',
         activeStatusesParam: '$6',
         excludeOrderIdParam: '$3',
         dailyCapacityParam: '$4',
-      })} dl ON dl.busy_day = target.target_date
+      })} dl ON dl.busy_day BETWEEN target.target_date
+          AND target.target_date + (GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1)
     ),
     heavy AS (
       SELECT 1 WHERE ${dailyCapacityExceededExpr({

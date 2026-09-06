@@ -28,6 +28,9 @@ export type DispatchRouteReason =
   | 'revisit_pinned'
   | 'near_term'
   | 'scheduled_far'
+  | 'same_day_workload'
+  | 'existing_requests'
+  | 'selected_provider_request'
   | 'not_searching';
 
 export interface DispatchRouteDecision {
@@ -85,7 +88,13 @@ export function describeDispatchRoute(decision: DispatchRouteDecision): string {
     case 'near_term':
       return `جولات عروض — الموعد خلال ${decision.nearTermHours} ساعة، فالفني لازم يقبل بنفسه مش يتفاجأ بشغل اتعيّنله`;
     case 'scheduled_far':
-      return `تأكيد تلقائي — الموعد أبعد من ${decision.nearTermHours} ساعة، فأعلى مرشّح بيتعيّن مباشرة`;
+      return `تأكيد تلقائي مشروط — الموعد أبعد من ${decision.nearTermHours} ساعة والفني بلا شغل آخر في أيام الطلب؛ يُعاد الفحص قبل التعيين`;
+    case 'same_day_workload':
+      return 'طلب يحتاج قبول — الفني عنده شغل آخر في أيام الطلب؛ الاختيار التلقائي يرسل دفعة، واختيار العميل يظل حصريًا';
+    case 'existing_requests':
+      return 'في انتظار قبول — الطلب دخل جولات العرض ويظل اختياريًا حتى لو تغيّر حمل الفني';
+    case 'selected_provider_request':
+      return 'اختيار العميل حصري — التحقق من إتاحة الفني وإبلاغ العميل لو احتاج يختار من جديد';
     case 'not_searching':
       return 'مش في مرحلة التوزيع دلوقتي — التوزيع بيشتغل على الطلبات اللي حالتها «بيدوّر على فني» بس';
   }

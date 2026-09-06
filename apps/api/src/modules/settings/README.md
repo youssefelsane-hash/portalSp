@@ -34,3 +34,9 @@
 - **`SETTING_UPDATED_EVENT` (`common/events/setting-updated.event.ts`) — بدائي جديد لموديولات محتفظة بقيمة إعداد في الذاكرة (docs/08 §33، طلب مالك صريح 2026-08-20)**: كل الأمثلة فوق (payouts، matching، orders) بتقرا `SettingsService.getX()` **في كل نداء** — كافي تمامًا، مفيش داعي لحدث. بس لو موديول عنده `@Injectable()` singleton بيحتفظ بقيمة الإعداد كـ`readonly`/field محسوب مرة واحدة وقت `bootstrap` (زي `InstaPayProvider.isConfigured` — راجع `../payments/README.md` §33)، `update()` بقى بتطلق `SETTING_UPDATED_EVENT` (`emitAsync`، بعد إبطال الكاش مباشرة) — أي موديول يستمع له بـ`@OnEvent(SETTING_UPDATED_EVENT)` ويتحقق `event.key` قبل ما يعيد تحميل قيمته. **قيد نطاق صريح**: `EventEmitter2` in-process بس — لو النظام يوماً بقى multi-instance، الحدث مش هيوصل لباقي الـinstances، لازم يتحول لـRedis pub/sub. `events: EventEmitter2` بقى param **اختياري** في `SettingsService`'s constructor (24+ ملف اختبار بينشئوها بـ`new` بـ3 args بس، إجباره كان هيكسرهم كلهم).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §11.2 و `../../../../docs/01-master-plan.md` §2.4.
+# Additional request batches (2026-09-06)
+
+`matching.additional_request_batch_size` defaults to four and accepts integers 1-100.
+Migration 0275 registers it and the admin matching settings expose it. ADR-0078 retires the
+assignment-only opportunity exclusivity/heavy-offer settings (migration 0276); normal round
+settings control additional requests. Existing crew recruitment is unchanged.

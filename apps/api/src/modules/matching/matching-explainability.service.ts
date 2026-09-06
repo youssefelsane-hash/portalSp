@@ -19,7 +19,6 @@ import {
   describeDispatchRoute,
   DispatchRoute,
   DispatchRouteReason,
-  resolveDispatchRoute,
 } from './dispatch-route';
 import { MatchingService } from './matching.service';
 import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
@@ -342,7 +341,7 @@ export class MatchingExplainabilityService {
     }
 
     // نفس الدالة اللي `dispatchOrAutoConfirm()` بتقرا منها — مش إعادة تنفيذ للقاعدة.
-    const routeDecision = resolveDispatchRoute(order, await this.matchingService.nearTermRequestHours());
+    const routeDecision = await this.matchingService.scheduledDispatchDecision(order);
     const dispatchRoute: OrderDispatchRouteExplanation = {
       route: routeDecision.route,
       reason: routeDecision.reason,

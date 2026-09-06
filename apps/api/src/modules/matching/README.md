@@ -866,3 +866,15 @@ rank_score = … − distance_km × effective_distance_weight
 اترجّع والفني اللي ضاع. `AuditLogService` حُقن `@Optional()` عمدًا — عشرات السبيكات بتبني
 `MatchingService` بـpositional args؛ في الإنتاج الـDI بيوفّرها دايمًا، و
 `provider-lock-no-silent-replacement.spec.ts` بيثبت الكتابة الفعلية.
+# Additional scheduled requests (ADR-0078, 2026-09-06)
+
+Scheduled same-day workload now enters normal `order_assignments` request rounds instead of
+creating assignment work opportunities. Automatic batches default to four through
+`matching.additional_request_batch_size`; customer-locked selections stay exclusive even
+after `viewed`. Existing request rounds never become automatic confirmation during recovery.
+`scheduledDispatchDecision()` supplies both dispatch and the admin explanation. Classification
+checks every day of a multi-day candidate. Hourly overlap/daily capacity remain enforced at
+listing and acceptance. Historical work opportunities remain decidable.
+
+Verification: hourly/parallel/selected-provider requests, mobile signup parity, legacy opportunity
+compatibility, matching and admin explainability: 41 tests passed on isolated PostgreSQL.

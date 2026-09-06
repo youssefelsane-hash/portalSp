@@ -128,6 +128,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── matching ──────────────────────────────────────────────────────────
   'matching.batch_size': { type: 'number', default: 5, group: 'matching', description: 'عدد الفنيين في كل دفعة توزيع' },
+  'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
   'matching.broaden_to_busy_after_round': { type: 'number', default: 4, group: 'matching', description: 'رقم الجولة اللي بعدها يتوسّع البحث لفنيين مرتبطين لكن مشغولين حاليًا' },
   'matching.company_large_job_boost': { type: 'number', default: 3, group: 'matching', description: 'زيادة معتدلة في ترتيب ممثل الشركة المسجلة للشغل الكبير عند كفاية طاقمها (0 = تعطيل)' },
   'matching.company_large_job_min_crew': { type: 'number', default: 4, group: 'matching', description: 'أقل إجمالي أفراد مطلوب في طلب فريق قبل تطبيق أفضلية الشركة المسجلة (افتراضي 4)' },
@@ -150,7 +151,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.low_value_order_cents': { type: 'number', default: 15000, group: 'matching', description: 'حد «الشغلانة الرخيصة» بالقرش (15000 = 150 جنيه) — الطلب تحته بياخد وزن المسافة المخصّص للشغل الرخيص' },
   'matching.near_term_request_hours': { type: 'number', default: 48, group: 'matching', description: 'الشغل اللي معاده خلال العدد ده من الساعات بيتبعت للفنيين كـ"طلب" محتاج قبول (زي الطوارئ) بدل التعيين التلقائي. 0 = تعطيل (كل غير الطوارئ يتعيّن تلقائي).' },
   'matching.near_term_round_timeouts_minutes': { type: 'string', default: '5,15,30', group: 'matching', description: 'مهلة كل موجة بث للشغل القريب بالدقايق، مفصولة بفاصلة — الموجة الأولى 5 دقايق، التانية 15، التالتة 30. أي موجة بعد كده بتاخد آخر قيمة.' },
-  'matching.offer_heavy_workload_technicians': { type: 'boolean', default: true, group: 'matching', description: 'فني تصنيفه HEAVY (شاغل يوم كامل/مدة متعددة الأيام) يتعرضله فرصة اختيارية برضه؟ false = يتستبعد تمامًا زي القديم' },
   'matching.preferred_crew_max_size': { type: 'number', default: 10, group: 'matching', description: 'أقصى عدد أعضاء مقبولين في الفريق المفضّل الدائم لكل فني (docs/08 §36.16)' },
   'matching.recovery_batch_size': { type: 'number', default: 25, group: 'matching', description: 'أقصى عدد طلبات يأخذ دوره في جولة استرداد واحدة' },
   'matching.recovery_initial_backoff_seconds': { type: 'number', default: 60, group: 'matching', description: 'مهلة إعادة المحاولة الأولى للطلب الذي لم يجد فنيًا؛ تتضاعف تدريجيًا لمنع حجب الطلبات الجديدة' },
@@ -160,7 +160,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.reliability_min_ratings_count': { type: 'number', default: 3, group: 'matching', description: 'أقل عدد تقييمات مطلوب قبل ما الموثوقية تأثر على الترتيب — فني تحت العدد ده محايد تمامًا (صفر تأثير سلبي/إيجابي)' },
   'matching.reliability_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة — 0 = معطّل بالكامل (افتراضي)' },
   'matching.tie_break_threshold': { type: 'number', default: 0, group: 'matching', description: 'الفرق بين نتيجتين مرشّحين اللي تحتهم يُعتبروا "متعادلين" لكسر التعادل الموزون عشوائيًا — 0 = معطّل (ترتيب حتمي زي القديم)' },
-  'matching.work_opportunity_exclusive_seconds': { type: 'number', default: 7200, group: 'matching', description: 'مدة حصرية العرض الاختياري الأول؛ بعدها يظل العرض صالحًا لكن يمكن توسيعه بالتوازي لفني آخر' },
   'matching.workload_balance_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن يتطرح من أولوية مستوى الفني (order_priority_weight) عن كل طلب نشط عليه حاليًا — عشان التوزيع يبقى متوازن مش دايمًا نفس الفني الأعلى مستوى/الأقرب (0 = تعطيل)' },
 
   'matching.max_rounds': { type: 'number', default: 4, group: 'matching', description: 'أقصى عدد جولات بث للطلب العادي قبل ما المطابقة تتوقف وتتصعّد' },

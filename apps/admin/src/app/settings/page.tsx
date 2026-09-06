@@ -76,6 +76,7 @@ const MATCHING_SECTIONS: { titleAr: string; descriptionAr: string; keys: string[
     descriptionAr: 'كام فني في الدفعة الواحدة، كام جولة، ونطاق البحث الجغرافي وتوسّعه لما الدفعة تفضى.',
     keys: [
       'matching.batch_size',
+      'matching.additional_request_batch_size',
       'matching.max_rounds',
       'matching.round_timeout_seconds',
       'matching.radius_km_initial',
@@ -87,8 +88,8 @@ const MATCHING_SECTIONS: { titleAr: string; descriptionAr: string; keys: string[
   },
   {
     titleAr: 'القدرة الاستيعابية والتأكيد التلقائي',
-    descriptionAr: 'سقف يوم الفني بالدقايق، وقواعد تحويل الطلب لفرصة اختيارية بدل تأكيد صامت.',
-    keys: ['matching.daily_capacity_minutes', 'matching.work_opportunity_exclusive_seconds'],
+    descriptionAr: 'سقف يوم الفني بالدقايق. أي شغل إضافي يحتاج قبول طلب، مع استمرار منع تداخل الساعات.',
+    keys: ['matching.daily_capacity_minutes'],
   },
 ];
 

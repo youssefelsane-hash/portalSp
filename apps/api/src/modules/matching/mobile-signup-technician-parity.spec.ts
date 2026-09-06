@@ -408,7 +408,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     }
   }, 20000);
 
-  it('الفني fixture: 3 طلبات نفس اليوم — أول واحد AUTO، والباقي OPT REQ متسقين', async () => {
+  it('الفني fixture: 3 طلبات نفس اليوم — أول واحد AUTO، والباقي طلبات عادية متسقين', async () => {
     const order1 = await insertOrder('fixture-1', ids.zoneFixture, 0, 30000, await cairoSameDayAt(9));
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
@@ -420,27 +420,27 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     const [opp2] = await q(
-      `SELECT status, context FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      `SELECT assignment_status FROM order_assignments WHERE order_id = $1 AND technician_id = $2`,
       [order2, ids.fixtureProfileId],
     );
-    expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
+    expect(opp2).toMatchObject({ assignment_status: 'sent' });
 
     const order3 = await insertOrder('fixture-3', ids.zoneFixture, 0, 30000, await cairoSameDayAt(13));
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
-      `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      `SELECT assignment_status FROM order_assignments WHERE order_id = $1 AND technician_id = $2`,
       [order3, ids.fixtureProfileId],
     );
-    expect(opp3).toMatchObject({ status: 'offered' });
+    expect(opp3).toMatchObject({ assignment_status: 'sent' });
 
-    const listed = await matchingService.listWorkOpportunitiesForUser(
+    const listed = await matchingService.listAvailableForTechnician(
       (await dataSource.getRepository(TechnicianProfile).findOneByOrFail({ id: ids.fixtureProfileId })).userId,
     );
     const listedOrderIds = listed.map((o) => o.order_id);
     expect(listedOrderIds).toEqual(expect.arrayContaining([order2, order3]));
   });
 
-  it('الفني الحقيقي (تسجيل موبايل → تحقق → اعتماد): نفس السلوك بالحرف — أول واحد AUTO، والباقي OPT REQ', async () => {
+  it('الفني الحقيقي (تسجيل موبايل → تحقق → اعتماد): نفس السلوك بالحرف — أول واحد AUTO، والباقي طلبات عادية', async () => {
     const order1 = await insertOrder('real-1', ids.zoneReal, 0, 30000, await cairoSameDayAt(9));
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
@@ -452,21 +452,21 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     const [opp2] = await q(
-      `SELECT status, context FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      `SELECT assignment_status FROM order_assignments WHERE order_id = $1 AND technician_id = $2`,
       [order2, realTechnicianProfileId],
     );
-    expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
+    expect(opp2).toMatchObject({ assignment_status: 'sent' });
 
     const order3 = await insertOrder('real-3', ids.zoneReal, 0, 30000, await cairoSameDayAt(13));
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
-      `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      `SELECT assignment_status FROM order_assignments WHERE order_id = $1 AND technician_id = $2`,
       [order3, realTechnicianProfileId],
     );
-    expect(opp3).toMatchObject({ status: 'offered' });
+    expect(opp3).toMatchObject({ assignment_status: 'sent' });
 
-    // نفس الـAPI اللي تطبيق الفني بينادّيه فعليًا (GET /technician/orders/work-opportunities)
-    const listed = await matchingService.listWorkOpportunitiesForUser(realTechnicianUserId);
+    // نفس الـAPI اللي تطبيق الفني بينادّيه فعليًا (GET /technician/orders/available)
+    const listed = await matchingService.listAvailableForTechnician(realTechnicianUserId);
     const listedOrderIds = listed.map((o) => o.order_id);
     expect(listedOrderIds).toEqual(expect.arrayContaining([order2, order3]));
   });

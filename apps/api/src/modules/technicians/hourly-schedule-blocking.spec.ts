@@ -2,6 +2,15 @@ import { DataSource } from 'typeorm';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { technicianAvailabilityCondition } from './technician-eligibility.sql';
 import { DAILY_CAPACITY_MINUTES_FALLBACK } from './technician-day-capacity.sql';
+import { Order } from '../orders/entities/order.entity';
+import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
+import { OrderAssignment } from '../matching/entities/order-assignment.entity';
+import { TechnicianProfile } from './entities/technician-profile.entity';
+import { TechniciansService } from './technicians.service';
+import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
+import { TechnicianWorkOpportunitiesService } from './technician-work-opportunities.service';
+import { MatchingService } from '../matching/matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 /**
  * **الجدولة بالساعة** (ADR-0077، بلاغ مالك حرفي 2026-09-06): «الشغلانة لو ساعة خلاص تبلوك
@@ -13,6 +22,9 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
   jest.setTimeout(40_000);
 
   let dataSource: DataSource;
+  let matching: MatchingService;
+  const extraTechs: { id: string; userId: string }[] = [];
+  const emitted = jest.fn();
   const runId = Date.now().toString(36).toUpperCase().slice(-6);
   const ids = {
     category: '', service: '', tech: '', techUser: '',
@@ -104,6 +116,7 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
+      entities: [Order, OrderAssignment, OrderStatusHistory, TechnicianProfile],
     });
     await dataSource.initialize();
 
@@ -154,12 +167,44 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
       [ids.techUser, `HRB-${runId}`],
     );
     ids.tech = p.id;
+    const settings = {
+      getNumber: async (_key: string, fallback: number) => fallback,
+      getString: async (_key: string, fallback: string) => fallback,
+      getBoolean: async (_key: string, fallback: boolean) => fallback,
+    };
+    matching = new MatchingService(
+      dataSource.getRepository(OrderAssignment), dataSource.getRepository(Order), dataSource,
+      new TechniciansService(dataSource.getRepository(TechnicianProfile), {} as never, {} as never,
+        {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never),
+      new TechnicianAssignmentGuardService(settings as never), settings as never,
+      { emit: emitted } as never, { add: async () => undefined } as never,
+      new TechnicianWorkOpportunitiesService(dataSource), levelPremiumServiceStub(),
+    );
+    for (let i = 0; i < 4; i++) {
+      const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type)
+        VALUES ($1,$2,'technician') RETURNING id`, [`+2094${runId}${i}`, `request ${runId} ${i}`]);
+      const [tech] = await q(`INSERT INTO technician_profiles (user_id, technician_code, verification_status, current_location)
+        VALUES ($1,$2,'approved',ST_SetSRID(ST_MakePoint(31.2357,30.0444),4326)::geography) RETURNING id`,
+      [user.id, `REQ-${runId}-${i}`]);
+      extraTechs.push({ id: tech.id, userId: user.id });
+    }
+    for (const techId of [ids.tech, ...extraTechs.map(t => t.id)]) {
+      await q(`INSERT INTO technician_services (technician_id, service_id, is_active) VALUES ($1,$2,true)`, [techId, ids.service]);
+      await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [techId, ids.zone]);
+    }
   });
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
+      await q(`DELETE FROM order_status_history WHERE order_id = ANY($1)`, [ids.orders]);
+      await q(`DELETE FROM order_assignments WHERE order_id = ANY($1)`, [ids.orders]);
       await q(`DELETE FROM orders WHERE id = ANY($1)`, [ids.orders]);
+      const techIds = [ids.tech, ...extraTechs.map(t => t.id)];
+      await q(`DELETE FROM technician_services WHERE technician_id = ANY($1)`, [techIds]);
+      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [techIds]);
+      await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [extraTechs.map(t => t.id)]);
+      await q(`DELETE FROM users WHERE id = ANY($1)`, [extraTechs.map(t => t.userId)]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.tech]);
@@ -174,6 +219,57 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
   });
 
   // ===== بلاغ المالك بالحرف =====
+  it('الطلب الثاني المختار يدويًا يظهر كطلب عادي، والمشاهدة وإعادة المحاولة لا تستبدل الفني', async () => {
+    const day = dayAfter(70);
+    await makeOrder(day, '09:00', { minutes: 60, days: 1 });
+    const request = await makeOrder(day, '15:00', { minutes: 60, days: 1 });
+    await q(`UPDATE orders SET order_status = 'searching_technician', technician_id = NULL,
+      requested_technician_id = $2, provider_lock_source = 'post_quote_selection' WHERE id = $1`, [request, ids.tech]);
+    expect((await matching.dispatchOrAutoConfirm(request)).dispatched).toBe(1);
+    const visible = await matching.listAvailableForTechnician(ids.techUser);
+    expect(visible.some(o => o.order_id === request)).toBe(true);
+    await q(`UPDATE order_assignments SET expires_at = now() - interval '1 hour' WHERE order_id = $1`, [request]);
+    await matching.dispatchOrAutoConfirm(request);
+    const offers = await q<{ technician_id: string; assignment_status: string }>(
+      `SELECT technician_id, assignment_status FROM order_assignments WHERE order_id = $1`, [request]);
+    expect(offers).toEqual([{ technician_id: ids.tech, assignment_status: 'viewed' }]);
+    expect(await q(`SELECT id FROM technician_work_opportunities WHERE order_id = $1`, [request])).toHaveLength(0);
+    const accepted = await matching.accept(ids.techUser, request);
+    expect(accepted.technicianId).toBe(ids.tech);
+    expect((await matching.listAvailableForTechnician(ids.techUser)).some(o => o.order_id === request)).toBe(false);
+  });
+
+  it('المطابقة التلقائية ترسل أربعة طلبات متوازية، والقبول المتزامن له فائز واحد', async () => {
+    const day = dayAfter(71);
+    for (const tech of [ids.tech, ...extraTechs.map(t => t.id)]) {
+      const busy = await makeOrder(day, '09:00', { minutes: 60, days: 1 });
+      await q(`UPDATE orders SET technician_id = $2 WHERE id = $1`, [busy, tech]);
+    }
+    const request = await makeOrder(day, '15:00', { minutes: 60, days: 1 });
+    await q(`UPDATE orders SET order_status='searching_technician', technician_id=NULL WHERE id=$1`, [request]);
+    expect((await matching.dispatchOrAutoConfirm(request)).dispatched).toBe(4);
+    const offers = await q<{ user_id: string }>(`SELECT tp.user_id FROM order_assignments a
+      JOIN technician_profiles tp ON tp.id=a.technician_id WHERE a.order_id=$1`, [request]);
+    expect(offers).toHaveLength(4);
+    await q(`UPDATE orders SET order_status='completed' WHERE id=ANY($1) AND id <> $2 AND scheduled_at::date=$3::date`,
+      [ids.orders, request, day]);
+    await matching.dispatchOrAutoConfirm(request);
+    expect((await dataSource.getRepository(Order).findOneByOrFail({ id: request })).orderStatus).toBe('searching_technician');
+    const outcomes = await Promise.allSettled(offers.slice(0, 2).map(o => matching.accept(o.user_id, request)));
+    expect(outcomes.filter(o => o.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter(o => o.status === 'rejected')).toHaveLength(1);
+    const states = await q<{ assignment_status: string }>(`SELECT assignment_status FROM order_assignments WHERE order_id=$1`, [request]);
+    expect(states.filter(s => s.assignment_status === 'accepted')).toHaveLength(1);
+    expect(states.filter(s => ['sent', 'viewed'].includes(s.assignment_status))).toHaveLength(0);
+  });
+
+  it('الفني الفاضي في الموعد البعيد يفضل يتأكد تلقائيًا', async () => {
+    const request = await makeOrder(dayAfter(72), '15:00', { minutes: 60, days: 1 });
+    await q(`UPDATE orders SET order_status='searching_technician', technician_id=NULL, requested_technician_id=$2 WHERE id=$1`, [request, ids.tech]);
+    await matching.dispatchOrAutoConfirm(request);
+    expect((await dataSource.getRepository(Order).findOneByOrFail({ id: request })).orderStatus).toBe('accepted');
+  });
+
   it('ساعة الصبح ما بتمنعش ساعة تانية الساعة 3 العصر — والمحرك حاطط estimated_duration_days=1', async () => {
     const day = dayAfter(30);
     await makeOrder(day, '09:00', { minutes: 60, days: 1 });

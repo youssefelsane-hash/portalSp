@@ -19,7 +19,6 @@ import {
   ORDER_LOCKED_PROVIDER_LOST_EVENT,
   OrderLockedProviderLostEvent,
 } from '../../common/events/order-locked-provider-lost.event';
-import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import {
   LockedProviderLostReason,
@@ -48,7 +47,7 @@ import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
 } from '../orders/revisit-pin';
-import { isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
+import { DispatchRouteDecision, isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
@@ -108,7 +107,6 @@ const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 // (10 نقاط)، فالشركة لا تتخطى الجودة/الحمل؛ تكسر التقارب المنطقي لما طاقمها قادر ينفذ الطلب.
 const COMPANY_LARGE_JOB_MIN_CREW_FALLBACK = 4;
 const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
-const WORK_OPPORTUNITY_EXCLUSIVE_SECONDS_FALLBACK = 7_200;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -702,7 +700,7 @@ export class MatchingService {
     // القرار نفسه اتنقل لـ`resolveDispatchRoute()` (دالة خالصة) عشان **شاشة الأدمن تقرا نفس
     // القرار مش تعيد تنفيذ القاعدة**. طلبان بنفس `booking_mode` بالظبط بياخدوا مسارين مختلفين
     // حسب بُعد الموعد، وده كان غير مرئي تمامًا للأدمن (docs/system-audit §06 §4).
-    const decision = resolveDispatchRoute(order, await this.nearTermRequestHours());
+    const decision = await this.scheduledDispatchDecision(order);
     if (decision.route === 'rounds') return this.dispatchNextRound(orderId);
     return this.autoConfirmScheduledOrder(orderId);
   }
@@ -820,7 +818,9 @@ export class MatchingService {
           batchSize = Math.min(batchSize, emergencyRemainingBudget);
         }
       } else {
-        batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+        batchSize = await this.isNearTermOrder(order.scheduledAt)
+          ? await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK)
+          : Math.max(1, Math.min(100, Math.floor(await this.settingsService.getNumber('matching.additional_request_batch_size', 4))));
       }
       // ADR-0051 (docs/08 §96) — إعادة زيارة مثبّتة: عرض **حصري** على الفني الأصلي، مفيش أي
       // fallback ولا جولات تانية. لو مش مؤهّل/مشغول دلوقتي، الطلب بيستناه طول المهلة بدل ما
@@ -868,7 +868,7 @@ export class MatchingService {
         });
         // عرض مفتوح لسه ما اتردّش عليه — نستناه، بلا عرض جديد وبلا أي بديل (نفس سلوك تثبيت
         // إعادة الزيارة بالحرف).
-        if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.SENT)) {
+        if (priorAssignments.some((a) => [AssignmentStatus.SENT, AssignmentStatus.VIEWED].includes(a.assignmentStatus))) {
           return { kind: 'noop' as const };
         }
         if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.REJECTED)) {
@@ -1182,12 +1182,12 @@ export class MatchingService {
    * قرار إضافية فوقه: `LIGHT` يتأكد تلقائيًا زي ما هو بالحرف، `MEANINGFUL`/`HEAVY` (لو الإعداد
    * سامح) بيتحول لفرصة اختيارية بدل تأكيد صامت.
    */
-  private async classifyCandidate(order: Order, technicianId: string, dailyCapacityMinutes: number): Promise<TechnicianCapacityTier> {
-    const service = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+  private async classifyCandidate(order: Order, technicianId: string, dailyCapacityMinutes: number, manager = this.dataSource.manager): Promise<TechnicianCapacityTier> {
+    const service = await manager.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
-    const tier = await classifyTechnicianCapacity(this.dataSource, {
+    const tier = await classifyTechnicianCapacity(manager, {
       technicianId,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
@@ -1210,14 +1210,8 @@ export class MatchingService {
   }
 
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
-    const opportunityExclusiveSeconds = Math.max(0, Math.floor(await this.settingsService.getNumber(
-      'matching.work_opportunity_exclusive_seconds',
-      WORK_OPPORTUNITY_EXCLUSIVE_SECONDS_FALLBACK,
-    )));
-
     const result = await this.dataSource.transaction(async (manager) => {
-      const order = await manager
-        .createQueryBuilder(Order, 'o')
+      const order = await manager.createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
         .where('o.id = :orderId', { orderId })
         .getOne();
@@ -1225,142 +1219,65 @@ export class MatchingService {
         return { kind: 'noop' as const };
       }
 
-      // الفحص تحت قفل الطلب يمنع نداءين متزامنين من إنشاء عرضين خلال النافذة الحصرية.
-      if (await this.workOpportunities.hasExclusiveOfferForOrder(orderId, opportunityExclusiveSeconds, manager)) {
-        return { kind: 'noop' as const };
-      }
-      const isOpportunityExpansion = await this.workOpportunities.hasOpenOfferForOrder(orderId, manager);
+      // ADR-0078: دخول مسار الطلبات قرار دائم؛ تغيّر الحمل لا يحوّله لتعيين بلا موافقة.
+      const decision = await this.scheduledDispatchDecision(order, manager);
+      if (decision.route === 'rounds') return { kind: 'request' as const, order };
+      const candidate = await this.firstScheduledCandidate(order);
+      if (!candidate) return { kind: 'stalled' as const, order };
 
-      const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
-      const candidateBatchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
-
-      let candidates = order.requestedTechnicianId
-        ? await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false)
-        : [];
-      // ADR-0065 §1 — التأكيد التلقائي مالوش استثناء من قفل المنفّذ. لو الفني المقفول مش متاح،
-      // بنوقف هنا (`stalled`) بدل ما نأكّد فني تاني تلقائيًا — أخطر شكل من أشكال الاستبدال
-      // الصامت، لأنه بيتم بلا أي عرض ولا رد. `dispatchNextRound()` هي اللي بتفك القفل رسميًا.
-      if (candidates.length === 0 && orderHasLockedProvider(order)) {
+      const technicianId = candidate.technician_id;
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+      try {
+        await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+      } catch (err) {
+        if (!(err instanceof ApiException)) throw err;
         return { kind: 'stalled' as const, order };
       }
-      if (candidates.length === 0 && order.requestedTechnicianCompanyId) {
-        candidates = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
-      }
-      if (candidates.length === 0) {
-        // دفعة (مش فني واحد بس) — عشان نقدر نلاقي أول مرشّح LIGHT فعلي بدل ما نقف عند أول واحد
-        // في الترتيب لو هو المرشّح الوحيد اللي مش LIGHT (docs/08 §34.1b).
-        candidates = await this.findEligibleTechnicians(order, candidateBatchSize, null, false);
-      }
-      // **بلا `return stalled` هنا لو candidates.length === 0** — دي بالظبط الحالة اللي محتاجة
-      // fallback الـHEAVY توسيع البحث تحت (docs/08 §34.1b): الاستعلام الصارم (technicianAvailability
-      // Condition()) بيستبعد فنيين HEAVY **بالكامل** من الأساس (مش بيرجعهم كمرشحين نصنّفهم بعدين) —
-      // يعني لو الفني الوحيد المؤهّل HEAVY، `candidates` هنا بترجع فاضية تمامًا، مش "فيها فني
-      // مصنّف HEAVY". لو رجّعنا stalled هنا زي الأول، fallback التوسيع تحت كان أبدًا مش هيتنفّذ.
-
-      let lightPick: { technicianId: string; distanceKm: string } | null = null;
-      let meaningfulPick: { technicianId: string; distanceKm: string } | null = null;
-      for (const candidate of candidates) {
-        const tier = await this.classifyCandidate(order, candidate.technician_id, dailyCapacityMinutes);
-        if (tier === 'LIGHT') {
-          lightPick = { technicianId: candidate.technician_id, distanceKm: candidate.distance_km };
-          break;
-        }
-        if (tier === 'MEANINGFUL' && !meaningfulPick) {
-          meaningfulPick = { technicianId: candidate.technician_id, distanceKm: candidate.distance_km };
-        }
-      }
-
-      if (process.env.DEBUG_MATCHING) {
-        // eslint-disable-next-line no-console
-        console.log('[DEBUG matching] candidates:', JSON.stringify(candidates), 'tiersChecked:', candidates.length);
-      }
-      if (!lightPick && !meaningfulPick) {
-        // مفيش LIGHT ولا MEANINGFUL في الدفعة (كلهم HEAVY أو اتستبعدوا) — نجرّب توسيع البحث
-        // (ignoreActiveOrderConflict، نفس آلية ADR-0017 §10) عشان نلاقي مرشّح HEAVY نعرضله فرصة،
-        // لو الإعداد سامح بده.
-        const offerHeavy = await this.settingsService.getBoolean('matching.offer_heavy_workload_technicians', true);
-        if (offerHeavy) {
-          const broadened = await this.findEligibleTechnicians(order, 1, null, false, null, true);
-          if (broadened.length > 0) {
-            const tier = await this.classifyCandidate(order, broadened[0].technician_id, dailyCapacityMinutes);
-            if (tier !== 'BLOCKED') {
-              meaningfulPick = { technicianId: broadened[0].technician_id, distanceKm: broadened[0].distance_km };
-            }
-          }
-        }
-      }
-
-      if (lightPick) {
-        // بعد انتهاء حصرية العرض الأول لا نعيّن فنيًا ثانيًا بالقوة ونغلق العرض الأصلي. بدلًا من
-        // ذلك نوسّع الاختيارات بعرض متوازٍ؛ أول فني يقبل يحسم الطلب ذريًا ويغلق باقي العروض.
-        if (isOpportunityExpansion) {
-          const opportunity = await this.workOpportunities.offerIfNotExists(
-            manager,
-            order.id,
-            lightPick.technicianId,
-            'LIGHT',
-          );
-          return { kind: 'offered' as const, order, technicianId: lightPick.technicianId, opportunity };
-        }
-        const technicianId = lightPick.technicianId;
-        // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
-        // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة.
-        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
-        try {
-          await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
-        } catch (err) {
-          if (process.env.DEBUG_MATCHING) {
-            // eslint-disable-next-line no-console
-            console.log('[DEBUG assertEligible-fail]', err instanceof Error ? err.message : err);
-          }
-          return { kind: 'stalled' as const, order };
-        }
-        const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, lightPick.distanceKm);
-        return confirmResult.kind === 'noop' ? { kind: 'noop' as const } : { kind: 'confirmed' as const, order, technicianId };
-      }
-
-      if (meaningfulPick) {
-        const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, dailyCapacityMinutes);
-        const opportunity = await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
-        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId, opportunity };
-      }
-
-      return { kind: 'stalled' as const, order };
+      const tier = await this.classifyCandidate(order, technicianId, await resolveDailyCapacityMinutes(this.settingsService), manager);
+      if (tier !== 'LIGHT') return { kind: 'request' as const, order };
+      const confirmed = await this.confirmTechnicianForOrder(manager, order, technicianId, candidate.distance_km);
+      return confirmed.kind === 'noop' ? { kind: 'noop' as const } : confirmed;
     });
 
-    if (result.kind === 'noop') {
-      return { dispatched: 0 };
-    }
-    if (result.kind === 'offered') {
-      // بره الـtransaction عمداً (زي ORDER_ACCEPTED_EVENT تحت) — مفيش داعي حد يسمع بيانات مش
-      // مؤكّدة. docs/08 §36.1 — created:false يعني الفرصة كانت موجودة بالفعل (idempotent
-      // re-check)، مش عرض جديد فعليًا، فمفيش داعي إشعار مكرر.
-      if (result.opportunity.created) {
-        this.events.emit(
-          WORK_OPPORTUNITY_OFFERED_EVENT,
-          new WorkOpportunityOfferedEvent(
-            result.opportunity.id,
-            result.order.id,
-            result.order.orderNumber,
-            result.technicianId,
-            'assignment',
-            result.opportunity.capacity_tier_at_offer,
-            result.order.scheduledAt,
-          ),
-        );
-      }
-      return { dispatched: 0 };
-    }
+    if (result.kind === 'request') return this.dispatchNextRound(orderId);
+    if (result.kind === 'noop') return { dispatched: 0 };
     if (result.kind === 'stalled') {
       this.emitNoTechniciansFound(result.order);
       return { dispatched: 0 };
     }
-
     this.events.emit(
       ORDER_ACCEPTED_EVENT,
       new OrderAcceptedEvent(result.order.id, result.order.customerId, result.technicianId, result.order.scheduledAt),
     );
     return { dispatched: 1 };
+  }
+
+  private async firstScheduledCandidate(order: Order): Promise<EligibleTechnicianRow | undefined> {
+    if (order.requestedTechnicianId) {
+      const selected = await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false);
+      if (selected.length || orderHasLockedProvider(order)) return selected[0];
+    }
+    if (order.requestedTechnicianCompanyId) {
+      const members = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
+      return members[0];
+    }
+    return (await this.findEligibleTechnicians(order, 1, null, false))[0];
+  }
+
+  async scheduledDispatchDecision(order: Order, manager = this.dataSource.manager): Promise<DispatchRouteDecision> {
+    const base = resolveDispatchRoute(order, await this.nearTermRequestHours());
+    if (base.route !== 'auto_confirm') return base;
+    const previousRequests = await manager.count(OrderAssignment, { where: { orderId: order.id } });
+    if (previousRequests > 0 || await this.workOpportunities.hasOpenOfferForOrder(order.id, manager)) {
+      return { ...base, route: 'rounds', reason: 'existing_requests' };
+    }
+    const candidate = await this.firstScheduledCandidate(order);
+    if (!candidate) {
+      // القفل يتفك من المسار الرسمي فقط، مع إبلاغ العميل؛ لا fallback صامت لمنفذ آخر.
+      return orderHasLockedProvider(order) ? { ...base, route: 'rounds', reason: 'selected_provider_request' } : base;
+    }
+    const tier = await this.classifyCandidate(order, candidate.technician_id, await resolveDailyCapacityMinutes(this.settingsService), manager);
+    return tier === 'LIGHT' ? base : { ...base, route: 'rounds', reason: 'same_day_workload' };
   }
 
   /**
@@ -1463,6 +1380,7 @@ export class MatchingService {
       -- 'viewed' لازم تفضل في القايمة: العرض بيتعلّم viewed تحت بمجرد ما الجهاز يسحبه (docs/08
       -- §72)، فلو الفلتر 'sent' بس القايمة كانت هتفضى من أول سحب والفني ما يشوفش شغله خالص.
       WHERE oa.technician_id = $1 AND oa.assignment_status IN ('sent', 'viewed')
+        AND o.deleted_at IS NULL AND o.order_status = 'searching_technician'
       ORDER BY oa.sent_at DESC
       `,
       [profile.id],

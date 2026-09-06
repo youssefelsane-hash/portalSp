@@ -162,6 +162,10 @@ export class SettingsService {
   async update(adminUserId: string, key: string, value: unknown, meta?: AuditActorMeta): Promise<Setting> {
     const setting = await this.getOrThrow(key);
     this.assertValueMatchesType(setting, value);
+    if (key === 'matching.additional_request_batch_size' &&
+        (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100)) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100', HttpStatus.BAD_REQUEST);
+    }
 
     if (isLegacyEarningsSettingKey(key) && (await this.getBoolean('earnings.v2_cutover_enabled', false))) {
       throw new ApiException(
