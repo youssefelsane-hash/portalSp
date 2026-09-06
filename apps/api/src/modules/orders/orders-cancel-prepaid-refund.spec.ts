@@ -287,6 +287,30 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     expect(orderRow.payment_status).toBe('refunded');
   });
 
+  it('إلغاء طلب له دفعة حجز ودفعة لاحقة — كل الدفعات الناجحة تُسترد ولا تُخفى خلف آخر دفعة', async () => {
+    const { orderId } = await insertOrder({
+      label: 'two-successful-payments',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      paymentStatus: OrderPaymentStatus.PAID,
+      totalAmountCents: 50000,
+    });
+    await insertSucceededPayment(orderId, 'two-payments-base', 30000);
+    await insertSucceededPayment(orderId, 'two-payments-delta', 20000);
+
+    await service.cancel(ids.customerUser, orderId, {});
+
+    const refunds = await dataSource.query(
+      `SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1 ORDER BY amount_cents ASC`,
+      [orderId],
+    );
+    expect(refunds).toEqual([
+      { amount_cents: 20000, refund_status: 'completed' },
+      { amount_cents: 30000, refund_status: 'completed' },
+    ]);
+    const [orderRow] = await dataSource.query(`SELECT payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(orderRow.payment_status).toBe('refunded');
+  });
+
   // **قرار المالك (2026-09-02، docs/08 §117): استرداد كامل دايمًا.**
   //
   // العميل يقدر يلغي وهو في `awaiting_admin_quote` — يعني ممكن يكون الإدارة خلاص فرزت الصور

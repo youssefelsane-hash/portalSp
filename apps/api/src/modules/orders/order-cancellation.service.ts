@@ -184,11 +184,17 @@ export class OrderCancellationService {
     // مايكسرش تجربة العميل — الطلب فضل ملغي صح حتى لو الاسترداد فشل واحتاج مراجعة يدوية.
     if (cancelledOrder.paymentStatus === OrderPaymentStatus.PAID) {
       try {
-        await this.paymentsService.refundCancelledPrepaidOrder(
-          cancelledOrder.id,
-          `استرداد تلقائي — العميل لغى طلب مدفوع مسبقًا قبل بدء الشغل${dto.reason ? `: ${dto.reason}` : ''}`,
-          'customer_cancel',
-        );
+        // الطلب قد يحمل دفعة حجز ودفعات لاحقة. الخدمة تحضّر دفعة واحدة في كل مرة حتى يبقى
+        // أي نداء بوابة خارج transaction وقابلًا للاستئناف بلا استرداد مزدوج.
+        while (
+          await this.paymentsService.refundCancelledPrepaidOrder(
+            cancelledOrder.id,
+            `استرداد تلقائي — العميل لغى طلب مدفوع مسبقًا قبل بدء الشغل${dto.reason ? `: ${dto.reason}` : ''}`,
+            'customer_cancel',
+          )
+        ) {
+          // تستمر حتى لا تبقى أي دفعة ناجحة غير مستردة.
+        }
       } catch (err) {
         this.auditLog
           .record({

@@ -3082,16 +3082,30 @@ export class PaymentsService {
       const isTerminallyCancelled =
         order?.orderStatus === OrderStatus.CANCELLED_BY_SYSTEM || order?.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER;
       if (!order || !isTerminallyCancelled) return null;
-      if (order.paymentStatus !== OrderPaymentStatus.PAID) return null;
 
-      const payment = await manager.findOne(Payment, {
-        where: { orderId, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
-        order: { completedAt: 'DESC' },
-      });
+      // الطلب قد يكون دفع على أكثر من دفعة: دفعة الحجز ثم فرق سعر/عمل إضافي. اختيار آخر
+      // دفعة فقط كان يترك الباقي عالقًا ويكتب `refunded` كأنه أعاد كل أموال العميل.
+      const paidPayments = await manager
+        .createQueryBuilder(Payment, 'payment')
+        .where('payment.order_id = :orderId', { orderId })
+        .andWhere('payment.payment_status IN (:...statuses)', {
+          statuses: [
+            PaymentGatewayStatus.SUCCEEDED,
+            PaymentGatewayStatus.PARTIALLY_REFUNDED,
+            PaymentGatewayStatus.REFUNDED,
+          ],
+        })
+        .orderBy('payment.completed_at', 'ASC', 'NULLS LAST')
+        .addOrderBy('payment.id', 'ASC')
+        .getMany();
+      if (paidPayments.length === 0) return null;
+
+      const existingRefunds = await manager.find(Refund, { where: { orderId } });
+      const refundByPaymentId = new Map(existingRefunds.map((existing) => [existing.paymentId, existing]));
+      const payment = paidPayments.find(
+        (candidate) => candidate.paymentStatus === PaymentGatewayStatus.SUCCEEDED && !refundByPaymentId.has(candidate.id),
+      );
       if (!payment) return null;
-
-      const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
-      if (existingRefund) return null;
 
       // ADR-0069 — رسم معاينة مقابل زيارة **حصلت فعلاً** ممكن يتحجز، حسب سياسة الخدمة المحفوظة
       // على الطلب. الافتراضي بيرجّع الكل زي ما كان بالظبط.
@@ -3101,7 +3115,7 @@ export class PaymentsService {
       );
       const refundDecision = resolveCancellationRefund(order, {
         onsiteQuoteExists: onsiteQuote?.exists === true,
-        paidAmountCents: payment.amountCents,
+        paidAmountCents: paidPayments.reduce((total, candidate) => total + candidate.amountCents, 0),
       });
       // المحجوز غطّى المبلغ كله — مفيش استرداد يتعمل، والدفعة بتفضل PAID مقابل الزيارة.
       if (refundDecision.refundableCents <= 0) {
@@ -3114,7 +3128,7 @@ export class PaymentsService {
             entityId: order.id,
             newValues: {
               withheld_cents: refundDecision.withheldCents,
-              paid_amount_cents: payment.amountCents,
+              paid_amount_cents: paidPayments.reduce((total, candidate) => total + candidate.amountCents, 0),
               reason: reasonNotes,
             },
           },
@@ -3122,6 +3136,14 @@ export class PaymentsService {
         );
         return null;
       }
+
+      // الدفعات التي تم إنشاء Refund مكتمل/قيد التنفيذ لها محجوزة بالفعل؛ المتبقي فقط هو الذي
+      // يجوز تحضيره هنا. `idx_refunds_payment_id_unique` يبقى طبقة الأمان الأخيرة للسباقات.
+      const reservedRefundCents = existingRefunds
+        .filter((existing) => existing.refundStatus === RefundStatus.COMPLETED || existing.refundStatus === RefundStatus.PROCESSING)
+        .reduce((total, existing) => total + existing.amountCents, 0);
+      const remainingRefundCents = refundDecision.refundableCents - reservedRefundCents;
+      if (remainingRefundCents <= 0) return null;
 
       const provider = this.paymentProviders.getProvider(payment.paymentMethod);
       const goesThroughGateway = provider.supportsRefund && !!payment.gatewayTransactionId;
@@ -3131,8 +3153,8 @@ export class PaymentsService {
         refundNumber,
         paymentId: payment.id,
         orderId: order.id,
-        amountCents: refundDecision.refundableCents,
-        refundType: refundDecision.withheldCents > 0 ? RefundType.PARTIAL : RefundType.FULL,
+        amountCents: Math.min(payment.amountCents, remainingRefundCents),
+        refundType: payment.amountCents > remainingRefundCents ? RefundType.PARTIAL : RefundType.FULL,
         reasonNotes,
         refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
         refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
@@ -3229,17 +3251,20 @@ export class PaymentsService {
         );
       }
 
-      const partiallyRefunded = refundDecision.withheldCents > 0;
-      payment.paymentStatus = partiallyRefunded
+      const paymentPartiallyRefunded = refund.amountCents < payment.amountCents;
+      payment.paymentStatus = paymentPartiallyRefunded
         ? PaymentGatewayStatus.PARTIALLY_REFUNDED
         : PaymentGatewayStatus.REFUNDED;
       await manager.save(payment);
 
-      // استرداد جزئي معناه إن جزء من فلوس العميل **فضل عند المنصة** بشكل مقصود — تعليمه
-      // `refunded` كان هيكدب على أي تقرير مالي بيقرا العمود ده.
-      order.paymentStatus = partiallyRefunded
-        ? OrderPaymentStatus.PARTIALLY_REFUNDED
-        : OrderPaymentStatus.REFUNDED;
+      const completedRefunds = await manager.find(Refund, { where: { orderId, refundStatus: RefundStatus.COMPLETED } });
+      const completedRefundCents = completedRefunds.reduce((total, completed) => total + completed.amountCents, 0);
+      // `refunded` لا تكتب إلا بعد رد كل ما تسمح به السياسة عبر جميع الدفعات. أي مبلغ محجوز
+      // للمعاينة أو دفعة لم تسترد بعد يظل ظاهرًا بوضوح كـ partially_refunded.
+      order.paymentStatus =
+        completedRefundCents >= refundDecision.refundableCents && refundDecision.withheldCents === 0
+          ? OrderPaymentStatus.REFUNDED
+          : OrderPaymentStatus.PARTIALLY_REFUNDED;
       await manager.save(order);
       // orderStatus فضل CANCELLED_BY_SYSTEM/CANCELLED_BY_CUSTOMER عمدًا — مفيش صف
       // OrderStatusHistory إضافي هنا، الكولر (OrderAutoCancelService أو OrdersService.cancel())
