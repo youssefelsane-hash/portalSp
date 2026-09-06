@@ -127,7 +127,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'loyalty.points_expiry_months': { type: 'number', default: 12, group: 'loyalty', description: 'بعد كام شهر تنتهي نقاط الولاء المكتسبة (0 = ماتنتهيش أبدًا). التغيير بيسري على النقاط الجديدة بس — النقاط القديمة بتحتفظ بتاريخ انتهائها المتسجّل وقت اكتسابها.' },
 
   // ── matching ──────────────────────────────────────────────────────────
-  'matching.batch_size': { type: 'number', default: 5, group: 'matching', description: 'عدد الفنيين في كل دفعة توزيع' },
+  'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب' },
   'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
   'matching.broaden_to_busy_after_round': { type: 'number', default: 4, group: 'matching', description: 'رقم الجولة اللي بعدها يتوسّع البحث لفنيين مرتبطين لكن مشغولين حاليًا' },
   'matching.company_large_job_boost': { type: 'number', default: 3, group: 'matching', description: 'زيادة معتدلة في ترتيب ممثل الشركة المسجلة للشغل الكبير عند كفاية طاقمها (0 = تعطيل)' },
