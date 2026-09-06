@@ -58,6 +58,8 @@ import { TechnicianCertificate } from './entities/technician-certificate.entity'
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechnicianScheduleSlot } from './entities/technician-schedule-slot.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
+import { ServiceZone } from '../geo/entities/service-zone.entity';
+import { ProviderScopeService } from './provider-scope.service';
 import { TechnicianEarningsModule } from '../payments/technician-earnings.module';
 import { AdminTechnicianInternalNotesController } from './admin-technician-internal-notes.controller';
 import { TechnicianInternalNote } from './entities/technician-internal-note.entity';
@@ -76,6 +78,7 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
       TechnicianLevelConfig,
       TechnicianLevelHistory,
       TechnicianZone,
+      ServiceZone,
       TechnicianPortfolioLink,
       TechnicianCertificate,
       TechnicianScheduleSlot,
@@ -112,6 +115,7 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
     TechnicianCertificatesService,
     AdminTechniciansService,
     TechnicianCompaniesService,
+    ProviderScopeService,
     TechnicianLevelsService,
     TechnicianStatsService,
     TechnicianStatsProcessor,

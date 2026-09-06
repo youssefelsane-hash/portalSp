@@ -11,7 +11,7 @@ export interface TechnicianServiceResponseDto {
   reviewed_at: string | null;
   created_at: string;
   // بس لعرض الأدمن (طابور المراجعة) — الفني نفسه بيعرف بروفايله فمش محتاجهم لبروفايله الذاتي.
-  technician_id?: string;
+  technician_id?: string | null;
   service_name_ar?: string;
 }
 
