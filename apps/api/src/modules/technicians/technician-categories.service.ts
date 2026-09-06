@@ -258,9 +258,6 @@ export class TechnicianCategoriesService {
     previousStatus: TechnicianServiceVerificationStatus,
     reason: string | null,
   ): Promise<void> {
-    // ADR-0079 — الجدول ده بقى جدول نطاق منفّذ: صف الشركة مالوش فني، والحدث ده إشعار **للفني**
-    // بالتحديد. مفيش حد يتبلّغ، فبنخرج بهدوء بدل ما نرمي على حالة صحيحة تمامًا.
-    if (!row.technicianId) return;
     const [profile, category] = await Promise.all([
       this.technicianProfiles.findOneOrFail({ where: { id: row.technicianId } }),
       this.serviceCategories.findOne({ where: { id: row.categoryId } }),

@@ -91,6 +91,21 @@ export function bookingFingerprintInput(dto: PreviewOrderDto): Record<string, un
   return picked;
 }
 
+/**
+ * **معرّف المنفّذ المثبّت في تذكرة المعاينة** — فني فرد أو شركة، واحد بالظبط
+ * (`chk_booking_match_preview_provider`).
+ *
+ * ADR-0080 — نقطة قراءة واحدة عمدًا: البصمة بتتحسب من القيمة دي في **الطرفين** (المعاينة
+ * والإنشاء). لو كل طرف اشتق المعرّف بنفسه، أول اختلاف بيخلي كل حجز بشركة يترفض بـ«تفاصيل
+ * الحجز اتغيّرت» — وهي رسالة مالهاش أي علاقة بالسبب الحقيقي.
+ */
+export function matchPreviewProviderId(preview: {
+  technicianId: string | null;
+  technicianCompanyId: string | null;
+}): string | null {
+  return preview.technicianId ?? preview.technicianCompanyId;
+}
+
 export function bookingMatchContextHash(
   dto: PreviewOrderDto,
   selectionMode: BookingMatchSelectionMode,

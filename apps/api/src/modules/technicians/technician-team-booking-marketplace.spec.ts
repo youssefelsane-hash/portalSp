@@ -166,10 +166,18 @@ describe('TechniciansService.listForServiceBooking — فلترة مستوى "ا
     await dataSource.destroy();
   });
 
-  it('فردي (isTeamBooking=false) — فني new وfني professional الاتنين بيظهروا، صفر شركات', async () => {
+  // ADR-0080 (طلب مالك، 2026-09-06: «لما بدخل أحجز أي خدمة مش بشوف الشركات») — الشركات بقت
+  // تظهر في الحجز الفردي كمان، مش «اعتماد» بس. التثبيتة القديمة كانت `expect(items.some(isCompany))
+  // .toBe(false)` وهي بالظبط السلوك اللي المالك بلّغ عنه كمشكلة.
+  it('فردي (isTeamBooking=false) — الفنيين الاتنين بيظهروا، والشركة كمان بقت تظهر', async () => {
     const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId, undefined, null, false);
     const ourItems = items.filter((i) => [ids.newTechId, ids.proTechId].includes(i.technicianId));
     expect(ourItems.map((i) => i.technicianId).sort()).toEqual([ids.newTechId, ids.proTechId].sort());
+    expect(items.some((i) => i.isCompany && i.technicianId === ids.companyId)).toBe(true);
+  });
+
+  it('الطوارئ مستثناة — الكولر بيقفل الشركات صراحةً (includeCompanyEntities=false)', async () => {
+    const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId, undefined, null, false, false);
     expect(items.some((i) => i.isCompany)).toBe(false);
   });
 

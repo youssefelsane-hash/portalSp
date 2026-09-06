@@ -514,9 +514,10 @@ export class TechnicianCompaniesService {
       await this.findOwnBranchOrThrow(managerProfile.companyId!, dto.branch_id);
     }
 
-    const oldValues = { team_role: target.teamRole, branch_id: target.branchId };
+    const oldValues = { team_role: target.teamRole, branch_id: target.branchId, company_exclusive: target.companyExclusive };
     if (dto.team_role !== undefined) target.teamRole = dto.team_role as TechnicianTeamRole;
     if (dto.branch_id !== undefined) target.branchId = dto.branch_id;
+    if (dto.company_exclusive !== undefined) target.companyExclusive = dto.company_exclusive;
     await this.technicianProfiles.save(target);
 
     await this.auditLog.record({
@@ -526,7 +527,7 @@ export class TechnicianCompaniesService {
       entityType: 'technician_company',
       entityId: managerProfile.companyId!,
       oldValues,
-      newValues: { team_role: target.teamRole, branch_id: target.branchId },
+      newValues: { team_role: target.teamRole, branch_id: target.branchId, company_exclusive: target.companyExclusive },
       meta,
     });
     return this.attachUser(target);
@@ -539,6 +540,10 @@ export class TechnicianCompaniesService {
     target.companyId = null;
     target.branchId = null;
     target.teamRole = TechnicianTeamRole.INDEPENDENT;
+    // ADR-0080 — «حصري لشركة» بلا شركة مالهاش معنى، والقاعدة نفسها بترفضها
+    // (`chk_technician_profiles_company_exclusive_needs_company`). من غير السطر ده، شيل عضو
+    // حصري كان هيرمي خطأ قاعدة بيانات خام في وش مالك الشركة.
+    target.companyExclusive = false;
     await this.technicianProfiles.save(target);
 
     await this.auditLog.record({

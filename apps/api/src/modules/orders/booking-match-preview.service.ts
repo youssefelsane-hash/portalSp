@@ -13,6 +13,7 @@ import { MatchingService } from "../matching/matching.service";
 import { CandidateOperationalLoad } from "../technicians/technician-day-capacity.sql";
 import { SettingsService } from "../settings/settings.service";
 import { TechniciansService } from "../technicians/technicians.service";
+import { TechnicianCompaniesService } from "../technicians/technician-companies.service";
 import { CreateBookingMatchPreviewDto } from "./dto/create-booking-match-preview.dto";
 import { PreviewOrderDto } from "./dto/preview-order.dto";
 import { PreviewOrderResponseDto } from "./dto/preview-order-response.dto";
@@ -32,11 +33,17 @@ export interface BookingMatchPreviewResponse {
   match_preview_id: string;
   expires_at: string;
   selection_mode: "auto" | "manual";
+  /**
+   * ADR-0080 — المنفّذ المثبّت في التذكرة نوعه إيه. `company` معناها العميل اختار شركة
+   * والتوزيع الفعلي هيختار العضو المناسب جوّاها وقت الإنشاء، مش دلوقتي.
+   */
+  provider_kind: "technician" | "company";
   provider: {
     id: string;
     full_name: string;
     avatar_url: string | null;
-    current_level: string;
+    /** `null` للشركة — المستوى صفة فرد، ومالوش معنى للشركة (ADR-0042 بيسعّرها بمعاملها هي). */
+    current_level: string | null;
     average_rating: number;
     total_ratings_count: number;
     completed_orders_count: number;
@@ -58,6 +65,8 @@ export class BookingMatchPreviewService {
     private readonly techniciansService: TechniciansService,
     private readonly settingsService: SettingsService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    // ADR-0080 — بيانات الشركة المعروضة للعميل لما يختارها كمنفّذ.
+    private readonly technicianCompanies: TechnicianCompaniesService,
   ) {}
 
   async create(
@@ -71,24 +80,34 @@ export class BookingMatchPreviewService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (dto.selection_mode === "manual" && !dto.technician_id) {
+    // ADR-0080 — العميل بيختار **منفّذ**: فني فرد أو شركة. اختيار الشركة بيشغّل توزيع تلقائي
+    // **جوّه الشركة** محكوم بنطاق كل عضو (منطقته وفئاته)، فشغل البواب مستحيل يوصل للحداد.
+    const selectedCompanyId = dto.requested_technician_company_id ?? null;
+    if (dto.selection_mode === "manual" && !dto.technician_id && !selectedCompanyId) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        "اختيار فني بعينه يحتاج technician_id",
+        "اختيار منفّذ بعينه يحتاج technician_id أو requested_technician_company_id",
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (dto.selection_mode === "auto" && dto.technician_id) {
+    if (dto.technician_id && selectedCompanyId) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        "المطابقة التلقائية لا تقبل technician_id",
+        "اختار فني أو شركة — مش الاتنين مع بعض",
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (dto.requested_technician_company_id || dto.schedule_slot_id) {
+    if (dto.selection_mode === "auto" && (dto.technician_id || selectedCompanyId)) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        "معاينة المطابقة تختار فنيًا واحدًا؛ لا تجمعها مع شركة أو سلوت فني آخر",
+        "المطابقة التلقائية لا تقبل اختيار منفّذ",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (dto.schedule_slot_id) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        "معاينة المطابقة تثبّت منفّذًا واحدًا؛ لا تجمعها مع سلوت فني آخر",
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -118,10 +137,12 @@ export class BookingMatchPreviewService {
     const initialCandidates =
       await this.matchingService.findEligibleTechnicians(
         initialOrder,
-        dto.selection_mode === "manual" ? 1 : candidateLimit,
-        dto.selection_mode === "manual" ? dto.technician_id! : null,
+        dto.technician_id ? 1 : candidateLimit,
+        dto.technician_id ?? null,
         false,
-        null,
+        // ADR-0080 — نفس محرك التوزيع بالحرف، مقيّد بأعضاء الشركة المختارة. مفيش محرك تاني
+        // «جوّه الشركة»: نفس الأهلية (خدمة/فئة/منطقة/توافر) بالظبط، على مجموعة أضيق.
+        selectedCompanyId,
         false,
         previewLoad,
       );
@@ -129,10 +150,11 @@ export class BookingMatchPreviewService {
     let chosen: (typeof initialCandidates)[number] | null = null;
     let finalPricing: PreviewOrderResponseDto | null = null;
     for (const candidate of initialCandidates) {
-      const exactInput: PreviewOrderDto = {
-        ...pricingInput,
-        requested_technician_id: candidate.technician_id,
-      };
+      // تسعير الشركة بيتم **بمعامل الشركة** مش بمستوى العضو (ADR-0042): العميل اختار الشركة،
+      // والعضو اللي هينفّذ بيتحدد وقت التوزيع الفعلي — فتثبيت سعر بمستواه هنا وعد مالوش أساس.
+      const exactInput: PreviewOrderDto = selectedCompanyId
+        ? { ...pricingInput }
+        : { ...pricingInput, requested_technician_id: candidate.technician_id };
       const exactPricing = await this.ordersService.previewPrice(
         userId,
         exactInput,
@@ -141,9 +163,9 @@ export class BookingMatchPreviewService {
       const stillEligible = await this.matchingService.findEligibleTechnicians(
         exactOrder,
         1,
-        candidate.technician_id,
+        selectedCompanyId ? null : candidate.technician_id,
         false,
-        null,
+        selectedCompanyId,
         false,
         {
           durationMinutes: exactPricing.duration_minutes,
@@ -159,9 +181,11 @@ export class BookingMatchPreviewService {
     if (!chosen || !finalPricing) {
       throw new ApiException(
         ErrorCode.ORDR_001,
-        dto.selection_mode === "manual"
-          ? "الفني المختار غير متاح أو غير مؤهل لهذا الحجز حاليًا"
-          : "لا يوجد فني متاح ومؤهل لهذا الحجز حاليًا",
+        selectedCompanyId
+          ? "مفيش حد متاح في الشركة دي للشغلانة دي دلوقتي — جرّب شركة تانية أو سيبها لنا نرشّحلك"
+          : dto.selection_mode === "manual"
+            ? "الفني المختار غير متاح أو غير مؤهل لهذا الحجز حاليًا"
+            : "لا يوجد فني متاح ومؤهل لهذا الحجز حاليًا",
         HttpStatus.CONFLICT,
       );
     }
@@ -176,9 +200,14 @@ export class BookingMatchPreviewService {
     //
     // دلوقتي الفني ده بيتعامل معاملة «مش متاح» بالظبط: بيتخطّى، والبحث بيكمّل على اللي بعده.
     // الفشل بيتسجّل في اللوج بهويته عشان يتصلح من جذره، مش بيتبلع.
-    let technician: Awaited<ReturnType<TechniciansService['getPublicProfile']>>;
+    // ADR-0080 — لما العميل يختار شركة، المنفّذ المعروض هو **الشركة**: العضو اللي هينفّذ
+    // بيتحدد وقت التوزيع الفعلي بعد الإنشاء، فعرض اسم عضو بعينه دلوقتي وعد مش مضمون.
+    const selectedCompany = selectedCompanyId
+      ? await this.technicianCompanies.findActiveCompanyOrThrow(selectedCompanyId)
+      : null;
+    let technician: Awaited<ReturnType<TechniciansService['getPublicProfile']>> | null = null;
     try {
-      technician = await this.techniciansService.getPublicProfile(chosen.technician_id);
+      if (!selectedCompany) technician = await this.techniciansService.getPublicProfile(chosen.technician_id);
     } catch (err) {
       this.logger.error(
         `تخطّي الفني ${chosen.technician_id} في معاينة المطابقة — تعذّر قراءة ملفه: ${
@@ -205,14 +234,16 @@ export class BookingMatchPreviewService {
       ),
     );
     const expiresAt = new Date(Date.now() + ttlSeconds * 1_000);
-    const exactInput: PreviewOrderDto = {
-      ...pricingInput,
-      requested_technician_id: chosen.technician_id,
-    };
+    // معرّف المنفّذ المثبّت — شركة أو فني، **واحد بالظبط**، ونفس القيمة اللي `create()` هتعيد
+    // حساب البصمة بيها (`matchPreviewProviderId`)، وإلا كل حجز بشركة هيترفض بـ«التفاصيل اتغيّرت».
+    const providerId = selectedCompanyId ?? chosen.technician_id;
+    const exactInput: PreviewOrderDto = selectedCompanyId
+      ? { ...pricingInput }
+      : { ...pricingInput, requested_technician_id: chosen.technician_id };
     const contextHash = bookingMatchContextHash(
       exactInput,
       dto.selection_mode,
-      chosen.technician_id,
+      providerId,
     );
 
     const preview = await this.previews.manager.transaction(async (manager) => {
@@ -236,7 +267,7 @@ export class BookingMatchPreviewService {
           orderId: null,
           serviceId: dto.service_id,
           addressId: dto.address_id,
-          technicianId: chosen!.technician_id,
+          technicianId: selectedCompanyId ? null : chosen!.technician_id,
           // **بلاغ مالك حقيقي (2026-09-06، req_86942f97/req_58327a98)**: «فني واحد بس اسمه
           // أحمد فني هو اللي عامل المشكلة» — أي فني **منتمي لشركة** كان بيفجّر الحجز بـ500.
           //
@@ -246,9 +277,9 @@ export class BookingMatchPreviewService {
           // (`technician_profiles.company_id`)، مش «المنفّذ شركة». فأي فني تابع لشركة كان
           // بينزل بالعمودين مليانين ⇒ خرق القيد ⇒ «حصل خطأ غير متوقع» عند العميل.
           //
-          // المسار ده بيرفض `requested_technician_company_id` صراحةً فوق (بيختار فني واحد
-          // بعينه دايمًا)، فالمنفّذ هنا **فرد بالتعريف** والعمود ده لازم يفضل NULL.
-          technicianCompanyId: null,
+          // ADR-0080 — العمود ده بيتملى **بس** لما العميل يختار شركة صراحةً (المنفّذ شركة).
+          // انتماء الفني لشركة (`chosen.company_id`) حاجة تانية خالص ومالهاش مكان هنا.
+          technicianCompanyId: selectedCompanyId,
           selectionMode: dto.selection_mode,
           contextHash,
           // migration 0256 — نفس المدخلات اللي البصمة اتحسبت منها، عشان الرفض يبقى قابل للتشخيص.
@@ -269,20 +300,34 @@ export class BookingMatchPreviewService {
       match_preview_id: preview.id,
       expires_at: preview.expiresAt.toISOString(),
       selection_mode: preview.selectionMode,
-      provider: {
-        id: technician.profile.id,
-        full_name: technician.fullName,
-        avatar_url: await resolveAvatarUrl(
-          this.storage,
-          technician.avatarUrl,
-          technician.avatarStorageKey,
-        ),
-        current_level: technician.profile.currentLevel,
-        average_rating: Number(technician.profile.averageRating),
-        total_ratings_count: technician.profile.totalRatingsCount,
-        completed_orders_count: technician.profile.completedOrdersCount,
-        distance_km: Number(chosen.distance_km),
-      },
+      provider_kind: selectedCompany ? "company" : "technician",
+      provider: selectedCompany
+        ? {
+            id: selectedCompany.id,
+            full_name: selectedCompany.name,
+            // الشركة مالهاش صورة خاصة بيها في المخطط (صورة مالكها هي اللي بتتعرض في شاشات
+            // الشركة عبر `toCompanyResponseDto`) — التذكرة بترجّع null بدل ما تخترع مصدر صورة.
+            avatar_url: null,
+            current_level: null,
+            average_rating: 0,
+            total_ratings_count: 0,
+            completed_orders_count: 0,
+            distance_km: Number(chosen.distance_km),
+          }
+        : {
+            id: technician!.profile.id,
+            full_name: technician!.fullName,
+            avatar_url: await resolveAvatarUrl(
+              this.storage,
+              technician!.avatarUrl,
+              technician!.avatarStorageKey,
+            ),
+            current_level: technician!.profile.currentLevel,
+            average_rating: Number(technician!.profile.averageRating),
+            total_ratings_count: technician!.profile.totalRatingsCount,
+            completed_orders_count: technician!.profile.completedOrdersCount,
+            distance_km: Number(chosen.distance_km),
+          },
       pricing: finalPricing,
     };
   }

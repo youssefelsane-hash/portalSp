@@ -219,6 +219,19 @@ export class TechnicianProfile {
   @Column({ name: 'team_role', type: 'varchar', length: 20, default: TechnicianTeamRole.INDEPENDENT })
   teamRole: TechnicianTeamRole;
 
+  /**
+   * **«حصري للشركة»** (ADR-0080، migration 0279) — طلب مالك صريح:
+   *
+   * > «الفني ده ما بيظهرش أصلًا إن هو فرد لوحده… كأنه مش متسجل معانا، هو فقط تابع للشركة،
+   * >  يعني بيتم اختياره فقط عن طريق الشركة بتاعته.»
+   *
+   * **مش حالة تحقق ولا إيقاف**: الفني معتمد وشغّال بالكامل، بيترقّى وبياخد أرباحه زي أي حد —
+   * اللي بيتغيّر هو **مسار وصول الشغل له** بس. القاعدة نفسها في
+   * `technicianIndividualVisibilityCondition()`، والقيد في القاعدة بيمنع تفعيله لفني مستقل.
+   */
+  @Column({ name: 'company_exclusive', type: 'boolean', default: false })
+  companyExclusive: boolean;
+
   // "معاه مساعد؟" (docs/06 §3.7) — الفني بيطلب ربط مساعد بكود موظفه (technician_code)، الإدارة
   // توافق قبل ما يبقى رسمي. assistantTechnicianId بيفضل NULL لحد ما assistantLinkStatus=approved.
   @Column({ name: 'assistant_technician_id', type: 'uuid', nullable: true })

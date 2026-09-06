@@ -34,6 +34,7 @@ import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
+  technicianIndividualVisibilityCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -459,6 +460,9 @@ export class MatchingService {
         )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
+        -- ADR-0080 — الفني «الحصري للشركة» مايوصلوش أي توزيع عام؛ يوصله بس لما الطلب نفسه
+        -- مقيّد بشركته ($9 مش NULL). الشرط ده هو كل الفرق بين «تابع للشركة» و«مخفي تمامًا».
+        AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp', companyScopeParam: '$9' })}
         -- بَقّة حقيقية اتلقطت وقت تحقيق §36.1 (docs/08، تعميق تسجيل موبايل حقيقي): الاستعلام ده
         -- كان بيكتشف الفني كمرشّح حتى لو مستواه مالوش حد قرار (decision_limit_cents) يكفي قيمة
         -- الطلب — نفس القاعدة اللي assertEligible() (technician-assignment-guard.service.ts)
@@ -1105,12 +1109,23 @@ export class MatchingService {
     }
   }
 
-  private async resolveAssignedCompanyId(technicianId: string): Promise<string | null> {
-    const rows = await this.dataSource.query<{ company_id: string | null }[]>(
-      `SELECT company_id FROM technician_profiles WHERE id = $1`,
-      [technicianId],
-    );
-    return rows[0]?.company_id ?? null;
+  /**
+   * **الشغلانة تتحسب للشركة إمتى؟** — ADR-0080، قرار مالك صريح (2026-09-06):
+   *
+   * > «لو الشخص مختارش شركة واختار فرد عادي، وراح على فرد من أفراد الشركة دول واختاره، هل كده
+   * >  الشغلانة تتحسب للشركة ولا للفرد؟ في الحالة دي أنا شايف إن الشغلانة تتحسب للفرد… الشركة
+   * >  مالهاش أي علاقة أصلًا.»
+   *
+   * القاعدة القديمة كانت بتقرا `technician_profiles.company_id` وقت التعيين، يعني **أي** شغلانة
+   * لأي عضو شركة كانت بتترسّى على الشركة — حتى لو العميل اختار الشخص نفسه، أو ساب التوزيع
+   * يختار بلا أي ذكر للشركة. ده كان بيحوّل الانتماء لملكية.
+   *
+   * دلوقتي المعيار هو **مسار الحجز**: الشركة بتتحط لو وبس لو العميل اختارها هو
+   * (`requested_technician_company_id`). غير كده الشغلانة للفرد، والشركة مالهاش علاقة —
+   * ومساحة عمل الشركة (`assigned_company_id`) بتعكس ده بالظبط.
+   */
+  private resolveAssignedCompanyId(order: Order): string | null {
+    return order.requestedTechnicianCompanyId ?? null;
   }
 
   private async confirmTechnicianForOrder(
@@ -1137,7 +1152,7 @@ export class MatchingService {
       return { kind: 'noop' };
     }
     order.technicianId = technicianId;
-    order.assignedCompanyId = await this.resolveAssignedCompanyId(technicianId);
+    order.assignedCompanyId = this.resolveAssignedCompanyId(order);
     order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
     order.assignedAt = now;
     await manager.save(order);
@@ -1466,9 +1481,9 @@ export class MatchingService {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
       order.technicianId = profile.id;
-      // مساحة عمل الشركة (ADR-0033) — profile هنا اتحمّل بالفعل (findByUserIdOrThrow فوق)، صفر
-      // داعي لاستعلام إضافي زي resolveAssignedCompanyId() تحت.
-      order.assignedCompanyId = profile.companyId;
+      // ADR-0080 — نفس قاعدة `resolveAssignedCompanyId()` بالحرف: الشركة بتترسّى على الطلب لو
+      // وبس لو العميل اختارها. قبول الفني لعرض عام مايحوّلش الشغلانة لشركته.
+      order.assignedCompanyId = this.resolveAssignedCompanyId(order);
       order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
       order.assignedAt = now;
       await manager.save(order);

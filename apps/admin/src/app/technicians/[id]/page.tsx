@@ -367,6 +367,20 @@ export default function TechnicianDetailPage() {
     setTrustBadgeNote('');
   }
 
+  /**
+   * ADR-0080 — «حصري للشركة» (طلب مالك صريح): الفني ده مايظهرش للعملاء كفرد خالص؛ يوصله شغل
+   * عن طريق شركته بس. مش إيقاف ولا سحب اعتماد — الفني شغّال بالكامل وبيترقّى عادي، اللي
+   * بيتغيّر هو مسار وصول الشغل له.
+   */
+  async function handleSetCompanyExclusive(companyExclusive: boolean) {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/company-exclusive`, {
+        method: 'PATCH',
+        body: JSON.stringify({ company_exclusive: companyExclusive }),
+      }),
+    );
+  }
+
   async function handleReviewDocument(documentId: string, reviewStatus: 'approved' | 'rejected', rejection_reason?: string) {
     await runAction(() =>
       authedFetch(`/admin/technicians/${id}/documents/${documentId}/review`, {
@@ -768,6 +782,42 @@ export default function TechnicianDetailPage() {
             )}
           </CardFooter>
         </Card>
+
+        {/* ADR-0080 — الكارت ده بيظهر بس للفني التابع لشركة: الزرار مالوش أي معنى للمستقل،
+            والباك-إند بيرفضه أصلاً. */}
+        {profile360?.team_role && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">حصري للشركة</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 text-sm">
+              <div className="flex items-center gap-2">
+                {detail.company_exclusive ? (
+                  <Badge className="bg-amber-600 text-white hover:bg-amber-600">حصري لـ{profile360.team_role.company_name}</Badge>
+                ) : (
+                  <Badge variant="outline">بيشتغل كفرد كمان</Badge>
+                )}
+              </div>
+              <p className="text-muted-foreground">
+                لما يبقى مفعّل، الفني ده مايظهرش للعملاء كفني مستقل خالص — لا في قايمة الاختيار ولا
+                في التوزيع التلقائي. الشغل بيوصله عن طريق {profile360.team_role.company_name} بس.
+                ده <strong>مش</strong> إيقاف: الفني شغّال بالكامل وبيترقّى وبياخد أرباحه زي أي حد،
+                اللي بيتغيّر هو مسار وصول الشغل ليه.
+              </p>
+            </CardContent>
+            <CardFooter>
+              {detail.company_exclusive ? (
+                <Button size="sm" variant="outline" disabled={isSaving} onClick={() => handleSetCompanyExclusive(false)}>
+                  رجّعه يشتغل كفرد كمان
+                </Button>
+              ) : (
+                <Button size="sm" disabled={isSaving} onClick={() => handleSetCompanyExclusive(true)}>
+                  خليه حصري للشركة
+                </Button>
+              )}
+            </CardFooter>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
