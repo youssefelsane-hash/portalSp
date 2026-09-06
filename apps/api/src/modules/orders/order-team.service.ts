@@ -22,7 +22,7 @@ import { resolveEffectiveMemberType } from './crew-member-type';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
-import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { orderCandidateLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 
@@ -351,19 +351,23 @@ export class OrderTeamService {
     return { enabled, maxPerOrder };
   }
 
-  private async getServiceDurationMinutes(order: Order): Promise<number> {
-    // docs/01B — مدة الطلب الحقيقية (ADR-0031/0032) بتتقدم على دقائق الخدمة الثابتة
-    if (order.durationMinutes != null && order.durationMinutes > 0) {
-      return order.durationMinutes;
-    }
-    if (order.durationHours != null && order.durationHours > 0) {
-      return order.durationHours * 60;
-    }
+  /**
+   * ADR-0077 — الحمل التشغيلي للطلب المرشّح بالشكل اللي `classifyTechnicianCapacity()` بتقراه:
+   * المدة الحقيقية والافتراضي بتاع الخدمة **منفصلين**، مش مدموجين في رقم واحد.
+   */
+  private async getCandidateCapacityLoad(
+    order: Order,
+  ): Promise<{ candidateDurationMinutes: number | null; candidateEstimatedDurationDays: number | null; serviceDurationMinutes: number }> {
+    const load = orderCandidateLoad(order);
     const [service] = await this.teamMembers.manager.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
-    return service?.estimated_duration_minutes ?? 60;
+    return {
+      candidateDurationMinutes: load.durationMinutes,
+      candidateEstimatedDurationDays: load.estimatedDurationDays,
+      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+    };
   }
 
   /**
@@ -508,7 +512,7 @@ export class OrderTeamService {
     );
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
-    const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
+    const capacityLoad = await this.getCandidateCapacityLoad(order);
     const withCapacity = await Promise.all(
       rows.map(async (row): Promise<RecruitCandidateRow | null> => {
         const scheduleAvailable = await this.assignmentGuard.isScheduleAvailable(this.teamMembers.manager, row.technicianId, order);
@@ -519,7 +523,7 @@ export class OrderTeamService {
             technicianId: row.technicianId,
             scheduledAt: order.scheduledAt,
             excludeOrderId: orderId,
-            serviceDurationMinutes,
+            ...capacityLoad,
             dailyCapacityMinutes: dailyCapacityMinutes,
           }),
         };
@@ -601,13 +605,13 @@ export class OrderTeamService {
     }
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
-    const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
+    const capacityLoad = await this.getCandidateCapacityLoad(order);
     await this.assignmentGuard.assertScheduleAvailable(this.teamMembers.manager, technicianId, order);
     const tier = await classifyTechnicianCapacity(this.teamMembers.manager, {
       technicianId,
       scheduledAt: order.scheduledAt,
       excludeOrderId: orderId,
-      serviceDurationMinutes,
+      ...capacityLoad,
       dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {

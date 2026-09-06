@@ -355,8 +355,20 @@ export async function classifyTechnicianCapacity(
     /** معرّف الطلب المرشّح نفسه، عشان يستبعد نفسه من فحص التعارض. `null` لو مفيش طلب مرشّح فعلي
      * (استخدام تشخيصي بس، زي معاينة قدرة الفني للأدمن — docs/08 §34.4). */
     excludeOrderId: string | null;
-    /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
+    /**
+     * **مدة الخدمة الافتراضية** بالدقايق — القيمة اللي بتُستخدم لما الطلب المرشّح نفسه مالوش
+     * مدة محسوبة. مش «مدة الطلب»: دي `candidateDurationMinutes` تحت.
+     */
     serviceDurationMinutes: number;
+    /**
+     * **المدة الحقيقية للطلب المرشّح** بالدقايق (ناتج محرك التسعير) أو `null` لو مش معروفة.
+     *
+     * ADR-0077 — الفصل ده مش تجميل: قاعدة الحمل بتفرّق بين «مدة حقيقية معروفة» (⇒ بتتحسب
+     * بالدقايق، فالجدولة بالساعة تشتغل) و«مفيش مدة + المحرك قال يوم» (⇒ يوم كامل). لما
+     * الاتنين كانوا بيوصلوا في نفس الحقل، الشغلانة اللي مالهاش مدة كانت بتاخد رقم الخدمة
+     * الافتراضي وتتعامل كأنها مدة حقيقية.
+     */
+    candidateDurationMinutes?: number | null;
     dailyCapacityMinutes: number;
     /**
      * `estimated_duration_days` **للطلب المرشّح كما هي** — ناتج محرك التسعير، و`null` لو المحرك
@@ -385,7 +397,7 @@ export async function classifyTechnicianCapacity(
         AND (tss.slot_date + tss.start_time) AT TIME ZONE 'Africa/Cairo'
             < (COALESCE($2::timestamptz, now())
                 + ((GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1) || ' days')::interval
-                + ($5::int || ' minutes')::interval)
+                + (COALESCE($9::int, $5::int) || ' minutes')::interval)
         AND (tss.slot_date + tss.end_time) AT TIME ZONE 'Africa/Cairo'
             > COALESCE($2::timestamptz, now())
       LIMIT 1
@@ -414,8 +426,8 @@ export async function classifyTechnicianCapacity(
         // `estimated_duration_days` الخام (ممكن NULL)، مش «عدد أيام» متحوّل لـ1.
         candidateLoad: {
           estimatedDurationDaysExpr: '$8::numeric',
-          durationMinutesExpr: '$5::int',
-          serviceDefaultMinutesExpr: 'NULL',
+          durationMinutesExpr: '$9::int',
+          serviceDefaultMinutesExpr: '$5::int',
         },
       })}
       -- **ADR-0070 — فرع «منشغل جسديًا دلوقتي» اتشال من هنا كمان.**
@@ -452,6 +464,7 @@ export async function classifyTechnicianCapacity(
       ACTIVE_TECHNICIAN_ORDER_STATUSES,
       ENGAGED_TECHNICIAN_ORDER_STATUSES,
       params.candidateEstimatedDurationDays ?? null,
+      params.candidateDurationMinutes ?? null,
     ],
   );
   return rows[0].tier;

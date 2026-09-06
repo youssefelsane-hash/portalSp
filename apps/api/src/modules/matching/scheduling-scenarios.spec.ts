@@ -321,7 +321,12 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   it('D4 (ADR-0070) — طلب طوارئ: الفني اللي يومه **مليان** بقى يتستبعد (السقف اليومي بقى يسري على الطوارئ)', async () => {
     // الوجه التاني لنفس القاعدة: قبل ADR-0070 السقف اليومي مكانش بيسري على الطوارئ خالص، فالفني
     // اللي محجوز يوم كامل كان لسه بياخد طوارئ. دلوقتي «مجموع الشغل ≤ المسموح» بيسري على الكل.
-    await insertOrder({ label: 'full-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 60, estimatedDurationDays: 1 });
+    //
+    // ADR-0077 — «يوم مليان» بقى لازم يتكتب كيوم مليان فعلاً. الصيغة القديمة هنا كانت
+    // `durationMinutes: 60, estimatedDurationDays: 1`، وكانت بتعدّي **بالغلط**: القاعدة القديمة
+    // كانت بتحوّل أي `days >= 1` ليوم كامل، فشغلانة ساعة كانت «بتملا اليوم». ده بالظبط البَقّة
+    // اللي ADR-0077 قفلها، فالتثبيتة اللي بتعتمد عليها كانت بتختبر البَقّة مش القاعدة.
+    await insertOrder({ label: 'full-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 720 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(false);
   });

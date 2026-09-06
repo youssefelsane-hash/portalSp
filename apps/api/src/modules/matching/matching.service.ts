@@ -1191,10 +1191,10 @@ export class MatchingService {
       technicianId,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      // مدة الطلب نفسه أدق من مدة الخدمة العامة لما تكون محسوبة (محرك التسعير) — نفس الترتيب
-      // اللي `serviceDurationExpr` بيستخدمه في الاستعلامات.
-      serviceDurationMinutes:
-        order.durationMinutes ?? (order.durationHours ? order.durationHours * 60 : null) ?? service[0]?.estimated_duration_minutes ?? 60,
+      // ADR-0077 — المدة المحسوبة (محرك التسعير) والمدة الافتراضية للخدمة بقوا حقلين منفصلين:
+      // الأولى «مدة حقيقية» بتتحسب بالدقايق، والتانية مجرد fallback لما مفيش مدة أصلاً.
+      candidateDurationMinutes: order.durationMinutes ?? (order.durationHours ? order.durationHours * 60 : null),
+      serviceDurationMinutes: service[0]?.estimated_duration_minutes ?? 60,
       dailyCapacityMinutes: dailyCapacityMinutes,
       // ADR-0059/0061 §2 — شغل بيمتد أيام لازم يتقاس على أيامه كلها، مش على يوم بدايته بس.
       // بتتبعت **خام** (`null` لو المحرك ماحددش أيام): تحويلها لـ1 هنا كان بيخلي أي شغلانة قصيرة
