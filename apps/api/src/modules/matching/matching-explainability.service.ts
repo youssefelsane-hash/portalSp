@@ -264,6 +264,10 @@ export class MatchingExplainabilityService {
         scheduledAt: order.scheduledAt,
         excludeOrderId: order.id,
         serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+        // ADR-0077 — التفسير لازم يقيس بنفس مسطرة المطابقة الفعلية بالحرف، وإلا الشاشة بتقول
+        // سبب مختلف عن اللي المحرك اشتغل بيه.
+        candidateDurationMinutes: order.durationMinutes ?? (order.durationHours ? Number(order.durationHours) * 60 : null),
+        candidateEstimatedDurationDays: order.estimatedDurationDays != null ? Number(order.estimatedDurationDays) : null,
         dailyCapacityMinutes: dailyCapacityMinutes,
       });
     } catch {

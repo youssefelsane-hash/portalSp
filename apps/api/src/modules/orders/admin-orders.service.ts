@@ -51,7 +51,7 @@ import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
-import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { orderCandidateLoadFields, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
 
@@ -1115,6 +1115,8 @@ export class AdminOrdersService {
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
+    // ADR-0077 — الحمل الحقيقي للطلب منفصل عن افتراضي الخدمة.
+    const candidateLoad = orderCandidateLoadFields(order);
     const serviceDurationMinutes = service?.estimated_duration_minutes ?? 60;
     const withCapacity = await Promise.all(
       rows.map(async (row) => {
@@ -1125,6 +1127,7 @@ export class AdminOrdersService {
           scheduledAt: order.scheduledAt,
           excludeOrderId: order.id,
           serviceDurationMinutes,
+          ...candidateLoad,
           dailyCapacityMinutes: dailyCapacityMinutes,
         });
         return { ...row, capacity_tier };
@@ -1218,6 +1221,8 @@ export class AdminOrdersService {
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
       serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      // ADR-0077 — نفس مسطرة التوزيع الفعلي بالحرف.
+      ...orderCandidateLoadFields(order),
       dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (capacityTier === 'BLOCKED') {
@@ -1322,6 +1327,8 @@ export class AdminOrdersService {
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
       serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      // ADR-0077 — نفس مسطرة التوزيع الفعلي بالحرف.
+      ...orderCandidateLoadFields(order),
       dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {

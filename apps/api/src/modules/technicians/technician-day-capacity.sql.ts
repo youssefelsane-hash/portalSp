@@ -49,28 +49,54 @@ function spanDaysExpr(alias: string): string {
 }
 
 /**
- * الدقايق اللي الطلب بياخدها **من كل يوم** في مداه.
+ * الدقايق اللي الطلب بياخدها **من كل يوم** في مداه — **مصدر الحقيقة الوحيد** للحمل اليومي.
  *
- * **الشغل المقدَّر بالأيام بياخد اليوم بالكامل** — مش `الإجمالي ÷ الأيام`، ومش دقايقه الخام.
- * `estimated_duration_days` **موجودة صراحةً** معناها محرك التسعير قال «الشغلانة دي بتاخد N
- * يوم»، وده بالتعريف يوم كامل في كل يوم من الـN (اللي عنده تركيب 3 أيام مش فاضي 8 ساعات كل
- * يوم؛ هو في الموقع اليوم كله). ده اللي بيخلي «محجوز شهر كامل» تعني اللي المالك قصده، وهو كمان
- * اللي بيحافظ على سلوك ADR-0018 §2 لطلب `estimated_duration_days = 1`.
+ * ADR-0077 (بلاغ مالك حرفي 2026-09-06): «الشغلانة لو ساعة خلاص تبلوك الساعة دي بس. شغلانة والله
+ * لو خمس ست ساعات تبلوك خمس ست ساعات». القاعدة القديمة كانت بتقول «`estimated_duration_days`
+ * موجودة و>= 1 ⇒ اليوم كله»، وده كان بيدّي نتيجة غلط لكل شغلانة قصيرة، لأن **`estimated_duration
+ * _days = 1` مش معناها يوم كامل**: `CatalogService.estimateDuration()` بتحسبها
+ * `Math.ceil(units / productivity)`، والـ`ceil` بتطلّع 1 لأي شغلانة أقصر من يوم — يعني شغلانة
+ * ساعة وشغلانة 12 ساعة بيوصلوا هنا بنفس الرقم بالظبط. النتيجة اللي المالك شافها: ساعة تنظيف
+ * الصبح بتقفل اليوم كله، فالساعة 3 العصر الفني «مش متاح».
  *
- * **الحساب بالدقايق بيسري بس على الشغل اللي مالوش تقدير بالأيام** — الشغلانات القصيرة اللي
- * بتتقاس بالساعة، واللي السقف اليومي (12 ساعة) اتعمل عشانها أصلاً.
+ * الترتيب الجديد بيقرا المعلومة الأدق الأول:
+ *
+ *  1. **`estimated_duration_days > 1`** ⇒ اليوم بالكامل. ده الشغل الممتد الحقيقي (تركيب/تشطيب
+ *     على أيام): اللي بياخد 3 أيام مش فاضي 8 ساعات في اليوم التاني، هو في الموقع اليوم كله.
+ *     شرط `> 1` (مش `>= 1`) هو **كل الفرق**: بيسيب الشغل الممتد زي ما هو وبيحرّر اليوم الواحد.
+ *  2. **المدة الحقيقية بالدقايق معروفة** (`duration_minutes` أو `duration_hours` — ناتج محرك
+ *     التسعير، ADR-0061 §1) ⇒ الدقايق دي بالظبط. ده اللي بيخلي الجدولة بالساعة تشتغل فعلاً.
+ *  3. **يوم واحد بلا أي تفصيل بالدقايق** ⇒ اليوم بالكامل. قالب «باليوم» بيبيع للعميل يوم، فالحمل
+ *     يوم — نفس سلوك ADR-0018 §2 محفوظ لحالته الوحيدة اللي بيعنيها فعلاً.
+ *  4. غير كده ⇒ مدة الخدمة الافتراضية، وإلا الافتراضي العام.
+ *
+ * السقف اليومي بيفضل الحارس الوحيد ضد التحميل الزايد فوق كده (ADR-0059)، وتقاطع الوقت الحقيقي
+ * في `activeOrderConflictExistsExpr` بيمنع حجز نفس الساعة مرتين.
  */
 function perDayMinutesExpr(alias: string, serviceAlias: string, capacityParam: string): string {
+  return preciseDayMinutesRule({
+    estimatedDurationDaysExpr: `${alias}.estimated_duration_days`,
+    durationMinutesExpr: `COALESCE(${alias}.duration_minutes, ${alias}.duration_hours * 60)`,
+    serviceDefaultMinutesExpr: `${serviceAlias}.estimated_duration_minutes`,
+  }, capacityParam);
+}
+
+/**
+ * القاعدة نفسها كتعبير واحد على أي مصدر أعمدة — الطلب القائم والطلب المرشّح بيعدّوا من هنا
+ * الاتنين، فالتماثل اللي ADR-0061 §2 فرضه بيفضل **خاصية بنيوية** مش تكرار نصّي.
+ */
+function preciseDayMinutesRule(source: CandidateLoadSource, capacityParam: string): string {
+  const days = `(${source.estimatedDurationDaysExpr})`;
+  const minutes = `(${source.durationMinutesExpr})`;
   return `CASE
-      WHEN ${alias}.estimated_duration_days IS NOT NULL AND ${alias}.estimated_duration_days >= 1
+      WHEN ${days} IS NOT NULL AND ${days} > 1
+        THEN ${capacityParam}::int
+      WHEN ${minutes} IS NOT NULL
+        THEN LEAST(${minutes}, ${capacityParam}::int)
+      WHEN ${days} IS NOT NULL AND ${days} >= 1
         THEN ${capacityParam}::int
       ELSE LEAST(
-        COALESCE(
-          ${alias}.duration_minutes,
-          ${alias}.duration_hours * 60,
-          ${serviceAlias}.estimated_duration_minutes,
-          ${DEFAULT_JOB_MINUTES}
-        ),
+        COALESCE((${source.serviceDefaultMinutesExpr}), ${DEFAULT_JOB_MINUTES}),
         ${capacityParam}::int
       )
     END`;
@@ -145,6 +171,43 @@ export interface CandidateOperationalLoad {
   estimatedDurationDays: number | null;
 }
 
+/**
+ * **الحمل التشغيلي لطلب موجود، كما تقراه شاشات القدرة** — نقطة قراءة واحدة (ADR-0077).
+ *
+ * قبلها كل كولر كان بيكتب سلسلة `durationMinutes ?? durationHours*60 ?? serviceDefault ?? 60`
+ * بنفسه، وكان بيدمج «المدة الحقيقية» مع «افتراضي الخدمة» في رقم واحد — فقاعدة الحمل ماكانتش
+ * تقدر تفرّق بين الاتنين. الدالة دي بترجّع الحقلين منفصلين وبس.
+ */
+export function orderCandidateLoad(order: {
+  durationMinutes: number | null;
+  durationHours: number | null;
+  estimatedDurationDays: number | null;
+}): CandidateOperationalLoad {
+  const minutes =
+    order.durationMinutes != null && order.durationMinutes > 0
+      ? order.durationMinutes
+      : order.durationHours != null && order.durationHours > 0
+        ? Number(order.durationHours) * 60
+        : null;
+  return {
+    durationMinutes: minutes,
+    estimatedDurationDays: order.estimatedDurationDays != null ? Number(order.estimatedDurationDays) : null,
+  };
+}
+
+/**
+ * نفس `orderCandidateLoad()` بس بأسماء حقول `classifyTechnicianCapacity()` — عشان الكولر يعمل
+ * `...orderCandidateLoadFields(order)` بدل ما يعيد كتابة الأسماء (ونسيان واحد منهم = انحراف صامت).
+ */
+export function orderCandidateLoadFields(order: {
+  durationMinutes: number | null;
+  durationHours: number | null;
+  estimatedDurationDays: number | null;
+}): { candidateDurationMinutes: number | null; candidateEstimatedDurationDays: number | null } {
+  const load = orderCandidateLoad(order);
+  return { candidateDurationMinutes: load.durationMinutes, candidateEstimatedDurationDays: load.estimatedDurationDays };
+}
+
 export interface CandidateLoadSource {
   /** تعبير SQL بيرجّع `estimated_duration_days` للطلب المرشّح (أو `NULL`). */
   estimatedDurationDaysExpr: string;
@@ -154,16 +217,12 @@ export interface CandidateLoadSource {
   serviceDefaultMinutesExpr: string;
 }
 
-/** دقايق الطلب المرشّح **من كل يوم** — نفس `perDayMinutesExpr` بالحرف، بس على أعمدة المرشّح. */
+/**
+ * دقايق الطلب المرشّح **من كل يوم** — نفس `perDayMinutesExpr` بالحرف (نفس الدالة فعليًا، مش
+ * نسخة منها)، بس على أعمدة المرشّح.
+ */
 export function candidatePerDayMinutesExpr(source: CandidateLoadSource, capacityParam: string): string {
-  return `CASE
-      WHEN (${source.estimatedDurationDaysExpr}) IS NOT NULL AND (${source.estimatedDurationDaysExpr}) >= 1
-        THEN ${capacityParam}::int
-      ELSE LEAST(
-        COALESCE((${source.durationMinutesExpr}), (${source.serviceDefaultMinutesExpr}), ${DEFAULT_JOB_MINUTES}),
-        ${capacityParam}::int
-      )
-    END`;
+  return preciseDayMinutesRule(source, capacityParam);
 }
 
 /** أيام الطلب المرشّح — نفس `spanDaysExpr` بالحرف. */

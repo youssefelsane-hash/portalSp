@@ -507,6 +507,10 @@ export class TechniciansService {
             durationMinutesExpr: '$13::int',
             serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
           },
+          // ADR-0077 — القايمة دي كانت بتشوف السقف اليومي بس، فكانت بتعرض فني محجوز في نفس
+          // الساعة بالظبط. المدة الحقيقية للمرشّح بتحوّل الفحص لتقاطع وقت فعلي — نفس اللي
+          // التوزيع والتعيين بيعملوه، فالثلاثة بيدّوا نفس الإجابة.
+          preciseDurationHoursExpr: '$13::numeric / 60.0',
           dailyCapacityMinutesParam: '$11',
         })}
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, COALESCE(ts.completed_count, 0) DESC
@@ -648,6 +652,10 @@ export class TechniciansService {
             durationMinutesExpr: '$9::int',
             serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
           },
+          // ADR-0077 — القايمة دي كانت بتشوف السقف اليومي بس، فكانت بتعرض فني محجوز في نفس
+          // الساعة بالظبط. المدة الحقيقية للمرشّح بتحوّل الفحص لتقاطع وقت فعلي — نفس اللي
+          // التوزيع والتعيين بيعملوه، فالثلاثة بيدّوا نفس الإجابة.
+          preciseDurationHoursExpr: '$9::numeric / 60.0',
           dailyCapacityMinutesParam: '$8',
         })}
       GROUP BY tc.id, tc.name
@@ -793,6 +801,10 @@ export class TechniciansService {
             durationMinutesExpr: '$11::int',
             serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
           },
+          // ADR-0077 — القايمة دي كانت بتشوف السقف اليومي بس، فكانت بتعرض فني محجوز في نفس
+          // الساعة بالظبط. المدة الحقيقية للمرشّح بتحوّل الفحص لتقاطع وقت فعلي — نفس اللي
+          // التوزيع والتعيين بيعملوه، فالثلاثة بيدّوا نفس الإجابة.
+          preciseDurationHoursExpr: '$11::numeric / 60.0',
           dailyCapacityMinutesParam: '$8',
         })}
       ORDER BY average_rating DESC, distance_km ASC NULLS LAST
@@ -939,6 +951,10 @@ export class TechniciansService {
               durationMinutesExpr: '$11::int',
               serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
             },
+            // ADR-0077 — القايمة دي كانت بتشوف السقف اليومي بس، فكانت بتعرض فني محجوز في نفس
+            // الساعة بالظبط. المدة الحقيقية للمرشّح بتحوّل الفحص لتقاطع وقت فعلي — نفس اللي
+            // التوزيع والتعيين بيعملوه، فالثلاثة بيدّوا نفس الإجابة.
+            preciseDurationHoursExpr: '$11::numeric / 60.0',
             dailyCapacityMinutesParam: '$8',
           })}
       ) AS exists
