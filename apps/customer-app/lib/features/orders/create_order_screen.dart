@@ -858,6 +858,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             addressId: _selectedAddress!.id,
             selectionMode: 'manual',
             technicianId: technicianId,
+            bookingMode: widget.bookingMode,
             scheduledAt: widget.scheduleSlotId != null
                 ? null
                 : (widget.service.requiresStartTime
@@ -1193,7 +1194,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         // بلاغ مالك: شغلانة ساعتين كانت بتتعرض «يوم واحد». الدقايق كانت راجعة من الـAPI من
         // الأول — الواجهة بس كانت بتتجاهلها وتكتب «يوم» جنب الرقم. الصياغة بقت في مكان واحد.
-        if (formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays) != null)
+        if (formatWorkDuration(
+              minutes: preview.durationMinutes,
+              days: preview.estimatedDurationDays,
+            ) !=
+            null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: Text(
