@@ -172,7 +172,9 @@ export class CatalogController {
       query.exclude_technician_id,
       query.scheduled_at ? new Date(query.scheduled_at) : null,
       query.booking_mode === 'team',
-      true,
+      // ADR-0080 — الشركة منفّذ يقدر العميل يختاره في أي حجز عادي. الطوارئ مستثناة: بتتوزّع
+      // بثًّا فوريًا بلا اختيار منفّذ أصلاً، فعرض الشركات فيها بيوعد بحاجة الفلو مابيوفّهاش.
+      !isEmergency,
       neutralEstimate
         ? {
             durationMinutes: neutralEstimate.duration_minutes,

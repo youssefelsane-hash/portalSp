@@ -36,6 +36,8 @@ export interface StaffMemberResponseDto {
   branch_id: string | null;
   current_level: string;
   verification_status: string;
+  /** ADR-0080 — العضو ده مايظهرش كفرد؛ يوصله شغل عن طريق الشركة بس. */
+  company_exclusive: boolean;
 }
 
 export interface CompanyDetailResponseDto {

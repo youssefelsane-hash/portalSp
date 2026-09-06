@@ -2,7 +2,7 @@ import { TechnicianZone } from '../entities/technician-zone.entity';
 
 export interface TechnicianZoneResponseDto {
   id: string;
-  technician_id: string | null;
+  technician_id: string;
   service_zone_id: string;
   is_primary: boolean;
   is_active: boolean;

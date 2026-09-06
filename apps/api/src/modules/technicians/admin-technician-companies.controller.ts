@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -14,15 +14,6 @@ import {
   toStaffMemberResponseDto,
 } from './dto/company-response.dto';
 import { TechnicianCompaniesService } from './technician-companies.service';
-import { ProviderScopeService } from './provider-scope.service';
-import {
-  AssignProviderCategoryDto,
-  AssignProviderServiceDto,
-  AssignProviderZoneDto,
-} from './dto/assign-provider-scope.dto';
-import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
-import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
-import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto';
 
 // إشراف الأدمن على شركات/فرق الفنيين — القراءة read-only عمداً، الإدارة نفسها ذاتية (owner/manager
 // بتاعت كل شركة) زي أي أدمن يشوف كل حاجة (RolesGuard كفاية، مفيش @RequirePermission).
@@ -32,15 +23,7 @@ import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto'
 @Controller('admin/technician-companies')
 @Roles(UserType.ADMIN)
 export class AdminTechnicianCompaniesController {
-  constructor(
-    private readonly companiesService: TechnicianCompaniesService,
-    private readonly providerScope: ProviderScopeService,
-  ) {}
-
-  /** ADR-0079 — الشركة مالك نطاق زي الفني بالظبط، بنفس الخدمة ونفس الجداول. */
-  private owner(id: string) {
-    return { kind: 'company' as const, id };
-  }
+  constructor(private readonly companiesService: TechnicianCompaniesService) {}
 
   @Get()
   @RequirePermission('technician_companies.view')
@@ -105,106 +88,5 @@ export class AdminTechnicianCompaniesController {
   async listOrders(@Param('id', ParseUUIDPipe) id: string) {
     const rows = await this.companiesService.listOrdersForAdmin(id);
     return rows.map(toCompanyOrderSummaryResponseDto);
-  }
-
-  // ── نطاق تشغيل الشركة (ADR-0079) ────────────────────────────────────
-  //
-  // «أنا عايز الشركة يكون عندها نفس اللي عند الفني بالضبط، عشان الأدمين يعرف يخش يديها
-  // صلاحيات تشتغل فيهم وتشتغلش في إيه، تشتغل في أنهي مناطق» (طلب مالك، 2026-09-06).
-  //
-  // نفس الجداول ونفس الخدمة اللي بتخدم نطاق الفني — `ProviderScopeService` — بمالك مختلف بس.
-  // الصلاحيات نفس صلاحيات نطاق الفني بالحرف عشان مايبقاش فيه باب خلفي أوسع للشركة.
-
-  @Get(':id/services')
-  @RequirePermission('technician_companies.view')
-  async listServices(@Param('id', ParseUUIDPipe) id: string) {
-    const rows = await this.providerScope.listServices(this.owner(id));
-    return rows.map((row) => toTechnicianServiceResponseDto(row));
-  }
-
-  @Post(':id/services')
-  @RequirePermission('technicians.approve')
-  async assignService(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignProviderServiceDto,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    const row = await this.providerScope.assignService(admin.sub, this.owner(id), dto.service_id, audit);
-    return toTechnicianServiceResponseDto(row);
-  }
-
-  @Delete(':id/services/:serviceId')
-  @RequirePermission('technicians.approve')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async removeService(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('serviceId', ParseUUIDPipe) serviceId: string,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    await this.providerScope.removeService(admin.sub, this.owner(id), serviceId, audit);
-  }
-
-  @Get(':id/categories')
-  @RequirePermission('technician_companies.view')
-  async listCategories(@Param('id', ParseUUIDPipe) id: string) {
-    const rows = await this.providerScope.listCategories(this.owner(id));
-    return rows.map((row) => toTechnicianCategoryResponseDto(row));
-  }
-
-  @Post(':id/categories')
-  @RequirePermission('technicians.approve')
-  async assignCategory(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignProviderCategoryDto,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    const row = await this.providerScope.assignCategory(admin.sub, this.owner(id), dto.category_id, audit);
-    return toTechnicianCategoryResponseDto(row);
-  }
-
-  @Delete(':id/categories/:categoryId')
-  @RequirePermission('technicians.approve')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async removeCategory(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('categoryId', ParseUUIDPipe) categoryId: string,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    await this.providerScope.removeCategory(admin.sub, this.owner(id), categoryId, audit);
-  }
-
-  @Get(':id/zones')
-  @RequirePermission('technician_companies.view')
-  async listZones(@Param('id', ParseUUIDPipe) id: string) {
-    const rows = await this.providerScope.listZones(this.owner(id));
-    return rows.map(toTechnicianZoneResponseDto);
-  }
-
-  @Post(':id/zones')
-  @RequirePermission('technicians.approve')
-  async assignZone(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignProviderZoneDto,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    const row = await this.providerScope.assignZone(admin.sub, this.owner(id), dto.service_zone_id, dto.is_primary ?? false, audit);
-    return toTechnicianZoneResponseDto(row);
-  }
-
-  @Delete(':id/zones/:zoneId')
-  @RequirePermission('technicians.approve')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async removeZone(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('zoneId', ParseUUIDPipe) zoneId: string,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    await this.providerScope.removeZone(admin.sub, this.owner(id), zoneId, audit);
   }
 }

@@ -29,6 +29,7 @@ import {
   describeTechnicianCapacity,
   technicianAvailabilityCondition,
   technicianScheduleConflictCondition,
+  technicianIndividualVisibilityCondition,
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
@@ -482,6 +483,9 @@ export class TechniciansService {
         -- والتوزيع الفعلي بعد كده يرفضه تمامًا بصمت. current_location شرط أساسي مايتفاوضش عليه
         -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
         AND tp.current_location IS NOT NULL
+        -- ADR-0080 — الفني «الحصري للشركة» مايظهرش في قايمة الأفراد خالص؛ بيوصله شغل عن طريق
+        -- شركته بس (فرع الشركات تحت مابيطبّقش الشرط ده عمدًا).
+        AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })}
         AND ($4::uuid IS NULL OR tp.id != $4)
         -- docs/08 §38 — نفس فلترة findEligibleTechnicians()/assertCoreEligibility() بالحرف، عشان
         -- قايمة التصفّح متعرضش فني هيترفض وقت التأكيد الفعلي. individual/emergency ($12=false)
@@ -586,7 +590,12 @@ export class TechniciansService {
     // الفوري. بلا فلتر مستوى هنا عمداً — الشركة أصلاً موثوقة كوحدة (مالكها/مديرها لازم كان
     // premium+ وقت الإنشاء، technician-companies.service.ts's canLeadTeam check)، وطلب المالك
     // كان "الشركات بتظهر كده كده" بلا أي شرط إضافي.
-    if (!isTeamBooking || !includeCompanyEntities) {
+    // ADR-0080 (طلب مالك، 2026-09-06: «لما بدخل أحجز أي خدمة مش بشوف الشركات») — الشركات بقت
+    // تظهر في **كل** حجز يقدر العميل يختار فيه منفّذ، مش «اعتماد» بس. الشرط القديم كان
+    // `!isTeamBooking || !includeCompanyEntities`، و`allows_team` مقفول على كل الخدمات فعليًا،
+    // فالشركات كانت غير مرئية بالكامل. الكولر هو اللي بيقرر (`includeCompanyEntities`) — إعادة
+    // التعيين واختيار المنفّذ بعد العرض لسه بيستبعدوها عمدًا لأسبابهم الموثّقة.
+    if (!includeCompanyEntities) {
       return {
         zoneId: zone.id,
         items: dedupeTechnicianBookingItems([...individualItems, ...conflictedItems]),
@@ -707,12 +716,26 @@ export class TechniciansService {
       availableAgainAt: null,
     }));
 
-    // ترتيب موحّد بسيط (تقييم ثم قرب) بعد الدمج — recommendation_score البايزي محسوب بس للفنيين
-    // الأفراد (فوق)، فمفيش مقياس واحد موحّد نقدر نستخدمه للاتنين مع بعض غير التقييم/المسافة.
+    /**
+     * **ترتيب موحّد بنفس مقياس الترشيح البايزي** — مش «تقييم خام ثم قرب».
+     *
+     * الترتيب القديم كان بيعيد فرز الأفراد بالتقييم الخام، فبيرمي `recommendation_score`
+     * البايزي اللي الاستعلام حسبه (`(n·r + m·C) / (n + m)`). كان أثره محدود لأن المسار ده كان
+     * بيشتغل في «اعتماد» بس؛ بعد ADR-0080 (الشركات بتظهر في كل حجز) بقى بيضرب **كل** قايمة —
+     * وده كان بيرجّع بالظبط البَقّة اللي Script 6 Part 9 اتعمل عشانها: فني 5.0 بتقييم واحد
+     * بيسبق فني 4.9 بمئتين تقييم.
+     *
+     * الحل: نفس الصيغة بالحرف على الطرفين. الشركة عندها `average_rating` و`total_ratings`
+     * مجمّعين من أعضائها، فالمقياس ينطبق عليها من غير أي اختراع.
+     */
+    const bayesianScore = (rating: number, ratingsCount: number): number =>
+      (ratingsCount * rating + bayesianMinSamples * bayesianPriorMean) / (ratingsCount + bayesianMinSamples || 1);
     // المتعارضين (ADR-0030) بيتضافوا آخر القايمة دايمًا (بغض النظر عن تقييمهم) — مؤهّل ومتاح فعلاً
     // لازم يفضل ظاهر أولاً، "متعارض" معلومة إضافية مش بديل عن الترتيب العادي.
     const merged = [...individualItems, ...companyItems].sort((a, b) => {
-      if (b.averageRating !== a.averageRating) return b.averageRating - a.averageRating;
+      const scoreDelta =
+        bayesianScore(b.averageRating, b.totalRatingsCount) - bayesianScore(a.averageRating, a.totalRatingsCount);
+      if (Math.abs(scoreDelta) > 1e-9) return scoreDelta;
       const da = a.distanceKm ?? Number.POSITIVE_INFINITY;
       const db = b.distanceKm ?? Number.POSITIVE_INFINITY;
       return da - db;
@@ -783,6 +806,8 @@ export class TechniciansService {
           directServiceAlias: 'ts',
         })}
         AND tp.current_location IS NOT NULL
+        -- ADR-0080 — نفس قاعدة قايمة الأفراد فوق: الحصري للشركة مايظهرش حتى كـ«متعارض جدوليًا».
+        AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })}
         AND NOT (tp.id = ANY($9::uuid[]))
         AND ($10::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
         ${technicianScheduleConflictCondition({
@@ -937,6 +962,10 @@ export class TechniciansService {
             directServiceAlias: 'ts',
           })}
           AND tp.current_location IS NOT NULL
+          -- ADR-0080 — «فيه حد متاح اليوم ده؟» سؤال عن الأفراد، فالحصري للشركة مايتحسبش.
+          -- الاستثناء: لما السؤال عن فني **بعينه** ($9)، بيتجاوب عنه زي ما هو — الدالة دي
+          -- بتخدم اقتراح مواعيد لفني متعيّن بالفعل، وإخفاؤه هناك بيكسر إعادة جدولة طلب شركة.
+          AND ($9::uuid IS NOT NULL OR ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })})
           AND ($9::uuid IS NULL OR tp.id = $9)
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'tp.id',

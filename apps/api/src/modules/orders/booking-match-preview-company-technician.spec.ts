@@ -145,6 +145,7 @@ describe('معاينة المطابقة لفني تابع لشركة (chk_bookin
       } as never,
       { getNumber: async (_k: string, fallback: number) => fallback } as never,
       {} as never,
+      { findActiveCompanyOrThrow: async () => ({ id: ids.company, name: 'شركة' }) } as never,
     );
 
   const createPreview = (technicianId: string, companyId: string | null) =>
@@ -153,6 +154,15 @@ describe('معاينة المطابقة لفني تابع لشركة (chk_bookin
       address_id: ids.address,
       selection_mode: 'manual',
       technician_id: technicianId,
+    } as never);
+
+  /** ADR-0080 — العميل اختار **شركة**: التوزيع بيدوّر جوّاها والتذكرة بتثبّت الشركة كمنفّذ. */
+  const createCompanyPreview = () =>
+    buildService(ids.companyTech, ids.company).create(ids.customer, {
+      service_id: ids.service,
+      address_id: ids.address,
+      selection_mode: 'manual',
+      requested_technician_company_id: ids.company,
     } as never);
 
   it('فني تابع لشركة: التذكرة بتتحفظ، وعمود الشركة بيفضل فاضي', async () => {
@@ -173,6 +183,42 @@ describe('معاينة المطابقة لفني تابع لشركة (chk_bookin
       [preview.match_preview_id],
     );
     expect(row.technician_company_id).toBeNull();
+  });
+
+  // ===== ADR-0080 — الشركة كمنفّذ مختار =====
+  it('اختيار شركة: التذكرة بتثبّت الشركة، والفني بيفضل فاضي', async () => {
+    const preview = await createCompanyPreview();
+    expect(preview.provider_kind).toBe('company');
+    expect(preview.provider.id).toBe(ids.company);
+    const [row] = await q<{ technician_id: string | null; technician_company_id: string | null }>(
+      `SELECT technician_id, technician_company_id FROM booking_match_previews WHERE id = $1`,
+      [preview.match_preview_id],
+    );
+    expect(row.technician_company_id).toBe(ids.company);
+    expect(row.technician_id).toBeNull();
+  });
+
+  it('مينفعش تختار فني وشركة مع بعض', async () => {
+    await expect(
+      buildService(ids.companyTech, ids.company).create(ids.customer, {
+        service_id: ids.service,
+        address_id: ids.address,
+        selection_mode: 'manual',
+        technician_id: ids.companyTech,
+        requested_technician_company_id: ids.company,
+      } as never),
+    ).rejects.toThrow(/فني أو شركة/);
+  });
+
+  it('«اختاروا لي الأنسب» مابيقبلش اختيار منفّذ', async () => {
+    await expect(
+      buildService(ids.companyTech, ids.company).create(ids.customer, {
+        service_id: ids.service,
+        address_id: ids.address,
+        selection_mode: 'auto',
+        requested_technician_company_id: ids.company,
+      } as never),
+    ).rejects.toThrow(/لا تقبل اختيار منفّذ/);
   });
 
   it('القيد نفسه حقيقي: صف بالعمودين مليانين بيترفض من قاعدة البيانات', async () => {

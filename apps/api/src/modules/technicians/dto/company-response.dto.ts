@@ -90,6 +90,8 @@ export interface StaffMemberResponseDto {
   branch_id: string | null;
   current_level: string;
   verification_status: string;
+  /** ADR-0080 — العضو ده مايظهرش كفرد؛ يوصله شغل عن طريق الشركة بس. */
+  company_exclusive: boolean;
 }
 
 export function toStaffMemberResponseDto(profile: TechnicianProfile, fullName: string): StaffMemberResponseDto {
@@ -101,6 +103,8 @@ export function toStaffMemberResponseDto(profile: TechnicianProfile, fullName: s
     branch_id: profile.branchId,
     current_level: profile.currentLevel,
     verification_status: profile.verificationStatus,
+    // ADR-0080 — مالك الشركة لازم يشوف حالة الزرار على كل عضو، مش يفتكرها.
+    company_exclusive: profile.companyExclusive,
   };
 }
 

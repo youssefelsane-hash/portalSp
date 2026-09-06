@@ -16,6 +16,7 @@ import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
 import { SetTechnicianKindDto } from './dto/set-technician-kind.dto';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
+import { SetCompanyExclusiveDto } from './dto/set-company-exclusive.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
@@ -646,6 +647,22 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.setTechnicianKind(admin.sub, id, dto, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  /**
+   * ADR-0080 — «حصري للشركة». نفس صلاحية باقي قرارات ملف الفني الإدارية: القرار ده بيغيّر مين
+   * بيوصله شغل، فمش قرار تشغيلي عابر.
+   */
+  @Patch(':id/company-exclusive')
+  @RequirePermission('technicians.approve')
+  async setCompanyExclusive(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCompanyExclusiveDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.setCompanyExclusive(admin.sub, id, dto, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

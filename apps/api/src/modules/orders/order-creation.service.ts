@@ -58,6 +58,7 @@ import {
   bookingFingerprintInput,
   bookingMatchContextHash,
   bookingPreviewInputFromCreate,
+  matchPreviewProviderId,
 } from './booking-match-context';
 
 const BOOKING_FINGERPRINT_FIELD_LABELS_AR: Record<string, string> = {
@@ -463,7 +464,8 @@ export class OrderCreationService {
         !selectedMatchPreview ||
         selectedMatchPreview.status !== 'active' ||
         selectedMatchPreview.expiresAt.getTime() <= Date.now() ||
-        !selectedMatchPreview.technicianId
+        // ADR-0080 — المنفّذ المثبّت ممكن يبقى شركة، فالفحص بقى «فيه منفّذ؟» مش «فيه فني؟».
+        !matchPreviewProviderId(selectedMatchPreview)
       ) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -477,27 +479,39 @@ export class OrderCreationService {
       ) {
         throw new ApiException(ErrorCode.VAL_001, 'معاينة الحجز لا تخص هذه الخدمة أو العنوان', HttpStatus.CONFLICT);
       }
-      if (
-        dto.request_remote_quote ||
-        dto.original_order_id ||
-        dto.repeat_frequency ||
-        dto.schedule_slot_id ||
-        dto.requested_technician_company_id
-      ) {
+      if (dto.request_remote_quote || dto.original_order_id || dto.repeat_frequency || dto.schedule_slot_id) {
         throw new ApiException(
           ErrorCode.VAL_001,
-          'معاينة الفني لا تُجمع مع تقييم الصور أو إعادة الزيارة أو التكرار أو الشركة أو السلوت',
+          'معاينة المنفّذ لا تُجمع مع تقييم الصور أو إعادة الزيارة أو التكرار أو السلوت',
           HttpStatus.BAD_REQUEST,
         );
       }
-      if (dto.requested_technician_id && dto.requested_technician_id !== selectedMatchPreview.technicianId) {
-        throw new ApiException(ErrorCode.VAL_001, 'الفني المرسل مختلف عن الفني المثبّت في المعاينة', HttpStatus.CONFLICT);
+      // ADR-0080 — التذكرة بتثبّت **منفّذ**: فني أو شركة. اللي بيتبعت في الإنشاء لازم يطابق
+      // اللي اتثبّت، والحقل التاني لازم يفضل فاضي — وإلا الطلب بيحمل تفضيلين متناقضين.
+      if (selectedMatchPreview.technicianCompanyId) {
+        if (dto.requested_technician_id) {
+          throw new ApiException(ErrorCode.VAL_001, 'التذكرة دي لشركة — مينفعش تبعت فني معاها', HttpStatus.CONFLICT);
+        }
+        if (
+          dto.requested_technician_company_id &&
+          dto.requested_technician_company_id !== selectedMatchPreview.technicianCompanyId
+        ) {
+          throw new ApiException(ErrorCode.VAL_001, 'الشركة المرسلة مختلفة عن الشركة المثبّتة في المعاينة', HttpStatus.CONFLICT);
+        }
+        dto.requested_technician_company_id = selectedMatchPreview.technicianCompanyId;
+      } else {
+        if (dto.requested_technician_company_id) {
+          throw new ApiException(ErrorCode.VAL_001, 'التذكرة دي لفني بعينه — مينفعش تبعت شركة معاها', HttpStatus.CONFLICT);
+        }
+        if (dto.requested_technician_id && dto.requested_technician_id !== selectedMatchPreview.technicianId) {
+          throw new ApiException(ErrorCode.VAL_001, 'الفني المرسل مختلف عن الفني المثبّت في المعاينة', HttpStatus.CONFLICT);
+        }
+        dto.requested_technician_id = selectedMatchPreview.technicianId ?? undefined;
       }
-      dto.requested_technician_id = selectedMatchPreview.technicianId;
       selectedMatchContextHash = bookingMatchContextHash(
         bookingPreviewInputFromCreate(dto),
         selectedMatchPreview.selectionMode,
-        selectedMatchPreview.technicianId,
+        matchPreviewProviderId(selectedMatchPreview)!,
       );
       if (selectedMatchContextHash !== selectedMatchPreview.contextHash) {
         // «معاينة» في الرسالة القديمة كانت بتتقري على إنها معاينة الموقع (زيارة الفني)، وهي

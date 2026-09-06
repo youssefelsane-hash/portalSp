@@ -80,7 +80,7 @@ export interface BookingMatchPreviewProvider {
   id: string;
   full_name: string;
   avatar_url: string | null;
-  current_level: string;
+  current_level: string | null;
   average_rating: number;
   total_ratings_count: number;
   completed_orders_count: number;
@@ -91,6 +91,8 @@ export interface BookingMatchPreviewDto {
   match_preview_id: string;
   expires_at: string;
   selection_mode: 'auto' | 'manual';
+  /** ADR-0080 — المنفّذ المثبّت شركة ولا فني فرد. */
+  provider_kind: 'technician' | 'company';
   provider: BookingMatchPreviewProvider;
   pricing: PreviewOrderResponseDto;
 }
@@ -100,6 +102,8 @@ export interface CreateMatchPreviewBody {
   address_id: string;
   selection_mode: 'auto' | 'manual';
   technician_id?: string;
+  /** ADR-0080 — العميل اختار شركة: التوزيع بيدوّر جوّاها والتذكرة بتثبّتها كمنفّذ. */
+  requested_technician_company_id?: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   scheduled_at?: string;
   field_values?: Record<string, string | number | boolean>;

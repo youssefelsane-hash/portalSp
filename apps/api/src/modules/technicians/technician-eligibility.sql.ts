@@ -5,7 +5,6 @@ import {
   dailyCapacityExceededExpr,
   technicianDayLoadSubquery,
 } from './technician-day-capacity.sql';
-import { providerServiceQualificationCondition } from './provider-scope.sql';
 
 /**
  * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
@@ -591,15 +590,62 @@ export function technicianServiceQualificationCondition(opts: {
    */
   directServiceAlias?: string;
 }): string {
-  // ADR-0079 — القاعدة نفسها عاشت في `provider-scope.sql.ts`: نفس الجملة بالحرف للفني وللشركة،
-  // بيتغيّر عمود المالك بس. الدالة دي بقت اسم مألوف على نفس القاعدة، مش نسخة منها.
-  return providerServiceQualificationCondition({
-    ownerColumn: 'technician_id',
-    ownerIdExpr: opts.technicianIdExpr,
-    serviceIdExpr: opts.serviceIdExpr,
-    categoryIdExpr: opts.categoryIdExpr,
-    directServiceAlias: opts.directServiceAlias,
-  });
+  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
+  const notExcluded = `NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )`;
+
+  const directlyApproved = opts.directServiceAlias
+    ? `${opts.directServiceAlias}.id IS NOT NULL`
+    : `EXISTS (
+             SELECT 1 FROM technician_services direct_svc
+             WHERE direct_svc.technician_id = ${opts.technicianIdExpr}
+               AND direct_svc.service_id = ${opts.serviceIdExpr}
+               AND direct_svc.is_active = true
+               AND direct_svc.verification_status = 'approved'
+           )`;
+
+  return `(
+          ${directlyApproved}
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tec_cat
+            WHERE tec_cat.technician_id = ${opts.technicianIdExpr}
+              AND tec_cat.category_id = ${opts.categoryIdExpr}
+              AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
+          )
+        )
+        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
+        AND ${notExcluded}`;
+}
+
+/**
+ * **«الفني ده ظاهر كفرد؟»** — ADR-0080، طلب مالك صريح (2026-09-06).
+ *
+ * > «عايز زرار عند كل فني داخل في شركة… لو متفعل، الفني ده ما بيظهرش أصلًا إن هو فرد لوحده،
+ * >  كأنه مش متسجل معانا، هو فقط تابع للشركة، يعني بيتم اختياره فقط عن طريق الشركة بتاعته.»
+ *
+ * القاعدة سطر واحد، والمهم فيه هو **الاستثناء**: العلم بيتجاهَل تمامًا لما الاستعلام يكون
+ * **مقيّد بشركة بعينها** أصلاً — لأن ده بالظبط المسار الوحيد اللي المفروض يوصل للفني ده.
+ * ولو الشرط اتحط بلا الاستثناء ده، الفني الحصري كان هيختفي حتى من توزيع شركته هو، يعني
+ * مايشتغلش خالص.
+ *
+ * بيتحط في كل مسار **مش** مقيّد بشركة: التوزيع التلقائي العام، قايمة اختيار العميل، قايمة
+ * «مؤهّل بس متعارض»، واقتراح المواعيد. مسار الشركة (`listForServiceBooking` فرع الشركات،
+ * والتوزيع بـ`requested_technician_company_id`) **مابيتحطش عليه** عمدًا.
+ */
+export function technicianIndividualVisibilityCondition(opts: {
+  /** alias صف الفني، مثلاً `tp` أو `member`. */
+  technicianAlias: string;
+  /**
+   * parameter الشركة اللي الاستعلام مقيّد بيها (`$9` مثلاً). لو الاستعلام مش بيقيّد بشركة
+   * أصلاً، سيبها فاضية وهتتقري `NULL` — يعني الشرط ساري بالكامل.
+   */
+  companyScopeParam?: string;
+}): string {
+  const scope = opts.companyScopeParam ?? 'NULL';
+  return `(${opts.technicianAlias}.company_exclusive = false OR ${scope}::uuid IS NOT NULL)`;
 }
 
 /**

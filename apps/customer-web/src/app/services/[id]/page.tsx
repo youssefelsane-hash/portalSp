@@ -64,6 +64,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [technicianChoiceMode, setTechnicianChoiceMode] = useState<'auto' | 'manual'>('auto');
   const [technicians, setTechnicians] = useState<TechnicianBookingListItemDto[] | null>(null);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string | null>(null);
+  /**
+   * ADR-0080 — المنفّذ المختار شركة ولا فني. بيتقري من القايمة نفسها بدل ما يتخزّن كحالة تانية
+   * ممكن تنحرف عن `selectedTechnicianId`.
+   */
+  const selectedProviderIsCompany = Boolean(
+    selectedTechnicianId && technicians?.find((t) => t.id === selectedTechnicianId)?.is_company,
+  );
 
   // إعادة ترتيب اختيار الميعاد (docs/08 §83 جزء ب، طلب مالك) — يوم (محدد/مرن) قبل تفاصيل السعر
   // مباشرة، مطابق apps/customer-app's ScheduleSelectionScreen بالحرف. خيار "أقرب وقت ممكن" اتشال
@@ -234,7 +241,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }
 
   /** بند 9-12 — بيطلب المرشّح وسعره من الباك-إند قبل الإنشاء، ويقفلهم بتذكرة. */
-  async function requestMatchPreview(mode: 'auto' | 'manual', technicianId?: string) {
+  async function requestMatchPreview(mode: 'auto' | 'manual', providerId?: string, isCompany = false) {
     if (!selectedAddressId) return;
     setPreviewLoading(true);
     setPreviewError(null);
@@ -244,7 +251,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         service_id: service!.id,
         address_id: selectedAddressId,
         selection_mode: mode,
-        ...(technicianId ? { technician_id: technicianId } : {}),
+        ...(providerId ? (isCompany ? { requested_technician_company_id: providerId } : { technician_id: providerId }) : {}),
         // نفس اللي بيتبعت في الإنشاء بالحرف — لازم البصمة تطابق، غير كده التذكرة بتبوظ.
         ...(computeScheduledAt(scheduledDate) ? { scheduled_at: computeScheduledAt(scheduledDate) } : {}),
         ...(Object.keys(fieldValues).length ? { field_values: fieldValues } : {}),
@@ -274,8 +281,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           service_id: service.id,
           address_id: selectedAddressId,
           booking_mode: effectiveRequestRemoteQuote ? 'individual' : bookingMode,
+          // ADR-0080 — الشركة بتتبعت في خانتها، مش في خانة الفني. التذكرة هي مصدر الحقيقة:
+          // الباك-إند بيعيد تثبيت الحقل الصح منها ويرفض أي تناقض.
           requested_technician_id:
-            !effectiveRequestRemoteQuote && technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
+            !effectiveRequestRemoteQuote && technicianChoiceMode === 'manual' && !selectedProviderIsCompany
+              ? (selectedTechnicianId ?? undefined)
+              : undefined,
+          requested_technician_company_id:
+            !effectiveRequestRemoteQuote && technicianChoiceMode === 'manual' && selectedProviderIsCompany
+              ? (selectedTechnicianId ?? undefined)
+              : undefined,
           problem_description: problemDescription || undefined,
           problem_image_ids: problemImages.map((image) => image.id),
           request_remote_quote: effectiveRequestRemoteQuote || undefined,
@@ -750,7 +765,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                       key={t.id}
                       t={t}
                       selected={selectedTechnicianId === t.id}
-                      onSelect={() => setSelectedTechnicianId(t.id)}
+                      // ADR-0080 — اختيار شركة بيقفل تذكرة زي اختيار فني بالظبط: التوزيع
+                      // بيدوّر جوّه الشركة والسعر بيتقفل. قبل كده الكارت كان بيسجّل معرّف
+                      // الشركة في `selectedTechnicianId` وبيتبعت كـ`requested_technician_id`
+                      // وقت الإنشاء — يعني معرّف شركة في خانة فني، والحجز بيقع.
+                      onSelect={() => {
+                        setSelectedTechnicianId(t.id);
+                        void requestMatchPreview('manual', t.id, true);
+                      }}
                     />
                   ) : (
                     <IndividualCard

@@ -27,6 +27,7 @@ import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
 import { SetTechnicianKindDto } from './dto/set-technician-kind.dto';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
+import { SetCompanyExclusiveDto } from './dto/set-company-exclusive.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -527,6 +528,62 @@ export class AdminTechniciansService {
     return withUser;
   }
 
+  /**
+   * **«حصري للشركة»** (ADR-0080) — نفس الزرار اللي مالك الشركة عنده (`updateStaff`)، من ناحية
+   * الأدمن. الاتنين بيكتبوا نفس العمود بنفس القاعدة؛ الفرق مين بيقدر يوصل للشاشة.
+   *
+   * الحارس هنا مش تجميل: العلم مالوش معنى لفني مستقل، والقاعدة بترفضه بـCHECK — فالرفض هنا
+   * برسالة عربية مفهومة أحسن من خطأ قاعدة بيانات خام في وش الأدمن.
+   */
+  async setCompanyExclusive(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: SetCompanyExclusiveDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (dto.company_exclusive && !profile.companyId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الفني ده مش تابع لأي شركة — «حصري للشركة» مالهاش معنى من غير شركة',
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (profile.companyExclusive === dto.company_exclusive) {
+      const [unchanged] = await this.attachUsers([profile]);
+      return unchanged;
+    }
+
+    const previous = profile.companyExclusive;
+    profile.companyExclusive = dto.company_exclusive;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: dto.company_exclusive ? 'technician.company_exclusive_enabled' : 'technician.company_exclusive_disabled',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { company_exclusive: previous },
+      newValues: { company_exclusive: dto.company_exclusive, company_id: profile.companyId },
+      meta,
+    });
+
+    // الفني لازم يعرف إن مسار وصول الشغل له اتغيّر — ده مش تفصيلة إدارية، ده دخله.
+    this.emitAdminAction(
+      profile.userId,
+      dto.company_exclusive ? 'company_exclusive_enabled' : 'company_exclusive_disabled',
+      dto.company_exclusive ? 'شغلك بقى من خلال شركتك' : 'رجعت تستقبل شغل عادي',
+      dto.company_exclusive
+        ? 'من دلوقتي الشغل هيوصلك من خلال شركتك بس — مش هتظهر للعملاء كفني مستقل'
+        : 'رجعت تظهر للعملاء زي أي فني مستقل، والشغل هيوصلك من الاتنين',
+      profile.id,
+    );
+
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
   async setTrustBadge(
     adminUserId: string,
     technicianProfileId: string,
@@ -768,9 +825,6 @@ export class AdminTechniciansService {
     previousStatus: TechnicianServiceVerificationStatus,
     reason: string | null,
   ): Promise<void> {
-    // ADR-0079 — الجدول ده بقى جدول نطاق منفّذ: صف الشركة مالوش فني، والحدث ده إشعار **للفني**
-    // بالتحديد. مفيش حد يتبلّغ، فبنخرج بهدوء بدل ما نرمي على حالة صحيحة تمامًا.
-    if (!row.technicianId) return;
     const [profile, service] = await Promise.all([
       this.findProfileOrThrow(row.technicianId),
       this.services.findOne({ where: { id: row.serviceId } }),
