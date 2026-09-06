@@ -660,7 +660,13 @@ export class AdminCatalogService {
         // A percentage row must not retain a hidden legacy multiplier.
         nextPricing.surgeMultiplier = '1';
       }
-      if (dto.inspection_fee_cents !== undefined) nextPricing.inspectionFeeCents = dto.inspection_fee_cents;
+      // تسعير المنطقة لا ينبغي أن يصفر رسم المعاينة لمجرد أن الأدمين عدّل نسبة السعر.
+      // غياب الحقل يعني وراثة الرسم الحالي للخدمة، وإرساله يعني override صريح.
+      if (dto.inspection_fee_cents !== undefined) {
+        nextPricing.inspectionFeeCents = dto.inspection_fee_cents;
+      } else if (created) {
+        nextPricing.inspectionFeeCents = service.inspectionFeeCents;
+      }
       if (mode === ZonePricingMode.OVERRIDE && dto.surge_multiplier !== undefined) {
         nextPricing.surgeMultiplier = String(dto.surge_multiplier);
       }

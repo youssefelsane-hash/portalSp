@@ -326,7 +326,7 @@ export const approveInitialQuote = (
   id: string,
   paymentChoice: 'cash' | 'electronic' = 'electronic',
 ) =>
-  authedFetch<OrderResponseDto>(`/orders/${id}/initial-quote/approve`, {
+  authedFetch<OrderResponseDto>(`/orders/${id}/approve-initial-quote`, {
     method: 'POST',
     body: JSON.stringify({ payment_choice: paymentChoice }),
   });

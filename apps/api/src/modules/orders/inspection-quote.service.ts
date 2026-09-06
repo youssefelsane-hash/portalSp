@@ -753,7 +753,14 @@ export class InspectionQuoteService {
           OrderStatus.IN_PROGRESS,
         ].includes(order.orderStatus)
       ) {
-        return { order, previousStatus: order.orderStatus, quotedAmountCents: 0, nextStatus: order.orderStatus, idempotent: true };
+        return {
+          order,
+          previousStatus: order.orderStatus,
+          quotedAmountCents: 0,
+          immediateElectronicChargeCents: 0,
+          nextStatus: order.orderStatus,
+          idempotent: true,
+        };
       }
 
       if (order.orderStatus !== OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL || !quote) {
@@ -769,6 +776,7 @@ export class InspectionQuoteService {
           order,
           previousStatus: order.orderStatus,
           quotedAmountCents: 0,
+          immediateElectronicChargeCents: 0,
           nextStatus: order.orderStatus,
           idempotent: false,
           expired: true,
@@ -879,10 +887,18 @@ export class InspectionQuoteService {
         manager,
       );
 
-      return { order, previousStatus, quotedAmountCents, nextStatus, idempotent: false, expired: false };
+      return {
+        order,
+        previousStatus,
+        quotedAmountCents,
+        immediateElectronicChargeCents: Math.max(0, deltaCents),
+        nextStatus,
+        idempotent: false,
+        expired: false,
+      };
     });
 
-    const { order, previousStatus, quotedAmountCents, nextStatus } = result;
+    const { order, previousStatus, quotedAmountCents, immediateElectronicChargeCents, nextStatus } = result;
 
     if ('expired' in result && result.expired) {
       throw new ApiException(ErrorCode.ORDR_003, 'انتهت صلاحية عرض السعر — اطلب عرضًا محدثًا', HttpStatus.CONFLICT);
@@ -913,9 +929,15 @@ export class InspectionQuoteService {
 
     // تحصيل فوري (docs/08 §21 نفس النمط) — برّه الـtransaction عمداً، فشله ميرجّعش خطأ للعميل
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل. batchId هنا مجرد مفتاح idempotency (مش بيتفحص ضد order_items).
-    if (order.paymentStatus === OrderPaymentStatus.PAID && paymentChoice === 'electronic' && quotedAmountCents > 0) {
+    // رسم المعاينة المُسدد يتحول لرصيد من سعر العرض. تحصيل العرض كاملاً هنا كان بيخصم
+    // الرسم مرتين من العميل رغم أن `increasePrice()` سجّل الالتزام الصافي فقط.
+    if (
+      order.paymentStatus === OrderPaymentStatus.PAID &&
+      paymentChoice === 'electronic' &&
+      immediateElectronicChargeCents > 0
+    ) {
       try {
-        await this.paymentsService.attemptAdditionalWorkCharge(order.id, randomUUID(), quotedAmountCents);
+        await this.paymentsService.attemptAdditionalWorkCharge(order.id, randomUUID(), immediateElectronicChargeCents);
       } catch (err) {
         this.logger.error(
           `فشل محاولة تحصيل سعر بعد المعاينة للطلب ${order.id} — المبلغ يفضل obligation مسجّل`,

@@ -286,6 +286,7 @@ function InitialQuoteApprovalSection({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paymentChoice, setPaymentChoice] = useState<'cash' | 'electronic'>('electronic');
   const isRemoteQuote = order.initial_quote_source === 'admin_remote';
 
   async function resolve(action: 'approve' | 'reject') {
@@ -293,7 +294,7 @@ function InitialQuoteApprovalSection({
     setError(null);
     try {
       if (action === 'approve') {
-        await approveInitialQuote(authedFetch, order.id);
+        await approveInitialQuote(authedFetch, order.id, paymentChoice);
       } else {
         await cancelOrder(authedFetch, order.id, { reason: 'العميل رفض السعر المقترح' });
       }
@@ -320,6 +321,17 @@ function InitialQuoteApprovalSection({
         <span className="text-sm text-muted">السعر المقترح</span>
         <span className="text-xl font-bold text-primary">{formatEgp(order.estimated_price_cents ?? 0)}</span>
       </div>
+      <fieldset className="mt-4 space-y-2 rounded-lg border border-border bg-surface p-3">
+        <legend className="px-1 text-sm font-medium">طريقة سداد السعر المتبقي</legend>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input type="radio" checked={paymentChoice === 'electronic'} onChange={() => setPaymentChoice('electronic')} />
+          دفع إلكتروني
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input type="radio" checked={paymentChoice === 'cash'} onChange={() => setPaymentChoice('cash')} />
+          كاش عند التنفيذ
+        </label>
+      </fieldset>
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       <div className="mt-4 flex gap-2">
         <button

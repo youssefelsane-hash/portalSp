@@ -364,6 +364,41 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(addlPayment?.paymentStatus).toBe(PaymentGatewayStatus.PENDING); // مستنية تأكيد webhook زي أي تحصيل شغل إضافي
   });
 
+  it('الائتمان الكامل لرسم المعاينة يخصم منه قبل التحصيل الإلكتروني للعرض', async () => {
+    await savedPaymentMethods.upsertToken({
+      customerId: ids.customerProfile,
+      provider: 'fake-tokenizer',
+      providerToken: `tok-itq-credit-${runId}`,
+      cardBrand: 'visa',
+      maskedPan: '4242',
+    });
+    await savedPaymentMethods.setDefault(ids.customerUser, ids.customerProfile, (await savedPaymentMethods.listForCustomer(ids.customerProfile))[0].id);
+
+    const orderId = await insertOrder(`credit-${runId}`, ids.inspectionService, OrderStatus.TECHNICIAN_ARRIVED, {
+      totalAmountCents: 5000,
+      estimatedPriceCents: 0,
+      inspectionFeeCents: 5000,
+      paid: true,
+    });
+    await dataSource.query(
+      `UPDATE orders
+       SET commissionable_base_cents = 5000,
+           assessment_fee_credit_mode_snapshot = 'full',
+           assessment_fee_credit_bps_snapshot = 10000
+       WHERE id = $1`,
+      [orderId],
+    );
+
+    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-itq-credit', failureReason: null };
+    const order = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'electronic');
+
+    expect(order.totalAmountCents).toBe(30000);
+    const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
+    const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
+    expect(addlPayment?.amountCents).toBe(25000);
+  });
+
   it('العميل اختار كاش للسعر بعد المعاينة — صفر محاولة تحصيل إلكتروني', async () => {
     const orderId = await insertOrder(`approve-cash-${runId}`, ids.inspectionService, OrderStatus.TECHNICIAN_ARRIVED, {
       totalAmountCents: 5000,
