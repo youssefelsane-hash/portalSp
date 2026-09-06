@@ -237,7 +237,18 @@ export class BookingMatchPreviewService {
           serviceId: dto.service_id,
           addressId: dto.address_id,
           technicianId: chosen!.technician_id,
-          technicianCompanyId: chosen!.company_id,
+          // **بلاغ مالك حقيقي (2026-09-06، req_86942f97/req_58327a98)**: «فني واحد بس اسمه
+          // أحمد فني هو اللي عامل المشكلة» — أي فني **منتمي لشركة** كان بيفجّر الحجز بـ500.
+          //
+          // `chk_booking_match_preview_provider` بيفرض إن **واحد بالظبط** من العمودين يبقى
+          // مليان: التذكرة بتسجّل «المنفّذ المختار مين» — إما فني فرد أو شركة. والكود كان
+          // بيحط `chosen.company_id`، وهي **مش دي**: دي شركة الفني المنتمي ليها
+          // (`technician_profiles.company_id`)، مش «المنفّذ شركة». فأي فني تابع لشركة كان
+          // بينزل بالعمودين مليانين ⇒ خرق القيد ⇒ «حصل خطأ غير متوقع» عند العميل.
+          //
+          // المسار ده بيرفض `requested_technician_company_id` صراحةً فوق (بيختار فني واحد
+          // بعينه دايمًا)، فالمنفّذ هنا **فرد بالتعريف** والعمود ده لازم يفضل NULL.
+          technicianCompanyId: null,
           selectionMode: dto.selection_mode,
           contextHash,
           // migration 0256 — نفس المدخلات اللي البصمة اتحسبت منها، عشان الرفض يبقى قابل للتشخيص.
