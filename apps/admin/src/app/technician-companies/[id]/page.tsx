@@ -332,6 +332,9 @@ export default function TechnicianCompanyDetailPage() {
                     <TableHead>الدور بالشركة</TableHead>
                     <TableHead>المستوى</TableHead>
                     <TableHead>حالة التوثيق</TableHead>
+                    {/* ADR-0080 — مالك الشركة والأدمن لازم يشوفوا مين فيهم حصري للشركة، مش
+                        يفتكروا. القلب نفسه من ملف الفني (نفس الصلاحية، نقطة واحدة). */}
+                    <TableHead>حصري للشركة</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -346,6 +349,15 @@ export default function TechnicianCompanyDetailPage() {
                       <TableCell>
                         {VERIFICATION_STATUS_LABELS[member.verification_status as keyof typeof VERIFICATION_STATUS_LABELS] ??
                           member.verification_status}
+                      </TableCell>
+                      <TableCell>
+                        {member.company_exclusive ? (
+                          <Badge className="bg-amber-600 text-white hover:bg-amber-600">حصري</Badge>
+                        ) : (
+                          <Link href={`/technicians/${member.technician_id}`} className="text-muted-foreground underline">
+                            بيشتغل كفرد كمان
+                          </Link>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

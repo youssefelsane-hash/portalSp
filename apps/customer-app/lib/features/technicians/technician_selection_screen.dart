@@ -181,11 +181,12 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   /// من غير التذكرة، `requested_technician_id` بيفضل **تفضيل** المحرك يقدر يستبدله لو الفني بقى
   /// مش متاح — يعني نفس باب الاستبدال الصامت اللي ADR-0065 قفله، بس مفتوح من ناحية الواجهة.
   ///
-  /// الشركات مستثناة: `match-preview` بياخد `technician_id` بس، فالشركة بتفضل على السلوك القديم
-  /// لحد ما الباك-إند يدعمها. مذكور صراحة عشان مايتقريش كسهو.
+  /// **ADR-0080 — الشركة بقت تتقفل بتذكرة زي الفني بالظبط.** كانت مستثناة لأن `match-preview`
+  /// ماكانش بياخد إلا `technician_id`؛ دلوقتي بياخد شركة كمان (بيوزّع جوّاها ويقفل السعر
+  /// بمعاملها). من غير التذكرة كان اختيار الشركة بيفضل تفضيل بلا قفل سعر — أضعف من الويب.
   Future<void> _selectManualProvider(String id, bool isCompany, DateTime? effectiveRequestedAt) async {
     final address = _selectedAddress;
-    if (isCompany || address == null) {
+    if (address == null) {
       _confirmSelection(
         requestedTechnicianId: isCompany ? null : id,
         requestedTechnicianCompanyId: isCompany ? id : null,
@@ -198,18 +199,20 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         serviceId: widget.service.id,
         addressId: address.id,
         selectionMode: 'manual',
-        technicianId: id,
+        technicianId: isCompany ? null : id,
+        technicianCompanyId: isCompany ? id : null,
         scheduledAt: (effectiveRequestedAt ?? widget.requestedAt)?.toUtc().toIso8601String(),
         fieldValues: widget.fieldValues,
       );
       if (!mounted) return;
       _confirmSelection(
-        requestedTechnicianId: id,
+        requestedTechnicianId: isCompany ? null : id,
+        requestedTechnicianCompanyId: isCompany ? id : null,
         effectiveRequestedAt: effectiveRequestedAt,
         matchPreviewId: preview.matchPreviewId,
       );
     } on ApiException catch (err) {
-      // الفني اللي اختاره بقى مش متاح — رسالة صريحة، وممنوع نكمّل على تفضيل ممكن يتبدّل.
+      // المنفّذ اللي اختاره بقى مش متاح — رسالة صريحة، وممنوع نكمّل على تفضيل ممكن يتبدّل.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       }

@@ -83,6 +83,8 @@ class TechniciansRepository {
     required String addressId,
     required String selectionMode,
     String? technicianId,
+    /// ADR-0080 — اختيار **شركة** كمنفّذ: التوزيع بيدوّر جوّاها والتذكرة بتثبّتها.
+    String? technicianCompanyId,
     String? scheduledAt,
     String? scheduledEndAt,
     String? periodStart,
@@ -105,6 +107,7 @@ class TechniciansRepository {
         'address_id': addressId,
         'selection_mode': selectionMode,
         'technician_id': ?technicianId,
+        'requested_technician_company_id': ?technicianCompanyId,
         'scheduled_at': ?scheduledAt,
         'scheduled_end_at': ?scheduledEndAt,
         'period_start': ?periodStart,
