@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Logger, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -43,6 +43,8 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 @Controller('technician/orders')
 @Roles(UserType.TECHNICIAN)
 export class TechnicianOrderExecutionController {
+  private readonly logger = new Logger(TechnicianOrderExecutionController.name);
+
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
@@ -87,6 +89,36 @@ export class TechnicianOrderExecutionController {
       }),
       money,
     );
+  }
+
+  /**
+   * **طلب واحد بايظ مايفضّيش شاشة الفني كلها** (بلاغ مالك 2026-09-06: «جزء من الشاشة ما
+   * اتحمّلش… الفني مش عارف يستخدم الموبايل بتاعه»).
+   *
+   * `Promise.all` بترمي من أول عنصر بيفشل، فطلب واحد بيانات مرجعية ناقصة (عنوان اتمسح، خدمة
+   * اتشالت، صف مالي مش متوقّع) كان بيحوّل القايمة كلها لـ500 — والفني بيلاقي شريط أحمر ومفيش
+   * ولا شغلانة، حتى لو باقي شغله تمام.
+   *
+   * الطلب اللي فشل بيتشال من القايمة **وبيتسجّل برقمه** عشان يتصلح من جذره؛ الباقي بيوصل.
+   * نفس فلسفة `available_orders_screen.dart` في التطبيق بالحرف: كل قايمة بتتحمّل لوحدها.
+   */
+  private async toDtoListResilient(orders: Order[], viewerProfileId?: string | null) {
+    const results = await Promise.allSettled(orders.map((order) => this.toDto(order, viewerProfileId)));
+    const dtos: Awaited<ReturnType<typeof this.toDto>>[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        dtos.push(result.value);
+        return;
+      }
+      const reason: unknown = result.reason;
+      this.logger.error(
+        `تخطّي الطلب ${orders[index].orderNumber} في قايمة الفني — تعذّر تجهيزه: ${
+          reason instanceof Error ? reason.message : String(reason)
+        }`,
+        reason instanceof Error ? reason.stack : undefined,
+      );
+    });
+    return dtos;
   }
 
   /**
@@ -164,7 +196,7 @@ export class TechnicianOrderExecutionController {
   @Get('upcoming-confirmed')
   async listUpcomingConfirmed(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findUpcomingConfirmedForTechnician(user.sub);
-    return Promise.all(orders.map((order) => this.toDto(order)));
+    return this.toDtoListResilient(orders);
   }
 
   // "شغل متأخر" (docs/08 §56 بند 4) — اتقبل، يومه عدّى، ولسه ما بدأش. كان بيختفي من كل الشاشات.
@@ -172,7 +204,7 @@ export class TechnicianOrderExecutionController {
   @Get('overdue')
   async listOverdue(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findOverdueForTechnician(user.sub);
-    return Promise.all(orders.map((order) => this.toDto(order)));
+    return this.toDtoListResilient(orders);
   }
 
   // "شغلي كعضو فريق" (docs/08 §31) — مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق.

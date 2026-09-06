@@ -228,6 +228,25 @@ if command -v adb >/dev/null 2>&1; then
   [[ "$devs" -gt 0 ]] && pass "$devs جهاز أندرويد موصول" || warn "مفيش جهاز أندرويد موصول (adb مش شايف حاجة)"
 fi
 
+# ── ٧) أعطال ٥xx المسجّلة ───────────────────────────────────────────────────────
+head2 "٧) أعطال الخادم المسجّلة"
+if [[ -f .dev-logs/errors.log ]]; then
+  count=$(wc -l < .dev-logs/errors.log | tr -d ' ')
+  if [[ "$count" -eq 0 ]]; then
+    pass "مفيش أي عطل ٥xx متسجّل"
+  else
+    fail "$count عطل ٥xx متسجّل — آخر تلاتة:"
+    node -e "
+      const fs=require('fs');
+      const lines=fs.readFileSync('.dev-logs/errors.log','utf8').split('\n').filter(Boolean).slice(-3);
+      for (const l of lines) { try { const e=JSON.parse(l); console.log('     '+e.at+'  '+e.method+' '+e.url); console.log('       '+e.message); } catch {} }
+    " 2>/dev/null
+    info "التفاصيل الكاملة:  node scripts/find-error.js --last 3"
+  fi
+else
+  info "مفيش سجل أعطال — يتعمل أول ما يحصل عطل ٥xx"
+fi
+
 echo
 echo "${D}ابعت التقرير ده كله زي ما هو.${O}"
 echo
