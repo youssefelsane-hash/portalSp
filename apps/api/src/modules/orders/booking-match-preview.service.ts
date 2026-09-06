@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { ApiException, ErrorCode } from "../../common/exceptions/api.exception";
@@ -47,6 +47,8 @@ export interface BookingMatchPreviewResponse {
 
 @Injectable()
 export class BookingMatchPreviewService {
+  private readonly logger = new Logger(BookingMatchPreviewService.name);
+
   constructor(
     @InjectRepository(BookingMatchPreview)
     private readonly previews: Repository<BookingMatchPreview>,
@@ -164,9 +166,34 @@ export class BookingMatchPreviewService {
       );
     }
 
-    const technician = await this.techniciansService.getPublicProfile(
-      chosen.technician_id,
-    );
+    // **فني ببيانات مكسورة لازم يتشال من الاختيار، مش يفجّر الحجز** (بلاغ مالك 2026-09-06:
+    // «فني واحد بس هو اللي عامل المشكلة… لو عليه خطأ المفروض يظهر زي الناس اللي مش متاحة، بس
+    // ليه ظهر عليه خطأ أصلاً؟»).
+    //
+    // كان أي فشل في قراءة ملف الفني (صف مستخدم ناقص، صورة، شهادات…) بيطلع للعميل كـ«حصل خطأ
+    // غير متوقع» ويقفل الحجز بالكامل — حتى في وضع «اختاروا لي الأنسب»، لأن التوزيع بيوصل لنفس
+    // الفني فيقع على نفس السطر كل مرة. والعميل مالوش أي مخرج.
+    //
+    // دلوقتي الفني ده بيتعامل معاملة «مش متاح» بالظبط: بيتخطّى، والبحث بيكمّل على اللي بعده.
+    // الفشل بيتسجّل في اللوج بهويته عشان يتصلح من جذره، مش بيتبلع.
+    let technician: Awaited<ReturnType<TechniciansService['getPublicProfile']>>;
+    try {
+      technician = await this.techniciansService.getPublicProfile(chosen.technician_id);
+    } catch (err) {
+      this.logger.error(
+        `تخطّي الفني ${chosen.technician_id} في معاينة المطابقة — تعذّر قراءة ملفه: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw new ApiException(
+        ErrorCode.ORDR_001,
+        dto.selection_mode === 'manual'
+          ? 'الفني ده مش متاح للحجز دلوقتي — اختار فني تاني أو سيبها لنا نرشّحلك'
+          : 'لا يوجد فني متاح ومؤهل لهذا الحجز حاليًا',
+        HttpStatus.CONFLICT,
+      );
+    }
     const ttlSeconds = Math.max(
       30,
       Math.min(
