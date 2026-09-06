@@ -212,7 +212,7 @@ export function toServiceZonePricingResponseDto(pricing: ServiceZonePricing): Se
 export interface EligibleTechnicianResponseDto {
   id: string;
   service_id: string;
-  technician_id: string;
+  technician_id: string | null;
   skill_level: string;
   is_active: boolean;
   completed_count: number;

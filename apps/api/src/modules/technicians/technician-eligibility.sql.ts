@@ -5,6 +5,7 @@ import {
   dailyCapacityExceededExpr,
   technicianDayLoadSubquery,
 } from './technician-day-capacity.sql';
+import { providerServiceQualificationCondition } from './provider-scope.sql';
 
 /**
  * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
@@ -590,34 +591,15 @@ export function technicianServiceQualificationCondition(opts: {
    */
   directServiceAlias?: string;
 }): string {
-  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
-  const notExcluded = `NOT EXISTS (
-          SELECT 1 FROM technician_excluded_services tes
-          WHERE tes.technician_id = ${opts.technicianIdExpr}
-            AND tes.service_id = ${opts.serviceIdExpr}
-        )`;
-
-  const directlyApproved = opts.directServiceAlias
-    ? `${opts.directServiceAlias}.id IS NOT NULL`
-    : `EXISTS (
-             SELECT 1 FROM technician_services direct_svc
-             WHERE direct_svc.technician_id = ${opts.technicianIdExpr}
-               AND direct_svc.service_id = ${opts.serviceIdExpr}
-               AND direct_svc.is_active = true
-               AND direct_svc.verification_status = 'approved'
-           )`;
-
-  return `(
-          ${directlyApproved}
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tec_cat
-            WHERE tec_cat.technician_id = ${opts.technicianIdExpr}
-              AND tec_cat.category_id = ${opts.categoryIdExpr}
-              AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
-          )
-        )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
-        AND ${notExcluded}`;
+  // ADR-0079 — القاعدة نفسها عاشت في `provider-scope.sql.ts`: نفس الجملة بالحرف للفني وللشركة،
+  // بيتغيّر عمود المالك بس. الدالة دي بقت اسم مألوف على نفس القاعدة، مش نسخة منها.
+  return providerServiceQualificationCondition({
+    ownerColumn: 'technician_id',
+    ownerIdExpr: opts.technicianIdExpr,
+    serviceIdExpr: opts.serviceIdExpr,
+    categoryIdExpr: opts.categoryIdExpr,
+    directServiceAlias: opts.directServiceAlias,
+  });
 }
 
 /**

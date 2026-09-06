@@ -1191,3 +1191,36 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 
 الاختبارات الحية: `multi-day-booking-availability.spec.ts` (الخدمة) و
 `catalog/booking-technician-list-endpoint.spec.ts` (نقطة الدخول الحقيقية اللي العملاء بينادوها).
+
+## نطاق المنفّذ — الشركة على نفس لاين الفني (ADR-0079)
+
+طلب المالك (2026-09-06): «عايز الشركة يكون عندها نفس اللي عند الفني بالضبط… **ما تعملهاش
+حاجات زي الفني، دخّلها على نفس اللاين**».
+
+`technician_services` / `technician_categories` / `technician_zones` بقت جداول **نطاق منفّذ**:
+كل صف ليه مالك **واحد بالظبط** — `technician_id` أو `company_id` — مفروض بـ`chk_*_owner` على
+مستوى القاعدة، وفهرس فريد جزئي لكل جهة.
+
+**نقاط القراءة/الكتابة الوحيدة**:
+
+| السؤال | المكان |
+|---|---|
+| «المنفّذ ده مؤهّل للخدمة دي؟» | `provider-scope.sql.ts` → `providerServiceQualificationCondition()` |
+| «بيغطّي المنطقة دي؟» | `provider-scope.sql.ts` → `providerZoneCondition()` |
+| تعيين/سحب خدمة/فئة/منطقة | `provider-scope.service.ts` → `ProviderScopeService` |
+
+`technicianServiceQualificationCondition()` بقت **اسم مألوف على نفس القاعدة** (بتنادي المشترك
+بـ`ownerColumn: 'technician_id'`)، مش نسخة منها. أي قاعدة أهلية جديدة بتتكتب مرة واحدة وبتسري
+على الاتنين **بالبناء**.
+
+**مسارات الأدمن**: `admin/technician-companies/:id/{services,categories,zones}` — نفس أفعال
+نطاق الفني بالحرف ونفس الصلاحيات (`technicians.approve` للكتابة، `technician_companies.view`
+للقراءة)، عشان مايبقاش فيه باب خلفي أوسع للشركة.
+
+**حدود المرحلة ١ بصراحة** (مسجّلة في ADR-0079):
+- مسارات الأدمن القايمة للفني (`AdminTechniciansService.assignZone`،
+  `TechnicianCategoriesService.adminAssignCategory`) لسه بتكتب بنفسها؛ تحويلها لتنادي
+  `ProviderScopeService` هو الخطوة الجاية. اتأجّلت عمدًا لأنها بتلمس ٢٦+ ملف اختبار بتبني
+  الخدمات دي بـ`new` مباشرة، وخلطها مع تغيير المخطط في نفس الدفعة بيخلي أي رجعة صعبة العزل.
+- الشركة لسه بتظهر للعميل في وضع «اعتماد» بس (`services.allows_team`). ظهورها في كل الأوضاع
+  هو المرحلة ٢، ورا علم خدمة صريح عشان مايبقاش تغيير صامت في مين بيوصل للعميل.
