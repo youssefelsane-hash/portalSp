@@ -84,6 +84,8 @@ export function toBranchResponseDto(branch: TechnicianCompanyBranch): BranchResp
 
 export interface StaffMemberResponseDto {
   user_id: string;
+  /** معرّف بروفايل الفني — مسارات الأدمن كلها بتشتغل بيه، مش بـ`user_id`. */
+  technician_id: string;
   full_name: string;
   technician_code: string;
   team_role: string;
@@ -97,6 +99,9 @@ export interface StaffMemberResponseDto {
 export function toStaffMemberResponseDto(profile: TechnicianProfile, fullName: string): StaffMemberResponseDto {
   return {
     user_id: profile.userId,
+    // ADR-0080 — شاشة الأدمن محتاجة معرّف **البروفايل** عشان تفتح ملف الفني أو تقلّب زرار
+    // «حصري للشركة»؛ `user_id` لوحده مش كفاية لأي مسار من دول.
+    technician_id: profile.id,
     full_name: fullName,
     technician_code: profile.technicianCode,
     team_role: profile.teamRole,
