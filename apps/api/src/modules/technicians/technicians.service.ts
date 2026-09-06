@@ -1028,6 +1028,17 @@ export class TechniciansService {
       `SELECT full_name, avatar_url, avatar_storage_key FROM users u JOIN technician_profiles tp ON tp.user_id = u.id WHERE tp.id = $1`,
       [technicianProfileId],
     );
+    // **صف مستخدم ناقص = انهيار غير مفهوم عند العميل.** `user.full_name` على `undefined` بترمي
+    // `TypeError` — واللي بيوصل للعميل هو «حصل خطأ غير متوقع، حاول تاني» من فلتر الاستثناءات
+    // العام، بلا أي إشارة للفني اللي سبب المشكلة. الرمي الصريح هنا بيخلّي السبب مكتوب في
+    // الرسالة واللوج، وبيحوّل العطل من «مجهول» لـ«بيانات ناقصة لفني بعينه».
+    if (!user) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'بيانات الفني ده ناقصة (مفيش حساب مستخدم مربوط) — تواصل مع الدعم',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
 
     interface ZoneRow {
       id: string;

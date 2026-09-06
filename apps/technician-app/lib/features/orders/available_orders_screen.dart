@@ -234,17 +234,19 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       orders = await _repository.fetchAvailable();
     } on ApiException catch (err) {
-      firstError ??= err.message;
+      // `displayMessage` بيضيف `request_id` لأخطاء الـ500 — من غيره الرسالة عامة ومفيش أي
+      // طريقة تربطها بسطر في لوج الباك-إند (بلاغ مالك: «التيرمنال مش ظاهر فيها الـerror»).
+      firstError ??= err.displayMessage;
     }
     try {
       upcoming = await _repository.fetchUpcomingConfirmed();
     } on ApiException catch (err) {
-      firstError ??= err.message;
+      firstError ??= err.displayMessage;
     }
     try {
       overdue = await _repository.fetchOverdue();
     } on ApiException catch (err) {
-      firstError ??= err.message;
+      firstError ??= err.displayMessage;
     }
 
     if (mounted) {

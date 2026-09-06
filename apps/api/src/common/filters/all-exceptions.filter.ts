@@ -32,7 +32,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (!isHttp) {
-      this.logger.error(exception instanceof Error ? exception.stack : exception);
+      // **العطل ده لازم يبقى قابل للتتبّع من الشاشة للوج في خطوة واحدة.**
+      //
+      // بلاغ مالك: «بيظهر خطأ غير متوقع… والتيرمنال مش ظاهر فيها الـerror». السطر القديم كان
+      // بيطبع الـstack بس — بلا مسار ولا مستخدم ولا `request_id`، فمستحيل تربط الرسالة اللي
+      // على الموبايل بسطر في لوج فيه آلاف السطور. دلوقتي السطر بيبدأ بنفس الـ`request_id` اللي
+      // بيظهر في التطبيق، فـ`grep <request_id> .dev-logs/api.log` بيوصل للسبب فورًا.
+      const actor = (req as { user?: { sub?: string } }).user?.sub ?? 'مجهول';
+      this.logger.error(
+        `500 [${req.requestId}] ${req.method} ${req.originalUrl} — مستخدم: ${actor}`,
+        exception instanceof Error ? exception.stack : String(exception),
+      );
     }
 
     const envelope: ApiEnvelope<null> = {
