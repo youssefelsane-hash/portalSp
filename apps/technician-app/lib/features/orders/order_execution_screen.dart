@@ -979,6 +979,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       ),
               ),
             ],
+            // صور المشكلة يرفعها العميل ليشوفها الفني قبل الوصول؛ كانت الـAPI ترجعها بالفعل
+            // لكن الواجهة لا ترسم إلا صور التنفيذ التي يرفعها الفني نفسه.
+            if ((_media ?? []).any((m) => m.mediaType == 'problem_photo')) ...[
+              const SizedBox(height: 12),
+              _PhotoGallery(
+                media: _media!
+                    .where((m) => m.mediaType == 'problem_photo')
+                    .toList(),
+                titleAr: 'صور المشكلة من العميل',
+              ),
+            ],
             if ((_media ?? []).any(
               (m) =>
                   m.mediaType == 'before_photo' || m.mediaType == 'after_photo',
