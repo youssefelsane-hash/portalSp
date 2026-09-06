@@ -20,7 +20,11 @@ import { OrderAssignment } from '../matching/entities/order-assignment.entity';
 describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
   let dataSource: DataSource;
   let adminOrdersService: AdminOrdersService;
-  const runId = Date.now().toString(36);
+  // الوقت وحده لا يكفي لو أعاد runner تشغيل الملف بسرعة بعد فشل سابق وترك بياناته المحلية.
+  // المقدمة العشوائية تجعل نطاق هذا الاختبار مستقلاً من دون الاعتماد على نظافة تشغيل سابق.
+  const runId = `${Math.floor(Math.random() * 0xffffff).toString(36)}${Date.now().toString(36)}`;
+  const phoneRunId = Math.floor(Math.random() * 9_000_000 + 1_000_000).toString();
+  let phoneSequence = 0;
   const ids = {
     zone: '',
     city: '',
@@ -33,6 +37,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     leaderProfile: '',
     technicianAProfile: '',
     technicianBProfile: '',
+    individualOldProfile: '',
+    individualNewProfile: '',
     newLeaderCProfile: '',
     newLeaderDProfile: '',
     raceCrewProfile: '',
@@ -43,9 +49,14 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     return dataSource.query(sql, params);
   }
 
+  function nextPhoneNumber() {
+    phoneSequence += 1;
+    return `+20${phoneRunId}${phoneSequence.toString().padStart(3, '0')}`;
+  }
+
   async function makeTechnician(label: string, opts: { companyId?: string | null; level?: string } = {}) {
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
-      `+2047${runId}${label}`.slice(0, 15),
+      nextPhoneNumber(),
       `فني تزامن ${label} ${runId}`,
     ]);
     users.push(user.id);
@@ -115,7 +126,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     ids.service = service.id;
 
     const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type, email) VALUES ($1,$2,'customer',$3) RETURNING id`, [
-      `+2048${runId}`.slice(0, 15),
+      nextPhoneNumber(),
       `عميل تزامن ${runId}`,
       `customer-cc-${runId}@test.local`,
     ]);
@@ -129,13 +140,13 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     ids.address = address.id;
 
     const [adminUserA] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`, [
-      `+2049${runId}A`.slice(0, 15),
+      nextPhoneNumber(),
       `أدمن تزامن أ ${runId}`,
     ]);
     users.push(adminUserA.id);
     ids.adminUserA = adminUserA.id;
     const [adminUserB] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`, [
-      `+2049${runId}B`.slice(0, 15),
+      nextPhoneNumber(),
       `أدمن تزامن ب ${runId}`,
     ]);
     users.push(adminUserB.id);
@@ -144,6 +155,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     ids.leaderProfile = await makeTechnician('leader');
     ids.technicianAProfile = await makeTechnician('a');
     ids.technicianBProfile = await makeTechnician('b');
+    ids.individualOldProfile = await makeTechnician('individual-old');
+    ids.individualNewProfile = await makeTechnician('individual-new');
     // docs/08 §38 — بوابة "مستوى الفني مؤهّل يبقى قائد اعتماد" (technician_level_config.eligible_
     // for_team_booking) بقت جزء من assertCoreEligibility() المستخدمة في reassignLeader(). المستوى
     // الافتراضي 'new' هنا مش مؤهّل (مزروع false في migration 0158) — الاتنين دول بس هدفهم يبقوا
@@ -197,6 +210,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
         ids.leaderProfile,
         ids.technicianAProfile,
         ids.technicianBProfile,
+        ids.individualOldProfile,
+        ids.individualNewProfile,
         ids.newLeaderCProfile,
         ids.newLeaderDProfile,
         ids.raceCrewProfile,
@@ -242,6 +257,26 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     expect(history[0].c).toBe(2);
   });
 
+  it('يستبدل منفّذ طلب فردي مقبول من غير ما يغيّر السعر أو حالة الدفع أو حالة الطلب', async () => {
+    const orderId = await insertOrder(`reassign-accepted-${runId}`, {
+      bookingMode: BookingMode.INDIVIDUAL,
+      technicianId: ids.individualOldProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+
+    const updated = await adminOrdersService.reassign(ids.adminUserA, orderId, ids.individualNewProfile);
+    expect(updated.technicianId).toBe(ids.individualNewProfile);
+    expect(updated.orderStatus).toBe(OrderStatus.ACCEPTED);
+
+    const [persisted] = await q(`SELECT technician_id, order_status, total_amount_cents, payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(persisted).toMatchObject({
+      technician_id: ids.individualNewProfile,
+      order_status: 'accepted',
+      total_amount_cents: 10000,
+      payment_status: 'pending',
+    });
+  });
+
   it('سباق حقيقي: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي — واحد بس ينجح، التاني يرجع 409 نضيف (مش 500 خام)', async () => {
     const orderId = await insertOrder(`crew-add-race-${runId}`, {
       bookingMode: BookingMode.TEAM,
@@ -276,9 +311,9 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     expect(members[0].c).toBe(1);
   });
 
-  // تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: reassign() مقصورة على مرحلة
-  // "قبل القبول"، مش تقدر تُستخدم لطلب فريق بعد ما القبول وتجميع الطاقم حصلوا بالفعل.
-  it('reassignLeader — بينجح لطلب فريق مقبول، والقائد القديم بيتحوّل لعضو فريق عادي (تماسك الحالة، سيناريو I)', async () => {
+  // تغيير قائد فريق مقبول يستعمل نفس مسار الاستبدال العام. القائد السابق يخرج من الطلب فعلاً
+  // بدل أن يبقى عضوًا صامتًا في طاقم/أجور شغل لم يعد سينفذه.
+  it('reassignLeader — بينجح لطلب فريق مقبول والقائد السابق يُزال من الطاقم', async () => {
     const orderId = await insertOrder(`reassign-leader-ok-${runId}`, {
       bookingMode: BookingMode.TEAM,
       technicianId: ids.leaderProfile,
@@ -288,13 +323,11 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     const updated = await adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.newLeaderCProfile, 'القائد الأصلي مش متاح');
     expect(updated.technicianId).toBe(ids.newLeaderCProfile);
 
-    const [oldLeaderMember] = await q(`SELECT role_label, added_by_admin_user_id FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
+    const [oldLeaderMember] = await q(`SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
       orderId,
       ids.leaderProfile,
     ]);
-    expect(oldLeaderMember).toBeDefined();
-    expect(oldLeaderMember.role_label).toBe('قائد سابق');
-    expect(oldLeaderMember.added_by_admin_user_id).toBe(ids.adminUserA);
+    expect(oldLeaderMember).toBeUndefined();
   });
 
   it('reassignLeader — لو القائد الجديد كان عضو فريق بالفعل، بيتشال من العضوية (بقى قائد مش عضو)', async () => {
@@ -354,11 +387,11 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     const [finalOrder] = await q(`SELECT technician_id FROM orders WHERE id = $1`, [orderId]);
     expect([ids.newLeaderCProfile, ids.newLeaderDProfile]).toContain(finalOrder.technician_id);
 
-    // القائد الأصلي لازم يتحوّل لعضو فريق مرة واحدة بس — صفر صف مكرر من المحاولة اللي فشلت.
+    // القائد الأصلي لازم يخرج من الطاقم مرة واحدة بس — ولا محاولة فاشلة تترك عضوية قديمة وراءها.
     const oldLeaderMembership = await q(`SELECT count(*)::int AS c FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
       orderId,
       ids.leaderProfile,
     ]);
-    expect(oldLeaderMembership[0].c).toBe(1);
+    expect(oldLeaderMembership[0].c).toBe(0);
   });
 });

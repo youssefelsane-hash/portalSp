@@ -68,12 +68,13 @@ const PRICE_LOCKED_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.DISPUTED,
 ]);
 
-// الحالات اللي التعيين اليدوي مسموح فيها — قبل ما أي فني يقبل الطلب. بعد القبول
-// (accepted فما بعده) الإلغاء/الاستبدال لازم يعدّي من مسار الشكوى، مش تعيين مباشر،
-// مطابق لـ order-state-machine.ts المقفولة (مفيش انتقال accepted→technician_assigned أصلاً).
+// الحالات التي لا يزال فيها المنفّذ قابلًا للاستبدال تشغيليًا. القبول يعني أن الموعد تأكد،
+// لا أن العمل بدأ؛ لذلك الاستبدال فيه لا يغيّر السعر أو حالة الدفع. بعد أن يبدأ الفني التحرك
+// أو يصل، لا نبدّل صاحب العمل بصمت لأن ذلك يصبح قرار شكوى/زيارة فاشلة له أثر تشغيلي ومالي.
 const REASSIGNABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.SEARCHING_TECHNICIAN,
   OrderStatus.TECHNICIAN_ASSIGNED,
+  OrderStatus.ACCEPTED,
 ]);
 
 export function formatEligibleTechniciansForAdmin(result: {
@@ -860,12 +861,13 @@ export class AdminOrdersService {
     orderId: string,
     newTechnicianProfileId: string,
     meta?: AuditActorMeta,
+    reason?: string,
   ): Promise<Order> {
     const snapshot = await this.findOrThrow(orderId);
     if (!REASSIGNABLE_STATUSES.has(snapshot.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
-        `مينفعش تعيّن فني يدوي والطلب في حالة ${snapshot.orderStatus} — التعيين متاح قبل ما أي فني يقبل الطلب بس`,
+        `مينفعش تبدّل منفّذ الطلب في حالة ${snapshot.orderStatus} — التبديل متاح لحد ما الفني يبدأ التحرك للعنوان`,
         HttpStatus.CONFLICT,
       );
     }
@@ -885,6 +887,13 @@ export class AdminOrdersService {
         .getOne();
       if (!order || !REASSIGNABLE_STATUSES.has(order.orderStatus)) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتغير أو اتقبله فني بالفعل', HttpStatus.CONFLICT);
+      }
+      // الطلب المقبول يظل قابلاً للاستبدال، لذلك فحص الحالة وحده لم يعد يمنع سباق أدمنين:
+      // الأول يبدّل المنفّذ ويحافظ على ACCEPTED، والثاني كان يستطيع تبديله فورًا مرة أخرى.
+      // نقفل القرار على المنفّذ الذي رآه كل أدمن قبل بدء المعاملة؛ أي قرار سابق يفرض إعادة
+      // تحميل الشاشة بدل الكتابة فوقه بصمت.
+      if (order.technicianId !== snapshot.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب اتغيّر من موظف آخر — حدّث الصفحة قبل إعادة المحاولة', HttpStatus.CONFLICT);
       }
       if (order.technicianId === lockedTechnician.id) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده معيّن للفني ده بالفعل', HttpStatus.CONFLICT);
@@ -907,10 +916,22 @@ export class AdminOrdersService {
         { assignmentStatus: AssignmentStatus.CANCELLED, respondedAt: now },
       );
 
+      // في طلب الفريق، القائد السابق لم يعد منفّذًا للطلب بعد الاستبدال. لا نُبقيه
+      // عضوًا تلقائيًا حتى لا يظهر للعميل/الأجور أنه ما زال مشاركًا في التنفيذ.
+      // أما أعضاء الطاقم الآخرون فيبقون كما هم، والقائد الجديد لو كان عضوًا يُزال
+      // من العضوية لأنه أصبح المنفّذ الرئيسي.
+      if (order.bookingMode === BookingMode.TEAM) {
+        const teamMemberRepo = manager.getRepository(OrderTeamMember);
+        if (previousTechnicianId) {
+          await teamMemberRepo.delete({ orderId: order.id, technicianId: previousTechnicianId });
+        }
+        await teamMemberRepo.delete({ orderId: order.id, technicianId: lockedTechnician.id });
+      }
+
       // لازم نعدّي بنفس المسارين المعرّفين في order-state-machine.ts بالظبط
-      // (searching_technician→technician_assigned→accepted)، مش قفزة مباشرة —
-      // التعيين اليدوي معناه إن الأدمن أكّد مع الفني تليفونياً بالفعل، فمفيش
-      // داعي إنه "يقبل" تاني من التطبيق، بس لازم يمر بنفس الانتقالات المسموحة.
+      // (searching_technician→technician_assigned→accepted)، مش قفزة مباشرة.
+      // أما طلب مقبول فعلاً فتبقى حالته مقبولة: تغيّر المنفّذ لا يغيّر عقد الطلب
+      // ولا السعر أو الدفع، لكنه يسجل في الـaudit والـtimeline.
       if (previousStatus === OrderStatus.SEARCHING_TECHNICIAN) {
         order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
         order.assignedAt = now;
@@ -928,20 +949,26 @@ export class AdminOrdersService {
         );
       }
 
-      order.orderStatus = OrderStatus.ACCEPTED;
-      order.acceptedAt = now;
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
-          newStatus: OrderStatus.ACCEPTED,
-          changedByUserId: adminUserId,
-          changedByRole: 'admin',
-          changeSource: OrderChangeSource.ADMIN,
-          reason: 'تعيين يدوي من الإدارة',
-        }),
-      );
+      if (previousStatus !== OrderStatus.ACCEPTED) {
+        order.orderStatus = OrderStatus.ACCEPTED;
+        order.acceptedAt = now;
+        await manager.save(order);
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+            newStatus: OrderStatus.ACCEPTED,
+            changedByUserId: adminUserId,
+            changedByRole: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reason: 'تعيين يدوي من الإدارة',
+          }),
+        );
+      } else {
+        // القبول السابق كان للفني القديم؛ لحظة القبول الجديدة تخص المنفّذ البديل.
+        order.acceptedAt = now;
+        await manager.save(order);
+      }
       await this.auditLog.record(
         {
           actorUserId: adminUserId,
@@ -950,7 +977,7 @@ export class AdminOrdersService {
           entityType: 'order',
           entityId: order.id,
           oldValues: { order_status: previousStatus, technician_id: previousTechnicianId },
-          newValues: { order_status: order.orderStatus, technician_id: technician.id },
+          newValues: { order_status: order.orderStatus, technician_id: technician.id, reason: reason ?? null },
           meta,
         },
         manager,
@@ -960,7 +987,7 @@ export class AdminOrdersService {
 
     this.events.emit(
       ORDER_REASSIGNED_EVENT,
-      new OrderReassignedEvent(result.order.id, result.order.orderNumber, technician.id),
+      new OrderReassignedEvent(result.order.id, result.order.orderNumber, technician.id, result.previousTechnicianId),
     );
 
     return result.order;
@@ -1524,12 +1551,8 @@ export class AdminOrdersService {
   }
 
   /**
-   * تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: `reassign()` فوق مقصورة على
-   * `REASSIGNABLE_STATUSES` (قبل أي فني يقبل الطلب أصلاً) ومصمّمة أصلاً لطلب فردي (فني واحد بلا
-   * طاقم) — مش تقدر تُستخدم لتغيير قائد طلب فريق **بعد** ما القبول حصل وطاقم اتجمّع بالفعل. القائد
-   * الجديد بيتفحص بنفس صرامة `assignmentGuard.assertEligible()` (نفس المستخدمة في `reassign()`
-   * ومسار قبول الفني الذاتي — صفر خوارزمية موازية). القائد القديم بيتحوّل لعضو فريق عادي (بدل ما
-   * يختفي من الطلب فجأة) — "order/team state remains coherent" (طلب مالك صريح، سيناريو I).
+   * توافق خلفي لمسار تغيير قائد الفريق القديم. المنطق الحقيقي أصبح `reassign()` أعلاه
+   * لكل أنواع الطلبات، حتى لا تكون هناك قاعدتان متنافستان لتبديل منفّذ الطلب.
    */
   async reassignLeader(
     adminUserId: string,
@@ -1540,84 +1563,9 @@ export class AdminOrdersService {
   ): Promise<Order> {
     const snapshot = await this.findOrThrow(orderId);
     if (snapshot.bookingMode !== BookingMode.TEAM) {
-      throw new ApiException(ErrorCode.VAL_001, 'تغيير القائد متاح بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
+      throw new ApiException(ErrorCode.VAL_001, 'مسار تغيير القائد مخصص لطلبات الفريق فقط', HttpStatus.BAD_REQUEST);
     }
-    if (PRICE_LOCKED_STATUSES.has(snapshot.orderStatus)) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        `مينفعش تغيّر القائد والطلب في حالة ${snapshot.orderStatus} — الطلب اتقفل بالفعل`,
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (snapshot.technicianId === newLeaderTechnicianId) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو القائد بالفعل', HttpStatus.CONFLICT);
-    }
-    // القائد الأصلي وقت الطلب — مصدر التحقق من التزامن جوّه الترانزاكشن تحت. بعكس reassign()
-    // العادية (بتعتمد على انتقال حالة الطلب لاستبعاد سباق تاني)، تغيير القائد هنا مايغيّرش حالة
-    // الطلب خالص — بَقّة حقيقية اتلقطت حية (اختبار سباق: أدمنين بيغيّروا لفنيين مختلفين بالتوازي
-    // كانوا الاتنين بينجحوا لأن الفحص القديم كان بس "الفني ده مش القائد الحالي بالفعل"، مش "القائد
-    // اللي انبنى عليه القرار لسه هو نفسه" — لازم إعادة فحص القائد المتوقّع تحت القفل صراحة.
-    const expectedPreviousLeaderId = snapshot.technicianId;
-
-    const result = await this.dataSource.transaction(async (manager) => {
-      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, newLeaderTechnicianId);
-      const order = await manager
-        .createQueryBuilder(Order, 'order')
-        .setLock('pessimistic_write')
-        .where('order.id = :orderId', { orderId })
-        .getOne();
-      if (!order || order.technicianId !== expectedPreviousLeaderId) {
-        throw new ApiException(ErrorCode.VAL_001, 'الطلب اتغيّر (القائد اتبدّل من مكان تاني) — رجّع الصفحة وحاول تاني', HttpStatus.CONFLICT);
-      }
-      if (PRICE_LOCKED_STATUSES.has(order.orderStatus)) {
-        throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتقفل قبل ما التغيير يخلص', HttpStatus.CONFLICT);
-      }
-      await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
-
-      const previousLeaderId = order.technicianId;
-      const teamMemberRepo = manager.getRepository(OrderTeamMember);
-
-      // لو القائد الجديد كان عضو فريق بالفعل — بيتشال من العضوية (بقى قائد دلوقتي، مش عضو تحت نفسه).
-      const existingMembership = await teamMemberRepo.findOne({ where: { orderId: order.id, technicianId: lockedTechnician.id } });
-      if (existingMembership) {
-        await teamMemberRepo.remove(existingMembership);
-      }
-
-      order.technicianId = lockedTechnician.id;
-      await manager.save(order);
-
-      if (previousLeaderId) {
-        const alreadyMemberAsOldLeader = await teamMemberRepo.findOne({ where: { orderId: order.id, technicianId: previousLeaderId } });
-        if (!alreadyMemberAsOldLeader) {
-          await teamMemberRepo.save(
-            teamMemberRepo.create({
-              orderId: order.id,
-              technicianId: previousLeaderId,
-              roleLabel: 'قائد سابق',
-              addedByTechnicianId: null,
-              addedByAdminUserId: adminUserId,
-            }),
-          );
-        }
-      }
-      return { order, previousLeaderId };
-    });
-
-    this.events.emit(
-      ORDER_REASSIGNED_EVENT,
-      new OrderReassignedEvent(result.order.id, result.order.orderNumber, result.order.technicianId!),
-    );
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.leader_reassigned',
-      entityType: 'order',
-      entityId: orderId,
-      oldValues: { technician_id: result.previousLeaderId },
-      newValues: { technician_id: result.order.technicianId, reason },
-      meta,
-    });
-    return result.order;
+    return this.reassign(adminUserId, orderId, newLeaderTechnicianId, meta, reason);
   }
 
   // نفس نمط RatingsService.isUniqueViolation() بالحرف — خطأ Postgres الخام (23505) بيتحوّل

@@ -436,7 +436,7 @@ export class AdminOrdersController {
     @Body() dto: ReassignOrderDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
+    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit, dto.reason));
   }
 
   // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس POST /orders/:id/reschedule (مقصور
@@ -739,10 +739,8 @@ export class AdminOrdersController {
     );
   }
 
-  // تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: reassign() تحت مقصورة على
-  // مرحلة "قبل القبول" (REASSIGNABLE_STATUSES)، مش تقدر تُستخدم لطلب فريق بعد ما القبول وتجميع
-  // الطاقم حصلوا بالفعل. نفس صلاحية إدارة الطاقم (orders.manage_crew) — تغيير القائد قرار تشغيلي
-  // يومي زي إضافة/إزالة عضو، مش قرار super_admin منفصل.
+  // توافق خلفي لتغيير قائد طلب فريق. التنفيذ الفعلي موحّد في reassign() حتى لا يتباعد
+  // سلوك الفريق عن الطلب الفردي؛ هذه الصلاحية باقية لمسار إدارة الطاقم القديم فقط.
   @Post(':id/reassign-leader')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('orders.manage_crew')

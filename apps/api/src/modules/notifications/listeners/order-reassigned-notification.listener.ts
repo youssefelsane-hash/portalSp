@@ -26,6 +26,18 @@ export class OrderReassignedNotificationListener {
         referenceId: event.orderId,
         deepLink: `/technician/orders/${event.orderId}`,
       });
+      if (event.previousTechnicianProfileId && event.previousTechnicianProfileId !== event.newTechnicianProfileId) {
+        const previousTechnician = await this.techniciansService.findByProfileIdOrThrow(event.previousTechnicianProfileId);
+        await this.notificationsService.notify({
+          userId: previousTechnician.userId,
+          notificationType: 'order_reassigned_away',
+          titleAr: 'الإدارة نقلت الطلب لفني آخر',
+          bodyAr: `طلب رقم ${event.orderNumber} لم يعد ضمن طلباتك.`,
+          referenceType: 'order',
+          referenceId: event.orderId,
+          deepLink: `/technician/orders/${event.orderId}`,
+        });
+      }
     } catch (err) {
       this.logger.error(`فشل إشعار تعيين الطلب ${event.orderId} يدوياً`, err instanceof Error ? err.stack : err);
     }

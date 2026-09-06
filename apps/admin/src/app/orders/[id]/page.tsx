@@ -1704,13 +1704,15 @@ export default function OrderDetailPage() {
               </p>
             )}
           </CardContent>
-          {isOrderCancellable(order.order_status) && (
+          {(isOrderCancellable(order.order_status) || isOrderReassignable(order.order_status)) && (
             <CardFooter className="flex-col items-stretch gap-3">
               <div className="flex gap-2">
-                <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
-                  إلغاء الطلب
-                </Button>
-                {isOrderReassignable(order.order_status) && (
+                {isOrderCancellable(order.order_status) && (
+                  <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
+                    إلغاء الطلب
+                  </Button>
+                )}
+                {isOrderReassignable(order.order_status) && hasPermission('orders.reassign') && (
                   <Button
                     variant="outline"
                     disabled={isSaving}
@@ -1719,7 +1721,7 @@ export default function OrderDetailPage() {
                       if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
                     }}
                   >
-                    {order.technician_id ? 'استبدال الفني المعيّن' : 'تعيين فني يدوي'}
+                    {order.technician_id ? 'استبدال منفّذ الطلب' : 'تعيين منفّذ للطلب'}
                   </Button>
                 )}
               </div>
@@ -1740,7 +1742,7 @@ export default function OrderDetailPage() {
               )}
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
-                  <Label htmlFor="technician_id">الفني/المساعد الجديد</Label>
+                  <Label htmlFor="technician_id">المنفّذ الجديد</Label>
                   {!eligibleReassignTechnicians ? (
                     <p className="text-sm text-muted-foreground">جاري تحميل المؤهلين لهذا الطلب…</p>
                   ) : eligibleReassignTechnicians.length === 0 ? (
@@ -1756,7 +1758,7 @@ export default function OrderDetailPage() {
                       required
                     >
                       <option value="" disabled>
-                        اختار فني أو مساعد
+                        اختار فني أو مساعد مؤهّل
                       </option>
                       {/* docs/08 §107 — القايمة دي بتفضل مقصورة على المؤهّلين فعلاً (مش تمييز
                           ضد المساعد: نفس assertCoreEligibility() هيرفض أي حد غير مؤهّل بـ409
@@ -1776,6 +1778,9 @@ export default function OrderDetailPage() {
                       })}
                     </SelectNative>
                   )}
+                  <p className="text-xs text-muted-foreground">
+                    الطلب المقبول يظل مقبولًا بعد الاستبدال؛ لا يتغير السعر أو الدفع أو الموعد.
+                  </p>
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
                     تأكيد إعادة التعيين
                   </Button>
