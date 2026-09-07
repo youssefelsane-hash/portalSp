@@ -110,6 +110,24 @@ export class InspectionQuoteService {
     details: InitialQuoteDetails,
     status: OrderQuoteStatus = OrderQuoteStatus.PENDING_CUSTOMER,
   ): Promise<OrderQuote> {
+    // الطلب مقفول عند كل caller قبل الوصول هنا. نحول حماية الـunique index إلى خطأ نطاق واضح:
+    // لا يصح فتح عرض جديد بينما عرض سابق ما زال ينتظر قرار الإدارة أو العميل.
+    const liveQuote = await manager
+      .createQueryBuilder(OrderQuote, 'live_quote')
+      .setLock('pessimistic_write')
+      .where('live_quote.order_id = :orderId', { orderId: order.id })
+      .andWhere('live_quote.status IN (:...statuses)', {
+        statuses: [OrderQuoteStatus.PENDING_ADMIN_REVIEW, OrderQuoteStatus.PENDING_CUSTOMER],
+      })
+      .getOne();
+    if (liveQuote) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'يوجد عرض سعر حي بالفعل لهذا الطلب؛ احسمه أو أعد إصداره بعد انتهاء صلاحيته قبل إرسال عرض جديد',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const [{ next_version }] = await manager.query<{ next_version: string }[]>(
       `SELECT (COALESCE(MAX(version), 0) + 1)::text AS next_version
          FROM order_quotes

@@ -313,6 +313,20 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     ).rejects.toMatchObject({ code: 'ORDR_003' });
   });
 
+  it('قرار الإدارة على عرض معلق لا يحيي طلبًا أُلغي بعد إرساله', async () => {
+    const orderId = await seedOrder(OrderStatus.TECHNICIAN_ARRIVED, { withTechnician: true, priceStatus: OrderPriceStatus.WAITING_QUOTE });
+    await quotes.submitInitialQuote(ids.techUser, orderId, RANGE_MAX + 10_000, 'عطل');
+    const [pending] = await q(`SELECT id FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
+    await q(`UPDATE orders SET order_status = 'cancelled_by_customer' WHERE id = $1`, [orderId]);
+
+    await expect(
+      triage.decideAboveRangeQuote(ids.adminUser, orderId, pending.id, true, 'موافق متأخر'),
+    ).rejects.toMatchObject({ code: 'ORDR_003' });
+
+    const [after] = await q(`SELECT status FROM order_quotes WHERE id = $1`, [pending.id]);
+    expect(after.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
+  });
+
   // ===== بند 8: تحويل لمعاينة في الموقع =====
 
   it('تحويل لمعاينة في الموقع: بيسجّل رسم المعاينة **وبيطلب التوزيع فعليًا**', async () => {
@@ -568,6 +582,15 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(row.estimated_price_cents).toBe(40_000);
     const [quote] = await q(`SELECT status FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
     expect(quote.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
+  });
+
+  it('لا يقبل تعديل تشخيص ثانيًا قبل حسم العرض الحي الأول', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 200_000, 'تعديل أول');
+
+    await expect(
+      quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 300_000, 'تعديل ثانٍ'),
+    ).rejects.toMatchObject({ code: 'ORDR_003' });
   });
 
   it('اعتماد الإدارة لتعديل تشخيص لا يمحو السعر السابق الذي يُحسب منه فرق موافقة العميل', async () => {
