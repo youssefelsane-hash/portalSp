@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, LessThan, Like, Repository } from 'typeorm';
+import { DataSource, Like, Repository } from 'typeorm';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { SettingsService } from '../settings/settings.service';
@@ -96,16 +96,18 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     const minutes = await this.settingsService.getNumber('orders.payment_timeout_minutes', PAYMENT_TIMEOUT_MINUTES_FALLBACK);
     const cutoff = new Date(Date.now() - minutes * 60 * 1000);
 
-    const staleOrders = await this.orders.find({
-      select: ['id'],
-      where: {
-        orderStatus: OrderStatus.PENDING_PAYMENT,
-        placedAt: LessThan(cutoff),
-        ...(orderNumberPrefix ? { orderNumber: Like(`${orderNumberPrefix}%`) } : {}),
-      },
-      order: { placedAt: 'ASC' },
-      take: SWEEP_BATCH_SIZE,
-    });
+    // نوبة card متكررة لها نافذة تحصيل مستقلة حتى T-24 ساعة (`RecurringOrdersService`).
+    // لا يجوز لمهلة الطلب العادي (دقائق) أن تلغيها قبل أن تبدأ محاولاتها المجدولة.
+    const staleOrders = await this.orders
+      .createQueryBuilder('o')
+      .select(['o.id'])
+      .where('o.order_status = :status', { status: OrderStatus.PENDING_PAYMENT })
+      .andWhere('o.placed_at < :cutoff', { cutoff })
+      .andWhere('(o.recurring_template_id IS NULL OR o.payment_method IS DISTINCT FROM :card)', { card: 'card' })
+      .andWhere(orderNumberPrefix ? 'o.order_number LIKE :prefix' : 'TRUE', orderNumberPrefix ? { prefix: `${orderNumberPrefix}%` } : {})
+      .orderBy('o.placed_at', 'ASC')
+      .take(SWEEP_BATCH_SIZE)
+      .getMany();
 
     let cancelledCount = 0;
     for (const { id } of staleOrders) {

@@ -10,9 +10,6 @@ import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { RecurringOrdersService } from './recurring-orders.service';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
-import {
-  RecurringOrderAwaitingPaymentEvent,
-} from '../../common/events/recurring-order-awaiting-payment.event';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
@@ -546,7 +543,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     await q(`UPDATE recurring_order_templates SET deleted_at = NULL WHERE id = $1`, [ids.template]);
   });
 
-  it('قالب بـpayment_method=card بيولّد PENDING_PAYMENT + إشعار انتظار الدفع بيوصّل', async () => {
+  it('قالب بـpayment_method=card بيولّد PENDING_PAYMENT بلا طلب دفع يدوي', async () => {
     await seedDueTemplate();
     await q(`DELETE FROM recurring_order_occurrences WHERE template_id = $1`, [ids.template]);
     await q(`UPDATE recurring_order_templates SET payment_method = 'card', next_run_at = now() - interval '1 minute' WHERE id = $1`, [ids.template]);
@@ -559,11 +556,8 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     ids.createdOrderIds.push(latest.id);
     expect(latest.order_status).toBe('pending_payment'); // نفس حالة "في انتظار الدفع" العادية
     expect(latest.order_type).toBe('recurring');
-    // إشعار انتظار الدفع اتصدّر مرة واحدة للنوبة دي (EventEmitter2 بيستدعي الـlistener بالـpayload بس)
-    expect(emitSpy).toHaveBeenCalledTimes(1);
-    const payload = emitSpy.mock.calls[0][0] as RecurringOrderAwaitingPaymentEvent;
-    expect(payload.orderId).toBe(latest.id);
-    expect(payload.customerId).toBe(ids.customerProfile);
+    // البطاقة المحفوظة تُحصّل تلقائياً عند T-3؛ لا نربك العميل برسالة "أكمل الدفع" اليدوية.
+    expect(emitSpy).not.toHaveBeenCalled();
 
     await q(`UPDATE recurring_order_templates SET payment_method = NULL WHERE id = $1`, [ids.template]);
   });

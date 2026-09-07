@@ -148,6 +148,7 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
     await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAC-%${runId}%`]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAC-%${runId}%`]);
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTAC-%${runId}%`]);
+    await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1 AND service_id = $2`, [ids.customerProfile, ids.service]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -176,6 +177,37 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
 
     const refund = await dataSource.getRepository(Refund).findOne({ where: { orderId } });
     expect(refund).toBeNull();
+  });
+
+  it('نوبة بطاقة متكررة مستقبلية لا تلغيها مهلة الدفع العادية قبل نافذة التحصيل الخاصة بها', async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [template] = await q(
+      `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, payment_method)
+       VALUES ($1,$2,$3,'individual','weekly', now() + interval '7 days', 'card') RETURNING id`,
+      [ids.customerProfile, ids.service, ids.address],
+    );
+    const { orderId } = await insertOrder({
+      label: `rc-${runId}`,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await q(
+      `UPDATE orders
+       SET recurring_template_id = $2,
+           recurring_occurrence_at = now() + interval '3 days',
+           order_type = 'recurring',
+           payment_method = 'card',
+           scheduled_at = now() + interval '3 days'
+       WHERE id = $1`,
+      [orderId, template.id],
+    );
+
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order?.cancelledAt).toBeNull();
   });
 
   it('طلب SEARCHING_TECHNICIAN مدفوع (كارت) قديم جدًا — يفضل SEARCHING_TECHNICIAN بلا أي إلغاء أو استرداد (regression: كان بيتلغى ويترد تلقائيًا قبل قرار المالك 2026-08-19)', async () => {

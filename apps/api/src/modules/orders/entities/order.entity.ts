@@ -190,6 +190,17 @@ export class Order {
   @Column({ name: 'recurring_occurrence_at', type: 'timestamptz', nullable: true })
   recurringOccurrenceAt: Date | null;
 
+  // تحصيل البطاقة للنوبات المتكررة: حالة دائمة لثلاث محاولات قبل الموعد، منفصلة عن مهلة
+  // PENDING_PAYMENT القصيرة للطلبات العادية حتى لا تُلغى نوبة مستقبلية بعد دقائق من توليدها.
+  @Column({ name: 'recurring_payment_attempt_count', type: 'integer', default: 0 })
+  recurringPaymentAttemptCount: number;
+
+  @Column({ name: 'recurring_payment_next_attempt_at', type: 'timestamptz', nullable: true })
+  recurringPaymentNextAttemptAt: Date | null;
+
+  @Column({ name: 'recurring_cash_reminder_sent_at', type: 'timestamptz', nullable: true })
+  recurringCashReminderSentAt: Date | null;
+
   /** المشروع المرتبط (migration 0179) — null لطلبات عادية */
   @Column({ name: 'project_id', type: 'uuid', nullable: true })
   projectId: string | null;

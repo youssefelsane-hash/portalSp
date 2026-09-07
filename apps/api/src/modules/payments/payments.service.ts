@@ -1350,6 +1350,111 @@ export class PaymentsService {
   }
 
   /**
+   * تحصيل نوبة متكررة من البطاقة المحفوظة. لا يستدعيه HTTP ولا العميل: الـscheduler وحده
+   * يمرّر رقم المحاولة، ومفتاح idempotency يجعل إعادة تشغيل العامل آمنة بلا تحصيل مزدوج.
+   * نجاح الاتصال بالبوابة يظل pending حتى webhook؛ الـwebhook الحالي هو مصدر الحقيقة الوحيد
+   * الذي ينقل الطلب من PENDING_PAYMENT إلى البحث عن الفني.
+   */
+  async attemptRecurringOrderCardCharge(
+    orderId: string,
+    attemptNumber: number,
+  ): Promise<{ status: PaymentGatewayStatus; failureReason: string | null }> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order || order.orderStatus !== OrderStatus.PENDING_PAYMENT || order.recurringTemplateId === null) {
+      return { status: PaymentGatewayStatus.CANCELLED, failureReason: 'النوبة لم تعد قابلة للتحصيل' };
+    }
+    if (order.paymentMethod !== PaymentMethod.CARD) {
+      return { status: PaymentGatewayStatus.CANCELLED, failureReason: 'وسيلة الدفع ليست بطاقة محفوظة' };
+    }
+
+    const idempotencyKey = `recurring-card:${order.id}:${attemptNumber}`;
+    const previous = await this.payments.findOne({ where: { idempotencyKey } });
+    if (previous) return { status: previous.paymentStatus, failureReason: previous.failureMessage };
+
+    const customer = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+    const savedMethod = await this.savedPaymentMethods.findDefaultForCustomer(customer.id);
+    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
+    const payment = this.payments.create({
+      paymentNumber,
+      orderId: order.id,
+      customerId: customer.id,
+      amountCents: await this.amountOwedNow(order),
+      paymentMethod: PaymentMethod.CARD,
+      paymentGateway: savedMethod?.provider ?? null,
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      idempotencyKey,
+    });
+    try {
+      await this.payments.save(payment);
+    } catch (err) {
+      if (this.isUniqueViolation(err)) {
+        const winner = await this.payments.findOne({ where: { idempotencyKey } });
+        if (winner) return { status: winner.paymentStatus, failureReason: winner.failureMessage };
+      }
+      throw err;
+    }
+
+    if (!savedMethod || savedMethod.isRevoked) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'NO_SAVED_PAYMENT_METHOD';
+      payment.failureMessage = 'مفيش بطاقة محفوظة صالحة للتحصيل التلقائي';
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+      return { status: payment.paymentStatus, failureReason: payment.failureMessage };
+    }
+
+    const provider = this.paymentProviders.getByProviderKey(savedMethod.provider);
+    if (!provider.supportsTokenization || !provider.isConfigured) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'TOKENIZATION_NOT_SUPPORTED';
+      payment.failureMessage = 'بوابة البطاقة المحفوظة غير متاحة للتحصيل التلقائي';
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+      return { status: payment.paymentStatus, failureReason: payment.failureMessage };
+    }
+
+    const user = await this.users.findOne({ where: { id: customer.userId } });
+    if (!user) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'CUSTOMER_NOT_FOUND';
+      payment.failureMessage = 'حساب العميل غير موجود';
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+      return { status: payment.paymentStatus, failureReason: payment.failureMessage };
+    }
+
+    const [firstName, ...rest] = user.fullName.trim().split(/\s+/);
+    try {
+      const result = await provider.chargeToken({
+        paymentId: payment.id,
+        orderNumber: order.orderNumber,
+        amountCents: payment.amountCents,
+        currencyCode: 'EGP',
+        providerToken: savedMethod.providerToken,
+        customerFirstName: firstName || 'NA',
+        customerLastName: rest.join(' ') || 'NA',
+        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerPhone: user.phoneNumber,
+      });
+      if (result.succeeded) {
+        if (result.providerReference) payment.gatewayTransactionId = result.providerReference;
+      } else {
+        payment.paymentStatus = PaymentGatewayStatus.FAILED;
+        payment.failureCode = 'GATEWAY_DECLINED';
+        payment.failureMessage = result.failureReason;
+        payment.failedAt = new Date();
+      }
+    } catch (err) {
+      // نتيجة timeout غير مؤكدة: لا نعتبرها فشلًا ولا نعيد السحب حتى تتصالح مع البوابة.
+      payment.paymentStatus = PaymentGatewayStatus.PROCESSING;
+      payment.failureCode = 'GATEWAY_OUTCOME_UNKNOWN';
+      payment.failureMessage = err instanceof Error ? err.message : String(err);
+    }
+    await this.payments.save(payment);
+    return { status: payment.paymentStatus, failureReason: payment.failureMessage };
+  }
+
+  /**
    * العميل بيطلب كود مرجعي FawryPay ("ادفع في أقرب فوري") — بيرجّع referenceNumber العميل
    * بياخده لمنفذ فوري ويدفعه كاش فعلياً هناك. التأكيد بعدين عبر POST /webhooks/fawry بس.
    */
