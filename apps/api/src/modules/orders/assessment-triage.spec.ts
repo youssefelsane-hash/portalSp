@@ -570,6 +570,24 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(quote.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
   });
 
+  it('اعتماد الإدارة لتعديل تشخيص لا يمحو السعر السابق الذي يُحسب منه فرق موافقة العميل', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 200_000, 'شغل أكبر من المتوقع');
+    const [pending] = await q(`SELECT id FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
+
+    await triage.decideAboveRangeQuote(ids.adminUser, orderId, pending.id, true, 'زيادة مبررة');
+    const [beforeApproval] = await q(`SELECT estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
+    expect(beforeApproval.estimated_price_cents).toBe(40_000);
+
+    await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
+    const [afterApproval] = await q(
+      `SELECT total_amount_cents, estimated_price_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    expect(afterApproval.total_amount_cents).toBe(RANGE_MAX + 200_000);
+    expect(afterApproval.estimated_price_cents).toBe(RANGE_MAX + 200_000);
+  });
+
   // ===== بند 7: الطابور =====
 
   it('الطابور بيفرز بكل فلتر — كل طلب بيظهر في خانته بس', async () => {

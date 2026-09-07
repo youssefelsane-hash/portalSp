@@ -20,7 +20,7 @@ import {
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
-import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderQuote, OrderQuoteSource, OrderQuoteStatus } from './entities/order-quote.entity';
 import { OrderCustomerNotice, OrderCustomerNoticeType } from './entities/order-customer-notice.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
@@ -321,7 +321,12 @@ export class AssessmentTriageService {
         quote.validUntil = new Date(Date.now() + service.quoteValidityMinutes * 60_000);
         await manager.save(quote);
 
-        order.estimatedPriceCents = quote.amountCents;
+        // تعديل التشخيص يغيّر سعر شغل قائم؛ `estimatedPriceCents` هو أساس حساب الفرق عند
+        // موافقة العميل. الكتابة هنا كانت تجعل الأساس = السعر الجديد، فيتحول فرق حقيقي إلى صفر.
+        // العرض الأول فقط هو الذي يؤسس سعرًا جديدًا للطلب.
+        if (quote.source !== OrderQuoteSource.TECHNICIAN_DIAGNOSIS) {
+          order.estimatedPriceCents = quote.amountCents;
+        }
         order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
         order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
         await manager.save(order);
