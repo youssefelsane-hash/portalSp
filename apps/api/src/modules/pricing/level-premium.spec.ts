@@ -84,6 +84,15 @@ describe('فرق الفني المميّز بعد التعيين التلقائ�
     expect(order.levelPremiumCents).toBe(0);
   });
 
+  it('عرض معاينة وافق عليه العميل: السعر ثابت حتى لو المطابقة عيّنت فنيًا أعلى مستوى', async () => {
+    const { service, manager } = makeService({ multiplier: 1.5 });
+    const order = makeOrder({ initialQuoteSource: 'admin_remote' });
+
+    expect(await service.applyOnAutoAssignment(manager, order, technician)).toBe(0);
+    expect(order.totalAmountCents).toBe(120_000);
+    expect(order.levelPremiumCents).toBe(0);
+  });
+
   it('مستوى بلا مضاعف (=1): مفيش إضافة', async () => {
     const { service, manager } = makeService({ multiplier: 1 });
     const order = makeOrder();
