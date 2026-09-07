@@ -9,7 +9,7 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PriceCertaintyMode, PricingModel } from '../catalog/entities/service.entity';
+import { PriceCertaintyMode, PricingModel, Service } from '../catalog/entities/service.entity';
 import { assessmentRouteRejection } from './assessment-route-guard';
 import { GeoService } from '../geo/geo.service';
 import { SettingsService } from '../settings/settings.service';
@@ -95,6 +95,15 @@ interface OptionalWarrantySelection {
   max_claims: number;
   terms_ar: string | null;
   exclusions_ar: string | null;
+}
+
+/**
+ * مدخلات مسار الإنتاجية القديم. تظل مدعومة فقط للخدمات التي لا تستمد طاقمها ومدتها
+ * من شجرة التسعير؛ لا يجوز للعميل اختيار أي مصدر للحقيقة في خدمة Formula.
+ */
+interface StandardDurationInput {
+  standard_data_id?: string;
+  requested_units?: number;
 }
 
 /**
@@ -827,26 +836,10 @@ export class OrderCreationService {
     // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم المحسوبة هنا بتتسجّل
     // snapshot على الطلب نفسه (مش مجرد معاينة زي POST /services/:id/estimate-duration)، عشان
     // تفضل ظاهرة لفريق العمليات/الفني حتى لو الأدمن غيّر service_standard_data بعدين.
-    let durationEstimate: Awaited<ReturnType<CatalogService['estimateDuration']>> | null = null;
-    // بَقّة حقيقية اتلقطت (Script 7 Phase 5): الفحص القديم `&&` كان بيسمح بالظبط بالحالة الممنوعة
-    // في تعليق DTO نفسه ("الاتنين لازم يتبعتوا مع بعض أو ولا واحد فيهم") — لو العميل بعت واحد بس
-    // من standard_data_id/requested_units، الكود كان بيتجاهله بصمت ويحفظ الطلب بـrequiredTechnicians/
-    // requiredAssistants=null بلا أي خطأ، فمطابقة المساعدين (assistant-matching.service.ts) كانت
-    // بتتخطى تمامًا (`if (!order.requiredAssistants...) return;`) لشغلانة ممكن تحتاج طاقم فعليًا.
-    if (Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'standard_data_id وrequested_units لازم يتبعتوا مع بعض — مينفعش واحد من غير التاني',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    if (dto.standard_data_id && dto.requested_units) {
-      durationEstimate = await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units);
-    }
+    const durationEstimate = await this.resolveStandardDurationEstimate(service, dto);
 
-    // docs/01B — تكامل Price Engine → Booking: مخرجات المعادلة التشغيلية (طاقم/مدة/ملاءمة
-    // طوارئ) بتوصل هنا رسميًا. الأولوية لمسار الإنتاجية القياسي (standard_data) لو العميل
-    // استخدمه صراحةً — ده المسار المقتبس من العميل؛ مخرجات المعادلة بتملأ الفراغ.
+    // docs/01B — تكامل Price Engine → Booking: مصدر واحد للطاقم والمدة لكل خدمة. خدمات
+    // Formula تعتمد مخرجات المعادلة فقط؛ أما مسار البيانات القياسية فيخص الخدمات غير المعادلية.
     const formulaCrewTechnicians =
       !durationEstimate && estimate.required_technicians != null ? estimate.required_technicians : null;
     const formulaCrewAssistants =
@@ -1752,17 +1745,7 @@ export class OrderCreationService {
       previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
       pricingContext,
     );
-    if (Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'standard_data_id وrequested_units لازم يتبعتوا مع بعض — مينفعش واحد من غير التاني',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    const durationEstimate =
-      dto.standard_data_id && dto.requested_units
-        ? await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units)
-        : null;
+    const durationEstimate = await this.resolveStandardDurationEstimate(service, dto);
     const requiredTechnicians = durationEstimate?.assigned_technicians ?? estimate.required_technicians ?? null;
     const requiredAssistants = durationEstimate?.assigned_assistants ?? estimate.required_assistants ?? null;
     const durationMinutes = estimate.duration_minutes != null ? Math.ceil(estimate.duration_minutes) : pricingContext.durationMinutes;
@@ -1883,5 +1866,33 @@ export class OrderCreationService {
         HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  /**
+   * يمنع المصدرين التشغيليين من التنافس على نفس الطلب. قرار الإداري يحدد مصدر الخدمة،
+   * وليس تطبيق قديم أو عميل يرسل payload مختلفاً.
+   */
+  private async resolveStandardDurationEstimate(
+    service: Service,
+    dto: StandardDurationInput,
+  ): Promise<Awaited<ReturnType<CatalogService['estimateDuration']>> | null> {
+    if (Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'standard_data_id وrequested_units لازم يتبعتوا مع بعض — مينفعش واحد من غير التاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!dto.standard_data_id || !dto.requested_units) return null;
+
+    if (service.pricingModel === PricingModel.FORMULA) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي بتستخدم محرك التسعير كمصدر وحيد للمدة والطاقم. عدّل معادلة الخدمة من الكتالوج بدل إرسال بيانات قياسية.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units);
   }
 }

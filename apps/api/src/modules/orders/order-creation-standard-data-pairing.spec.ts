@@ -63,8 +63,8 @@ import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
  * حسب `service_standard_data.min_technicians/min_assistants`) — استبعاد صامت لمتطلب طاقم حقيقي،
  * بالظبط زي ما audit Phase 5 حذّر منه صراحة.
  *
- * الإصلاح: XOR check صريح بيرفض الحالة النصفية بـVAL_001 واضح قبل أي كتابة في الداتابيز (قبل
- * الـtransaction بالكامل)، فمفيش طلب بيتسجّل بمتطلبات طاقم ناقصة بصمت.
+ * كمان خدمة Formula لها مصدر تشغيل وحيد: مخرجات المعادلة. حتى لو فيه صف قياسي قديم، لا يسمح
+ * للعميل إنه يستبدل طاقم المعادلة أو مدتها ببيانات من API قديم.
  */
 describe('OrdersService.create() — standard_data_id/requested_units لازم يتبعتوا مع بعض (Script 7 Phase 5)', () => {
   let dataSource: DataSource;
@@ -332,18 +332,17 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
     expect(await countOrdersForCustomer()).toBe(before);
   });
 
-  it('الاتنين مع بعض (المسار السليم): الطلب بيتسجّل بمتطلبات الطاقم المحسوبة فعليًا من service_standard_data', async () => {
-    const order = await ordersService.create(ids.customerUser, {
-      service_id: ids.service,
-      address_id: ids.address,
-      standard_data_id: ids.standardData,
-      requested_units: 40,
-    } as never);
-    expect(order.standardDataId).toBe(ids.standardData);
-    // productivity=20/يوم بالحد الأدنى (2 صنايعي) → لسه بمتطلب الحد الأدنى فمفيش مضاعف: 40/20 = 2 يوم.
-    expect(order.requiredTechnicians).toBe(2);
-    expect(order.requiredAssistants).toBe(1);
-    expect(order.estimatedDurationDays).toBe(2);
+  it('بيانات قياسية مع خدمة Formula: تترفض بدل ما تستبدل متطلبات طاقم المعادلة', async () => {
+    const before = await countOrdersForCustomer();
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.service,
+        address_id: ids.address,
+        standard_data_id: ids.standardData,
+        requested_units: 40,
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+    expect(await countOrdersForCustomer()).toBe(before);
   });
 
   it('ولا واحد فيهم (خدمة عادية بلا إنتاجية): الطلب بيتسجّل عادي بمتطلبات طاقم null — مش متأثر بالإصلاح', async () => {
