@@ -116,6 +116,11 @@ export interface ChargeTokenInput {
 export interface ChargeTokenResult {
   /** نجاح النداء المتزامن بس — مش تأكيد نهائي. لو false، الدفعة تتسجّل failed فورًا (بلا webhook مستنى). */
   succeeded: boolean;
+  /**
+   * `unknown` = وصلنا طلبًا للبوابة لكن لا نملك ردًا صالحًا يثبت الرفض أو القبول.
+   * الحقول اختيارية مؤقتًا للتوافق مع مزود قديم؛ غيابها يفسر كـ`confirmed` فقط عند false.
+   */
+  outcome?: 'confirmed' | 'unknown';
   providerReference: string | null;
   failureReason: string | null;
 }

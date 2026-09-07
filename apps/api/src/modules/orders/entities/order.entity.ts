@@ -201,6 +201,10 @@ export class Order {
   @Column({ name: 'recurring_cash_reminder_sent_at', type: 'timestamptz', nullable: true })
   recurringCashReminderSentAt: Date | null;
 
+  /** lease قصيرة لتوصيل التذكير قبل تعليم النوبة بأنها أُبلغت بالفعل. */
+  @Column({ name: 'recurring_cash_reminder_claimed_at', type: 'timestamptz', nullable: true })
+  recurringCashReminderClaimedAt: Date | null;
+
   /** المشروع المرتبط (migration 0179) — null لطلبات عادية */
   @Column({ name: 'project_id', type: 'uuid', nullable: true })
   projectId: string | null;

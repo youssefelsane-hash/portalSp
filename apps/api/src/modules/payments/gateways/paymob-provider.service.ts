@@ -525,18 +525,34 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
           payment_token: paymentKey.token,
         }),
       });
-      const body = (await payRes.json().catch(() => ({}))) as PaymobPayResponse;
-      if (!payRes.ok || body.success === false) {
+      const body = (await payRes.json().catch(() => null)) as PaymobPayResponse | null;
+      // 4xx مع رد مفهوم أو success=false رفض مؤكد. أما 5xx/JSON ناقص فالمزود قد يكون
+      // نفّذ السحب ثم فشل الرد، لذلك لا نبلّغ scheduler أنه فشل.
+      if (body?.success === false || (payRes.status >= 400 && payRes.status < 500)) {
         return {
           succeeded: false,
-          providerReference: body.id ? String(body.id) : null,
-          failureReason: body.data?.message ?? `Paymob token charge رفض: ${payRes.status}`,
+          outcome: 'confirmed',
+          providerReference: body?.id ? String(body.id) : null,
+          failureReason: body?.data?.message ?? `Paymob token charge رفض: ${payRes.status}`,
         };
       }
-      return { succeeded: body.success === true, providerReference: body.id ? String(body.id) : null, failureReason: null };
+      if (!payRes.ok || !body || body.success !== true) {
+        return {
+          succeeded: false,
+          outcome: 'unknown',
+          providerReference: body?.id ? String(body.id) : null,
+          failureReason: `تعذر تأكيد نتيجة Paymob token charge: ${payRes.status}`,
+        };
+      }
+      return { succeeded: true, outcome: 'confirmed', providerReference: body.id ? String(body.id) : null, failureReason: null };
     } catch (err) {
       this.logger.error('فشل تحصيل بوسيلة دفع محفوظة (chargeToken) Paymob', err instanceof Error ? err.stack : err);
-      return { succeeded: false, providerReference: null, failureReason: err instanceof Error ? err.message : String(err) };
+      return {
+        succeeded: false,
+        outcome: 'unknown',
+        providerReference: null,
+        failureReason: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 

@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import {
   RECURRING_CARD_PAYMENT_FAILED_EVENT,
   RECURRING_CASH_REMINDER_EVENT,
@@ -16,6 +18,7 @@ export class RecurringOrderPaymentNotificationListener {
   constructor(
     private readonly customerProfiles: CustomerProfilesService,
     private readonly notifications: NotificationsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   @OnEvent(RECURRING_CARD_PAYMENT_FAILED_EVENT)
@@ -50,12 +53,25 @@ export class RecurringOrderPaymentNotificationListener {
         userId: customer.userId,
         notificationType: 'recurring_cash_reminder',
         titleAr: 'تذكير بحجزك المتكرر',
-        bodyAr: `الفني هيوصلك ${when}. قيمة الزيارة ${price} ج.م، وحجزك ما زال مؤكدًا.`,
+        bodyAr: `حجزك المتكرر موعده ${when}. قيمة الزيارة ${price} ج.م. سنرسل تفاصيل مقدم الخدمة بعد تعيينه.`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/orders/${event.orderId}`,
       });
+      // لا تصبح النوبة "مُبلّغ عنها" إلا بعد إنشاء سجل العميل الدائم. فشل الإشعار يترك
+      // lease قابلة للاسترداد بدل أن يضيع التذكير.
+      await this.dataSource.query(
+        `UPDATE orders
+         SET recurring_cash_reminder_sent_at = now(), recurring_cash_reminder_claimed_at = NULL
+         WHERE id = $1 AND recurring_cash_reminder_sent_at IS NULL`,
+        [event.orderId],
+      );
     } catch (err) {
+      await this.dataSource.query(
+        `UPDATE orders SET recurring_cash_reminder_claimed_at = NULL
+         WHERE id = $1 AND recurring_cash_reminder_sent_at IS NULL`,
+        [event.orderId],
+      ).catch(() => undefined);
       this.logger.error(`فشل تذكير الكاش للنوبة المتكررة ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }

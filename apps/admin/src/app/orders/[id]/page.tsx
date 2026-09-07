@@ -2268,8 +2268,13 @@ export default function OrderDetailPage() {
                             </span>
                             <span>{formatEgp(p.amount_cents)}</span>
                           </div>
-                          {p.payment_status === 'failed' && p.failure_message && (
+                          {(p.payment_status === 'failed' || p.payment_status === 'manual_review') && p.failure_message && (
                             <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
+                          )}
+                          {p.payment_status === 'manual_review' && (
+                            <span className="text-amber-700">
+                              لا تُنشأ محاولة تحصيل أو استرداد تلقائيًا. راجع نتيجة البوابة أولًا، ثم استخدم الاسترداد اليدوي فقط إذا ثبت تحصيل مكرر.
+                            </span>
                           )}
                           {/* بَقّة حقيقية اتلقطت — العميل مكانش عنده طريقة يسجّل بيها "أنا حوّلت" غير
                               polling محلي بلا أثر على السيرفر. customer_confirmed_transfer_at بيفرّق
