@@ -20,9 +20,6 @@ import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-ev
 import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
 import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
 import { realPricingEngineService } from '../pricing/pricing-engine.testing';
-import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
-import { LevelPremiumService } from '../pricing/level-premium.service';
-import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 import { GeoService } from '../geo/geo.service';
 import { City } from '../geo/entities/city.entity';
 import { Area } from '../geo/entities/area.entity';
@@ -37,14 +34,12 @@ import { RedisCacheService } from '../../common/cache/redis-cache.service';
 
 /**
  * **ADR-0066** — الطلب اللي عرض سعره اتعمد كان بيقف في `AWAITING_TECHNICIAN_SELECTION` للأبد
- * (بند 3 من «المتبقي بالترتيب»)، وفرق مستوى المنفّذ ماكانش بيتحسب في المسار ده خالص لأن
- * `applyOnAutoAssignment()` بترفض أي طلب `requestedTechnicianId` مضبوط فيه (بند 4).
+ * (بند 3 من «المتبقي بالترتيب»). العرض المعتمد يظل ثابتًا مهما كان مستوى المنفّذ.
  *
  * الاختبار ده بيثبت الأربع حقائق اللي البندين دول عنهم:
  * 1. الطلب بيخرج من الحالة دي فعلاً، والمنفّذ بيتقفل (مش تفضيل).
- * 2. فرق المستوى بيتحسب **مرة واحدة** فوق قيمة العرض.
- * 3. إعادة الاختيار مابتضيفش فرق تاني فوق الأول (الحارس المشترك).
- * 4. المرشّح اللي مستواه = 1 مابياخدش أي فرق — الفرق مشتق من المستوى مش رقم ثابت.
+ * 2. سعر العميل لا يزيد عند اختيار منفّذ أعلى مستوى.
+ * 3. إعادة الاختيار لا تغيّر السعر.
  */
 describe('اختيار المنفّذ بعد عرض السعر + فرق المستوى مرة واحدة (ADR-0066)', () => {
   let emitter: EventEmitter2;
@@ -184,9 +179,6 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
       dataSource.getRepository(Service), dataSource.getRepository(User), {} as never, {} as never, auditStub,
       geoService, settingsService,
     );
-    const levelPremiumService = new LevelPremiumService(
-      catalogService, settingsService, commissionBaseServiceStub(), new OrderFinancialFinalizationService(),
-    );
     emitter = new EventEmitter2();
     emitter.onAny((event: string | string[], payload: unknown) => {
       emitted.push({ event: String(event), payload });
@@ -195,8 +187,6 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),
       techniciansService,
-      catalogService,
-      levelPremiumService,
       new TechnicianAssignmentGuardService(settingsService),
       auditStub,
       emitter,
@@ -228,7 +218,7 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     }
   });
 
-  it('المرشّحون بيرجعوا بسعر = قيمة العرض + فرق مستوى كل واحد', async () => {
+  it('المرشّحون كلهم بيرجعوا بنفس السعر الذي وافق عليه العميل', async () => {
     ids.order = await seedAwaitingSelectionOrder();
     const candidates = await service.listCandidates(ids.customerUser, ids.order);
     const plain = candidates.find((c) => c.technician_id === ids.plainTech);
@@ -239,25 +229,24 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     expect(plain!.final_price_cents).toBe(QUOTE_CENTS);
 
     expect(premium).toBeDefined();
-    expect(premium!.level_premium_cents).toBe(Math.round(QUOTE_CENTS * (PREMIUM_MULTIPLIER - 1)));
-    expect(premium!.final_price_cents).toBe(QUOTE_CENTS + premium!.level_premium_cents);
+    expect(premium!.level_premium_cents).toBe(0);
+    expect(premium!.final_price_cents).toBe(QUOTE_CENTS);
   });
 
-  it('اختيار المنفّذ المميّز: الطلب بيخرج من الانتظار، القفل بيتسجّل، والفرق بيتضاف مرة واحدة', async () => {
+  it('اختيار منفّذ مميّز لا يغيّر سعر العرض الذي وافق عليه العميل', async () => {
     const order = await service.selectProvider(ids.customerUser, ids.order, ids.premiumTech);
-    const expectedPremium = Math.round(QUOTE_CENTS * (PREMIUM_MULTIPLIER - 1));
 
     expect(order.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     expect(order.requestedTechnicianId).toBe(ids.premiumTech);
     expect(order.providerLockSource).toBe('post_quote_selection');
-    expect(order.levelPremiumCents).toBe(expectedPremium);
-    expect(order.totalAmountCents).toBe(QUOTE_CENTS + expectedPremium);
+    expect(order.levelPremiumCents).toBe(0);
+    expect(order.totalAmountCents).toBe(QUOTE_CENTS);
 
     const [row] = await q(`SELECT total_amount_cents, level_premium_cents, provider_lock_source FROM orders WHERE id = $1`, [
       ids.order,
     ]);
-    expect(row.total_amount_cents).toBe(QUOTE_CENTS + expectedPremium);
-    expect(row.level_premium_cents).toBe(expectedPremium);
+    expect(row.total_amount_cents).toBe(QUOTE_CENTS);
+    expect(row.level_premium_cents).toBe(0);
     expect(row.provider_lock_source).toBe('post_quote_selection');
   });
 
@@ -275,13 +264,13 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     expect(dispatch[0].payload).toMatchObject({ orderId });
   });
 
-  it('الاختيار مرة تانية بيترفض — الطلب خرج من مرحلة الاختيار خلاص (مفيش فرق مضاعف)', async () => {
+  it('الاختيار مرة تانية بيترفض — الطلب خرج من مرحلة الاختيار خلاص', async () => {
     await expect(service.selectProvider(ids.customerUser, ids.order, ids.plainTech)).rejects.toMatchObject({
       code: 'ORDR_003',
     });
     const [row] = await q(`SELECT total_amount_cents, level_premium_cents FROM orders WHERE id = $1`, [ids.order]);
-    expect(row.level_premium_cents).toBe(Math.round(QUOTE_CENTS * (PREMIUM_MULTIPLIER - 1)));
-    expect(row.total_amount_cents).toBe(QUOTE_CENTS + row.level_premium_cents);
+    expect(row.level_premium_cents).toBe(0);
+    expect(row.total_amount_cents).toBe(QUOTE_CENTS);
   });
 
   it('منفّذ مستواه بلا مضاعف: الطلب بيتقفل عليه بلا أي فرق — قيمة العرض زي ما هي', async () => {

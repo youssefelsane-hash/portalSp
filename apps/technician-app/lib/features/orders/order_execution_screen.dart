@@ -524,7 +524,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       context: context,
       builder: (context) => const _PriceEntryDialog(
         titleAr: 'إرسال سعر بعد المعاينة',
-        helperAr: 'ده أول سعر للطلب — العميل هيوافق عليه قبل ما تبدأ.',
+        helperAr: 'اكتب سعر الشغل فقط. رسم المعاينة المدفوع بيتضاف تلقائيًا في إجمالي العميل.',
         requireReason: false,
       ),
     );
@@ -1022,7 +1022,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // مابيستنتجش من الحالة التشغيلية ولا بيحسب سعر بنفسه. والحالتين الاتنين معناهم
             // «لسه مفيش سعر»: `waiting_assessment` (المعاينة لسه ما حصلتش) و`waiting_quote`
             // (حصلت والسعر لسه ما اتحددش).
-            if (_order.orderStatus == 'technician_arrived' &&
+            if ((_order.orderStatus == 'technician_arrived' || _order.orderStatus == 'in_progress') &&
                 (_order.priceStatus == 'waiting_assessment' ||
                     _order.priceStatus == 'waiting_quote')) ...[
               const SizedBox(height: 16),
@@ -1032,7 +1032,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 label: const Text('إرسال سعر بعد المعاينة'),
               ),
             ],
-            if (_order.orderStatus == 'in_progress') ...[
+            if (_order.orderStatus == 'in_progress' &&
+                !(_order.priceStatus == 'waiting_assessment' || _order.priceStatus == 'waiting_quote')) ...[
               // بند 14 — «تعديل السعر بعد التشخيص» مختلف عن «شغل إضافي» تحته: ده بيصحّح سعر
               // الشغل الأساسي نفسه، وده بيضيف بنود فوقه. الاتنين مع بعض عشان الفني يشوف الفرق.
               const SizedBox(height: 16),

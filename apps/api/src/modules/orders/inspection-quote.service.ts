@@ -466,9 +466,9 @@ export class InspectionQuoteService {
     return quote;
   }
 
-  // الفني بيحدد السعر بعد ما وصل وعاين المكان فعليًا (TECHNICIAN_ARRIVED بس — نفس شرط
-  // state machine). لازم الخدمة تكون فعلاً inspection_then_quote، وإلا الطلب أصلاً معندوش
-  // سعر متأسس من الحجز ومفيش داعي للمسار ده.
+  // الفني بيحدد أول سعر بعد ما وصل وعاين المكان. قد يبدأ التشخيص قبل إدخال السعر، لذلك
+  // نقبل TECHNICIAN_ARRIVED وIN_PROGRESS بنفس عقد «أول عرض»، لا نحوله بالخطأ إلى تعديل سعر.
+  // لازم الخدمة تكون فعلاً inspection_then_quote، وإلا الطلب أصلاً معندوش سعر متأسس من الحجز.
   async submitInitialQuote(
     userId: string,
     orderId: string,

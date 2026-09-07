@@ -71,6 +71,9 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
   ],
   [OrderStatus.IN_PROGRESS]: [
+    // المعاينة قد تبدأ كتَشخيص سريع قبل أن يرسل الفني أول سعر. إرسال أول عرض يعيد الطلب
+    // لانتظار موافقة العميل، ثم يعود لنفس الفني بعد الموافقة.
+    OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
     OrderStatus.AWAITING_QUOTE_APPROVAL,
     OrderStatus.WORK_COMPLETED,
     OrderStatus.DISPUTED,

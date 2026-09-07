@@ -321,14 +321,16 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     await expect(inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000)).rejects.toThrow();
   });
 
-  it('رفض تحديد سعر لطلب مش technician_arrived (حماية state machine)', async () => {
+  it('الفني يقدر يرسل أول سعر بعد بدء التشخيص — يظل أول عرض وليس تعديلًا', async () => {
     const orderId = await insertOrder(`wrongstatus-${runId}`, ids.inspectionService, OrderStatus.IN_PROGRESS, {
       totalAmountCents: 5000,
       estimatedPriceCents: 0,
       inspectionFeeCents: 5000,
       paid: true,
     });
-    await expect(inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000)).rejects.toThrow();
+    const order = await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    expect(order.orderStatus).toBe(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL);
+    expect(order.estimatedPriceCents).toBe(30000);
   });
 
   it('العميل يوافق على السعر بعد المعاينة — total_amount_cents/commissionable_base_cents يتحدّثوا صح، تحصيل فوري للدلتا (ADR-0044 §4)', async () => {
