@@ -111,13 +111,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _loadRescheduleRequests();
   }
 
-  // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
-  // مايمنعش بقية الشاشة تشتغل، نفس فلسفة _loadMedia() فوق بالحرف.
+  // طاقم الطلب. احتياج الطاقم الفعلي يأتي من التسعير/الإنتاجية لا من booking_mode وحده؛ قد يكون
+  // الحجز فرديًا ومع ذلك يحتاج مساعدًا. فشل التحميل لا يمنع بقية الشاشة من العمل.
   Future<void> _loadTeamMembersIfApplicable() async {
     // ADR-0052 (docs/08 §97) — الشغلانة الفردية ممكن يكون فيها مساعد اختياري مضاف، فلازم تحمّل
     // الطاقم كمان عشان القائد يشوفه ويقدر يشيله. الشرط هنا **مشتق محليًا** (`_isSoloJob`) مش من
     // `crewStatus` — وقت أول تحميل الطلب ممكن يكون جاي من فعل تنفيذي بلا crew_status لسه.
-    if (_order.bookingMode != 'team' && !_isSoloJob) return;
+    if (!_hasTeamManagement) return;
     try {
       final members = await _repository.fetchTeamMembers(_order.id);
       if (mounted) setState(() => _teamMembers = members);
@@ -137,7 +137,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   Future<void> _refreshTeamInfoIfApplicable() async {
     // ADR-0052 — نفس البَقّة بالظبط بتنطبق على خانة المساعد الاختياري: `crew_status` بتتحسب في
     // getOne() بس، فالشغلانة الفردية محتاجة نفس النداء الصريح ده وإلا الخانة ما تظهرش من أول فتح.
-    if (_order.bookingMode != 'team' && !_isSoloJob) return;
+    if (!_hasTeamManagement) return;
     await _refreshFromServer();
   }
 
@@ -354,6 +354,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   bool get _isSoloJob =>
       (_order.requiredTechnicians ?? 1) <= 1 &&
       (_order.requiredAssistants ?? 0) == 0;
+
+  bool get _requiresMandatoryCrew =>
+      (_order.requiredTechnicians ?? 1) > 1 ||
+      (_order.requiredAssistants ?? 0) > 0;
+
+  bool get _hasTeamManagement =>
+      _order.bookingMode == 'team' || _requiresMandatoryCrew || _isSoloJob;
 
   /// ADR-0052 — الشغلانة الفردية اللي القائد يقدر يضم فيها مساعد اختياري (أو ضم واحد بالفعل).
   /// الباك-إند هو اللي بيقرر (crew_status.optionalAssistant*) — التطبيق مابيحسبش الأهلية بنفسه.
@@ -745,7 +752,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       // التنفيذية بتحطّ نسخة جديدة من الطلب مكان القديمة، وحالة collect_cash بتتبني محليًا أصلاً،
       // فأي حقل مش موجود في الرد (زي crew_status) كان بيضيع. تحديث واحد من السيرفر بعد أي فعل على
       // طلب فريق بيخلّي الكارت وقايمة الطاقم يعكسوا الحقيقة دايمًا، مهما كان شكل رد الفعل.
-      if (_order.bookingMode == 'team') {
+      if (_hasTeamManagement) {
         await _refreshFromServer();
         await _loadTeamMembersIfApplicable();
       }
@@ -850,7 +857,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // بيحب ياخد معاه مساعد… لو هو مش عايز يضيف مساعد خلاص مش مهم». كارت **هادي** عمدًا
             // (surfaceContainerHighest مش errorContainer) — ده اختيار مش نقص، فمينفعش يبان
             // كإنذار زي كارت "الطاقم مش مكتمل".
-            if (_order.bookingMode != 'team' && _hasOptionalAssistantSlot) ...[
+            if (_hasOptionalAssistantSlot) ...[
               const SizedBox(height: 12),
               _OptionalAssistantCard(
                 crewStatus: _order.crewStatus!,
@@ -859,7 +866,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 onRemove: _removeOptionalAssistant,
               ),
             ],
-            if (_order.bookingMode == 'team') ...[
+            if (_order.bookingMode == 'team' || _requiresMandatoryCrew) ...[
               const SizedBox(height: 12),
               _TeamRosterCard(
                 members: _teamMembers,

@@ -25,11 +25,11 @@ import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { RecruitTeamMemberDto } from './dto/recruit-team-member.dto';
 import { toRecruitCandidateResponseDto } from './dto/recruit-candidate-response.dto';
-import { BookingMode, Order } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
-import { CrewRole, OrderTeamService, isSoloJob } from './order-team.service';
+import { CrewRole, OrderTeamService, isSoloJob, orderRequiresCrewBeyondLeader } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -122,29 +122,20 @@ export class TechnicianOrderExecutionController {
   }
 
   /**
-   * نسخة toDto بتحسب حقول تجنيد الفريق (docs/08 §31) — بس لمسارات تفاصيل الطلب الفردي
-   * (getOne/team-assigned)، مش القوائم العادية ولا أفعال التنفيذ (زرار "افتح الملاحة" مش محتاج
-   * الحقول دي، صفر استعلام إضافي غير ضروري في المسار الساخن ده).
+   * نسخة التفاصيل التي تحسب حقول الطاقم. احتياج الطاقم يأتي من التسعير والإنتاجية، وليس من
+   * booking_mode وحده: قد يكون الحجز فرديًا لكنه يحتاج مساعدًا أو فنيًا إضافيًا.
    */
   private async toDtoWithTeamInfo(order: Order, viewerProfileId: string) {
     const base = await this.toDto(order, viewerProfileId);
-    if (order.bookingMode !== BookingMode.TEAM) {
-      // ADR-0052 (docs/08 §97) — الشغلانة الفردية بقت ليها `crew_status` كمان، بس عشان حقل
-      // `optionalAssistantSlots` (خانة المساعد الاختياري). حقول النقص فيها أصفار دايمًا هنا،
-      // فكارت "الطاقم مش مكتمل" الأحمر ما بيظهرش — الاختياري عمره ما يكون نقص.
-      if (order.technicianId !== viewerProfileId || !isSoloJob(order)) {
-        return base;
-      }
-      const soloCrewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
-      return soloCrewStatus.optionalAssistantSlots > 0 || soloCrewStatus.optionalAssistantsAdded > 0
-        ? { ...base, crew_status: soloCrewStatus }
-        : base;
-    }
     if (order.technicianId === viewerProfileId) {
-      // docs/08 §35، ADR-0021 §1 — crew_status موحّد (فني/مساعد منفصلين) بدل team_shortage/
-      // team_members_needed القديمين (كانوا بيتجاهلوا required_assistants تمامًا).
       const crewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
-      return { ...base, crew_status: crewStatus };
+      if (
+        orderRequiresCrewBeyondLeader(order) ||
+        (isSoloJob(order) && (crewStatus.optionalAssistantSlots > 0 || crewStatus.optionalAssistantsAdded > 0))
+      ) {
+        return { ...base, crew_status: crewStatus };
+      }
+      return base;
     }
     if (order.technicianId) {
       const leader = await this.techniciansService.findContactInfoOrThrow(order.technicianId);
@@ -158,12 +149,10 @@ export class TechnicianOrderExecutionController {
    * start/complete/...) كانت بترجّع `toDto()` **من غير `crew_status`**، وتطبيق الفني بيحط الرد ده
    * مكان الطلب الحالي — فكارت "الطاقم ناقص" وأزرار ضم فني/مساعد كانوا **بيختفوا بعد أول فعل**
    * ويرجعوا بس لما الشاشة تعيد التحميل من `getOne()`. ده اللي المالك وصفه بـ«بيظهر أول ما الطلب
-   * ييجي وبعدين بيختفي». الاستعلام الزيادة بيتعمل **بس لطلبات الفريق** (نفس تحفّظ الأداء الأصلي).
+   * ييجي وبعدين بيختفي». المعيار هنا هو احتياج الطاقم الفعلي، وليس وضع الحجز فقط.
    */
   private async toDtoAfterAction(order: Order, userId: string) {
-    // ADR-0052 — الشغلانة الفردية بقت محتاجة نفس المعاملة (خانة المساعد الاختياري لازم تفضل
-    // ظاهرة بعد كل فعل، نفس البَقّة الموصوفة فوق بالظبط)، فالتحفّظ بقى "فريق **أو** فردية".
-    if (order.bookingMode !== BookingMode.TEAM && !isSoloJob(order)) {
+    if (!orderRequiresCrewBeyondLeader(order) && !isSoloJob(order)) {
       return this.toDto(order);
     }
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);

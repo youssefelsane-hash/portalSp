@@ -134,15 +134,15 @@ export function orderRequiresCrewBeyondLeader(
  * رسالة نقص الطاقم للفني — **بتذكر الناقص بس** (ADR-0064 §1).
  *
  * الرسالة القديمة كانت بتقول حرفيًا «محتاج 0 فني و1 مساعد»، والصفر ده مش معلومة، ده ضوضاء
- * بتخلي الفني يقرا رقمين عشان يعرف واحد. وكانت كمان بتسيبه في طريق مسدود بلا أي إشارة إن حد
- * بيتصرّف. دلوقتي بتسمّي الناقص الفعلي، وبتقول له إن الإدارة اتبلّغت.
+ * بتخلي الفني يقرا رقمين عشان يعرف واحد. وكانت كذلك تقوله إنه يستطيع البدء ثم تمنعه البوابة
+ * نفسها. الرسالة الآن تسمي الإجراء المتاح بوضوح وتؤكد أن الإدارة أُبلغت للمساعدة.
  */
 export function crewShortageMessageAr(crew: Pick<CrewComposition, 'missingTechnicians' | 'missingAssistants'>): string {
   const parts: string[] = [];
   if (crew.missingTechnicians > 0) parts.push(`${crew.missingTechnicians} فني`);
   if (crew.missingAssistants > 0) parts.push(`${crew.missingAssistants} مساعد`);
   const missing = parts.join(' و');
-  return `الطاقم لسه ناقص ${missing} — بلّغنا الإدارة وهيتم تدبيره. لو الشغل ينفع يبدأ من غيره، كلّم الدعم.`;
+  return `الطاقم لسه ناقص ${missing} — ضيفه من قسم «طاقم الطلب» قبل ما تبدأ. بلّغنا الإدارة كمان للمساعدة.`;
 }
 
 /** كام خانة مساعد اختياري لسه مفتوحة. صفر لأي طلب مش فردي، أو لو الميزة متقفلة من الإعدادات. */
@@ -536,18 +536,14 @@ export class OrderTeamService {
    * الحارس الوحيد لسؤال "فيه خانة مفتوحة للدور ده دلوقتي؟" — مشترك بين قايمة المرشّحين والتجنيد
    * الفعلي عشان الاتنين مايفترقوش أبدًا (القايمة تقول "فيه" والتجنيد يقول "مفيش" أو العكس).
    *
-   * **ضم فني** لسه محصور في طلبات "اعتماد" (فريق) بالحرف زي ما كان — الشغلانة الفردية مش محتاجة
-   * فني تاني بالتعريف، وفتحها كانت هتخلي أي فني يقسّم أرباح أي شغلانة مع فني تاني بلا سقف.
-   *
-   * **ضم مساعد** بقى ليه مسارين (ADR-0052، docs/08 §97): نقص إجباري في طلب فريق زي ما كان، أو
+   * ضم الفني أو المساعد متاح فقط إذا كانت هناك خانة مطلوبة فعلًا. وضع الحجز لا يكفي للحكم:
+   * محرك التسعير قد يطلب طاقمًا لحجز فردي، وبوابة بدء العمل تعتمد على هذه المتطلبات نفسها.
+   * **ضم مساعد** له مساران: نقص إجباري، أو
    * خانة **اختيارية** في شغلانة فردية — «لو هو مش عايز يضيف مساعد خلاص مش مهم» بنص المالك.
    */
   private async assertCrewSlotOpen(orderId: string, order: Order, role: CrewRole): Promise<void> {
     const composition = await this.getCrewComposition(orderId, order);
     if (role === 'technician') {
-      if (order.bookingMode !== BookingMode.TEAM) {
-        throw new ApiException(ErrorCode.VAL_001, 'ضم فني متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
-      }
       if (composition.missingTechnicians <= 0) {
         throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
       }
