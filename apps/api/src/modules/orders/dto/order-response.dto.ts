@@ -335,6 +335,8 @@ export interface TechnicianOrderResponseDto
   earning_pending: boolean;
   /** الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040). */
   is_crew_share: boolean;
+  /** لا توجد حصة تاريخية مسجلة لطلب مقفل؛ لا يعرض التطبيق رقمًا مُعاد حسابه. */
+  earning_snapshot_missing: boolean;
 }
 
 export function toTechnicianOrderResponseDto(
@@ -347,6 +349,7 @@ export function toTechnicianOrderResponseDto(
     fullyPaidOnline: boolean;
     earningPending?: boolean;
     isCrewShare?: boolean;
+    earningSnapshotMissing?: boolean;
   },
 ): TechnicianOrderResponseDto {
   const {
@@ -379,6 +382,7 @@ export function toTechnicianOrderResponseDto(
     // docs/08 §64.ب — «لسه ما اتحددش» غير «صفر». التطبيق بيكتب نص مختلف تمامًا للحالتين.
     earning_pending: money.earningPending ?? false,
     is_crew_share: money.isCrewShare ?? false,
+    earning_snapshot_missing: money.earningSnapshotMissing ?? false,
     has_online_payment: money.hasOnlinePayment,
     fully_paid_online: money.fullyPaidOnline,
     // docs/08 §108-B — total_amount_cents بقى مخفي دايمًا لنسخة الفني، بلا استثناء الكاش الكامل

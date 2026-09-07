@@ -40,11 +40,13 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
       onlinePaidAmountCents?: number;
       amountDueToTechnicianCents?: number;
     } = {},
+    historicalShares: Array<{ technicianId: string; shareCents: number }> = [],
   ): PaymentsService {
     const svc = Object.create(PaymentsService.prototype) as PaymentsService;
     Object.assign(svc, {
       crewEarningsService: {
         resolveParticipants: async () => participants,
+        listForOrder: async () => historicalShares,
       } as unknown as CrewEarningsService,
       dataSource: { manager: {} },
       // المسار ده بيتنادى بس لما technician_earning_cents = 0 (طلب لسه ما اتقفلش) — وقتها
@@ -143,6 +145,46 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     );
     // الثابت الحاكم لـADR-0040: مجموع الحصص = الوعاء بالظبط، مفيش قرش ضايع ولا مضاعف.
     expect(leaderView.myEarningCents + memberView.myEarningCents).toBe(80000);
+  });
+
+  it('بعد التسوية يقرأ حصة الـsnapshot حتى لو قواعد المستوى تغيرت لاحقًا', async () => {
+    const historicalShares = [
+      { technicianId: LEADER, shareCents: 59000 },
+      { technicianId: MEMBER, shareCents: 21000 },
+    ];
+    const settledOrder = order({
+      orderStatus: OrderStatus.COMPLETED,
+      closedAt: new Date(),
+      settlementPolicyVersion: 2,
+      bookingMode: BookingMode.TEAM,
+    });
+    const svc = service([], {}, historicalShares);
+    // لو كود العرض حاول يعيد الحساب هنا، الاختبار يفشل بدل ما يقرأ ما أُقفل فعليًا.
+    Object.assign(svc, {
+      earningsPolicyService: {
+        calculateOrder: async () => {
+          throw new Error('historical orders must not be recalculated');
+        },
+      },
+    });
+
+    const memberView = await svc.getTechnicianMoneyView(settledOrder, undefined, MEMBER);
+    expect(memberView.myEarningCents).toBe(21000);
+    expect(memberView.isCrewShare).toBe(true);
+    expect(memberView.earningSnapshotMissing).toBe(false);
+  });
+
+  it('طلب مقفل بلا snapshot لا يخمّن حصة فريق من قواعد اليوم', async () => {
+    const settledOrder = order({
+      orderStatus: OrderStatus.COMPLETED,
+      closedAt: new Date(),
+      settlementPolicyVersion: 2,
+      bookingMode: BookingMode.TEAM,
+    });
+    const memberView = await service([]).getTechnicianMoneyView(settledOrder, undefined, MEMBER);
+
+    expect(memberView.myEarningCents).toBe(0);
+    expect(memberView.earningSnapshotMissing).toBe(true);
   });
 
   // docs/08 §108-B — بلاغ مالك صريح، قاعدة صارمة: بس القائد (أو الفني الوحيد لو مفيش طاقم) يشوف

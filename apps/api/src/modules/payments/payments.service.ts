@@ -85,6 +85,8 @@ export interface TechnicianMoneyView {
   earningPending: boolean;
   /** حصّة الفني ده هو من وعاء الطاقم (ADR-0040) — بتساوي الوعاء كله لو مفيش طاقم. */
   isCrewShare: boolean;
+  /** طلب مقفل بلا snapshot حصص تاريخي؛ الرقم لا يجوز تخمينه بقواعد اليوم. */
+  earningSnapshotMissing: boolean;
 }
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
@@ -402,6 +404,7 @@ export class PaymentsService {
 
     let myEarningCents = poolCents;
     let isCrewShare = false;
+    let earningSnapshotMissing = false;
     // ADR-0040 — عضو الطاقم كان بيشوف **وعاء القائد كله** كأنه نصيبه هو. الحصص بتتحسب بنفس
     // الدالة النقية بتاعت التسوية بالظبط (splitCrewEarnings)، فالرقم اللي بيشوفه دلوقتي هو
     // نفس اللي هينزل محفظته وقت الإقفال.
@@ -409,7 +412,25 @@ export class PaymentsService {
     // مهم: القائد كمان بياخد **حصّته هو** وقت التسوية مش الوعاء كله (settleAndComplete)، فلازم
     // يشوف نفس الرقم اللي هينزل محفظته.
     const viewerId = viewerTechnicianProfileId ?? order.technicianId;
-    if (viewerId && order.technicianId && poolCents > 0) {
+    const isSettled = order.orderStatus === OrderStatus.COMPLETED || order.closedAt != null;
+    if (viewerId && order.technicianId && isSettled) {
+      // بعد التسوية الحصة المكتوبة وقت الإقفال هي الحقيقة الوحيدة. إعادة calculateOrder هنا كانت
+      // بتقرأ المستوى والأوزان الحالية، فترقية فني أو تعديل سياسة بعد شهور تغيّر الرقم المعروض
+      // لطلب قديم رغم أن المحفظة والاسترداد ماشيان على الـsnapshot الأصلي.
+      const em = manager ?? this.dataSource.manager;
+      const historicalShares = await this.crewEarningsService.listForOrder(em, order.id);
+      const mine = historicalShares.find((share) => share.technicianId === viewerId);
+      if (mine) {
+        myEarningCents = mine.shareCents;
+        isCrewShare = historicalShares.length > 1;
+      } else {
+        // لا نعيد توزيع الماضي من قواعد اليوم. الصف الناقص يحتاج تصحيحًا ماليًا موثقًا، لا
+        // fallback يعرض وعاء القائد أو حصة متخيلة لعضو فريق.
+        myEarningCents = 0;
+        isCrewShare = historicalShares.length > 1;
+        earningSnapshotMissing = true;
+      }
+    } else if (viewerId && order.technicianId && poolCents > 0) {
       const em = manager ?? this.dataSource.manager;
       if (order.settlementPolicyVersion === 2 && this.earningsPolicyService) {
         const calculation = await this.earningsPolicyService.calculateOrder(order.id, order.totalAmountCents, em);
@@ -455,6 +476,7 @@ export class PaymentsService {
       fullyPaidOnline: paidOnlineCents > 0 && paidOnlineCents >= breakdown.totalAmountCents,
       earningPending,
       isCrewShare,
+      earningSnapshotMissing,
     };
   }
 
