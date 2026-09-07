@@ -2,5 +2,5 @@
 -- من غير هذا الصف كان المنفّذ الجديد فقط يعرف بالتعيين، بينما القديم قد يظل متجهًا للطلب.
 
 INSERT INTO notification_type_configs (notification_type, priority_tier, default_channels) VALUES
-  ('order_reassigned_away', 'high', '["push", "in_app"]'::jsonb)
+  ('order_reassigned_away', 'informational', '["push", "in_app"]'::jsonb)
 ON CONFLICT (notification_type) DO NOTHING;
