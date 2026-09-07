@@ -20,7 +20,7 @@ Baseline: `a77013b5`. لا تنفيذ إصلاحات ولا تحريك أموا�
 
 ## AUD-014 — P2 BUG: نصيب الفني المعروض في الطلب المكتمل يتغير مع قواعد اليوم
 
-- الدليل: `apps/api/src/modules/payments/payments.service.ts:411` يستدعي `earningsPolicyService.calculateOrder` داخل `getTechnicianMoneyView` حتى عند طلب تمت تسويته. `apps/api/src/modules/payments/earnings-policy.service.ts:54` يعيد حل المشاركين؛ الاستعلام عند `:88` يقرأ المستوى والأوزان والمهارات وتعديلات الأجر الحالية بما فيها `now()`، وليس snapshot التسوية.
+- الدليل: `apps/api/src/modules/payments/payments.service.ts:400` يستدعي `earningsPolicyService.calculateOrder` داخل `getTechnicianMoneyView` حتى عند طلب تمت تسويته. `apps/api/src/modules/payments/earnings-policy.service.ts:54` يعيد حل المشاركين؛ الاستعلام عند `:88` يقرأ المستوى والأوزان والمهارات وتعديلات الأجر الحالية بما فيها `now()`، وليس snapshot التسوية.
 - الحصص التاريخية متاحة بالفعل: `apps/api/src/modules/payments/crew-earnings.service.ts:179` يكتب `recordV2Shares`، والاسترداد عند `payments.service.ts:2952` يعتمد على الحصص المسجلة. شاشة الفني تدخل مسار العرض عبر `apps/api/src/modules/orders/technician-order-execution.controller.ts:78`.
 - السيناريو: طلب مكتمل فيه قائد ومساعد؛ يتغير وزن مستوى المساعد أو ترقيته بعد الإقفال. فتح الطلب القديم يعرض حصة معاد حسابها، بينما المحفظة والاسترداد مبنيان على الحصة الأصلية.
 - الحل المقترح: قبل التسوية يُعرض تقدير مُسمّى بوضوح؛ بعد التسوية يقرأ `order_earning_shares` للمشاهد نفسه فقط. عرض إجمالي الحصة ومرتجعاتها وصافيها كقيم منفصلة عند الحاجة، لا إعادة تقسيم الماضي. عدم وجود حصة تاريخية لا يرجع لوعاء الفريق كله بصمت.
