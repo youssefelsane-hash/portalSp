@@ -352,13 +352,24 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     // الوعاء وقت الحجز = رسم المعاينة بس (workPriceCents=0 وقتها) — نفس ما OrdersService.createOrder() كانت هتحسبه فعليًا.
     await dataSource.query(`UPDATE orders SET commissionable_base_cents = 5000 WHERE id = $1`, [orderId]);
 
-    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000, undefined, {
+      estimatedDurationMinutes: 390,
+      requiredTechnicians: 2,
+      requiredAssistants: 1,
+    });
     fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-itq-approve', failureReason: null };
     const order = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'electronic');
 
     expect(order.totalAmountCents).toBe(35000); // 5000 (رسم معاينة) + 30000 (سعر الشغل)
     expect(order.commissionableBaseCents).toBe(35000); // workPriceCents اتضاف بلا شرط سياسة
-    expect(order.orderStatus).toBe(OrderStatus.IN_PROGRESS);
+    // عرض المعاينة صار عقد تنفيذ: المطابقة والسعة وتجنيد الفريق يقرأون هذه القيم من الطلب نفسه.
+    expect(order.durationMinutes).toBe(390);
+    expect(order.estimatedDurationDays).toBeNull();
+    expect(order.requiredTechnicians).toBe(2);
+    expect(order.requiredAssistants).toBe(1);
+    expect(order.bookingMode).toBe('team');
+    // الفني المعاين لا يبدأ منفردًا بينما العرض المعتمد يطلب فريقًا ناقصًا.
+    expect(order.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
 
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
