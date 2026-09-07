@@ -19,6 +19,7 @@ import { RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQueriesService } from './order-queries.service';
 import { assertNoScheduleOverlap, resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
+import { orderCandidateLoad } from '../technicians/technician-day-capacity.sql';
 
 export type OrderRescheduleRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -389,7 +390,8 @@ export class OrderRescheduleService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مفيهوش فني معيّن لسه', HttpStatus.CONFLICT);
     }
     const zone = await this.resolveZoneForOrderOrThrow(order);
-    const technicianId = order.technicianId;
+    const technicianIds = await this.assignedTechnicianIds(this.dataSource, order);
+    const candidateLoad = orderCandidateLoad(order);
     const startOfToday = new Date();
     startOfToday.setUTCHours(0, 0, 0, 0);
 
@@ -397,14 +399,14 @@ export class OrderRescheduleService {
     for (let offset = 0; offset < days; offset += 1) {
       const day = new Date(startOfToday.getTime() + offset * 24 * 60 * 60 * 1000);
        
-      const available = await this.techniciansService.hasEligibleTechnicianForDate(
-        order.serviceId,
-        zone.id,
-        order.addressId,
-        day,
-        technicianId,
-        orderId,
+      const availability = await Promise.all(
+        technicianIds.map((technicianId) =>
+          this.techniciansService.hasEligibleTechnicianForDate(
+            order.serviceId, zone.id, order.addressId, day, technicianId, orderId, candidateLoad,
+          ),
+        ),
       );
+      const available = availability.every(Boolean);
       options.push({ date: day.toISOString().slice(0, 10), available });
     }
     return options;
@@ -477,6 +479,8 @@ export class OrderRescheduleService {
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       this.assertReschedulable(fresh);
       const interval = resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
+      const targetZone = zone ?? await this.resolveZoneForOrderOrThrow(fresh);
+      await this.lockAndAssertCrewAvailability(manager, fresh, targetZone.id, newScheduledAt, interval.durationMinutes);
 
       if (newSlot) {
         if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
@@ -491,21 +495,6 @@ export class OrderRescheduleService {
           throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
         }
       } else {
-        const free = await this.techniciansService.hasEligibleTechnicianForDate(
-          fresh.serviceId,
-          zone!.id,
-          fresh.addressId,
-          newScheduledAt,
-          fresh.technicianId!,
-          orderId,
-        );
-        if (!free) {
-          throw new ApiException(
-            ErrorCode.VAL_001,
-            'الفني مش متاح في اليوم ده (إجازة محددة منه، أو عنده شغل تاني بيتعارض) — اختار يوم تاني',
-            HttpStatus.CONFLICT,
-          );
-        }
         if (interval.durationMinutes != null) {
           await assertNoScheduleOverlap(
             manager,
@@ -594,6 +583,54 @@ export class OrderRescheduleService {
     }
   }
 
+  private async assignedTechnicianIds(runner: Pick<DataSource | EntityManager, 'query'>, order: Order): Promise<string[]> {
+    const rows = await runner.query<{ technician_id: string }[]>(
+      `SELECT technician_id FROM order_team_members WHERE order_id = $1 ORDER BY technician_id`,
+      [order.id],
+    );
+    return [...new Set([order.technicianId!, ...rows.map((row) => row.technician_id)])].sort();
+  }
+
+  private async lockAndAssertCrewAvailability(
+    manager: EntityManager,
+    order: Order,
+    zoneId: string,
+    scheduledAt: Date,
+    durationMinutes: number | null,
+  ): Promise<void> {
+    const technicianIds = await this.assignedTechnicianIds(manager, order);
+    // كل إعادة جدولة تقفل نفس صفوف الأفراد بترتيب ثابت قبل سؤال الإتاحة؛ طلبان مختلفان
+    // لنفس المساعد لا يمران معًا ثم يحفظان تعارضًا صامتًا.
+    await manager.query(`SELECT id FROM technician_profiles WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [technicianIds]);
+    const candidateLoad = orderCandidateLoad({ ...order, durationMinutes, durationHours: null });
+    for (const technicianId of technicianIds) {
+      const available = await this.techniciansService.hasEligibleTechnicianForDate(
+        order.serviceId, zoneId, order.addressId, scheduledAt, technicianId, order.id, candidateLoad,
+      );
+      if (!available) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          technicianId === order.technicianId
+            ? 'الفني مش متاح في الموعد الجديد — اختار موعدًا آخر'
+            : 'أحد أعضاء الطاقم مش متاح في الموعد الجديد — غيّر الموعد أو بدّل عضو الطاقم أولًا',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (durationMinutes != null && durationMinutes > 0) {
+        await assertNoScheduleOverlap(
+          manager,
+          {
+            technicianId,
+            startsAt: scheduledAt,
+            endsAt: new Date(scheduledAt.getTime() + durationMinutes * 60_000),
+            excludeOrderId: order.id,
+          },
+          (orderNumber) => `أحد أفراد الطاقم لديه طلب آخر (${orderNumber}) متعارض مع الفترة الجديدة`,
+        );
+      }
+    }
+  }
+
   private async rescheduleLockedOrder(
     manager: EntityManager,
     order: Order,
@@ -641,6 +678,8 @@ export class OrderRescheduleService {
         HttpStatus.CONFLICT,
       );
     }
+    const targetZone = await this.resolveZoneForOrderOrThrow(order);
+    await this.lockAndAssertCrewAvailability(manager, order, targetZone.id, newScheduledAt, interval.durationMinutes);
     const booked = await this.scheduleService.rescheduleSlot(order.id, newSlot.id, manager);
     if (!booked) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
