@@ -46,7 +46,7 @@ Baseline: `a77013b5`. فحص كود فقط مع محاكاة زمنية بالذ
 
 ## AUD-005 — P1 / BUG: حماية دفع الطلب العادي من التكرار تنتهي بعد خمس دقائق وقابلة للسباق
 
-- الدليل: `payments.service.ts:1228` يبحث عن PENDING/PROCESSING أحدث من نافذة خمس دقائق فقط؛ بعدها ينشئ Payment خارج transaction مشتركة مع هذا الفحص `:1253`. الـunique على idempotency_key في `entities/payment.entity.ts:89` لا يمنع مفتاحين مختلفين لنفس الطلب.
+- الدليل: `payments.service.ts:1228` يبحث عن PENDING/PROCESSING أحدث من نافذة خمس دقائق فقط؛ بعدها ينشئ Payment خارج transaction مشتركة مع هذا الفحص `:1253`. الـunique على idempotency_key في `apps/api/src/modules/payments/entities/payment.entity.ts:86` لا يمنع مفتاحين مختلفين لنفس الطلب.
 - السيناريو: checkout أول ما زال صالحًا بعد خمس دقائق، ثم checkout جديد؛ أو طلبان متزامنان بمفتاحين جديدين يقرآن لا شيء. كِلا الرابطين قد يُدفع.
 - الأثر: قفل التسوية المحلي يمنع تكرار completion لكنه لا يعيد الخصم الخارجي الثاني تلقائيًا. `payments.service.ts:2095` قد يرفض تأكيد الدفع الثاني بعد اكتمال الأول.
 - التنفيذ المقترح: intent/obligation مركزي نشط حتى انتهاء موثق من البوابة، لا انتهاء نافذة عمر محلية فقط. أضف قرار معالجة فائض دفع مثبت (refund/review) عوض إخفائه بفشل webhook.

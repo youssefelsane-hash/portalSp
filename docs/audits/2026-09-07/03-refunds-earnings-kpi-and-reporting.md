@@ -28,7 +28,7 @@ Baseline: `a77013b5`. لا تنفيذ إصلاحات ولا تحريك أموا�
 
 ## AUD-015 — P1 BUG: صرف مكافأة KPI قابل للتكرار
 
-- الدليل: `apps/api/src/modules/technician-kpi/technician-kpi.service.ts:276` يقرأ الحالة `APPROVED` دون قفل، ثم `:293` ينفذ `wallets.doubleEntry()` بلا transaction مشتركة؛ حالة `PAID` تحفظ بعده عند `:309`.
+- الدليل: `apps/api/src/modules/technician-kpi/technician-kpi.service.ts:276` يقرأ الحالة `APPROVED` دون قفل، ثم `:293` ينفذ `wallets.doubleEntry()` بلا transaction مشتركة؛ حالة `PAID` تحفظ بعده عند `:308`.
 - `apps/api/src/modules/payments/wallets.service.ts:77` يفتح transaction مستقلة إذا لم يُمرر manager. قفل المحفظتين عند `:104` يحمي الأرصدة من lost update، لكنه لا يمنع تكرار نفس العملية؛ عند `:155` و`:170` تُكتب مراجع العملية دون فحص وجودها. فهرس `(reference_type, reference_id)` في `infra/migrations/0008_finance.sql:42` عادي وليس unique؛ رقم الحركة الفريد يختلف في كل استدعاء.
 - السيناريو: طلبا صرف متزامنان يقرآن APPROVED؛ كلاهما يودع المكافأة، ثم كلاهما يكتب PAID. أو يتوقف السيرفر بعد القيد وقبل حفظ PAID، فيعيد الأدمن الصرف.
 - الحل المقترح: قفل snapshot وإعادة فحص حالته ثم القيد والحالة والتدقيق في transaction واحدة. إضافة هوية مالية فريدة لعملية مكافأة snapshot تمنع التكرار حتى عند retry، مع عدم فرض unique عام يكسر الاستردادات الجزئية المشروعة.
