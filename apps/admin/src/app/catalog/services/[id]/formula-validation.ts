@@ -72,6 +72,15 @@ export function collectFormulaPayloadIssues(payload: unknown, context: FormulaEd
     return issues;
   }
 
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+    if (bytes > FORMULA_LIMITS.MAX_PAYLOAD_JSON_BYTES) {
+      add(['المعادلة'], `حجم المعادلة (${bytes} بايت) أكبر من الحد المسموح (${FORMULA_LIMITS.MAX_PAYLOAD_JSON_BYTES} بايت).`);
+    }
+  } catch {
+    add(['المعادلة'], 'المعادلة لا يمكن تحويلها إلى JSON صالح.');
+  }
+
   const unknownOutputs = Object.keys(payload).filter((key) => !OUTPUT_KEYS.has(key));
   for (const key of unknownOutputs) {
     add([key], 'هذا مخرج غير معروف. احذفه أو استخدم اسم مخرج معتمد.');
