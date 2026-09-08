@@ -35,10 +35,8 @@ import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../commo
 import {
   RECURRING_CARD_PAYMENT_FAILED_EVENT,
   RECURRING_CARD_PAYMENT_DECLINED_EVENT,
-  RECURRING_CASH_REMINDER_EVENT,
   RecurringCardPaymentDeclinedEvent,
   RecurringCardPaymentFailedEvent,
-  RecurringCashReminderEvent,
 } from '../../common/events/recurring-order-payment.event';
 
 const SWEEP_INTERVAL_MS = 60_000;
@@ -548,9 +546,24 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       ? (remindedRaw[0] as { id: string; order_number: string; customer_id: string; scheduled_at: Date; total_amount_cents: number }[])
       : (remindedRaw as { id: string; order_number: string; customer_id: string; scheduled_at: Date; total_amount_cents: number }[]);
     for (const order of reminded) {
-      this.eventEmitter.emit(
-        RECURRING_CASH_REMINDER_EVENT,
-        new RecurringCashReminderEvent(order.id, order.order_number, order.customer_id, order.scheduled_at, Number(order.total_amount_cents)),
+      // الصف الدائم هو مصدر التسليم، مش EventEmitter: لو الخدمة وقعت الآن تبقى lease وتُعاد
+      // المحاولة، ولا يضيع التذكير بين claim والإرسال.
+      await this.dataSource.query(
+        `INSERT INTO recurring_notification_outbox
+           (event_type, order_id, customer_profile_id, payload)
+         VALUES ('cash_reminder', $1, $2, $3::jsonb)
+         ON CONFLICT (event_type, order_id) DO NOTHING`,
+        [
+          order.id,
+          order.customer_id,
+          JSON.stringify({
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerId: order.customer_id,
+            scheduledAt: order.scheduled_at,
+            totalAmountCents: Number(order.total_amount_cents),
+          }),
+        ],
       );
     }
   }
