@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Between, DataSource, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
+import { Between, DataSource, EntityManager, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -16,7 +16,7 @@ import { CrewMemberType } from './dto/admin-crew-member.dto';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
-import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
 import {
@@ -1183,148 +1183,104 @@ export class AdminOrdersService {
     technicianProfileId: string,
     meta?: AuditActorMeta,
   ): Promise<CrewAssignOutcome> {
-    const order = await this.findOrThrow(orderId);
-    if (order.orderType === OrderType.REVISIT) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
-        HttpStatus.CONFLICT,
+    let assistantAssignedEvent: OrderAssistantAssignedManuallyEvent | null = null;
+    let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      assertCrewMembershipMutable(order);
+      if (order.orderType === OrderType.REVISIT) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (!order.requiredAssistants || order.requiredAssistants <= 0) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
+      }
+
+      const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
+      if (order.technicianId === technician.id) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
+      }
+      await assertCrewCandidateScope(manager, order, technician.id, 'assistant');
+
+      const members = manager.getRepository(OrderTeamMember);
+      const filled = await members.count({ where: { orderId, memberType: ASSISTANT_MEMBER_TYPE } });
+      if (filled >= order.requiredAssistants) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الأماكن المطلوبة اكتملت بالفعل', HttpStatus.CONFLICT);
+      }
+      const alreadyAssistant = await members.findOne({ where: { orderId, technicianId: technician.id } });
+      if (alreadyAssistant) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل في طاقم الطلب', HttpStatus.CONFLICT);
+      }
+
+      await this.assignmentGuard.assertScheduleAvailable(manager, technician.id, order);
+      const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+      const [service] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
+        `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+        [order.serviceId],
       );
-    }
-    if (!order.requiredAssistants || order.requiredAssistants <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
-    }
-
-    const filled = await this.teamMembers.count({ where: { orderId, memberType: ASSISTANT_MEMBER_TYPE } });
-    if (filled >= order.requiredAssistants) {
-      throw new ApiException(ErrorCode.ORDR_003, 'الأماكن المطلوبة اكتملت بالفعل', HttpStatus.CONFLICT);
-    }
-
-    const technician = await this.techniciansService.findByProfileIdOrThrow(technicianProfileId);
-    if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
-      throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
-    }
-    if (order.technicianId === technician.id) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
-    }
-    const [scope] = await this.dataSource.query<{
-      correct_kind: boolean;
-      approved_specialty: boolean;
-      same_city: boolean;
-    }[]>(
-      `SELECT
-         (tp.technician_kind = 'assistant') AS correct_kind,
-         (${technicianServiceQualificationCondition({
-           technicianIdExpr: 'tp.id',
-           serviceIdExpr: 'svc.id',
-           categoryIdExpr: 'svc.category_id',
-         })}) AS approved_specialty,
-         (${technicianCityCoverageCondition({
-           technicianIdExpr: 'tp.id',
-           requestedServiceZoneIdExpr: '$3',
-         })}) AS same_city
-       FROM technician_profiles tp
-       JOIN services svc ON svc.id = $2
-       WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
-      [technician.id, order.serviceId, order.serviceZoneId],
-    );
-    if (!scope?.correct_kind) {
-      throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش مسجل حاليًا كمساعد', HttpStatus.CONFLICT);
-    }
-    if (!scope.approved_specialty) {
-      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
-    }
-    if (!scope.same_city) {
-      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
-    }
-    const alreadyAssistant = await this.teamMembers.findOne({
-      where: { orderId, technicianId: technician.id, memberType: ASSISTANT_MEMBER_TYPE },
-    });
-    if (alreadyAssistant) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده معيّن كمساعد على الطلب ده بالفعل', HttpStatus.CONFLICT);
-    }
-
-    // ADR-0057 — كان هنا فحص BLOCKED بس، بحجة إن "التعيين الإداري قرار واعٍ". المالك صحّح ده
-    // صراحة: نفس قاعدة `recruitMember()` بالحرف لازم تتطبق هنا — تعارض زمني صريح = رفض قاطع،
-    // MEANINGFUL/HEAVY = فرصة تحتاج قبول الشخص نفسه (مش تحميل صامت حتى لو الفاعل أدمن)، BLOCKED
-    // = رفض تمامًا. صفر استثناء لكون الفاعل أدمن.
-    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
-
-    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
-    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
-      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
-      [order.serviceId],
-    );
-    const capacityTier = await classifyTechnicianCapacity(this.dataSource, {
-      technicianId: technician.id,
-      scheduledAt: order.scheduledAt,
-      excludeOrderId: order.id,
-      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
-      // ADR-0077 — نفس مسطرة التوزيع الفعلي بالحرف.
-      ...orderCandidateLoadFields(order),
-      dailyCapacityMinutes: dailyCapacityMinutes,
-    });
-    if (capacityTier === 'BLOCKED') {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
-    }
-
-    if (capacityTier !== 'LIGHT') {
-      return this.offerCrewOpportunityInsteadOfSilentLoad(orderId, order, technician.id, capacityTier, 'assistant');
-    }
-
-    await this.teamMembers.save(
-      this.teamMembers.create({
-        orderId,
+      const capacityTier = await classifyTechnicianCapacity(manager, {
         technicianId: technician.id,
-        roleLabel: 'مساعد',
-        memberType: ASSISTANT_MEMBER_TYPE,
-        addedByTechnicianId: null,
-        addedByAdminUserId: adminUserId,
-      }),
-    );
+        scheduledAt: order.scheduledAt,
+        excludeOrderId: order.id,
+        serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+        ...orderCandidateLoadFields(order),
+        dailyCapacityMinutes,
+      });
+      if (capacityTier === 'BLOCKED') {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
+      }
+      if (capacityTier !== 'LIGHT') {
+        const opportunity = await this.workOpportunities.offerIfNotExists(manager, orderId, technician.id, capacityTier, 'crew_recruit', 'assistant');
+        if (opportunity.created) {
+          opportunityEvent = new WorkOpportunityOfferedEvent(
+            opportunity.id,
+            orderId,
+            order.orderNumber,
+            technician.id,
+            'crew_recruit',
+            capacityTier,
+            order.scheduledAt,
+          );
+        }
+        return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier } as const;
+      }
 
-    // إشعار الفني عبر حدث، مش نداء مباشر لـNotificationsService — راجع "لماذا الإشعارات عبر
-    // أحداث" في assistant-matching/README.md، نفس الاتفاقية المتبعة في كل الموديول ده بالفعل
-    // (ORDER_STATUS_CHANGED_EVENT/ORDER_REASSIGNED_EVENT).
-    this.events.emit(
-      ORDER_ASSISTANT_ASSIGNED_MANUALLY_EVENT,
-      new OrderAssistantAssignedManuallyEvent(order.id, technician.id),
-    );
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.assistant_assigned_manually',
-      entityType: 'order',
-      entityId: order.id,
-      newValues: { technician_id: technician.id, capacity_tier: capacityTier },
-      meta,
-    });
-
-    return { status: 'assigned', order };
-  }
-
-  /**
-   * ADR-0057 — نقطة مشتركة لتحويل تعيين إداري لفرصة تحتاج قبول، بدل تحميل صامت، لما القدرة
-   * الاستيعابية MEANINGFUL/HEAVY. نفس آلية `OrderTeamService.recruitMember()` بالحرف
-   * (`technician_work_opportunities`, context=`crew_recruit`) — نقطة قبول واحدة
-   * (`acceptCrewOpportunity`) بغض النظر مين عرض الفرصة، قائد أو أدمن.
-   */
-  private async offerCrewOpportunityInsteadOfSilentLoad(
-    orderId: string,
-    order: Order,
-    technicianId: string,
-    tier: TechnicianCapacityTier,
-    role: 'technician' | 'assistant',
-  ): Promise<CrewAssignOutcome> {
-    const opportunity = await this.workOpportunities.offerIfNotExists(this.dataSource.manager, orderId, technicianId, tier, 'crew_recruit', role);
-    if (opportunity.created) {
-      this.events.emit(
-        WORK_OPPORTUNITY_OFFERED_EVENT,
-        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier, order.scheduledAt),
+      await members.save(
+        members.create({
+          orderId,
+          technicianId: technician.id,
+          roleLabel: 'مساعد',
+          memberType: ASSISTANT_MEMBER_TYPE,
+          addedByTechnicianId: null,
+          addedByAdminUserId: adminUserId,
+        }),
       );
-    }
-    return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.assistant_assigned_manually',
+          entityType: 'order',
+          entityId: order.id,
+          newValues: { technician_id: technician.id, capacity_tier: capacityTier },
+          meta,
+        },
+        manager,
+      );
+      assistantAssignedEvent = new OrderAssistantAssignedManuallyEvent(order.id, technician.id);
+      return { status: 'assigned', order } as const;
+    });
+    if (assistantAssignedEvent) this.events.emit(ORDER_ASSISTANT_ASSIGNED_MANUALLY_EVENT, assistantAssignedEvent);
+    if (opportunityEvent) this.events.emit(WORK_OPPORTUNITY_OFFERED_EVENT, opportunityEvent);
+    return outcome;
   }
 
   // ── إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) ────────────────────────
@@ -1339,37 +1295,39 @@ export class AdminOrdersService {
    * أدمن. `assertScheduleAvailable` هنا حارس صارم زيه بالظبط في المسار الذاتي.
    */
   private async validateCrewCandidateOrThrow(
+    manager: EntityManager,
     order: Order,
     technicianProfileId: string,
     memberType: CrewMemberType,
-  ): Promise<TechnicianCapacityTier> {
+  ): Promise<{ capacityTier: TechnicianCapacityTier; technician: TechnicianProfile; effectiveMemberType: string }> {
     assertCrewMembershipMutable(order);
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'إدارة طاقم الفريق متاحة بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
-    const technician = await this.techniciansService.findByProfileIdOrThrow(technicianProfileId);
+    // القفل على الشخص المرشح يجعل كل كاتبي الطاقم يتسلسلوا عليه قبل حساب جدوله وسعته.
+    const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
     const effectiveMemberType = resolveEffectiveMemberType(memberType, technician.technicianKind);
     const role: CrewRole = effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician';
-    await assertCrewCandidateScope(this.dataSource.manager, order, technician.id, role);
+    await assertCrewCandidateScope(manager, order, technician.id, role);
     if (order.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل', HttpStatus.CONFLICT);
     }
-    const alreadyMember = await this.teamMembers.findOne({ where: { orderId: order.id, technicianId: technician.id } });
+    const alreadyMember = await manager.getRepository(OrderTeamMember).findOne({ where: { orderId: order.id, technicianId: technician.id } });
     if (alreadyMember) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
 
-    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
+    await this.assignmentGuard.assertScheduleAvailable(manager, technician.id, order);
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
-    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+    const [service] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
-    const tier = await classifyTechnicianCapacity(this.dataSource, {
+    const tier = await classifyTechnicianCapacity(manager, {
       technicianId: technician.id,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
@@ -1381,7 +1339,7 @@ export class AdminOrdersService {
     if (tier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد حتى بتعيين إداري', HttpStatus.CONFLICT);
     }
-    return tier;
+    return { capacityTier: tier, technician, effectiveMemberType };
   }
 
   /** إضافة عضو طاقم (Ops حل نقص طاقم، مش شغل "مساعد" بالضرورة — راجع assignAssistant فوق للمساعد تحديدًا). */
@@ -1398,105 +1356,134 @@ export class AdminOrdersService {
     memberType: CrewMemberType = 'team_member',
     meta?: AuditActorMeta,
   ): Promise<CrewAssignOutcome> {
-    const order = await this.findOrThrow(orderId);
-    const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId, memberType);
-    // ADR-0050 — حتى الأدمن ما يقدرش يضيف مساعد بنصيب عضو فريق كامل: الدور صفة على الشخص،
-    // والنسبة بتتبعه. لو الأدمن عايز يديه نصيب كامل، الطريق الصح إنه يرقّيه لفني في بروفايله.
-    const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
-    const effectiveMemberType = resolveEffectiveMemberType(memberType, candidateProfile.technicianKind);
-    if (order.orderType === OrderType.REVISIT && effectiveMemberType === ASSISTANT_MEMBER_TYPE) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
-        HttpStatus.CONFLICT,
-      );
-    }
+    let crewChangedEvent: OrderCrewChangedEvent | null = null;
+    let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
 
-    const existingCount = await this.teamMembers.count({ where: { orderId } });
-    if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
-      throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
-    }
+      const candidate = await this.validateCrewCandidateOrThrow(manager, order, technicianId, memberType);
+      if (order.orderType === OrderType.REVISIT && candidate.effectiveMemberType === ASSISTANT_MEMBER_TYPE) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+          HttpStatus.CONFLICT,
+        );
+      }
 
-    // ADR-0057 — زي assignAssistant بالحرف: LIGHT بس هو اللي بيتضاف فورًا، MEANINGFUL/HEAVY
-    // بتتحول لفرصة تحتاج قبول الشخص نفسه.
-    if (capacityTier !== 'LIGHT') {
-      return this.offerCrewOpportunityInsteadOfSilentLoad(
-        orderId,
-        order,
-        technicianId,
-        capacityTier,
-        effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician',
-      );
-    }
+      const members = manager.getRepository(OrderTeamMember);
+      const existingCount = await members.count({ where: { orderId } });
+      if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
+        throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
+      }
 
-    // Script 4 Part Q — سباق حقيقي ممكن: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي
-    // بالظبط، الفحص فوق (validateCrewCandidateOrThrow) مش ذرّي. الـUNIQUE constraint في الداتابيز
-    // (order_id, technician_id، migration 0060) هو خط الدفاع الأخير اللي بيمنع صف مكرر فعليًا —
-    // هنا بس بنحوّل خطأ الداتابيز الخام لنفس رسالة 409 الواضحة اللي الفحص العادي بيرجّعها.
-    try {
-      await this.teamMembers.save(
-        this.teamMembers.create({
+      if (candidate.capacityTier !== 'LIGHT') {
+        const opportunity = await this.workOpportunities.offerIfNotExists(
+          manager,
+          orderId,
+          technicianId,
+          candidate.capacityTier,
+          'crew_recruit',
+          candidate.effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician',
+        );
+        if (opportunity.created) {
+          opportunityEvent = new WorkOpportunityOfferedEvent(
+            opportunity.id,
+            orderId,
+            order.orderNumber,
+            technicianId,
+            'crew_recruit',
+            candidate.capacityTier,
+            order.scheduledAt,
+          );
+        }
+        return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: candidate.capacityTier } as const;
+      }
+
+      await members.save(
+        members.create({
           orderId,
           technicianId,
           roleLabel,
-          memberType: effectiveMemberType,
+          memberType: candidate.effectiveMemberType,
           addedByTechnicianId: null,
           addedByAdminUserId: adminUserId,
         }),
       );
-    } catch (err) {
-      if (this.isUniqueViolation(err)) {
-        throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
-      }
-      throw err;
-    }
-
-    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null));
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.crew_member_added',
-      entityType: 'order',
-      entityId: orderId,
-      newValues: { technician_id: technicianId, role_label: roleLabel, member_type: memberType, capacity_tier: capacityTier },
-      meta,
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.crew_member_added',
+          entityType: 'order',
+          entityId: orderId,
+          newValues: {
+            technician_id: technicianId,
+            role_label: roleLabel,
+            member_type: candidate.effectiveMemberType,
+            capacity_tier: candidate.capacityTier,
+          },
+          meta,
+        },
+        manager,
+      );
+      crewChangedEvent = new OrderCrewChangedEvent(orderId, 'added', technicianId, null);
+      return { status: 'assigned', order } as const;
     });
-    return { status: 'assigned', order };
+    if (crewChangedEvent) this.events.emit(ORDER_CREW_CHANGED_EVENT, crewChangedEvent);
+    if (opportunityEvent) this.events.emit(WORK_OPPORTUNITY_OFFERED_EVENT, opportunityEvent);
+    return outcome;
   }
 
   /** إزالة عضو طاقم — سبب إلزامي (Script 4 §38-41: "require appropriate state, reason, authorization"). */
   async removeCrewMember(adminUserId: string, orderId: string, memberId: string, reason: string, meta?: AuditActorMeta): Promise<{ crewShortage: boolean }> {
-    const order = await this.findOrThrow(orderId);
-    assertCrewMembershipMutable(order);
-    const member = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
-    if (!member) {
-      throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
-    }
-    await this.teamMembers.remove(member);
-
-    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'removed', null, member.technicianId));
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.crew_member_removed',
-      entityType: 'order',
-      entityId: orderId,
-      oldValues: { technician_id: member.technicianId, role_label: member.roleLabel, member_type: member.memberType },
-      newValues: { reason },
-      meta,
+    let removedTechnicianId: string | null = null;
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      assertCrewMembershipMutable(order);
+      const member = await manager
+        .createQueryBuilder(OrderTeamMember, 'member')
+        .setLock('pessimistic_write')
+        .where('member.id = :memberId AND member.order_id = :orderId', { memberId, orderId })
+        .getOne();
+      if (!member) {
+        throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
+      }
+      await manager.remove(member);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.crew_member_removed',
+          entityType: 'order',
+          entityId: orderId,
+          oldValues: { technician_id: member.technicianId, role_label: member.roleLabel, member_type: member.memberType },
+          newValues: { reason },
+          meta,
+        },
+        manager,
+      );
+      const rows = await manager.query<{ member_type: string; count: string }[]>(
+        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
+        [orderId],
+      );
+      const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
+      const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+      removedTechnicianId = member.technicianId;
+      return { crewShortage: !composition.crewComplete };
     });
-
-    // جاهزية الطاقم (Script 4 §22-29: "don't silently show ready" لو الطاقم نقص) — منطق مشترك مع
-    // OrderTeamService.getCrewComposition() (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين دلوقتي،
-    // مش عدّاد كلي زي computeCrewShortage() القديمة.
-    const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
-      `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
-      [orderId],
-    );
-    const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
-    const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
-    const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
-    return { crewShortage: !composition.crewComplete };
+    if (removedTechnicianId) this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'removed', null, removedTechnicianId));
+    return result;
   }
 
   /**
@@ -1513,58 +1500,61 @@ export class AdminOrdersService {
     roleLabelOverride: string | undefined,
     meta?: AuditActorMeta,
   ): Promise<Order> {
-    const order = await this.findOrThrow(orderId);
-    assertCrewMembershipMutable(order);
-    const existingMember = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
-    if (!existingMember) {
-      throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
-    }
-    if (newTechnicianId === existingMember.technicianId) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
-    }
-    const replacementMemberType: CrewMemberType =
-      existingMember.memberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'team_member';
-    const capacityTier = await this.validateCrewCandidateOrThrow(order, newTechnicianId, replacementMemberType);
-
-    const oldMember = await this.dataSource.transaction(async (manager) => {
+    let crewChangedEvent: OrderCrewChangedEvent | null = null;
+    const order = await this.dataSource.transaction(async (manager) => {
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!lockedOrder) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      assertCrewMembershipMutable(lockedOrder);
       const repo = manager.getRepository(OrderTeamMember);
-      // إعادة قراءة جوّه الترانزاكشن (مش الاعتماد على existingMember المقروء فوق) — يحمي من
-      // سباق حذف/استبدال متزامن على نفس العضو بين التحقق فوق والتنفيذ هنا.
-      const existing = await repo.findOne({ where: { id: memberId, orderId } });
+      const existing = await manager
+        .createQueryBuilder(OrderTeamMember, 'member')
+        .setLock('pessimistic_write')
+        .where('member.id = :memberId AND member.order_id = :orderId', { memberId, orderId })
+        .getOne();
       if (!existing) {
         throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود (اتشال قبل كده)', HttpStatus.NOT_FOUND);
       }
-      const roleLabel = roleLabelOverride ?? existing.roleLabel;
-      // docs/08 §70 — نوع العضو بيتوارث من اللي اتشال: استبدال مساعد بيدّي مساعد، مش فني.
-      // من غير ده كان الاستبدال بيرجع للافتراضي (`team_member`) ويقلب حسبة نقص المساعدين.
-      const memberType = existing.memberType;
-      await repo.remove(existing);
-      // نفس حماية addCrewMember فوق — سباق ممكن: الفني الجديد بقى عضو بالفعل (إضافة متزامنة)
-      // بين التحقق فوق (validateCrewCandidateOrThrow) وهنا.
-      try {
-        await repo.save(
-          repo.create({ orderId, technicianId: newTechnicianId, roleLabel, memberType, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
-        );
-      } catch (err) {
-        if (this.isUniqueViolation(err)) {
-          throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد بقى عضو في فريق الطلب بالفعل (سباق تعديل متزامن)', HttpStatus.CONFLICT);
-        }
-        throw err;
+      if (newTechnicianId === existing.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
       }
-      return existing;
+      const requestedMemberType: CrewMemberType = existing.memberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'team_member';
+      const candidate = await this.validateCrewCandidateOrThrow(manager, lockedOrder, newTechnicianId, requestedMemberType);
+      if (candidate.effectiveMemberType !== existing.memberType) {
+        throw new ApiException(ErrorCode.VAL_001, 'استبدل الفني بفني أو المساعد بمساعد للحفاظ على توزيع الطاقم والأجور', HttpStatus.CONFLICT);
+      }
+      const roleLabel = roleLabelOverride ?? existing.roleLabel;
+      await repo.remove(existing);
+      await repo.save(
+        repo.create({
+          orderId,
+          technicianId: newTechnicianId,
+          roleLabel,
+          memberType: candidate.effectiveMemberType,
+          addedByTechnicianId: null,
+          addedByAdminUserId: adminUserId,
+        }),
+      );
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.crew_member_replaced',
+          entityType: 'order',
+          entityId: orderId,
+          oldValues: { technician_id: existing.technicianId, role_label: existing.roleLabel, member_type: existing.memberType },
+          newValues: { technician_id: newTechnicianId, reason, capacity_tier: candidate.capacityTier },
+          meta,
+        },
+        manager,
+      );
+      crewChangedEvent = new OrderCrewChangedEvent(orderId, 'replaced', newTechnicianId, existing.technicianId);
+      return lockedOrder;
     });
-
-    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'replaced', newTechnicianId, oldMember.technicianId));
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.crew_member_replaced',
-      entityType: 'order',
-      entityId: orderId,
-      oldValues: { technician_id: oldMember.technicianId, role_label: oldMember.roleLabel },
-      newValues: { technician_id: newTechnicianId, reason, capacity_tier: capacityTier },
-      meta,
-    });
+    if (crewChangedEvent) this.events.emit(ORDER_CREW_CHANGED_EVENT, crewChangedEvent);
     return order;
   }
 
@@ -1586,9 +1576,4 @@ export class AdminOrdersService {
     return this.reassign(adminUserId, orderId, newLeaderTechnicianId, meta, reason);
   }
 
-  // نفس نمط RatingsService.isUniqueViolation() بالحرف — خطأ Postgres الخام (23505) بيتحوّل
-  // لرسالة 409 واضحة بدل ما يتسرّب كـ500 عام.
-  private isUniqueViolation(err: unknown): boolean {
-    return typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === '23505';
-  }
 }
