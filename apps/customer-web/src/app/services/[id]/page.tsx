@@ -311,7 +311,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: effectiveRequestRemoteQuote ? undefined : promoCode || undefined,
           field_values: showsDynamicForm ? fieldValues : undefined,
-          payment_method:
+          prepayment_method:
             remoteAssessmentFeeDueCents > 0
               ? 'card'
               : !effectiveRequestRemoteQuote && paymentMethod === 'card'
@@ -400,7 +400,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
   const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
   const effectiveRequestRemoteQuote = remoteRouteForced ? true : requestRemoteQuote;
-  // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `payment_method: undefined`
+  // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `prepayment_method: undefined`
   // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
   // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
   // والاتجاه التاني مطلوب برضه: رسم = صفر مع طريقة دفع بيترفض بـ«الدفع يتم بعد ما الإدارة

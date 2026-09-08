@@ -211,7 +211,7 @@ class OrdersRepository {
         'match_preview_id': ?matchPreviewId,
         'standard_data_id': ?standardDataId,
         'requested_units': ?requestedUnits,
-        'payment_method': ?paymentMethod,
+        'prepayment_method': ?paymentMethod,
         'warranty_plan_id': ?warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
         'booking_mode': bookingMode.apiValue,
