@@ -32,6 +32,8 @@ export interface NotifyInput {
   workflowId?: string;
   /** Durable-event source. One row per user/channel makes retries idempotent. */
   sourceOutboxId?: string;
+  /** مفتاح idempotency عام لصناديق تسليم غير مرتبطة بجدول project_notification_outbox. */
+  sourceDeliveryKey?: string;
 }
 
 export interface ListNotificationsParams {
@@ -135,9 +137,11 @@ export class NotificationsService {
   /** بيسجّل الإشعار في القاعدة دايماً حتى لو فشل الإرسال الفعلي — الفشل بيتسجل في الصف نفسه، مش بيوقف تدفق العملية اللي استدعته. */
   private async notifyOnChannel(input: NotifyInput, channel: NotificationChannel): Promise<Notification> {
     let notification: Notification | null = null;
-    if (input.sourceOutboxId) {
+    if (input.sourceOutboxId || input.sourceDeliveryKey) {
       notification = await this.notifications.findOne({
-        where: { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel },
+        where: input.sourceOutboxId
+          ? { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel }
+          : { sourceDeliveryKey: input.sourceDeliveryKey!, userId: input.userId, channel },
       });
       // صف نجح بالفعل لا نعيد إرساله عند retry لقناة ثانية فشلت. أما queued/failed فيُستأنف
       // بالصف نفسه، فلا يضيع retry بعد crash ولا تتكرر عناصر صندوق الإشعارات.
@@ -162,6 +166,7 @@ export class NotificationsService {
         referenceId: input.referenceId ?? null,
         workflowId: input.workflowId ?? null,
         sourceOutboxId: input.sourceOutboxId ?? null,
+        sourceDeliveryKey: input.sourceDeliveryKey ?? null,
         deliveryStatus: NotificationDeliveryStatus.QUEUED,
       });
       await this.notifications.save(notification);

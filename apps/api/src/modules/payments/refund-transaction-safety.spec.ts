@@ -8,7 +8,6 @@ import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
-import { REFUND_RESOLVED_EVENT } from '../../common/events/refund-resolved.event';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة distributed-transaction حقيقية (docs/08 §19
 // بند 4): كان provider.refund() (نداء خارجي حقيقي للبوابة) بينفّذ جوّه DB transaction واحدة مع
@@ -220,16 +219,16 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
 
     const payment = await dataSource.getRepository(Payment).findOne({ where: { orderId } });
     expect(payment?.paymentStatus).toBe(PaymentGatewayStatus.REFUNDED);
-    expect(events.emit).toHaveBeenCalledWith(
-      REFUND_RESOLVED_EVENT,
-      expect.objectContaining({
-        orderId,
-        customerProfileId: ids.customerProfile,
-        amountCents: PAID_AMOUNT_CENTS,
-        status: 'completed',
-        method: 'original_method',
-      }),
+    const [outbox] = await dataSource.query(
+      `SELECT event_type, order_id, customer_profile_id, payload FROM payment_notification_outbox WHERE aggregate_id=$1`,
+      [refund.id],
     );
+    expect(outbox).toEqual(expect.objectContaining({
+      event_type: 'refund_resolved',
+      order_id: orderId,
+      customer_profile_id: ids.customerProfile,
+      payload: expect.objectContaining({ amountCents: PAID_AMOUNT_CENTS, status: 'completed', method: 'original_method' }),
+    }));
   });
 
   it('البوابة رفضت الاسترداد صراحة: الصف يترحّل لـREJECTED، الطلب يفضل زي ما هو (مفيش تأثير مالي كاذب)', async () => {
@@ -243,10 +242,11 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.orderStatus).toBe(OrderStatus.COMPLETED); // زي ما هو، مش REFUNDED
     expect(order?.paymentStatus).toBe(OrderPaymentStatus.PAID); // زي ما هو
-    expect(events.emit).toHaveBeenCalledWith(
-      REFUND_RESOLVED_EVENT,
-      expect.objectContaining({ orderId, status: 'rejected' }),
+    const [outbox] = await dataSource.query(
+      `SELECT payload FROM payment_notification_outbox WHERE aggregate_id=$1`,
+      [refund.id],
     );
+    expect(outbox.payload).toEqual(expect.objectContaining({ orderId, status: 'rejected' }));
   });
 
   it('نداء البوابة رمى استثناء (شبكة اتقطعت): صف الـRefund يفضل PROCESSING (مش ضايع)، والطلب يفضل PAID — أي محاولة تانية تترفض فورًا (الثغرة الأصلية اتقفلت)', async () => {

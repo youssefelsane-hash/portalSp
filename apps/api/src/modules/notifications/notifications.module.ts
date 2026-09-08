@@ -79,6 +79,7 @@ import { NotificationWorkflowService } from './notification-workflow.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { ProjectNotificationOutboxProcessor } from './project-notification-outbox.processor';
+import { PaymentNotificationOutboxProcessor } from './payment-notification-outbox.processor';
 
 @Module({
   imports: [
@@ -162,6 +163,7 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     PaymentInstaPayConfirmedNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
     ProjectNotificationOutboxProcessor,
+    PaymentNotificationOutboxProcessor,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

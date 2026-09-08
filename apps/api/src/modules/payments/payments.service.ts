@@ -15,7 +15,7 @@ import {
   RecurringCardPaymentDeclinedEvent,
 } from '../../common/events/recurring-order-payment.event';
 import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
-import { REFUND_RESOLVED_EVENT, RefundResolvedEvent } from '../../common/events/refund-resolved.event';
+import type { RefundResolvedEvent } from '../../common/events/refund-resolved.event';
 import { InstaPayPendingPaymentResponseDto } from './dto/payments-response.dto';
 import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
 import {
@@ -172,7 +172,7 @@ export class PaymentsService {
     }
   }
 
-  private emitRefundResolved(refund: Refund, order: Order): void {
+  private async enqueueRefundNotification(manager: EntityManager, refund: Refund, order: Order): Promise<void> {
     if (refund.refundStatus !== RefundStatus.COMPLETED && refund.refundStatus !== RefundStatus.REJECTED) return;
     const method: RefundResolvedEvent['method'] =
       refund.refundMethod === RefundMethod.ORIGINAL_METHOD
@@ -181,15 +181,26 @@ export class PaymentsService {
           ? 'wallet_credit'
           : 'cash';
 
-    this.events.emit(REFUND_RESOLVED_EVENT, {
-      refundId: refund.id,
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      customerProfileId: order.customerId,
-      amountCents: refund.amountCents,
-      status: refund.refundStatus === RefundStatus.COMPLETED ? 'completed' : 'rejected',
-      method,
-    } satisfies RefundResolvedEvent);
+    await manager.query(
+      `INSERT INTO payment_notification_outbox
+        (event_type, aggregate_id, order_id, customer_profile_id, payload)
+       VALUES ('refund_resolved', $1, $2, $3, $4::jsonb)
+       ON CONFLICT (event_type, aggregate_id) DO NOTHING`,
+      [
+        refund.id,
+        order.id,
+        order.customerId,
+        JSON.stringify({
+          refundId: refund.id,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerProfileId: order.customerId,
+          amountCents: refund.amountCents,
+          status: refund.refundStatus === RefundStatus.COMPLETED ? 'completed' : 'rejected',
+          method,
+        }),
+      ],
+    );
   }
 
   private async reverseParticipantRefund(
@@ -3077,6 +3088,7 @@ export class PaymentsService {
         lockedRefund.refundStatus = RefundStatus.REJECTED;
         await manager.save(lockedRefund);
         await recordRefundAudit();
+        await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
         return lockedRefund;
       }
 
@@ -3272,9 +3284,9 @@ export class PaymentsService {
       }
 
       await recordRefundAudit();
+      await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
       return lockedRefund;
     });
-    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 
@@ -3516,6 +3528,7 @@ export class PaymentsService {
         lockedRefund.refundStatus = RefundStatus.REJECTED;
         await manager.save(lockedRefund);
         await recordRefundAudit();
+        await this.enqueueRefundNotification(manager, lockedRefund, order);
         return lockedRefund;
       }
 
@@ -3577,10 +3590,9 @@ export class PaymentsService {
       // سجّل بالفعل صف انتقال الحالة نفسه.
 
       await recordRefundAudit();
+      await this.enqueueRefundNotification(manager, lockedRefund, order);
       return lockedRefund;
     });
-
-    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 

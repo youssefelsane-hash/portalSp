@@ -12,7 +12,6 @@ import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity'
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
-import { REFUND_RESOLVED_EVENT } from '../../common/events/refund-resolved.event';
 
 // اختبار حي ضد Postgres حقيقي — بند 6/§20.7 من تدقيق التسوية المالية: عميل بيلغي بنفسه (مش
 // النظام) طلب مدفوع مسبقًا إلكترونيًا (كارت/InstaPay، ADR-0013) قبل ما فني يتعيّن أو بعده قبل
@@ -258,16 +257,14 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const [refundRow] = await dataSource.query(`SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1`, [orderId]);
     expect(refundRow.amount_cents).toBe(30000);
     expect(refundRow.refund_status).toBe('completed');
-    expect(paymentEvents.emit).toHaveBeenCalledWith(
-      REFUND_RESOLVED_EVENT,
-      expect.objectContaining({
-        orderId,
-        customerProfileId: ids.customerProfile,
-        amountCents: 30000,
-        status: 'completed',
-        method: 'original_method',
-      }),
+    const [notificationOutbox] = await dataSource.query(
+      `SELECT customer_profile_id, payload FROM payment_notification_outbox WHERE order_id=$1`,
+      [orderId],
     );
+    expect(notificationOutbox).toEqual(expect.objectContaining({
+      customer_profile_id: ids.customerProfile,
+      payload: expect.objectContaining({ amountCents: 30000, status: 'completed', method: 'original_method' }),
+    }));
   });
 
   it('العميل يلغي طلب مدفوع (كارت) بعد تعيين فني بس قبل بدء الشغل (ACCEPTED) — يترد تلقائيًا برضه (صفر تسوية أرباح فني تحتاج عكس، لسه ما بدأش شغل)', async () => {
