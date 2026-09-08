@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ORDER_RESCHEDULED_EVENT, OrderRescheduledEvent } from '../../common/events/order-rescheduled.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
@@ -20,6 +20,7 @@ import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-h
 import { OrderQueriesService } from './order-queries.service';
 import { assertNoScheduleOverlap, resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
 import { orderCandidateLoad } from '../technicians/technician-day-capacity.sql';
+import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 
 export type OrderRescheduleRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -40,6 +41,10 @@ export interface OrderRescheduleRequestResponse {
 // technician_on_way الموعد بقى واقعي (الفني في الطريق)، تغييره في اللحظة دي مش "إعادة جدولة" لطلب
 // مستقبلي، ده تصادم مع رحلة شغالة فعلاً.
 const RESCHEDULABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ASSIGNED, OrderStatus.ACCEPTED]);
+
+// حالة إضافية للأدمن فقط: الطلب المجدول قد يمر موعده وهو ما زال يبحث عن منفّذ. لا يوجد
+// فني نتحقق من جدوله بعد، لكن لا بد من موعد مستقبلي جديد قبل التعيين اليدوي.
+const ADMIN_RESCHEDULABLE_UNASSIGNED_STATUS = OrderStatus.SEARCHING_TECHNICIAN;
 
 /**
  * **فلو إعادة جدولة الطلب — الشريحة ٢-ب من تقسيم `OrdersService`** (تدقيق A-1).
@@ -337,12 +342,15 @@ export class OrderRescheduleService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
     }
     const previousScheduledAt = order.scheduledAt;
-    const updated = await this.rescheduleCore(order, target, {
-      userId: adminUserId,
-      role: 'admin',
-      changeSource: OrderChangeSource.ADMIN,
-      reasonSuffix: ` — سبب: ${reason}`,
-    });
+    const updated =
+      order.orderStatus === ADMIN_RESCHEDULABLE_UNASSIGNED_STATUS && !order.technicianId
+        ? await this.rescheduleUnassignedOrderByAdmin(order, target, adminUserId, reason)
+        : await this.rescheduleCore(order, target, {
+            userId: adminUserId,
+            role: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reasonSuffix: ` — سبب: ${reason}`,
+          });
     await this.auditLog.record({
       actorUserId: adminUserId,
       actorRole: 'admin',
@@ -360,6 +368,101 @@ export class OrderRescheduleService {
       },
       meta,
     });
+    return updated;
+  }
+
+  /**
+   * يعيد جدولة طلب لم يُسند بعد. هذا ليس استثناءً متساهلًا من فحص التوافر: لا يوجد منفّذ
+   * أصلًا لفحصه، ولذلك لا يسمح إلا بموعد عام مستقبلي ثم يظل التعيين مسارًا منفصلًا يطبق
+   * كامل أهلية الفني/المساعد على الموعد الجديد.
+   */
+  private async rescheduleUnassignedOrderByAdmin(
+    snapshot: Order,
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
+    adminUserId: string,
+    reason: string,
+  ): Promise<Order> {
+    if (target.newSlotId != null || target.newScheduledAt == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الطلب غير المعيّن يعاد جدولته بموعد جديد فقط، ثم يعيّن له منفّذ في خطوة مستقلة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const newScheduledAt = new Date(target.newScheduledAt);
+    if (Number.isNaN(newScheduledAt.getTime()) || newScheduledAt.getTime() <= Date.now()) {
+      throw new ApiException(ErrorCode.VAL_001, 'اختار موعدًا مستقبليًا لإعادة الجدولة', HttpStatus.BAD_REQUEST);
+    }
+    const customer = await this.customerProfiles.findByProfileIdOrThrow(snapshot.customerId);
+    const previousScheduledAt = snapshot.scheduledAt;
+
+    const updated = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId: snapshot.id })
+        .getOne();
+      if (
+        !order ||
+        order.orderStatus !== ADMIN_RESCHEDULABLE_UNASSIGNED_STATUS ||
+        order.technicianId !== null
+      ) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتغيّر بالفعل — حدّث الصفحة قبل إعادة المحاولة', HttpStatus.CONFLICT);
+      }
+
+      const interval = resolveRescheduledInterval(order, newScheduledAt, target.newScheduledEndAt);
+      const now = new Date();
+      order.scheduledAt = newScheduledAt;
+      order.scheduledEndAt = interval.scheduledEndAt;
+      order.durationMinutes = interval.durationMinutes;
+      order.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+        ? interval.durationMinutes / 60
+        : null;
+      await manager.save(order);
+
+      // أي عرض قبل الموعد القديم لم يعد صالحًا. إلغاؤه صراحةً يمنع قبولًا متأخرًا يحجز
+      // فنيًا على تاريخ انتهى، ويترك سجل الجولة متاحًا للتدقيق.
+      await manager.update(
+        OrderAssignment,
+        { orderId: order.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
+        { assignmentStatus: AssignmentStatus.CANCELLED, respondedAt: now },
+      );
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: order.orderStatus,
+          newStatus: order.orderStatus,
+          changedByUserId: adminUserId,
+          changedByRole: 'admin',
+          changeSource: OrderChangeSource.ADMIN,
+          reason: `إعادة جدولة قبل التعيين — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()} — سبب: ${reason}`,
+        }),
+      );
+      await insertDurableInAppNotification(manager, {
+        userId: customer.userId,
+        notificationType: 'order_rescheduled',
+        titleAr: 'تم تغيير موعد طلبك',
+        bodyAr: `الإدارة غيّرت موعد طلب رقم ${order.orderNumber}. افتح الطلب لمراجعة الموعد الجديد.`,
+        orderId: order.id,
+        deepLink: `/orders/${order.id}`,
+      });
+      return order;
+    });
+
+    this.events.emit(
+      ORDER_RESCHEDULED_EVENT,
+      new OrderRescheduledEvent(
+        updated.id,
+        updated.orderNumber,
+        null,
+        updated.customerId,
+        previousScheduledAt,
+        newScheduledAt,
+        'admin',
+        false,
+        true,
+      ),
+    );
     return updated;
   }
   /** ADR-0034 — نفس منطق حل المنطقة اللي `create()` بتستخدمه بالحرف (point-in-polygon حقيقي). */

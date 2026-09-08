@@ -1791,7 +1791,7 @@ export default function OrderDetailPage() {
           {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — مستقلة عن isOrderCancellable
               فوق (accepted مش cancellable لكنها reschedulable). استخدام تشغيلي: العميل يتصل
               يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه. */}
-          {isOrderReschedulable(order.order_status) && hasPermission('orders.reschedule') && (
+          {(isOrderReschedulable(order.order_status) || (order.order_status === 'searching_technician' && !order.technician_id)) && hasPermission('orders.reschedule') && (
             <CardFooter className="flex-col items-stretch gap-3">
               <Button type="button" variant="outline" disabled={isSaving} onClick={handleOpenAdminRescheduleForm}>
                 إعادة جدولة الموعد
@@ -1799,10 +1799,20 @@ export default function OrderDetailPage() {
               {showAdminRescheduleForm && (
                 <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
                   <Label htmlFor="admin_reschedule_date">اليوم الجديد</Label>
-                  {adminRescheduleOptions === null && (
+                  {!order.technician_id && (
+                    <Input
+                      id="admin_reschedule_date"
+                      type="date"
+                      value={adminRescheduleDate}
+                      min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+                      onChange={(e) => setAdminRescheduleDate(e.target.value)}
+                      required
+                    />
+                  )}
+                  {order.technician_id && adminRescheduleOptions === null && (
                     <p className="text-xs text-muted-foreground">جاري تحميل أيام الفني المتاحة…</p>
                   )}
-                  {adminRescheduleOptions !== null && (
+                  {order.technician_id && adminRescheduleOptions !== null && (
                     <>
                       <SelectNative
                         id="admin_reschedule_date"

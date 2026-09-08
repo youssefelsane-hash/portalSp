@@ -39,6 +39,9 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   'searching_technician',
   'technician_assigned',
   'awaiting_admin_quote',
+  // عرض المعاينة الأول قد يظل بلا رد من العميل بعد أن انتهت الزيارة. الإلغاء هنا قرار
+  // إداري موثق، لا إلغاء تلقائي ولا تغيير مباشر في قاعدة البيانات.
+  'awaiting_initial_quote_approval',
   // سياسة إلغاء الفني (docs/10) — order-state-machine.ts بيسمح admin cancel() يقفل الطلب من
   // الحالة دي (العميل واقف مستني اختيار فني بديل، ممكن يقرر يلغي كله بدل ما يستمر).
   'awaiting_technician_reselection',
