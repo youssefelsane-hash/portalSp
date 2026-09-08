@@ -6,6 +6,7 @@ import { AdminAnalyticsController } from './admin-analytics.controller';
 import { BookingFunnelEvent } from './entities/booking-funnel-event.entity';
 import { MarketingSpend } from './entities/marketing-spend.entity';
 import { ExecutiveKpisService } from './executive-kpis.service';
+import { FinancialDashboardService } from './financial-dashboard.service';
 import { FunnelService } from './funnel.service';
 import { FunnelTrackerService } from './funnel-tracker.service';
 import { MarketingSpendService } from './marketing-spend.service';
@@ -24,7 +25,13 @@ import { MarketingSpendService } from './marketing-spend.service';
 @Module({
   imports: [TypeOrmModule.forFeature([BookingFunnelEvent, MarketingSpend]), SettingsModule, AuditModule],
   controllers: [AdminAnalyticsController],
-  providers: [FunnelService, FunnelTrackerService, ExecutiveKpisService, MarketingSpendService],
+  providers: [
+    FunnelService,
+    FunnelTrackerService,
+    ExecutiveKpisService,
+    MarketingSpendService,
+    FinancialDashboardService,
+  ],
   exports: [FunnelTrackerService],
 })
 export class AnalyticsModule {}
