@@ -13,6 +13,25 @@ import { Setting } from './entities/setting.entity';
 // TTL دفاعي بس — الإبطال الفعلي فوري في update() تحت، الـ TTL ده شبكة أمان لو حصل تعديل
 // مباشر في القاعدة (SQL) من غير ما يعدّي من update() هنا.
 const CACHE_TTL_SECONDS = 60;
+
+/**
+ * **طبقة كاش داخل العملية قدّام Redis** (تدقيق `docs/29` P0-1، الشق التاني).
+ *
+ * `readRaw()` تحت بترجع للقاعدة (`this.settings.findOne`) لو الكاش فاضي. المشكلة إن الرجوع ده
+ * **بياخد اتصال من نفس الـpool**، و`MatchingService.findEligibleTechnicians()` بتقرا **١٢ إعداد**
+ * في النداء الواحد — وبتتنادى من جوّه ترانزاكشن. يعني على كاش بارد (بعد نشر جديد، أو إعادة
+ * تشغيل Redis، أو انتهاء TTL) الترانزاكشن الواحد كان ممكن يطلب ١٢ اتصال إضافي وهو ماسك اتصال،
+ * فيستنزف الـpool ويعمل نفس القفلة اللي البند ده موجود عشانها.
+ *
+ * الحل: كاش ذاكرة قصير جدًا قدّام Redis. الإعدادات دي **قيم ضبط بتتقرا آلاف المرات وبتتغيّر
+ * نادرًا**، فالقراءة المتكررة من الشبكة إهدار خالص.
+ *
+ * **مدى التقادم**: `update()` بيمسح النسخة المحلية والـRedis مع بعض، فالـinstance اللي عدّل
+ * بيشوف التغيير **فورًا**. أي instance تاني بيشوفه بعد `LOCAL_CACHE_TTL_MS` بحد أقصى (ثانيتين
+ * افتراضيًا). ده مقبول لقيم الضبط، ومضبوط بـ`SETTINGS_LOCAL_CACHE_TTL_MS` (صفر = تعطيل كامل
+ * ورجوع للسلوك القديم بالحرف).
+ */
+const LOCAL_CACHE_TTL_MS = Math.max(0, parseInt(process.env.SETTINGS_LOCAL_CACHE_TTL_MS ?? '2000', 10) || 0);
 const SECRET_SETTING_KEYS = new Set([
   'payments.paymob.api_key',
   'payments.paymob.secret_key',
@@ -73,22 +92,58 @@ export class SettingsService {
     return `settings:${key}`;
   }
 
-  /** قراءة القيمة الخام (value + valueType بس) — كاش-أول، مصدر الحقيقة القاعدة دايماً لو فشل الكاش أو مفيش. */
+  /**
+   * كاش الذاكرة (الطبقة صفر). `null` كقيمة مخزّنة معناها «المفتاح مش موجود» — بنكاشها كمان،
+   * وإلا كل قراءة لمفتاح مالوش صف بتضرب القاعدة كل مرة.
+   */
+  private readonly localCache = new Map<string, { raw: { value: unknown; valueType: string } | null; expiresAt: number }>();
+
+  private localGet(key: string): { raw: { value: unknown; valueType: string } | null } | undefined {
+    if (LOCAL_CACHE_TTL_MS === 0) return undefined;
+    const hit = this.localCache.get(key);
+    if (!hit) return undefined;
+    if (hit.expiresAt <= Date.now()) {
+      this.localCache.delete(key);
+      return undefined;
+    }
+    return { raw: hit.raw };
+  }
+
+  private localSet(key: string, raw: { value: unknown; valueType: string } | null): void {
+    if (LOCAL_CACHE_TTL_MS === 0) return;
+    this.localCache.set(key, { raw, expiresAt: Date.now() + LOCAL_CACHE_TTL_MS });
+  }
+
+  /** إبطال محلي فوري — بيتنادى من `update()` عشان الـinstance اللي عدّل يشوف قيمته الجديدة حالًا. */
+  private localInvalidate(key: string): void {
+    this.localCache.delete(key);
+  }
+
+  /** قراءة القيمة الخام (value + valueType بس) — ذاكرة ← Redis ← القاعدة (مصدر الحقيقة). */
   private async readRaw(key: string): Promise<{ value: unknown; valueType: string } | null> {
+    const local = this.localGet(key);
+    if (local) return local.raw;
+
     const cached = await this.cache.get(this.cacheKey(key));
     if (cached !== null) {
       try {
-        return JSON.parse(cached) as { value: unknown; valueType: string };
+        const raw = JSON.parse(cached) as { value: unknown; valueType: string };
+        this.localSet(key, raw);
+        return raw;
       } catch {
         // كاش فاسد (تنسيق قديم مثلاً) — تجاهله وارجع للقاعدة، متكسرش الطلب
       }
     }
 
     const setting = await this.settings.findOne({ where: { key } });
-    if (!setting) return null;
+    if (!setting) {
+      this.localSet(key, null);
+      return null;
+    }
 
     const raw = { value: setting.value, valueType: setting.valueType };
     await this.cache.set(this.cacheKey(key), JSON.stringify(raw), CACHE_TTL_SECONDS);
+    this.localSet(key, raw);
     return raw;
   }
 
@@ -213,6 +268,9 @@ export class SettingsService {
       return fresh;
     });
     // إبطال فوري — مش مستنيين انتهاء الـ TTL، القراءة الجاية لازم تشوف القيمة الجديدة على طول
+    // الترتيب مقصود: المحلي الأول (متزامن، مايفشلش)، وبعدين Redis. كده الـinstance اللي عدّل
+    // بيشوف قيمته الجديدة فورًا حتى لو Redis وقع في اللحظة دي.
+    this.localInvalidate(key);
     await this.cache.del(this.cacheKey(key));
     // §33 — أي موديول محتفظ بنسخة في الذاكرة من قيمة إعداد (زي InstaPayProvider) بيسمع للحدث ده
     // بدل ما يعتمد على readRaw() في كل نداء. in-process بس — راجع تحذير النطاق في

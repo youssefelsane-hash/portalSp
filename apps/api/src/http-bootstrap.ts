@@ -6,6 +6,7 @@ import { ApiException, ErrorCode } from './common/exceptions/api.exception';
  * `configureHttpLayer` تبقى قابلة للاختبار من غير ما نقوم تطبيق Nest كامل في السبيك. */
 export interface HttpLayerTarget {
   use(...handlers: unknown[]): unknown;
+  set(key: string, value: unknown): unknown;
   setGlobalPrefix(prefix: string): unknown;
   enableCors(options: unknown): unknown;
   useStaticAssets(path: string, options?: { prefix?: string }): unknown;
@@ -16,6 +17,8 @@ export interface HttpLayerOptions {
   uploadsDir: string;
   apiPrefix: string;
   corsOrigins: string[];
+  /** عدد الـproxies الموثوقة بين العميل والتطبيق (راجع الشرح جوّه `configureHttpLayer`). */
+  trustedProxyHops: number;
 }
 
 /**
@@ -24,6 +27,21 @@ export interface HttpLayerOptions {
  * بيقفل على الترتيب ده صراحة.
  */
 export function configureHttpLayer(app: HttpLayerTarget, options: HttpLayerOptions): void {
+  // 0) **الثقة في الـproxy — لازم تيجي قبل أي حاجة بتقرا `req.ip`** (تدقيق `docs/29` P0-2).
+  //
+  // من غير السطر ده، Express بيرجّع في `req.ip` عنوان **الـload balancer** مش العميل، لأن ده
+  // فعلًا الطرف اللي فاتح الـsocket. و`@nestjs/throttler` بيتعقّب بالـ`req.ip` افتراضيًا،
+  // فالنتيجة إن **كل عملاء المنصة بيتحسبوا شخص واحد**: السقف العام (٦٠/دقيقة) بيقف المنصة كلها
+  // عند طلب واحد في الثانية، و`/auth/otp/request` (٥/دقيقة) بيخلّي خمس عمليات تسجيل دخول
+  // للمنصة **كلها** في الدقيقة. وكمان كل `audit_logs.ip_address` و`security_events` بتسجّل
+  // عنوان الـload balancer، فسجل الأمان بيفقد قيمته التحقيقية بالكامل.
+  //
+  // **رقم مش `true`**: `trust proxy: true` معناها «صدّق أي `X-Forwarded-For`»، وده بيخلّي أي
+  // حد يزوّر الهيدر وياخد هوية شبكية تانية (يتخطى الـthrottle أو يلوّث سجل الأمان). الرقم
+  // بيقول «صدّق آخر N قفزة موثوقة بس» — القيمة بتختلف حسب النشر (Railway = 1، nginx محلي = 1،
+  // CDN + LB = 2)، فهي من env مش مكتوبة في الكود.
+  app.set('trust proxy', options.trustedProxyHops);
+
   // 1) رؤوس أمان قياسية (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security،
   // إلخ) — API JSON بحت من غير أي صفحة HTML مُصيَّرة، فـcontentSecurityPolicy معطّلة عمداً
   // (قيمتها الحقيقية ضد XSS في صفحات HTML، مش موجودة هنا) بدل ما تضيف تعقيد من غير فايدة.

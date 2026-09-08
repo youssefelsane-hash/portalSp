@@ -336,10 +336,38 @@ describe('OrdersService.create() — Idempotency-Key يمنع تكرار الط�
     expect(await countOrdersForCustomer()).toBe(before + 1);
   });
 
-  it('من غير idempotency key خالص (عميل قديم لسه ما حدّثش): السلوك القديم فاضل زي ما هو — كل نداء بينشئ طلب جديد', async () => {
+  /**
+   * **الاختبار ده كان بيقفل على السلوك الغلط** (تدقيق `docs/29` P0-4).
+   *
+   * كان اسمه «السلوك القديم فاضل زي ما هو — كل نداء بينشئ طلب جديد»، وكان بيعدّي. المشكلة إن
+   * ده بالظبط هو البَقّة: الهيدر اختياري، فأي كلاينت مش بيبعته (تطبيق قديم، متصفح، تكامل خارجي)
+   * كان مكشوف تمامًا لدوسة مزدوجة. اتأكد حيًا بنداءين متوازيين: **طلبين مختلفين اتعملوا**.
+   *
+   * دلوقتي السيرفر بيشتق مفتاح بنفسه (`order-duplicate-guard.ts`)، فالعقد اتغيّر عمدًا.
+   */
+  it('من غير مفتاح: نفس الطلب بالظبط مرتين ورا بعض بيرجّع نفس الطلب — مش نسخة تانية', async () => {
     const before = await countOrdersForCustomer();
-    await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address } as never);
-    await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address } as never);
+    const first = await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address } as never);
+    const second = await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address } as never);
+    expect(second.id).toBe(first.id);
+    expect(await countOrdersForCustomer()).toBe(before + 1);
+  });
+
+  it('من غير مفتاح: نداءين متوازيين تمامًا بنفس البيانات — طلب واحد بس (السباق الحقيقي)', async () => {
+    const before = await countOrdersForCustomer();
+    const [a, b] = await Promise.all([
+      ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address, problem_description: `سباق ${runId}` } as never),
+      ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address, problem_description: `سباق ${runId}` } as never),
+    ]);
+    expect(a.id).toBe(b.id);
+    expect(await countOrdersForCustomer()).toBe(before + 1);
+  });
+
+  it('من غير مفتاح: طلب مختلف فعلًا (وصف مشكلة تاني) بينشئ طلب جديد — مفيش قمع خاطئ', async () => {
+    const before = await countOrdersForCustomer();
+    const first = await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address, problem_description: `مشكلة أولى ${runId}` } as never);
+    const second = await ordersService.create(ids.customerUser, { service_id: ids.service, address_id: ids.address, problem_description: `مشكلة تانية ${runId}` } as never);
+    expect(second.id).not.toBe(first.id);
     expect(await countOrdersForCustomer()).toBe(before + 2);
   });
 });
