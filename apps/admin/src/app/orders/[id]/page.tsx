@@ -1766,6 +1766,12 @@ export default function OrderDetailPage() {
               </div>
               {showCancelForm && (
                 <form onSubmit={handleCancel} className="flex flex-col gap-2">
+                  {['awaiting_initial_quote_approval', 'awaiting_quote_approval'].includes(order.order_status) && (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                      العميل لم يرد على عرض السعر. الإلغاء يزيل الطلب من قوائم التنفيذ، ولا ينفذ أي استرداد تلقائي؛
+                      راجع المدفوعات ونفّذ الاسترداد اليدوي عند الحاجة.
+                    </p>
+                  )}
                   <Label htmlFor="cancel_reason">سبب الإلغاء</Label>
                   <Input
                     id="cancel_reason"

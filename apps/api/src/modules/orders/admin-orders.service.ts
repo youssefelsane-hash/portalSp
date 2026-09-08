@@ -545,7 +545,7 @@ export class AdminOrdersService {
     if (!canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_SYSTEM)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
-        `مينفعش تلغي الطلب وهو في حالة ${order.orderStatus} — بعد قبول الفني الإلغاء لازم يعدّي من الشكوى`,
+        `مينفعش تلغي الطلب إداريًا وهو في حالة ${order.orderStatus} — استخدم مسار الشكوى أو الاسترداد المناسب للحالة`,
         HttpStatus.CONFLICT,
       );
     }

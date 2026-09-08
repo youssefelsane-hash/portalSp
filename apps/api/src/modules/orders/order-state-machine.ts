@@ -78,7 +78,13 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.WORK_COMPLETED,
     OrderStatus.DISPUTED,
   ],
-  [OrderStatus.AWAITING_QUOTE_APPROVAL]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_CUSTOMER],
+  [OrderStatus.AWAITING_QUOTE_APPROVAL]: [
+    OrderStatus.IN_PROGRESS,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+    // عرض عمل إضافي قد يظل بلا رد بعد أن توقف الفني. الإدارة تقفله يدويًا بسبب موثق؛
+    // لا يوجد استرداد تلقائي من هذا الانتقال، وأي استرداد يظل في مسار الإدارة اليدوي.
+    OrderStatus.CANCELLED_BY_SYSTEM,
+  ],
   [OrderStatus.AWAITING_ADMIN_QUOTE]: [
     OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
     // فرز الأدمن (بند 8) — الصور مش كفاية، فالطلب بيتحوّل لمعاينة في الموقع: بيتوزّع على معاين
