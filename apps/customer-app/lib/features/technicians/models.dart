@@ -354,7 +354,8 @@ class BookingMatchProvider {
   final String id;
   final String fullName;
   final String? avatarUrl;
-  final String currentLevel;
+  // المستوى خاص بالشخص؛ الشركة لها فريق وقد لا يكون لها مستوى واحد ممثل لها.
+  final String? currentLevel;
   final double averageRating;
   final int totalRatingsCount;
   final int completedOrdersCount;
@@ -375,7 +376,7 @@ class BookingMatchProvider {
         id: json['id'] as String,
         fullName: json['full_name'] as String,
         avatarUrl: json['avatar_url'] as String?,
-        currentLevel: json['current_level'] as String,
+        currentLevel: json['current_level'] as String?,
         averageRating: (json['average_rating'] as num).toDouble(),
         totalRatingsCount: json['total_ratings_count'] as int,
         completedOrdersCount: json['completed_orders_count'] as int,
