@@ -23,6 +23,8 @@ export interface KpiWeightsApplied {
 export interface TechnicianKpiSnapshotResponseDto {
   id: string;
   technician_id: string;
+  technician_full_name: string | null;
+  technician_code: string | null;
   period_year: number;
   period_month: number;
   offered_orders_count: number;

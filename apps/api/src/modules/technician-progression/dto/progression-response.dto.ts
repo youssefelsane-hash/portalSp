@@ -50,6 +50,8 @@ export function toProgressionRuleResponseDto(r: TechnicianProgressionRule): Tech
 export interface TechnicianProgressionStatusResponseDto {
   id: string;
   technician_id: string;
+  technician_full_name: string | null;
+  technician_code: string | null;
   current_level: string;
   next_level: string | null;
   is_eligible: boolean;
@@ -64,10 +66,14 @@ export interface TechnicianProgressionStatusResponseDto {
   last_evaluated_at: string;
 }
 
-export function toProgressionStatusResponseDto(s: TechnicianProgressionStatus): TechnicianProgressionStatusResponseDto {
+export function toProgressionStatusResponseDto(
+  s: TechnicianProgressionStatus & { technicianFullName?: string | null; technicianCode?: string | null },
+): TechnicianProgressionStatusResponseDto {
   return {
     id: s.id,
     technician_id: s.technicianId,
+    technician_full_name: s.technicianFullName ?? null,
+    technician_code: s.technicianCode ?? null,
     current_level: s.currentLevel,
     next_level: s.nextLevel,
     is_eligible: s.isEligible,

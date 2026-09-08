@@ -5,6 +5,7 @@ import { Repository, DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { User } from '../auth/entities/user.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from '../technicians/entities/technician-level-history.entity';
 import { TechnicianLevel, TechnicianVerificationStatus, TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianProgressionCalculationService } from './technician-progression-calculation.service';
@@ -18,6 +19,11 @@ export interface ListProgressionStatusParams {
   page: number;
   perPage: number;
 }
+
+export type TechnicianProgressionStatusWithIdentity = TechnicianProgressionStatus & {
+  technicianFullName: string | null;
+  technicianCode: string | null;
+};
 
 // مقاييس الترقية كلها "طول العمر" (all-time) وبتتحرك ببطء، فكل 6 ساعات أكتر من كفاية — الهدف
 // إن الشاشة تبقى حيّة مش إنها تبقى لحظية.
@@ -217,14 +223,42 @@ export class TechnicianProgressionService implements OnModuleInit, OnModuleDestr
     return status;
   }
 
-  async listForAdmin(params: ListProgressionStatusParams): Promise<{ items: TechnicianProgressionStatus[]; total: number }> {
+  async listForAdmin(
+    params: ListProgressionStatusParams,
+  ): Promise<{ items: TechnicianProgressionStatusWithIdentity[]; total: number }> {
     const qb = this.statuses.createQueryBuilder('s');
     if (params.isEligible !== undefined) qb.andWhere('s.isEligible = :e', { e: params.isEligible });
     if (params.needsDemotionReview !== undefined) qb.andWhere('s.needsDemotionReview = :d', { d: params.needsDemotionReview });
     qb.orderBy('s.isEligible', 'DESC').addOrderBy('s.lastEvaluatedAt', 'DESC');
     qb.skip((params.page - 1) * params.perPage).take(params.perPage);
     const [items, total] = await qb.getManyAndCount();
-    return { items, total };
+    return { items: await this.withTechnicianIdentity(items), total };
+  }
+
+  // قائمة الإدارة تعرض شخصًا لا معرف قاعدة البيانات. الاستعلام المجمع يمنع N+1 مع صفحات كبيرة.
+  private async withTechnicianIdentity(
+    statuses: TechnicianProgressionStatus[],
+  ): Promise<TechnicianProgressionStatusWithIdentity[]> {
+    if (statuses.length === 0) return [];
+
+    const identities = await this.technicianProfiles
+      .createQueryBuilder('tp')
+      .innerJoin(User, 'u', 'u.id = tp.user_id')
+      .select('tp.id', 'technician_id')
+      .addSelect('tp.technician_code', 'technician_code')
+      .addSelect('u.full_name', 'technician_full_name')
+      .where('tp.id IN (:...technicianIds)', { technicianIds: statuses.map((status) => status.technicianId) })
+      .getRawMany<{ technician_id: string; technician_code: string; technician_full_name: string }>();
+    const byTechnicianId = new Map(identities.map((identity) => [identity.technician_id, identity]));
+
+    return statuses.map((status) => {
+      const identity = byTechnicianId.get(status.technicianId);
+      return {
+        ...status,
+        technicianFullName: identity?.technician_full_name ?? null,
+        technicianCode: identity?.technician_code ?? null,
+      };
+    });
   }
 
   async getTechnicianSummary(

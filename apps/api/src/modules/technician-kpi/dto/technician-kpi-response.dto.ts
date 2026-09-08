@@ -3,6 +3,8 @@ import { KpiDimensionScores, KpiWeightsApplied, TechnicianKpiSnapshot } from '..
 export interface TechnicianKpiSnapshotResponseDto {
   id: string;
   technician_id: string;
+  technician_full_name: string | null;
+  technician_code: string | null;
   period_year: number;
   period_month: number;
   offered_orders_count: number;
@@ -45,12 +47,14 @@ function toNumberOrNull(value: string | null): number | null {
 }
 
 export function toTechnicianKpiSnapshotResponseDto(
-  s: TechnicianKpiSnapshot,
+  s: TechnicianKpiSnapshot & { technicianFullName?: string | null; technicianCode?: string | null },
   options: { includeApprovalNotes: boolean } = { includeApprovalNotes: true },
 ): TechnicianKpiSnapshotResponseDto {
   return {
     id: s.id,
     technician_id: s.technicianId,
+    technician_full_name: s.technicianFullName ?? null,
+    technician_code: s.technicianCode ?? null,
     period_year: s.periodYear,
     period_month: s.periodMonth,
     offered_orders_count: s.offeredOrdersCount,

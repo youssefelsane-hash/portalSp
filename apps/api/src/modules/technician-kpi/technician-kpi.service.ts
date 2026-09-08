@@ -10,6 +10,7 @@ import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { User } from '../auth/entities/user.entity';
 import { TechnicianKpiCalculationService } from './technician-kpi-calculation.service';
 import { KpiSnapshotStatus, TechnicianKpiSnapshot } from './entities/technician-kpi-snapshot.entity';
 
@@ -21,6 +22,11 @@ export interface ListKpiSnapshotsParams {
   page: number;
   perPage: number;
 }
+
+export type TechnicianKpiSnapshotWithIdentity = TechnicianKpiSnapshot & {
+  technicianFullName: string | null;
+  technicianCode: string | null;
+};
 
 @Injectable()
 export class TechnicianKpiService {
@@ -174,7 +180,7 @@ export class TechnicianKpiService {
 
   async listForAdmin(
     params: ListKpiSnapshotsParams,
-  ): Promise<{ items: TechnicianKpiSnapshot[]; total: number }> {
+  ): Promise<{ items: TechnicianKpiSnapshotWithIdentity[]; total: number }> {
     const qb = this.snapshots.createQueryBuilder('s');
     if (params.periodYear) qb.andWhere('s.periodYear = :y', { y: params.periodYear });
     if (params.periodMonth) qb.andWhere('s.periodMonth = :m', { m: params.periodMonth });
@@ -183,7 +189,33 @@ export class TechnicianKpiService {
     qb.orderBy('s.overallScore', 'DESC', 'NULLS LAST').addOrderBy('s.createdAt', 'DESC');
     qb.skip((params.page - 1) * params.perPage).take(params.perPage);
     const [items, total] = await qb.getManyAndCount();
-    return { items, total };
+    return { items: await this.withTechnicianIdentity(items), total };
+  }
+
+  // الاسم والكود جزء من بيانات العرض، ويُجلبان دفعة واحدة بدل استعلام لكل صف KPI.
+  private async withTechnicianIdentity(
+    snapshots: TechnicianKpiSnapshot[],
+  ): Promise<TechnicianKpiSnapshotWithIdentity[]> {
+    if (snapshots.length === 0) return [];
+
+    const identities = await this.technicianProfiles
+      .createQueryBuilder('tp')
+      .innerJoin(User, 'u', 'u.id = tp.user_id')
+      .select('tp.id', 'technician_id')
+      .addSelect('tp.technician_code', 'technician_code')
+      .addSelect('u.full_name', 'technician_full_name')
+      .where('tp.id IN (:...technicianIds)', { technicianIds: snapshots.map((snapshot) => snapshot.technicianId) })
+      .getRawMany<{ technician_id: string; technician_code: string; technician_full_name: string }>();
+    const byTechnicianId = new Map(identities.map((identity) => [identity.technician_id, identity]));
+
+    return snapshots.map((snapshot) => {
+      const identity = byTechnicianId.get(snapshot.technicianId);
+      return {
+        ...snapshot,
+        technicianFullName: identity?.technician_full_name ?? null,
+        technicianCode: identity?.technician_code ?? null,
+      };
+    });
   }
 
   async getTechnicianSummary(

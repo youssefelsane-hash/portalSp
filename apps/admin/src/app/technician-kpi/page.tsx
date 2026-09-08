@@ -168,7 +168,8 @@ export default function TechnicianKpiPage() {
               <TableRow key={s.id}>
                 <TableCell>
                   <Link href={`/technicians/${s.technician_id}`} className="underline-offset-2 hover:underline">
-                    {s.technician_id.slice(0, 8)}…
+                    <span className="font-medium">{s.technician_full_name ?? s.technician_code ?? 'فني غير معروف'}</span>
+                    {s.technician_code && <span className="block text-xs text-muted-foreground" dir="ltr">{s.technician_code}</span>}
                   </Link>
                 </TableCell>
                 <TableCell className="font-medium">

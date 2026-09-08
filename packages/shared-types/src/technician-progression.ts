@@ -31,6 +31,8 @@ export interface ProgressionUnmetRequirement {
 export interface TechnicianProgressionStatusResponseDto {
   id: string;
   technician_id: string;
+  technician_full_name: string | null;
+  technician_code: string | null;
   current_level: string;
   next_level: string | null;
   is_eligible: boolean;
