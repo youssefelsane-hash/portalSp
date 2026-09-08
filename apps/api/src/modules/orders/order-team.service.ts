@@ -385,8 +385,9 @@ export class OrderTeamService {
   async getCrewComposition(
     orderId: string,
     order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'> & { orderType?: OrderType },
+    manager: EntityManager = this.teamMembers.manager,
   ): Promise<CrewComposition> {
-    const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
+    const rows = await manager.query<{ member_type: string; count: string }[]>(
       `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
       [orderId],
     );
@@ -545,8 +546,13 @@ export class OrderTeamService {
    * **ضم مساعد** له مساران: نقص إجباري، أو
    * خانة **اختيارية** في شغلانة فردية — «لو هو مش عايز يضيف مساعد خلاص مش مهم» بنص المالك.
    */
-  private async assertCrewSlotOpen(orderId: string, order: Order, role: CrewRole): Promise<void> {
-    const composition = await this.getCrewComposition(orderId, order);
+  private async assertCrewSlotOpen(
+    orderId: string,
+    order: Order,
+    role: CrewRole,
+    manager: EntityManager = this.teamMembers.manager,
+  ): Promise<void> {
+    const composition = await this.getCrewComposition(orderId, order, manager);
     if (role === 'technician') {
       if (composition.missingTechnicians <= 0) {
         throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
@@ -682,7 +688,11 @@ export class OrderTeamService {
           .setLock('pessimistic_write')
           .where('o.id = :orderId', { orderId: opportunity.order_id })
           .getOne();
-        if (!order || order.bookingMode !== BookingMode.TEAM || !order.technicianId) {
+        if (
+          !order ||
+          !order.technicianId ||
+          (order.bookingMode !== BookingMode.TEAM && opportunity.crew_role !== 'assistant')
+        ) {
           throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
         }
         assertCrewMembershipMutable(order);
@@ -698,21 +708,18 @@ export class OrderTeamService {
           await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
         }
 
-        const composition = await this.getCrewComposition(order.id, order);
         // بَقّة حقيقية تانية اتلقطت وقت كتابة اختبار التزامن (docs/08 §35.19): تعليم الفرصة
         // declined هنا كان بيتعمل بـmarkDecided() *جوّه نفس المعاملة* اللي هترمي استثناء وترتد —
         // يعني التعليم نفسه كان بيتلغى مع الـrollback، والفرصة كانت تفضل offered للأبد رغم إن
         // مكانها راح لحد تاني. لازم نرمي CrewOpportunityDeclinedError بدل ApiException مباشرة،
         // ونمسك بره المعاملة عشان نعلّم declined بكتابة منفصلة *بعد* الـrollback فعليًا.
-        if (role === 'technician' && composition.missingTechnicians <= 0) {
-          throw new CrewOpportunityDeclinedError(
-            new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT),
-          );
-        }
-        if (role === 'assistant' && composition.missingAssistants <= 0) {
-          throw new CrewOpportunityDeclinedError(
-            new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT),
-          );
+        try {
+          // نفس المصدر المستخدم عند إنشاء الفرصة، لكن داخل قفل الطلب. يشمل خانة المساعد
+          // الاختيارية في الطلب الفردي، لا المساعد الإلزامي فقط.
+          await this.assertCrewSlotOpen(order.id, order, role, manager);
+        } catch (err) {
+          if (err instanceof ApiException) throw new CrewOpportunityDeclinedError(err);
+          throw err;
         }
 
         const alreadyAdded = await manager.findOne(OrderTeamMember, {
