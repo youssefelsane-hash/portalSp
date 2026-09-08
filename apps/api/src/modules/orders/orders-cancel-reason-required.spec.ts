@@ -6,6 +6,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { OrderCancellationService } from './order-cancellation.service';
 
 // اختبار حي ضد Postgres حقيقي — ثغرة رسوم الإلغاء (docs/08 §112).
 //
@@ -32,6 +33,7 @@ describe('OrdersService.cancel() — سبب الإلغاء إجباري لما �
     customerProfile: '',
     address: '',
     reason: '',
+    feeReason: '',
   };
 
   async function insertOrder(label: string) {
@@ -134,6 +136,13 @@ describe('OrdersService.cancel() — سبب الإلغاء إجباري لما �
     );
     ids.reason = reason.id;
 
+    const [feeReason] = await q(
+      `INSERT INTO cancellation_reasons (reason_ar, reason_en, applies_to, charges_fee, fee_percentage, display_order, is_active)
+       VALUES ($1,$2,'customer',true,10,901,true) RETURNING id`,
+      [`سبب برسوم ${runId}`, `Fee reason ${runId}`],
+    );
+    ids.feeReason = feeReason.id;
+
     // خدمة أسباب الإلغاء الحقيقية — بتقرا من نفس الجدول اللي زرعنا فيه فوق، مش stub.
     service = buildOrdersService(
       new CancellationReasonsService(dataSource.getRepository(CancellationReason), { record: async () => undefined } as never),
@@ -150,6 +159,7 @@ describe('OrdersService.cancel() — سبب الإلغاء إجباري لما �
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM cancellation_reasons WHERE id = $1`, [ids.reason]);
+    await q(`DELETE FROM cancellation_reasons WHERE id = $1`, [ids.feeReason]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -203,5 +213,40 @@ describe('OrdersService.cancel() — سبب الإلغاء إجباري لما �
 
     const [row] = await dataSource.query(`SELECT cancellation_reason_id FROM orders WHERE id = $1`, [orderId]);
     expect(row.cancellation_reason_id).toBeNull();
+  });
+
+  it('رسم الإلغاء يقرأ السعر المقفول داخل المعاملة، لا نسخة قديمة قبل القفل', async () => {
+    const orderId = await insertOrder('locked-price');
+    await dataSource.query(`UPDATE orders SET placed_at = now() - interval '10 minutes' WHERE id = $1`, [orderId]);
+
+    let chargedCents = 0;
+    const cancellationService = new OrderCancellationService(
+      dataSource,
+      {
+        // يحاكي إعادة تسعير تمت بين قراءة العميل ومحاولة قفل صف الطلب.
+        findOneOwnedOrThrow: async () => {
+          const stale = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+          await dataSource.getRepository(Order).update(orderId, { totalAmountCents: 50_000 });
+          return stale;
+        },
+      } as never,
+      new CancellationReasonsService(dataSource.getRepository(CancellationReason), { record: async () => undefined } as never),
+      { releaseUsage: async () => undefined } as never,
+      {
+        getOrCreateWallet: async () => ({ id: '00000000-0000-7000-8000-000000000021' }),
+        findByUserIdOrThrow: async () => ({ id: '00000000-0000-7000-8000-000000000022' }),
+        doubleEntry: async (params: { amountCents: number }) => {
+          chargedCents = params.amountCents;
+        },
+      } as never,
+      {} as never, // لا يوجد دفع مسبق في الطلب الاختباري
+      { getNumber: async () => 0 } as never,
+      { record: async () => undefined } as never,
+      { emit: () => undefined } as never,
+    );
+
+    const cancelled = await cancellationService.cancel(ids.customerUser, orderId, { cancellation_reason_id: ids.feeReason });
+    expect(cancelled.cancellationFeeCents).toBe(5_000);
+    expect(chargedCents).toBe(5_000);
   });
 });
