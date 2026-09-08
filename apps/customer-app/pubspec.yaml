@@ -48,6 +48,7 @@ dependencies:
   flutter_local_notifications: ^19.4.2
   geolocator: ^13.0.2
   local_auth: ^2.3.0
+  mobile_scanner: ^7.4.0
 
 dev_dependencies:
   flutter_test:

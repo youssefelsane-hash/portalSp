@@ -22,6 +22,7 @@ import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
+import 'qr_code_scan_screen.dart';
 import '../technicians/technicians_repository.dart';
 import 'schedule_selection_screen.dart';
 
@@ -753,6 +754,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     } finally {
       if (mounted) setState(() => _validatingCode = false);
     }
+  }
+
+  Future<void> _scanCode() async {
+    final code = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrCodeScanScreen()));
+    if (!mounted || code == null || code.isEmpty) return;
+
+    setState(() {
+      _codeController.text = code;
+      _codeError = null;
+      _resolvedCodeKind = null;
+      _pricePreview = null;
+    });
+    await _validateCode();
   }
 
   // دفع قبل التوزيع (docs/08 §19 بند 1) — بيفتح نفس شاشات الدفع المستخدمة أصلاً للدفع بعد
@@ -1721,12 +1737,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         border: const OutlineInputBorder(),
                         // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
                         // من غير ما يدوّر على الفرق في السعر.
-                        suffixIcon: _resolvedCodeKind == null
-                            ? null
-                            : Icon(
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'مسح QR بالكاميرا',
+                              onPressed: _validatingCode ? null : _scanCode,
+                              icon: const Icon(Icons.qr_code_scanner_outlined),
+                            ),
+                            if (_resolvedCodeKind != null)
+                              Icon(
                                 Icons.check_circle,
                                 color: Colors.green.shade600,
                               ),
+                          ],
+                        ),
                         helperText: _resolvedCodeKind == 'building'
                             ? 'اتقبل ككود عمارة'
                             : _resolvedCodeKind == 'promo'
