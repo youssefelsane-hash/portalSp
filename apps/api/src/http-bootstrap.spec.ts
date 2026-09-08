@@ -1,4 +1,4 @@
-import { configureHttpLayer, HttpLayerTarget, validationErrorsToArabic } from './http-bootstrap';
+import { configureHttpLayer, HttpLayerTarget, stripBidiControls, validationErrorsToArabic } from './http-bootstrap';
 
 // بيسجّل ترتيب النداءات بس — الهدف مش تغطية الـmiddleware نفسها (helmet/cors مكتبات مُختبَرة
 // عندها)، الهدف قفل **الترتيب** اللي كان مكسور فعلاً وكسّر صور /uploads على الويب (docs/08 §59).
@@ -121,5 +121,19 @@ describe('validationErrorsToArabic', () => {
     ['whitelistValidation', 'الحقل غير مسموح'],
   ])('translates %s without leaking validator internals', (constraint, expected) => {
     expect(validationErrorsToArabic([{ property: 'internal_field', constraints: { [constraint]: 'English framework text' } }])).toBe(expected);
+  });
+});
+
+describe('stripBidiControls', () => {
+  it('removes display-control characters from nested request input without changing Arabic content', () => {
+    const payload = {
+      problem_description: '🔧‮مشكلة‬',
+      answers: [{ value: 'A⁦B⁩' }],
+    };
+
+    expect(stripBidiControls(payload)).toEqual({
+      problem_description: '🔧مشكلة',
+      answers: [{ value: 'AB' }],
+    });
   });
 });

@@ -62,6 +62,32 @@ export function validationErrorsToArabic(errors: ValidationError[]): string {
   return messages[constraint] ?? 'البيانات المرسلة غير صحيحة';
 }
 
+// علامات التحكم الثنائية الاتجاه لا تحمل معنى محتوى للمستخدم، لكنها تقلب عرض النص الذي بعدها
+// بصريًا (مثل U+202E). ننزعها عند كل مدخل HTTP حتى لا يصل نص مزوّر للأدمن أو الفني أو العميل.
+const BIDI_CONTROL_CHARACTERS = /[\u202A-\u202E\u2066-\u2069]/g;
+
+export function stripBidiControls<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value === 'string') return value.replace(BIDI_CONTROL_CHARACTERS, '') as T;
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = stripBidiControls(value[i], seen);
+    return value;
+  }
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    (value as Record<string, unknown>)[key] = stripBidiControls(item, seen);
+  }
+  return value;
+}
+
+/** نفس ValidationPipe القياسي، مع تنظيف نصوص الطلب قبل class-transformer/class-validator. */
+export class BidiSafeValidationPipe extends ValidationPipe {
+  override async transform(value: unknown, metadata: Parameters<ValidationPipe['transform']>[1]) {
+    return super.transform(stripBidiControls(value), metadata);
+  }
+}
+
 /**
  * تركيب طبقة الـHTTP كلها بترتيب مقصود. **الترتيب هنا مش تفصيلة تجميلية** — express بينفّذ
  * الـmiddleware بترتيب التسجيل بالظبط، فأي تبديل بيغيّر السلوك فعليًا. `http-bootstrap.spec.ts`
@@ -119,7 +145,7 @@ export function configureHttpLayer(app: HttpLayerTarget, options: HttpLayerOptio
   app.useStaticAssets(options.uploadsDir, { prefix: '/uploads/' });
 
   app.useGlobalPipes(
-    new ValidationPipe({
+    new BidiSafeValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
