@@ -2829,6 +2829,204 @@ export class PaymentsService {
     });
   }
 
+  /**
+   * AUD-012: لا نخمّن نتيجة استرداد انقطع ردها. موظف Finance يثبت النتيجة من المزود أولًا،
+   * ثم هذا الإجراء يقفل صف PROCESSING نفسه تحت الأقفال ويطبق الأثر المحلي مرة واحدة فقط.
+   */
+  async reconcileRefund(
+    performedByUserId: string,
+    refundId: string,
+    outcome: 'confirmed' | 'rejected',
+    evidence: string,
+    providerRefundId: string | undefined,
+    meta?: AuditActorMeta,
+  ): Promise<Refund> {
+    return this.dataSource.transaction(async (manager) => {
+      const lockedRefund = await manager
+        .createQueryBuilder(Refund, 'refund')
+        .setLock('pessimistic_write')
+        .where('refund.id = :refundId', { refundId })
+        .getOne();
+      if (!lockedRefund) throw new ApiException(ErrorCode.VAL_001, 'طلب الاسترداد غير موجود', HttpStatus.NOT_FOUND);
+      if (lockedRefund.refundStatus !== RefundStatus.PROCESSING) {
+        throw new ApiException(ErrorCode.PAY_003, 'الاسترداد ده اتقفل بالفعل ومش محتاج مراجعة', HttpStatus.CONFLICT);
+      }
+      if (lockedRefund.refundMethod !== RefundMethod.ORIGINAL_METHOD) {
+        throw new ApiException(ErrorCode.PAY_003, 'المراجعة اليدوية دي مخصصة لاسترداد البوابة المعلق فقط', HttpStatus.CONFLICT);
+      }
+      if (outcome === 'confirmed' && !providerRefundId?.trim()) {
+        throw new ApiException(ErrorCode.VAL_001, 'مرجع استرداد البوابة مطلوب عند تأكيد النتيجة', HttpStatus.BAD_REQUEST);
+      }
+
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId: lockedRefund.orderId })
+        .getOneOrFail();
+      const lockedPayment = await manager
+        .createQueryBuilder(Payment, 'payment')
+        .setLock('pessimistic_write')
+        .where('payment.id = :paymentId', { paymentId: lockedRefund.paymentId })
+        .getOneOrFail();
+
+      lockedRefund.reconciledByUserId = performedByUserId;
+      lockedRefund.reconciledAt = new Date();
+      lockedRefund.reconciliationEvidence = evidence.trim();
+
+      const audit = async (action: string) => this.auditLog.record(
+        {
+          actorUserId: performedByUserId,
+          actorRole: 'admin',
+          action,
+          entityType: 'order',
+          entityId: lockedOrder.id,
+          newValues: {
+            refund_id: lockedRefund.id,
+            outcome,
+            amount_cents: lockedRefund.amountCents,
+            provider_refund_id: providerRefundId ?? null,
+            reconciliation_evidence: lockedRefund.reconciliationEvidence,
+          },
+          meta,
+        },
+        manager,
+      );
+
+      if (outcome === 'rejected') {
+        lockedRefund.refundStatus = RefundStatus.REJECTED;
+        await manager.save(lockedRefund);
+        await audit('order.refund_reconciliation_rejected');
+        await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
+        return lockedRefund;
+      }
+
+      const isCancelledOrder = [OrderStatus.CANCELLED_BY_CUSTOMER, OrderStatus.CANCELLED_BY_SYSTEM].includes(
+        lockedOrder.orderStatus,
+      );
+      if (!isCancelledOrder && lockedOrder.totalAmountCents > 0) {
+        const previousRefundRows = await manager.find(Refund, {
+          where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+          select: ['amountCents'],
+        });
+        const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
+        const recordedShares = await this.crewEarningsService.listForOrder(manager, lockedOrder.id);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+
+        if (lockedOrder.settlementPolicyVersion === 2) {
+          const reversals = allocateSettlementRefundReversal({
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: lockedRefund.amountCents,
+            buckets: [
+              { bucketType: 'platform', technicianId: null, originalCents: lockedOrder.platformCommissionCents },
+              ...recordedShares.map((share) => ({
+                bucketType: 'participant' as const,
+                technicianId: share.technicianId,
+                originalCents: share.shareCents,
+              })),
+            ],
+          });
+          for (const reversal of reversals) {
+            await manager.query(
+              `INSERT INTO refund_settlement_reversals
+                 (refund_id, order_id, bucket_type, technician_id, original_bucket_cents, reversal_cents)
+               VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+              [lockedRefund.id, lockedOrder.id, reversal.bucketType, reversal.technicianId, reversal.originalCents, reversal.reversalCents],
+            );
+            if (reversal.bucketType === 'participant' && reversal.technicianId && reversal.reversalCents > 0) {
+              await this.reverseParticipantRefund(
+                manager, reversal.technicianId, reversal.reversalCents, platformWallet.id, lockedRefund.id, lockedOrder.orderNumber,
+              );
+            }
+          }
+        } else {
+          const sourceShares = recordedShares.length > 0
+            ? recordedShares.map((share) => ({
+                technicianId: share.technicianId,
+                participantRole: share.participantRole,
+                shareCents: share.shareCents,
+              }))
+            : lockedOrder.technicianId
+              ? [{ technicianId: lockedOrder.technicianId, participantRole: 'leader' as const, shareCents: lockedOrder.technicianEarningCents }]
+              : [];
+          const reversals = allocateCrewRefundReversal({
+            grossPoolCents: lockedOrder.technicianEarningCents,
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: lockedRefund.amountCents,
+            shares: sourceShares,
+          });
+          for (const reversal of reversals) {
+            if (reversal.reversalCents > 0) {
+              await this.reverseParticipantRefund(
+                manager, reversal.technicianId, reversal.reversalCents, platformWallet.id, lockedRefund.id, lockedOrder.orderNumber,
+              );
+            }
+          }
+        }
+      }
+
+      lockedRefund.refundStatus = RefundStatus.COMPLETED;
+      lockedRefund.providerRefundId = providerRefundId!.trim();
+      lockedRefund.completedAt = new Date();
+      await manager.save(lockedRefund);
+
+      const completedForPayment = await manager.find(Refund, {
+        where: { paymentId: lockedPayment.id, refundStatus: RefundStatus.COMPLETED },
+        select: ['amountCents'],
+      });
+      const refundedPaymentCents = completedForPayment.reduce((sum, row) => sum + row.amountCents, 0);
+      lockedPayment.paymentStatus = refundedPaymentCents >= lockedPayment.amountCents
+        ? PaymentGatewayStatus.REFUNDED
+        : PaymentGatewayStatus.PARTIALLY_REFUNDED;
+      await manager.save(lockedPayment);
+
+      const financialPayments = await manager.find(Payment, {
+        where: {
+          orderId: lockedOrder.id,
+          paymentStatus: In([PaymentGatewayStatus.SUCCEEDED, PaymentGatewayStatus.PARTIALLY_REFUNDED, PaymentGatewayStatus.REFUNDED]),
+        },
+        select: ['id', 'amountCents'],
+      });
+      const completedRefunds = await manager.find(Refund, {
+        where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+        select: ['paymentId', 'amountCents'],
+      });
+      const refundedByPayment = new Map<string, number>();
+      for (const row of completedRefunds) {
+        refundedByPayment.set(row.paymentId, (refundedByPayment.get(row.paymentId) ?? 0) + row.amountCents);
+      }
+      const orderFullyRefunded = financialPayments.length > 0 && financialPayments.every(
+        (financialPayment) => (refundedByPayment.get(financialPayment.id) ?? 0) >= financialPayment.amountCents,
+      );
+      if (orderFullyRefunded && !isCancelledOrder && lockedOrder.orderStatus !== OrderStatus.REFUNDED) {
+        if (!canTransition(lockedOrder.orderStatus, OrderStatus.REFUNDED)) {
+          throw new ApiException(ErrorCode.ORDR_003, 'لا يمكن إقفال الاسترداد مع حالة الطلب الحالية', HttpStatus.CONFLICT);
+        }
+        const previousStatus = lockedOrder.orderStatus;
+        lockedOrder.orderStatus = OrderStatus.REFUNDED;
+        lockedOrder.paymentStatus = OrderPaymentStatus.REFUNDED;
+        await manager.save(lockedOrder);
+        await manager.save(manager.create(OrderStatusHistory, {
+          orderId: lockedOrder.id,
+          previousStatus,
+          newStatus: OrderStatus.REFUNDED,
+          changedByUserId: performedByUserId,
+          changedByRole: 'admin',
+          changeSource: OrderChangeSource.ADMIN,
+          reason: `تسوية يدوية للاسترداد: ${lockedRefund.reconciliationEvidence}`,
+        }));
+      } else {
+        lockedOrder.paymentStatus = orderFullyRefunded ? OrderPaymentStatus.REFUNDED : OrderPaymentStatus.PARTIALLY_REFUNDED;
+        await manager.save(lockedOrder);
+      }
+
+      await audit('order.refund_reconciled_confirmed');
+      await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
+      return lockedRefund;
+    });
+  }
+
   async refundOrder(
     performedByUserId: string,
     orderId: string,

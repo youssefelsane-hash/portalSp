@@ -282,6 +282,34 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     expect(stuckRefunds.some((r) => r.id === refund!.id)).toBe(true);
   });
 
+  it('النتيجة غير المعروفة لا تتحول لرفض: الأدمن يقفل نفس صف الاسترداد بدليل ومرجع مزود مرة واحدة', async () => {
+    const gatewayTxnId = `gw-reconcile-${runId}`;
+    const { orderId } = await insertPaidOrderAndPayment(`reconcile-${runId}`, gatewayTxnId);
+    service = buildService(makeFakeProvider('throw'));
+
+    await expect(service.refundOrder(ids.customerUser, orderId, 'اختبار نتيجة غير معروفة')).rejects.toThrow();
+    const pending = await dataSource.getRepository(Refund).findOneByOrFail({ paymentId: (await dataSource.getRepository(Payment).findOneByOrFail({ orderId })).id });
+
+    const reconciled = await service.reconcileRefund(
+      ids.customerUser,
+      pending.id,
+      'confirmed',
+      'تمت مراجعة لوحة المزود ورقم العملية الخارجي',
+      `provider-manual-${runId}`,
+    );
+    expect(reconciled.refundStatus).toBe(RefundStatus.COMPLETED);
+    expect(reconciled.providerRefundId).toBe(`provider-manual-${runId}`);
+    expect(reconciled.reconciliationEvidence).toContain('لوحة المزود');
+
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(order.orderStatus).toBe(OrderStatus.REFUNDED);
+    const [outbox] = await dataSource.query(
+      `SELECT payload FROM payment_notification_outbox WHERE aggregate_id=$1`,
+      [pending.id],
+    );
+    expect(outbox.payload).toEqual(expect.objectContaining({ status: 'completed' }));
+  });
+
   it('البوابة رفضت أول محاولة: الرفض لا يحجز أي مبلغ، لذلك يمكن إعادة المحاولة لاحقًا بأمان', async () => {
     const gatewayTxnId = `gw-double-${runId}`;
     const { orderId } = await insertPaidOrderAndPayment(`dbl-${runId}`, gatewayTxnId);
