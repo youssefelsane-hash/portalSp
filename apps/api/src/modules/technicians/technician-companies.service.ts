@@ -337,7 +337,14 @@ export class TechnicianCompaniesService {
   // مساحة عمل الشركة (ADR-0033) — آخر 100 طلب اتعيّنوا للشركة (الأحدث أولًا)، الأحدث بيتصدّر
   // القائمة لأن ده اللي مالك الشركة محتاج يتابعه فعليًا. SQL مباشر مش TypeORM query builder —
   // الاستعلام بسيط وواضح أكتر بالـSQL الخام هنا (4 جداول join).
-  private async queryOrdersForCompany(companyId: string): Promise<CompanyOrderRow[]> {
+  /**
+   * @param participantTechnicianId لو مش `null`، القايمة بتتقصر على الطلبات اللي الشخص ده
+   *   شارك فيها فعلاً (قائد أو عضو طاقم). `null` = كل طلبات الشركة.
+   */
+  private async queryOrdersForCompany(
+    companyId: string,
+    participantTechnicianId: string | null = null,
+  ): Promise<CompanyOrderRow[]> {
     return this.dataSource.query<CompanyOrderRow[]>(
       `
       SELECT o.id, o.order_number AS "orderNumber", s.name_ar AS "serviceNameAr",
@@ -351,16 +358,35 @@ export class TechnicianCompaniesService {
       LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
       LEFT JOIN users u ON u.id = tp.user_id
       WHERE o.assigned_company_id = $1
+        AND (
+          $2::uuid IS NULL
+          OR o.technician_id = $2::uuid
+          OR EXISTS (
+            SELECT 1 FROM order_team_members otm
+             WHERE otm.order_id = o.id AND otm.technician_id = $2::uuid
+          )
+        )
       ORDER BY o.created_at DESC
       LIMIT 100
       `,
-      [companyId],
+      [companyId, participantTechnicianId],
     );
   }
 
+  /**
+   * مساحة عمل الشركة — **الرؤية بتختلف حسب الدور** (سياسة الشركة، طلب مالك 2026-09-08).
+   *
+   * كانت قبل كده بترجّع **كل** طلبات الشركة لأي عضو (ADR-0033 الأصلي). السياسة الجديدة نصّت
+   * صراحةً على العكس: «كل عضو يشوف الطلبات اللي شارك فيها هو بس، والمالك والمدير يشوفوا كل
+   * طلبات الشركة». ده مش تشديد شكلي — بيانات الطلب فيها اسم العميل وعنوانه وسعره، وعامل في
+   * فرع تاني مالوش أي علاقة بالشغلانة ماكانش المفروض يشوفها أصلاً.
+   *
+   * أدمن المنصة بيشوف كل حاجة عبر `listOrdersForAdmin()` — مسار منفصل بصلاحيته الخاصة.
+   */
   async listOrders(userId: string): Promise<CompanyOrderRow[]> {
     const profile = await this.requireMembership(userId);
-    return this.queryOrdersForCompany(profile.companyId!);
+    const seesEverything = MANAGING_ROLES.has(profile.teamRole);
+    return this.queryOrdersForCompany(profile.companyId!, seesEverything ? null : profile.id);
   }
 
   async listOrdersForAdmin(companyId: string): Promise<CompanyOrderRow[]> {
