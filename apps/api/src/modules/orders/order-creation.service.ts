@@ -1097,11 +1097,9 @@ export class OrderCreationService {
         ? undefined
         : dto.payment_method;
 
-    // سياسة المستحقات الموحدة: النسبة تُحفظ لقطة على الطلب، لذلك تعديل الكتالوج لاحقًا لا يبدل
-    // حقيقة مالية تاريخية. مفتاح الترحيل يُبقي السجلات القديمة وأدوات الصيانة متوافقة فقط؛
-    // الترحيل يفعّله في الإنتاج ولا توجد واجهة تشغيل ثانية له.
-    const earningsPolicyEnabled = await this.settingsService.getBoolean('earnings.v2_cutover_enabled', true);
-    const settlementPolicyVersion: 1 | 2 = earningsPolicyEnabled ? 2 : 1;
+    // سياسة الأرباح الموحدة هي المسار الوحيد لإنشاء أي طلب جديد. V1 يبقى قراءة تاريخية فقط؛
+    // زر تحويله كان يسمح بإنشاء طلبات حديثة بحقائق مالية من مسار متقاعد.
+    const settlementPolicyVersion: 2 = 2;
     const platformCommissionCentsSnapshot = null;
     const commissionRateApplied = settlementPolicyVersion === 2 ? (originalOrder ? 0 : Number(service.commissionPercentage)) : null;
     if (commissionRateApplied !== null && (!Number.isFinite(commissionRateApplied) || commissionRateApplied < 0 || commissionRateApplied > 100)) {

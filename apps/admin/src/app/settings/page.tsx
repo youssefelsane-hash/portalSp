@@ -129,7 +129,7 @@ const LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH = new Set([
   'legal.support_phone',
 ]);
 
-const LEGACY_EARNINGS_KEYS = [
+const HISTORICAL_EARNINGS_KEYS = [
   'commission_base.include_level_premium',
   'commission_base.include_zone_surge',
   'commission_base.include_emergency_surcharge',
@@ -143,21 +143,6 @@ const LEGACY_EARNINGS_KEYS = [
   'commission.emergency_adjustment_percentage',
   'crew.assistant_share_ratio',
 ];
-
-const LEGACY_EARNINGS_LABELS: Record<string, string> = {
-  'commission_base.include_level_premium': 'مضاعف مستوى الفني',
-  'commission_base.include_zone_surge': 'مضاعف المنطقة / التضخم',
-  'commission_base.include_emergency_surcharge': 'رسوم الطوارئ',
-  'commission_base.include_inspection_fee': 'رسوم المعاينة',
-  'commission_base.include_addons': 'إضافات الكتالوج (وقت الحجز)',
-  'commission_base.include_additional_items': 'بنود إضافية أثناء الشغل',
-  'commission_base.include_warranty': 'الضمان الاختياري',
-  'commission_base.include_installment_interest': 'فوائد / رسوم التقسيط',
-  'commission.individual_adjustment_percentage': 'فرق عمولة الطلب الفردي',
-  'commission.team_adjustment_percentage': 'فرق عمولة طلب الفريق',
-  'commission.emergency_adjustment_percentage': 'فرق عمولة طلب الطوارئ',
-  'crew.assistant_share_ratio': 'نسبة حصة المساعد القديمة',
-};
 
 const CENTRAL_EARNINGS_KEYS = ['earnings.v2_cutover_enabled', 'earnings.v2_shadow_enabled'];
 
@@ -297,7 +282,7 @@ export default function SettingsPage() {
   // المفاتيح دي ليها كارت مخصص تحت — بنستبعدها من العرض العام عشان ما تتكررش.
   const generalSettings = (settings ?? []).filter(
     (s) =>
-      !LEGACY_EARNINGS_KEYS.includes(s.key) &&
+      !HISTORICAL_EARNINGS_KEYS.includes(s.key) &&
       !CENTRAL_EARNINGS_KEYS.includes(s.key) &&
       !LEGAL_ENTITY_KEYS.includes(s.key),
   );
@@ -307,10 +292,6 @@ export default function SettingsPage() {
   const missingBeforeLaunch = legalEntitySettings.filter(
     (s) => LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH.has(s.key) && String(s.value ?? '').replace(/"/g, '').trim() === '',
   );
-  const legacyEarningsSettings = LEGACY_EARNINGS_KEYS.map((key) =>
-    (settings ?? []).find((s) => s.key === key),
-  ).filter((s): s is SettingResponseDto => s !== undefined);
-  const earningsV2Enabled = (settings ?? []).find((s) => s.key === 'earnings.v2_cutover_enabled')?.value === true;
   // ADR-0062 §4 — مجموعة matching ليها قسم مخصّص تحت، فمستبعدة من الجدول العام: مسار تحرير واحد.
   const matchingSettings = generalSettings.filter((s) => s.group_name === 'matching');
   const groups = Array.from(new Set(generalSettings.map((s) => s.group_name)))
@@ -408,55 +389,6 @@ export default function SettingsPage() {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {legacyEarningsSettings.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-base">إعدادات تسوية V1 القديمة</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-4 text-sm text-muted-foreground">
-              الإعدادات دي موجودة فقط لتشغيل الطلبات القديمة قبل الانتقال. الطلبات V2 تستخدم العمولة
-              الثابتة والأوزان من صفحة <strong>سياسة الأرباح</strong> ولا تقرأ أي قيمة من هنا.
-            </p>
-            {earningsV2Enabled ? (
-              <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
-                محرك V2 مفعّل؛ إعدادات V1 متوقفة للقراءة التاريخية فقط ولا يمكن تعديلها.
-              </div>
-            ) : <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>المكوّن</TableHead>
-                  <TableHead>الشرح</TableHead>
-                  <TableHead>داخل وعاء العمولة؟</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {legacyEarningsSettings.map((setting) => (
-                  <TableRow key={setting.key}>
-                    <TableCell className="font-medium">
-                      {LEGACY_EARNINGS_LABELS[setting.key] ?? setting.key}
-                      <span className="block text-xs text-muted-foreground" dir="ltr">
-                        {setting.key}
-                      </span>
-                    </TableCell>
-                    <TableCell className="max-w-md whitespace-normal text-muted-foreground">
-                      {setting.description ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <SettingValueEditor
-                        setting={setting}
-                        isSaving={savingKey === setting.key}
-                        onSave={(value) => handleSave(setting.key, value)}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>}
           </CardContent>
         </Card>
       )}

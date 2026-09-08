@@ -14,12 +14,12 @@ describe('legacy earnings settings cutover guard', () => {
     expect(isLegacyEarningsSettingKey(key)).toBe(true);
   });
 
-  it('does not classify V2 controls or unrelated pricing settings as legacy', () => {
-    expect(isLegacyEarningsSettingKey('earnings.v2_cutover_enabled')).toBe(false);
+  it('classifies the retired cutover switch, but not unrelated pricing settings, as legacy', () => {
+    expect(isLegacyEarningsSettingKey('earnings.v2_cutover_enabled')).toBe(true);
     expect(isLegacyEarningsSettingKey('pricing.auto_match_level_premium')).toBe(false);
   });
 
-  it('rejects direct edits to V1 money settings after V2 cutover', async () => {
+  it('rejects direct edits to retired V1 money settings', async () => {
     const service = new SettingsService(
       {} as never,
       {} as AuditLogService,

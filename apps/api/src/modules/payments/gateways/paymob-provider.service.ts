@@ -391,10 +391,22 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
           failureReason: body.data?.message ?? `Paymob refund رفض: ${res.status}`,
         };
       }
+      if (body.success !== true || !body.id) {
+        // HTTP 2xx without a complete refund acknowledgement is not confirmation.
+        // Treating an empty/malformed JSON object as success would create a local
+        // completed refund with no provider proof.
+        return {
+          succeeded: false,
+          outcome: 'unknown',
+          providerRefundId: null,
+          status: PaymentProviderStatus.PROCESSING,
+          failureReason: 'Paymob refund returned an incomplete acknowledgement; reconciliation is required',
+        };
+      }
       return {
         succeeded: true,
         outcome: 'confirmed',
-        providerRefundId: body.id ? String(body.id) : null,
+        providerRefundId: String(body.id),
         status: PaymentProviderStatus.REFUNDED,
         failureReason: null,
       };

@@ -25,7 +25,8 @@ export const isSecretSettingKey = (key: string): boolean => SECRET_SETTING_KEYS.
 export const isLegacyEarningsSettingKey = (key: string): boolean =>
   key.startsWith('commission_base.') ||
   /^commission\.(individual|team|emergency)_adjustment_percentage$/.test(key) ||
-  key === 'crew.assistant_share_ratio';
+  key === 'crew.assistant_share_ratio' ||
+  key === 'earnings.v2_cutover_enabled';
 
 @Injectable()
 export class SettingsService {
@@ -167,7 +168,7 @@ export class SettingsService {
       throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100', HttpStatus.BAD_REQUEST);
     }
 
-    if (isLegacyEarningsSettingKey(key) && (await this.getBoolean('earnings.v2_cutover_enabled', false))) {
+    if (isLegacyEarningsSettingKey(key)) {
       throw new ApiException(
         ErrorCode.VAL_001,
         'الإعداد ده خاص بتسوية V1 واتقفل بعد تشغيل محرك الأرباح V2؛ استخدم صفحة سياسة الأرباح',
