@@ -70,6 +70,8 @@ export interface OrderResponseDto {
   refunded_amount_cents?: number;
   installment_outstanding_cents?: number;
   amount_due_to_technician_cents?: number;
+  /** الرصيد المتبقي الذي يجوز تحصيله الآن من العميل؛ يحسب من دفتر الدفعات لا من علامة paid التاريخية. */
+  amount_due_now_cents?: number;
   warranty_plan_id: string | null;
   warranty_price_cents: number;
   optional_warranty: {

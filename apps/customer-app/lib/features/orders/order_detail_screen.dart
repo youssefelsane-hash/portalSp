@@ -1294,8 +1294,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
-                      if (_payableOrderStatuses.contains(order.orderStatus) && order.paymentStatus != 'paid') ...[
+                      if (_payableOrderStatuses.contains(order.orderStatus) &&
+                          (order.paymentStatus != 'paid' || (order.amountDueNowCents ?? 0) > 0)) ...[
                         const SizedBox(height: 16),
+                        if (order.paymentStatus == 'paid' && (order.amountDueNowCents ?? 0) > 0) ...[
+                          Text(
+                            'باقي للسداد: ${_formatEgp(order.amountDueNowCents!)}',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                         FilledButton.icon(
                           onPressed: _paying ? null : _payWithWallet,
                           icon: const Icon(Icons.account_balance_wallet_outlined),

@@ -98,6 +98,8 @@ export interface OrderResponseDto {
   refunded_amount_cents?: number;
   installment_outstanding_cents?: number;
   amount_due_to_technician_cents?: number;
+  /** الرصيد المتبقي الذي يمكن للعميل سداده الآن؛ لا يعتمد على payment_status التاريخية وحدها. */
+  amount_due_now_cents?: number;
   warranty_plan_id: string | null;
   warranty_price_cents: number;
   optional_warranty: { name_ar: string; coverage_months: number } | null;

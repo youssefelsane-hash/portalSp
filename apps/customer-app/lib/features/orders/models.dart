@@ -64,6 +64,8 @@ class Order {
   final String? initialQuoteSource;
   final String? initialQuoteNote;
   final int totalAmountCents;
+  /// الرصيد الفعلي المتبقي الآن من دفتر الدفعات؛ مهم لفرق السعر بعد دفعة أصلية ناجحة.
+  final int? amountDueNowCents;
   /// الخصم المطبّق فعلاً على الطلب (كود خصم أو عمارة). العميل كان بيشوفه في المعاينة قبل
   /// التأكيد وبعدين يختفي من سجل الطلب تمامًا — فمكانش عنده أي طريقة يتأكد إن الكود اشتغل.
   final int discountAmountCents;
@@ -128,6 +130,7 @@ class Order {
     this.initialQuoteSource,
     this.initialQuoteNote,
     required this.totalAmountCents,
+    this.amountDueNowCents,
     this.discountAmountCents = 0,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
@@ -175,6 +178,7 @@ class Order {
     initialQuoteSource: json['initial_quote_source'] as String?,
     initialQuoteNote: json['initial_quote_note'] as String?,
     totalAmountCents: json['total_amount_cents'] as int,
+    amountDueNowCents: (json['amount_due_now_cents'] as num?)?.round(),
     discountAmountCents: (json['discount_amount_cents'] as num?)?.round() ?? 0,
     warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
     levelPremiumCents: json['level_premium_cents'] as int? ?? 0,

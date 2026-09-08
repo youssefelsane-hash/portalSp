@@ -45,6 +45,7 @@ import { ProblemImagesService } from './problem-images.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { PaymentsService } from '../payments/payments.service';
 import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 import { CreateBookingMatchPreviewDto } from './dto/create-booking-match-preview.dto';
 import { BookingMatchPreviewService } from './booking-match-preview.service';
@@ -63,6 +64,7 @@ export class OrdersController {
     private readonly problemImagesService: ProblemImagesService,
     private readonly addressesService: AddressesService,
     private readonly techniciansService: TechniciansService,
+    private readonly paymentsService: PaymentsService,
     private readonly bookingMatchPreviews: BookingMatchPreviewService,
     private readonly postQuoteProviderSelection: PostQuoteProviderSelectionService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
@@ -132,7 +134,11 @@ export class OrdersController {
     // ADR-0071 — رسايل الإدارة بتتقرا هنا مرة واحدة، فـ`getOne()` وكل الـmutations اللي
     // بتستخدم الـhelper ده بيرجّعوها زي بعض.
     const customerNotices = await this.ordersService.listCustomerNotices(order.id);
-    return toOrderResponseDto(order, address, technicianContact, { customerNotices });
+    const collection = await this.paymentsService.getCollectionBreakdownForOrder(order);
+    return {
+      ...toOrderResponseDto(order, address, technicianContact, { customerNotices }),
+      amount_due_now_cents: collection.amountDueToTechnicianCents,
+    };
   }
 
   @Post()

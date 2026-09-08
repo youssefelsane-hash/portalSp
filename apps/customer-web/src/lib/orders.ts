@@ -199,6 +199,7 @@ export interface OrderResponseDto {
   display_price_max_cents: number | null;
   promo_code_id: string | null;
   total_amount_cents: number;
+  amount_due_now_cents?: number;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;
