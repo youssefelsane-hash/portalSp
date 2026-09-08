@@ -153,7 +153,8 @@ export class TechnicianCompaniesService {
   /** المالك بس (مش manager) يقدر ينقل الملكية — قرار أكبر من إدارة يومية عادية */
   private async requireOwner(userId: string): Promise<TechnicianProfile> {
     const profile = await this.requireMembership(userId);
-    if (profile.teamRole !== TechnicianTeamRole.OWNER) {
+    const company = await this.companies.findOne({ where: { id: profile.companyId!, ownerUserId: userId } });
+    if (profile.teamRole !== TechnicianTeamRole.OWNER || !company) {
       throw new ApiException(ErrorCode.VAL_001, 'لازم تكون مالك الشركة عشان تنقل الملكية', HttpStatus.FORBIDDEN);
     }
     return profile;
@@ -454,36 +455,53 @@ export class TechnicianCompaniesService {
   }
 
   async addStaff(userId: string, dto: AddStaffDto, meta?: AuditActorMeta): Promise<{ profile: TechnicianProfile; user: User }> {
-    const managerProfile = await this.requireManager(userId);
-    const target = await this.technicianProfiles.findOne({ where: { technicianCode: dto.technician_code } });
-    if (!target) {
-      throw new ApiException(ErrorCode.VAL_001, 'مفيش فني بالكود ده', HttpStatus.NOT_FOUND);
-    }
-    if (target.userId === userId) {
-      throw new ApiException(ErrorCode.VAL_001, 'انت أصلاً مالك الشركة دي', HttpStatus.BAD_REQUEST);
-    }
-    if (target.companyId) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        target.companyId === managerProfile.companyId ? 'الفني ده عضو في شركتك بالفعل' : 'الفني ده عضو في شركة تانية بالفعل',
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (dto.branch_id) {
-      await this.findOwnBranchOrThrow(managerProfile.companyId!, dto.branch_id);
-    }
+    const target = await this.dataSource.transaction(async (manager) => {
+      const managerProfile = await manager
+        .createQueryBuilder(TechnicianProfile, 'tp')
+        .setLock('pessimistic_write')
+        .where('tp.user_id = :userId', { userId })
+        .getOne();
+      if (!managerProfile?.companyId || !MANAGING_ROLES.has(managerProfile.teamRole)) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تكون مالك أو مدير الشركة عشان تعمل العملية دي', HttpStatus.FORBIDDEN);
+      }
+      const target = await manager
+        .createQueryBuilder(TechnicianProfile, 'tp')
+        .setLock('pessimistic_write')
+        .where('tp.technician_code = :technicianCode', { technicianCode: dto.technician_code })
+        .getOne();
+      if (!target) {
+        throw new ApiException(ErrorCode.VAL_001, 'مفيش فني بالكود ده', HttpStatus.NOT_FOUND);
+      }
+      if (target.userId === userId) {
+        throw new ApiException(ErrorCode.VAL_001, 'انت أصلاً عضو في الشركة دي', HttpStatus.BAD_REQUEST);
+      }
+      if (target.companyId) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          target.companyId === managerProfile.companyId ? 'الفني ده عضو في شركتك بالفعل' : 'الفني ده عضو في شركة تانية بالفعل',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (dto.branch_id) {
+        const branch = await manager.getRepository(TechnicianCompanyBranch).findOne({
+          where: { id: dto.branch_id, companyId: managerProfile.companyId },
+        });
+        if (!branch) throw new ApiException(ErrorCode.VAL_001, 'الفرع غير موجود أو مش تابع لشركتك', HttpStatus.NOT_FOUND);
+      }
 
-    target.companyId = managerProfile.companyId!;
-    target.branchId = dto.branch_id ?? null;
-    target.teamRole = dto.team_role as TechnicianTeamRole;
-    await this.technicianProfiles.save(target);
+      target.companyId = managerProfile.companyId;
+      target.branchId = dto.branch_id ?? null;
+      target.teamRole = dto.team_role as TechnicianTeamRole;
+      await manager.save(target);
+      return target;
+    });
 
     await this.auditLog.record({
       actorUserId: userId,
       actorRole: 'technician',
       action: 'technician_company_staff.added',
       entityType: 'technician_company',
-      entityId: managerProfile.companyId!,
+      entityId: target.companyId!,
       newValues: { technician_user_id: target.userId, team_role: target.teamRole },
       meta,
     });
@@ -565,19 +583,54 @@ export class TechnicianCompaniesService {
     dto: TransferOwnershipDto,
     meta?: AuditActorMeta,
   ): Promise<{ profile: TechnicianProfile; user: User }> {
-    const ownerProfile = await this.requireOwner(userId);
-    const company = await this.findCompanyOrThrow(ownerProfile.companyId!);
-    const newOwner = await this.findOwnStaffOrThrow(ownerProfile.companyId!, dto.new_owner_user_id);
+    await this.requireOwner(userId);
+    const result = await this.dataSource.transaction(async (manager) => {
+      const ownerProfile = await manager
+        .createQueryBuilder(TechnicianProfile, 'tp')
+        .setLock('pessimistic_write')
+        .where('tp.user_id = :userId', { userId })
+        .getOne();
+      if (!ownerProfile?.companyId) {
+        throw new ApiException(ErrorCode.VAL_001, 'مش عضو في أي شركة/فريق', HttpStatus.NOT_FOUND);
+      }
+      const company = await manager
+        .createQueryBuilder(TechnicianCompany, 'company')
+        .setLock('pessimistic_write')
+        .where('company.id = :companyId', { companyId: ownerProfile.companyId })
+        .getOne();
+      if (!company || company.ownerUserId !== userId || ownerProfile.teamRole !== TechnicianTeamRole.OWNER) {
+        throw new ApiException(ErrorCode.VAL_001, 'الملكية اتغيرت بالفعل — حدّث الصفحة قبل المحاولة مرة ثانية', HttpStatus.CONFLICT);
+      }
+      const newOwner = await manager
+        .createQueryBuilder(TechnicianProfile, 'tp')
+        .setLock('pessimistic_write')
+        .where('tp.user_id = :userId AND tp.company_id = :companyId', {
+          userId: dto.new_owner_user_id,
+          companyId: company.id,
+        })
+        .getOne();
+      if (!newOwner) {
+        throw new ApiException(ErrorCode.VAL_001, 'المالك الجديد لازم يكون عضوًا في نفس الشركة', HttpStatus.NOT_FOUND);
+      }
+      if (newOwner.userId === userId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الشخص ده هو مالك الشركة بالفعل', HttpStatus.BAD_REQUEST);
+      }
 
-    await this.dataSource.transaction(async (manager) => {
-      company.ownerUserId = newOwner.userId;
-      await manager.save(company);
-
+      // تنظيف أي لقب OWNER قديم من محاولة متزامنة سابقة، ثم تثبيت مصدر الملكية الواحد.
+      await manager
+        .createQueryBuilder()
+        .update(TechnicianProfile)
+        .set({ teamRole: TechnicianTeamRole.MANAGER })
+        .where('company_id = :companyId AND team_role = :ownerRole AND user_id <> :newOwnerUserId', {
+          companyId: company.id,
+          ownerRole: TechnicianTeamRole.OWNER,
+          newOwnerUserId: newOwner.userId,
+        })
+        .execute();
       newOwner.teamRole = TechnicianTeamRole.OWNER;
-      await manager.save(newOwner);
-
-      ownerProfile.teamRole = TechnicianTeamRole.MANAGER;
-      await manager.save(ownerProfile);
+      company.ownerUserId = newOwner.userId;
+      await manager.save([newOwner, company]);
+      return { company, newOwner, previousOwnerUserId: userId };
     });
 
     await this.auditLog.record({
@@ -585,11 +638,11 @@ export class TechnicianCompaniesService {
       actorRole: 'technician',
       action: 'technician_company.ownership_transferred',
       entityType: 'technician_company',
-      entityId: company.id,
-      oldValues: { owner_user_id: userId },
-      newValues: { owner_user_id: newOwner.userId },
+      entityId: result.company.id,
+      oldValues: { owner_user_id: result.previousOwnerUserId },
+      newValues: { owner_user_id: result.newOwner.userId },
       meta,
     });
-    return this.attachUser(newOwner);
+    return this.attachUser(result.newOwner);
   }
 }
