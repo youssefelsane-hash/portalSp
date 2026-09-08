@@ -40,6 +40,11 @@ export interface AdminTechnicianResponseDto {
   verification_status: TechnicianVerificationStatus;
   // ADR-0039 — علامة التوثيق الزرقاء. مِنحة إدارية، مستقلة عن verification_status فوق.
   is_trust_verified: boolean;
+  /**
+   * ADR-0080 — «حصري للشركة»: الفني ده مايظهرش للعملاء كفرد؛ يوصله شغل عن طريق شركته بس.
+   * `false` دايمًا لأي فني مستقل (القاعدة بترفض غير كده).
+   */
+  company_exclusive: boolean;
   trust_verified_at: string | null;
   trust_verified_note: string | null;
   is_available: boolean;

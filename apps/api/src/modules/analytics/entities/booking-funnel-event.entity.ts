@@ -14,14 +14,14 @@ export const FUNNEL_STAGES = [
 ] as const;
 export type FunnelStage = (typeof FUNNEL_STAGES)[number];
 
-/** المراحل اللي بتتحسب من `order_status_history` مش من الجدول ده (ADR-0075 §3). */
+/** المراحل اللي بتتحسب من `order_status_history` مش من الجدول ده (ADR-0081 §3). */
 export const DERIVED_FUNNEL_STAGES = ['technician_assigned', 'technician_arrived', 'order_completed'] as const;
 export type DerivedFunnelStage = (typeof DERIVED_FUNNEL_STAGES)[number];
 
 export type FunnelEventSource = 'client' | 'server';
 export type FunnelEventOutcome = 'success' | 'failed';
 
-// مطابق لـ infra/migrations/0272_booking_funnel_events.sql
+// مطابق لـ infra/migrations/0292_booking_funnel_events.sql
 @Entity('booking_funnel_events')
 export class BookingFunnelEvent {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })

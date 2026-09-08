@@ -43,9 +43,9 @@ describe('CatalogService.findMostRequestedCategories (docs/08 §77-E2)', () => {
 
   async function makeOrder(serviceId: string, status: string, n: number): Promise<void> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status,
                            payment_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,$5::order_status,'pending',10000) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5::order_status,'pending',10000) RETURNING id`,
       [`MR${runId}${n}`, ids.profile, serviceId, ids.address, status],
     );
     ids.orders.push(row.id);

@@ -41,6 +41,7 @@ export type PaymentMethod = 'cash' | 'card' | 'wallet' | 'bank_transfer' | 'corp
 export type PaymentGatewayStatus =
   | 'pending'
   | 'processing'
+  | 'manual_review'
   | 'succeeded'
   | 'failed'
   | 'cancelled'

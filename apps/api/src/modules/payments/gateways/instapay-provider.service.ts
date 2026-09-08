@@ -1,6 +1,10 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../../common/events/setting-updated.event';
+import {
+  SETTING_RELOAD_REQUIRED_EVENT,
+  SETTING_UPDATED_EVENT,
+  SettingUpdatedEvent,
+} from '../../../common/events/setting-updated.event';
 import { SettingsService } from '../../settings/settings.service';
 import { InstaPayQrService } from './instapay-qr.service';
 import {
@@ -37,8 +41,9 @@ const RECIPIENT_NAME_SETTING_KEY = 'payments.instapay.recipient_name';
  * محدودين لـ`super_admin` بس (`settings.manage`، migration 0023 — أصلاً super_admin بس افتراضيًا).
  * `isConfigured`/`ipaAddress`/`recipientName` بقوا mutable (مش `readonly`) — بيتحمّلوا أول مرة في
  * `onModuleInit()` وبيتحدّثوا لحظيًا لما `SettingsService.update()` يطلق `SETTING_UPDATED_EVENT`
- * (بلا restart للسيرفر). **قيد نطاق صريح**: الحدث ده in-process بس (EventEmitter2)، مش هيوصل
- * لأكتر من instance واحد لو النظام يوماً بقى multi-instance — راجع setting-updated.event.ts.
+ * (بلا restart للسيرفر). **والنسخ التانية كمان** بقت تعيد التحميل عبر
+ * `SETTING_RELOAD_REQUIRED_EVENT` (ADR-0075) — قبله كانت أي نسخة غير اللي الأدمن حفظ عليها
+ * تفضل شغّالة بعنوان قديم للأبد.
  */
 @Injectable()
 export class InstaPayProvider implements PaymentProvider, OnModuleInit {
@@ -63,7 +68,10 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
 
   // async (بترجع الـPromise، مش void) عمداً — SettingsService.update() بينادي emitAsync()
   // بالظبط عشان ينتظر الدالة دي تخلّص قبل ما يرجّع نجاح الـPATCH للأدمن، صفر سباق race condition.
+  // الحدث التاني (تدقيق A-3) = التغيير حصل على نسخة تانية. إعادة التحميل idempotent وأثرها
+  // في ذاكرة النسخة دي بس، فالاشتراك في الاتنين آمن ومقصود.
   @OnEvent(SETTING_UPDATED_EVENT)
+  @OnEvent(SETTING_RELOAD_REQUIRED_EVENT)
   async handleSettingUpdated(event: SettingUpdatedEvent): Promise<void> {
     if (event.key !== IPA_ADDRESS_SETTING_KEY && event.key !== RECIPIENT_NAME_SETTING_KEY) return;
     await this.reload();

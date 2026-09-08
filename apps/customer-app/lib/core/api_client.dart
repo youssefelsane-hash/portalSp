@@ -108,6 +108,7 @@ Future<dynamic> _apiRequestRaw(
         code: error?['code'] as String? ?? 'UNKNOWN',
         message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
         statusCode: response.statusCode,
+        requestId: decoded['request_id'] as String?,
       );
     }
 
@@ -179,6 +180,7 @@ Future<Map<String, dynamic>?> apiUpload(
         code: error?['code'] as String? ?? 'UNKNOWN',
         message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
         statusCode: response.statusCode,
+        requestId: decoded['request_id'] as String?,
       );
     }
 

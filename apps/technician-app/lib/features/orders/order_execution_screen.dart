@@ -111,13 +111,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _loadRescheduleRequests();
   }
 
-  // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
-  // مايمنعش بقية الشاشة تشتغل، نفس فلسفة _loadMedia() فوق بالحرف.
+  // طاقم الطلب. احتياج الطاقم الفعلي يأتي من التسعير/الإنتاجية لا من booking_mode وحده؛ قد يكون
+  // الحجز فرديًا ومع ذلك يحتاج مساعدًا. فشل التحميل لا يمنع بقية الشاشة من العمل.
   Future<void> _loadTeamMembersIfApplicable() async {
     // ADR-0052 (docs/08 §97) — الشغلانة الفردية ممكن يكون فيها مساعد اختياري مضاف، فلازم تحمّل
     // الطاقم كمان عشان القائد يشوفه ويقدر يشيله. الشرط هنا **مشتق محليًا** (`_isSoloJob`) مش من
     // `crewStatus` — وقت أول تحميل الطلب ممكن يكون جاي من فعل تنفيذي بلا crew_status لسه.
-    if (_order.bookingMode != 'team' && !_isSoloJob) return;
+    if (!_hasTeamManagement) return;
     try {
       final members = await _repository.fetchTeamMembers(_order.id);
       if (mounted) setState(() => _teamMembers = members);
@@ -137,7 +137,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   Future<void> _refreshTeamInfoIfApplicable() async {
     // ADR-0052 — نفس البَقّة بالظبط بتنطبق على خانة المساعد الاختياري: `crew_status` بتتحسب في
     // getOne() بس، فالشغلانة الفردية محتاجة نفس النداء الصريح ده وإلا الخانة ما تظهرش من أول فتح.
-    if (_order.bookingMode != 'team' && !_isSoloJob) return;
+    if (!_hasTeamManagement) return;
     await _refreshFromServer();
   }
 
@@ -355,6 +355,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       (_order.requiredTechnicians ?? 1) <= 1 &&
       (_order.requiredAssistants ?? 0) == 0;
 
+  bool get _requiresMandatoryCrew =>
+      (_order.requiredTechnicians ?? 1) > 1 ||
+      (_order.requiredAssistants ?? 0) > 0;
+
+  bool get _hasTeamManagement =>
+      _order.bookingMode == 'team' || _requiresMandatoryCrew || _isSoloJob;
+
   /// ADR-0052 — الشغلانة الفردية اللي القائد يقدر يضم فيها مساعد اختياري (أو ضم واحد بالفعل).
   /// الباك-إند هو اللي بيقرر (crew_status.optionalAssistant*) — التطبيق مابيحسبش الأهلية بنفسه.
   bool get _hasOptionalAssistantSlot {
@@ -517,7 +524,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       context: context,
       builder: (context) => const _PriceEntryDialog(
         titleAr: 'إرسال سعر بعد المعاينة',
-        helperAr: 'ده أول سعر للطلب — العميل هيوافق عليه قبل ما تبدأ.',
+        helperAr:
+            'اكتب سعر الشغل فقط. رسم المعاينة المدفوع بيتضاف تلقائيًا في إجمالي العميل.',
         requireReason: false,
       ),
     );
@@ -551,7 +559,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       context: context,
       builder: (context) => const _PriceEntryDialog(
         titleAr: 'تعديل السعر بعد التشخيص',
-        helperAr: 'الشغل طلع مختلف عن اللي اتسعّر. اكتب السعر الصح والسبب — العميل لازم يوافق قبل ما تكمّل.',
+        helperAr:
+            'الشغل طلع مختلف عن اللي اتسعّر. اكتب السعر الصح والسبب — العميل لازم يوافق قبل ما تكمّل.',
         requireReason: true,
       ),
     );
@@ -569,7 +578,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('اتبعت السعر المعدّل — مستني موافقة العميل')),
+          const SnackBar(
+            content: Text('اتبعت السعر المعدّل — مستني موافقة العميل'),
+          ),
         );
       }
     } on ApiException catch (err) {
@@ -745,7 +756,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       // التنفيذية بتحطّ نسخة جديدة من الطلب مكان القديمة، وحالة collect_cash بتتبني محليًا أصلاً،
       // فأي حقل مش موجود في الرد (زي crew_status) كان بيضيع. تحديث واحد من السيرفر بعد أي فعل على
       // طلب فريق بيخلّي الكارت وقايمة الطاقم يعكسوا الحقيقة دايمًا، مهما كان شكل رد الفعل.
-      if (_order.bookingMode == 'team') {
+      if (_hasTeamManagement) {
         await _refreshFromServer();
         await _loadTeamMembersIfApplicable();
       }
@@ -850,7 +861,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // بيحب ياخد معاه مساعد… لو هو مش عايز يضيف مساعد خلاص مش مهم». كارت **هادي** عمدًا
             // (surfaceContainerHighest مش errorContainer) — ده اختيار مش نقص، فمينفعش يبان
             // كإنذار زي كارت "الطاقم مش مكتمل".
-            if (_order.bookingMode != 'team' && _hasOptionalAssistantSlot) ...[
+            if (_hasOptionalAssistantSlot) ...[
               const SizedBox(height: 12),
               _OptionalAssistantCard(
                 crewStatus: _order.crewStatus!,
@@ -859,7 +870,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 onRemove: _removeOptionalAssistant,
               ),
             ],
-            if (_order.bookingMode == 'team') ...[
+            if (_order.bookingMode == 'team' || _requiresMandatoryCrew) ...[
               const SizedBox(height: 12),
               _TeamRosterCard(
                 members: _teamMembers,
@@ -979,6 +990,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       ),
               ),
             ],
+            // صور المشكلة يرفعها العميل ليشوفها الفني قبل الوصول؛ كانت الـAPI ترجعها بالفعل
+            // لكن الواجهة لا ترسم إلا صور التنفيذ التي يرفعها الفني نفسه.
+            if ((_media ?? []).any((m) => m.mediaType == 'problem_photo')) ...[
+              const SizedBox(height: 12),
+              _PhotoGallery(
+                media: _media!
+                    .where((m) => m.mediaType == 'problem_photo')
+                    .toList(),
+                titleAr: 'صور المشكلة من العميل',
+              ),
+            ],
             if ((_media ?? []).any(
               (m) =>
                   m.mediaType == 'before_photo' || m.mediaType == 'after_photo',
@@ -1004,7 +1026,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // مابيستنتجش من الحالة التشغيلية ولا بيحسب سعر بنفسه. والحالتين الاتنين معناهم
             // «لسه مفيش سعر»: `waiting_assessment` (المعاينة لسه ما حصلتش) و`waiting_quote`
             // (حصلت والسعر لسه ما اتحددش).
-            if (_order.orderStatus == 'technician_arrived' &&
+            if ((_order.orderStatus == 'technician_arrived' ||
+                    _order.orderStatus == 'in_progress') &&
                 (_order.priceStatus == 'waiting_assessment' ||
                     _order.priceStatus == 'waiting_quote')) ...[
               const SizedBox(height: 16),
@@ -1014,7 +1037,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 label: const Text('إرسال سعر بعد المعاينة'),
               ),
             ],
-            if (_order.orderStatus == 'in_progress') ...[
+            if (_order.orderStatus == 'in_progress' &&
+                !(_order.priceStatus == 'waiting_assessment' ||
+                    _order.priceStatus == 'waiting_quote')) ...[
               // بند 14 — «تعديل السعر بعد التشخيص» مختلف عن «شغل إضافي» تحته: ده بيصحّح سعر
               // الشغل الأساسي نفسه، وده بيضيف بنود فوقه. الاتنين مع بعض عشان الفني يشوف الفرق.
               const SizedBox(height: 16),
@@ -1027,7 +1052,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                   ),
                 ),
               OutlinedButton.icon(
-                onPressed: _acting || _order.priceStatus == 'waiting_customer_approval'
+                onPressed:
+                    _acting || _order.priceStatus == 'waiting_customer_approval'
                     ? null
                     : _submitDiagnosisRevision,
                 icon: const Icon(Icons.edit_note_outlined),
@@ -1369,6 +1395,7 @@ class _MoneySummaryCard extends StatelessWidget {
 
   final Order order;
   final String Function(int cents) formatEgp;
+
   /// آخر تحديث من السيرفر فشل — الأرقام المعروضة ممكن تكون قديمة.
   final bool stale;
   final Future<void> Function()? onRetry;
@@ -1459,6 +1486,7 @@ class _MoneySummaryCard extends StatelessWidget {
                 myEarningCents: order.myEarningCents,
                 earningPending: order.earningPending,
                 isCrewShare: order.isCrewShare,
+                earningSnapshotMissing: order.earningSnapshotMissing,
                 formatEgp: formatEgp,
                 hasMoneyView: order.hasMoneyView,
               ),
@@ -2036,7 +2064,12 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
       setState(() => _error = 'اكتب سبب التعديل — العميل والإدارة هيشوفوه');
       return;
     }
-    _close(_PriceEntryResult(amountCents: (egp * 100).round(), note: note.isEmpty ? null : note));
+    _close(
+      _PriceEntryResult(
+        amountCents: (egp * 100).round(),
+        note: note.isEmpty ? null : note,
+      ),
+    );
   }
 
   @override
@@ -2049,29 +2082,42 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
       // لازم SingleChildScrollView صراحة. أي حوار فيه TextField لازم يتلف بيها.
       content: SingleChildScrollView(
         child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(widget.helperAr, style: const TextStyle(fontSize: 12, color: Colors.black54)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _amountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'السعر بالجنيه', prefixText: 'ج.م '),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _noteController,
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: widget.requireReason ? 'سبب التعديل (إجباري)' : 'إيه اللي شامله السعر؟ (اختياري)',
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.helperAr,
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
             ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'السعر بالجنيه',
+                prefixText: 'ج.م ',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _noteController,
+              maxLines: 2,
+              decoration: InputDecoration(
+                labelText: widget.requireReason
+                    ? 'سبب التعديل (إجباري)'
+                    : 'إيه اللي شامله السعر؟ (اختياري)',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ],
           ],
-        ],
         ),
       ),
       actions: [

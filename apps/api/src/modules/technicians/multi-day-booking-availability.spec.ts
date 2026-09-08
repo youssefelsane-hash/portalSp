@@ -142,10 +142,10 @@ describe('TechniciansService — الحجز متعدد الأيام بيقفل �
     const insertOrder = async (technicianId: string, scheduledAt: Date, load: { days?: number; minutes?: number }) => {
       const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
       const [row] = await q(
-        `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
                               order_status, scheduled_at, estimated_duration_days, duration_minutes,
                               total_amount_cents, payment_status, placed_at, source_channel)
-         VALUES ($1,$2,$3,$4,$5,'standard','individual','accepted',$6,$7,$8,10000,'unpaid', now(), 'customer_app') RETURNING id`,
+         VALUES (20,$1,$2,$3,$4,$5,'standard','individual','accepted',$6,$7,$8,10000,'unpaid', now(), 'customer_app') RETURNING id`,
         [orderNumber, ids.customerProfileId, technicianId, ids.serviceId, ids.addressId, scheduledAt, load.days ?? null, load.minutes ?? null],
       );
       return row.id as string;
@@ -227,12 +227,23 @@ describe('TechniciansService — الحجز متعدد الأيام بيقفل �
     expect(technicianIds).toContain(ids.freeTechId);
     expect(technicianIds).not.toContain(ids.hoursBusyTechId);
 
-    // ونفس اليوم بحمل صغير (60 دقيقة): 600 + 60 = 660 ≤ 720 ⇒ لسه فيه متسع، بيفضل ظاهر.
-    const { items: light } = await service.listForServiceBooking(ids.serviceId, ids.addressId, undefined, midSpanBusyDay, false, true, {
+    // ونفس اليوم بحمل صغير (60 دقيقة) **بعد** ما الشغل القائم يخلص: 600 + 60 = 660 ≤ 720
+    // ⇒ لسه فيه متسع، بيفضل ظاهر.
+    const afterBusyWindow = new Date(midSpanBusyDay.getTime() + 10 * 3_600_000);
+    const { items: light } = await service.listForServiceBooking(ids.serviceId, ids.addressId, undefined, afterBusyWindow, false, true, {
       durationMinutes: 60,
       estimatedDurationDays: null,
     });
     expect(light.map((i) => i.technicianId)).toContain(ids.hoursBusyTechId);
+
+    // ADR-0077 — نفس الساعة بالظبط اللي الشغل القائم شاغلها بقت مرفوضة على القايمة دي كمان،
+    // مش بالسقف اليومي بس: الشغلانة بتبلوك ساعاتها هي. قبل ADR-0077 القايمة كانت بتعرضه هنا
+    // بينما التعيين الفعلي بيرفضه — نفس الانحراف اللي المالك بلّغ عنه من الناحية التانية.
+    const { items: overlapping } = await service.listForServiceBooking(
+      ids.serviceId, ids.addressId, undefined, midSpanBusyDay, false, true,
+      { durationMinutes: 60, estimatedDurationDays: null },
+    );
+    expect(overlapping.map((i) => i.technicianId)).not.toContain(ids.hoursBusyTechId);
   });
 
   it('«متعارض جدوليًا» بيتقاس بنفس الحمل — الفني بيظهر schedule_conflicted مش يختفي بلا سبب', async () => {

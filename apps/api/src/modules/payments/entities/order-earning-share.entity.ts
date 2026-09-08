@@ -40,7 +40,7 @@ export class OrderEarningShare {
   @Column({ name: 'assistant_target_cents', type: 'integer', nullable: true })
   assistantTargetCents: number | null;
 
-  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 1 })
+  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 2 })
   settlementPolicyVersion: 1 | 2;
 
   @Column({ name: 'calculation_algorithm_version', type: 'varchar', length: 40, nullable: true })

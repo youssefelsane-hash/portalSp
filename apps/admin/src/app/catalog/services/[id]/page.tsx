@@ -250,6 +250,7 @@ export default function ServiceDetailPage() {
     const form = new FormData(e.target as HTMLFormElement);
     const validFrom = form.get('valid_from') as string;
     const mode = (form.get('pricing_mode') as 'override' | 'percentage') || 'override';
+    const inspectionFee = form.get('inspection_fee_cents') as string;
     const body: UpsertZonePricingBody = {
       service_zone_id: form.get('service_zone_id') as string,
       pricing_mode: mode,
@@ -258,6 +259,7 @@ export default function ServiceDetailPage() {
       ...(mode === 'override'
         ? { price_cents: Math.round(Number(form.get('price')) * 100) }
         : { modifier_percentage: Number(form.get('modifier_percentage')) }),
+      ...(inspectionFee === '' ? {} : { inspection_fee_cents: Number(inspectionFee) }),
       // تاريخ سريان (docs/06 §3.10) — فاضي = فوري (النهاردة). تاريخ مستقبلي = جدولة سعر
       // جاي من غير ما يأثر على أي حاجة دلوقتي (تفاصيل في catalog/README.md).
       valid_from: validFrom ? new Date(validFrom).toISOString() : undefined,
@@ -1485,6 +1487,16 @@ export default function ServiceDetailPage() {
                   <Input id="zp_modifier" name="modifier_percentage" type="number" min="-100" max="1000" step="0.01" required />
                 </>
               )}
+              <Label htmlFor="zp_inspection_fee_cents">رسم المعاينة في المنطقة (قرش، اختياري)</Label>
+              <Input
+                id="zp_inspection_fee_cents"
+                name="inspection_fee_cents"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="يرث رسم الخدمة الأساسي لو تُرك فارغًا"
+                dir="ltr"
+              />
               <Label htmlFor="zp_valid_from">تاريخ السريان (فاضي = فوري)</Label>
               <Input id="zp_valid_from" name="valid_from" type="date" />
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit">

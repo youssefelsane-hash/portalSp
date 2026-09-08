@@ -1,7 +1,6 @@
 import { DataSource } from 'typeorm';
 import { Order, OrderStatus } from './entities/order.entity';
-import { OrdersService } from './orders.service';
-import { ordersServiceForGateway } from './orders.testing';
+import { OrderQueriesService } from './order-queries.service';
 
 /**
  * **تدقيق L-4 + L-5 — تتبّع الطلب: مين ينضم، ولمين البث يروح.**
@@ -22,7 +21,7 @@ describe('تتبّع الطلب — انتماء الطاقم وحتمية «ف�
   jest.setTimeout(60_000);
 
   let dataSource: DataSource;
-  let ordersService: OrdersService;
+  let ordersService: OrderQueriesService;
 
   const runId = Date.now().toString(36);
   const ids = {
@@ -58,9 +57,9 @@ describe('تتبّع الطلب — انتماء الطاقم وحتمية «ف�
 
   async function makeOrder(status: OrderStatus, technicianProfileId: string | null, scheduledAt: string | null = null): Promise<string> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status,
                            total_amount_cents, technician_earning_cents, technician_id, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,0,0,$6,$7::timestamptz) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,0,0,$6,$7::timestamptz) RETURNING id`,
       [`TRK-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, status, technicianProfileId, scheduledAt],
     );
     orderIds.push(row.id as string);
@@ -74,7 +73,7 @@ describe('تتبّع الطلب — انتماء الطاقم وحتمية «ف�
       entities: [Order],
     });
     await dataSource.initialize();
-    ordersService = ordersServiceForGateway(dataSource);
+    ordersService = new OrderQueriesService(dataSource.getRepository(Order), dataSource, {} as never, {} as never);
 
     const [category] = await q(
       `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,

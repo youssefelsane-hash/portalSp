@@ -7,7 +7,7 @@ import { FunnelTrackerService } from './funnel-tracker.service';
 import { FunnelService } from './funnel.service';
 
 /**
- * ADR-0075 — الفنل هو الرد المباشر على سؤال المالك «الفلو بيتكسر فين؟»، فالاختبار هنا بيبني
+ * ADR-0081 — الفنل هو الرد المباشر على سؤال المالك «الفلو بيتكسر فين؟»، فالاختبار هنا بيبني
  * رحلات حقيقية بأرقام معروفة وبيتأكد إن التقرير بيقولها بالظبط:
  *
  * - عدّ **بالمحاولة** قبل الطلب و**بالطلب** بعده، والاتنين بيتقابلوا عند `order_placed`.
@@ -15,7 +15,7 @@ import { FunnelService } from './funnel.service';
  * - المحاولات **الفاشلة** متفصولة عن اللي انسحبوا — دول سؤالين مختلفين تمامًا.
  * - المراحل بعد الطلب بتتحسب من `order_status_history` مش من الجدول (مصدر حقيقة واحد).
  */
-describe('FunnelService + FunnelTracker (ADR-0075) — حي', () => {
+describe('FunnelService + FunnelTracker (ADR-0081) — حي', () => {
   jest.setTimeout(30_000);
 
   let dataSource: DataSource;
@@ -49,9 +49,9 @@ describe('FunnelService + FunnelTracker (ADR-0075) — حي', () => {
 
   async function makeOrder(status: string[] = []): Promise<string> {
     const [order] = await q<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'individual') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'individual') RETURNING id`,
       [`FNL-${runId}-${orders.length}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     orders.push(order.id);

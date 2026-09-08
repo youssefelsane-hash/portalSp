@@ -101,8 +101,8 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
   }) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0) RETURNING id, order_number`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,$9,0) RETURNING id, order_number`,
       [
         `TESTFV-${opts.label}`.slice(0, 24),
         ids.customerProfile,

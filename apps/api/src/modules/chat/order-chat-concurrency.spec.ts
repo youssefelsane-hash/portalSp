@@ -62,9 +62,8 @@ describe('ChatService order-thread replay safety (PostgreSQL)', () => {
     );
     ids.address = address.id;
     const [order] = await q(
-      `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, order_status, accepted_at)
-       VALUES ($1, $2, $3, $4, $5, 'accepted', now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, order_status, accepted_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'accepted', now()) RETURNING id`,
       [`CHAT-${runId}`.slice(0, 24), ids.customer, ids.technician, ids.service, ids.address],
     );
     ids.order = order.id;

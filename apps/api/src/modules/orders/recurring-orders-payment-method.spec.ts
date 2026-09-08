@@ -106,8 +106,8 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
     // generateFromTemplate() تقدر تحدّثه بأمان، حتى لو مش بنختبر تفاصيل الطلب نفسه هنا (ده مسؤولية
     // OrdersService.create() المزيّفة تحت).
     const [fakeOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,'draft',0,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,'draft',0,0) RETURNING id`,
       [`TESTROT-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address],
     );
     ids.fakeOrder = fakeOrder.id;

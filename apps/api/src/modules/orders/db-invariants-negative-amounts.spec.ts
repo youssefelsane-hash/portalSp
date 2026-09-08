@@ -43,11 +43,11 @@ describe('قيود CHECK على أعمدة المبالغ المالية الأ�
   it('الداتابيز نفسها بترفض orders.total_amount_cents سالب فعليًا (مش بس فحص الكود)', async () => {
     await expect(
       dataSource.query(
-        `INSERT INTO orders (
+        `INSERT INTO orders (commission_rate_applied,
            order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
            order_status, estimated_price_cents, inspection_fee_cents, surge_amount_cents, total_amount_cents,
            payment_status, placed_at, source_channel
-         ) VALUES (
+         ) VALUES (20,
            'ORD-INVARIANT-TEST', gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
            'standard', 'individual', 'searching_technician', 0, 0, 0, -100, 'unpaid', now(), 'customer_app'
          )`,

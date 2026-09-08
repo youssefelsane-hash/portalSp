@@ -256,8 +256,8 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
 
   it('العميل المشغول بطلب شغال دلوقتي مش وقته إعلان', async () => {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,'in_progress','pending',30000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,'in_progress','pending',30000,0) RETURNING id`,
       [`CMPG-${runId}`.slice(0, 24), ids.customerProfile, ids.servicePromotable, ids.address, ids.zone],
     );
     await service.sweep({ userIds: sweepScope() });
@@ -330,8 +330,8 @@ describe('CampaignsService — محرك الحملات (ADR-0046)', () => {
       ids.customerUser,
     ]);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, created_at)
-       VALUES ($1,$2,$3,$4,$5,'completed','paid',30000,0, now() - interval '30 minutes') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, created_at)
+       VALUES (20,$1,$2,$3,$4,$5,'completed','paid',30000,0, now() - interval '30 minutes') RETURNING id`,
       [`CMPB-${runId}`.slice(0, 24), ids.customerProfile, ids.servicePromotable, ids.address, ids.zone],
     );
 

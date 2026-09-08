@@ -6,7 +6,7 @@ import { FunnelService } from './funnel.service';
 import { FunnelTrackerService } from './funnel-tracker.service';
 
 /**
- * موديول التحليلات (ADR-0075).
+ * موديول التحليلات (ADR-0081).
  *
  * **الاتجاه في اتجاه واحد بس**: الموديول ده بيقرا من جداول التشغيل بـSQL، ومابيستوردش
  * `orders`/`payments`/`matching` ولا بيتم استيراده منهم — غير `FunnelTrackerService` اللي

@@ -133,8 +133,26 @@ export function technicianAvailabilityCondition(opts: {
    * مش بث عشوائي لأي حد.
    */
   ignoreActiveOrderConflict?: boolean;
+  /**
+   * **بث الطوارئ للكل** (`matching.emergency_ignore_schedule`، طلب مالك صريح 2026-09-05):
+   * «الطلب يروح لكل الناس بالقرب… يتجاهل الـschedule تمامًا، فاضي بقى شغّال مش شغّال».
+   *
+   * الفرق عن `ignoreActiveOrderConflict`: ده بيتجاهل تعارض الطلبات النشطة بس وبيحترم الاستثناء
+   * الذاتي (`blocked`) دايمًا. العلم ده بيتجاهل **الاتنين** — يعني الجدول كله مش داخل الحساب.
+   *
+   * مقصور على الطوارئ بقرار الأدمن عمدًا: الفني بيفضل حر يرفض العرض، فاللي بيتغيّر هو إن العرض
+   * **يوصله** أصلاً بدل ما يتفلتر قبل ما يشوفه. أي استخدام تاني بيحوّل «إجازة» لكلمة بلا معنى.
+   */
+  ignoreScheduleEntirely?: boolean;
 }): string {
-  const { activeStatusesParam, engagedStatusesParam, isEmergencyParam, dailyCapacityMinutesParam, ignoreActiveOrderConflict } = opts;
+  const {
+    activeStatusesParam,
+    engagedStatusesParam,
+    isEmergencyParam,
+    dailyCapacityMinutesParam,
+    ignoreScheduleEntirely,
+  } = opts;
+  const ignoreActiveOrderConflict = opts.ignoreActiveOrderConflict || ignoreScheduleEntirely;
   const activeOrderConflictConditions = ignoreActiveOrderConflict
     ? // Postgres مايقدرش يستنتج نوع parameter من غير أي إشارة ليه في الاستعلام ("could not
       // determine data type") — تعبيرات دايمًا صحيحة (tautology) لكل الـparameters الجديدة كمان
@@ -150,9 +168,12 @@ export function technicianAvailabilityCondition(opts: {
   // الذاتي الصريح) — لازم يفضل بعد الـreturn المبكّر القديم اللي كان بيتخطاه بالغلط في أول نسخة
   // من الـrefactor ده (اتلقطت حيًا: matching-work-opportunity.spec.ts فشل بمعنى مختلف، "$10" مش
   // مرتبط بأي تعبير — كان دليل غير مباشر إن الشرط (3) اختفى تمامًا مش بس السبب الظاهري).
+  // بث الطوارئ للكل بيشيل الشرط ده كمان — وده **الفرق الوحيد** بينه وبين التوزيع العادي.
+  // باقي بوابة الأهلية (خدمة/فئة/منطقة/اعتماد/موقع) برّه الدالة دي وبتفضل سارية زي ما هي.
+  const blockedCondition = ignoreScheduleEntirely ? '' : `AND NOT (${blockedExistsExpr(opts)})`;
   return `
     ${activeOrderConflictConditions}
-    AND NOT (${blockedExistsExpr(opts)})
+    ${blockedCondition}
   `;
 }
 
@@ -261,10 +282,11 @@ function blockedExistsExpr(opts: {
   technicianIdExpr: string;
   scheduledAtParam: string;
   serviceDurationExpr: string;
+  dailyCapacityMinutesParam: string;
   candidateLoad?: CandidateLoadSource;
 }): string {
-  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, candidateLoad } = opts;
-  const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad) : '1';
+  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, dailyCapacityMinutesParam, candidateLoad } = opts;
+  const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad, dailyCapacityMinutesParam) : '1';
   const candidateStart = `COALESCE(${scheduledAtParam}::timestamptz, now())`;
   // نهاية النافذة = البداية + (أيام الشغل - 1) + مدة اليوم. لشغل يوم واحد بترجع للسلوك الصح
   // القديم بالظبط (بداية + المدة)، فمفيش إفراط في التقييد لإجازة مش متقاطعة.
@@ -334,8 +356,20 @@ export async function classifyTechnicianCapacity(
     /** معرّف الطلب المرشّح نفسه، عشان يستبعد نفسه من فحص التعارض. `null` لو مفيش طلب مرشّح فعلي
      * (استخدام تشخيصي بس، زي معاينة قدرة الفني للأدمن — docs/08 §34.4). */
     excludeOrderId: string | null;
-    /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
+    /**
+     * **مدة الخدمة الافتراضية** بالدقايق — القيمة اللي بتُستخدم لما الطلب المرشّح نفسه مالوش
+     * مدة محسوبة. مش «مدة الطلب»: دي `candidateDurationMinutes` تحت.
+     */
     serviceDurationMinutes: number;
+    /**
+     * **المدة الحقيقية للطلب المرشّح** بالدقايق (ناتج محرك التسعير) أو `null` لو مش معروفة.
+     *
+     * ADR-0077 — الفصل ده مش تجميل: قاعدة الحمل بتفرّق بين «مدة حقيقية معروفة» (⇒ بتتحسب
+     * بالدقايق، فالجدولة بالساعة تشتغل) و«مفيش مدة + المحرك قال يوم» (⇒ يوم كامل). لما
+     * الاتنين كانوا بيوصلوا في نفس الحقل، الشغلانة اللي مالهاش مدة كانت بتاخد رقم الخدمة
+     * الافتراضي وتتعامل كأنها مدة حقيقية.
+     */
+    candidateDurationMinutes?: number | null;
     dailyCapacityMinutes: number;
     /**
      * `estimated_duration_days` **للطلب المرشّح كما هي** — ناتج محرك التسعير، و`null` لو المحرك
@@ -364,7 +398,7 @@ export async function classifyTechnicianCapacity(
         AND (tss.slot_date + tss.start_time) AT TIME ZONE 'Africa/Cairo'
             < (COALESCE($2::timestamptz, now())
                 + ((GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1) || ' days')::interval
-                + ($5::int || ' minutes')::interval)
+                + (COALESCE($9::int, $5::int) || ' minutes')::interval)
         AND (tss.slot_date + tss.end_time) AT TIME ZONE 'Africa/Cairo'
             > COALESCE($2::timestamptz, now())
       LIMIT 1
@@ -373,14 +407,15 @@ export async function classifyTechnicianCapacity(
     -- قبل كده كان هنا **منطق تاني** بقاعدة «شاغل يوم كامل»، فالتصنيف والتوافر كانوا ممكن
     -- يختلفوا على نفس الفني (التصنيف يقول MEANINGFUL والتوزيع يستبعده، أو العكس).
     load_today AS (
-      SELECT COALESCE(dl.busy_minutes, 0) AS busy_minutes
+      SELECT COALESCE(SUM(dl.busy_minutes), 0) AS busy_minutes
       FROM target
       LEFT JOIN ${technicianDayLoadSubquery({
         technicianIdExpr: '$1',
         activeStatusesParam: '$6',
         excludeOrderIdParam: '$3',
         dailyCapacityParam: '$4',
-      })} dl ON dl.busy_day = target.target_date
+      })} dl ON dl.busy_day BETWEEN target.target_date
+          AND target.target_date + (GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1)
     ),
     heavy AS (
       SELECT 1 WHERE ${dailyCapacityExceededExpr({
@@ -393,8 +428,8 @@ export async function classifyTechnicianCapacity(
         // `estimated_duration_days` الخام (ممكن NULL)، مش «عدد أيام» متحوّل لـ1.
         candidateLoad: {
           estimatedDurationDaysExpr: '$8::numeric',
-          durationMinutesExpr: '$5::int',
-          serviceDefaultMinutesExpr: 'NULL',
+          durationMinutesExpr: '$9::int',
+          serviceDefaultMinutesExpr: '$5::int',
         },
       })}
       -- **ADR-0070 — فرع «منشغل جسديًا دلوقتي» اتشال من هنا كمان.**
@@ -431,6 +466,7 @@ export async function classifyTechnicianCapacity(
       ACTIVE_TECHNICIAN_ORDER_STATUSES,
       ENGAGED_TECHNICIAN_ORDER_STATUSES,
       params.candidateEstimatedDurationDays ?? null,
+      params.candidateDurationMinutes ?? null,
     ],
   );
   return rows[0].tier;
@@ -583,6 +619,34 @@ export function technicianServiceQualificationCondition(opts: {
         )
         -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
         AND ${notExcluded}`;
+}
+
+/**
+ * **«الفني ده ظاهر كفرد؟»** — ADR-0080، طلب مالك صريح (2026-09-06).
+ *
+ * > «عايز زرار عند كل فني داخل في شركة… لو متفعل، الفني ده ما بيظهرش أصلًا إن هو فرد لوحده،
+ * >  كأنه مش متسجل معانا، هو فقط تابع للشركة، يعني بيتم اختياره فقط عن طريق الشركة بتاعته.»
+ *
+ * القاعدة سطر واحد، والمهم فيه هو **الاستثناء**: العلم بيتجاهَل تمامًا لما الاستعلام يكون
+ * **مقيّد بشركة بعينها** أصلاً — لأن ده بالظبط المسار الوحيد اللي المفروض يوصل للفني ده.
+ * ولو الشرط اتحط بلا الاستثناء ده، الفني الحصري كان هيختفي حتى من توزيع شركته هو، يعني
+ * مايشتغلش خالص.
+ *
+ * بيتحط في كل مسار **مش** مقيّد بشركة: التوزيع التلقائي العام، قايمة اختيار العميل، قايمة
+ * «مؤهّل بس متعارض»، واقتراح المواعيد. مسار الشركة (`listForServiceBooking` فرع الشركات،
+ * والتوزيع بـ`requested_technician_company_id`) **مابيتحطش عليه** عمدًا.
+ */
+export function technicianIndividualVisibilityCondition(opts: {
+  /** alias صف الفني، مثلاً `tp` أو `member`. */
+  technicianAlias: string;
+  /**
+   * parameter الشركة اللي الاستعلام مقيّد بيها (`$9` مثلاً). لو الاستعلام مش بيقيّد بشركة
+   * أصلاً، سيبها فاضية وهتتقري `NULL` — يعني الشرط ساري بالكامل.
+   */
+  companyScopeParam?: string;
+}): string {
+  const scope = opts.companyScopeParam ?? 'NULL';
+  return `(${opts.technicianAlias}.company_exclusive = false OR ${scope}::uuid IS NOT NULL)`;
 }
 
 /**

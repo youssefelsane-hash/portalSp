@@ -20,6 +20,7 @@ const MIN_SAMPLE_SIZE_FALLBACK = 5;
 const MIN_CHANGE_PERCENTAGE_FALLBACK = 5;
 const SUGGESTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000; // ساعة — مش وقتي زي matching، فحص دوري بطيء كافي
 const SWEEP_BATCH_SIZE = 25;
+const WORKDAY_MINUTES_FALLBACK = 12 * 60;
 
 /**
  * محرك الإنتاجية الذاتي التعلّم — مرحلة 2 (docs/06 §3.9، migration 0077). كانت فجوة موثّقة
@@ -66,8 +67,9 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
   /**
    * observation تلقائي عند إكمال طلب حقيقي مربوط بـstandard_data_id — بيتنادى من
    * OrderCompletedProductivityListener. actual_units من orders.requested_units (snapshot وقت
-   * الحجز، migration 0077)، actual_days من فرق work_started_at/work_completed_at (يوم واحد على
-   * الأقل — طلب بدأ وخلص في نفس اليوم لسه "يوم شغل واحد")، actual_technicians/assistants من عدد
+   * الحجز، migration 0077)، actual_days من فرق work_started_at/work_completed_at على تعريف يوم
+   * العمل الموحد (افتراضي 12 ساعة، لا 24 ساعة تقويمية)، يوم واحد على الأقل — طلب بدأ وخلص في
+   * نفس اليوم لسه "يوم شغل واحد". actual_technicians/assistants من عدد
    * order_team_members الفعليين + قائد الطلب نفسه (1). فشل الالتقاط (بيانات ناقصة، نادر) بيتسجّل
    * بس ومايكسرش دورة إكمال الطلب — نفس فلسفة أي مستمع حدث ثانوي في المشروع.
    */
@@ -77,9 +79,16 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
       if (!order || !order.standardDataId || !order.requestedUnits) return;
       if (!order.workStartedAt || !order.workCompletedAt) return;
 
+      const configuredWorkdayMinutes = await this.settingsService.getNumber(
+        'matching.daily_capacity_minutes',
+        WORKDAY_MINUTES_FALLBACK,
+      );
+      const workdayMinutes = Number.isInteger(configuredWorkdayMinutes)
+        ? Math.max(60, Math.min(WORKDAY_MINUTES_FALLBACK, configuredWorkdayMinutes))
+        : WORKDAY_MINUTES_FALLBACK;
       const actualDays = Math.max(
         1,
-        Math.ceil((order.workCompletedAt.getTime() - order.workStartedAt.getTime()) / (24 * 60 * 60 * 1000)),
+        Math.ceil((order.workCompletedAt.getTime() - order.workStartedAt.getTime()) / (workdayMinutes * 60 * 1000)),
       );
 
       const members = await this.teamMembers.find({ where: { orderId } });

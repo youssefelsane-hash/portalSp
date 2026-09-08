@@ -65,10 +65,10 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     estimatedDurationDays?: number | null;
   }): Promise<string> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, total_amount_cents, technician_id, scheduled_at, duration_minutes,
                            estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9,$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9,$10) RETURNING id`,
       [
         `SCN-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
         opts.status, ids.techProfile, opts.scheduledAt, opts.durationMinutes ?? null,
@@ -94,10 +94,10 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     estimatedDurationDays: number | null = null,
   ): Promise<Order> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, total_amount_cents, scheduled_at, duration_minutes, booking_mode,
                            estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8,$9) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8,$9) RETURNING id`,
       [
         `CND-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
         scheduledAt, durationMinutes, emergency ? 'emergency' : 'individual', estimatedDurationDays,
@@ -321,7 +321,12 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   it('D4 (ADR-0070) — طلب طوارئ: الفني اللي يومه **مليان** بقى يتستبعد (السقف اليومي بقى يسري على الطوارئ)', async () => {
     // الوجه التاني لنفس القاعدة: قبل ADR-0070 السقف اليومي مكانش بيسري على الطوارئ خالص، فالفني
     // اللي محجوز يوم كامل كان لسه بياخد طوارئ. دلوقتي «مجموع الشغل ≤ المسموح» بيسري على الكل.
-    await insertOrder({ label: 'full-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 60, estimatedDurationDays: 1 });
+    //
+    // ADR-0077 — «يوم مليان» بقى لازم يتكتب كيوم مليان فعلاً. الصيغة القديمة هنا كانت
+    // `durationMinutes: 60, estimatedDurationDays: 1`، وكانت بتعدّي **بالغلط**: القاعدة القديمة
+    // كانت بتحوّل أي `days >= 1` ليوم كامل، فشغلانة ساعة كانت «بتملا اليوم». ده بالظبط البَقّة
+    // اللي ADR-0077 قفلها، فالتثبيتة اللي بتعتمد عليها كانت بتختبر البَقّة مش القاعدة.
+    await insertOrder({ label: 'full-day', status: OrderStatus.ACCEPTED, scheduledAt: await cairoAt(0, 9), durationMinutes: 720 });
     const urgent = await candidateOrder(null, null, true);
     expect(await isEligible(urgent)).toBe(false);
   });

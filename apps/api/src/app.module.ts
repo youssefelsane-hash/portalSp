@@ -62,7 +62,16 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     }),
     EventEmitterModule.forRoot(),
     // 60 طلب/دقيقة لكل مستخدم افتراضياً — docs/01-master-plan.md §7.3
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
+    // السقف الافتراضي (٦٠ طلب/دقيقة) هو اللي بيسري في الإنتاج — القيم دي **مابتتضبطش** هناك.
+    // الحاجة للضبط جات من أدوات التطوير: `scripts/audit-booking-flow.js` بيمشي على مئات
+    // التركيبات ورا بعض، فبيستهلك سقف الدقيقة في تانيتين ويقيس الـ429 بدل ما يقيس الفلو.
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+        limit: parseInt(process.env.THROTTLE_LIMIT ?? '60', 10),
+      },
+    ]),
     // اتسجّل هنا مرة واحدة (مش في كل موديول محتاج طابور) — أي موديول يقدر يستخدم
     // BullModule.registerQueue() بعد كده من غير ما يعيد ضبط الاتصال بـ Redis. الاتصال ده
     // بيتستخدم من الـ Queue (producer, .add()) — الـ Workers (consumers) ليهم اتصال منفصل

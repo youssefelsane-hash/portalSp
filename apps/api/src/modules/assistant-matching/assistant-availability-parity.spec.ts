@@ -151,9 +151,9 @@ describe('توافر المساعد = توافر الفني (ADR-0061 §3)', () 
     /** حِمل حقيقي على مساعد — طلب نشط بيقوده هو نفسه. */
     const loadOrder = async (technicianId: string, day: string, minutes: number): Promise<void> => {
       const [o] = await q(
-        `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                              order_status, scheduled_at, duration_minutes, total_amount_cents)
-         VALUES ($1,$2,$3,$4,$5,$6,'accepted', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', $8, 10000)
+         VALUES (20,$1,$2,$3,$4,$5,$6,'accepted', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', $8, 10000)
          RETURNING id`,
         [`AST-${runId}-${ids.loadOrders.length}`, ids.customerProfile, ids.service, ids.address, ids.zone, technicianId, day, minutes],
       );
@@ -173,9 +173,9 @@ describe('توافر المساعد = توافر الفني (ADR-0061 §3)', () 
 
     // الطلب المطلوب استكماله: 4 شرائح مساعد عشان كل المؤهلين ياخدوا عرض (مش أول واحد بس).
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, scheduled_at, total_amount_cents, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', 10000, 4)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', 10000, 4)
        RETURNING id`,
       [`AST-${runId}-MAIN`, ids.customerProfile, ids.leadProfile, ids.service, ids.address, ids.zone, TARGET_DAY],
     );

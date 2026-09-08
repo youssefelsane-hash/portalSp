@@ -140,8 +140,8 @@ describe('AdminCampaignsService.listAbandonedLeads() — عملاء متروكي
     const occurredAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
     await insertIntent(customer.userId, ids.service, occurredAt);
     await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents, created_at)
-       VALUES ($1,$2,$3,$4,'searching_technician','unpaid',20000, now())`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents, created_at)
+       VALUES (20,$1,$2,$3,$4,'searching_technician','unpaid',20000, now())`,
       [`TESTLEAD-${runId}`.slice(0, 24), profile.id, ids.service, ids.address],
     );
 

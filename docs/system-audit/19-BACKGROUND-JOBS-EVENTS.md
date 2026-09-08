@@ -166,6 +166,23 @@ onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 `ScheduleSlotReleaseListener` بيستمع مرة واحدة بدل ما نضيف نداء في **4 أماكن** مختلفة بتلغي
 طلبًا (`cancel` / `technicianCancel` / أدمن / إلغاء تلقائي).
 
+### النطاق: in-process — وده **قرار** مش سقف
+
+`EventEmitter2` كله داخل نفس الـprocess. الفرز الكامل للمستمعين (ADR-0075):
+
+| الفئة | in-process = ؟ |
+|-------|-----------------|
+| كتابة في القاعدة · إشعار · إضافة لطابور | ✅ **صح ومقصود** — التنفيذ مرة واحدة هو الضمانة. جسر عام كان هيعمل إشعارات ومكافآت **مكررة** |
+| بث لحظي من gateway | ✅ اتحل في **ADR-0073** — الحدث بيتنفّذ على نسخة واحدة، والبث بيوصل لكل النسخ عبر Socket.IO Redis adapter |
+| **خدمة ماسكة قيمة الإعداد في ذاكرتها** (بوابتا الدفع) | 🔴 كان **مكسور** — اتقفل في **ADR-0075** |
+
+الحالة المكسورة كانت: الأدمن يغيّر مفاتيح البوابة على نسخة ⇒ باقي النسخ تفضل تحصّل بالمفاتيح
+القديمة للأبد، **بلا أي خطأ في اللوج**. الحل: `SETTING_RELOAD_REQUIRED_EVENT` بينتقل بين النسخ
+عبر Postgres `LISTEN/NOTIFY` (`SettingsCrossInstanceBridge`) — **مقصور على الفئة دي بس**.
+
+> القاعدة اللي بتحكم الاشتراك في الحدث ده: **اشترك لو معالجك idempotent وأثره في ذاكرة النسخة
+> دي بس.** أي معالج بيكتب أو بيبعت أو بيبثّ — مايشتركش.
+
 ### ⚠️ فخّ موثّق: `emitAsync` بينتظر المستمعين
 
 `SettingsService.update()` بتستخدم `emitAsync`، اللي **بينتظر القيم المرجَعة** من المستمعين.
@@ -204,3 +221,4 @@ onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 | استعادة webhooks | `apps/api/src/modules/payments/webhook-recovery.service.ts` |
 | وحدة systemd | `infra/systemd/baytak-api.service` |
 | توثيق فجوة BullMQ | `apps/api/src/modules/technicians/README.md` |
+| جسر الإعدادات بين النسخ | `apps/api/src/common/events/settings-cross-instance.bridge.ts` · [ADR-0075](../adr/0075-settings-cross-instance-reload.md) |

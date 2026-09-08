@@ -54,10 +54,9 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     durationHours?: number,
   ): Promise<string> {
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status,
           total_amount_cents, estimated_duration_days, scheduled_at, duration_hours)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9,$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,10000,$8,$9,$10) RETURNING id`,
       [
         // **بَقّة تنظيف حقيقية**: الصيغة القديمة كانت `P7-${label}-${runId}`.slice(0, 24) —
         // والقص من الآخر بياكل الـ`runId` نفسه لأي label أطول من ١٢ حرف، فطلبين من تشغيلتين
@@ -225,8 +224,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',10000) RETURNING id`,
       [`TEST-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;

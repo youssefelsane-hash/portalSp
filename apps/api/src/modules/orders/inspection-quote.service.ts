@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import {
   ORDER_QUOTE_ABOVE_RANGE_SUBMITTED_EVENT,
@@ -14,7 +15,7 @@ import { PricingModel, Service } from '../catalog/entities/service.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
-import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
@@ -109,6 +110,24 @@ export class InspectionQuoteService {
     details: InitialQuoteDetails,
     status: OrderQuoteStatus = OrderQuoteStatus.PENDING_CUSTOMER,
   ): Promise<OrderQuote> {
+    // الطلب مقفول عند كل caller قبل الوصول هنا. نحول حماية الـunique index إلى خطأ نطاق واضح:
+    // لا يصح فتح عرض جديد بينما عرض سابق ما زال ينتظر قرار الإدارة أو العميل.
+    const liveQuote = await manager
+      .createQueryBuilder(OrderQuote, 'live_quote')
+      .setLock('pessimistic_write')
+      .where('live_quote.order_id = :orderId', { orderId: order.id })
+      .andWhere('live_quote.status IN (:...statuses)', {
+        statuses: [OrderQuoteStatus.PENDING_ADMIN_REVIEW, OrderQuoteStatus.PENDING_CUSTOMER],
+      })
+      .getOne();
+    if (liveQuote) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'يوجد عرض سعر حي بالفعل لهذا الطلب؛ احسمه أو أعد إصداره بعد انتهاء صلاحيته قبل إرسال عرض جديد',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const [{ next_version }] = await manager.query<{ next_version: string }[]>(
       `SELECT (COALESCE(MAX(version), 0) + 1)::text AS next_version
          FROM order_quotes
@@ -243,17 +262,6 @@ export class InspectionQuoteService {
           ErrorCode.ORDR_003,
           'الطلب مدفوع بالفعل — تخفيض السعر محتاج استرداد من الإدارة، مش تعديل سعر',
           HttpStatus.CONFLICT,
-        );
-      }
-      if (
-        order.settlementPolicyVersion === 2 &&
-        order.platformCommissionCentsSnapshot != null &&
-        order.platformCommissionCentsSnapshot > newAmountCents
-      ) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
-          HttpStatus.BAD_REQUEST,
         );
       }
 
@@ -476,9 +484,9 @@ export class InspectionQuoteService {
     return quote;
   }
 
-  // الفني بيحدد السعر بعد ما وصل وعاين المكان فعليًا (TECHNICIAN_ARRIVED بس — نفس شرط
-  // state machine). لازم الخدمة تكون فعلاً inspection_then_quote، وإلا الطلب أصلاً معندوش
-  // سعر متأسس من الحجز ومفيش داعي للمسار ده.
+  // الفني بيحدد أول سعر بعد ما وصل وعاين المكان. قد يبدأ التشخيص قبل إدخال السعر، لذلك
+  // نقبل TECHNICIAN_ARRIVED وIN_PROGRESS بنفس عقد «أول عرض»، لا نحوله بالخطأ إلى تعديل سعر.
+  // لازم الخدمة تكون فعلاً inspection_then_quote، وإلا الطلب أصلاً معندوش سعر متأسس من الحجز.
   async submitInitialQuote(
     userId: string,
     orderId: string,
@@ -637,17 +645,6 @@ export class InspectionQuoteService {
       if (Number(count) < 1) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب مفيهوش صور مشكلة كفاية للتسعير', HttpStatus.BAD_REQUEST);
       }
-      if (
-        order.settlementPolicyVersion === 2 &&
-        order.platformCommissionCentsSnapshot != null &&
-        order.platformCommissionCentsSnapshot > quotedAmountCents
-      ) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `السعر لازم يكون على الأقل ${order.platformCommissionCentsSnapshot} قرش عشان يغطي عمولة المنصة`,
-          HttpStatus.BAD_REQUEST,
-        );
-      }
 
       const previousStatus = order.orderStatus;
       const quote = await this.createQuoteVersion(
@@ -721,6 +718,7 @@ export class InspectionQuoteService {
     userId: string,
     orderId: string,
     paymentChoice: 'cash' | 'electronic' = 'electronic',
+    expectedQuote?: { id: string; version: number },
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -741,11 +739,36 @@ export class InspectionQuoteService {
         .getOne();
 
       if (
+        expectedQuote &&
+        (!quote || quote.id !== expectedQuote.id || quote.version !== expectedQuote.version)
+      ) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'عرض السعر اتحدّث. راجع السعر الجديد قبل الموافقة.',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      if (
         quote?.status === OrderQuoteStatus.APPROVED &&
         quote.customerDecidedByUserId === userId &&
-        [OrderStatus.AWAITING_TECHNICIAN_SELECTION, OrderStatus.IN_PROGRESS].includes(order.orderStatus)
+        // `SEARCHING_TECHNICIAN` هي وجهة الموافقة الجديدة (توزيع تلقائي فورًا)، و
+        // `AWAITING_TECHNICIAN_SELECTION` بتفضل هنا للطلبات اللي اتوافق عليها قبل التغيير —
+        // ضغطة تانية على «موافق» لازم ترجع نفس الطلب بهدوء مش تعارض.
+        [
+          OrderStatus.SEARCHING_TECHNICIAN,
+          OrderStatus.AWAITING_TECHNICIAN_SELECTION,
+          OrderStatus.IN_PROGRESS,
+        ].includes(order.orderStatus)
       ) {
-        return { order, previousStatus: order.orderStatus, quotedAmountCents: 0, nextStatus: order.orderStatus, idempotent: true };
+        return {
+          order,
+          previousStatus: order.orderStatus,
+          quotedAmountCents: 0,
+          immediateElectronicChargeCents: 0,
+          nextStatus: order.orderStatus,
+          idempotent: true,
+        };
       }
 
       if (order.orderStatus !== OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL || !quote) {
@@ -761,6 +784,7 @@ export class InspectionQuoteService {
           order,
           previousStatus: order.orderStatus,
           quotedAmountCents: 0,
+          immediateElectronicChargeCents: 0,
           nextStatus: order.orderStatus,
           idempotent: false,
           expired: true,
@@ -803,14 +827,34 @@ export class InspectionQuoteService {
       }
       if (isDiagnosisRevision) order.estimatedPriceCents = quotedAmountCents;
 
+      // العرض المعتمد يحدد عقد التنفيذ، لا السعر وحده. نحفظ نفس المدة والطاقم على الطلب قبل
+      // دخول المطابقة حتى يستخدمها الحجز والسعة والتجنيد بدل fallback ساعة/فني واحد.
+      // تعديل التشخيص يحدث أثناء التنفيذ، فلا يغيّر فريقًا ملتزمًا أو جدولًا قائمًا بصمت.
+      const operationalQuoteApplied = isDiagnosisRevision
+        ? { applied: false, requiresCrewRecruitment: false }
+        : this.applyApprovedOperationalQuote(order, quote);
+
+      // **موافقة العميل على السعر = الطلب يدخل التوزيع التلقائي فورًا** (طلب مالك صريح
+      // 2026-09-05: «طالما وافق على السعر، ينزله على طول في الـauto matching»).
+      //
+      // كان بيروح لـ`AWAITING_TECHNICIAN_SELECTION` — «مستنيك تختار الفني». والحالة دي كانت
+      // **طريق مسدود لكل عميل**: مفيش أي شاشة في `customer-app` ولا `customer-web` بتنده
+      // `provider-candidates` أو `select-provider` (اتأكد بالبحث في التطبيقين). يعني الطلب
+      // بيقف عند رسالة بتطلب فعل مافيش زرار يعمله.
+      //
+      // `SEARCHING_TECHNICIAN` + `ORDER_CREATED_EVENT` تحت هي **نفس** نقطة الدخول اللي أي طلب
+      // عادي بيتوزّع بيها (ADR-0018) — مفيش نظام موازي، ونفس إعدادات المطابقة بالحرف.
+      //
+      // الفرع الوحيد اللي بيفضل `IN_PROGRESS` هو اللي فيه منفّذ في المكان فعلاً: مراجعة تشخيص
+      // لفني واقف عند العميل، أو معاينة في الموقع والأدمن ضابط إن المعاين هو اللي ينفّذ.
       const nextStatus = isDiagnosisRevision
         ? // الفني واقف في المكان ومستني موافقة على سعر شغل لسه ما بدأش — بيكمّل من مكانه.
           OrderStatus.IN_PROGRESS
-        : order.initialQuoteSource === 'admin_remote'
-          ? OrderStatus.AWAITING_TECHNICIAN_SELECTION
-          : order.onsiteAssessorExecutesWorkSnapshot
-            ? OrderStatus.IN_PROGRESS
-            : OrderStatus.AWAITING_TECHNICIAN_SELECTION;
+        : order.initialQuoteSource !== 'admin_remote' &&
+            order.onsiteAssessorExecutesWorkSnapshot &&
+            !operationalQuoteApplied.requiresCrewRecruitment
+          ? OrderStatus.IN_PROGRESS
+          : OrderStatus.SEARCHING_TECHNICIAN;
       order.orderStatus = nextStatus;
       order.assessmentFeeCreditCents = assessmentCreditCents;
       order.priceStatus = nextStatus === OrderStatus.IN_PROGRESS ? OrderPriceStatus.LOCKED : OrderPriceStatus.CONFIRMED;
@@ -839,6 +883,10 @@ export class InspectionQuoteService {
             assessment_credit_cents: assessmentCreditCents,
             net_added_cents: quotedAmountCents - assessmentCreditCents,
             quote_source: order.initialQuoteSource,
+            operational_snapshot_applied: operationalQuoteApplied.applied,
+            estimated_duration_minutes: order.durationMinutes,
+            required_technicians: order.requiredTechnicians,
+            required_assistants: order.requiredAssistants,
           },
         }),
       );
@@ -860,10 +908,18 @@ export class InspectionQuoteService {
         manager,
       );
 
-      return { order, previousStatus, quotedAmountCents, nextStatus, idempotent: false, expired: false };
+      return {
+        order,
+        previousStatus,
+        quotedAmountCents,
+        immediateElectronicChargeCents: Math.max(0, deltaCents),
+        nextStatus,
+        idempotent: false,
+        expired: false,
+      };
     });
 
-    const { order, previousStatus, quotedAmountCents, nextStatus } = result;
+    const { order, previousStatus, quotedAmountCents, immediateElectronicChargeCents, nextStatus } = result;
 
     if ('expired' in result && result.expired) {
       throw new ApiException(ErrorCode.ORDR_003, 'انتهت صلاحية عرض السعر — اطلب عرضًا محدثًا', HttpStatus.CONFLICT);
@@ -884,11 +940,25 @@ export class InspectionQuoteService {
       ),
     );
 
+    // بث نقطة الدخول الموحّدة للتوزيع (ADR-0018) — من غيرها الطلب بيقف في `SEARCHING_TECHNICIAN`
+    // للأبد. بعد الـcommit عمدًا (قاعدة المشروع: مفيش حدث قبل نجاح الـtransaction)، وبـ`emitAsync`
+    // زي `OrdersService.create()` و`PostQuoteProviderSelectionService` بالحرف. الـlistener بيبلع
+    // أخطاءه بنفسه فمفيش خطر على رد العميل.
+    if (nextStatus === OrderStatus.SEARCHING_TECHNICIAN) {
+      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    }
+
     // تحصيل فوري (docs/08 §21 نفس النمط) — برّه الـtransaction عمداً، فشله ميرجّعش خطأ للعميل
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل. batchId هنا مجرد مفتاح idempotency (مش بيتفحص ضد order_items).
-    if (order.paymentStatus === OrderPaymentStatus.PAID && paymentChoice === 'electronic' && quotedAmountCents > 0) {
+    // رسم المعاينة المُسدد يتحول لرصيد من سعر العرض. تحصيل العرض كاملاً هنا كان بيخصم
+    // الرسم مرتين من العميل رغم أن `increasePrice()` سجّل الالتزام الصافي فقط.
+    if (
+      order.paymentStatus === OrderPaymentStatus.PAID &&
+      paymentChoice === 'electronic' &&
+      immediateElectronicChargeCents > 0
+    ) {
       try {
-        await this.paymentsService.attemptAdditionalWorkCharge(order.id, randomUUID(), quotedAmountCents);
+        await this.paymentsService.attemptAdditionalWorkCharge(order.id, randomUUID(), immediateElectronicChargeCents);
       } catch (err) {
         this.logger.error(
           `فشل محاولة تحصيل سعر بعد المعاينة للطلب ${order.id} — المبلغ يفضل obligation مسجّل`,
@@ -898,5 +968,42 @@ export class InspectionQuoteService {
     }
 
     return order;
+  }
+
+  /**
+   * ينسخ snapshot التنفيذ من نسخة العرض التي وافق عليها العميل. وجود كل حقل اختياري يظل
+   * مقصودًا: التسعير لا يخترع مدة أو طاقمًا لم يحدده مُصدر العرض، لكنه لا يسمح للحقل الذي
+   * حدده أن يضيع بين quote والمطابقة.
+   */
+  private applyApprovedOperationalQuote(
+    order: Order,
+    quote: OrderQuote,
+  ): { applied: boolean; requiresCrewRecruitment: boolean } {
+    let applied = false;
+
+    if (quote.estimatedDurationMinutes != null) {
+      order.durationMinutes = quote.estimatedDurationMinutes;
+      order.durationHours =
+        quote.estimatedDurationMinutes % 60 === 0 ? quote.estimatedDurationMinutes / 60 : null;
+      // السعة تشتق الأيام من دقائق العمل الحقيقية عند غياب يوم صريح؛ لا نحتفظ بتقدير قديم
+      // يمكن أن يحجز يومًا كاملًا لشغل ساعتين أو يخفي امتداد شغل طويل.
+      order.estimatedDurationDays = null;
+      applied = true;
+    }
+    if (quote.requiredTechnicians != null) {
+      order.requiredTechnicians = quote.requiredTechnicians;
+      applied = true;
+    }
+    if (quote.requiredAssistants != null) {
+      order.requiredAssistants = quote.requiredAssistants;
+      applied = true;
+    }
+
+    const requiredTechnicians = Math.max(1, order.requiredTechnicians ?? 1);
+    const requiredAssistants = Math.max(0, order.requiredAssistants ?? 0);
+    const requiresCrewRecruitment = requiredTechnicians > 1 || requiredAssistants > 0;
+    if (requiresCrewRecruitment) order.bookingMode = BookingMode.TEAM;
+
+    return { applied, requiresCrewRecruitment };
   }
 }

@@ -27,7 +27,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { TechniciansService } from '../technicians/technicians.service';
 import { Order } from './entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
-import { OrdersService } from './orders.service';
+import { OrderQueriesService } from './order-queries.service';
 import { JoinTrackingOrderDto, TechnicianLocationEventDto } from './dto/tracking-socket.dto';
 
 interface AuthenticatedSocket extends Socket {
@@ -49,7 +49,9 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
-    private readonly ordersService: OrdersService,
+    // شريحة القراءات بس (تدقيق A-1) — الـgateway مابيحتاجش غير سؤالين عن الـrepository،
+    // فمفيش سبب يعتمد على `OrdersService` بـ٢٥ اعتمادية عشانهم.
+    private readonly ordersService: OrderQueriesService,
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly sessions: RealtimeSessionRegistry,
     private readonly events: EventEmitter2,
@@ -170,7 +172,7 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     const profile = await this.techniciansService.findByUserIdOrThrow(payload.sub);
     await this.techniciansService.updateLocation(payload.sub, body);
 
-    // تعريف «الطلب اللي الفني في طريقه ليه دلوقتي» بقى في `OrdersService` مصدرًا واحدًا
+    // تعريف «الطلب اللي الفني في طريقه ليه دلوقتي» بقى في `OrderQueriesService` مصدرًا واحدًا
     // (`findOrdersInTransitForTechnician`) بدل نسخة تانية هنا كانت بتختلف عن نسخة الخدمة في
     // الشرط **وفي الحتمية**: كانت `findOne` بلا `ORDER BY` على مجموعة ممكن ترجّع أكتر من صف بعد
     // ADR-0070 (الفني بقى يقدر يمسك أكتر من طلب نشط في نفس اليوم)، فـPostgres كان بيختار صف

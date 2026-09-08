@@ -61,10 +61,9 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
 
   async function makeOrder(bookingMode: 'individual' | 'team'): Promise<string> {
     const [order] = await q(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, booking_mode,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, booking_mode,
           required_technicians, required_assistants, scheduled_at, subtotal_cents, total_amount_cents)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',$6,$7,$8, now() + interval '2 days', 50000, 50000)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',$6,$7,$8, now() + interval '2 days', 50000, 50000)
        RETURNING id`,
       [
         `EXC-${bookingMode}-${runId}`.slice(0, 30),

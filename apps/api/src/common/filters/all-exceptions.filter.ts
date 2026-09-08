@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { ApiEnvelope } from '../dto/api-response';
 import { ErrorCode } from '../exceptions/api.exception';
 import { RequestWithId } from '../middleware/request-context.middleware';
+import { recordError } from './error-journal';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -32,7 +33,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (!isHttp) {
-      this.logger.error(exception instanceof Error ? exception.stack : exception);
+      // **العطل ده لازم يبقى قابل للتتبّع من الشاشة للوج في خطوة واحدة.**
+      //
+      // بلاغ مالك: «بيظهر خطأ غير متوقع… والتيرمنال مش ظاهر فيها الـerror». السطر القديم كان
+      // بيطبع الـstack بس — بلا مسار ولا مستخدم ولا `request_id`، فمستحيل تربط الرسالة اللي
+      // على الموبايل بسطر في لوج فيه آلاف السطور. دلوقتي السطر بيبدأ بنفس الـ`request_id` اللي
+      // بيظهر في التطبيق، فـ`grep <request_id> .dev-logs/api.log` بيوصل للسبب فورًا.
+      const actor = (req as { user?: { sub?: string } }).user?.sub ?? null;
+      this.logger.error(
+        `500 [${req.requestId}] ${req.method} ${req.originalUrl} — مستخدم: ${actor ?? 'مجهول'}`,
+        exception instanceof Error ? exception.stack : String(exception),
+      );
+      // ومعاه سجل مخصّص على القرص: اللوج على الشاشة بيضيع، والكود اللي المستخدم شايفه لازم
+      // يوصل لسببه حتى بعد ما التيرمنال يتقفل (`node scripts/find-error.js <كود>`).
+      recordError({
+        requestId: req.requestId,
+        method: req.method,
+        url: req.originalUrl,
+        userId: actor,
+        message: exception instanceof Error ? exception.message : String(exception),
+        stack: exception instanceof Error ? (exception.stack ?? null) : null,
+      });
     }
 
     const envelope: ApiEnvelope<null> = {

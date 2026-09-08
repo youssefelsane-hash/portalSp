@@ -176,9 +176,9 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
   /** طلب أصلي مكتمل بأرباح فني معروفة + إعادة زيارة مثبّتة عليه. */
   async function seedRevisit(opts: { technicianEarningCents: number; pinnedHoursAgo: number; useEarningShare?: boolean }) {
     const [original] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, order_type)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid',50000,$7,'individual','standard') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'completed','paid',50000,$7,'individual','standard') RETURNING id`,
       [
         `RVO-${runId}-${orderIds.length}`.slice(0, 24),
         ids.customerProfile,
@@ -200,10 +200,10 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
     }
 
     const [revisit] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, parent_order_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, parent_order_id,
                            order_status, payment_status, total_amount_cents, booking_mode, order_type,
                            revisit_pinned_technician_id, revisit_pinned_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'searching_technician','unpaid',0,'individual','revisit',$7, now() - make_interval(hours => $8::int))
+       VALUES (20,$1,$2,$3,$4,$5,$6,'searching_technician','unpaid',0,'individual','revisit',$7, now() - make_interval(hours => $8::int))
        RETURNING id`,
       [
         `RVR-${runId}-${orderIds.length}`.slice(0, 24),

@@ -9,11 +9,10 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminEarningsPolicyService } from './admin-earnings-policy.service';
 import {
   CreateTechnicianEarningAdjustmentDto,
-  SetEarningsCutoverDto,
   SimulateEarningsDto,
   UpdateEarningsLevelPolicyDto,
   UpdateEarningsSkillPolicyDto,
-  UpdateFixedCommissionDto,
+  UpdatePlatformCommissionDto,
   ResetEarningsOverrideDto,
   UpdateServiceLevelEarningsOverrideDto,
   UpdateServiceSkillEarningsOverrideDto,
@@ -36,7 +35,7 @@ export class AdminEarningsPolicyController {
   updateCommission(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateFixedCommissionDto,
+    @Body() dto: UpdatePlatformCommissionDto,
     @AuditContext() audit: AuditMeta,
   ) {
     return this.policy.updateServiceCommission(user.sub, id, dto, audit);
@@ -64,17 +63,6 @@ export class AdminEarningsPolicyController {
     @AuditContext() audit: AuditMeta,
   ) {
     return this.policy.updateSkill(user.sub, skill, dto, audit);
-  }
-
-  @Post('cutover')
-  @RequirePermission('earnings_policy.manage')
-  @RequireStepUp()
-  cutover(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: SetEarningsCutoverDto,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    return this.policy.setCutover(user.sub, dto.enabled, dto.reason, audit);
   }
 
   @Post('simulate')

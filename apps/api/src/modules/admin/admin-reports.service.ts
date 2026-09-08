@@ -320,7 +320,9 @@ export class AdminReportsService {
     const rows = await this.dataSource.query<
       { period_start: Date; orders_count: string; total_amount_cents: string; platform_commission_cents: string; technician_earnings_cents: string }[]
     >(
-      `SELECT date_trunc($3, o.paid_at) AS period_start,
+      // نطاق تاريخ التقارير هو أيام عمل بالقاهرة، لا timestamps عارية بتتوقف عند 00:00 من
+      // يوم النهاية. نستخدم [بداية from، بداية اليوم التالي لـto) ونجمّع بنفس المنطقة.
+      `SELECT (date_trunc($3, o.paid_at AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo') AS period_start,
               COUNT(*) AS orders_count,
               COALESCE(SUM(o.total_amount_cents), 0) AS total_amount_cents,
               COALESCE(SUM(o.platform_commission_cents - COALESCE((
@@ -333,7 +335,8 @@ export class AdminReportsService {
               ), 0)), 0) AS technician_earnings_cents
        FROM orders o
        WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
-         AND o.paid_at BETWEEN $1 AND $2
+         AND o.paid_at >= ($1::date AT TIME ZONE 'Africa/Cairo')
+         AND o.paid_at < (($2::date + 1) AT TIME ZONE 'Africa/Cairo')
        GROUP BY period_start
        ORDER BY period_start ASC`,
       [query.from, query.to, query.group_by ?? 'day'],

@@ -138,9 +138,9 @@ describe('MatchingService.dispatchNextRound() — إعادة الزيارة مث
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents,
                            booking_mode, order_type, revisit_pinned_technician_id, revisit_pinned_at)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',0,'individual','revisit',$6, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',0,'individual','revisit',$6, now()) RETURNING id`,
       [`TPIN-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, ids.technicians[0]],
     );
     ids.order = order.id;

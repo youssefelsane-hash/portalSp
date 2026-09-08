@@ -37,19 +37,38 @@ class TechniciansRepository {
     // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
     // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
     final query = StringBuffer();
-    if (excludeTechnicianId != null) query.write('&exclude_technician_id=$excludeTechnicianId');
-    if (fieldValues != null && fieldValues.isNotEmpty) {
-      query.write('&field_values=${Uri.encodeComponent(jsonEncode(fieldValues))}');
+    if (excludeTechnicianId != null) {
+      query.write('&exclude_technician_id=$excludeTechnicianId');
     }
-    if (sort != null) query.write('&sort=$sort');
-    if (scheduledAt != null) query.write('&scheduled_at=${Uri.encodeComponent(scheduledAt.toUtc().toIso8601String())}');
-    if (bookingMode != null) query.write('&booking_mode=${bookingMode.apiValue}');
-    final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
+    if (fieldValues != null && fieldValues.isNotEmpty) {
+      query.write(
+        '&field_values=${Uri.encodeComponent(jsonEncode(fieldValues))}',
+      );
+    }
+    if (sort != null) {
+      query.write('&sort=$sort');
+    }
+    if (scheduledAt != null) {
+      query.write(
+        '&scheduled_at=${Uri.encodeComponent(scheduledAt.toUtc().toIso8601String())}',
+      );
+    }
+    if (bookingMode != null) {
+      query.write('&booking_mode=${bookingMode.apiValue}');
+    }
+    final items = await api_client.apiRequestList(
+      '/services/$serviceId/technicians?address_id=$addressId$query',
+    );
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }
 
-  Future<TechnicianPublicProfile> fetchPublicProfile(String technicianId) async {
-    final data = await auth.authedRequest('GET', '/technicians/$technicianId/profile');
+  Future<TechnicianPublicProfile> fetchPublicProfile(
+    String technicianId,
+  ) async {
+    final data = await auth.authedRequest(
+      'GET',
+      '/technicians/$technicianId/profile',
+    );
     return TechnicianPublicProfile.fromJson(data!);
   }
 
@@ -62,7 +81,9 @@ class TechniciansRepository {
   // الجدولة الحقيقية للفني (docs/08 §2-§3) — العميل يشوف السلوتات الفاضية/المحجوزة (أخضر/أحمر)
   // بتاعة فني بعينه ويختار واحد منها وقت الحجز. مش @Public() في الباك-إند (محتاج توكن عميل عادي).
   Future<List<ScheduleSlot>> fetchSchedule(String technicianId) async {
-    final items = await auth.authedRequestList('/technicians/$technicianId/schedule');
+    final items = await auth.authedRequestList(
+      '/technicians/$technicianId/schedule',
+    );
     return items.map(ScheduleSlot.fromJson).toList();
   }
 
@@ -83,6 +104,12 @@ class TechniciansRepository {
     required String addressId,
     required String selectionMode,
     String? technicianId,
+
+    /// ADR-0080 — اختيار **شركة** كمنفّذ: التوزيع بيدوّر جوّاها والتذكرة بتثبّتها.
+    String? technicianCompanyId,
+    // الشركة لا تُحجز كفني فردي: وضع الحجز جزء من بصمة التذكرة، فلازم يخرج مع المعاينة نفسها
+    // وليس فقط مع POST /orders النهائي. غيابه كان يجعل ضغط «اختار الشركة» يرفض في الخلفية.
+    BookingMode bookingMode = BookingMode.individual,
     String? scheduledAt,
     String? scheduledEndAt,
     String? periodStart,
@@ -104,14 +131,18 @@ class TechniciansRepository {
         'service_id': serviceId,
         'address_id': addressId,
         'selection_mode': selectionMode,
+        'booking_mode': bookingMode.apiValue,
         'technician_id': ?technicianId,
+        'requested_technician_company_id': ?technicianCompanyId,
         'scheduled_at': ?scheduledAt,
         'scheduled_end_at': ?scheduledEndAt,
         'period_start': ?periodStart,
         'period_end': ?periodEnd,
-        if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
+        if (fieldValues != null && fieldValues.isNotEmpty)
+          'field_values': fieldValues,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
-        if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
+        if (buildingCode != null && buildingCode.isNotEmpty)
+          'building_code': buildingCode,
         if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
         'warranty_plan_id': ?warrantyPlanId,
         'standard_data_id': ?standardDataId,

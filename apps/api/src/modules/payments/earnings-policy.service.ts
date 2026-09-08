@@ -34,9 +34,9 @@ export class EarningsPolicyService {
   ): Promise<EarningsCalculationResult> {
     const orderRows: Array<{
       settlement_policy_version: number | string;
-      platform_commission_cents_snapshot: number | string | null;
+      commission_rate_applied: number | string | null;
     }> = await manager.query(
-      `SELECT settlement_policy_version, platform_commission_cents_snapshot
+      `SELECT settlement_policy_version, commission_rate_applied
          FROM orders
         WHERE id = $1
         ${lockOrder ? 'FOR UPDATE' : ''}`,
@@ -47,14 +47,18 @@ export class EarningsPolicyService {
     if (Number(order.settlement_policy_version) !== 2) {
       throw new Error('Earnings Policy V2 cannot settle a V1 order');
     }
-    if (order.platform_commission_cents_snapshot == null) {
-      throw new Error('V2 order is missing its fixed platform commission snapshot');
+    if (order.commission_rate_applied == null) {
+      throw new Error('Earnings order is missing its platform commission percentage snapshot');
     }
 
     const participants = await this.resolveParticipants(orderId, manager);
+    const commissionRatePercentage = Number(order.commission_rate_applied);
+    if (!Number.isFinite(commissionRatePercentage) || commissionRatePercentage < 0 || commissionRatePercentage > 100) {
+      throw new Error('Earnings order has an invalid platform commission percentage snapshot');
+    }
     return calculateEarningsV2(
       finalOrderTotalCents,
-      Number(order.platform_commission_cents_snapshot),
+      Math.round((finalOrderTotalCents * commissionRatePercentage) / 100),
       participants,
     );
   }

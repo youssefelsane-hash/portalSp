@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SelectNative } from '@/components/ui/select-native';
+import { isFormulaNodeShape } from './formula-validation';
 
 export interface FormulaEditorContext {
   fieldKeys: string[];
@@ -120,7 +121,8 @@ const COMPARISON_LABELS: Record<ComparisonOperator, string> = {
 };
 
 /** ملخص سطر واحد لأي عقدة — بيظهر لما العقدة تتطوي. شرح هيكلي فقط (مش مصدر تسعير). */
-export function nodeSummary(node: FormulaNode, context: FormulaEditorContext): string {
+export function nodeSummary(node: unknown, context: FormulaEditorContext): string {
+  if (!isFormulaNodeShape(node)) return 'عقدة ناقصة تحتاج إصلاح';
   const key = (k: string | undefined) => k ?? '—';
   switch (node.type) {
     case 'literal':
@@ -226,14 +228,15 @@ function depthBadgeClass(edgeDepth: number): string {
 }
 
 export function FormulaTreeEditor({
-  node,
+  node: rawNode,
   onChange,
   context,
   depth = 0,
   path = [],
   onNavigate,
 }: {
-  node: FormulaNode;
+  /** JSON المستورد قد يكون ناقصًا؛ لا نفترض صحته قبل الفحص. */
+  node: unknown;
   onChange: (node: FormulaNode) => void;
   context: FormulaEditorContext;
   depth?: number;
@@ -242,8 +245,37 @@ export function FormulaTreeEditor({
   /** بيتنادى لما الأدمن يختار عقدة — عشان شريط المسار فوق المحرر يتحدث. */
   onNavigate?: (path: string[]) => void;
 }) {
+  const isValidNode = isFormulaNodeShape(rawNode);
   // العقد التركيبية العميقة تبدأ مطوية تلقائيًا بعد المستوى السادس — توفير مساحة بلا إخفاء قدرات
-  const [collapsed, setCollapsed] = useState(() => COMPOUND_TYPES.has(node.type) && depth >= 6);
+  const [collapsed, setCollapsed] = useState(() => isValidNode && COMPOUND_TYPES.has((rawNode as FormulaNode).type) && depth >= 6);
+  const [replacementType, setReplacementType] = useState<FormulaNode['type']>('literal');
+
+  // مهم: أي JSON متضرر يظل قابلًا للإصلاح من نفس الشاشة بدل ما node.type يوقف صفحة الأدمن.
+  if (!isValidNode) {
+    return (
+      <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm">
+        <p className="font-medium text-destructive">فيه عقدة ناقصة أو غير مفهومة في هذا المسار</p>
+        <p className="mt-1 text-muted-foreground" dir="ltr">
+          {path.join(' → ') || 'price_cents'}
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <SelectNative value={replacementType} onChange={(e) => setReplacementType(e.target.value as FormulaNode['type'])} className="w-fit">
+            {NODE_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {NODE_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </SelectNative>
+          <Button type="button" size="sm" variant="outline" onClick={() => onChange(defaultNodeForType(replacementType, context))}>
+            إصلاح هذه العقدة
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  // Re-run the guard directly so TypeScript and every access below share the same safe narrowing.
+  if (!isFormulaNodeShape(rawNode)) return null;
+  const node = rawNode;
 
   function handleTypeChange(newType: FormulaNode['type']) {
     if (newType === node.type) return;

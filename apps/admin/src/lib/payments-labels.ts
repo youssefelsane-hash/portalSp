@@ -39,6 +39,7 @@ export const PAYMENT_METHOD_LABELS_FULL: Record<PaymentMethod, string> = {
 export const PAYMENT_GATEWAY_STATUS_LABELS: Record<PaymentGatewayStatus, string> = {
   pending: 'قيد الانتظار',
   processing: 'جاري التنفيذ',
+  manual_review: 'مراجعة مالية مطلوبة',
   succeeded: 'ناجحة',
   failed: 'فشلت',
   cancelled: 'ملغاة',

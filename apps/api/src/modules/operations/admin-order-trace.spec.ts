@@ -49,9 +49,9 @@ describe('AdminOrderTraceService (تتبّع الطلب في المطابقة)',
 
   async function insertOrder(orderStatus: string, orderType: 'scheduled' | 'emergency' = 'scheduled') {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, order_type, payment_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, order_type, payment_status,
          booking_mode, total_amount_cents, technician_earning_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending','individual',50000,0, now() + interval '2 hours')
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending','individual',50000,0, now() + interval '2 hours')
        RETURNING id`,
       [`TESTTRC-${randomUUID().slice(0, 8)}`, ids.customerProfile, ids.service, ids.address, ids.zone, orderStatus, orderType],
     );

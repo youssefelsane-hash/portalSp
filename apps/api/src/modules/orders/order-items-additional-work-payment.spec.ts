@@ -64,8 +64,8 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   async function insertPrepaidOrder(label: string, totalAmountCents: number): Promise<string> {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'in_progress','paid',$7,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'in_progress','paid',$7,0) RETURNING id`,
       // `runId` في رقم الطلب مش تجميل: `orders.order_number` عليه UNIQUE، و`TESTAWP-<label>`
       // الثابت كان معناه إن أي تشغيلة اتقطعت قبل التنظيف بتقفل السبيك **للأبد** على نفس القاعدة
       // (حصلت فعلاً: صفوف متروكة من 2026-09-02 كانت بتفشّلها بـduplicate key بلا أي علاقة

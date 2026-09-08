@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
-import { Order } from './entities/order.entity';
+import { BookingMode, Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { User } from '../auth/entities/user.entity';
@@ -109,10 +109,10 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     );
   }
 
-  async function insertOrder(label: string, opts: { requiredTechnicians: number | null; requiredAssistants?: number | null }) {
+  async function insertOrder(label: string, opts: { requiredTechnicians: number | null; requiredAssistants?: number | null; bookingMode?: BookingMode }) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'team',$7,$8) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
       [
         `TESTREC-${label}`.slice(0, 24),
         ids.customerProfile,
@@ -120,6 +120,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
         ids.service,
         ids.address,
         ids.zone,
+        opts.bookingMode ?? BookingMode.TEAM,
         opts.requiredTechnicians,
         opts.requiredAssistants ?? 0,
       ],
@@ -408,6 +409,15 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     expect(teamMembers[0].addedBy).toEqual({ type: 'leader', name: `فني leader ${runId}` });
   });
 
+  it('recruitMember — احتياج فني إضافي في حجز فردي يتجنّد عادي بدل ما يفضل مانع بدء الشغل', async () => {
+    const orderId = await insertOrder(`individual-extra-tech-${runId}`, {
+      bookingMode: BookingMode.INDIVIDUAL,
+      requiredTechnicians: 2,
+    });
+
+    await expect(orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'technician')).resolves.toEqual({ status: 'added' });
+  });
+
   it('recruitMember — دور "assistant" بيتخزن member_type=assistant، role_label الافتراضي "مساعد"', async () => {
     const orderId = await insertOrder(`recruit-assistant-${runId}`, { requiredTechnicians: 1, requiredAssistants: 2 });
     const outcome = await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.assistantProfile, 'assistant');
@@ -453,8 +463,8 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     const orderId = await insertOrder(`recruit-meaningful-${runId}`, { requiredTechnicians: 3 });
     // نشغّل الجونيور بشغلانة مؤكدة تانية نفس اليوم (ASAP، بلا scheduled_at) — يبقى MEANINGFUL على الأقل.
     const [busyOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',10000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',10000,0,'individual') RETURNING id`,
       [`TESTREC-busy-${runId}`.slice(0, 24), ids.customerProfile, ids.juniorProfile, ids.service, ids.address, ids.zone],
     );
 

@@ -113,12 +113,14 @@ export class TechnicianAssignmentGuardService {
       technicianId: technician.id,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      serviceDurationMinutes:
+      // ADR-0077 — المدة الحقيقية للطلب منفصلة عن الافتراضي بتاع الخدمة.
+      candidateDurationMinutes:
         order.durationMinutes != null && order.durationMinutes > 0
           ? order.durationMinutes
           : order.durationHours != null && order.durationHours > 0
             ? order.durationHours * 60
-            : (svc?.estimated_duration_minutes ?? 60),
+            : null,
+      serviceDurationMinutes: svc?.estimated_duration_minutes ?? 60,
       dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {

@@ -163,9 +163,9 @@ describe('GET /services/:id/technicians — الحجز الممتد بيخفي �
 
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [busyOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
                             order_status, scheduled_at, estimated_duration_days, total_amount_cents, payment_status, placed_at, source_channel)
-       VALUES ($1,$2,$3,$4,$5,'standard','individual','accepted',$6,1,10000,'unpaid', now(), 'customer_app') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'standard','individual','accepted',$6,1,10000,'unpaid', now(), 'customer_app') RETURNING id`,
       [orderNumber, ids.customerProfileId, ids.busyTechId, ids.serviceId, ids.addressId, midSpanBusyDay],
     );
     ids.busyOrderId = busyOrder.id;

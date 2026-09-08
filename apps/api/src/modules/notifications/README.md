@@ -443,3 +443,33 @@ default_channels` كان افتراضيًا `'["push","in_app"]'` (`infra/migrat
 تحويلات InstaPay، سعر خارج النطاق…) كانت بتتسجّل في القاعدة وتموت هناك. المستهلك الناقص اتعمل:
 `apps/admin/src/components/notification-bell.tsx` — جرس في قشرة الأدمن بيقرا نفس الـendpoints
 الموجودة (`GET /notifications`, `/notifications/unread-count`, `PATCH .../read`)، من غير أي API جديد.
+
+## قناة `in_app` مضمونة — مش قابلة للإلغاء (2026-09-05)
+
+**بلاغ المالك**: «الـnotifications ما بقتش بتتبعت خالص… حتى لما الطلب بيتقبل ما لهاش أي أصل».
+
+`notifyMultiChannel` موصوفة في الكود بالحرف: «in_app مضمون دايمًا + push/sms إضافي». الضمان ده
+**مكانش متنفّذ**: `notify()` بلا قناة صريحة كانت بتقرا `default_channels` من
+`notification_type_configs` وتستخدمها **كبديل** للقنوات مش كإضافة عليها.
+
+الحالة الفعلية على قاعدة تطوير حقيقية وقت البلاغ:
+
+| | |
+|---|---|
+| إجمالي أنواع الإشعارات | **٣٧** |
+| منهم بلا `in_app` (`["push"]` بالظبط) | **٣٦** |
+
+من ضمنهم `order_accepted` و`order_awaiting_quote_approval` و`order_quote_decision`. النتيجة إن
+**مفيش أي صف `in_app` بيتعمل تقريبًا لأي حدث**: صندوق الإشعارات جوّه التطبيق فاضي مهما حصل،
+والـpush بيفشل في أي بيئة بلا مزوّد حقيقي — فالحدث بيختفي من الوجود.
+
+### القاعدة دلوقتي
+
+`in_app` **سجل دائم** جوّه المنتج، وباقي القنوات **توصيل** فوقه. الأدمن يزوّد التوصيل من
+`/admin/notification-types`، ومايقدرش يشيل السجل:
+
+- `NotificationsService.resolveConfiguredChannels()` بتضيف `IN_APP` دايمًا (اتحاد، مش استبدال).
+- `NotificationTypeConfigService.normalizeChannels()` بترجّعها تلقائيًا عند الحفظ (مش رفض —
+  قصد الأدمن يضيف/يشيل توصيل، والرفض كان هيبقى عائق بلا فايدة).
+- migration 0293 صلّحت الـ٣٦ صف الموجودين (إضافة بحتة: مابتشيلش أي قناة اختارها الأدمن).
+- `in-app-channel-guarantee.spec.ts` بيحرس القاعدة في الاتجاهين.

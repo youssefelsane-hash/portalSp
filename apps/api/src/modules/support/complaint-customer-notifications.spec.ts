@@ -162,8 +162,8 @@ describe('SupportService — إشعارات صاحب الشكوى (رد الأد
       [ids.customerUser, `شارع اختبار شكاوى ${runId}`],
     );
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
+       VALUES (20,$1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
       [`TESTCPF-${runId}`.slice(0, 24), ids.customerProfile, service_.id, address.id],
     );
     await dataSource.query(`UPDATE complaints SET order_id = $1 WHERE id = $2`, [order.id, linkedComplaintId]);

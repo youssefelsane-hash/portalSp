@@ -49,9 +49,9 @@ describe('السقف اليومي وتماثل الجدولة (ADR-0059)', () =>
     opts: { days?: number | null; minutes?: number | null; serviceId?: string },
   ): Promise<string> => {
     const [o] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, scheduled_at, estimated_duration_days, duration_minutes)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', $8, $9)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', $8, $9)
        RETURNING id`,
       [
         `CAP-${runId}-${ids.orders.length}`,

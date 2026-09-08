@@ -39,6 +39,9 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   'searching_technician',
   'technician_assigned',
   'awaiting_admin_quote',
+  // عرض المعاينة الأول قد يظل بلا رد من العميل بعد أن انتهت الزيارة. الإلغاء هنا قرار
+  // إداري موثق، لا إلغاء تلقائي ولا تغيير مباشر في قاعدة البيانات.
+  'awaiting_initial_quote_approval',
   // سياسة إلغاء الفني (docs/10) — order-state-machine.ts بيسمح admin cancel() يقفل الطلب من
   // الحالة دي (العميل واقف مستني اختيار فني بديل، ممكن يقرر يلغي كله بدل ما يستمر).
   'awaiting_technician_reselection',
@@ -51,10 +54,10 @@ export function isOrderCancellable(status: OrderStatus): boolean {
   return CANCELLABLE_STATUSES.includes(status);
 }
 
-// مطابق حرفياً لـ REASSIGNABLE_STATUSES في apps/api/src/modules/orders/admin-orders.service.ts —
-// التعيين اليدوي متاح بس قبل ما أي فني يقبل الطلب (searching_technician/technician_assigned).
-// بعد accepted الباك-إند بيرفض (409) — الاستبدال بعد القبول لازم يعدّي من مسار الشكوى.
-const REASSIGNABLE_STATUSES: OrderStatus[] = ['searching_technician', 'technician_assigned'];
+// مطابق حرفياً لـ REASSIGNABLE_STATUSES في apps/api/src/modules/orders/admin-orders.service.ts.
+// قبول الفني يثبت الموعد فقط؛ لذلك يمكن للإدارة استبداله حتى يبدأ التحرك. بعد ذلك يلزم مسار
+// شكوى/زيارة فاشلة حتى لا نغيّر سجل تنفيذ بدأ بالفعل.
+const REASSIGNABLE_STATUSES: OrderStatus[] = ['searching_technician', 'technician_assigned', 'accepted'];
 
 export function isOrderReassignable(status: OrderStatus): boolean {
   return REASSIGNABLE_STATUSES.includes(status);
@@ -152,3 +155,18 @@ export const RECURRING_FREQUENCY_LABELS: Record<string, string> = {
   monthly: 'شهريًا',
   yearly: 'سنويًا',
 };
+
+// مسار التوزيع (تدقيق §06 §4) — الفرق بين «الفني بيقبل بنفسه» و«الفني اتعيّن بلا موافقته».
+// النغمة مقصودة: التعيين التلقائي بيتعرض كتحذير لأنه القرار الوحيد اللي بيلزم فني بشغل من غير
+// ما يقول أيوه، فلازم يبان للأدمن مش يتلخبط مع الجولات.
+export const DISPATCH_ROUTE_LABELS: Record<string, string> = {
+  rounds: 'جولات عروض',
+  auto_confirm: 'تأكيد تلقائي',
+  not_dispatchable: 'خارج التوزيع',
+};
+
+export function dispatchRouteBadgeClass(route: string): string {
+  if (route === 'rounds') return 'border-transparent bg-success-bg text-success';
+  if (route === 'auto_confirm') return 'border-transparent bg-warning-bg text-warning';
+  return 'border-transparent bg-muted text-muted-foreground';
+}

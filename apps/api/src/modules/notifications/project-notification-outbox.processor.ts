@@ -105,7 +105,7 @@ export class ProjectNotificationOutboxProcessor implements OnModuleInit, OnModul
       const recipients = await this.recipients(row);
       const message = this.message(row);
       for (const recipient of recipients) {
-        await this.notifications.notifyMultiChannel({
+        const deliveries = await this.notifications.notifyMultiChannel({
           userId: recipient.userId,
           notificationType: row.action,
           titleAr: message.title,
@@ -119,6 +119,12 @@ export class ProjectNotificationOutboxProcessor implements OnModuleInit, OnModul
               : undefined,
           sourceOutboxId: row.id,
         }, [NotificationChannel.IN_APP, NotificationChannel.PUSH]);
+        const failed = deliveries.filter((delivery) => delivery.deliveryStatus === 'failed');
+        if (failed.length > 0) {
+          // وجود سجل in-app لا يعني أن push وصل. نرمي خطأ متعمدًا ليُعاد الصف نفسه بعد
+          // backoff؛ NotificationsService تعيد القناة الفاشلة فقط ولا تضاعف ما نجح منها.
+          throw new Error(`فشل تسليم ${failed.map((delivery) => `${recipient.userId}:${delivery.channel}`).join(', ')}`);
+        }
       }
       await this.dataSource.query(
         `UPDATE project_notification_outbox SET status='delivered', delivered_at=now(), locked_at=NULL WHERE id=$1`,

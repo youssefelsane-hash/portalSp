@@ -70,11 +70,11 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
   ): Promise<string> {
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, total_amount_cents, estimated_price_cents,
                            inspection_fee_cents, commissionable_base_cents, technician_earning_cents,
                            assessment_type, price_status, display_price_max_cents_snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',0,0,0,0,0,$8,$9,$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',0,0,0,0,0,$8,$9,$10) RETURNING id`,
       [
         orderNumber,
         ids.customerProfile,
@@ -191,7 +191,16 @@ describe('ADR-0067 — أحداث دورة حياة التقييم وعرض ال
     });
     const auditStub = { record: async () => undefined } as never;
 
-    triage = new AssessmentTriageService(dataSource, catalogService, auditStub, emitter);
+    // الخدمة بقت بتمرّر رسم المعاينة من نقطة الدخول المالية الوحيدة (`increasePrice`) بدل ما
+    // تكتبه على الطلب وبس — فلازم تتبنى بالاعتماديتين الحقيقيتين، وإلا الاختبار مايشوفش الفلوس.
+    triage = new AssessmentTriageService(
+      dataSource,
+      catalogService,
+      auditStub,
+      emitter,
+      new OrderFinancialFinalizationService(),
+      { getBoolean: async (_key: string, fallback: boolean) => fallback } as never,
+    );
     quotes = new InspectionQuoteService(
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),

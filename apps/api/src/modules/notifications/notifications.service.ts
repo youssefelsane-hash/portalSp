@@ -32,6 +32,8 @@ export interface NotifyInput {
   workflowId?: string;
   /** Durable-event source. One row per user/channel makes retries idempotent. */
   sourceOutboxId?: string;
+  /** مفتاح idempotency عام لصناديق تسليم غير مرتبطة بجدول project_notification_outbox. */
+  sourceDeliveryKey?: string;
 }
 
 export interface ListNotificationsParams {
@@ -103,7 +105,18 @@ export class NotificationsService {
     const configured = (config?.defaultChannels ?? []).filter((value): value is NotificationChannel =>
       Object.values(NotificationChannel).includes(value as NotificationChannel),
     );
-    return configured.length > 0 ? Array.from(new Set(configured)) : [NotificationChannel.IN_APP];
+    // **`in_app` بتتضاف دايمًا، مابتتستبدلش.** التوثيق فوق `notifyMultiChannel` بيقول الضمان ده
+    // بالحرف («in_app مضمون دايمًا + push/sms إضافي»)، بس مكانش متنفّذ في أي مكان: الإعدادات
+    // كانت **بديل** للقنوات مش إضافة عليها.
+    //
+    // الأثر الحقيقي اتقاس على قاعدة التطوير: ٣٦ نوع من ٣٧ كانوا `["push"]` بالظبط — من ضمنهم
+    // `order_accepted` و`order_awaiting_quote_approval`. يعني صفر صف `in_app` لأي حدث تقريبًا:
+    // صندوق الإشعارات في التطبيق فاضي، والـpush بيفشل في أي بيئة بلا مزوّد، فالإشعار بيختفي
+    // من الوجود. (بلاغ المالك: «حتى لما الطلب بيتقبل ما لهاش أي أصل».)
+    //
+    // القاعدة: `in_app` **سجل دائم** جوّه المنتج، وباقي القنوات **توصيل** فوقه. الأدمن يزوّد
+    // التوصيل، ومايشيلش السجل.
+    return Array.from(new Set([...configured, NotificationChannel.IN_APP])).sort();
   }
 
   /**
@@ -123,26 +136,41 @@ export class NotificationsService {
 
   /** بيسجّل الإشعار في القاعدة دايماً حتى لو فشل الإرسال الفعلي — الفشل بيتسجل في الصف نفسه، مش بيوقف تدفق العملية اللي استدعته. */
   private async notifyOnChannel(input: NotifyInput, channel: NotificationChannel): Promise<Notification> {
-    if (input.sourceOutboxId) {
-      const existing = await this.notifications.findOne({
-        where: { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel },
+    let notification: Notification | null = null;
+    if (input.sourceOutboxId || input.sourceDeliveryKey) {
+      notification = await this.notifications.findOne({
+        where: input.sourceOutboxId
+          ? { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel }
+          : { sourceDeliveryKey: input.sourceDeliveryKey!, userId: input.userId, channel },
       });
-      if (existing) return existing;
+      // صف نجح بالفعل لا نعيد إرساله عند retry لقناة ثانية فشلت. أما queued/failed فيُستأنف
+      // بالصف نفسه، فلا يضيع retry بعد crash ولا تتكرر عناصر صندوق الإشعارات.
+      if (
+        notification &&
+        [NotificationDeliveryStatus.SENT, NotificationDeliveryStatus.DELIVERED, NotificationDeliveryStatus.READ].includes(
+          notification.deliveryStatus,
+        )
+      ) {
+        return notification;
+      }
     }
-    const notification = this.notifications.create({
-      userId: input.userId,
-      notificationType: input.notificationType,
-      channel,
-      titleAr: input.titleAr,
-      bodyAr: input.bodyAr,
-      deepLink: input.deepLink ?? null,
-      referenceType: input.referenceType ?? null,
-      referenceId: input.referenceId ?? null,
-      workflowId: input.workflowId ?? null,
-      sourceOutboxId: input.sourceOutboxId ?? null,
-      deliveryStatus: NotificationDeliveryStatus.QUEUED,
-    });
-    await this.notifications.save(notification);
+    if (!notification) {
+      notification = this.notifications.create({
+        userId: input.userId,
+        notificationType: input.notificationType,
+        channel,
+        titleAr: input.titleAr,
+        bodyAr: input.bodyAr,
+        deepLink: input.deepLink ?? null,
+        referenceType: input.referenceType ?? null,
+        referenceId: input.referenceId ?? null,
+        workflowId: input.workflowId ?? null,
+        sourceOutboxId: input.sourceOutboxId ?? null,
+        sourceDeliveryKey: input.sourceDeliveryKey ?? null,
+        deliveryStatus: NotificationDeliveryStatus.QUEUED,
+      });
+      await this.notifications.save(notification);
+    }
 
     // تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — in_app دايماً بتتسجّل وتترسل، مفيش
     // تفضيل ليها أصلاً (راجع PREFERENCE_ELIGIBLE_CHANNELS). الصف اتسجّل فوق بالفعل (سجل دايم
@@ -178,6 +206,7 @@ export class NotificationsService {
       if (result.delivered) {
         notification.deliveryStatus = NotificationDeliveryStatus.SENT;
         notification.sentAt = now;
+        notification.failureReason = null;
       } else {
         notification.deliveryStatus = NotificationDeliveryStatus.FAILED;
         notification.failureReason = result.failureReason;
@@ -228,7 +257,19 @@ export class NotificationsService {
     userId: string,
     params: ListNotificationsParams,
   ): Promise<{ items: Notification[]; meta: { page: number; per_page: number; total: number } }> {
-    const where = params.unreadOnly ? { userId, readAt: IsNull() } : { userId };
+    // **صندوق الإشعارات = صفوف `in_app` بس.**
+    //
+    // الصف بيتعمل لكل قناة على حدة (in_app سجل + push/sms/email توصيل). الاستعلام هنا مكانش
+    // بيفلتر بالقناة خالص، فكان بيرجّع الحدث الواحد مرة لكل قناة. الشكل ده مكانش باين قبل كده
+    // **بالصدفة**: ٣٦ نوع من ٣٧ كانوا `["push"]` بس، فمافيش غير صف واحد أصلاً. أول ما `in_app`
+    // رجعت (migration 0293) بقى كل إشعار بيبان **مرتين** في القايمة — بلاغ المالك مباشرةً.
+    //
+    // القاعدة الصح: صفوف التوصيل سجل تشغيلي (وصلت؟ فشلت ليه؟) مش عناصر في صندوق المستخدم.
+    const where = {
+      userId,
+      channel: NotificationChannel.IN_APP,
+      ...(params.unreadOnly ? { readAt: IsNull() } : {}),
+    };
 
     const [items, total] = await this.notifications.findAndCount({
       where,
@@ -271,8 +312,11 @@ export class NotificationsService {
     return result.affected ?? 0;
   }
 
+  /** نفس قاعدة `listMine` بالحرف — العدّاد لازم يطابق اللي المستخدم هيشوفه لما يفتح الصندوق. */
   unreadCount(userId: string): Promise<number> {
-    return this.notifications.count({ where: { userId, readAt: IsNull() } });
+    return this.notifications.count({
+      where: { userId, channel: NotificationChannel.IN_APP, readAt: IsNull() },
+    });
   }
 
   async markRead(userId: string, notificationId: string): Promise<Notification> {
@@ -300,7 +344,12 @@ export class NotificationsService {
       .createQueryBuilder()
       .update(Notification)
       .set({ readAt: new Date(), deliveryStatus: NotificationDeliveryStatus.READ })
-      .where('user_id = :userId AND read_at IS NULL', { userId })
+      // نفس فلتر القناة بتاع `listMine`/`unreadCount` — «علّم الكل كمقروء» لازم يمس اللي
+      // المستخدم شايفه بالظبط، مش صفوف التوصيل اللي هو مالوش علاقة بيها.
+      .where('user_id = :userId AND read_at IS NULL AND channel = :channel', {
+        userId,
+        channel: NotificationChannel.IN_APP,
+      })
       .returning(['workflowId'])
       .execute();
 

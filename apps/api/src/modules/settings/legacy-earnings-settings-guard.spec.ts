@@ -14,12 +14,12 @@ describe('legacy earnings settings cutover guard', () => {
     expect(isLegacyEarningsSettingKey(key)).toBe(true);
   });
 
-  it('does not classify V2 controls or unrelated pricing settings as legacy', () => {
-    expect(isLegacyEarningsSettingKey('earnings.v2_cutover_enabled')).toBe(false);
+  it('classifies the retired cutover switch, but not unrelated pricing settings, as legacy', () => {
+    expect(isLegacyEarningsSettingKey('earnings.v2_cutover_enabled')).toBe(true);
     expect(isLegacyEarningsSettingKey('pricing.auto_match_level_premium')).toBe(false);
   });
 
-  it('rejects direct edits to V1 money settings after V2 cutover', async () => {
+  it('rejects direct edits to retired V1 money settings', async () => {
     const service = new SettingsService(
       {} as never,
       {} as AuditLogService,
@@ -33,6 +33,22 @@ describe('legacy earnings settings cutover guard', () => {
 
     await expect(service.update('admin-id', 'crew.assistant_share_ratio', 0.7)).rejects.toMatchObject({
       status: 409,
+    });
+  });
+
+  it('keeps the configurable workday within the owner-approved 12-hour ceiling', async () => {
+    const service = new SettingsService(
+      {} as never,
+      {} as AuditLogService,
+      {} as RedisCacheService,
+    );
+    jest.spyOn(service, 'getOrThrow').mockResolvedValue({
+      key: 'matching.daily_capacity_minutes',
+      valueType: 'number',
+    } as Setting);
+
+    await expect(service.update('admin-id', 'matching.daily_capacity_minutes', 721)).rejects.toMatchObject({
+      status: 400,
     });
   });
 });

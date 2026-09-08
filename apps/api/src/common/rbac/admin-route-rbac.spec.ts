@@ -1,6 +1,6 @@
 import 'reflect-metadata';
+import { readdirSync } from 'fs';
 import * as path from 'path';
-import { globSync } from 'glob';
 import { DataSource } from 'typeorm';
 import { AuditLog } from '../../modules/audit/entities/audit-log.entity';
 import { AuditLogService } from '../../modules/audit/audit-log.service';
@@ -11,6 +11,27 @@ import { UserRole } from '../../modules/admin/entities/user-role.entity';
 import { PermissionsService } from '../../modules/admin/permissions.service';
 import { SecurityEventsService } from '../../modules/security/security-events.service';
 import { AdminRouteRbacReport, formatUndeclared, scanAdminRoutes } from './admin-route-rbac.scanner';
+
+
+/**
+ * مشي بسيط على الشجرة بدل حزمة `glob`.
+ *
+ * الحزمة كانت **غير معلنة** في أي `package.json` وشغّالة بالصدفة لأنها متثبّتة transitively —
+ * وهي الفئة الوحيدة اللي `docs/system-audit/21` بيقول لازم تفضل **صفر**، لأنها بتختفي بلا أي
+ * إنذار أول ما حزمة أب تشيلها من اعتمادياتها. والحارس ده بالذات (S-1) هو آخر حاجة تستحمل إنها
+ * تقع لسبب زي ده.
+ *
+ * البديل مش «نعلن الحزمة» — البديل إننا **مش محتاجينها**: ١٠ سطور على `fs` القياسي.
+ */
+function findControllerFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...findControllerFiles(full));
+    else if (entry.name.endsWith('.controller.ts')) found.push(full);
+  }
+  return found;
+}
 
 /**
  * تدقيق S-1 — «٩٢ مسار أدمن بلا أي صلاحية».
@@ -29,8 +50,8 @@ describe('تدقيق S-1 — كل مسار أدمن معلَن صلاحيته', 
   beforeAll(async () => {
     const root = path.resolve(__dirname, '../..');
     const controllers: (new (...args: never[]) => unknown)[] = [];
-    for (const file of globSync('**/*.controller.ts', { cwd: root })) {
-      const mod = (await import(path.join(root, file))) as Record<string, unknown>;
+    for (const file of findControllerFiles(root)) {
+      const mod = (await import(file)) as Record<string, unknown>;
       for (const exported of Object.values(mod)) {
         if (typeof exported === 'function') controllers.push(exported as never);
       }

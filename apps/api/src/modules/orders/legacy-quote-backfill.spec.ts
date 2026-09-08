@@ -28,10 +28,10 @@ describe('migration 0250 — backfill عروض السعر القديمة', () =>
   async function seedLegacyOrder(technicianId: string | null, priceCents: number): Promise<string> {
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                             order_type, booking_mode, order_status, scheduled_at, total_amount_cents,
                             estimated_price_cents, payment_status, placed_at, source_channel)
-       VALUES ($1,$2,$3,$4,$5,$6,'standard','individual','awaiting_initial_quote_approval', now() + interval '5 days',
+       VALUES (20,$1,$2,$3,$4,$5,$6,'standard','individual','awaiting_initial_quote_approval', now() + interval '5 days',
                0,$7,'unpaid', now(), 'customer_app') RETURNING id`,
       [orderNumber, ids.customerProfile, technicianId, ids.service, ids.address, ids.zone, priceCents],
     );

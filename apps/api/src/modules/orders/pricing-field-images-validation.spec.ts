@@ -1,5 +1,5 @@
 import { EntityManager } from 'typeorm';
-import { OrdersService } from './orders.service';
+import { OrderCreationService } from './order-creation.service';
 
 type ValidateImages = (
   manager: EntityManager,
@@ -20,8 +20,10 @@ const field = {
 };
 const uploadId = '20000000-0000-7000-8000-000000000001';
 
-describe('OrdersService dynamic pricing-field images', () => {
-  const service = Object.create(OrdersService.prototype) as OrdersService;
+// الدالة دي بقت في `OrderCreationService` بعد تقسيم `OrdersService` (تدقيق A-1) — الاختبار
+// بيمشي وراها لأنه بيختبر **منطق التحقق** نفسه، مش مكان الدالة.
+describe('OrderCreationService dynamic pricing-field images', () => {
+  const service = Object.create(OrderCreationService.prototype) as OrderCreationService;
   const validate = (service as unknown as { validatePricingFieldImages: ValidateImages }).validatePricingFieldImages.bind(service);
 
   it('يرفض الحقل الإجباري من غير صورة', async () => {

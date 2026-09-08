@@ -76,8 +76,8 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
   ): Promise<string> {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, estimated_price_cents, inspection_fee_cents, commissionable_base_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, estimated_price_cents, inspection_fee_cents, commissionable_base_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0) RETURNING id`,
       [
         `TESTITQ-${label}`.slice(0, 24),
         ids.customerProfile,
@@ -321,14 +321,16 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     await expect(inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000)).rejects.toThrow();
   });
 
-  it('رفض تحديد سعر لطلب مش technician_arrived (حماية state machine)', async () => {
+  it('الفني يقدر يرسل أول سعر بعد بدء التشخيص — يظل أول عرض وليس تعديلًا', async () => {
     const orderId = await insertOrder(`wrongstatus-${runId}`, ids.inspectionService, OrderStatus.IN_PROGRESS, {
       totalAmountCents: 5000,
       estimatedPriceCents: 0,
       inspectionFeeCents: 5000,
       paid: true,
     });
-    await expect(inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000)).rejects.toThrow();
+    const order = await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    expect(order.orderStatus).toBe(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL);
+    expect(order.estimatedPriceCents).toBe(30000);
   });
 
   it('العميل يوافق على السعر بعد المعاينة — total_amount_cents/commissionable_base_cents يتحدّثوا صح، تحصيل فوري للدلتا (ADR-0044 §4)', async () => {
@@ -350,18 +352,64 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     // الوعاء وقت الحجز = رسم المعاينة بس (workPriceCents=0 وقتها) — نفس ما OrdersService.createOrder() كانت هتحسبه فعليًا.
     await dataSource.query(`UPDATE orders SET commissionable_base_cents = 5000 WHERE id = $1`, [orderId]);
 
-    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000, undefined, {
+      estimatedDurationMinutes: 390,
+      requiredTechnicians: 2,
+      requiredAssistants: 1,
+    });
     fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-itq-approve', failureReason: null };
     const order = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'electronic');
 
     expect(order.totalAmountCents).toBe(35000); // 5000 (رسم معاينة) + 30000 (سعر الشغل)
     expect(order.commissionableBaseCents).toBe(35000); // workPriceCents اتضاف بلا شرط سياسة
-    expect(order.orderStatus).toBe(OrderStatus.IN_PROGRESS);
+    // عرض المعاينة صار عقد تنفيذ: المطابقة والسعة وتجنيد الفريق يقرأون هذه القيم من الطلب نفسه.
+    expect(order.durationMinutes).toBe(390);
+    expect(order.estimatedDurationDays).toBeNull();
+    expect(order.requiredTechnicians).toBe(2);
+    expect(order.requiredAssistants).toBe(1);
+    expect(order.bookingMode).toBe('team');
+    // الفني المعاين لا يبدأ منفردًا بينما العرض المعتمد يطلب فريقًا ناقصًا.
+    expect(order.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
 
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
     expect(addlPayment?.amountCents).toBe(30000);
     expect(addlPayment?.paymentStatus).toBe(PaymentGatewayStatus.PENDING); // مستنية تأكيد webhook زي أي تحصيل شغل إضافي
+  });
+
+  it('الائتمان الكامل لرسم المعاينة يخصم منه قبل التحصيل الإلكتروني للعرض', async () => {
+    await savedPaymentMethods.upsertToken({
+      customerId: ids.customerProfile,
+      provider: 'fake-tokenizer',
+      providerToken: `tok-itq-credit-${runId}`,
+      cardBrand: 'visa',
+      maskedPan: '4242',
+    });
+    await savedPaymentMethods.setDefault(ids.customerUser, ids.customerProfile, (await savedPaymentMethods.listForCustomer(ids.customerProfile))[0].id);
+
+    const orderId = await insertOrder(`credit-${runId}`, ids.inspectionService, OrderStatus.TECHNICIAN_ARRIVED, {
+      totalAmountCents: 5000,
+      estimatedPriceCents: 0,
+      inspectionFeeCents: 5000,
+      paid: true,
+    });
+    await dataSource.query(
+      `UPDATE orders
+       SET commissionable_base_cents = 5000,
+           assessment_fee_credit_mode_snapshot = 'full',
+           assessment_fee_credit_bps_snapshot = 10000
+       WHERE id = $1`,
+      [orderId],
+    );
+
+    await inspectionQuoteService.submitInitialQuote(ids.techUser, orderId, 30000);
+    fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-itq-credit', failureReason: null };
+    const order = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'electronic');
+
+    expect(order.totalAmountCents).toBe(30000);
+    const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
+    const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
+    expect(addlPayment?.amountCents).toBe(25000);
   });
 
   it('العميل اختار كاش للسعر بعد المعاينة — صفر محاولة تحصيل إلكتروني', async () => {
@@ -384,7 +432,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(addlPayment).toBeUndefined();
   });
 
-  it('الإدارة تسعّر من صور العميل ثم الموافقة تنتظر اختيار الفني بالسعر المعتمد', async () => {
+  it('الإدارة تسعّر من صور العميل، والموافقة بتوّدي الطلب للتوزيع التلقائي بالسعر المعتمد', async () => {
     const orderId = await insertOrder(`remote-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
       totalAmountCents: 0,
       estimatedPriceCents: 0,
@@ -412,12 +460,15 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
     expect(quoted.initialQuoteNote).toBe('السعر حسب الصور');
 
     const approved = await inspectionQuoteService.approveInitialQuote(ids.customerUser, orderId, 'cash');
-    expect(approved.orderStatus).toBe(OrderStatus.AWAITING_TECHNICIAN_SELECTION);
+    // **تغيّر مقصود (طلب مالك 2026-09-05)**: الموافقة بتوّدي الطلب للتوزيع التلقائي على طول.
+    // الحالة القديمة (`AWAITING_TECHNICIAN_SELECTION`) كانت بتقول للعميل «اختار الفني» ومفيش
+    // شاشة في التطبيق ولا الويب بتخليه يختار — طريق مسدود. راجع `post-quote-auto-dispatch.spec.ts`.
+    expect(approved.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     expect(approved.totalAmountCents).toBe(42000);
     expect(approved.commissionableBaseCents).toBe(42000);
   });
 
-  it('يرفض عرض سعر بالصور أقل من عمولة المنصة المثبتة على الطلب', async () => {
+  it('عرض السعر بالصور لا يتعطل بسبب عمولة ثابتة قديمة؛ النسبة المثبتة تتحسب عند التسوية', async () => {
     const orderId = await insertOrder(`remote-low-${runId}`, ids.inspectionService, OrderStatus.AWAITING_ADMIN_QUOTE, {
       totalAmountCents: 0,
       estimatedPriceCents: 0,
@@ -429,7 +480,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
           SET technician_id = NULL,
               initial_quote_source = 'admin_remote',
               settlement_policy_version = 2,
-              platform_commission_cents_snapshot = 50000
+              commission_rate_applied = 20
         WHERE id = $1`,
       [orderId],
     );
@@ -439,9 +490,8 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       [orderId, ids.customerUser],
     );
 
-    await expect(inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000)).rejects.toThrow(
-      'السعر لازم يكون على الأقل',
-    );
+    const quoted = await inspectionQuoteService.submitAdminRemoteQuote(ids.customerUser, orderId, 42000);
+    expect(quoted.estimatedPriceCents).toBe(42000);
   });
 
   it('مسار الرفض — awaiting_initial_quote_approval → cancelled_by_customer مسموح ومُدرج في CUSTOMER_CANCELLABLE_STATUSES (ADR-0044 §4، صفر رسوم إلغاء إضافية)', () => {

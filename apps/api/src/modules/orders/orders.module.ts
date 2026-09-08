@@ -24,6 +24,12 @@ import { CancellationReasonsService } from './cancellation-reasons.service';
 import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { RecurringOrdersController } from './recurring-orders.controller';
+import { OrderDisputeService } from './order-dispute.service';
+import { OrderCancellationService } from './order-cancellation.service';
+import { OrderCreationService } from './order-creation.service';
+import { OrderQueriesService } from './order-queries.service';
+import { OrderTechnicianOpsService } from './order-technician-ops.service';
+import { OrderRescheduleService } from './order-reschedule.service';
 import { OrdersService } from './orders.service';
 import { PostQuoteProviderSelectionService } from './post-quote-provider-selection.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
@@ -31,6 +37,7 @@ import { CrewShortageEscalationService } from './crew-shortage-escalation.servic
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { AssessmentTriageService } from './assessment-triage.service';
+import { StuckSelectionRecoveryService } from './stuck-selection-recovery.service';
 import { QuoteExpiryService } from './quote-expiry.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
@@ -98,12 +105,19 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
   ],
   providers: [
     OrdersService,
+    OrderQueriesService,
+    OrderRescheduleService,
+    OrderDisputeService,
+    OrderTechnicianOpsService,
+    OrderCreationService,
+    OrderCancellationService,
     PostQuoteProviderSelectionService,
     OrderAutoCancelService,
     CrewShortageEscalationService,
     OrderItemsService,
     InspectionQuoteService,
     AssessmentTriageService,
+    StuckSelectionRecoveryService,
     QuoteExpiryService,
     OrderInternalNotesService,
     OrderMediaService,
@@ -117,6 +131,14 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     BookingMatchPreviewService,
     storageServiceProvider,
   ],
-  exports: [OrdersService],
+  exports: [
+    OrdersService,
+    OrderQueriesService,
+    OrderRescheduleService,
+    OrderDisputeService,
+    OrderTechnicianOpsService,
+    OrderCreationService,
+    OrderCancellationService,
+  ],
 })
 export class OrdersModule {}

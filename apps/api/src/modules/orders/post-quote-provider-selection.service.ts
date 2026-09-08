@@ -7,8 +7,6 @@ import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/orde
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
-import { CatalogService } from '../catalog/catalog.service';
-import { LevelPremiumService } from '../pricing/level-premium.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
@@ -18,7 +16,7 @@ import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-h
 import { canTransition } from './order-state-machine';
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 
-/** كارت مرشّح لاختيار المنفّذ بعد اعتماد عرض السعر — نفس بيانات كارت السوق + السعر النهائي بمستواه. */
+/** كارت مرشّح لاختيار المنفّذ بعد اعتماد عرض السعر — السعر ثابت بعد موافقة العميل. */
 export interface PostQuoteProviderCandidate {
   technician_id: string;
   full_name: string;
@@ -29,9 +27,9 @@ export interface PostQuoteProviderCandidate {
   distance_km: number | null;
   current_level: string;
   is_verified: boolean;
-  /** قيمة العرض المعتمد + فرق مستوى الفني ده. ده اللي هيتحصّل بالظبط لو العميل اختاره. */
+  /** السعر النهائي الذي وافق عليه العميل. */
   final_price_cents: number;
-  /** الفرق لوحده — معروض صراحة عشان العميل يشوف سبب اختلاف السعر بين المرشّحين (docs/08 §60.3). */
+  /** اختيار منفّذ بعد اعتماد عرض لا يفرض علاوة سعرية جديدة. */
   level_premium_cents: number;
 }
 
@@ -43,7 +41,8 @@ export interface PostQuoteProviderCandidate {
  *
  * **مش محرك مطابقة تاني**: القايمة بتيجي من `TechniciansService.listForServiceBooking()` — نفس
  * القايمة اللي العميل بيشوفها قبل الحجز بالظبط (نفس الأهلية، نفس الترتيب، نفس محرك التوافر
- * بالحمل التشغيلي الحقيقي). الفرق الوحيد إن السعر أساسه **قيمة العرض المعتمد**، مش معادلة الخدمة.
+ * بالحمل التشغيلي الحقيقي). قيمة العرض المعتمدة نهائية؛ مستوى المنفّذ يؤثر في الأولوية لا في
+ * مبلغ وافق عليه العميل بالفعل.
  */
 @Injectable()
 export class PostQuoteProviderSelectionService {
@@ -53,8 +52,6 @@ export class PostQuoteProviderSelectionService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
-    private readonly catalogService: CatalogService,
-    private readonly levelPremiumService: LevelPremiumService,
     private readonly assignmentGuard: TechnicianAssignmentGuardService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
@@ -74,37 +71,28 @@ export class PostQuoteProviderSelectionService {
       this.orderLoad(order),
     );
 
-    return Promise.all(
-      items
-        .filter((item) => !item.isCompany)
-        .map(async (item) => {
-          const multiplier = await this.catalogService.resolveLevelPriceMultiplier(
-            order.serviceId,
-            item.currentLevel,
-            item.pricingTier ?? undefined,
-          );
-          const premiumCents = multiplier > 1 ? Math.round(order.totalAmountCents * (multiplier - 1)) : 0;
-          return {
-            technician_id: item.technicianId,
-            full_name: item.fullName,
-            avatar_url: item.avatarUrl,
-            average_rating: item.averageRating,
-            total_ratings_count: item.totalRatingsCount,
-            completed_orders_count: item.serviceCompletedCount,
-            distance_km: item.distanceKm,
-            current_level: item.currentLevel,
-            is_verified: item.isVerified,
-            final_price_cents: order.totalAmountCents + premiumCents,
-            level_premium_cents: premiumCents,
-          };
-        }),
-    );
+    return items
+      .filter((item) => !item.isCompany)
+      .map((item) => {
+        return {
+          technician_id: item.technicianId,
+          full_name: item.fullName,
+          avatar_url: item.avatarUrl,
+          average_rating: item.averageRating,
+          total_ratings_count: item.totalRatingsCount,
+          completed_orders_count: item.serviceCompletedCount,
+          distance_km: item.distanceKm,
+          current_level: item.currentLevel,
+          is_verified: item.isVerified,
+          final_price_cents: order.totalAmountCents,
+          level_premium_cents: 0,
+        };
+      });
   }
 
   /**
-   * العميل اختار منفّذ. الفني بيتقفل صفه، بيتفحص بنفس بوابة المطابقة، وفرق مستواه بيتضاف **مرة
-   * واحدة** — كله جوّه ترانزاكشن واحدة عشان مايبقاش فيه لحظة الطلب فيها متعيّن على فني بسعر
-   * غلط أو العكس.
+   * العميل اختار منفّذ. الفني بيتقفل صفه وبيتفحص بنفس بوابة المطابقة داخل ترانزاكشن واحدة.
+   * السعر لا يتغير هنا: موافقة العميل على العرض هي لحظة تثبيت السعر المالي.
    */
   async selectProvider(userId: string, orderId: string, technicianId: string): Promise<Order> {
     await this.findSelectableOrderOrThrow(userId, orderId);
@@ -135,7 +123,9 @@ export class PostQuoteProviderSelectionService {
 
       const previousStatus = order.orderStatus;
       const previousTotalCents = order.totalAmountCents;
-      const premiumCents = await this.levelPremiumService.applyOnProviderSelection(manager, order, technician);
+      // اختيار فني بعد عرض معتمد ليس عملية تسعير. لا نطبق مستوى الفني هنا حتى لا يرى
+      // العميل مبلغًا ثم يلتزم بمبلغ أعلى بعد موافقته.
+      const premiumCents = 0;
 
       if (!canTransition(previousStatus, OrderStatus.SEARCHING_TECHNICIAN)) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب مش في مرحلة اختيار المنفّذ', HttpStatus.CONFLICT);
@@ -155,7 +145,7 @@ export class PostQuoteProviderSelectionService {
           changedByUserId: userId,
           changedByRole: 'customer',
           changeSource: OrderChangeSource.CUSTOMER,
-          reason: `العميل اختار المنفّذ بعد اعتماد عرض السعر — فرق المستوى ${premiumCents} قرش`,
+          reason: 'العميل اختار المنفّذ بعد اعتماد عرض السعر الثابت',
           metadata: {
             technician_id: technician.id,
             level_premium_cents: premiumCents,
@@ -201,7 +191,7 @@ export class PostQuoteProviderSelectionService {
     // OrdersService.create() بالحرف. الـlistener بيبلع أخطاءه بنفسه فمفيش خطر على رد العميل.
     await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(result.order.id));
     this.logger.log(
-      `الطلب ${result.order.orderNumber} اتقفل على منفّذ بعد عرض السعر — فرق المستوى ${result.premiumCents} قرش`,
+      `الطلب ${result.order.orderNumber} اتقفل على منفّذ بعد عرض السعر الثابت`,
     );
     return result.order;
   }

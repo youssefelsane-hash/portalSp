@@ -44,6 +44,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { FormulaTreeEditor, type FormulaEditorContext } from './formula-tree-editor';
+import { collectFormulaPayloadIssues, isRecord } from './formula-validation';
 import { FORMULA_LIMITS } from '@baytak/shared-types';
 
 const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
@@ -119,10 +120,12 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   // نمط "derived state" بدل useEffect+setState (كان بيسبب cascading render فعلي، اتلقط بالـlint).
   // بقى object بنية (FinalPriceFormulaPayload) بدل نص JSON خام — المحرر البصري (FormulaTreeEditor)
   // بيعدّل عليه مباشرة، صفر JSON ظاهر للأدمن إلا لو فتح وضع "عرض JSON" الاختياري تحت.
-  const [payloadOverride, setPayloadOverride] = useState<FinalPriceFormulaPayload | null>(null);
-  const payload: FinalPriceFormulaPayload =
-    payloadOverride ?? ((finalPriceRule?.payload as FinalPriceFormulaPayload | undefined) ?? DEFAULT_FORMULA_PAYLOAD);
-  const setPayload = (next: FinalPriceFormulaPayload) => setPayloadOverride(next);
+  // مهم: JSON المتقدم قد يكون صحيحًا نحويًا لكنه ناقص هيكليًا. نحتفظ به كما هو ليظهر للأدمن
+  // كقائمة إصلاحات، بدل cast قسري يخفي الخطأ ثم يسبب Runtime crash في المحرر البصري.
+  const [payloadOverride, setPayloadOverride] = useState<unknown>(undefined);
+  const rawPayload: unknown = payloadOverride !== undefined ? payloadOverride : finalPriceRule?.payload ?? DEFAULT_FORMULA_PAYLOAD;
+  const payload = isRecord(rawPayload) ? rawPayload : {};
+  const setPayload = (next: Record<string, unknown>) => setPayloadOverride(next);
 
   const [showJsonView, setShowJsonView] = useState(false);
   const [jsonText, setJsonText] = useState<string | null>(null);
@@ -133,38 +136,39 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
 
   // سياق المحرر البصري — أسماء الحقول/الثوابت/جداول البحث المتاحة، عشان FormulaTreeEditor يعرضها
   // كـdropdowns بدل ما الأدمن يكتب field_key بإيده (زي ما كان لازم في وضع JSON القديم).
-  function maxDepthOf(node: FormulaNode | undefined): number {
+  function maxDepthOf(node: unknown): number {
     if (!node || typeof node !== 'object') return 0;
-    const kids: FormulaNode[] = [];
-    if ('operands' in node && Array.isArray((node as { operands?: FormulaNode[] }).operands)) {
-      kids.push(...(node as unknown as { operands: FormulaNode[] }).operands);
+    const candidate = node as Record<string, unknown>;
+    const kids: unknown[] = [];
+    if (Array.isArray(candidate.operands)) {
+      kids.push(...candidate.operands);
     }
-    if ('base' in node) kids.push((node as unknown as { base: FormulaNode }).base);
-    if ('percent' in node) kids.push((node as unknown as { percent: FormulaNode }).percent);
-    if ('value' in node && (node.type === 'round' || node.type === 'ceil' || node.type === 'floor')) {
-      kids.push((node as unknown as { value: FormulaNode }).value);
+    if ('base' in candidate) kids.push(candidate.base);
+    if ('percent' in candidate) kids.push(candidate.percent);
+    if ('value' in candidate && (candidate.type === 'round' || candidate.type === 'ceil' || candidate.type === 'floor')) {
+      kids.push(candidate.value);
     }
-    if (node.type === 'if') {
-      kids.push((node as unknown as { then: FormulaNode; else: FormulaNode }).then);
-      kids.push((node as unknown as { then: FormulaNode; else: FormulaNode }).else);
+    if (candidate.type === 'if') {
+      kids.push(candidate.then, candidate.else);
     }
     return 1 + Math.max(0, ...kids.map(maxDepthOf));
   }
 
-  function countNodes(node: FormulaNode | undefined): number {
+  function countNodes(node: unknown): number {
     if (!node || typeof node !== 'object') return 0;
+    const candidate = node as Record<string, unknown>;
     let total = 1;
-    if ('operands' in node && Array.isArray((node as { operands?: FormulaNode[] }).operands)) {
-      for (const o of (node as unknown as { operands: FormulaNode[] }).operands) total += countNodes(o);
+    if (Array.isArray(candidate.operands)) {
+      for (const operand of candidate.operands) total += countNodes(operand);
     }
-    if ('base' in node) total += countNodes((node as unknown as { base: FormulaNode }).base);
-    if ('percent' in node) total += countNodes((node as unknown as { percent: FormulaNode }).percent);
-    if ('value' in node && (node.type === 'round' || node.type === 'ceil' || node.type === 'floor')) {
-      total += countNodes((node as unknown as { value: FormulaNode }).value);
+    if ('base' in candidate) total += countNodes(candidate.base);
+    if ('percent' in candidate) total += countNodes(candidate.percent);
+    if ('value' in candidate && (candidate.type === 'round' || candidate.type === 'ceil' || candidate.type === 'floor')) {
+      total += countNodes(candidate.value);
     }
-    if (node.type === 'if') {
-      total += countNodes((node as unknown as { then: FormulaNode; else: FormulaNode }).then);
-      total += countNodes((node as unknown as { then: FormulaNode; else: FormulaNode }).else);
+    if (candidate.type === 'if') {
+      total += countNodes(candidate.then);
+      total += countNodes(candidate.else);
     }
     return total;
   }
@@ -176,6 +180,8 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
       .filter((r) => r.rule_type === 'lookup_table' && r.is_active)
       .map((r) => ({ ruleKey: r.rule_key, fieldKey: (r.payload as LookupTableRulePayload).field_key })),
   };
+  const formulaIssues = collectFormulaPayloadIssues(rawPayload, formulaContext);
+  const formulaIsValid = formulaIssues.length === 0;
 
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewResult, setPreviewResult] = useState<
@@ -391,7 +397,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   async function handleSaveFormula() {
     // وضع عرض JSON مفعّل — لازم نزامن أي تعديل يدوي فيه لـpayload قبل الحفظ (نفس فحص الأخطاء
     // القديم، بس دلوقتي اختياري مش الطريق الوحيد).
-    let toSave = payload;
+    let toSave: unknown = rawPayload;
     if (showJsonView && jsonText !== null) {
       try {
         toSave = JSON.parse(jsonText);
@@ -401,9 +407,14 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
       }
       setJsonError(null);
     }
-    const ok = await upsertRule({ rule_type: 'formula', rule_key: 'final_price', payload: toSave as unknown as Record<string, unknown> });
+    const issues = collectFormulaPayloadIssues(toSave, formulaContext);
+    if (issues.length > 0) {
+      setJsonError(`المعادلة فيها ${issues.length} مشكلة. راجع قائمة الأخطاء الظاهرة وأصلحها قبل الحفظ.`);
+      return;
+    }
+    const ok = await upsertRule({ rule_type: 'formula', rule_key: 'final_price', payload: toSave as Record<string, unknown> });
     if (ok) {
-      setPayloadOverride(null);
+      setPayloadOverride(undefined);
       setJsonText(null);
     }
   }
@@ -445,13 +456,17 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   }
 
   async function handlePreview() {
+    if (!formulaIsValid) {
+      setPreviewError(`أصلح مشاكل المعادلة (${formulaIssues.length}) قبل حساب السعر.`);
+      return;
+    }
     setIsPreviewing(true);
     setPreviewError(null);
     setPreviewResult(null);
     try {
       const result = await authedFetch<PricingEvaluationResponseDto>(`/admin/services/${serviceId}/pricing/evaluate-draft`, {
         method: 'POST',
-        body: JSON.stringify({ field_values: collectPreviewFieldValues(), formula_payload: payload }),
+        body: JSON.stringify({ field_values: collectPreviewFieldValues(), formula_payload: rawPayload }),
       });
       setPreviewResult(result);
     } catch (err) {
@@ -521,12 +536,16 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   // بيشغّل كل الحالات ضد المسوّدة الحالية (payload) — مش القاعدة المحفوظة، عشان الأدمن يتأكد
   // إن تعديله اللي لسه بيعمله ما كسرش أي سيناريو معروف قبل ما يحفظ.
   async function handleRunRuleTests() {
+    if (!formulaIsValid) {
+      setError(`أصلح مشاكل المعادلة (${formulaIssues.length}) قبل تشغيل حالات الاختبار.`);
+      return;
+    }
     setIsRunningTests(true);
     setError(null);
     try {
       const results = await authedFetch<PricingRuleTestRunResultDto[]>(`/admin/services/${serviceId}/pricing-tests/run`, {
         method: 'POST',
-        body: JSON.stringify({ formula_payload: payload }),
+        body: JSON.stringify({ formula_payload: rawPayload }),
       });
       setRuleTestRunResults(results);
     } catch (err) {
@@ -876,12 +895,39 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
             بيرفض بوضوح لو الشجرة اتخربطت (نفس الأمان القديم بالحرف، بس مش محتاج تكتب الشكل بنفسك).
           </p>
 
+          {formulaIssues.length > 0 && (
+            <div role="alert" className="mb-4 rounded-md border border-destructive bg-destructive/10 p-3 text-sm">
+              <p className="font-semibold text-destructive">المعادلة تحتاج تصحيح قبل الحفظ أو حساب السعر ({formulaIssues.length})</p>
+              <p className="mt-1 text-muted-foreground">كل نقطة تحت تحدد مكان الخطأ بوضوح. أصلحها من المحرر أو من وضع JSON المتقدم.</p>
+              <ul className="mt-2 list-disc space-y-1 ps-5">
+                {formulaIssues.map((issue, index) => (
+                  <li key={`${issue.path}-${index}`}>
+                    <span dir="ltr" className="font-mono text-xs">{issue.path}</span>: {issue.message}
+                  </li>
+                ))}
+              </ul>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={() => {
+                  setPayload({ ...DEFAULT_FORMULA_PAYLOAD });
+                  setJsonText(JSON.stringify(DEFAULT_FORMULA_PAYLOAD, null, 2));
+                  setJsonError(null);
+                }}
+              >
+                ابدأ من معادلة آمنة
+              </Button>
+            </div>
+          )}
+
           <div className="mb-4">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Label className="block font-medium">السعر النهائي (price_cents) — إجباري</Label>
               {(() => {
-                const depth = maxDepthOf(payload?.price_cents);
-                const nodes = countNodes(payload?.price_cents);
+                const depth = maxDepthOf(payload.price_cents);
+                const nodes = countNodes(payload.price_cents);
                 const depthTone = depth >= FORMULA_LIMITS.MAX_DEPTH ? 'bg-destructive text-white' : depth >= FORMULA_LIMITS.MAX_DEPTH * 0.85 ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground';
                 const nodesTone = nodes > FORMULA_LIMITS.MAX_NODE_COUNT ? 'bg-destructive text-white' : nodes >= FORMULA_LIMITS.MAX_NODE_COUNT * 0.9 ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground';
                 return (
@@ -944,7 +990,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
           })}
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={isSaving} onClick={handleSaveFormula}>
+            <Button size="sm" disabled={isSaving || !formulaIsValid} title={!formulaIsValid ? 'أصلح الأخطاء الظاهرة أولًا' : undefined} onClick={handleSaveFormula}>
               حفظ المعادلة
             </Button>
             {finalPriceRule && (
@@ -957,7 +1003,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
               size="sm"
               variant="outline"
               onClick={() => {
-                if (!showJsonView) setJsonText(JSON.stringify(payload, null, 2));
+                if (!showJsonView) setJsonText(JSON.stringify(rawPayload ?? {}, null, 2));
                 setShowJsonView((s) => !s);
               }}
             >
@@ -971,7 +1017,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
           {showJsonView && (
             <div className="mt-3 rounded-md border p-3">
               <Textarea
-                value={jsonText ?? JSON.stringify(payload, null, 2)}
+                value={jsonText ?? JSON.stringify(rawPayload ?? {}, null, 2)}
                 onChange={(e) => setJsonText(e.target.value)}
                 rows={14}
                 dir="ltr"
@@ -986,8 +1032,9 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                 onClick={() => {
                   try {
                     const parsed = JSON.parse(jsonText ?? '{}');
-                    setPayload(parsed);
-                    setJsonError(null);
+                    setPayloadOverride(parsed);
+                    const issues = collectFormulaPayloadIssues(parsed, formulaContext);
+                    setJsonError(issues.length > 0 ? `اتطبّق النص، لكن فيه ${issues.length} مشكلة ظاهرة فوق لازم تتصلح.` : null);
                   } catch {
                     setJsonError('نص JSON مش صالح — راجع الأقواس والفواصل');
                   }
@@ -1053,7 +1100,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                 ))}
               </div>
               <div className="flex gap-2">
-                <Button size="sm" disabled={isPreviewing} onClick={handlePreview}>
+                <Button size="sm" disabled={isPreviewing || !formulaIsValid} title={!formulaIsValid ? 'أصلح الأخطاء الظاهرة أولًا' : undefined} onClick={handlePreview}>
                   احسب السعر
                 </Button>
                 <Button size="sm" variant="outline" onClick={openNewRuleTestForm}>
@@ -1168,7 +1215,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
             </Table>
           )}
           {ruleTests && ruleTests.length > 0 && (
-            <Button className="mt-3" size="sm" disabled={isRunningTests} onClick={handleRunRuleTests}>
+            <Button className="mt-3" size="sm" disabled={isRunningTests || !formulaIsValid} title={!formulaIsValid ? 'أصلح الأخطاء الظاهرة أولًا' : undefined} onClick={handleRunRuleTests}>
               {isRunningTests ? 'جاري التشغيل…' : 'شغّل كل الحالات ضد المسوّدة الحالية'}
             </Button>
           )}

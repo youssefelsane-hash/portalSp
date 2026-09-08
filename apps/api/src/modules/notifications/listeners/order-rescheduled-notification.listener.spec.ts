@@ -74,6 +74,30 @@ describe("OrderRescheduledNotificationListener", () => {
     expect(notifyMultiChannel.mock.calls[0][0].userId).toBe("technician-user");
   });
 
+  it("إعادة جدولة طلب لم يعيّن له منفذ تبلغ العميل فقط", async () => {
+    const { listener, notifyMultiChannel } = makeListener();
+
+    await listener.handle(
+      new OrderRescheduledEvent(
+        "order-id",
+        "ORD-2026-000126",
+        null,
+        "customer-profile",
+        new Date("2026-09-01T00:00:00Z"),
+        new Date("2026-09-04T00:00:00Z"),
+        "admin",
+        false,
+        true,
+      ),
+    );
+
+    expect(notifyMultiChannel).toHaveBeenCalledTimes(1);
+    expect(notifyMultiChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "customer-user", referenceId: "order-id" }),
+      [NotificationChannel.PUSH],
+    );
+  });
+
   it("فشل قناة لطرف لا يمنع محاولة إشعار الطرف الآخر ولا يكسر العملية الأصلية", async () => {
     const notifyMultiChannel = jest
       .fn()

@@ -121,6 +121,8 @@ import {
   isOrderReschedulable,
   TIMELINE_SOURCE_LABELS,
   timelineEventSourceTone,
+  DISPATCH_ROUTE_LABELS,
+  dispatchRouteBadgeClass,
 } from '@/lib/order-labels';
 import {
   PAYMENT_GATEWAY_STATUS_LABELS,
@@ -342,6 +344,10 @@ export default function OrderDetailPage() {
   const [showRefundForm, setShowRefundForm] = useState(false);
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [reconcilingRefundId, setReconcilingRefundId] = useState<string | null>(null);
+  const [refundReconciliationOutcome, setRefundReconciliationOutcome] = useState<'confirmed' | 'rejected'>('confirmed');
+  const [refundProviderReference, setRefundProviderReference] = useState('');
+  const [refundReconciliationEvidence, setRefundReconciliationEvidence] = useState('');
   const [rejectInstaPayPaymentId, setRejectInstaPayPaymentId] = useState<string | null>(null);
   const [rejectInstaPayReason, setRejectInstaPayReason] = useState('');
 
@@ -606,6 +612,38 @@ export default function OrderDetailPage() {
       setShowRefundForm(false);
       setRefundAmountEgp('');
       setRefundReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRefundReconciliation(e: FormEvent) {
+    e.preventDefault();
+    if (!reconcilingRefundId || refundReconciliationEvidence.trim().length < 8) {
+      window.alert('اكتب دليل المراجعة من لوحة مزود الدفع (8 حروف على الأقل)');
+      return;
+    }
+    if (refundReconciliationOutcome === 'confirmed' && refundProviderReference.trim().length < 3) {
+      window.alert('مرجع استرداد البوابة مطلوب عند التأكيد');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/refunds/${reconcilingRefundId}/reconcile`, {
+        method: 'POST',
+        body: JSON.stringify({
+          outcome: refundReconciliationOutcome,
+          evidence: refundReconciliationEvidence,
+          ...(refundReconciliationOutcome === 'confirmed' ? { provider_refund_id: refundProviderReference } : {}),
+        }),
+      });
+      setReconcilingRefundId(null);
+      setRefundProviderReference('');
+      setRefundReconciliationEvidence('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -1428,6 +1466,18 @@ export default function OrderDetailPage() {
           {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
           {matchingFunnel && (
             <div className="flex flex-col gap-4 text-sm">
+              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
+                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
+                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
+              <div>
+                <p className="mb-2 font-medium">مسار التوزيع</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
+                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
+                  </Badge>
+                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
+                </div>
+              </div>
               <div>
                 <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
                 <div className="flex flex-wrap gap-2">
@@ -1690,13 +1740,15 @@ export default function OrderDetailPage() {
               </p>
             )}
           </CardContent>
-          {isOrderCancellable(order.order_status) && (
+          {(isOrderCancellable(order.order_status) || isOrderReassignable(order.order_status)) && (
             <CardFooter className="flex-col items-stretch gap-3">
               <div className="flex gap-2">
-                <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
-                  إلغاء الطلب
-                </Button>
-                {isOrderReassignable(order.order_status) && (
+                {isOrderCancellable(order.order_status) && (
+                  <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
+                    إلغاء الطلب
+                  </Button>
+                )}
+                {isOrderReassignable(order.order_status) && hasPermission('orders.reassign') && (
                   <Button
                     variant="outline"
                     disabled={isSaving}
@@ -1705,7 +1757,7 @@ export default function OrderDetailPage() {
                       if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
                     }}
                   >
-                    {order.technician_id ? 'استبدال الفني المعيّن' : 'تعيين فني يدوي'}
+                    {order.technician_id ? 'استبدال منفّذ الطلب' : 'تعيين منفّذ للطلب'}
                   </Button>
                 )}
               </div>
@@ -1726,7 +1778,7 @@ export default function OrderDetailPage() {
               )}
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
-                  <Label htmlFor="technician_id">الفني/المساعد الجديد</Label>
+                  <Label htmlFor="technician_id">المنفّذ الجديد</Label>
                   {!eligibleReassignTechnicians ? (
                     <p className="text-sm text-muted-foreground">جاري تحميل المؤهلين لهذا الطلب…</p>
                   ) : eligibleReassignTechnicians.length === 0 ? (
@@ -1742,7 +1794,7 @@ export default function OrderDetailPage() {
                       required
                     >
                       <option value="" disabled>
-                        اختار فني أو مساعد
+                        اختار فني أو مساعد مؤهّل
                       </option>
                       {/* docs/08 §107 — القايمة دي بتفضل مقصورة على المؤهّلين فعلاً (مش تمييز
                           ضد المساعد: نفس assertCoreEligibility() هيرفض أي حد غير مؤهّل بـ409
@@ -1762,6 +1814,9 @@ export default function OrderDetailPage() {
                       })}
                     </SelectNative>
                   )}
+                  <p className="text-xs text-muted-foreground">
+                    الطلب المقبول يظل مقبولًا بعد الاستبدال؛ لا يتغير السعر أو الدفع أو الموعد.
+                  </p>
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
                     تأكيد إعادة التعيين
                   </Button>
@@ -1772,7 +1827,7 @@ export default function OrderDetailPage() {
           {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — مستقلة عن isOrderCancellable
               فوق (accepted مش cancellable لكنها reschedulable). استخدام تشغيلي: العميل يتصل
               يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه. */}
-          {isOrderReschedulable(order.order_status) && hasPermission('orders.reschedule') && (
+          {(isOrderReschedulable(order.order_status) || (order.order_status === 'searching_technician' && !order.technician_id)) && hasPermission('orders.reschedule') && (
             <CardFooter className="flex-col items-stretch gap-3">
               <Button type="button" variant="outline" disabled={isSaving} onClick={handleOpenAdminRescheduleForm}>
                 إعادة جدولة الموعد
@@ -1780,10 +1835,20 @@ export default function OrderDetailPage() {
               {showAdminRescheduleForm && (
                 <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
                   <Label htmlFor="admin_reschedule_date">اليوم الجديد</Label>
-                  {adminRescheduleOptions === null && (
+                  {!order.technician_id && (
+                    <Input
+                      id="admin_reschedule_date"
+                      type="date"
+                      value={adminRescheduleDate}
+                      min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+                      onChange={(e) => setAdminRescheduleDate(e.target.value)}
+                      required
+                    />
+                  )}
+                  {order.technician_id && adminRescheduleOptions === null && (
                     <p className="text-xs text-muted-foreground">جاري تحميل أيام الفني المتاحة…</p>
                   )}
-                  {adminRescheduleOptions !== null && (
+                  {order.technician_id && adminRescheduleOptions !== null && (
                     <>
                       <SelectNative
                         id="admin_reschedule_date"
@@ -2249,8 +2314,13 @@ export default function OrderDetailPage() {
                             </span>
                             <span>{formatEgp(p.amount_cents)}</span>
                           </div>
-                          {p.payment_status === 'failed' && p.failure_message && (
+                          {(p.payment_status === 'failed' || p.payment_status === 'manual_review') && p.failure_message && (
                             <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
+                          )}
+                          {p.payment_status === 'manual_review' && (
+                            <span className="text-amber-700">
+                              لا تُنشأ محاولة تحصيل أو استرداد تلقائيًا. راجع نتيجة البوابة أولًا، ثم استخدم الاسترداد اليدوي فقط إذا ثبت تحصيل مكرر.
+                            </span>
                           )}
                           {/* بَقّة حقيقية اتلقطت — العميل مكانش عنده طريقة يسجّل بيها "أنا حوّلت" غير
                               polling محلي بلا أثر على السيرفر. customer_confirmed_transfer_at بيفرّق
@@ -2328,11 +2398,68 @@ export default function OrderDetailPage() {
                     <p className="mb-1 font-medium">الاستردادات ({financialSummary.refunds.length})</p>
                     <ul className="flex flex-col gap-1">
                       {financialSummary.refunds.map((r) => (
-                        <li key={r.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
-                          <span>
-                            {REFUND_METHOD_LABELS[r.refund_method]} · {REFUND_STATUS_LABELS[r.refund_status]}
-                          </span>
-                          <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
+                        <li key={r.id} className="flex flex-col gap-2 border-b pb-2 text-xs last:border-0">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {REFUND_METHOD_LABELS[r.refund_method]} · {REFUND_STATUS_LABELS[r.refund_status]}
+                            </span>
+                            <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
+                          </div>
+                          {r.refund_status === 'processing' && r.refund_method === 'original_method' && (
+                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-950">
+                              <p>
+                                النتيجة عند البوابة غير مؤكدة. لا تُنشئ استردادًا آخر؛ راجع لوحة المزود ثم اقفل نفس العملية بدليل.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="mt-2"
+                                disabled={isSaving}
+                                onClick={() => {
+                                  setReconcilingRefundId(reconcilingRefundId === r.id ? null : r.id);
+                                  setRefundReconciliationOutcome('confirmed');
+                                  setRefundProviderReference('');
+                                  setRefundReconciliationEvidence('');
+                                }}
+                              >
+                                مراجعة نتيجة الاسترداد
+                              </Button>
+                              {reconcilingRefundId === r.id && (
+                                <form onSubmit={handleRefundReconciliation} className="mt-2 flex flex-col gap-2">
+                                  <Label htmlFor={`refund_reconciliation_outcome_${r.id}`}>نتيجة مراجعة البوابة</Label>
+                                  <SelectNative
+                                    id={`refund_reconciliation_outcome_${r.id}`}
+                                    value={refundReconciliationOutcome}
+                                    onChange={(event) => setRefundReconciliationOutcome(event.target.value as 'confirmed' | 'rejected')}
+                                  >
+                                    <option value="confirmed">تم الاسترداد فعليًا</option>
+                                    <option value="rejected">البوابة رفضت الاسترداد صراحة</option>
+                                  </SelectNative>
+                                  {refundReconciliationOutcome === 'confirmed' && (
+                                    <Input
+                                      value={refundProviderReference}
+                                      onChange={(event) => setRefundProviderReference(event.target.value)}
+                                      placeholder="مرجع استرداد البوابة"
+                                      minLength={3}
+                                      required
+                                    />
+                                  )}
+                                  <Input
+                                    value={refundReconciliationEvidence}
+                                    onChange={(event) => setRefundReconciliationEvidence(event.target.value)}
+                                    placeholder="الدليل: رابط/رقم عملية أو ملاحظة من لوحة المزود"
+                                    minLength={8}
+                                    required
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button type="submit" size="sm" disabled={isSaving}>تأكيد القرار الموثق</Button>
+                                    <Button type="button" size="sm" variant="outline" onClick={() => setReconcilingRefundId(null)}>إلغاء</Button>
+                                  </div>
+                                </form>
+                              )}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>

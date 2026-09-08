@@ -12,7 +12,6 @@ import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity'
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
-import { REFUND_RESOLVED_EVENT } from '../../common/events/refund-resolved.event';
 
 // اختبار حي ضد Postgres حقيقي — بند 6/§20.7 من تدقيق التسوية المالية: عميل بيلغي بنفسه (مش
 // النظام) طلب مدفوع مسبقًا إلكترونيًا (كارت/InstaPay، ADR-0013) قبل ما فني يتعيّن أو بعده قبل
@@ -85,8 +84,8 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
   }) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at, assessment_type, price_status, remote_assessment_fee_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0, now(), $9, COALESCE($10, 'confirmed'), $11) RETURNING id, order_number`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at, assessment_type, price_status, remote_assessment_fee_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,0, now(), $9, COALESCE($10, 'confirmed'), $11) RETURNING id, order_number`,
       [
         `TESTCPR-${opts.label}`.slice(0, 24),
         ids.customerProfile,
@@ -258,16 +257,14 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const [refundRow] = await dataSource.query(`SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1`, [orderId]);
     expect(refundRow.amount_cents).toBe(30000);
     expect(refundRow.refund_status).toBe('completed');
-    expect(paymentEvents.emit).toHaveBeenCalledWith(
-      REFUND_RESOLVED_EVENT,
-      expect.objectContaining({
-        orderId,
-        customerProfileId: ids.customerProfile,
-        amountCents: 30000,
-        status: 'completed',
-        method: 'original_method',
-      }),
+    const [notificationOutbox] = await dataSource.query(
+      `SELECT customer_profile_id, payload FROM payment_notification_outbox WHERE order_id=$1`,
+      [orderId],
     );
+    expect(notificationOutbox).toEqual(expect.objectContaining({
+      customer_profile_id: ids.customerProfile,
+      payload: expect.objectContaining({ amountCents: 30000, status: 'completed', method: 'original_method' }),
+    }));
   });
 
   it('العميل يلغي طلب مدفوع (كارت) بعد تعيين فني بس قبل بدء الشغل (ACCEPTED) — يترد تلقائيًا برضه (صفر تسوية أرباح فني تحتاج عكس، لسه ما بدأش شغل)', async () => {
@@ -283,6 +280,30 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const cancelled = await service.cancel(ids.customerUser, orderId, {});
     expect(cancelled.orderStatus).toBe(OrderStatus.CANCELLED_BY_CUSTOMER);
 
+    const [orderRow] = await dataSource.query(`SELECT payment_status FROM orders WHERE id = $1`, [orderId]);
+    expect(orderRow.payment_status).toBe('refunded');
+  });
+
+  it('إلغاء طلب له دفعة حجز ودفعة لاحقة — كل الدفعات الناجحة تُسترد ولا تُخفى خلف آخر دفعة', async () => {
+    const { orderId } = await insertOrder({
+      label: 'two-successful-payments',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      paymentStatus: OrderPaymentStatus.PAID,
+      totalAmountCents: 50000,
+    });
+    await insertSucceededPayment(orderId, 'two-payments-base', 30000);
+    await insertSucceededPayment(orderId, 'two-payments-delta', 20000);
+
+    await service.cancel(ids.customerUser, orderId, {});
+
+    const refunds = await dataSource.query(
+      `SELECT amount_cents, refund_status FROM refunds WHERE order_id = $1 ORDER BY amount_cents ASC`,
+      [orderId],
+    );
+    expect(refunds).toEqual([
+      { amount_cents: 20000, refund_status: 'completed' },
+      { amount_cents: 30000, refund_status: 'completed' },
+    ]);
     const [orderRow] = await dataSource.query(`SELECT payment_status FROM orders WHERE id = $1`, [orderId]);
     expect(orderRow.payment_status).toBe('refunded');
   });

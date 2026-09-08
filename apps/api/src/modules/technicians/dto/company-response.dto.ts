@@ -84,23 +84,32 @@ export function toBranchResponseDto(branch: TechnicianCompanyBranch): BranchResp
 
 export interface StaffMemberResponseDto {
   user_id: string;
+  /** معرّف بروفايل الفني — مسارات الأدمن كلها بتشتغل بيه، مش بـ`user_id`. */
+  technician_id: string;
   full_name: string;
   technician_code: string;
   team_role: string;
   branch_id: string | null;
   current_level: string;
   verification_status: string;
+  /** ADR-0080 — العضو ده مايظهرش كفرد؛ يوصله شغل عن طريق الشركة بس. */
+  company_exclusive: boolean;
 }
 
 export function toStaffMemberResponseDto(profile: TechnicianProfile, fullName: string): StaffMemberResponseDto {
   return {
     user_id: profile.userId,
+    // ADR-0080 — شاشة الأدمن محتاجة معرّف **البروفايل** عشان تفتح ملف الفني أو تقلّب زرار
+    // «حصري للشركة»؛ `user_id` لوحده مش كفاية لأي مسار من دول.
+    technician_id: profile.id,
     full_name: fullName,
     technician_code: profile.technicianCode,
     team_role: profile.teamRole,
     branch_id: profile.branchId,
     current_level: profile.currentLevel,
     verification_status: profile.verificationStatus,
+    // ADR-0080 — مالك الشركة لازم يشوف حالة الزرار على كل عضو، مش يفتكرها.
+    company_exclusive: profile.companyExclusive,
   };
 }
 

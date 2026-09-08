@@ -161,8 +161,8 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
 
   async function seedOrder(totalCents: number): Promise<string> {
     const [order] = await q<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,'work_completed','unpaid',$5,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,'work_completed','unpaid',$5,0) RETURNING id`,
       [`SUB-${randomUUID().slice(0, 12)}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, totalCents],
     );
     return order.id;

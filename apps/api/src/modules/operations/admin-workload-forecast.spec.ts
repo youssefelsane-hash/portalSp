@@ -66,8 +66,8 @@ describe('AdminWorkloadForecastService.getForecast() (docs/08 §36.4)', () => {
     estimatedDurationDays?: number;
   }) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, scheduled_at, estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, scheduled_at, estimated_duration_days)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',30000,0,
          (((now() AT TIME ZONE 'Africa/Cairo')::date + ($8::int * INTERVAL '1 day') + INTERVAL '12 hours') AT TIME ZONE 'Africa/Cairo'),
          $9)
        RETURNING id`,

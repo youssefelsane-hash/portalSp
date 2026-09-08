@@ -51,6 +51,7 @@ import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires
 import { RatingSubmittedNotificationListener } from './listeners/rating-submitted-notification.listener';
 import { RecurringTemplateGenerationFailingRoutingListener } from './listeners/recurring-template-generation-failing-routing.listener';
 import { RecurringOrderAwaitingPaymentNotificationListener } from './listeners/recurring-order-awaiting-payment-notification.listener';
+import { RecurringOrderPaymentNotificationListener } from './listeners/recurring-order-payment-notification.listener';
 import { InstallmentNotificationListener } from './listeners/installment-notification.listener';
 import { ReferralRewardNotificationListener } from './listeners/referral-reward-notification.listener';
 import { SecurityEventRoutingListener } from './listeners/security-event-routing.listener';
@@ -78,6 +79,8 @@ import { NotificationWorkflowService } from './notification-workflow.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { ProjectNotificationOutboxProcessor } from './project-notification-outbox.processor';
+import { PaymentNotificationOutboxProcessor } from './payment-notification-outbox.processor';
+import { RecurringNotificationOutboxProcessor } from './recurring-notification-outbox.processor';
 
 @Module({
   imports: [
@@ -135,6 +138,7 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     SecurityEventRoutingListener,
     RecurringTemplateGenerationFailingRoutingListener,
     RecurringOrderAwaitingPaymentNotificationListener,
+    RecurringOrderPaymentNotificationListener,
     InstallmentNotificationListener,
     ReferralRewardNotificationListener,
     AssistantPersonalAssignedNotificationListener,
@@ -160,6 +164,8 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     PaymentInstaPayConfirmedNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
     ProjectNotificationOutboxProcessor,
+    PaymentNotificationOutboxProcessor,
+    RecurringNotificationOutboxProcessor,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

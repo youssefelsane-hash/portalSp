@@ -2,9 +2,14 @@
   "name": "customer-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9 <25"
+  },
   "scripts": {
     "predev": "npm --prefix ../../packages/shared-types run build",
     "dev": "next dev -p 3002",
+    "predev:webpack": "npm --prefix ../../packages/shared-types run build",
+    "dev:webpack": "next dev --webpack -p 3002",
     "prebuild": "npm --prefix ../../packages/shared-types run build",
     "build": "next build",
     "start": "next start -p 3002",

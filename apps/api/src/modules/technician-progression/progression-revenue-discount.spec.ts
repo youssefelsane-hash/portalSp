@@ -25,9 +25,9 @@ describe('تقدّم الترقية — الخصم اللي المنصّة مو�
   /** طلب مكتمل بعمولة منصّة محدّدة — موجبة (ربح) أو سالبة (المنصّة اتحمّلت الخصم). */
   async function completedOrder(label: string, totalCents: number, earningCents: number, commissionCents: number) {
     await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, order_status,
                            total_amount_cents, technician_earning_cents, platform_commission_cents, work_completed_at)
-       VALUES ($1,$2,$3,$4,$5,'completed',$6,$7,$8, now())`,
+       VALUES (20,$1,$2,$3,$4,$5,'completed',$6,$7,$8, now())`,
       [`PRG-${runId}-${label}`.slice(0, 24), ids.customerProfile, ids.profile, ids.service, ids.address,
        totalCents, earningCents, commissionCents],
     );

@@ -80,7 +80,7 @@ export interface BookingMatchPreviewProvider {
   id: string;
   full_name: string;
   avatar_url: string | null;
-  current_level: string;
+  current_level: string | null;
   average_rating: number;
   total_ratings_count: number;
   completed_orders_count: number;
@@ -91,6 +91,8 @@ export interface BookingMatchPreviewDto {
   match_preview_id: string;
   expires_at: string;
   selection_mode: 'auto' | 'manual';
+  /** ADR-0080 — المنفّذ المثبّت شركة ولا فني فرد. */
+  provider_kind: 'technician' | 'company';
   provider: BookingMatchPreviewProvider;
   pricing: PreviewOrderResponseDto;
 }
@@ -100,6 +102,8 @@ export interface CreateMatchPreviewBody {
   address_id: string;
   selection_mode: 'auto' | 'manual';
   technician_id?: string;
+  /** ADR-0080 — العميل اختار شركة: التوزيع بيدوّر جوّاها والتذكرة بتثبّتها كمنفّذ. */
+  requested_technician_company_id?: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   scheduled_at?: string;
   field_values?: Record<string, string | number | boolean>;
@@ -195,6 +199,7 @@ export interface OrderResponseDto {
   display_price_max_cents: number | null;
   promo_code_id: string | null;
   total_amount_cents: number;
+  amount_due_now_cents?: number;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;
@@ -320,12 +325,33 @@ export const confirmCashHandover = (authedFetch: AuthedFetch, id: string) =>
 export const approveInitialQuote = (
   authedFetch: AuthedFetch,
   id: string,
+  quoteId: string,
+  quoteVersion: number,
   paymentChoice: 'cash' | 'electronic' = 'electronic',
 ) =>
-  authedFetch<OrderResponseDto>(`/orders/${id}/initial-quote/approve`, {
+  authedFetch<OrderResponseDto>(`/orders/${id}/approve-initial-quote`, {
     method: 'POST',
-    body: JSON.stringify({ payment_choice: paymentChoice }),
+    body: JSON.stringify({ quote_id: quoteId, quote_version: quoteVersion, payment_choice: paymentChoice }),
   });
+
+export interface OrderQuoteDto {
+  id: string;
+  order_id: string;
+  version: number;
+  source: string;
+  status: string;
+  amount_cents: number;
+  diagnosis: string | null;
+  scope_included: string | null;
+  scope_excluded: string | null;
+  estimated_duration_minutes: number | null;
+  required_technicians: number | null;
+  required_assistants: number | null;
+  valid_until: string;
+}
+
+export const getCurrentQuote = (authedFetch: AuthedFetch, id: string) =>
+  authedFetch<OrderQuoteDto>(`/orders/${id}/current-quote`);
 
 export interface OrderItemDto {
   id: string;

@@ -63,6 +63,9 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
         // ADR-0035 — nearTermRoundTimeoutSeconds() بتقرا قايمة الكادينس كنص، فالـstub لازم
         // يغطّي getString كمان مش getNumber بس (وإلا بترمي TypeError جوّه الترانزاكشن).
         getString: jest.fn(async (_key: string, fallback: string) => fallback),
+        // «بث الطوارئ للكل» (`matching.emergency_ignore_schedule`) بيتقرا هنا كمان — الافتراضي
+        // `false` معناه سلوك التوزيع في الاختبارات دي زي ما هو بالحرف.
+        getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
       } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
@@ -150,8 +153,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // بدأش مبقاش يستبعد خالص (نفس فلسفة المجدول تمامًا)، فالفحوصات هنا محتاجة تعارض يوم-كامل
     // حقيقي عشان تفضل ذات معنى — راجع اختبار "accepted تاني قصير مابيستبعدش" تحت لتغطية العكس بالظبط.
     const [blockingOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted',1) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, estimated_duration_days)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',1) RETURNING id`,
       [`TEST-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianProfile, ids.service, ids.address, ids.zone],
     );
     ids.blockingOrder = blockingOrder.id;
@@ -245,8 +248,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // شاغل يوم كامل) بمفرده مابيستبعدش.
     await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted') RETURNING id`,
       [`ACC-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianProfile, ids.service, ids.address, ids.zone],
     );
     try {
@@ -271,9 +274,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   it('نداءا recovery متتاليان لنفس الطلب لا ينشئان جولتين بينما العرض الأول ما زال حيًا', async () => {
     await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', now())
        RETURNING id`,
       [`REC-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
@@ -301,9 +303,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   it('autoConfirmScheduledOrder: طلب بعد أسبوعين بيتأكد تلقائيًا لأفضل فني مؤهّل بلا انتظار قبول', async () => {
     const twoWeeksFromNow = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
        RETURNING id`,
       [`FAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, twoWeeksFromNow],
     );
@@ -344,9 +345,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // هيترشّح أصلاً ومكانش الاختبار هيقيس اللي اتعمل عشانه. بنفضّي يومه مؤقتًا هنا صراحةً.
     await dataSource.query(`UPDATE orders SET estimated_duration_days = NULL WHERE id = $1`, [ids.blockingOrder]);
     const [emergencyOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
       [`EMG-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
@@ -358,9 +358,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
     const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     const [scheduledOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
        RETURNING id`,
       [`SCHED-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, threeDaysFromNow],
     );
@@ -386,9 +385,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   it('dispatchOrAutoConfirm: مجدول خلال 48 ساعة = دورة طلب/قبول (sent)، وبعد 5 أيام = تأكيد تلقائي (ADR-0035)', async () => {
     const inOneDay = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const [nearOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
        RETURNING id`,
       [`NEAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, inOneDay],
     );
@@ -413,9 +411,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
     const inFiveDays = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
     const [farOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
        RETURNING id`,
       [`FAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, inFiveDays],
     );
@@ -445,9 +442,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       [ids.blockingOrder],
     );
     const [roomLeftOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
       [`EMG70A-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
@@ -464,9 +460,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // مستبعد. قبل ADR-0070 كان بياخد الطوارئ دي عادي لأن السقف مكانش بيسري عليها خالص.
     await dataSource.query(`UPDATE orders SET estimated_duration_days = 1 WHERE id = $1`, [ids.blockingOrder]);
     const [fullDayOrder] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
       [`EMG70B-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
@@ -519,6 +514,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     const broadenSettingsService = {
       getNumber: jest.fn(async (key: string, fallback: number) => (key === 'matching.broaden_to_busy_after_round' ? 1 : fallback)),
       getString: jest.fn(async (_key: string, fallback: string) => fallback),
+      getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
     };
     const broadenQueueAdd = jest.fn().mockResolvedValue(undefined);
     const broadenMatchingService = new MatchingService(
@@ -535,9 +531,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     );
 
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, now())
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, placed_at)
+       VALUES (20,$1, $2, $3, $4, $5, 'searching_technician', 10000, now())
        RETURNING id`,
       [`BROAD-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );

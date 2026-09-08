@@ -22,6 +22,7 @@ import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
+import 'qr_code_scan_screen.dart';
 import '../technicians/technicians_repository.dart';
 import 'schedule_selection_screen.dart';
 
@@ -198,6 +199,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String get _remoteFeeSuffix => widget.service.remoteAssessmentFeeCents > 0
       ? ' — رسم التقييم ${_formatEgp(widget.service.remoteAssessmentFeeCents)}'
       : '';
+
+  /// نص مسار «المعاينة في الموقع» — **بيتبع إعداد الأدمن، مش نص ثابت**.
+  ///
+  /// بلاغ مالك (2026-09-05): «مكتوب للعميل إن الفني ممكن يتغيّر، على الرغم إن الأدمن ممكن
+  /// يكون حاطط إن الفني اللي عمل المعاينة هو اللي بينفّذ — ومنطقيًا ده اللي هيحصل في أغلب
+  /// الأحيان». النص اللي بيكذّب إعداد الأدمن أسوأ من نص عام: بيخوّف العميل من حاجة مش هتحصل.
+  ///
+  /// `onsite_assessor_executes_work` افتراضيها `true` في الباك-إند وفي الموديل هنا، فالحالة
+  /// الغالبة بتقول الحقيقة المطمئنة، والحالة التانية بتتقال صراحةً بدل ما تتلمّح.
+  String get _onsiteRouteSubtitle {
+    final fee = _formatEgp(_resolvedInspectionFeeCents);
+    final assessorExecutes = widget.service.onsiteAssessorExecutesWork;
+    return assessorExecutes
+        ? 'فني بيجي يشوف الشغل ويبعتلك السعر، وهو نفسه اللي بينفّذ بعد موافقتك — رسم المعاينة $fee'
+        : 'فني بيجي يشوف الشغل ويبعتلك السعر، والتنفيذ بيتوزّع بعد موافقتك — رسم المعاينة $fee';
+  }
 
   /// رسم المعاينة في الموقع **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
   ///
@@ -716,9 +733,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       try {
         result = await attempt(asBuilding: false);
         kind = 'promo';
-      } on ApiException {
-        // الكود مش كود خصم صالح — يبقى يمكن كود عمارة. لو ده كمان فشل، الاستثناء بيطلع
-        // للـcatch اللي تحت ويتعرض كرسالة واحدة.
+      } on ApiException catch (error) {
+        // نجرّب كود عمارة فقط لو كود الخصم غير موجود. أي خطأ آخر (منتهي، غير صالح للخدمة،
+        // تجاوز الحد...) يخص كود الخصم نفسه ويجب أن يراه العميل بدل رسالة عمارة مضللة.
+        if (error.statusCode != 404) rethrow;
         result = await attempt(asBuilding: true);
         kind = 'building';
       }
@@ -736,6 +754,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     } finally {
       if (mounted) setState(() => _validatingCode = false);
     }
+  }
+
+  Future<void> _scanCode() async {
+    final code = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrCodeScanScreen()));
+    if (!mounted || code == null || code.isEmpty) return;
+
+    setState(() {
+      _codeController.text = code;
+      _codeError = null;
+      _resolvedCodeKind = null;
+      _pricePreview = null;
+    });
+    await _validateCode();
   }
 
   // دفع قبل التوزيع (docs/08 §19 بند 1) — بيفتح نفس شاشات الدفع المستخدمة أصلاً للدفع بعد
@@ -842,6 +875,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             addressId: _selectedAddress!.id,
             selectionMode: 'manual',
             technicianId: technicianId,
+            bookingMode: widget.bookingMode,
             scheduledAt: widget.scheduleSlotId != null
                 ? null
                 : (widget.service.requiresStartTime
@@ -1177,7 +1211,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         // بلاغ مالك: شغلانة ساعتين كانت بتتعرض «يوم واحد». الدقايق كانت راجعة من الـAPI من
         // الأول — الواجهة بس كانت بتتجاهلها وتكتب «يوم» جنب الرقم. الصياغة بقت في مكان واحد.
-        if (formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays) != null)
+        if (formatWorkDuration(
+              minutes: preview.durationMinutes,
+              days: preview.estimatedDurationDays,
+            ) !=
+            null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: Text(
@@ -1620,10 +1658,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         RadioListTile<bool>(
                           value: false,
                           title: const Text('معاينة في الموقع'),
-                          subtitle: Text(
-                            'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                            '${_formatEgp(_resolvedInspectionFeeCents)}',
-                          ),
+                          subtitle: Text(_onsiteRouteSubtitle),
                           secondary: const Icon(
                             Icons.home_repair_service_outlined,
                           ),
@@ -1650,8 +1685,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     subtitle: Text(
                       _remoteRouteAvailable
                           ? 'الخدمة دي سعرها بيتحدد من الصور — ارفع صور المشكلة وهتستلم عرض سعر$_remoteFeeSuffix'
-                          : 'فني بيجي يشوف الشغل ويبعتلك السعر — رسم المعاينة '
-                                '${_formatEgp(_resolvedInspectionFeeCents)}',
+                          : _onsiteRouteSubtitle,
                     ),
                   ),
                 ),
@@ -1703,12 +1737,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         border: const OutlineInputBorder(),
                         // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
                         // من غير ما يدوّر على الفرق في السعر.
-                        suffixIcon: _resolvedCodeKind == null
-                            ? null
-                            : Icon(
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'مسح QR بالكاميرا',
+                              onPressed: _validatingCode ? null : _scanCode,
+                              icon: const Icon(Icons.qr_code_scanner_outlined),
+                            ),
+                            if (_resolvedCodeKind != null)
+                              Icon(
                                 Icons.check_circle,
                                 color: Colors.green.shade600,
                               ),
+                          ],
+                        ),
                         helperText: _resolvedCodeKind == 'building'
                             ? 'اتقبل ككود عمارة'
                             : _resolvedCodeKind == 'promo'

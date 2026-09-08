@@ -125,9 +125,9 @@ describe('TechniciansService.listForServiceBooking() — سياسة إظهار �
     // شغل يوم كامل للفني المشغول في نفس اليوم المستهدف — نفس شرط "HEAVY" (estimated_duration_days=1).
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [blockingOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, order_type, booking_mode,
                             order_status, scheduled_at, estimated_duration_days, total_amount_cents, payment_status, placed_at, source_channel)
-       VALUES ($1,$2,$3,$4,$5,'standard','individual','accepted',$6,1,10000,'unpaid', now(), 'customer_app') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'standard','individual','accepted',$6,1,10000,'unpaid', now(), 'customer_app') RETURNING id`,
       [orderNumber, customerProfile.id, ids.busyTechId, ids.serviceVisibleId, ids.addressId, targetDate],
     );
     ids.blockingOrderId = blockingOrder.id;

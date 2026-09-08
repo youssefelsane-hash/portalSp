@@ -91,9 +91,9 @@ describe('§116-C — كل حالة طلب لازم تظهر في قايمة ا�
     // طلب واحد لكل حالة — كلهم اتعملوا دلوقتي، فالمفروض كلهم في أول صفحة بترتيب «الأحدث».
     for (const [index, status] of allStatuses.entries()) {
       await q(
-        `INSERT INTO orders (order_number, customer_id, address_id, service_id, order_status,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, address_id, service_id, order_status,
                              payment_method, total_amount_cents, placed_at)
-         VALUES ($1,$2,$3,$4,$5::order_status,'cash',10000, now())`,
+         VALUES (20,$1,$2,$3,$4,$5::order_status,'cash',10000, now())`,
         [orderNumberFor(index), ids.customer, ids.address, ids.service, status],
       );
     }

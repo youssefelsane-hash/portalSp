@@ -52,9 +52,9 @@ describe('BuildingsService (تدقيق T-1) — حي', () => {
   /** طلب في العمارة دي بتاريخ محدّد — `created_at` بيتحط بعد الإدخال عشان الافتراضي `now()`. */
   async function makeOrder(buildingId: string, createdAt?: string, softDeleted = false): Promise<string> {
     const [order] = await q<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, building_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, building_id,
                            order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'searching_technician','pending',30000,0,'individual') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'searching_technician','pending',30000,0,'individual') RETURNING id`,
       [
         `BLDT-${runId}-${orders.length}`.slice(0, 24),
         ids.customerProfile,

@@ -15,6 +15,11 @@ import {
   TechnicianCapacityTier,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
+import {
+  describeDispatchRoute,
+  DispatchRoute,
+  DispatchRouteReason,
+} from './dispatch-route';
 import { MatchingService } from './matching.service';
 import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 import { DISTANCE_WEIGHT_CONTEXT_LABELS_AR, resolveDistanceWeight } from './matching-weights';
@@ -258,6 +263,10 @@ export class MatchingExplainabilityService {
         scheduledAt: order.scheduledAt,
         excludeOrderId: order.id,
         serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+        // ADR-0077 — التفسير لازم يقيس بنفس مسطرة المطابقة الفعلية بالحرف، وإلا الشاشة بتقول
+        // سبب مختلف عن اللي المحرك اشتغل بيه.
+        candidateDurationMinutes: order.durationMinutes ?? (order.durationHours ? Number(order.durationHours) * 60 : null),
+        candidateEstimatedDurationDays: order.estimatedDurationDays != null ? Number(order.estimatedDurationDays) : null,
         dailyCapacityMinutes: dailyCapacityMinutes,
       });
     } catch {
@@ -330,6 +339,15 @@ export class MatchingExplainabilityService {
     if (!order.serviceZoneId) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش نطاق خدمة محدد — مفيش فانل مطابقة ممكن عليه أصلاً', HttpStatus.BAD_REQUEST);
     }
+
+    // نفس الدالة اللي `dispatchOrAutoConfirm()` بتقرا منها — مش إعادة تنفيذ للقاعدة.
+    const routeDecision = await this.matchingService.scheduledDispatchDecision(order);
+    const dispatchRoute: OrderDispatchRouteExplanation = {
+      route: routeDecision.route,
+      reason: routeDecision.reason,
+      nearTermHours: routeDecision.nearTermHours,
+      explanationAr: describeDispatchRoute(routeDecision),
+    };
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
@@ -458,6 +476,7 @@ export class MatchingExplainabilityService {
     return {
       orderId: order.id,
       orderStatus: order.orderStatus,
+      dispatchRoute,
       pool: {
         categoryEligible: Number(poolRow?.category_eligible_count ?? 0),
         zoneEligible: Number(poolRow?.zone_eligible_count ?? 0),
@@ -499,9 +518,26 @@ export interface WorkOpportunityStatusCounts {
   closed: number;
 }
 
+/**
+ * **ليه الطلب ده راح للجولات وده اتأكّد تلقائي؟** (تدقيق §06 §4).
+ *
+ * القيم دي **مش محسوبة هنا** — بتيجي من `resolveDispatchRoute()` نفسها اللي
+ * `MatchingService.dispatchOrAutoConfirm()` بتاخد قرارها منها. فالأدمن بيقرا القرار، مش
+ * إعادة تنفيذ ليه.
+ */
+export interface OrderDispatchRouteExplanation {
+  route: DispatchRoute;
+  reason: DispatchRouteReason;
+  /** عتبة «قريب» الفعلية وقت القراءة — من `matching.near_term_request_hours`. */
+  nearTermHours: number;
+  explanationAr: string;
+}
+
 export interface OrderMatchingFunnel {
   orderId: string;
   orderStatus: OrderStatus;
+  /** مسار التوزيع اللي الطلب ده واخده (أو هياخده لو رجع للتوزيع). */
+  dispatchRoute: OrderDispatchRouteExplanation;
   pool: OrderMatchingFunnelPoolCounts;
   /** توزيع order_assignments (مسار التوزيع العادي/الطوارئ) — سواء اتبعت للطلب فعليًا لحد دلوقتي. */
   dispatchAssignments: OrderAssignmentStatusCounts;

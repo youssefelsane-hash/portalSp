@@ -56,8 +56,8 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
   async function insertPrepaidWorkCompletedOrder(label: string, totalAmountCents: number, originalPaidCents: number) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, payment_method, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'work_completed','paid','card',$7,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, payment_method, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'work_completed','paid','card',$7,0) RETURNING id`,
       [`TESTPPS-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, totalAmountCents],
     );
     // الدفعة الأصلية (المسبقة) اللي اتحصّلت قبل التوزيع — completed_at أقدم عمدًا (وقت التوزيع)
@@ -331,8 +331,8 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
   it('طلب عادي (مش مدفوع مسبقًا) في WORK_COMPLETED — settleAlreadyPaidOrder() لا تفعل شيء (regression: المسار العادي فضل زي زمان)', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'work_completed','unpaid',20000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'work_completed','unpaid',20000,0) RETURNING id`,
       [`TESTPPS-n-${runId}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone],
     );
 

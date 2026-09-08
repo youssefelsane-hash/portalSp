@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Logger, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -25,11 +25,11 @@ import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { RecruitTeamMemberDto } from './dto/recruit-team-member.dto';
 import { toRecruitCandidateResponseDto } from './dto/recruit-candidate-response.dto';
-import { BookingMode, Order } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
-import { CrewRole, OrderTeamService, isSoloJob } from './order-team.service';
+import { CrewRole, OrderTeamService, isSoloJob, orderRequiresCrewBeyondLeader } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -43,6 +43,8 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 @Controller('technician/orders')
 @Roles(UserType.TECHNICIAN)
 export class TechnicianOrderExecutionController {
+  private readonly logger = new Logger(TechnicianOrderExecutionController.name);
+
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
@@ -90,29 +92,50 @@ export class TechnicianOrderExecutionController {
   }
 
   /**
-   * نسخة toDto بتحسب حقول تجنيد الفريق (docs/08 §31) — بس لمسارات تفاصيل الطلب الفردي
-   * (getOne/team-assigned)، مش القوائم العادية ولا أفعال التنفيذ (زرار "افتح الملاحة" مش محتاج
-   * الحقول دي، صفر استعلام إضافي غير ضروري في المسار الساخن ده).
+   * **طلب واحد بايظ مايفضّيش شاشة الفني كلها** (بلاغ مالك 2026-09-06: «جزء من الشاشة ما
+   * اتحمّلش… الفني مش عارف يستخدم الموبايل بتاعه»).
+   *
+   * `Promise.all` بترمي من أول عنصر بيفشل، فطلب واحد بيانات مرجعية ناقصة (عنوان اتمسح، خدمة
+   * اتشالت، صف مالي مش متوقّع) كان بيحوّل القايمة كلها لـ500 — والفني بيلاقي شريط أحمر ومفيش
+   * ولا شغلانة، حتى لو باقي شغله تمام.
+   *
+   * الطلب اللي فشل بيتشال من القايمة **وبيتسجّل برقمه** عشان يتصلح من جذره؛ الباقي بيوصل.
+   * نفس فلسفة `available_orders_screen.dart` في التطبيق بالحرف: كل قايمة بتتحمّل لوحدها.
+   */
+  private async toDtoListResilient(orders: Order[], viewerProfileId?: string | null) {
+    const results = await Promise.allSettled(orders.map((order) => this.toDto(order, viewerProfileId)));
+    const dtos: Awaited<ReturnType<typeof this.toDto>>[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        dtos.push(result.value);
+        return;
+      }
+      const reason: unknown = result.reason;
+      this.logger.error(
+        `تخطّي الطلب ${orders[index].orderNumber} في قايمة الفني — تعذّر تجهيزه: ${
+          reason instanceof Error ? reason.message : String(reason)
+        }`,
+        reason instanceof Error ? reason.stack : undefined,
+      );
+    });
+    return dtos;
+  }
+
+  /**
+   * نسخة التفاصيل التي تحسب حقول الطاقم. احتياج الطاقم يأتي من التسعير والإنتاجية، وليس من
+   * booking_mode وحده: قد يكون الحجز فرديًا لكنه يحتاج مساعدًا أو فنيًا إضافيًا.
    */
   private async toDtoWithTeamInfo(order: Order, viewerProfileId: string) {
     const base = await this.toDto(order, viewerProfileId);
-    if (order.bookingMode !== BookingMode.TEAM) {
-      // ADR-0052 (docs/08 §97) — الشغلانة الفردية بقت ليها `crew_status` كمان، بس عشان حقل
-      // `optionalAssistantSlots` (خانة المساعد الاختياري). حقول النقص فيها أصفار دايمًا هنا،
-      // فكارت "الطاقم مش مكتمل" الأحمر ما بيظهرش — الاختياري عمره ما يكون نقص.
-      if (order.technicianId !== viewerProfileId || !isSoloJob(order)) {
-        return base;
-      }
-      const soloCrewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
-      return soloCrewStatus.optionalAssistantSlots > 0 || soloCrewStatus.optionalAssistantsAdded > 0
-        ? { ...base, crew_status: soloCrewStatus }
-        : base;
-    }
     if (order.technicianId === viewerProfileId) {
-      // docs/08 §35، ADR-0021 §1 — crew_status موحّد (فني/مساعد منفصلين) بدل team_shortage/
-      // team_members_needed القديمين (كانوا بيتجاهلوا required_assistants تمامًا).
       const crewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
-      return { ...base, crew_status: crewStatus };
+      if (
+        orderRequiresCrewBeyondLeader(order) ||
+        (isSoloJob(order) && (crewStatus.optionalAssistantSlots > 0 || crewStatus.optionalAssistantsAdded > 0))
+      ) {
+        return { ...base, crew_status: crewStatus };
+      }
+      return base;
     }
     if (order.technicianId) {
       const leader = await this.techniciansService.findContactInfoOrThrow(order.technicianId);
@@ -126,12 +149,10 @@ export class TechnicianOrderExecutionController {
    * start/complete/...) كانت بترجّع `toDto()` **من غير `crew_status`**، وتطبيق الفني بيحط الرد ده
    * مكان الطلب الحالي — فكارت "الطاقم ناقص" وأزرار ضم فني/مساعد كانوا **بيختفوا بعد أول فعل**
    * ويرجعوا بس لما الشاشة تعيد التحميل من `getOne()`. ده اللي المالك وصفه بـ«بيظهر أول ما الطلب
-   * ييجي وبعدين بيختفي». الاستعلام الزيادة بيتعمل **بس لطلبات الفريق** (نفس تحفّظ الأداء الأصلي).
+   * ييجي وبعدين بيختفي». المعيار هنا هو احتياج الطاقم الفعلي، وليس وضع الحجز فقط.
    */
   private async toDtoAfterAction(order: Order, userId: string) {
-    // ADR-0052 — الشغلانة الفردية بقت محتاجة نفس المعاملة (خانة المساعد الاختياري لازم تفضل
-    // ظاهرة بعد كل فعل، نفس البَقّة الموصوفة فوق بالظبط)، فالتحفّظ بقى "فريق **أو** فردية".
-    if (order.bookingMode !== BookingMode.TEAM && !isSoloJob(order)) {
+    if (!orderRequiresCrewBeyondLeader(order) && !isSoloJob(order)) {
       return this.toDto(order);
     }
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
@@ -164,7 +185,7 @@ export class TechnicianOrderExecutionController {
   @Get('upcoming-confirmed')
   async listUpcomingConfirmed(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findUpcomingConfirmedForTechnician(user.sub);
-    return Promise.all(orders.map((order) => this.toDto(order)));
+    return this.toDtoListResilient(orders);
   }
 
   // "شغل متأخر" (docs/08 §56 بند 4) — اتقبل، يومه عدّى، ولسه ما بدأش. كان بيختفي من كل الشاشات.
@@ -172,7 +193,7 @@ export class TechnicianOrderExecutionController {
   @Get('overdue')
   async listOverdue(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findOverdueForTechnician(user.sub);
-    return Promise.all(orders.map((order) => this.toDto(order)));
+    return this.toDtoListResilient(orders);
   }
 
   // "شغلي كعضو فريق" (docs/08 §31) — مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق.
@@ -446,8 +467,11 @@ export class TechnicianOrderExecutionController {
   // على طلبات "اعتماد" (فريق)، وبس لأعضاء من نفس الشركة/الفريق. تفاصيل كاملة في orders/README.md.
   @Post(':id/team-members')
   async addTeamMember(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AddTeamMemberDto) {
-    await this.orderTeamService.addMember(user.sub, id, dto);
-    return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+    const outcome = await this.orderTeamService.addMember(user.sub, id, dto);
+    if (outcome.status === 'offer_sent') {
+      return { status: outcome.status, opportunity_id: outcome.opportunityId, capacity_tier: outcome.capacityTier };
+    }
+    return { status: outcome.status, items: (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto) };
   }
 
   @Get(':id/team-members')

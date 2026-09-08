@@ -67,7 +67,8 @@ class TechnicianSelectionScreen extends StatefulWidget {
   });
 
   @override
-  State<TechnicianSelectionScreen> createState() => _TechnicianSelectionScreenState();
+  State<TechnicianSelectionScreen> createState() =>
+      _TechnicianSelectionScreenState();
 }
 
 class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
@@ -94,7 +95,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
 
   Future<void> _pickAddress() async {
     final address = await Navigator.of(context).push<Address>(
-      MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
+      MaterialPageRoute(
+        builder: (_) => const AddressesScreen(selectionMode: true),
+      ),
     );
     if (address == null) {
       // العميل رجع من غير ما يختار عنوان — مفيش داعي نفضل في شاشة فاضية، نرجعه للخلف.
@@ -118,6 +121,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         serviceId: widget.service.id,
         addressId: address.id,
         selectionMode: 'auto',
+        bookingMode: widget.bookingMode,
         // نفس المدخلات اللي هتتبعت في الإنشاء — البصمة لازم تطابق.
         scheduledAt: widget.requestedAt?.toUtc().toIso8601String(),
         fieldValues: widget.fieldValues,
@@ -136,7 +140,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     } on ApiException catch (err) {
       // رسالة صريحة — ممنوع نكمّل في صمت على مرشّح مش موجود (بند 10).
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
       }
     } finally {
       if (mounted) setState(() => _previewingAuto = false);
@@ -181,11 +187,16 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   /// من غير التذكرة، `requested_technician_id` بيفضل **تفضيل** المحرك يقدر يستبدله لو الفني بقى
   /// مش متاح — يعني نفس باب الاستبدال الصامت اللي ADR-0065 قفله، بس مفتوح من ناحية الواجهة.
   ///
-  /// الشركات مستثناة: `match-preview` بياخد `technician_id` بس، فالشركة بتفضل على السلوك القديم
-  /// لحد ما الباك-إند يدعمها. مذكور صراحة عشان مايتقريش كسهو.
-  Future<void> _selectManualProvider(String id, bool isCompany, DateTime? effectiveRequestedAt) async {
+  /// **ADR-0080 — الشركة بقت تتقفل بتذكرة زي الفني بالظبط.** كانت مستثناة لأن `match-preview`
+  /// ماكانش بياخد إلا `technician_id`؛ دلوقتي بياخد شركة كمان (بيوزّع جوّاها ويقفل السعر
+  /// بمعاملها). من غير التذكرة كان اختيار الشركة بيفضل تفضيل بلا قفل سعر — أضعف من الويب.
+  Future<void> _selectManualProvider(
+    String id,
+    bool isCompany,
+    DateTime? effectiveRequestedAt,
+  ) async {
     final address = _selectedAddress;
-    if (isCompany || address == null) {
+    if (address == null) {
       _confirmSelection(
         requestedTechnicianId: isCompany ? null : id,
         requestedTechnicianCompanyId: isCompany ? id : null,
@@ -198,21 +209,25 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         serviceId: widget.service.id,
         addressId: address.id,
         selectionMode: 'manual',
-        technicianId: id,
-        scheduledAt: (effectiveRequestedAt ?? widget.requestedAt)?.toUtc().toIso8601String(),
+        bookingMode: widget.bookingMode,
+        technicianId: isCompany ? null : id,
+        technicianCompanyId: isCompany ? id : null,
+        scheduledAt: (effectiveRequestedAt ?? widget.requestedAt)
+            ?.toUtc()
+            .toIso8601String(),
         fieldValues: widget.fieldValues,
       );
       if (!mounted) return;
       _confirmSelection(
-        requestedTechnicianId: id,
+        requestedTechnicianId: isCompany ? null : id,
+        requestedTechnicianCompanyId: isCompany ? id : null,
         effectiveRequestedAt: effectiveRequestedAt,
         matchPreviewId: preview.matchPreviewId,
       );
-    } on ApiException catch (err) {
-      // الفني اللي اختاره بقى مش متاح — رسالة صريحة، وممنوع نكمّل على تفضيل ممكن يتبدّل.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
-      }
+    } on ApiException {
+      // شاشة السوق هي التي تظل ظاهرة وقت الاختيار، لذلك هي المسؤولة عن عرض الخطأ؛ عرضه
+      // من الشاشة الخلفية كان يجعل العميل يضغط الزر ولا يرى شيئًا.
+      rethrow;
     }
   }
 
@@ -229,7 +244,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           requestedAt: widget.requestedAt,
           bookingMode: widget.bookingMode,
           onSelect: (id, isCompany, effectiveRequestedAt) =>
-              unawaited(_selectManualProvider(id, isCompany, effectiveRequestedAt)),
+              _selectManualProvider(id, isCompany, effectiveRequestedAt),
         ),
       ),
     );
@@ -249,10 +264,12 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         bookingMode: widget.bookingMode,
         // onManualSelect (استبدال فني لطلب موجود بالفعل) بيستخدم requestedTechnicianId بس —
         // معاد الطلب نفسه ثابت بالفعل، فمفيش داعي لـeffectiveRequestedAt هنا.
-        onSelect: (id, isCompany, _) => _confirmSelection(
-          requestedTechnicianId: isCompany ? null : id,
-          requestedTechnicianCompanyId: isCompany ? id : null,
-        ),
+        onSelect: (id, isCompany, _) async {
+          _confirmSelection(
+            requestedTechnicianId: isCompany ? null : id,
+            requestedTechnicianCompanyId: isCompany ? id : null,
+          );
+        },
       );
     }
 
@@ -277,13 +294,18 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       alignment: AlignmentDirectional.centerEnd,
                       child: TextButton.icon(
                         onPressed: _pickAddress,
-                        icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                        icon: const Icon(
+                          Icons.edit_location_alt_outlined,
+                          size: 18,
+                        ),
                         label: const Text('تغيير العنوان'),
                       ),
                     ),
                     const Spacer(),
                     Text(
-                      widget.bookingMode == BookingMode.team ? 'إزاي حابب تختار الفريق/الشركة؟' : 'إزاي حابب تختار الفني؟',
+                      widget.bookingMode == BookingMode.team
+                          ? 'إزاي حابب تختار الفريق/الشركة؟'
+                          : 'إزاي حابب تختار الفني؟',
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -294,7 +316,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       subtitle: widget.bookingMode == BookingMode.team
                           ? 'هنبعت الطلب لأنسب فريق/شركة متاحة فورًا حسب تقييمها وقربها منك'
                           : 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
-                      onTap: _previewingAuto ? () {} : () => unawaited(_startAutoMatch()),
+                      onTap: _previewingAuto
+                          ? () {}
+                          : () => unawaited(_startAutoMatch()),
                       highlighted: true,
                     ),
                     const SizedBox(height: 16),
@@ -342,7 +366,11 @@ class _ChoiceCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Icon(icon, size: 32, color: highlighted ? scheme.onPrimaryContainer : scheme.primary),
+              Icon(
+                icon,
+                size: 32,
+                color: highlighted ? scheme.onPrimaryContainer : scheme.primary,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -350,7 +378,10 @@ class _ChoiceCard extends StatelessWidget {
                   children: [
                     Text(title, style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -388,8 +419,12 @@ class _AutoMatchPreviewSheet extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 26,
-                  backgroundImage: provider.avatarUrl != null ? NetworkImage(provider.avatarUrl!) : null,
-                  child: provider.avatarUrl == null ? const Icon(Icons.person_outline) : null,
+                  backgroundImage: provider.avatarUrl != null
+                      ? NetworkImage(provider.avatarUrl!)
+                      : null,
+                  child: provider.avatarUrl == null
+                      ? const Icon(Icons.person_outline)
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -412,7 +447,10 @@ class _AutoMatchPreviewSheet extends StatelessWidget {
                 ),
                 Text(
                   '${(preview.totalAmountCents / 100).toStringAsFixed(2)} ج.م',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
                 ),
               ],
             ),

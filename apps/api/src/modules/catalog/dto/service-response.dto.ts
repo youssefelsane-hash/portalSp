@@ -79,6 +79,14 @@ export interface ServiceResponseDto {
   assessment_route_policy: AssessmentRoutePolicy;
   remote_assessment_enabled: boolean;
   onsite_assessment_enabled: boolean;
+  /**
+   * **الفني اللي بيعاين هو نفسه اللي بينفّذ؟** (الافتراضي `true` — والحالة الغالبة عمليًا).
+   *
+   * كان محبوس في الباك-إند، فتطبيق العميل مكانش يقدر يقول الحقيقة: بيعرض تحذير «الفني ممكن
+   * يتغيّر» على طول، حتى والأدمن ضابط إن المعاين هو المنفّذ (بلاغ مالك 2026-09-05). النص اللي
+   * بيكذّب إعداد الأدمن أسوأ من نص عام.
+   */
+  onsite_assessor_executes_work: boolean;
   /** رسم التقييم بالصور — بيتحصّل وقت إرسال الصور، والعميل لازم يشوفه قبل ما يبعت. */
   remote_assessment_fee_cents: number;
 }
@@ -108,6 +116,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     assessment_route_policy: service.assessmentRoutePolicy,
     remote_assessment_enabled: service.remoteAssessmentEnabled,
     onsite_assessment_enabled: service.onsiteAssessmentEnabled,
+    onsite_assessor_executes_work: service.onsiteAssessorExecutesWork,
     remote_assessment_fee_cents: service.remoteAssessmentFeeCents,
     requires_photos: service.requiresPhotos,
     allows_scheduling: service.allowsScheduling,

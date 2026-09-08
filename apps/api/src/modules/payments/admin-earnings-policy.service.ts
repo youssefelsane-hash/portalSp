@@ -2,14 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
-import { SettingsService } from '../settings/settings.service';
 import { calculateEarningsV2 } from './earnings-calculator';
 import {
   CreateTechnicianEarningAdjustmentDto,
   SimulateEarningsDto,
   UpdateEarningsLevelPolicyDto,
   UpdateEarningsSkillPolicyDto,
-  UpdateFixedCommissionDto,
+  UpdatePlatformCommissionDto,
   UpdateServiceLevelEarningsOverrideDto,
   UpdateServiceSkillEarningsOverrideDto,
 } from './dto/earnings-policy.dto';
@@ -18,7 +17,6 @@ import {
 export class AdminEarningsPolicyService {
   constructor(
     private readonly dataSource: DataSource,
-    private readonly settingsService: SettingsService,
     private readonly auditLog: AuditLogService,
   ) {}
 
@@ -31,8 +29,6 @@ export class AdminEarningsPolicyService {
       serviceSkillOverrides,
       technicians,
       adjustments,
-      shadow,
-      shadowOrders,
       auditHistory,
     ] = await Promise.all([
       this.dataSource.query(
@@ -42,7 +38,7 @@ export class AdminEarningsPolicyService {
       ),
       this.dataSource.query(`SELECT skill_level, factor_bps, updated_at FROM earnings_skill_policy ORDER BY skill_level`),
       this.dataSource.query(
-        `SELECT id, name_ar, slug, is_active, platform_commission_cents
+        `SELECT id, name_ar, slug, is_active, ROUND(commission_percentage * 100)::integer AS platform_commission_bps
            FROM services WHERE deleted_at IS NULL ORDER BY is_active DESC, name_ar`,
       ),
       this.dataSource.query(`SELECT * FROM service_earnings_level_overrides ORDER BY service_id, technician_level`),
@@ -67,22 +63,6 @@ export class AdminEarningsPolicyService {
           ORDER BY tea.created_at DESC`,
       ),
       this.dataSource.query(
-        `SELECT COUNT(*)::integer AS compared_orders,
-                COALESCE(AVG(absolute_delta_cents), 0)::numeric(14,2) AS average_absolute_delta_cents,
-                COALESCE(MAX(absolute_delta_cents), 0)::integer AS maximum_absolute_delta_cents
-          FROM earnings_shadow_comparisons`,
-      ),
-      this.dataSource.query(
-        `SELECT esc.order_id, o.order_number, esc.legacy_platform_cents,
-                esc.v2_platform_cents, esc.legacy_worker_pool_cents,
-                esc.v2_worker_pool_cents, esc.v2_participant_shares,
-                esc.absolute_delta_cents, esc.created_at
-           FROM earnings_shadow_comparisons esc
-           JOIN orders o ON o.id = esc.order_id
-          ORDER BY esc.created_at DESC
-          LIMIT 20`,
-      ),
-      this.dataSource.query(
         `SELECT al.action, al.entity_type, al.entity_id, al.old_values, al.new_values,
                 al.created_at, u.full_name AS actor_name
            FROM audit_logs al
@@ -93,20 +73,12 @@ export class AdminEarningsPolicyService {
       ),
     ]);
     const activeServices = services.filter((service: { is_active: boolean }) => service.is_active);
-    const missing = activeServices.filter(
-      (service: { platform_commission_cents: number | null }) => service.platform_commission_cents == null,
-    );
     return {
-      cutover_enabled: await this.settingsService.getBoolean('earnings.v2_cutover_enabled', false),
-      shadow_enabled: await this.settingsService.getBoolean('earnings.v2_shadow_enabled', true),
       readiness: {
-        ready: missing.length === 0,
-        configured_active_services: activeServices.length - missing.length,
+        ready: true,
+        configured_active_services: activeServices.length,
         active_services: activeServices.length,
-        missing_services: missing.map((service: { id: string; name_ar: string }) => ({
-          id: service.id,
-          name_ar: service.name_ar,
-        })),
+        missing_services: [],
       },
       levels,
       skills,
@@ -115,8 +87,6 @@ export class AdminEarningsPolicyService {
       service_skill_overrides: serviceSkillOverrides,
       technicians,
       technician_adjustments: adjustments,
-      shadow: shadow[0],
-      shadow_orders: shadowOrders,
       audit_history: auditHistory,
     };
   }
@@ -124,15 +94,15 @@ export class AdminEarningsPolicyService {
   async updateServiceCommission(
     adminUserId: string,
     serviceId: string,
-    dto: UpdateFixedCommissionDto,
+    dto: UpdatePlatformCommissionDto,
     meta?: AuditActorMeta,
   ) {
     return this.dataSource.transaction(async (manager) => {
       const rows = await manager.query(
-        `UPDATE services SET platform_commission_cents = $2, updated_at = now()
+        `UPDATE services SET commission_percentage = $2::numeric / 100, updated_at = now()
           WHERE id = $1 AND deleted_at IS NULL
-          RETURNING id, name_ar, platform_commission_cents`,
-        [serviceId, dto.platform_commission_cents],
+          RETURNING id, name_ar, ROUND(commission_percentage * 100)::integer AS platform_commission_bps`,
+        [serviceId, dto.platform_commission_bps],
       );
       if (!rows[0]) throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة', HttpStatus.NOT_FOUND);
       await this.auditLog.record(
@@ -142,7 +112,7 @@ export class AdminEarningsPolicyService {
           action: 'earnings_policy.service_commission_updated',
           entityType: 'service',
           entityId: serviceId,
-          newValues: { platform_commission_cents: dto.platform_commission_cents, reason: dto.reason },
+          newValues: { platform_commission_bps: dto.platform_commission_bps, reason: dto.reason },
           meta,
         },
         manager,
@@ -216,38 +186,10 @@ export class AdminEarningsPolicyService {
     return updated;
   }
 
-  async setCutover(adminUserId: string, enabled: boolean, reason: string, meta?: AuditActorMeta) {
-    if (enabled) {
-      const missing = await this.dataSource.query(
-        `SELECT id, name_ar FROM services
-          WHERE is_active = true AND deleted_at IS NULL AND platform_commission_cents IS NULL
-          ORDER BY name_ar`,
-      );
-      if (missing.length > 0) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `لا يمكن التفعيل: ${missing.length} خدمة نشطة بدون عمولة ثابتة`,
-          HttpStatus.CONFLICT,
-        );
-      }
-    }
-    const updated = await this.settingsService.update(adminUserId, 'earnings.v2_cutover_enabled', enabled, meta);
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'earnings_policy.cutover_changed',
-      entityType: 'setting',
-      entityId: updated.id,
-      newValues: { enabled, reason },
-      meta,
-    });
-    return { enabled };
-  }
-
   simulate(dto: SimulateEarningsDto) {
     return calculateEarningsV2(
       dto.order_total_cents,
-      dto.platform_commission_cents,
+      Math.round((dto.order_total_cents * dto.platform_commission_bps) / 10_000),
       dto.participants.map((participant) => ({
         technicianId: participant.technician_id,
         earningRole: participant.earning_role,

@@ -16,7 +16,6 @@ export const COMMISSION_BASE_SETTING_KEYS = {
   includeAdditionalItems: 'commission_base.include_additional_items',
   includeWarranty: 'commission_base.include_warranty',
   includeInstallmentInterest: 'commission_base.include_installment_interest',
-  discountReducesTechnicianShare: 'commission_base.discount_reduces_technician_share',
 } as const;
 
 export interface CommissionBasePolicy {
@@ -28,7 +27,6 @@ export interface CommissionBasePolicy {
   includeAdditionalItems: boolean;
   includeWarranty: boolean;
   includeInstallmentInterest: boolean;
-  discountReducesTechnicianShare: boolean;
 }
 
 /** الافتراضيات = طلب المالك بالحرف. مستخدمة كـfallback لو الإعداد مش موجود في القاعدة. */
@@ -41,7 +39,6 @@ export const DEFAULT_COMMISSION_BASE_POLICY: CommissionBasePolicy = {
   includeAdditionalItems: true,
   includeWarranty: false,
   includeInstallmentInterest: false,
-  discountReducesTechnicianShare: false,
 };
 
 /** مكوّنات إيراد الطلب وقت الإنشاء، بالقروش، زي ما `OrdersService` بيحسبها بالظبط. */
@@ -125,8 +122,6 @@ export function computeCommissionableBase(
   if (policy.includeAddons) baseCents += components.addonsTotalCents;
   if (policy.includeWarranty) baseCents += components.warrantyPriceCents;
   if (policy.includeInstallmentInterest) baseCents += components.installmentInterestCents;
-  if (policy.discountReducesTechnicianShare) baseCents -= components.discountCents;
-
   return {
     commissionableBaseCents: Math.max(baseCents, 0),
     workPriceCents,

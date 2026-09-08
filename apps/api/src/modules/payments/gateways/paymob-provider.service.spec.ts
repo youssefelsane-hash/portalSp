@@ -86,6 +86,50 @@ describe('PaymobProvider', () => {
     });
   });
 
+  describe('chargeToken outcome classification', () => {
+    const input = {
+      paymentId: 'payment-1',
+      orderNumber: 'ORD-1',
+      amountCents: 1000,
+      currencyCode: 'EGP',
+      providerToken: 'saved-token',
+      customerFirstName: 'A',
+      customerLastName: 'B',
+      customerEmail: 'a@example.test',
+      customerPhone: '+201000000000',
+    };
+
+    it('لا يحوّل رد 5xx أو JSON غير صالح إلى رفض مؤكد', async () => {
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 11 }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ token: 'payment-key' }) })
+        .mockResolvedValueOnce({ ok: false, status: 500, json: async () => { throw new Error('invalid json'); } });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
+      (provider as unknown as { legacyAuthToken: () => Promise<string> }).legacyAuthToken = async () => 'auth-token';
+
+      await expect(provider.chargeToken(input)).resolves.toEqual(
+        expect.objectContaining({ succeeded: false, outcome: 'unknown' }),
+      );
+    });
+
+    it('يحافظ على رفض 4xx المؤكد كرفض قابل لإعادة المحاولة المقررة', async () => {
+      const fetchMock = jest
+        .fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 11 }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ token: 'payment-key' }) })
+        .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ data: { message: 'declined' } }) });
+      global.fetch = fetchMock as unknown as typeof fetch;
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
+      (provider as unknown as { legacyAuthToken: () => Promise<string> }).legacyAuthToken = async () => 'auth-token';
+
+      await expect(provider.chargeToken(input)).resolves.toEqual(
+        expect.objectContaining({ succeeded: false, outcome: 'confirmed', failureReason: 'declined' }),
+      );
+    });
+  });
+
   describe('verifyWebhook', () => {
     it('يقبل حمولة صحيحة بتوقيع HMAC صح، ويستخرج كل الحقول صح', () => {
       const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));

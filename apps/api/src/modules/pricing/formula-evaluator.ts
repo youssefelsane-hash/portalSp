@@ -356,14 +356,20 @@ function evaluateCondition(condition: FormulaCondition, context: FormulaEvaluati
   if (fieldValue === undefined) {
     throw new ApiException(ErrorCode.VAL_001, `الحقل "${condition.field_key}" مطلوب لتقييم الشرط`, HttpStatus.BAD_REQUEST);
   }
+  // multi_select يتحفظ كنص مفصول بفواصل كي يظل سياق المعادلة scalar. في المقارنة يعبّر
+  // `equals` عن "يحتوي أحد الاختيارات" و`not_equals` عن "لا يحتوي هذا الاختيار" بدل مقارنة
+  // النص الكامل مثل "a,b" بـ "a" والتي كانت تجعل شروط التسعير صامتة وخاطئة.
+  const selectedValues = typeof fieldValue === 'string' && fieldValue.includes(',')
+    ? fieldValue.split(',').map((value) => value.trim()).filter(Boolean)
+    : null;
   const left = toComparableNumber(fieldValue);
   const right = toComparableNumber(condition.value as string | number | boolean);
 
   switch (condition.op) {
     case 'equals':
-      return looseEquals(left, right);
+      return selectedValues ? selectedValues.some((value) => looseEquals(value, right)) : looseEquals(left, right);
     case 'not_equals':
-      return !looseEquals(left, right);
+      return selectedValues ? selectedValues.every((value) => !looseEquals(value, right)) : !looseEquals(left, right);
     case 'gt':
       return Number(left) > Number(right);
     case 'gte':

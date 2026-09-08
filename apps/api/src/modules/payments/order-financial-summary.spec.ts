@@ -82,9 +82,9 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
          payment_status, total_amount_cents, platform_commission_cents, technician_earning_cents, cancellation_fee_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'completed','partially_refunded',100000,20000,80000,5000, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'completed','partially_refunded',100000,20000,80000,5000, now()) RETURNING id`,
       [`TESTFIN-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;
@@ -175,9 +175,9 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
 
   it('طلب 6200 جنيه + إيداع 15% يعرض 930 مدفوع و5270 فقط للتحصيل', async () => {
     const [order] = await dataSource.query<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
          payment_status, total_amount_cents, deposit_amount_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'work_completed','paid',620000,93000,now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'work_completed','paid',620000,93000,now()) RETURNING id`,
       [`TESTDEP15-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     try {
@@ -201,9 +201,9 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
 
   it('خطة تقسيط معتمدة تغطي أصل الطلب ولا تحوّل باقي الأقساط لمبلغ كاش على الفني', async () => {
     const [order] = await dataSource.query<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
          payment_status, total_amount_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'work_completed','unpaid',620000,now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'work_completed','unpaid',620000,now()) RETURNING id`,
       [`TESTINST-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     const [plan] = await dataSource.query<{ id: string }[]>(

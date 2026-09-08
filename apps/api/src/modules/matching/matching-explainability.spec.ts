@@ -144,8 +144,8 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'individual') RETURNING id`,
       [`TESTEXP-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;
@@ -243,9 +243,9 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
   // مساري التنفيذ الاتنين وناقص من الـchecks بس، فالمفتّش كان بيدّي إجابة غلط بثقة.
   it('طلب اعتماد + مستوى مش مؤهّل للقيادة — team_leader_ok=false، والمفتّش بيوافق قايمة التعيين (§107)', async () => {
     const [teamOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status,
          total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'team',2,2) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician','pending',30000,0,'team',2,2) RETURNING id`,
       [`TESTEXPLD-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     // مستوى `verified` عمدًا: حد قراره (50000) بيكفي قيمة الطلب (30000) فالشرط التاني بيعدّي —
@@ -380,8 +380,8 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
 
   it('explainOrderFunnel() — طلب فريق بيرجّع crew_status + crew_recruit_opportunities بدل null', async () => {
     const [teamOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'team',3,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'team',3,0) RETURNING id`,
       [`TESTEXPTM-${runId}`.slice(0, 24), ids.customerProfile, ids.eligibleProfile, ids.service, ids.address, ids.zone],
     );
     ids.teamOrder = teamOrder.id;

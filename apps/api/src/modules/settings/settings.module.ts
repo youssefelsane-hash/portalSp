@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
+import { SettingsCrossInstanceBridge } from '../../common/events/settings-cross-instance.bridge';
 import { AuditModule } from '../audit/audit.module';
 import { Setting } from './entities/setting.entity';
 import { HomepageContentController } from './homepage-content.controller';
@@ -16,7 +17,7 @@ import { LegalEntityController } from './legal-entity.controller';
 @Module({
   imports: [TypeOrmModule.forFeature([Setting]), AuditModule],
   controllers: [BookingPolicyController, SupportContactController, HomepageContentController, TrustInfoController, LegalEntityController],
-  providers: [SettingsService, RedisCacheService],
+  providers: [SettingsService, RedisCacheService, SettingsCrossInstanceBridge],
   exports: [SettingsService],
 })
 export class SettingsModule {}

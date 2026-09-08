@@ -75,10 +75,9 @@ describe('AdminOrdersService — تكافؤ السكدول بين التعيين
   // الاستيعابية لازم يكون `accepted` على الأقل، مش أي حالة عشوائية.
   async function insertOrder(label: string, opts: { technicianId: string; requiredAssistants?: number; hourOfDay?: number }) {
     const [order] = await q(
-      `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status,
           total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team',2,$7,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team',2,$7,
          (date_trunc('day', now() AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo') + ($8::int || ' hours')::interval)
        RETURNING id`,
       [

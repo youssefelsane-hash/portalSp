@@ -89,9 +89,8 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
         [user.id, `شارع referral ${index}`],
       );
       const [order] = await q(
-        `INSERT INTO orders
-           (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
-         VALUES ($1,$2,$3,$4,$5,'completed',10000) RETURNING id`,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
+         VALUES (20,$1,$2,$3,$4,$5,'completed',10000) RETURNING id`,
         [`RFI-${index}-${runId}`.slice(0, 24), profile.id, ids.service, address.id, ids.zone],
       );
       ids.referred.push({ user: user.id, profile: profile.id, address: address.id, order: order.id });

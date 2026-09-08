@@ -53,7 +53,20 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
     });
   }
 
-  function controller(current: Order): TechnicianOrderExecutionController {
+  function controller(
+    current: Order,
+    crewStatus = {
+      requiredTechnicians: 1,
+      requiredAssistants: 0,
+      assignedTechnicians: 1,
+      assignedAssistants: 0,
+      missingTechnicians: 0,
+      missingAssistants: 0,
+      crewComplete: true,
+      optionalAssistantsAdded: 0,
+      optionalAssistantSlots: 0,
+    },
+  ): TechnicianOrderExecutionController {
     return new TechnicianOrderExecutionController(
       {
         findVisibleForTechnician: jest.fn().mockResolvedValue(current),
@@ -66,17 +79,7 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       // ADR-0052 — الكولر بقى بينادي getCrewComposition للشغلانة الفردية كمان (خانة المساعد
       // الاختياري)، مش لطلبات الفريق بس. الاختبار ده مالوش علاقة بالطاقم فبيرجّع تكوين فاضي.
       {
-        getCrewComposition: jest.fn().mockResolvedValue({
-          requiredTechnicians: 1,
-          requiredAssistants: 0,
-          assignedTechnicians: 1,
-          assignedAssistants: 0,
-          missingTechnicians: 0,
-          missingAssistants: 0,
-          crewComplete: true,
-          optionalAssistantsAdded: 0,
-          optionalAssistantSlots: 0,
-        }),
+        getCrewComposition: jest.fn().mockResolvedValue(crewStatus),
       } as never,
       {
         findByIdOrThrow: jest.fn().mockResolvedValue({
@@ -121,5 +124,26 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
 
     expect(dto.customer_phone).toBeUndefined();
     expect(customerProfiles.findContactInfoOrThrow).not.toHaveBeenCalled();
+  });
+
+  it('returns mandatory crew status for an individual booking that needs an assistant', async () => {
+    const current = order(OrderStatus.ACCEPTED);
+    current.requiredAssistants = 1;
+    const dto = await controller(current, {
+      requiredTechnicians: 1,
+      requiredAssistants: 1,
+      assignedTechnicians: 1,
+      assignedAssistants: 0,
+      missingTechnicians: 0,
+      missingAssistants: 1,
+      crewComplete: false,
+      optionalAssistantsAdded: 0,
+      optionalAssistantSlots: 0,
+    }).getOne(
+      { sub: 'technician-user' } as never,
+      '00000000-0000-4000-8000-000000000001',
+    );
+
+    expect((dto as { crew_status?: unknown }).crew_status).toMatchObject({ missingAssistants: 1, crewComplete: false });
   });
 });

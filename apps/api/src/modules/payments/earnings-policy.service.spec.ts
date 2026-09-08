@@ -1,10 +1,10 @@
 import { EarningsPolicyService } from './earnings-policy.service';
 
 describe('EarningsPolicyService', () => {
-  it('uses the immutable commission snapshot and maps permanent/order roles centrally', async () => {
+  it('uses the immutable commission percentage snapshot and maps permanent/order roles centrally', async () => {
     const manager = {
       query: jest.fn()
-        .mockResolvedValueOnce([{ settlement_policy_version: 2, platform_commission_cents_snapshot: 10_000 }])
+        .mockResolvedValueOnce([{ settlement_policy_version: 2, commission_rate_applied: 10 }])
         .mockResolvedValueOnce([
           {
             technician_id: 'leader', participant_role: 'leader', technician_kind: 'technician',
@@ -39,13 +39,13 @@ describe('EarningsPolicyService', () => {
     );
   });
 
-  it('refuses a V2 order with no fixed commission snapshot', async () => {
+  it('refuses an earnings order with no commission percentage snapshot', async () => {
     const manager = {
-      query: jest.fn().mockResolvedValue([{ settlement_policy_version: 2, platform_commission_cents_snapshot: null }]),
+      query: jest.fn().mockResolvedValue([{ settlement_policy_version: 2, commission_rate_applied: null }]),
     };
     const service = new EarningsPolicyService({ manager } as never);
     await expect(service.calculateOrder('order', 100_000, manager as never)).rejects.toThrow(
-      'missing its fixed platform commission snapshot',
+      'missing its platform commission percentage snapshot',
     );
   });
 });

@@ -77,11 +77,11 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
   ): Promise<string> {
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, total_amount_cents, estimated_price_cents,
                            inspection_fee_cents, commissionable_base_cents, technician_earning_cents,
                            assessment_type, price_status, display_price_max_cents_snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',0,0,0,0,0,$8,$9,$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',0,0,0,0,0,$8,$9,$10) RETURNING id`,
       [
         orderNumber,
         ids.customerProfile,
@@ -201,7 +201,16 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     });
     const auditStub = { record: async () => undefined } as never;
 
-    triage = new AssessmentTriageService(dataSource, catalogService, auditStub, emitter);
+    // الخدمة بقت بتمرّر رسم المعاينة من نقطة الدخول المالية الوحيدة (`increasePrice`) بدل ما
+    // تكتبه على الطلب وبس — فلازم تتبنى بالاعتماديتين الحقيقيتين، وإلا الاختبار مايشوفش الفلوس.
+    triage = new AssessmentTriageService(
+      dataSource,
+      catalogService,
+      auditStub,
+      emitter,
+      new OrderFinancialFinalizationService(),
+      { getBoolean: async (_key: string, fallback: boolean) => fallback } as never,
+    );
     quotes = new InspectionQuoteService(
       dataSource,
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),
@@ -304,6 +313,20 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     ).rejects.toMatchObject({ code: 'ORDR_003' });
   });
 
+  it('قرار الإدارة على عرض معلق لا يحيي طلبًا أُلغي بعد إرساله', async () => {
+    const orderId = await seedOrder(OrderStatus.TECHNICIAN_ARRIVED, { withTechnician: true, priceStatus: OrderPriceStatus.WAITING_QUOTE });
+    await quotes.submitInitialQuote(ids.techUser, orderId, RANGE_MAX + 10_000, 'عطل');
+    const [pending] = await q(`SELECT id FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
+    await q(`UPDATE orders SET order_status = 'cancelled_by_customer' WHERE id = $1`, [orderId]);
+
+    await expect(
+      triage.decideAboveRangeQuote(ids.adminUser, orderId, pending.id, true, 'موافق متأخر'),
+    ).rejects.toMatchObject({ code: 'ORDR_003' });
+
+    const [after] = await q(`SELECT status FROM order_quotes WHERE id = $1`, [pending.id]);
+    expect(after.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
+  });
+
   // ===== بند 8: تحويل لمعاينة في الموقع =====
 
   it('تحويل لمعاينة في الموقع: بيسجّل رسم المعاينة **وبيطلب التوزيع فعليًا**', async () => {
@@ -324,6 +347,37 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
       [orderId],
     );
     expect(notices).toEqual([{ notice_type: 'routed_to_onsite_assessment', message: 'الصور مش واضحة' }]);
+  });
+
+  /**
+   * **بلاغ مالك 2026-09-05: «الفلوس فيها مشكلة… الصنايعي بيبان عنده إن الفلوس كلها بتاعته،
+   * الشركة ما بتاخدش حاجة».**
+   *
+   * الطلب بيتعمل على مسار الصور بإجمالي **صفر**، والتحويل لمعاينة كان بيكتب
+   * `inspection_fee_cents` على الطلب وبس — من غير ما يمس `total_amount_cents` ولا
+   * `commissionable_base_cents`. يعني الرسم اللي العميل بيدفعه بيقع برّه النظام المالي: التسوية
+   * بتشتغل على صفر، وعمولة المنصّة صفر، ومحدش بياخد منه غير الفني.
+   */
+  it('رسم المعاينة بيدخل إجمالي الطلب ووعاء العمولة — مش بيتكتب على الطلب وبس', async () => {
+    const orderId = await seedOrder(OrderStatus.AWAITING_ADMIN_QUOTE, { assessmentType: 'remote' });
+    const [before] = (await dataSource.query(
+      `SELECT total_amount_cents, commissionable_base_cents FROM orders WHERE id = $1`,
+      [orderId],
+    )) as { total_amount_cents: number; commissionable_base_cents: number | null }[];
+    expect(Number(before.total_amount_cents)).toBe(0);
+
+    await triage.routeToOnsiteAssessment(ids.adminUser, orderId, 'الصور مش واضحة');
+
+    const [after] = (await dataSource.query(
+      `SELECT total_amount_cents, commissionable_base_cents, inspection_fee_cents FROM orders WHERE id = $1`,
+      [orderId],
+    )) as { total_amount_cents: number; commissionable_base_cents: number | null; inspection_fee_cents: number }[];
+
+    expect(Number(after.inspection_fee_cents)).toBe(7500);
+    // الرسم دخل الإجمالي — من غير ده التسوية بتشتغل على صفر وعمولة المنصّة بتطلع صفر.
+    expect(Number(after.total_amount_cents)).toBe(Number(before.total_amount_cents) + 7500);
+    // ودخل وعاء العمولة كمان (السياسة الافتراضية `include_inspection_fee = true`).
+    expect(Number(after.commissionable_base_cents)).toBe(Number(before.commissionable_base_cents ?? 0) + 7500);
   });
 
   it('التحويل لمعاينة من حالة غلط بيترفض', async () => {
@@ -419,11 +473,11 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
   async function seedPricedWorkOrder(status: OrderStatus, priceCents: number, paid = false): Promise<string> {
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, total_amount_cents, estimated_price_cents,
                            inspection_fee_cents, commissionable_base_cents, technician_earning_cents,
                            assessment_type, price_status, display_price_max_cents_snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,0,$9,0,'onsite','confirmed',$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,$9,$9,0,$9,0,'onsite','confirmed',$10) RETURNING id`,
       [
         orderNumber, ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone,
         status, paid ? 'paid' : 'pending', priceCents, RANGE_MAX + 100_000,
@@ -528,6 +582,33 @@ describe('فرز التقييم في الأدمن — الطابور والقر�
     expect(row.estimated_price_cents).toBe(40_000);
     const [quote] = await q(`SELECT status FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
     expect(quote.status).toBe(OrderQuoteStatus.PENDING_ADMIN_REVIEW);
+  });
+
+  it('لا يقبل تعديل تشخيص ثانيًا قبل حسم العرض الحي الأول', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 200_000, 'تعديل أول');
+
+    await expect(
+      quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 300_000, 'تعديل ثانٍ'),
+    ).rejects.toMatchObject({ code: 'ORDR_003' });
+  });
+
+  it('اعتماد الإدارة لتعديل تشخيص لا يمحو السعر السابق الذي يُحسب منه فرق موافقة العميل', async () => {
+    const orderId = await seedPricedWorkOrder(OrderStatus.IN_PROGRESS, 40_000);
+    await quotes.submitDiagnosisRevision(ids.techUser, orderId, RANGE_MAX + 200_000, 'شغل أكبر من المتوقع');
+    const [pending] = await q(`SELECT id FROM order_quotes WHERE order_id = $1 ORDER BY version DESC LIMIT 1`, [orderId]);
+
+    await triage.decideAboveRangeQuote(ids.adminUser, orderId, pending.id, true, 'زيادة مبررة');
+    const [beforeApproval] = await q(`SELECT estimated_price_cents FROM orders WHERE id = $1`, [orderId]);
+    expect(beforeApproval.estimated_price_cents).toBe(40_000);
+
+    await quotes.approveInitialQuote(ids.customerUser, orderId, 'cash');
+    const [afterApproval] = await q(
+      `SELECT total_amount_cents, estimated_price_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    expect(afterApproval.total_amount_cents).toBe(RANGE_MAX + 200_000);
+    expect(afterApproval.estimated_price_cents).toBe(RANGE_MAX + 200_000);
   });
 
   // ===== بند 7: الطابور =====

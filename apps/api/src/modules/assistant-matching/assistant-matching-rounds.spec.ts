@@ -149,9 +149,9 @@ describe('جولات مطابقة المساعدين (ADR-0061 §4)', () => {
     ids.address = addr.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, scheduled_at, total_amount_cents, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', 10000, 1)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned', ($7 || ' 09:00')::timestamp AT TIME ZONE 'Africa/Cairo', 10000, 1)
        RETURNING id`,
       [`RND-${runId}-MAIN`, ids.customerProfile, ids.leadProfile, ids.service, ids.address, ids.zone, TARGET_DAY],
     );

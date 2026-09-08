@@ -71,8 +71,8 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
 
   async function insertRecentAssignedOrder(technicianId: string): Promise<void> {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, assigned_at, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed', now() - interval '1 day', now() - interval '1 day') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, assigned_at, scheduled_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'completed', now() - interval '1 day', now() - interval '1 day') RETURNING id`,
       [`FAIRDONE-${cleanupOrderIds.length}-${runId}`.slice(0, 24), ids.customerProfile, technicianId, ids.service, ids.address, ids.zone],
     );
     cleanupOrderIds.push(order.id as string);
@@ -80,8 +80,8 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
 
   async function insertRecentDeclinedOpportunity(technicianId: string): Promise<void> {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician') RETURNING id`,
       [`FAIRDECL-${cleanupOrderIds.length}-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     cleanupOrderIds.push(order.id as string);

@@ -6,9 +6,9 @@ import { AnalyticsRangeQueryDto, FunnelByServiceQueryDto, resolveRange } from '.
 import { FunnelService } from './funnel.service';
 
 /**
- * لوحة التحليلات (ADR-0075). كل مسار هنا **قراءة بس** — صفر كتابة على أي بيانات تشغيلية.
+ * لوحة التحليلات (ADR-0081). كل مسار هنا **قراءة بس** — صفر كتابة على أي بيانات تشغيلية.
  *
- * `analytics.view` (migration 0273) تشغيلية: فين بيتكسر الفنل. اللوحة المالية بصلاحيتها
+ * `analytics.view` (migration 0293) تشغيلية: فين بيتكسر الفنل. اللوحة المالية بصلاحيتها
  * المنفصلة `analytics.financial.view` — نفس قسمة `reports.view` / `reports.view_revenue`.
  */
 @Controller('admin/analytics')

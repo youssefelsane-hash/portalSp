@@ -15,7 +15,11 @@ import 'technicians_repository.dart';
 // الباراميتر التالت (ADR-0030 Slice D) بيحمل التاريخ الفعّال وقت الاختيار — ممكن يكون مختلف عن
 // requestedAt الأصلي لو العميل جرّب "احجزه في المعاد ده بدلاً" على كارت متعارض جدوليًا.
 typedef TechnicianOrCompanySelected =
-    void Function(String id, bool isCompany, DateTime? effectiveRequestedAt);
+    Future<void> Function(
+      String id,
+      bool isCompany,
+      DateTime? effectiveRequestedAt,
+    );
 
 enum TechnicianSortOption { recommended, lowestPrice, highestRating }
 
@@ -74,6 +78,7 @@ class _TechnicianMarketplaceScreenState
   late final TechniciansRepository _repository;
   List<TechnicianBookingListItem>? _technicians;
   bool _loading = false;
+  bool _selecting = false;
   String? _error;
   TechnicianSortOption _sort = TechnicianSortOption.recommended;
   // ADR-0030 Slice D — "احجزه في المعاد ده بدلاً" على كارت متعارض جدوليًا بيغيّر التاريخ الفعّال
@@ -129,8 +134,21 @@ class _TechnicianMarketplaceScreenState
     _load();
   }
 
-  void _select(String id, bool isCompany) =>
-      widget.onSelect(id, isCompany, _effectiveRequestedAt);
+  Future<void> _select(String id, bool isCompany) async {
+    if (_selecting) return;
+    setState(() => _selecting = true);
+    try {
+      await widget.onSelect(id, isCompany, _effectiveRequestedAt);
+    } on ApiException catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _selecting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -400,8 +418,8 @@ class _TechnicianMarketplaceScreenState
                   ),
                   if (!conflicted)
                     FilledButton(
-                      onPressed: () => _select(t.id, false),
-                      child: const Text('اختار'),
+                      onPressed: _selecting ? null : () => _select(t.id, false),
+                      child: Text(_selecting ? 'جاري التجهيز…' : 'اختار'),
                     )
                   // ADR-0059 §6 — الاقتراح بقى تاريخ حقيقي (أقرب يوم الفني فاضي فيه فعلاً)،
                   // فالزرار بيقول اليوم صراحةً بدل «جرّب» مبهمة. النص اللي المالك طلبه بالحرف:
@@ -571,8 +589,10 @@ class _TechnicianMarketplaceScreenState
                     ),
                     const SizedBox(width: 8),
                     FilledButton(
-                      onPressed: () => _select(c.id, true),
-                      child: const Text('اختار الشركة'),
+                      onPressed: _selecting ? null : () => _select(c.id, true),
+                      child: Text(
+                        _selecting ? 'جاري تجهيز الحجز…' : 'اختار الشركة',
+                      ),
                     ),
                   ],
                 ),

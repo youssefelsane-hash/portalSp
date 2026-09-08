@@ -290,11 +290,11 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       { next_human_readable_number: string }[]
     >("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (
+      `INSERT INTO orders (commission_rate_applied,
          order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
          order_status, estimated_price_cents, inspection_fee_cents, surge_amount_cents, total_amount_cents,
          payment_status, placed_at, closed_at, warranty_expires_at, parent_order_id, source_channel
-       ) VALUES (
+       ) VALUES (20,
          $1,$2,$3,$4,$5,$6,'individual','completed',$7,0,0,$7,'paid',now(),now(),$8,$9,'customer_app'
        ) RETURNING id`,
       [

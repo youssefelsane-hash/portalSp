@@ -1003,6 +1003,20 @@ id, home_profile_id FK, document_type ENUM,   -- invoice | warranty | contract |
 title VARCHAR(160), file_url TEXT, related_order_id UUID NULL, expires_at DATE NULL
 ```
 
+### جداول التشغيل (مش دومين)
+
+```sql
+-- sweep_leases (migration 0272، ADR-0076)
+-- حصرية الدورات المجدولة عبر النسخ. صف لكل دورة (١٨ صف)، مالوش أي علاقة ببيانات الدومين.
+-- **مفيش deleted_at عمدًا**: صف «متشال منطقيًا» هنا = قفل ميت بيمنع الدورة للأبد.
+id, lock_name TEXT UNIQUE,
+holder_token UUID,                    -- fencing: التجديد والتحرير مشروطين بيه
+holder_instance TEXT,                 -- hostname:pid — مين شغّال إيه وقت التشخيص
+acquired_at, renewed_at, expires_at TIMESTAMPTZ,
+run_count BIGINT, last_released_at TIMESTAMPTZ NULL,
+created_at, updated_at
+```
+
 ---
 
 ## 13. عقد الـ API (REST)

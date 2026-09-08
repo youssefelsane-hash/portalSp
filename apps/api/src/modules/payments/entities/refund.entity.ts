@@ -69,4 +69,13 @@ export class Refund {
   // محفظة بس (مفيش بوابة اتحاول أصلاً، ADR-0013 §9). مضافة في migration 0093.
   @Column({ name: 'provider_refund_id', type: 'varchar', length: 120, nullable: true })
   providerRefundId: string | null;
+
+  @Column({ name: 'reconciled_by_user_id', type: 'uuid', nullable: true })
+  reconciledByUserId: string | null;
+
+  @Column({ name: 'reconciled_at', type: 'timestamptz', nullable: true })
+  reconciledAt: Date | null;
+
+  @Column({ name: 'reconciliation_evidence', type: 'text', nullable: true })
+  reconciliationEvidence: string | null;
 }

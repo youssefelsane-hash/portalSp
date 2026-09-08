@@ -89,8 +89,8 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     orderSeq += 1;
     const orderNumber = `TESTCSD-${runId}-${orderSeq}`.slice(0, 24);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'work_completed','unpaid',$7,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'work_completed','unpaid',$7,0) RETURNING id`,
       [orderNumber, ids.customerProfile, ids.techProfile, serviceId, ids.address, ids.zone, totalAmountCents],
     );
     return order.id as string;
@@ -844,8 +844,8 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   it('استرداد دفعة عمل إضافي أصغر يعكس حصتها من إجمالي أرباح الطلب فقط، ثم يقفل الطلب بعد استرداد الدفعة الأساسية أيضًا', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid',120000,96000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'completed','paid',120000,96000) RETURNING id`,
       [
         `TESTCSD-component-${runId}`.slice(0, 24),
         ids.customerProfile,

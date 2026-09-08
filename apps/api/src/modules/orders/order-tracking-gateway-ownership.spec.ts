@@ -7,7 +7,7 @@ import { DataSource } from 'typeorm';
 import { Server as SocketIoServer } from 'socket.io';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import { OrderTrackingGateway } from './order-tracking.gateway';
-import { ordersServiceForGateway } from './orders.testing';
+import { OrderQueriesService } from './order-queries.service';
 import { Order } from './entities/order.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -123,8 +123,8 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
     );
     ids.address = address.id;
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,'accepted',0,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,'accepted',0,0) RETURNING id`,
       [`TESTWS-${runId}`.slice(0, 24), ids.ownerProfile, ids.service, ids.address],
     );
     ids.order = order.id;
@@ -152,7 +152,7 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
       dataSource.getRepository(Order),
       customerProfilesService,
       techniciansService,
-      ordersServiceForGateway(dataSource),
+      new OrderQueriesService(dataSource.getRepository(Order), dataSource, {} as never, {} as never),
       new RealtimeAccessService(dataSource.getRepository(User), jwt, configStub),
       {
         register: jest.fn(),

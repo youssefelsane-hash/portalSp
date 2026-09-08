@@ -109,6 +109,8 @@ export interface ServiceDto {
   assessment_route_policy: 'admin_triage' | 'remote_only' | 'onsite_only' | 'customer_choice';
   remote_assessment_enabled: boolean;
   onsite_assessment_enabled: boolean;
+  /** الفني اللي بيعاين هو نفسه اللي بينفّذ؟ (افتراضي true) — النص المعروض للعميل بيتبعه. */
+  onsite_assessor_executes_work: boolean;
   remote_assessment_fee_cents: number;
   unit_name_ar: string | null;
   quantity_min: number | null;

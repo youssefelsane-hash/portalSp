@@ -116,8 +116,8 @@ describe('OrderMediaService — حدود تفويض المرفقات (Script 2 P
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, placed_at, work_started_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'in_progress','unpaid',20000, now(), now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, placed_at, work_started_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'in_progress','unpaid',20000, now(), now()) RETURNING id`,
       [`TESTMA-${runId}`.slice(0, 24), ids.customerProfile, ids.assignedTechProfile, ids.service, ids.address, zone.id],
     );
     ids.order = order.id;

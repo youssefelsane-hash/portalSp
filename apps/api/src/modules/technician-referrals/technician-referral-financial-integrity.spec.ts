@@ -46,10 +46,9 @@ describe('Technician referral Phase 4 financial integrity', () => {
   async function createOrder(customerIndex: number, label: string): Promise<string> {
     const customer = ids.customers[customerIndex];
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
           order_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed',30000,24000) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'completed',30000,24000) RETURNING id`,
       // runId قبل الـlabel: `order_number` محدود بـ24 حرف، ولو الـrunId في الآخر بيتقص فيبقى
       // الرقم ثابت بين التشغيلات ⇒ تصادم unique مع صفوف تشغيلة سابقة ما اتنضفتش (حصل فعلًا).
       [`TR${runId}-${label}`.slice(0, 24), customer.profile, ids.techProfile, ids.service, customer.address, ids.zone],

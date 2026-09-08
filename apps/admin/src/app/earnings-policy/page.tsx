@@ -37,7 +37,7 @@ type ServicePolicy = {
   name_ar: string;
   slug: string;
   is_active: boolean;
-  platform_commission_cents: number | null;
+  platform_commission_bps: number;
 };
 type ServiceLevelOverride = { service_id: string; technician_level: string; assistant_ratio_bps: number };
 type ServiceSkillOverride = { service_id: string; skill_level: string; factor_bps: number };
@@ -56,15 +56,6 @@ type TechnicianAdjustment = TechnicianOption & {
   effective_from: string;
   effective_until: string | null;
 };
-type ShadowOrder = {
-  order_id: string;
-  order_number: string;
-  legacy_platform_cents: number;
-  v2_platform_cents: number;
-  legacy_worker_pool_cents: number;
-  v2_worker_pool_cents: number;
-  absolute_delta_cents: number;
-};
 type AuditEntry = {
   action: string;
   actor_name: string | null;
@@ -82,8 +73,6 @@ type SimulationResult = {
   }>;
 };
 type Overview = {
-  cutover_enabled: boolean;
-  shadow_enabled: boolean;
   readiness: {
     ready: boolean;
     configured_active_services: number;
@@ -97,8 +86,6 @@ type Overview = {
   service_skill_overrides: ServiceSkillOverride[];
   technicians: TechnicianOption[];
   technician_adjustments: TechnicianAdjustment[];
-  shadow: { compared_orders: number; average_absolute_delta_cents: string; maximum_absolute_delta_cents: number };
-  shadow_orders: ShadowOrder[];
   audit_history: AuditEntry[];
 };
 
@@ -168,7 +155,7 @@ export default function EarningsPolicyPage() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await submit(`service:${service.id}`, `/admin/earnings-policy/services/${service.id}/commission`, {
-      platform_commission_cents: Math.round(Number(form.get('commission_egp')) * 100),
+      platform_commission_bps: Math.round(Number(form.get('commission_percentage')) * 100),
       reason: form.get('reason'),
     });
   }
@@ -245,7 +232,7 @@ export default function EarningsPolicyPage() {
         method: 'POST',
         body: JSON.stringify({
           order_total_cents: Math.round(Number(form.get('total_egp')) * 100),
-          platform_commission_cents: Math.round(Number(form.get('commission_egp')) * 100),
+          platform_commission_bps: Math.round(Number(form.get('commission_percentage')) * 100),
           participants: [
             {
               technician_id: 'simulated-leader',
@@ -281,31 +268,11 @@ export default function EarningsPolicyPage() {
     }
   }
 
-  async function toggleCutover() {
-    if (!overview) return;
-    setSaving('cutover');
-    setError(null);
-    try {
-      await authedFetch('/admin/earnings-policy/cutover', {
-        method: 'POST',
-        body: JSON.stringify({
-          enabled: !overview.cutover_enabled,
-          reason: overview.cutover_enabled ? 'إيقاف تشغيلي من مركز سياسة المستحقات' : 'تفعيل بعد اكتمال فحص الجاهزية',
-        }),
-      });
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'لم يتم تغيير حالة التشغيل');
-    } finally {
-      setSaving(null);
-    }
-  }
-
   return (
     <AppShell>
       <PageHeader
         title="مركز سياسة المستحقات"
-        description="مصدر واحد لعمولة المنصة الثابتة وتوزيع وعاء الفنيين والمساعدين. التعديلات تسري على الطلبات الجديدة فقط."
+        description="مصدر واحد لنسبة عمولة المنصة وتوزيع وعاء الفنيين والمساعدين. التعديلات تسري على الطلبات الجديدة فقط."
       />
 
       {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</div>}
@@ -323,22 +290,9 @@ export default function EarningsPolicyPage() {
                     تم ضبط {overview.readiness.configured_active_services} من {overview.readiness.active_services} خدمة نشطة.
                     {overview.readiness.missing_services.length > 0 && ` المتبقي: ${overview.readiness.missing_services.map((item) => item.name_ar).join('، ')}.`}
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge variant={overview.cutover_enabled ? 'default' : 'secondary'}>
-                      {overview.cutover_enabled ? 'V2 يعمل للطلبات الجديدة' : 'V2 غير مفعّل'}
-                    </Badge>
-                    <Badge variant="outline">المقارنة الصامتة: {overview.shadow_enabled ? 'تعمل' : 'متوقفة'}</Badge>
-                  </div>
                 </div>
               </div>
-              <Button
-                onClick={toggleCutover}
-                disabled={saving === 'cutover' || (!overview.readiness.ready && !overview.cutover_enabled)}
-                variant={overview.cutover_enabled ? 'outline' : 'default'}
-              >
-                <ShieldCheck className="ml-2 h-4 w-4" />
-                {overview.cutover_enabled ? 'إيقاف V2 للطلبات الجديدة' : 'تفعيل V2 بأمان'}
-              </Button>
+              <Badge variant="outline"><ShieldCheck className="ml-2 h-4 w-4" />السياسة مفعّلة للطلبات الجديدة</Badge>
             </CardContent>
           </Card>
 
@@ -404,8 +358,8 @@ export default function EarningsPolicyPage() {
             <div className="mb-3 flex items-center gap-2">
               <Coins className="h-5 w-5 text-emerald-700" />
               <div>
-                <h2 className="text-xl font-bold">عمولة المنصة الثابتة لكل خدمة</h2>
-                <p className="text-sm text-muted-foreground">مبلغ بالجنيه يُخصم مرة واحدة، وليس نسبة من الطلب.</p>
+                <h2 className="text-xl font-bold">نسبة عمولة المنصة لكل خدمة</h2>
+                <p className="text-sm text-muted-foreground">تُحسب كنسبة من إجمالي الطلب، وتُثبت عند إنشاء الطلب.</p>
               </div>
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
@@ -419,13 +373,13 @@ export default function EarningsPolicyPage() {
                           {!service.is_active && <Badge variant="secondary">متوقفة</Badge>}
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {service.platform_commission_cents == null ? 'لم تُضبط بعد' : `الحالي: ${formatEgp(service.platform_commission_cents)}`}
+                          {`الحالي: ${(service.platform_commission_bps / 100).toFixed(2)}%`}
                         </p>
                         <Input className="mt-3" name="reason" placeholder="سبب التعديل" minLength={3} required />
                       </div>
                       <div className="space-y-2">
                         <Label>العمولة بالجنيه</Label>
-                        <Input name="commission_egp" type="number" min="0" step="0.01" dir="ltr" defaultValue={service.platform_commission_cents == null ? '' : service.platform_commission_cents / 100} required />
+                        <Input name="commission_percentage" type="number" min="0" max="100" step="0.01" dir="ltr" defaultValue={service.platform_commission_bps / 100} required />
                         <Button className="w-full" size="sm" disabled={saving === `service:${service.id}`}>حفظ</Button>
                       </div>
                     </form>
@@ -554,7 +508,7 @@ export default function EarningsPolicyPage() {
                 <form className="space-y-3" onSubmit={runSimulation}>
                   <div className="grid grid-cols-2 gap-3">
                     <div><Label>إجمالي الطلب</Label><Input name="total_egp" type="number" min="0" step="0.01" defaultValue="5000" dir="ltr" required /></div>
-                    <div><Label>عمولة المنصة الثابتة</Label><Input name="commission_egp" type="number" min="0" step="0.01" defaultValue="500" dir="ltr" required /></div>
+                    <div><Label>عمولة المنصة %</Label><Input name="commission_percentage" type="number" min="0" max="100" step="0.01" defaultValue="15" dir="ltr" required /></div>
                   </div>
                   <div className="rounded-xl border p-3"><strong className="text-sm">الفني القائد</strong><div className="mt-2 grid grid-cols-2 gap-2"><select name="leader_level" className="h-10 rounded-md border px-2" defaultValue="professional">{overview.levels.map((level) => <option key={level.level} value={level.level}>{level.display_name_ar}</option>)}</select><select name="leader_skill" className="h-10 rounded-md border px-2" defaultValue="expert">{overview.skills.map((skill) => <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>)}</select></div></div>
                   <div className="rounded-xl border p-3"><strong className="text-sm">المساعد</strong><div className="mt-2 grid grid-cols-3 gap-2"><select name="assistant_level" className="h-10 rounded-md border px-2" defaultValue="verified">{overview.levels.map((level) => <option key={level.level} value={level.level}>{level.display_name_ar}</option>)}</select><select name="assistant_skill" className="h-10 rounded-md border px-2" defaultValue="standard">{overview.skills.map((skill) => <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>)}</select><Input name="assistant_adjustment" type="number" step="0.01" defaultValue="5" aria-label="تعديل المساعد بالمئة" dir="ltr" /></div></div>
@@ -573,14 +527,7 @@ export default function EarningsPolicyPage() {
             </Card>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4" />المقارنة الصامتة</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                <p className="text-sm text-muted-foreground">{overview.shadow.compared_orders} طلب تمت مقارنته - متوسط الفرق {formatEgp(Math.round(Number(overview.shadow.average_absolute_delta_cents)))}</p>
-                {overview.shadow_orders.slice(0, 8).map((row) => <div key={row.order_id} className="grid grid-cols-3 gap-2 rounded-xl border p-3 text-sm"><strong>{row.order_number}</strong><span>V1: {formatEgp(row.legacy_platform_cents)}</span><span>V2: {formatEgp(row.v2_platform_cents)}</span></div>)}
-              </CardContent>
-            </Card>
+          <section>
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2 text-base"><History className="h-4 w-4" />آخر تغييرات السياسة</CardTitle></CardHeader>
               <CardContent className="space-y-2">

@@ -50,8 +50,8 @@ describe('OrderInternalNotesService — ملاحظات داخلية على ال�
     );
     ids.service = svc.id;
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,'work_completed','unpaid',10000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
+       VALUES (20,$1,$2,$3,$4,'work_completed','unpaid',10000) RETURNING id`,
       [`NOTES-${runId}`.slice(0, 24), ids.profile, ids.service, ids.address],
     );
     ids.order = order.id;

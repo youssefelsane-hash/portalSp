@@ -421,11 +421,23 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
-  Future<Order> approveInitialQuote(String orderId) async {
+  Future<InitialOrderQuote> getCurrentQuote(String orderId) async {
+    final data = await auth.authedRequest('GET', '/orders/$orderId/current-quote');
+    return InitialOrderQuote.fromJson(data!);
+  }
+
+  Future<Order> approveInitialQuote(
+    String orderId,
+    InitialOrderQuote quote,
+  ) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/approve-initial-quote',
-      body: {'payment_choice': 'electronic'},
+      body: {
+        'quote_id': quote.id,
+        'quote_version': quote.version,
+        'payment_choice': 'electronic',
+      },
     );
     return Order.fromJson(data!);
   }

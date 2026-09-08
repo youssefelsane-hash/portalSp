@@ -127,7 +127,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'loyalty.points_expiry_months': { type: 'number', default: 12, group: 'loyalty', description: 'بعد كام شهر تنتهي نقاط الولاء المكتسبة (0 = ماتنتهيش أبدًا). التغيير بيسري على النقاط الجديدة بس — النقاط القديمة بتحتفظ بتاريخ انتهائها المتسجّل وقت اكتسابها.' },
 
   // ── matching ──────────────────────────────────────────────────────────
-  'matching.batch_size': { type: 'number', default: 5, group: 'matching', description: 'عدد الفنيين في كل دفعة توزيع' },
+  'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب' },
+  'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
   'matching.broaden_to_busy_after_round': { type: 'number', default: 4, group: 'matching', description: 'رقم الجولة اللي بعدها يتوسّع البحث لفنيين مرتبطين لكن مشغولين حاليًا' },
   'matching.company_large_job_boost': { type: 'number', default: 3, group: 'matching', description: 'زيادة معتدلة في ترتيب ممثل الشركة المسجلة للشغل الكبير عند كفاية طاقمها (0 = تعطيل)' },
   'matching.company_large_job_min_crew': { type: 'number', default: 4, group: 'matching', description: 'أقل إجمالي أفراد مطلوب في طلب فريق قبل تطبيق أفضلية الشركة المسجلة (افتراضي 4)' },
@@ -138,6 +139,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.distance_weight_emergency': { type: 'number', default: 2.0, group: 'matching', description: 'وزن المسافة لطلبات الطوارئ — كل كيلومتر بيخصم القيمة دي من نتيجة الفني. 2.0 يعني كل ٥ كم = فرق مستوى فني كامل، فالأقرب بيسبق. لو أقل من الأساسي، الأساسي بيسري' },
   'matching.distance_weight_low_value': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للشغلانات الرخيصة (أقل من أو يساوي matching.low_value_order_cents) — تكلفة الانتقال بتاكل هامش الشغلانة' },
   'matching.distance_weight_near_term': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للطلبات خلال نافذة matching.near_term_request_hours (48 ساعة افتراضيًا) — مفيش مساحة لإعادة توزيع، فالأقرب أضمن' },
+  'matching.emergency_ignore_schedule': { type: 'boolean', default: false, group: 'matching', description: 'بث الطوارئ للكل: لو مفعّل، طلب الطوارئ بيروح لكل فني مؤهّل قريب **بغض النظر عن جدوله** (مشغول بطلب تاني أو حاطط إجازة) — نفس نظام الدفعات والمهل وأوزان المسافة بالحرف، الفرق الوحيد إن الجدول مش داخل الفلترة. الفني يقبل أو يرفض. مقفول افتراضيًا' },
   'matching.emergency_batch_size': { type: 'number', default: 10, group: 'matching', description: 'عدد الفنيين في أول دفعة بث لطلب الطوارئ' },
   'matching.emergency_escalation_after_rounds': { type: 'number', default: 2, group: 'matching', description: 'عدد جولات الطوارئ الفاشلة قبل تصعيد الطلب للإدارة' },
   'matching.emergency_max_technicians_contacted': { type: 'number', default: 40, group: 'matching', description: 'أقصى عدد فنيين يتواصل معاهم النظام لطلب طوارئ واحد قبل التصعيد' },
@@ -149,7 +151,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.low_value_order_cents': { type: 'number', default: 15000, group: 'matching', description: 'حد «الشغلانة الرخيصة» بالقرش (15000 = 150 جنيه) — الطلب تحته بياخد وزن المسافة المخصّص للشغل الرخيص' },
   'matching.near_term_request_hours': { type: 'number', default: 48, group: 'matching', description: 'الشغل اللي معاده خلال العدد ده من الساعات بيتبعت للفنيين كـ"طلب" محتاج قبول (زي الطوارئ) بدل التعيين التلقائي. 0 = تعطيل (كل غير الطوارئ يتعيّن تلقائي).' },
   'matching.near_term_round_timeouts_minutes': { type: 'string', default: '5,15,30', group: 'matching', description: 'مهلة كل موجة بث للشغل القريب بالدقايق، مفصولة بفاصلة — الموجة الأولى 5 دقايق، التانية 15، التالتة 30. أي موجة بعد كده بتاخد آخر قيمة.' },
-  'matching.offer_heavy_workload_technicians': { type: 'boolean', default: true, group: 'matching', description: 'فني تصنيفه HEAVY (شاغل يوم كامل/مدة متعددة الأيام) يتعرضله فرصة اختيارية برضه؟ false = يتستبعد تمامًا زي القديم' },
   'matching.preferred_crew_max_size': { type: 'number', default: 10, group: 'matching', description: 'أقصى عدد أعضاء مقبولين في الفريق المفضّل الدائم لكل فني (docs/08 §36.16)' },
   'matching.recovery_batch_size': { type: 'number', default: 25, group: 'matching', description: 'أقصى عدد طلبات يأخذ دوره في جولة استرداد واحدة' },
   'matching.recovery_initial_backoff_seconds': { type: 'number', default: 60, group: 'matching', description: 'مهلة إعادة المحاولة الأولى للطلب الذي لم يجد فنيًا؛ تتضاعف تدريجيًا لمنع حجب الطلبات الجديدة' },
@@ -159,7 +160,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.reliability_min_ratings_count': { type: 'number', default: 3, group: 'matching', description: 'أقل عدد تقييمات مطلوب قبل ما الموثوقية تأثر على الترتيب — فني تحت العدد ده محايد تمامًا (صفر تأثير سلبي/إيجابي)' },
   'matching.reliability_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة — 0 = معطّل بالكامل (افتراضي)' },
   'matching.tie_break_threshold': { type: 'number', default: 0, group: 'matching', description: 'الفرق بين نتيجتين مرشّحين اللي تحتهم يُعتبروا "متعادلين" لكسر التعادل الموزون عشوائيًا — 0 = معطّل (ترتيب حتمي زي القديم)' },
-  'matching.work_opportunity_exclusive_seconds': { type: 'number', default: 7200, group: 'matching', description: 'مدة حصرية العرض الاختياري الأول؛ بعدها يظل العرض صالحًا لكن يمكن توسيعه بالتوازي لفني آخر' },
   'matching.workload_balance_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن يتطرح من أولوية مستوى الفني (order_priority_weight) عن كل طلب نشط عليه حاليًا — عشان التوزيع يبقى متوازن مش دايمًا نفس الفني الأعلى مستوى/الأقرب (0 = تعطيل)' },
 
   'matching.max_rounds': { type: 'number', default: 4, group: 'matching', description: 'أقصى عدد جولات بث للطلب العادي قبل ما المطابقة تتوقف وتتصعّد' },
@@ -189,7 +189,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── payments ──────────────────────────────────────────────────────────
   'crew.assistant_share_ratio': { type: 'number', default: 0.65, group: 'payments', description: 'نسبة حصة المساعد من حصة الفني في نفس المستوى داخل الطاقم (0.65 = المساعد بياخد 65% من اللي الفني بياخده). بتتضرب في وزن المستوى، مش بديل عنه.' },
-  'earnings.v2_cutover_enabled': { type: 'boolean', default: false, group: 'payments', description: 'Enable policy version 2 for newly created paid orders only after readiness reaches 100%.' },
   'earnings.v2_shadow_enabled': { type: 'boolean', default: true, group: 'payments', description: 'Compare legacy and V2 results without posting V2 wallet movements.' },
   'payments.card_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار الدفع بالبطاقة عبر Paymob للعملاء عند اكتمال الإعداد' },
   'payments.cash_enabled': { type: 'boolean', default: true, group: 'payments', description: 'تفعيل الدفع كاش (تسليم مباشر للفني) — لو اتعطّل، العميل ميقدرش يأكّد تسليم كاش ولا يختاره كوسيلة دفع جديدة' },
@@ -218,7 +217,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.paymob.secret_key': { type: 'string', default: '', group: 'payments_paymob', description: 'Paymob Intention API secret key (secret, encrypted)' },
 
   // ── pricing ───────────────────────────────────────────────────────────
-  'commission_base.discount_reduces_technician_share': { type: 'boolean', default: false, group: 'pricing', description: 'false = الخصم (كوبون/عمارة) بيتحمّله نصيب الشركة وحدها، والفني بياخد على سعر الشغل الكامل قبل الخصم.' },
   'commission_base.include_additional_items': { type: 'boolean', default: true, group: 'pricing', description: 'البنود الإضافية المعتمدة أثناء الشغل داخل الوعاء (طلب مالك صريح: "ده برضه بيعتبر ضمن الشغل").' },
   'commission_base.include_addons': { type: 'boolean', default: true, group: 'pricing', description: 'إضافات الكتالوج المختارة وقت الحجز داخل الوعاء — شغل إضافي حقيقي بينفّذه الفني.' },
   'commission_base.include_emergency_surcharge': { type: 'boolean', default: false, group: 'pricing', description: 'رسوم الطوارئ الإضافية: false = 100% للشركة.' },

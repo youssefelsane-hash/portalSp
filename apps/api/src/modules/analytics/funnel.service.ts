@@ -47,7 +47,7 @@ export class FunnelService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   /**
-   * فنل رحلة الحجز الكامل (ADR-0075 §3).
+   * فنل رحلة الحجز الكامل (ADR-0081 §3).
    *
    * **وحدة العد بتختلف بين نصّين الفنل عن قصد، وده مذكور في الرد نفسه:**
    * - المراحل قبل الطلب بتتعد بـ**المحاولة** (`funnel_session_id`) — العميل الواحد ممكن يحاول

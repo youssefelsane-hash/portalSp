@@ -66,6 +66,17 @@ describe('formula-evaluator', () => {
   });
 
   describe('evaluateFormulaNode — عمليات حسابية', () => {
+    it('شرط multi_select يطابق أي اختيار محفوظ بدل مقارنة النص المفصول بفواصل كله', () => {
+      const node: FormulaNode = {
+        type: 'if',
+        condition: { field_key: 'materials', op: 'equals', value: 'copper' },
+        then: { type: 'literal', value: 1 },
+        else: { type: 'literal', value: 0 },
+      };
+      expect(evaluateFormulaNode(node, context({ fieldValues: { materials: 'steel,copper' } }))).toBe(1);
+      expect(evaluateFormulaNode({ ...node, condition: { field_key: 'materials', op: 'not_equals', value: 'copper' } }, context({ fieldValues: { materials: 'steel,copper' } }))).toBe(0);
+    });
+
     it('add بيجمع كل الـ operands', () => {
       const node: FormulaNode = { type: 'add', operands: [{ type: 'literal', value: 10 }, { type: 'literal', value: 5 }, { type: 'literal', value: 2 }] };
       expect(evaluateFormulaNode(node, context())).toBe(17);
