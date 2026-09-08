@@ -295,7 +295,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
 
     await expect(
       ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newScheduledAt: target.toISOString() }, 'تأجيل ليوم إجازة الفني'),
-    ).rejects.toThrow(/مش متاح في اليوم ده/);
+    ).rejects.toThrow(/مش متاح في الموعد الجديد/);
   });
 
   it('يوم فيه طلب تاني "يوم كامل" لنفس الفني بيترفض، والطلب مابيتعارضش مع نفسه', async () => {
@@ -305,7 +305,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
 
     await expect(
       ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newScheduledAt: busyDay.toISOString() }, 'تأجيل ليوم مشغول'),
-    ).rejects.toThrow(/مش متاح في اليوم ده/);
+    ).rejects.toThrow(/مش متاح في الموعد الجديد/);
 
     // نفس اليوم الأصلي للطلب: لو الطلب كان بيتعارض مع نفسه، ده كان هيفشل — وده كان هيكسر أي
     // إعادة جدولة "لنفس اليوم بوقت تاني" تمامًا.

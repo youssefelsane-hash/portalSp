@@ -171,8 +171,9 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, payment_method, total_amount_cents, discount_amount_cents,
                            commissionable_base_cents, technician_earning_cents, platform_commission_cents,
-                           commission_rate_applied, level_premium_cents, warranty_price_cents, closed_at, paid_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid','cash',100000,0,100000,85000,15000,15,0,0,$7,$7) RETURNING id`,
+                           commission_rate_applied, level_premium_cents, warranty_price_cents,
+                           worker_pool_cents, calculation_algorithm_version, closed_at, paid_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid','cash',100000,0,100000,85000,15000,15,0,0,85000,'v2',$7,$7) RETURNING id`,
       [`REC${runId}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, `${MONTH}-10T09:00:00Z`],
     );
     const [payment] = await q(

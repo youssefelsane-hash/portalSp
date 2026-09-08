@@ -83,8 +83,8 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     const [order] = await dataSource.query(
       `INSERT INTO orders (commission_rate_applied,order_number,customer_id,address_id,service_id,order_status,payment_method,
                            total_amount_cents,technician_id,booking_mode,standard_data_id,estimated_duration_days,
-                           assistant_daily_wage_cents_snapshot)
-       VALUES (20,$1,$2,$3,$4,'work_completed','cash',100000,$5,'team',$6,2,20000) RETURNING id`,
+                           assistant_daily_wage_cents_snapshot,settlement_policy_version)
+       VALUES (20,$1,$2,$3,$4,'work_completed','cash',100000,$5,'team',$6,2,20000,1) RETURNING id`,
       [`ORD-SHARE-${runId}`, ids.customerId, ids.addressId, ids.serviceId, ids.leaderId, ids.standardDataId],
     );
     ids.orderId = order.id;
