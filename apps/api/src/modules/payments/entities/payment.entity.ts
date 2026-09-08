@@ -19,6 +19,11 @@ export enum PaymentMethod {
 export enum PaymentGatewayStatus {
   PENDING = 'pending',
   PROCESSING = 'processing',
+  /**
+   * المزود قد يكون نفّذ العملية لكن ردّه لم يصل أو كان غير صالح للتحقق.
+   * لا تعني فشل التحصيل ولا نجاحه، وتحظر إنشاء محاولة تلقائية بديلة.
+   */
+  MANUAL_REVIEW = 'manual_review',
   SUCCEEDED = 'succeeded',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
@@ -85,6 +90,13 @@ export class Payment {
 
   @Column({ name: 'idempotency_key', type: 'varchar', length: 80, unique: true })
   idempotencyKey: string;
+
+  /**
+   * حاجز فريد لمحاولة تحصيل أصلية نشطة لنفس الطلب. يبقى موجودًا فقط حتى تتأكد
+   * نتيجة البوابة أو يحسمها موظف مخول؛ الدفعات الإضافية والأقساط لها هوياتها الخاصة.
+   */
+  @Column({ name: 'active_order_payment_guard', type: 'varchar', length: 96, nullable: true })
+  activeOrderPaymentGuard: string | null;
 
   @CreateDateColumn({ name: 'initiated_at', type: 'timestamptz' })
   initiatedAt: Date;

@@ -20,7 +20,8 @@ export class OrderRescheduledNotificationListener {
 
   @OnEvent(ORDER_RESCHEDULED_EVENT)
   async handle(event: OrderRescheduledEvent): Promise<void> {
-    const deliveries = [this.notifyTechnician(event)];
+    const deliveries: Promise<void>[] = [];
+    if (event.technicianProfileId) deliveries.push(this.notifyTechnician(event));
     if (event.source === 'admin') deliveries.push(this.notifyCustomer(event));
 
     const results = await Promise.allSettled(deliveries);
@@ -33,6 +34,7 @@ export class OrderRescheduledNotificationListener {
   }
 
   private async notifyTechnician(event: OrderRescheduledEvent): Promise<void> {
+    if (!event.technicianProfileId) return;
     const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianProfileId);
     const newTimeAr = event.newScheduledAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
     const technicianRequested = event.source === 'technician_request';

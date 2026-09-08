@@ -20,7 +20,31 @@ describe('RecurringOrdersService — تحصيل بطاقة الحجز المتك
       {} as never,
       eventEmitter,
       {} as never,
-      { query } as unknown as DataSource,
+      {
+        query,
+        getRepository: () => ({ findOne: jest.fn().mockResolvedValue(null) }),
+        transaction: async (work: (manager: unknown) => unknown) =>
+          work({
+            createQueryBuilder: () => ({
+              setLock: () => ({
+                where: () => ({
+                  getOne: async () => ({
+                    id: 'order-1',
+                    orderNumber: 'ORD-TEST-1',
+                    customerId: 'customer-1',
+                    technicianId: null,
+                    orderStatus: 'pending_payment',
+                    recurringTemplateId: 'template-1',
+                    recurringPaymentAttemptCount: 1,
+                    scheduledAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+                  }),
+                }),
+              }),
+            }),
+            save: jest.fn(),
+            create: (_entity: unknown, value: unknown) => value,
+          }),
+      } as unknown as DataSource,
       payments,
     );
     return { service, eventEmitter, payments };
@@ -44,8 +68,9 @@ describe('RecurringOrdersService — تحصيل بطاقة الحجز المتك
     await (service as unknown as { sweepRecurringPaymentCollection(): Promise<void> }).sweepRecurringPaymentCollection();
 
     expect(payments.attemptRecurringOrderCardCharge).toHaveBeenCalledWith('order-1', 1);
-    expect(query.mock.calls[1][0]).toContain('recurring_payment_next_attempt_at');
-    expect(query.mock.calls[1][1]).toEqual(['order-1', 24, 24]);
+    expect(query.mock.calls[0][0]).toContain('recurring_payment_next_attempt_at');
+    // آخر محاولة تُحجز عند T-25، لا عند T-24 بالضبط حيث قد تضيع بسبب فرق millisecond.
+    expect(query.mock.calls[0][1][3]).toBe(25);
     expect((eventEmitter.emit as jest.Mock)).toHaveBeenCalledWith(
       RECURRING_CARD_PAYMENT_FAILED_EVENT,
       expect.objectContaining({ orderId: 'order-1', attemptNumber: 1, cancelled: false }),
@@ -70,7 +95,18 @@ describe('RecurringOrdersService — تحصيل بطاقة الحجز المتك
     await (service as unknown as { sweepRecurringPaymentCollection(): Promise<void> }).sweepRecurringPaymentCollection();
 
     expect(payments.attemptRecurringOrderCardCharge).toHaveBeenCalledWith('order-2', 1);
-    expect(query.mock.calls[1][0]).toContain('scheduled_at -');
+    expect(query.mock.calls[1][0]).toContain('recurring_payment_next_attempt_at = NULL');
     expect((eventEmitter.emit as jest.Mock)).not.toHaveBeenCalled();
+  });
+
+  it('تذكير الكاش لا يستهدف المسودات أو الدفعات المنتظرة أو الطلبات المنتهية', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const { service } = buildService(query, { status: PaymentGatewayStatus.PENDING, failureReason: null });
+
+    await (service as unknown as { sendRecurringCashReminders(): Promise<void> }).sendRecurringCashReminders();
+
+    expect(query.mock.calls[0][0]).toContain("o.order_status IN (");
+    expect(query.mock.calls[0][0]).toContain("'searching_technician'");
+    expect(query.mock.calls[0][0]).not.toContain("o.order_status NOT IN ('cancelled_by_customer'");
   });
 });

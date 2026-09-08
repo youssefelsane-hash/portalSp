@@ -112,4 +112,8 @@ describe('order-state-machine — تسعير الإدارة من الصور', ()
     expect(canTransition(OrderStatus.AWAITING_ADMIN_QUOTE, OrderStatus.CANCELLED_BY_CUSTOMER)).toBe(true);
     expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_CUSTOMER)).toBe(true);
   });
+
+  it('يسمح للأدمن بإغلاق عرض المعاينة الذي تركه العميل بلا رد', () => {
+    expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+  });
 });

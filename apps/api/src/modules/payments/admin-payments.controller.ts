@@ -30,6 +30,7 @@ import { ListRefundsQueryDto } from './dto/list-refunds-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
 import { RejectInstaPayPaymentDto } from './dto/reject-instapay-payment.dto';
+import { ReconcileRefundDto } from './dto/reconcile-refund.dto';
 import { SetInstaPayQrLinkDto } from './dto/set-instapay-qr-link.dto';
 import {
   toAdminPayoutResponseDto,
@@ -92,6 +93,24 @@ export class AdminPaymentsController {
   ) {
     return toRefundResponseDto(
       await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, dto.amount_cents, audit, dto.payment_id),
+    );
+  }
+
+  /**
+   * لا يفتح استردادًا جديدًا: يقفل فقط صف PROCESSING موجود بعد مراجعة دليل المزود يدويًا.
+   * النجاح يطبق القيود المحلية مرة واحدة داخل transaction، والرفض يحرر الحجز مع سجل تدقيق.
+   */
+  @Post('refunds/:id/reconcile')
+  @RequirePermission('refunds.issue')
+  @RequireStepUp()
+  async reconcileRefund(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReconcileRefundDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toRefundResponseDto(
+      await this.paymentsService.reconcileRefund(user.sub, id, dto.outcome, dto.evidence, dto.provider_refund_id, audit),
     );
   }
 

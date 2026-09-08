@@ -90,14 +90,13 @@ describe('أساس العمولة (ADR-0037)', () => {
     expect(split.technicianEarningCents + split.platformCommissionCents).toBe(totalAmountCents);
   });
 
-  it('لو الأدمن شغّل discount_reduces_technician_share صراحةً: الخصم بيتخصم من الوعاء', () => {
-    // المفتاح ده موجود للمرونة بس تشغيله بيخالف قرار المالك في ADR-0038 صراحةً.
+  it('الخصم لا يغيّر وعاء الفني تحت أي إعدادات أخرى', () => {
     const components: OrderRevenueComponents = { ...ownerScenario, warrantyPriceCents: 0, discountCents: 50_000 };
-    const withFlag = computeCommissionableBase(components, {
+    const base = computeCommissionableBase(components, {
       ...DEFAULT_COMMISSION_BASE_POLICY,
-      discountReducesTechnicianShare: true,
+      includeEmergencySurcharge: true,
     });
-    expect(withFlag.commissionableBaseCents).toBe(50_000);
+    expect(base.commissionableBaseCents).toBe(100_000);
   });
 
   it('الثابت المحاسبي: نصيب الفني + نصيب الشركة = الإجمالي، في كل الحالات', () => {

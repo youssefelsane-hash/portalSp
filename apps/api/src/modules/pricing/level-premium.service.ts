@@ -50,6 +50,10 @@ export class LevelPremiumService {
   ): Promise<number> {
     if (order.requestedTechnicianId) return 0;
     if (order.requestedTechnicianCompanyId) return 0;
+    // سعر المعاينة الذي وافق عليه العميل نهائي. `initialQuoteSource` هو الـsnapshot الذي
+    // يميّز هذا المسار عن الحجز العادي ذي السعر المؤكد؛ priceStatus وحده لا يكفي لأن الحجز
+    // العادي يستخدم CONFIRMED أيضًا ويظل مسموحًا له بعلاوة المستوى المعلنة.
+    if (order.initialQuoteSource != null) return 0;
     return this.applyPremium(manager, order, technician, order.estimatedPriceCents);
   }
 
@@ -71,6 +75,7 @@ export class LevelPremiumService {
     technician: Pick<TechnicianProfile, 'currentLevel' | 'pricingTier'>,
   ): Promise<number> {
     if (order.requestedTechnicianCompanyId) return 0;
+    if (order.initialQuoteSource != null) return 0;
     return this.applyPremium(manager, order, technician, order.totalAmountCents);
   }
 

@@ -96,6 +96,9 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.AWAITING_TECHNICIAN_SELECTION,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.CANCELLED_BY_CUSTOMER,
+    // العميل قد يترك عرض المعاينة بلا رد بعد أن أنهى الفني التشخيص. الأدمن يحتاج إغلاقًا
+    // تشغيليًا موثقًا كي لا يظل الطلب حجزًا وهميًا في قوائم التنفيذ إلى الأبد.
+    OrderStatus.CANCELLED_BY_SYSTEM,
   ],
   // A remote quote has been accepted, but provider and final level-adjusted price are not locked
   // yet. The customer can finish selection, cancel, or let operations cancel the request.

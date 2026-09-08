@@ -1,5 +1,6 @@
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
+import { OrderStatus } from '../orders/entities/order.entity';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 describe('PaymentsService — unknown provider-registration outcome', () => {
@@ -16,7 +17,14 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       getProvider: jest.fn().mockReturnValue(provider),
     };
     const service = new PaymentsService(
-      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'order-1',
+          customerId: 'customer-1',
+          orderStatus: OrderStatus.PENDING_PAYMENT,
+          totalAmountCents: 100000,
+        }),
+      } as never,
       paymentRepository as never,
       {} as never,
       { findOne: jest.fn().mockResolvedValue({ id: 'user-1', fullName: 'عميل اختبار', email: null, phoneNumber: '+201000000000' }) } as never,
@@ -24,7 +32,10 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       {} as never,
       {} as never,
       {} as never,
-      { findByProfileIdOrThrow: jest.fn().mockResolvedValue({ userId: 'user-1' }) } as never,
+      {
+        findByUserIdOrThrow: jest.fn().mockResolvedValue({ id: 'customer-1', userId: 'user-1' }),
+        findByProfileIdOrThrow: jest.fn().mockResolvedValue({ id: 'customer-1', userId: 'user-1' }),
+      } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -40,7 +51,7 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
     return { service, paymentRepository, provider, paymentProviders };
   };
 
-  it('الـtimeout لا يتحول إلى FAILED؛ يظل PROCESSING لحين webhook أو reconciliation', async () => {
+  it('الـtimeout لا يتحول إلى FAILED؛ يصبح مراجعة مالية صريحة لحين webhook أو reconciliation', async () => {
     const payment = {
       id: 'payment-1',
       customerId: 'customer-1',
@@ -62,16 +73,16 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       ),
     ).rejects.toThrow('gateway timeout');
 
-    expect(payment.paymentStatus).toBe(PaymentGatewayStatus.PROCESSING);
+    expect(payment.paymentStatus).toBe(PaymentGatewayStatus.MANUAL_REVIEW);
     expect(payment.failureCode).toBe('GATEWAY_REGISTRATION_OUTCOME_UNKNOWN');
     expect(paymentRepository.save).toHaveBeenCalledWith(payment);
   });
 
-  it('لا يعيد إنشاء عملية دفع عند إعادة نفس Idempotency-Key وهي PROCESSING', async () => {
+  it('لا يعيد إنشاء عملية دفع عند إعادة نفس Idempotency-Key وهي تحت مراجعة مالية', async () => {
     const existing = {
       id: 'payment-1',
       orderId: 'order-1',
-      paymentStatus: PaymentGatewayStatus.PROCESSING,
+      paymentStatus: PaymentGatewayStatus.MANUAL_REVIEW,
       gatewayResponse: null,
     } as Payment;
     const { service, provider } = makeService({ existingPayment: existing });
@@ -80,7 +91,7 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       (service as unknown as {
         payWithProvider: (userId: string, orderId: string, idempotencyKey: string, method: PaymentMethod) => Promise<unknown>;
       }).payWithProvider('user-1', 'order-1', 'same-idempotency-key', PaymentMethod.CARD),
-    ).rejects.toThrow('قيد التحقق عند البوابة');
+    ).rejects.toThrow('تحتاج مراجعة مالية');
 
     expect(provider.createPayment).not.toHaveBeenCalled();
   });

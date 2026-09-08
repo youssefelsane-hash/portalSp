@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -36,6 +36,19 @@ export class TechnicianKpiService {
     private readonly auditLog: AuditLogService,
     private readonly notifications: NotificationsService,
   ) {}
+
+  /** كل انتقال حساس يقفل نفس السنابشوت، فلا يتحول calculate/approve/pay المتوازي إلى آخر حفظ يفوز. */
+  private async lockSnapshotOrThrow(manager: EntityManager, id: string): Promise<TechnicianKpiSnapshot> {
+    const snapshot = await manager
+      .createQueryBuilder(TechnicianKpiSnapshot, 'snapshot')
+      .setLock('pessimistic_write')
+      .where('snapshot.id = :id', { id })
+      .getOne();
+    if (!snapshot) {
+      throw new ApiException(ErrorCode.VAL_001, 'سنابشوت الـKPI غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return snapshot;
+  }
 
   /**
    * بيحسب/يعيد حساب سنابشوت الشهر لكل الفنيين النشطين (أو فني واحد لو اتحدد). محمي بقاعدة
@@ -120,12 +133,29 @@ export class TechnicianKpiService {
         calculatedAt: new Date(),
       };
 
-      if (existing) {
-        await this.snapshots.update(existing.id, payload);
-      } else {
-        await this.snapshots.save(this.snapshots.create(payload));
-      }
-      calculated += 1;
+      const committed = await this.snapshots.manager.transaction(async (manager) => {
+        // يمنع عمليتي calculate لنفس الفني/الشهر من سباق إنشاء صف فريد، من غير قفل طويل أثناء
+        // تجميع المقاييس نفسه الذي تم خارج المعاملة.
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`kpi:${techId}:${periodYear}:${periodMonth}`]);
+        const current = await manager
+          .createQueryBuilder(TechnicianKpiSnapshot, 'snapshot')
+          .setLock('pessimistic_write')
+          .where('snapshot.technician_id = :technicianId AND snapshot.period_year = :periodYear AND snapshot.period_month = :periodMonth', {
+            technicianId: techId,
+            periodYear,
+            periodMonth,
+          })
+          .getOne();
+        if (current?.status === KpiSnapshotStatus.APPROVED || current?.status === KpiSnapshotStatus.PAID) return false;
+        if (current) {
+          await manager.save(TechnicianKpiSnapshot, { ...current, ...payload });
+        } else {
+          await manager.save(TechnicianKpiSnapshot, manager.create(TechnicianKpiSnapshot, payload));
+        }
+        return true;
+      });
+      if (committed) calculated += 1;
+      else skippedLocked += 1;
     }
 
     this.logger.log(
@@ -228,25 +258,32 @@ export class TechnicianKpiService {
       );
     }
 
-    const oldValues = { status: snapshot.status, approved_bonus_cents: snapshot.approvedBonusCents };
-    snapshot.status = KpiSnapshotStatus.APPROVED;
-    snapshot.approvedBonusCents = approvedBonusCents;
-    snapshot.approvedByUserId = approvedByUserId;
-    snapshot.approvedAt = new Date();
-    snapshot.approvalNotes = notes;
-    await this.snapshots.save(snapshot);
-
-    await this.auditLog.record({
-      actorUserId: approvedByUserId,
-      actorRole: 'admin',
-      action: 'technician_kpi.approved',
-      entityType: 'technician_kpi_snapshot',
-      entityId: snapshot.id,
-      oldValues,
-      newValues: { status: snapshot.status, approved_bonus_cents: approvedBonusCents },
+    return this.snapshots.manager.transaction(async (manager) => {
+      const locked = await this.lockSnapshotOrThrow(manager, id);
+      if (locked.status === KpiSnapshotStatus.APPROVED || locked.status === KpiSnapshotStatus.PAID) {
+        throw new ApiException(ErrorCode.VAL_001, 'السنابشوت ده اتوافق عليه بالفعل', HttpStatus.CONFLICT);
+      }
+      const oldValues = { status: locked.status, approved_bonus_cents: locked.approvedBonusCents };
+      locked.status = KpiSnapshotStatus.APPROVED;
+      locked.approvedBonusCents = approvedBonusCents;
+      locked.approvedByUserId = approvedByUserId;
+      locked.approvedAt = new Date();
+      locked.approvalNotes = notes;
+      await manager.save(locked);
+      await this.auditLog.record(
+        {
+          actorUserId: approvedByUserId,
+          actorRole: 'admin',
+          action: 'technician_kpi.approved',
+          entityType: 'technician_kpi_snapshot',
+          entityId: locked.id,
+          oldValues,
+          newValues: { status: locked.status, approved_bonus_cents: approvedBonusCents },
+        },
+        manager,
+      );
+      return locked;
     });
-
-    return snapshot;
   }
 
   async reject(id: string, rejectedByUserId: string, reason: string): Promise<TechnicianKpiSnapshot> {
@@ -254,79 +291,90 @@ export class TechnicianKpiService {
     if (snapshot.status === KpiSnapshotStatus.APPROVED || snapshot.status === KpiSnapshotStatus.PAID) {
       throw new ApiException(ErrorCode.VAL_001, 'مينفعش ترفض سنابشوت اتوافق عليه/اتصرف بالفعل', HttpStatus.CONFLICT);
     }
-    const oldValues = { status: snapshot.status };
-    snapshot.status = KpiSnapshotStatus.REJECTED;
-    snapshot.rejectedReason = reason;
-    await this.snapshots.save(snapshot);
-
-    await this.auditLog.record({
-      actorUserId: rejectedByUserId,
-      actorRole: 'admin',
-      action: 'technician_kpi.rejected',
-      entityType: 'technician_kpi_snapshot',
-      entityId: snapshot.id,
-      oldValues,
-      newValues: { status: snapshot.status, reason },
+    return this.snapshots.manager.transaction(async (manager) => {
+      const locked = await this.lockSnapshotOrThrow(manager, id);
+      if (locked.status === KpiSnapshotStatus.APPROVED || locked.status === KpiSnapshotStatus.PAID) {
+        throw new ApiException(ErrorCode.VAL_001, 'مينفعش ترفض سنابشوت اتوافق عليه/اتصرف بالفعل', HttpStatus.CONFLICT);
+      }
+      const oldValues = { status: locked.status };
+      locked.status = KpiSnapshotStatus.REJECTED;
+      locked.rejectedReason = reason;
+      await manager.save(locked);
+      await this.auditLog.record(
+        {
+          actorUserId: rejectedByUserId,
+          actorRole: 'admin',
+          action: 'technician_kpi.rejected',
+          entityType: 'technician_kpi_snapshot',
+          entityId: locked.id,
+          oldValues,
+          newValues: { status: locked.status, reason },
+        },
+        manager,
+      );
+      return locked;
     });
-
-    return snapshot;
   }
 
   /** صرف المكافأة المعتمدة فعليًا عبر نظام المحفظة — idempotent (status='approved' بس قابل للصرف). */
   async pay(id: string, paidByUserId: string): Promise<TechnicianKpiSnapshot> {
-    const snapshot = await this.getOrThrow(id);
-    if (snapshot.status !== KpiSnapshotStatus.APPROVED) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم يتوافق على السنابشوت الأول قبل الصرف', HttpStatus.CONFLICT);
-    }
-    if (!snapshot.approvedBonusCents || snapshot.approvedBonusCents <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'المبلغ المعتمد صفر — مفيش حاجة تُصرف', HttpStatus.BAD_REQUEST);
-    }
-
-    const technician = await this.technicianProfiles.findOne({ where: { id: snapshot.technicianId } });
-    if (!technician) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني غير موجود', HttpStatus.NOT_FOUND);
-    }
-
-    const platformWallet = await this.wallets.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-    const technicianWallet = await this.wallets.getOrCreateWallet(technician.userId, WalletOwnerType.TECHNICIAN);
-
-    const { credit } = await this.wallets.doubleEntry({
-      fromWalletId: platformWallet.id,
-      toWalletId: technicianWallet.id,
-      amountCents: snapshot.approvedBonusCents,
-      transactionType: WalletTxType.BONUS,
-      referenceType: 'technician_kpi_snapshot',
-      referenceId: snapshot.id,
-      descriptionAr: `مكافأة أداء KPI — ${snapshot.periodMonth}/${snapshot.periodYear}`,
-      performedByUserId: paidByUserId,
-      allowNegativeBalance: true,
-    });
-
-    snapshot.status = KpiSnapshotStatus.PAID;
-    snapshot.paidAt = new Date();
-    snapshot.walletCreditTxId = credit.id;
-    await this.snapshots.save(snapshot);
-
-    await this.auditLog.record({
-      actorUserId: paidByUserId,
-      actorRole: 'admin',
-      action: 'technician_kpi.paid',
-      entityType: 'technician_kpi_snapshot',
-      entityId: snapshot.id,
-      newValues: { amount_cents: snapshot.approvedBonusCents, wallet_credit_tx_id: credit.id },
+    const paid = await this.snapshots.manager.transaction(async (manager) => {
+      const snapshot = await this.lockSnapshotOrThrow(manager, id);
+      if (snapshot.status !== KpiSnapshotStatus.APPROVED) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم يتوافق على السنابشوت الأول قبل الصرف', HttpStatus.CONFLICT);
+      }
+      if (!snapshot.approvedBonusCents || snapshot.approvedBonusCents <= 0) {
+        throw new ApiException(ErrorCode.VAL_001, 'المبلغ المعتمد صفر — مفيش حاجة تُصرف', HttpStatus.BAD_REQUEST);
+      }
+      const technician = await manager.findOne(TechnicianProfile, { where: { id: snapshot.technicianId } });
+      if (!technician) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني غير موجود', HttpStatus.NOT_FOUND);
+      }
+      const platformWallet = await this.wallets.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+      const technicianWallet = await this.wallets.getOrCreateWallet(technician.userId, WalletOwnerType.TECHNICIAN, manager);
+      const { credit } = await this.wallets.doubleEntry(
+        {
+          fromWalletId: platformWallet.id,
+          toWalletId: technicianWallet.id,
+          amountCents: snapshot.approvedBonusCents,
+          transactionType: WalletTxType.BONUS,
+          referenceType: 'technician_kpi_snapshot',
+          referenceId: snapshot.id,
+          descriptionAr: `مكافأة أداء KPI — ${snapshot.periodMonth}/${snapshot.periodYear}`,
+          performedByUserId: paidByUserId,
+          allowNegativeBalance: true,
+        },
+        manager,
+      );
+      snapshot.status = KpiSnapshotStatus.PAID;
+      snapshot.paidAt = new Date();
+      snapshot.walletCreditTxId = credit.id;
+      await manager.save(snapshot);
+      await this.auditLog.record(
+        {
+          actorUserId: paidByUserId,
+          actorRole: 'admin',
+          action: 'technician_kpi.paid',
+          entityType: 'technician_kpi_snapshot',
+          entityId: snapshot.id,
+          newValues: { amount_cents: snapshot.approvedBonusCents, wallet_credit_tx_id: credit.id },
+        },
+        manager,
+      );
+      return { snapshot, technicianUserId: technician.userId };
     });
 
     this.notifications
       .notify({
-        userId: technician.userId,
+        userId: paid.technicianUserId,
         notificationType: 'technician_kpi_bonus_paid',
         titleAr: 'مكافأة أداء شهرية',
-        bodyAr: `اتصرفت مكافأة أداء بقيمة ${(snapshot.approvedBonusCents / 100).toFixed(0)} ج.م. عن ${snapshot.periodMonth}/${snapshot.periodYear}`,
+        bodyAr: `اتصرفت مكافأة أداء بقيمة ${((paid.snapshot.approvedBonusCents ?? 0) / 100).toFixed(0)} ج.م. عن ${paid.snapshot.periodMonth}/${paid.snapshot.periodYear}`,
         referenceType: 'technician_kpi_snapshot',
-        referenceId: snapshot.id,
+        referenceId: paid.snapshot.id,
       })
       .catch((err) => this.logger.warn(`فشل إرسال إشعار مكافأة KPI: ${err.message}`));
 
-    return snapshot;
+    return paid.snapshot;
   }
 }

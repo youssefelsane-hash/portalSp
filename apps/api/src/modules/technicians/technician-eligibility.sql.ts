@@ -282,10 +282,11 @@ function blockedExistsExpr(opts: {
   technicianIdExpr: string;
   scheduledAtParam: string;
   serviceDurationExpr: string;
+  dailyCapacityMinutesParam: string;
   candidateLoad?: CandidateLoadSource;
 }): string {
-  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, candidateLoad } = opts;
-  const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad) : '1';
+  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, dailyCapacityMinutesParam, candidateLoad } = opts;
+  const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad, dailyCapacityMinutesParam) : '1';
   const candidateStart = `COALESCE(${scheduledAtParam}::timestamptz, now())`;
   // نهاية النافذة = البداية + (أيام الشغل - 1) + مدة اليوم. لشغل يوم واحد بترجع للسلوك الصح
   // القديم بالظبط (بداية + المدة)، فمفيش إفراط في التقييد لإجازة مش متقاطعة.

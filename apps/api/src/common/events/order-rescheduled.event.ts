@@ -9,7 +9,9 @@ export class OrderRescheduledEvent {
   constructor(
     public readonly orderId: string,
     public readonly orderNumber: string,
-    public readonly technicianProfileId: string,
+    // الطلب قد يعاد جدولته قبل تعيين أي منفّذ؛ في هذه الحالة نحدّث العميل ولوحات
+    // العمليات فقط، ولا نحاول إرسال إشعار لفني غير موجود.
+    public readonly technicianProfileId: string | null,
     public readonly customerProfileId: string,
     public readonly previousScheduledAt: Date | null,
     public readonly newScheduledAt: Date,

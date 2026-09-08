@@ -44,8 +44,22 @@ function committedOrdersSource(technicianIdExpr: string, alias: string): string 
  * ADR-0050)، بحد أدنى يوم واحد. ده بالظبط اللي المالك أشار له: «عدد الأيام اللي الـprice engine
  * بيحددها».
  */
-function spanDaysExpr(alias: string): string {
-  return `GREATEST(COALESCE(CEIL(${alias}.estimated_duration_days)::int, 1), 1)`;
+function spanDaysExpr(alias: string, capacityParam: string): string {
+  const minutes = `COALESCE(${alias}.duration_minutes, ${alias}.duration_hours * 60)`;
+  return `CASE
+      WHEN ${alias}.pricing_period_start IS NOT NULL AND ${alias}.pricing_period_end IS NOT NULL
+        THEN GREATEST(
+          ((${alias}.pricing_period_end AT TIME ZONE 'Africa/Cairo')::date
+            - (${alias}.pricing_period_start AT TIME ZONE 'Africa/Cairo')::date) + 1,
+          1
+        )
+      -- A precise duration is the operational source of truth. The day estimate
+      -- remains the full-day fallback for legacy/day-priced work with no hour estimate.
+      ELSE CASE
+        WHEN ${minutes} IS NOT NULL THEN GREATEST(CEIL(${minutes}::numeric / ${capacityParam}::numeric)::int, 1)
+        ELSE GREATEST(COALESCE(CEIL(${alias}.estimated_duration_days)::int, 1), 1)
+      END
+    END`;
 }
 
 /**
@@ -61,24 +75,30 @@ function spanDaysExpr(alias: string): string {
  *
  * الترتيب الجديد بيقرا المعلومة الأدق الأول:
  *
- *  1. **`estimated_duration_days > 1`** ⇒ اليوم بالكامل. ده الشغل الممتد الحقيقي (تركيب/تشطيب
- *     على أيام): اللي بياخد 3 أيام مش فاضي 8 ساعات في اليوم التاني، هو في الموقع اليوم كله.
- *     شرط `> 1` (مش `>= 1`) هو **كل الفرق**: بيسيب الشغل الممتد زي ما هو وبيحرّر اليوم الواحد.
- *  2. **المدة الحقيقية بالدقايق معروفة** (`duration_minutes` أو `duration_hours` — ناتج محرك
- *     التسعير، ADR-0061 §1) ⇒ الدقايق دي بالظبط. ده اللي بيخلي الجدولة بالساعة تشتغل فعلاً.
- *  3. **يوم واحد بلا أي تفصيل بالدقايق** ⇒ اليوم بالكامل. قالب «باليوم» بيبيع للعميل يوم، فالحمل
+ *  1. **المدة الحقيقية بالدقايق معروفة** (`duration_minutes` أو `duration_hours` — ناتج محرك
+ *     التسعير، ADR-0061 §1) ⇒ توزع بالدقة نفسها على أيام العمل. 15 ساعة = 12 ثم 3، لا يومين
+ *     كاملين لمجرد وجود `estimated_duration_days` قديم بجانبها.
+ *  2. **يوم واحد أو أكثر بلا أي تفصيل بالدقايق** ⇒ اليوم بالكامل. قالب «باليوم» بيبيع للعميل يوم، فالحمل
  *     يوم — نفس سلوك ADR-0018 §2 محفوظ لحالته الوحيدة اللي بيعنيها فعلاً.
- *  4. غير كده ⇒ مدة الخدمة الافتراضية، وإلا الافتراضي العام.
+ *  3. غير كده ⇒ مدة الخدمة الافتراضية، وإلا الافتراضي العام.
  *
  * السقف اليومي بيفضل الحارس الوحيد ضد التحميل الزايد فوق كده (ADR-0059)، وتقاطع الوقت الحقيقي
  * في `activeOrderConflictExistsExpr` بيمنع حجز نفس الساعة مرتين.
  */
-function perDayMinutesExpr(alias: string, serviceAlias: string, capacityParam: string): string {
-  return preciseDayMinutesRule({
-    estimatedDurationDaysExpr: `${alias}.estimated_duration_days`,
-    durationMinutesExpr: `COALESCE(${alias}.duration_minutes, ${alias}.duration_hours * 60)`,
-    serviceDefaultMinutesExpr: `${serviceAlias}.estimated_duration_minutes`,
-  }, capacityParam);
+function perDayMinutesExpr(alias: string, serviceAlias: string, capacityParam: string, busyDayExpr: string): string {
+  const minutes = `COALESCE(${alias}.duration_minutes, ${alias}.duration_hours * 60)`;
+  const dayOffset = `(${busyDayExpr}::date - ${startDayExpr(alias)}::date)`;
+  return `CASE
+      -- عقد شهري/زمني: مقدم الخدمة محجوز بالكامل من البداية للنهاية بقرار المالك.
+      WHEN ${alias}.pricing_period_start IS NOT NULL AND ${alias}.pricing_period_end IS NOT NULL
+        THEN ${capacityParam}::int
+      -- مدة 15 ساعة لا تختفي بعد أول 12: 12 في اليوم الأول و3 في اليوم التالي.
+      WHEN ${minutes} IS NOT NULL
+        THEN LEAST(GREATEST(${minutes} - (${dayOffset} * ${capacityParam}::int), 0), ${capacityParam}::int)
+      WHEN ${alias}.estimated_duration_days IS NOT NULL AND ${alias}.estimated_duration_days >= 1
+        THEN ${capacityParam}::int
+      ELSE LEAST(COALESCE(${serviceAlias}.estimated_duration_minutes, ${DEFAULT_JOB_MINUTES}), ${capacityParam}::int)
+    END`;
 }
 
 /**
@@ -89,8 +109,6 @@ function preciseDayMinutesRule(source: CandidateLoadSource, capacityParam: strin
   const days = `(${source.estimatedDurationDaysExpr})`;
   const minutes = `(${source.durationMinutesExpr})`;
   return `CASE
-      WHEN ${days} IS NOT NULL AND ${days} > 1
-        THEN ${capacityParam}::int
       WHEN ${minutes} IS NOT NULL
         THEN LEAST(${minutes}, ${capacityParam}::int)
       WHEN ${days} IS NOT NULL AND ${days} >= 1
@@ -132,12 +150,12 @@ export function technicianDayLoadSubquery(opts: DayLoadOpts): string {
   const { technicianIdExpr, activeStatusesParam, excludeOrderIdParam, dailyCapacityParam } = opts;
   return `(
     SELECT gs.busy_day::date AS busy_day,
-           SUM(${perDayMinutesExpr('lo', 'ls', dailyCapacityParam)})::int AS busy_minutes
+           SUM(${perDayMinutesExpr('lo', 'ls', dailyCapacityParam, 'gs.busy_day')})::int AS busy_minutes
     FROM ${committedOrdersSource(technicianIdExpr, 'lo')}
     JOIN services ls ON ls.id = lo.service_id
     CROSS JOIN LATERAL generate_series(
       ${startDayExpr('lo')}::timestamp,
-      (${startDayExpr('lo')} + (${spanDaysExpr('lo')} - 1))::timestamp,
+      (${startDayExpr('lo')} + (${spanDaysExpr('lo', dailyCapacityParam)} - 1))::timestamp,
       interval '1 day'
     ) AS gs(busy_day)
     WHERE lo.deleted_at IS NULL
@@ -226,8 +244,12 @@ export function candidatePerDayMinutesExpr(source: CandidateLoadSource, capacity
 }
 
 /** أيام الطلب المرشّح — نفس `spanDaysExpr` بالحرف. */
-export function candidateSpanDaysFromSource(source: CandidateLoadSource): string {
-  return `GREATEST(COALESCE(CEIL(${source.estimatedDurationDaysExpr})::int, 1), 1)`;
+export function candidateSpanDaysFromSource(source: CandidateLoadSource, capacityParam: string): string {
+  return `CASE
+    WHEN ${source.durationMinutesExpr} IS NOT NULL
+      THEN GREATEST(CEIL(${source.durationMinutesExpr}::numeric / ${capacityParam}::numeric)::int, 1)
+    ELSE GREATEST(COALESCE(CEIL(${source.estimatedDurationDaysExpr})::int, 1), 1)
+  END`;
 }
 
 export interface CapacityConflictOpts extends DayLoadOpts {
@@ -245,8 +267,8 @@ export interface CapacityConflictOpts extends DayLoadOpts {
  */
 export function dailyCapacityExceededExpr(opts: CapacityConflictOpts): string {
   const { scheduledAtParam, candidateLoad, dailyCapacityParam } = opts;
-  const candidateMinutesExpr = candidatePerDayMinutesExpr(candidateLoad, dailyCapacityParam);
-  const candidateSpanDaysExpr = candidateSpanDaysFromSource(candidateLoad);
+  const candidateMinutesExpr = `COALESCE(${candidateLoad.durationMinutesExpr}, ${candidateLoad.serviceDefaultMinutesExpr}, ${DEFAULT_JOB_MINUTES})`;
+  const candidateSpanDaysExpr = candidateSpanDaysFromSource(candidateLoad, dailyCapacityParam);
   const candidateStartDay = `(COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date`;
   return `EXISTS (
     SELECT 1
@@ -257,7 +279,15 @@ export function dailyCapacityExceededExpr(opts: CapacityConflictOpts): string {
     ) AS cd(candidate_day)
     LEFT JOIN ${technicianDayLoadSubquery(opts)} dl ON dl.busy_day = cd.candidate_day::date
     WHERE COALESCE(dl.busy_minutes, 0)
-        + LEAST(${candidateMinutesExpr}, ${dailyCapacityParam}::int)
+        + CASE
+            WHEN ${candidateLoad.durationMinutesExpr} IS NOT NULL THEN LEAST(
+              GREATEST(${candidateMinutesExpr} - ((cd.candidate_day::date - ${candidateStartDay}) * ${dailyCapacityParam}::int), 0),
+              ${dailyCapacityParam}::int
+            )
+            WHEN ${candidateLoad.estimatedDurationDaysExpr} IS NOT NULL
+              AND ${candidateLoad.estimatedDurationDaysExpr} >= 1 THEN ${dailyCapacityParam}::int
+            ELSE LEAST(${candidateMinutesExpr}, ${dailyCapacityParam}::int)
+          END
         > ${dailyCapacityParam}::int
   )`;
 }

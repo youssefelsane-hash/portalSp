@@ -32,6 +32,8 @@ export interface NotifyInput {
   workflowId?: string;
   /** Durable-event source. One row per user/channel makes retries idempotent. */
   sourceOutboxId?: string;
+  /** مفتاح idempotency عام لصناديق تسليم غير مرتبطة بجدول project_notification_outbox. */
+  sourceDeliveryKey?: string;
 }
 
 export interface ListNotificationsParams {
@@ -134,26 +136,41 @@ export class NotificationsService {
 
   /** بيسجّل الإشعار في القاعدة دايماً حتى لو فشل الإرسال الفعلي — الفشل بيتسجل في الصف نفسه، مش بيوقف تدفق العملية اللي استدعته. */
   private async notifyOnChannel(input: NotifyInput, channel: NotificationChannel): Promise<Notification> {
-    if (input.sourceOutboxId) {
-      const existing = await this.notifications.findOne({
-        where: { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel },
+    let notification: Notification | null = null;
+    if (input.sourceOutboxId || input.sourceDeliveryKey) {
+      notification = await this.notifications.findOne({
+        where: input.sourceOutboxId
+          ? { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel }
+          : { sourceDeliveryKey: input.sourceDeliveryKey!, userId: input.userId, channel },
       });
-      if (existing) return existing;
+      // صف نجح بالفعل لا نعيد إرساله عند retry لقناة ثانية فشلت. أما queued/failed فيُستأنف
+      // بالصف نفسه، فلا يضيع retry بعد crash ولا تتكرر عناصر صندوق الإشعارات.
+      if (
+        notification &&
+        [NotificationDeliveryStatus.SENT, NotificationDeliveryStatus.DELIVERED, NotificationDeliveryStatus.READ].includes(
+          notification.deliveryStatus,
+        )
+      ) {
+        return notification;
+      }
     }
-    const notification = this.notifications.create({
-      userId: input.userId,
-      notificationType: input.notificationType,
-      channel,
-      titleAr: input.titleAr,
-      bodyAr: input.bodyAr,
-      deepLink: input.deepLink ?? null,
-      referenceType: input.referenceType ?? null,
-      referenceId: input.referenceId ?? null,
-      workflowId: input.workflowId ?? null,
-      sourceOutboxId: input.sourceOutboxId ?? null,
-      deliveryStatus: NotificationDeliveryStatus.QUEUED,
-    });
-    await this.notifications.save(notification);
+    if (!notification) {
+      notification = this.notifications.create({
+        userId: input.userId,
+        notificationType: input.notificationType,
+        channel,
+        titleAr: input.titleAr,
+        bodyAr: input.bodyAr,
+        deepLink: input.deepLink ?? null,
+        referenceType: input.referenceType ?? null,
+        referenceId: input.referenceId ?? null,
+        workflowId: input.workflowId ?? null,
+        sourceOutboxId: input.sourceOutboxId ?? null,
+        sourceDeliveryKey: input.sourceDeliveryKey ?? null,
+        deliveryStatus: NotificationDeliveryStatus.QUEUED,
+      });
+      await this.notifications.save(notification);
+    }
 
     // تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — in_app دايماً بتتسجّل وتترسل، مفيش
     // تفضيل ليها أصلاً (راجع PREFERENCE_ELIGIBLE_CHANNELS). الصف اتسجّل فوق بالفعل (سجل دايم
@@ -189,6 +206,7 @@ export class NotificationsService {
       if (result.delivered) {
         notification.deliveryStatus = NotificationDeliveryStatus.SENT;
         notification.sentAt = now;
+        notification.failureReason = null;
       } else {
         notification.deliveryStatus = NotificationDeliveryStatus.FAILED;
         notification.failureReason = result.failureReason;

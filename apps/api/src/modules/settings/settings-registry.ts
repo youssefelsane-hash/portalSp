@@ -189,7 +189,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── payments ──────────────────────────────────────────────────────────
   'crew.assistant_share_ratio': { type: 'number', default: 0.65, group: 'payments', description: 'نسبة حصة المساعد من حصة الفني في نفس المستوى داخل الطاقم (0.65 = المساعد بياخد 65% من اللي الفني بياخده). بتتضرب في وزن المستوى، مش بديل عنه.' },
-  'earnings.v2_cutover_enabled': { type: 'boolean', default: true, group: 'payments', description: 'Unified percentage earnings policy for newly created orders.' },
   'earnings.v2_shadow_enabled': { type: 'boolean', default: true, group: 'payments', description: 'Compare legacy and V2 results without posting V2 wallet movements.' },
   'payments.card_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار الدفع بالبطاقة عبر Paymob للعملاء عند اكتمال الإعداد' },
   'payments.cash_enabled': { type: 'boolean', default: true, group: 'payments', description: 'تفعيل الدفع كاش (تسليم مباشر للفني) — لو اتعطّل، العميل ميقدرش يأكّد تسليم كاش ولا يختاره كوسيلة دفع جديدة' },
@@ -218,7 +217,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.paymob.secret_key': { type: 'string', default: '', group: 'payments_paymob', description: 'Paymob Intention API secret key (secret, encrypted)' },
 
   // ── pricing ───────────────────────────────────────────────────────────
-  'commission_base.discount_reduces_technician_share': { type: 'boolean', default: false, group: 'pricing', description: 'false = الخصم (كوبون/عمارة) بيتحمّله نصيب الشركة وحدها، والفني بياخد على سعر الشغل الكامل قبل الخصم.' },
   'commission_base.include_additional_items': { type: 'boolean', default: true, group: 'pricing', description: 'البنود الإضافية المعتمدة أثناء الشغل داخل الوعاء (طلب مالك صريح: "ده برضه بيعتبر ضمن الشغل").' },
   'commission_base.include_addons': { type: 'boolean', default: true, group: 'pricing', description: 'إضافات الكتالوج المختارة وقت الحجز داخل الوعاء — شغل إضافي حقيقي بينفّذه الفني.' },
   'commission_base.include_emergency_surcharge': { type: 'boolean', default: false, group: 'pricing', description: 'رسوم الطوارئ الإضافية: false = 100% للشركة.' },

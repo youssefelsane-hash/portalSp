@@ -2,9 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   RECURRING_CARD_PAYMENT_FAILED_EVENT,
-  RECURRING_CASH_REMINDER_EVENT,
   RecurringCardPaymentFailedEvent,
-  RecurringCashReminderEvent,
 } from '../../../common/events/recurring-order-payment.event';
 import { CustomerProfilesService } from '../../customers/customer-profiles.service';
 import { NotificationsService } from '../notifications.service';
@@ -37,26 +35,6 @@ export class RecurringOrderPaymentNotificationListener {
       });
     } catch (err) {
       this.logger.error(`فشل إشعار تحصيل النوبة المتكررة ${event.orderId}`, err instanceof Error ? err.stack : err);
-    }
-  }
-
-  @OnEvent(RECURRING_CASH_REMINDER_EVENT)
-  async notifyCashReminder(event: RecurringCashReminderEvent): Promise<void> {
-    try {
-      const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
-      const when = new Intl.DateTimeFormat('ar-EG', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Africa/Cairo' }).format(event.scheduledAt);
-      const price = (event.totalAmountCents / 100).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      await this.notifications.notify({
-        userId: customer.userId,
-        notificationType: 'recurring_cash_reminder',
-        titleAr: 'تذكير بحجزك المتكرر',
-        bodyAr: `الفني هيوصلك ${when}. قيمة الزيارة ${price} ج.م، وحجزك ما زال مؤكدًا.`,
-        referenceType: 'order',
-        referenceId: event.orderId,
-        deepLink: `/orders/${event.orderId}`,
-      });
-    } catch (err) {
-      this.logger.error(`فشل تذكير الكاش للنوبة المتكررة ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }
 }

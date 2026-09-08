@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
@@ -33,9 +34,9 @@ import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-h
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import {
   RECURRING_CARD_PAYMENT_FAILED_EVENT,
-  RECURRING_CASH_REMINDER_EVENT,
+  RECURRING_CARD_PAYMENT_DECLINED_EVENT,
+  RecurringCardPaymentDeclinedEvent,
   RecurringCardPaymentFailedEvent,
-  RecurringCashReminderEvent,
 } from '../../common/events/recurring-order-payment.event';
 
 const SWEEP_INTERVAL_MS = 60_000;
@@ -45,6 +46,8 @@ const MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK = 96;
 const RECURRING_CARD_COLLECTION_LEAD_DAYS = 3;
 const RECURRING_CASH_REMINDER_LEAD_DAYS = 4;
 const RECURRING_CARD_PAYMENT_DEADLINE_HOURS = 24;
+// المحاولة الثالثة تكون قبل T-24 بساعة، فلا تضيع بسبب فرق ثوانٍ بين scheduler وSQL cutoff.
+const RECURRING_CARD_FINAL_ATTEMPT_BUFFER_HOURS = 1;
 const RECURRING_CARD_MAX_ATTEMPTS = 3;
 // T-3 ثم T-2 ثم T-1: ثلاث فرص موزعة على يومين، وتنتهي قبل الموعد بـ24 ساعة.
 const RECURRING_CARD_RETRY_HOURS = 24;
@@ -355,7 +358,9 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * نوبات البطاقة تُولّد قبل الموعد بأربعة أيام، لكن السحب يبدأ عند T-3 أيام. claim ذري يحجز
-   * المحاولة ويزيد عدادها قبل أي اتصال بوابة، لذلك لا يمكن لنسختين API تحصيل النوبة نفسها.
+   * العمل مؤقتًا فقط؛ عداد المحاولة لا يزيد إلا مع حفظ Payment قبل اتصال البوابة، لذلك لا تضيع
+   * محاولة عند توقف العامل ولا يمكن لنسختين API تحصيل النوبة نفسها.
+   * أي محاولة بوابة نشطة أو تحت مراجعة تمنع claim جديد، مهما طال عمرها.
    */
   private async sweepRecurringPaymentCollection(templateIds?: string[]): Promise<void> {
     if (!this.paymentsService || typeof this.dataSource.query !== 'function') return;
@@ -370,20 +375,33 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
            AND o.scheduled_at <= now() + ($3::integer * interval '1 day')
            AND o.recurring_payment_attempt_count < $2
            AND COALESCE(o.recurring_payment_next_attempt_at, o.scheduled_at - ($3::integer * interval '1 day')) <= now()
+           AND NOT EXISTS (
+             SELECT 1
+             FROM payments p
+             WHERE p.order_id = o.id
+               AND p.order_item_batch_id IS NULL
+               AND p.installment_id IS NULL
+               AND p.payment_status IN ('pending', 'processing', 'manual_review')
+           )
            AND ($5::uuid[] IS NULL OR o.recurring_template_id = ANY($5))
          ORDER BY o.scheduled_at, o.id
          LIMIT $1
          FOR UPDATE SKIP LOCKED
        )
        UPDATE orders o
-       SET recurring_payment_attempt_count = o.recurring_payment_attempt_count + 1,
-           -- lease قصيرة فقط؛ النتيجة تضبط الموعد الحقيقي بعد استدعاء البوابة.
+       SET -- lease قصيرة فقط؛ العداد لا يزيد إلا عند حفظ Payment قبل الاتصال بالبوابة.
            recurring_payment_next_attempt_at = now() + interval '15 minutes'
        FROM candidates
        WHERE o.id = candidates.id
        RETURNING o.id, o.order_number, o.customer_id, o.scheduled_at, o.total_amount_cents,
-                 o.recurring_payment_attempt_count AS attempt_number`,
-      [SWEEP_BATCH_SIZE, RECURRING_CARD_MAX_ATTEMPTS, RECURRING_CARD_COLLECTION_LEAD_DAYS, RECURRING_CARD_PAYMENT_DEADLINE_HOURS, templateIds ?? null],
+                 o.recurring_payment_attempt_count + 1 AS attempt_number`,
+      [
+        SWEEP_BATCH_SIZE,
+        RECURRING_CARD_MAX_ATTEMPTS,
+        RECURRING_CARD_COLLECTION_LEAD_DAYS,
+        RECURRING_CARD_PAYMENT_DEADLINE_HOURS + RECURRING_CARD_FINAL_ATTEMPT_BUFFER_HOURS,
+        templateIds ?? null,
+      ],
     );
     // TypeORM قد يعيد UPDATE ... RETURNING كـ[rows, affectedCount] بحسب الـdriver؛ نفس فك
     // الغلاف الموجود في claimOccurrences يمنع أن يصبح الصف الأول مصفوفة داخل الحلقة.
@@ -394,68 +412,56 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     for (const order of claimed) {
       const result = await this.paymentsService.attemptRecurringOrderCardCharge(order.id, Number(order.attempt_number));
       if (result.status === PaymentGatewayStatus.FAILED) {
-        await this.handleRecurringCardFailure(order, result.failureReason ?? 'تم رفض عملية السحب من البطاقة');
-      } else if (result.status === PaymentGatewayStatus.PENDING || result.status === PaymentGatewayStatus.PROCESSING) {
-        // لا نعيد السحب بينما البوابة تؤكد العملية. عند T-24 تتوقف المحاولة التلقائية ويحتاج
-        // pending غير محسوم إلى reconciliation، فلا نلغي مالًا قد يكون تحصّل فعليًا.
+        await this.handleRecurringCardFailure(order.id, Number(order.attempt_number), result.failureReason ?? 'تم رفض عملية السحب من البطاقة');
+      } else if (
+        result.status === PaymentGatewayStatus.PENDING ||
+        result.status === PaymentGatewayStatus.PROCESSING ||
+        result.status === PaymentGatewayStatus.MANUAL_REVIEW
+      ) {
+        // لا نعيد السحب بينما البوابة تؤكد العملية أو تحتاج مراجعة. لا نلغي مالًا قد يكون تحصّل فعليًا.
         await this.dataSource.query(
-          `UPDATE orders SET recurring_payment_next_attempt_at = scheduled_at - ($2::integer * interval '1 hour')
+          `UPDATE orders SET recurring_payment_next_attempt_at = NULL
            WHERE id = $1 AND order_status = 'pending_payment'`,
-          [order.id, RECURRING_CARD_PAYMENT_DEADLINE_HOURS],
+          [order.id],
         );
       }
     }
   }
 
-  private async handleRecurringCardFailure(order: ClaimedRecurringCardPayment, failureReason: string): Promise<void> {
-    const attemptNumber = Number(order.attempt_number);
-    const exhausted = attemptNumber >= RECURRING_CARD_MAX_ATTEMPTS;
-    if (exhausted) {
-      const cancelled = await this.cancelRecurringPaymentFailure(order.id, failureReason);
-      if (cancelled) {
-        this.eventEmitter.emit(
-          ORDER_STATUS_CHANGED_EVENT,
-          new OrderStatusChangedEvent(
-            cancelled.id,
-            cancelled.orderNumber,
-            OrderStatus.PENDING_PAYMENT,
-            OrderStatus.CANCELLED_BY_SYSTEM,
-            cancelled.customerId,
-            cancelled.technicianId,
-            'إلغاء تلقائي بعد فشل تحصيل البطاقة المتكررة',
-          ),
-        );
-        this.eventEmitter.emit(
-          RECURRING_CARD_PAYMENT_FAILED_EVENT,
-          new RecurringCardPaymentFailedEvent(order.id, order.order_number, order.customer_id, attemptNumber, true, failureReason),
-        );
-      }
-      return;
-    }
-
-    await this.dataSource.query(
-      `UPDATE orders
-       SET recurring_payment_next_attempt_at = LEAST(
-             scheduled_at - ($3::integer * interval '1 hour'),
-             now() + ($2::integer * interval '1 hour')
-           )
-       WHERE id = $1 AND order_status = 'pending_payment'`,
-      [order.id, RECURRING_CARD_RETRY_HOURS, RECURRING_CARD_PAYMENT_DEADLINE_HOURS],
-    );
-    this.eventEmitter.emit(
-      RECURRING_CARD_PAYMENT_FAILED_EVENT,
-      new RecurringCardPaymentFailedEvent(order.id, order.order_number, order.customer_id, attemptNumber, false, failureReason),
-    );
+  @OnEvent(RECURRING_CARD_PAYMENT_DECLINED_EVENT)
+  async handleRecurringCardPaymentDeclined(event: RecurringCardPaymentDeclinedEvent): Promise<void> {
+    const order = await this.dataSource.getRepository(Order).findOne({ where: { id: event.orderId } });
+    if (!order || order.recurringTemplateId === null || order.orderStatus !== OrderStatus.PENDING_PAYMENT) return;
+    await this.handleRecurringCardFailure(order.id, order.recurringPaymentAttemptCount, event.failureReason);
   }
 
-  private async cancelRecurringPaymentFailure(orderId: string, failureReason: string): Promise<Order | null> {
-    return this.dataSource.transaction(async (manager) => {
+  private async handleRecurringCardFailure(orderId: string, attemptNumber: number, failureReason: string): Promise<void> {
+    const resolved = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'order')
         .setLock('pessimistic_write')
         .where('order.id = :orderId', { orderId })
         .getOne();
-      if (!order || order.orderStatus !== OrderStatus.PENDING_PAYMENT || order.recurringTemplateId === null) return null;
+      if (
+        !order ||
+        order.orderStatus !== OrderStatus.PENDING_PAYMENT ||
+        order.recurringTemplateId === null ||
+        order.scheduledAt === null ||
+        order.recurringPaymentAttemptCount !== attemptNumber
+      ) {
+        return null;
+      }
+
+      if (attemptNumber < RECURRING_CARD_MAX_ATTEMPTS) {
+        const finalAttemptAt = new Date(
+          order.scheduledAt.getTime() -
+            (RECURRING_CARD_PAYMENT_DEADLINE_HOURS + RECURRING_CARD_FINAL_ATTEMPT_BUFFER_HOURS) * 60 * 60 * 1000,
+        );
+        const retryAt = new Date(Date.now() + RECURRING_CARD_RETRY_HOURS * 60 * 60 * 1000);
+        order.recurringPaymentNextAttemptAt = retryAt < finalAttemptAt ? retryAt : finalAttemptAt;
+        await manager.save(order);
+        return { order, cancelled: false };
+      }
 
       const previousStatus = order.orderStatus;
       order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
@@ -471,8 +477,29 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
           reason: `إلغاء النوبة المتكررة بعد ${RECURRING_CARD_MAX_ATTEMPTS} محاولات تحصيل فاشلة: ${failureReason}`,
         }),
       );
-      return order;
+      return { order, cancelled: true };
     });
+
+    if (!resolved) return;
+    const { order, cancelled } = resolved;
+    if (cancelled) {
+      this.eventEmitter.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          order.id,
+          order.orderNumber,
+          OrderStatus.PENDING_PAYMENT,
+          OrderStatus.CANCELLED_BY_SYSTEM,
+          order.customerId,
+          order.technicianId,
+          'إلغاء تلقائي بعد فشل تحصيل البطاقة المتكررة',
+        ),
+      );
+    }
+    this.eventEmitter.emit(
+      RECURRING_CARD_PAYMENT_FAILED_EVENT,
+      new RecurringCardPaymentFailedEvent(order.id, order.orderNumber, order.customerId, attemptNumber, cancelled, failureReason),
+    );
   }
 
   private async sendRecurringCashReminders(templateIds?: string[]): Promise<void> {
@@ -487,9 +514,20 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
          SELECT o.id
          FROM orders o
          WHERE o.order_type = 'recurring'
-           AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired')
+           -- Reminder is operational, not marketing: never revive a draft/payment/terminal
+           -- occurrence just because its scheduled time is still in the future.
+           AND o.order_status IN (
+             'searching_technician', 'technician_assigned', 'accepted', 'technician_on_way',
+             'technician_arrived', 'in_progress', 'awaiting_quote_approval',
+             'awaiting_admin_quote', 'awaiting_initial_quote_approval',
+             'awaiting_technician_selection', 'awaiting_technician_reselection'
+           )
            AND (o.payment_method IS NULL OR o.payment_method = 'cash')
            AND o.recurring_cash_reminder_sent_at IS NULL
+           AND (
+             o.recurring_cash_reminder_claimed_at IS NULL
+             OR o.recurring_cash_reminder_claimed_at < now() - interval '15 minutes'
+           )
            AND o.scheduled_at > now()
            AND o.scheduled_at <= now() + ($1::integer * interval '1 day')
            AND ($2::uuid[] IS NULL OR o.recurring_template_id = ANY($2))
@@ -498,7 +536,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
          FOR UPDATE SKIP LOCKED
        )
        UPDATE orders o
-       SET recurring_cash_reminder_sent_at = now()
+       SET recurring_cash_reminder_claimed_at = now()
        FROM candidates
        WHERE o.id = candidates.id
        RETURNING o.id, o.order_number, o.customer_id, o.scheduled_at, o.total_amount_cents`,
@@ -508,9 +546,24 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       ? (remindedRaw[0] as { id: string; order_number: string; customer_id: string; scheduled_at: Date; total_amount_cents: number }[])
       : (remindedRaw as { id: string; order_number: string; customer_id: string; scheduled_at: Date; total_amount_cents: number }[]);
     for (const order of reminded) {
-      this.eventEmitter.emit(
-        RECURRING_CASH_REMINDER_EVENT,
-        new RecurringCashReminderEvent(order.id, order.order_number, order.customer_id, order.scheduled_at, Number(order.total_amount_cents)),
+      // الصف الدائم هو مصدر التسليم، مش EventEmitter: لو الخدمة وقعت الآن تبقى lease وتُعاد
+      // المحاولة، ولا يضيع التذكير بين claim والإرسال.
+      await this.dataSource.query(
+        `INSERT INTO recurring_notification_outbox
+           (event_type, order_id, customer_profile_id, payload)
+         VALUES ('cash_reminder', $1, $2, $3::jsonb)
+         ON CONFLICT (event_type, order_id) DO NOTHING`,
+        [
+          order.id,
+          order.customer_id,
+          JSON.stringify({
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerId: order.customer_id,
+            scheduledAt: order.scheduled_at,
+            totalAmountCents: Number(order.total_amount_cents),
+          }),
+        ],
       );
     }
   }

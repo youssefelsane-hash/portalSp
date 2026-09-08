@@ -20,7 +20,7 @@ import {
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { Order, OrderPriceStatus, OrderStatus } from './entities/order.entity';
-import { OrderQuote, OrderQuoteStatus } from './entities/order-quote.entity';
+import { OrderQuote, OrderQuoteSource, OrderQuoteStatus } from './entities/order-quote.entity';
 import { OrderCustomerNotice, OrderCustomerNoticeType } from './entities/order-customer-notice.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
@@ -297,7 +297,11 @@ export class AssessmentTriageService {
   ): Promise<OrderQuote> {
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await this.lockOrderOrThrow(manager, orderId);
-      const quote = await manager.findOne(OrderQuote, { where: { id: quoteId, orderId } });
+      const quote = await manager
+        .createQueryBuilder(OrderQuote, 'quote')
+        .setLock('pessimistic_write')
+        .where('quote.id = :quoteId AND quote.order_id = :orderId', { quoteId, orderId })
+        .getOne();
       if (!quote) {
         throw new ApiException(ErrorCode.VAL_001, 'عرض السعر غير موجود على الطلب ده', HttpStatus.NOT_FOUND);
       }
@@ -305,6 +309,27 @@ export class AssessmentTriageService {
         throw new ApiException(
           ErrorCode.ORDR_003,
           'العرض ده مش مستني مراجعة الإدارة',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const latest = await manager
+        .createQueryBuilder(OrderQuote, 'latest_quote')
+        .setLock('pessimistic_write')
+        .where('latest_quote.order_id = :orderId', { orderId })
+        .orderBy('latest_quote.version', 'DESC')
+        .getOne();
+      if (!latest || latest.id !== quote.id) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'العرض ده لم يعد أحدث إصدار للطلب؛ راجع أحدث عرض قبل اتخاذ القرار',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (!canTransition(order.orderStatus, OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL)) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الطلب في حالة لا تسمح بإرسال عرض سعر للعميل',
           HttpStatus.CONFLICT,
         );
       }
@@ -321,7 +346,12 @@ export class AssessmentTriageService {
         quote.validUntil = new Date(Date.now() + service.quoteValidityMinutes * 60_000);
         await manager.save(quote);
 
-        order.estimatedPriceCents = quote.amountCents;
+        // تعديل التشخيص يغيّر سعر شغل قائم؛ `estimatedPriceCents` هو أساس حساب الفرق عند
+        // موافقة العميل. الكتابة هنا كانت تجعل الأساس = السعر الجديد، فيتحول فرق حقيقي إلى صفر.
+        // العرض الأول فقط هو الذي يؤسس سعرًا جديدًا للطلب.
+        if (quote.source !== OrderQuoteSource.TECHNICIAN_DIAGNOSIS) {
+          order.estimatedPriceCents = quote.amountCents;
+        }
         order.orderStatus = OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL;
         order.priceStatus = OrderPriceStatus.WAITING_CUSTOMER_APPROVAL;
         await manager.save(order);

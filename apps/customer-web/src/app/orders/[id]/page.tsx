@@ -20,6 +20,8 @@ import {
   OrderItemDto,
   CancellationReasonDto,
   approveInitialQuote,
+  getCurrentQuote,
+  OrderQuoteDto,
 } from '@/lib/orders';
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
@@ -105,7 +107,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           {order.order_status === 'awaiting_admin_quote'
             ? 'السعر قيد المراجعة'
             : order.order_status === 'awaiting_initial_quote_approval'
-              ? formatEgp(order.estimated_price_cents ?? 0)
+              ? 'السعر جاهز'
               : formatEgp(order.total_amount_cents)}
         </span>
       </div>
@@ -287,19 +289,36 @@ function InitialQuoteApprovalSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paymentChoice, setPaymentChoice] = useState<'cash' | 'electronic'>('electronic');
+  const [quote, setQuote] = useState<OrderQuoteDto | null>(null);
   const isRemoteQuote = order.initial_quote_source === 'admin_remote';
+
+  useEffect(() => {
+    getCurrentQuote(authedFetch, order.id)
+      .then(setQuote)
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof ApiError ? loadError.message : 'تعذّر تحميل عرض السعر الحالي');
+      });
+  // المرجع الوحيد للعرض هو رقم الطلب؛ لا نعيد التحميل عند تغيير وسيلة الدفع.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id]);
 
   async function resolve(action: 'approve' | 'reject') {
     setBusy(true);
     setError(null);
     try {
       if (action === 'approve') {
-        await approveInitialQuote(authedFetch, order.id, paymentChoice);
+        if (!quote) {
+          throw new Error('عرض السعر الحالي لم يُحمّل بعد');
+        }
+        await approveInitialQuote(authedFetch, order.id, quote.id, quote.version, paymentChoice);
       } else {
         await cancelOrder(authedFetch, order.id, { reason: 'العميل رفض السعر المقترح' });
       }
       onResolved();
     } catch (resolveError) {
+      if (resolveError instanceof ApiError && resolveError.status === 409) {
+        getCurrentQuote(authedFetch, order.id).then(setQuote).catch(() => undefined);
+      }
       setError(resolveError instanceof ApiError ? resolveError.message : 'تعذّر تنفيذ الطلب، حاول تاني');
     } finally {
       setBusy(false);
@@ -319,7 +338,9 @@ function InitialQuoteApprovalSection({
       )}
       <div className="mt-4 flex items-center justify-between rounded-lg bg-surface px-4 py-3">
         <span className="text-sm text-muted">السعر المقترح</span>
-        <span className="text-xl font-bold text-primary">{formatEgp(order.estimated_price_cents ?? 0)}</span>
+        <span className="text-xl font-bold text-primary">
+          {quote ? formatEgp(quote.amount_cents) : 'جارٍ تحميل السعر...'}
+        </span>
       </div>
       <fieldset className="mt-4 space-y-2 rounded-lg border border-border bg-surface p-3">
         <legend className="px-1 text-sm font-medium">طريقة سداد السعر المتبقي</legend>
@@ -336,7 +357,7 @@ function InitialQuoteApprovalSection({
       <div className="mt-4 flex gap-2">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !quote}
           onClick={() => resolve('approve')}
           className="flex-1 rounded-lg bg-primary py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >

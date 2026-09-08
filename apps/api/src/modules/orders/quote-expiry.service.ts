@@ -75,22 +75,29 @@ export class QuoteExpiryService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async expireOne(quoteId: string): Promise<boolean> {
-    const result = await this.dataSource.transaction(async (manager) => {
-      const quote = await manager
-        .createQueryBuilder(OrderQuote, 'q')
-        .setLock('pessimistic_write')
-        .where('q.id = :quoteId', { quoteId })
-        .getOne();
-      // العميل ممكن يكون وافق في نفس اللحظة بين الاستعلام والقفل — القفل هنا هو اللي بيحسم.
-      if (!quote || quote.status !== OrderQuoteStatus.PENDING_CUSTOMER) return null;
-      if (quote.validUntil.getTime() > Date.now()) return null;
+    // موافقة العميل تقفل الطلب ثم العرض. نقرأ مرجع الطلب بلا قفل، ثم نعيد التحقق من العرض تحت
+    // أقفال بالترتيب نفسه؛ عكس الترتيب كان يفتح deadlock قرب لحظة انتهاء المهلة.
+    const quoteReference = await this.dataSource
+      .getRepository(OrderQuote)
+      .findOne({ select: { id: true, orderId: true }, where: { id: quoteId } });
+    if (!quoteReference) return false;
 
+    const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
-        .where('o.id = :orderId', { orderId: quote.orderId })
+        .where('o.id = :orderId', { orderId: quoteReference.orderId })
         .getOne();
       if (!order) return null;
+
+      const quote = await manager
+        .createQueryBuilder(OrderQuote, 'q')
+        .setLock('pessimistic_write')
+        .where('q.id = :quoteId AND q.order_id = :orderId', { quoteId, orderId: order.id })
+        .getOne();
+      // العميل ممكن يكون وافق في نفس اللحظة بين الاستعلام والقفل — الأقفال هنا هي التي تحسم.
+      if (!quote || quote.status !== OrderQuoteStatus.PENDING_CUSTOMER) return null;
+      if (quote.validUntil.getTime() > Date.now()) return null;
 
       await this.inspectionQuoteService.expireQuoteInTransaction(manager, order, quote);
       // ADR-0068 §3 — العرض ده كان سعر معروض على العميل وبقى ملغي. فاعل النظام مش أقل استحقاقًا

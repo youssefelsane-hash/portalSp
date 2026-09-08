@@ -14,11 +14,11 @@ class OrderAddress {
   });
 
   factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
-        streetName: json['street_name'] as String,
-        landmark: json['landmark'] as String?,
-        latitude: (json['latitude'] as num).toDouble(),
-        longitude: (json['longitude'] as num).toDouble(),
-      );
+    streetName: json['street_name'] as String,
+    landmark: json['landmark'] as String?,
+    latitude: (json['latitude'] as num).toDouble(),
+    longitude: (json['longitude'] as num).toDouble(),
+  );
 }
 
 // تكوين الطاقم الموحّد (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين، بتستبدل teamShortage/
@@ -52,16 +52,16 @@ class CrewStatus {
   });
 
   factory CrewStatus.fromJson(Map<String, dynamic> json) => CrewStatus(
-        requiredTechnicians: json['requiredTechnicians'] as int,
-        requiredAssistants: json['requiredAssistants'] as int,
-        assignedTechnicians: json['assignedTechnicians'] as int,
-        assignedAssistants: json['assignedAssistants'] as int,
-        missingTechnicians: json['missingTechnicians'] as int,
-        missingAssistants: json['missingAssistants'] as int,
-        crewComplete: json['crewComplete'] as bool,
-        optionalAssistantsAdded: (json['optionalAssistantsAdded'] as int?) ?? 0,
-        optionalAssistantSlots: (json['optionalAssistantSlots'] as int?) ?? 0,
-      );
+    requiredTechnicians: json['requiredTechnicians'] as int,
+    requiredAssistants: json['requiredAssistants'] as int,
+    assignedTechnicians: json['assignedTechnicians'] as int,
+    assignedAssistants: json['assignedAssistants'] as int,
+    missingTechnicians: json['missingTechnicians'] as int,
+    missingAssistants: json['missingAssistants'] as int,
+    crewComplete: json['crewComplete'] as bool,
+    optionalAssistantsAdded: (json['optionalAssistantsAdded'] as int?) ?? 0,
+    optionalAssistantSlots: (json['optionalAssistantSlots'] as int?) ?? 0,
+  );
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
@@ -78,7 +78,9 @@ String _formatCustomerInputs(dynamic raw) {
         final value = item['value'] as String? ?? '';
         final unit = item['unit'] as String?;
         if (label.isEmpty || value.isEmpty) return '';
-        return unit != null && unit.isNotEmpty ? '$label: $value $unit' : '$label: $value';
+        return unit != null && unit.isNotEmpty
+            ? '$label: $value $unit'
+            : '$label: $value';
       })
       .where((part) => part.isNotEmpty)
       .join(' · ');
@@ -89,6 +91,7 @@ class Order {
   final String orderNumber;
   final String orderStatus;
   final String? problemDescription;
+
   /// اللي العميل اختاره في الفورم الديناميكي وقت الحجز (docs/08 §71) — نص جاهز للعرض في سطر
   /// واحد، متبني في الباك-إند بتسميات عربية محلولة. فاضي = الخدمة مالهاش حقول ديناميكية.
   final String customerInputsLine;
@@ -99,14 +102,19 @@ class Order {
   // القاعدة: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
   /// الكاش المطلوب تحصيله من العميل دلوقتي.
   final int cashToCollectCents;
+
   /// الكاش الذي تم تسجيل استلامه بالفعل لهذا الطلب.
   final int cashCollectedCents;
+
   /// نصيب الفني من الطلب (بعد نسبة الشركة) — بلا أي شرح لتكوينه.
   final int myEarningCents;
+
   /// فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم.
   final bool hasOnlinePayment;
+
   /// كله اتدفع أونلاين ومفيش كاش هيتحصّل.
   final bool fullyPaidOnline;
+
   /// الإجمالي — بيرجع من الـAPI بس لما مفيش دفع أونلاين (وقتها = الكاش المطلوب تحصيله).
   final int? totalAmountCents;
   // docs/08 §64.ب (بلاغ مالك: «نصيبك 0 وده مش منطقي») — السعر لسه ما اتحددش (معاينة/عرض سعر
@@ -114,6 +122,9 @@ class Order {
   final bool earningPending;
   // الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040).
   final bool isCrewShare;
+
+  /// الطلب اتقفل تاريخيًا من غير snapshot للحصة؛ التطبيق لا يعرض رقمًا مخمّنًا.
+  final bool earningSnapshotMissing;
   // بَقّة مالية حقيقية (بلاغ مالك 2026-09-03): مش كل رد من الباك-إند بيحمل العقد المالي للفني —
   // `OrderResponseDto` العام (مسارات مشتركة مع العميل) مافيهوش `my_earning_cents` ولا
   // `cash_to_collect_cents` خالص. `?? 0` لوحده كان بيحوّل «الحقل مش موجود» لـ«مستحقك أنت صفر»،
@@ -166,6 +177,7 @@ class Order {
     this.totalAmountCents,
     this.earningPending = false,
     this.isCrewShare = false,
+    this.earningSnapshotMissing = false,
     this.hasMoneyView = true,
     required this.paymentStatus,
     // قيمة افتراضية مش `required`: حقل جديد، و'confirmed' معناها «سعره مستقر» — وده السلوك
@@ -185,38 +197,41 @@ class Order {
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
-        id: json['id'] as String,
-        orderNumber: json['order_number'] as String,
-        orderStatus: json['order_status'] as String,
-        problemDescription: json['problem_description'] as String?,
-        customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
-        cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
-        cashCollectedCents: json['cash_collected_cents'] as int? ?? 0,
-        myEarningCents: json['my_earning_cents'] as int? ?? 0,
-        hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
-        fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
-        totalAmountCents: json['total_amount_cents'] as int?,
-        earningPending: json['earning_pending'] as bool? ?? false,
-        isCrewShare: json['is_crew_share'] as bool? ?? false,
-        hasMoneyView: json.containsKey('my_earning_cents'),
-        paymentStatus: json['payment_status'] as String,
-        // الطلبات القديمة قبل ADR-0063 مالهاش الحقل ده — 'confirmed' يعني «سعره مستقر»،
-        // وده السلوك الصح ليها: مفيش زرار تسعير بيظهر.
-        priceStatus: json['price_status'] as String? ?? 'confirmed',
-        bookingMode: json['booking_mode'] as String? ?? 'individual',
-        requiredTechnicians: json['required_technicians'] as int?,
-        requiredAssistants: json['required_assistants'] as int?,
-        address: json['address'] != null
-            ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
-            : null,
-        scheduledAt: json['scheduled_at'] as String?,
-        crewStatus: json['crew_status'] != null ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>) : null,
-        teamLeaderName: json['team_leader_name'] as String?,
-        customerName: json['customer_name'] as String?,
-        customerPhone: json['customer_phone'] as String?,
-        serviceNameAr: json['service_name_ar'] as String?,
-        isNewForTechnician: json['is_new_for_technician'] as bool? ?? false,
-      );
+    id: json['id'] as String,
+    orderNumber: json['order_number'] as String,
+    orderStatus: json['order_status'] as String,
+    problemDescription: json['problem_description'] as String?,
+    customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
+    cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
+    cashCollectedCents: json['cash_collected_cents'] as int? ?? 0,
+    myEarningCents: json['my_earning_cents'] as int? ?? 0,
+    hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
+    fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
+    totalAmountCents: json['total_amount_cents'] as int?,
+    earningPending: json['earning_pending'] as bool? ?? false,
+    isCrewShare: json['is_crew_share'] as bool? ?? false,
+    earningSnapshotMissing: json['earning_snapshot_missing'] as bool? ?? false,
+    hasMoneyView: json.containsKey('my_earning_cents'),
+    paymentStatus: json['payment_status'] as String,
+    // الطلبات القديمة قبل ADR-0063 مالهاش الحقل ده — 'confirmed' يعني «سعره مستقر»،
+    // وده السلوك الصح ليها: مفيش زرار تسعير بيظهر.
+    priceStatus: json['price_status'] as String? ?? 'confirmed',
+    bookingMode: json['booking_mode'] as String? ?? 'individual',
+    requiredTechnicians: json['required_technicians'] as int?,
+    requiredAssistants: json['required_assistants'] as int?,
+    address: json['address'] != null
+        ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
+        : null,
+    scheduledAt: json['scheduled_at'] as String?,
+    crewStatus: json['crew_status'] != null
+        ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>)
+        : null,
+    teamLeaderName: json['team_leader_name'] as String?,
+    customerName: json['customer_name'] as String?,
+    customerPhone: json['customer_phone'] as String?,
+    serviceNameAr: json['service_name_ar'] as String?,
+    isNewForTechnician: json['is_new_for_technician'] as bool? ?? false,
+  );
 }
 
 // تسلسل دورة عمل الفني بعد القبول — مطابق لـ order-state-machine.ts بالظبط
@@ -263,12 +278,12 @@ class OrderItem {
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
-        id: json['id'] as String,
-        itemType: json['item_type'] as String,
-        nameAr: json['name_ar'] as String,
-        totalPriceCents: json['total_price_cents'] as int,
-        isCustomerApproved: json['is_customer_approved'] as bool,
-      );
+    id: json['id'] as String,
+    itemType: json['item_type'] as String,
+    nameAr: json['name_ar'] as String,
+    totalPriceCents: json['total_price_cents'] as int,
+    isCustomerApproved: json['is_customer_approved'] as bool,
+  );
 }
 
 const Map<String, String> technicianActionLabelsAr = {
@@ -288,12 +303,14 @@ String technicianEarningLabel({
   required int myEarningCents,
   required bool earningPending,
   required bool isCrewShare,
+  bool earningSnapshotMissing = false,
   required String Function(int) formatEgp,
   // الرد اللي بنينا منه الطلب ده مكانش فيه العقد المالي أصلاً — راجع `Order.hasMoneyView`.
   // «0 ج.م» هنا كانت هتبقى كذبة أسوأ من الصمت.
   bool hasMoneyView = true,
 }) {
   if (!hasMoneyView) return 'نصيبك: بنحدّث الرقم…';
+  if (earningSnapshotMissing) return 'نصيبك: يحتاج مراجعة من الإدارة';
   if (earningPending) return 'نصيبك: هيتحدد بعد تسعير الشغلانة';
   final amount = formatEgp(myEarningCents);
   return isCrewShare ? 'نصيبك من الطاقم: $amount' : 'نصيبك: $amount';
@@ -327,6 +344,8 @@ String technicianCashStatusLabel({
   }
   if (fullyPaidOnline) return 'مش مطلوب كاش — الطلب مدفوع أونلاين بالكامل';
   if (hasOnlinePayment) return 'مش مطلوب كاش إضافي من العميل';
-  if (isCrewShare) return 'مفيش كاش عليك تحصّله من العميل — ده بيتحصّل عن طريق قائد الفريق';
+  if (isCrewShare) {
+    return 'مفيش كاش عليك تحصّله من العميل — ده بيتحصّل عن طريق قائد الفريق';
+  }
   return 'لا يوجد مبلغ كاش مطلوب من العميل';
 }

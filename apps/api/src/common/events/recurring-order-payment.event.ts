@@ -1,6 +1,7 @@
 /** أحداث مالية للنوبة المتكررة. تُرسل بعد تسجيل الحالة الدائمة، ولا تحتوي بيانات بطاقة. */
 export const RECURRING_CARD_PAYMENT_FAILED_EVENT = 'orders.recurring_card_payment_failed';
-export const RECURRING_CASH_REMINDER_EVENT = 'orders.recurring_cash_reminder';
+/** رفض مؤكد من webhook بعد محاولة حفظ البطاقة؛ منفصل عن إشعار العميل لأنّه يحرّك retry أولًا. */
+export const RECURRING_CARD_PAYMENT_DECLINED_EVENT = 'orders.recurring_card_payment_declined';
 
 export class RecurringCardPaymentFailedEvent {
   constructor(
@@ -13,12 +14,9 @@ export class RecurringCardPaymentFailedEvent {
   ) {}
 }
 
-export class RecurringCashReminderEvent {
+export class RecurringCardPaymentDeclinedEvent {
   constructor(
     public readonly orderId: string,
-    public readonly orderNumber: string,
-    public readonly customerId: string,
-    public readonly scheduledAt: Date,
-    public readonly totalAmountCents: number,
+    public readonly failureReason: string,
   ) {}
 }

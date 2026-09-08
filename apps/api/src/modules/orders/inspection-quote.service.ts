@@ -15,7 +15,7 @@ import { PricingModel, Service } from '../catalog/entities/service.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
-import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
 import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
@@ -110,6 +110,24 @@ export class InspectionQuoteService {
     details: InitialQuoteDetails,
     status: OrderQuoteStatus = OrderQuoteStatus.PENDING_CUSTOMER,
   ): Promise<OrderQuote> {
+    // الطلب مقفول عند كل caller قبل الوصول هنا. نحول حماية الـunique index إلى خطأ نطاق واضح:
+    // لا يصح فتح عرض جديد بينما عرض سابق ما زال ينتظر قرار الإدارة أو العميل.
+    const liveQuote = await manager
+      .createQueryBuilder(OrderQuote, 'live_quote')
+      .setLock('pessimistic_write')
+      .where('live_quote.order_id = :orderId', { orderId: order.id })
+      .andWhere('live_quote.status IN (:...statuses)', {
+        statuses: [OrderQuoteStatus.PENDING_ADMIN_REVIEW, OrderQuoteStatus.PENDING_CUSTOMER],
+      })
+      .getOne();
+    if (liveQuote) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'يوجد عرض سعر حي بالفعل لهذا الطلب؛ احسمه أو أعد إصداره بعد انتهاء صلاحيته قبل إرسال عرض جديد',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const [{ next_version }] = await manager.query<{ next_version: string }[]>(
       `SELECT (COALESCE(MAX(version), 0) + 1)::text AS next_version
          FROM order_quotes
@@ -700,6 +718,7 @@ export class InspectionQuoteService {
     userId: string,
     orderId: string,
     paymentChoice: 'cash' | 'electronic' = 'electronic',
+    expectedQuote?: { id: string; version: number },
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -718,6 +737,17 @@ export class InspectionQuoteService {
         .where('q.order_id = :orderId', { orderId: order.id })
         .orderBy('q.version', 'DESC')
         .getOne();
+
+      if (
+        expectedQuote &&
+        (!quote || quote.id !== expectedQuote.id || quote.version !== expectedQuote.version)
+      ) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'عرض السعر اتحدّث. راجع السعر الجديد قبل الموافقة.',
+          HttpStatus.CONFLICT,
+        );
+      }
 
       if (
         quote?.status === OrderQuoteStatus.APPROVED &&
@@ -797,6 +827,13 @@ export class InspectionQuoteService {
       }
       if (isDiagnosisRevision) order.estimatedPriceCents = quotedAmountCents;
 
+      // العرض المعتمد يحدد عقد التنفيذ، لا السعر وحده. نحفظ نفس المدة والطاقم على الطلب قبل
+      // دخول المطابقة حتى يستخدمها الحجز والسعة والتجنيد بدل fallback ساعة/فني واحد.
+      // تعديل التشخيص يحدث أثناء التنفيذ، فلا يغيّر فريقًا ملتزمًا أو جدولًا قائمًا بصمت.
+      const operationalQuoteApplied = isDiagnosisRevision
+        ? { applied: false, requiresCrewRecruitment: false }
+        : this.applyApprovedOperationalQuote(order, quote);
+
       // **موافقة العميل على السعر = الطلب يدخل التوزيع التلقائي فورًا** (طلب مالك صريح
       // 2026-09-05: «طالما وافق على السعر، ينزله على طول في الـauto matching»).
       //
@@ -813,7 +850,9 @@ export class InspectionQuoteService {
       const nextStatus = isDiagnosisRevision
         ? // الفني واقف في المكان ومستني موافقة على سعر شغل لسه ما بدأش — بيكمّل من مكانه.
           OrderStatus.IN_PROGRESS
-        : order.initialQuoteSource !== 'admin_remote' && order.onsiteAssessorExecutesWorkSnapshot
+        : order.initialQuoteSource !== 'admin_remote' &&
+            order.onsiteAssessorExecutesWorkSnapshot &&
+            !operationalQuoteApplied.requiresCrewRecruitment
           ? OrderStatus.IN_PROGRESS
           : OrderStatus.SEARCHING_TECHNICIAN;
       order.orderStatus = nextStatus;
@@ -844,6 +883,10 @@ export class InspectionQuoteService {
             assessment_credit_cents: assessmentCreditCents,
             net_added_cents: quotedAmountCents - assessmentCreditCents,
             quote_source: order.initialQuoteSource,
+            operational_snapshot_applied: operationalQuoteApplied.applied,
+            estimated_duration_minutes: order.durationMinutes,
+            required_technicians: order.requiredTechnicians,
+            required_assistants: order.requiredAssistants,
           },
         }),
       );
@@ -925,5 +968,42 @@ export class InspectionQuoteService {
     }
 
     return order;
+  }
+
+  /**
+   * ينسخ snapshot التنفيذ من نسخة العرض التي وافق عليها العميل. وجود كل حقل اختياري يظل
+   * مقصودًا: التسعير لا يخترع مدة أو طاقمًا لم يحدده مُصدر العرض، لكنه لا يسمح للحقل الذي
+   * حدده أن يضيع بين quote والمطابقة.
+   */
+  private applyApprovedOperationalQuote(
+    order: Order,
+    quote: OrderQuote,
+  ): { applied: boolean; requiresCrewRecruitment: boolean } {
+    let applied = false;
+
+    if (quote.estimatedDurationMinutes != null) {
+      order.durationMinutes = quote.estimatedDurationMinutes;
+      order.durationHours =
+        quote.estimatedDurationMinutes % 60 === 0 ? quote.estimatedDurationMinutes / 60 : null;
+      // السعة تشتق الأيام من دقائق العمل الحقيقية عند غياب يوم صريح؛ لا نحتفظ بتقدير قديم
+      // يمكن أن يحجز يومًا كاملًا لشغل ساعتين أو يخفي امتداد شغل طويل.
+      order.estimatedDurationDays = null;
+      applied = true;
+    }
+    if (quote.requiredTechnicians != null) {
+      order.requiredTechnicians = quote.requiredTechnicians;
+      applied = true;
+    }
+    if (quote.requiredAssistants != null) {
+      order.requiredAssistants = quote.requiredAssistants;
+      applied = true;
+    }
+
+    const requiredTechnicians = Math.max(1, order.requiredTechnicians ?? 1);
+    const requiredAssistants = Math.max(0, order.requiredAssistants ?? 0);
+    const requiresCrewRecruitment = requiredTechnicians > 1 || requiredAssistants > 0;
+    if (requiresCrewRecruitment) order.bookingMode = BookingMode.TEAM;
+
+    return { applied, requiresCrewRecruitment };
   }
 }

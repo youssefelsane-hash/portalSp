@@ -54,6 +54,12 @@ export class Notification {
   @Column({ name: 'source_outbox_id', type: 'uuid', nullable: true })
   sourceOutboxId: string | null;
 
+  // مفتاح تسليم عام للأحداث الدائمة خارج صندوق مشاريع محدد. يظل sourceOutboxId كما هو
+  // للتوافق مع مشروع الإشعارات القديم ذي الـ FK، بينما هذا المفتاح يمنع تكرار التسليم
+  // المالي حتى لو أعيدت المحاولة بعد توقف الخدمة.
+  @Column({ name: 'source_delivery_key', type: 'varchar', length: 140, nullable: true })
+  sourceDeliveryKey: string | null;
+
   @Column({
     name: 'delivery_status',
     type: 'enum',

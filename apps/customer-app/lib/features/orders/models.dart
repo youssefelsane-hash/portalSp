@@ -49,6 +49,30 @@ class OrderCustomerNotice {
   );
 }
 
+/// النسخة الحالية من عرض السعر. الموافقة تربط هذا المعرّف والإصدار معًا حتى لا يقبل العميل
+/// عرضًا جديدًا وصل بعد أن فتح الشاشة.
+class InitialOrderQuote {
+  final String id;
+  final int version;
+  final int amountCents;
+  final String? diagnosis;
+
+  const InitialOrderQuote({
+    required this.id,
+    required this.version,
+    required this.amountCents,
+    required this.diagnosis,
+  });
+
+  factory InitialOrderQuote.fromJson(Map<String, dynamic> json) =>
+      InitialOrderQuote(
+        id: json['id'] as String,
+        version: (json['version'] as num).round(),
+        amountCents: (json['amount_cents'] as num).round(),
+        diagnosis: json['diagnosis'] as String?,
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts
 class Order {
   final String id;
@@ -64,6 +88,8 @@ class Order {
   final String? initialQuoteSource;
   final String? initialQuoteNote;
   final int totalAmountCents;
+  /// الرصيد الفعلي المتبقي الآن من دفتر الدفعات؛ مهم لفرق السعر بعد دفعة أصلية ناجحة.
+  final int? amountDueNowCents;
   /// الخصم المطبّق فعلاً على الطلب (كود خصم أو عمارة). العميل كان بيشوفه في المعاينة قبل
   /// التأكيد وبعدين يختفي من سجل الطلب تمامًا — فمكانش عنده أي طريقة يتأكد إن الكود اشتغل.
   final int discountAmountCents;
@@ -128,6 +154,7 @@ class Order {
     this.initialQuoteSource,
     this.initialQuoteNote,
     required this.totalAmountCents,
+    this.amountDueNowCents,
     this.discountAmountCents = 0,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
@@ -175,6 +202,7 @@ class Order {
     initialQuoteSource: json['initial_quote_source'] as String?,
     initialQuoteNote: json['initial_quote_note'] as String?,
     totalAmountCents: json['total_amount_cents'] as int,
+    amountDueNowCents: (json['amount_due_now_cents'] as num?)?.round(),
     discountAmountCents: (json['discount_amount_cents'] as num?)?.round() ?? 0,
     warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
     levelPremiumCents: json['level_premium_cents'] as int? ?? 0,

@@ -201,6 +201,10 @@ export class Order {
   @Column({ name: 'recurring_cash_reminder_sent_at', type: 'timestamptz', nullable: true })
   recurringCashReminderSentAt: Date | null;
 
+  /** lease قصيرة لتوصيل التذكير قبل تعليم النوبة بأنها أُبلغت بالفعل. */
+  @Column({ name: 'recurring_cash_reminder_claimed_at', type: 'timestamptz', nullable: true })
+  recurringCashReminderClaimedAt: Date | null;
+
   /** المشروع المرتبط (migration 0179) — null لطلبات عادية */
   @Column({ name: 'project_id', type: 'uuid', nullable: true })
   projectId: string | null;
@@ -370,8 +374,8 @@ export class Order {
   @Column({ name: 'commissionable_base_cents', type: 'integer', nullable: true })
   commissionableBaseCents: number | null;
 
-  /** Explicit immutable settlement policy for this order. Existing orders remain V1. */
-  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 1 })
+  /** Existing V1 rows are read-only history; every newly created order uses the unified policy. */
+  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 2 })
   settlementPolicyVersion: 1 | 2;
 
   /** Fixed V2 service commission captured when the order is created. */

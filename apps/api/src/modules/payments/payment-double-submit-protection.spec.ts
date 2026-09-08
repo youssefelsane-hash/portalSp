@@ -87,14 +87,14 @@ describe('PaymentsService — حماية من دفع مزدوج (§90.2)', () =>
       orderId: 'order-1',
       paymentStatus: PaymentGatewayStatus.PENDING,
       initiatedAt: new Date(),
-    } as Payment;
+    } as unknown as Payment;
     // النداء الأول: بحث بمفتاح idempotency الجديد → مفيش تطابق. النداء التاني: بحث عن دفعة نشطة
     // حديثة لنفس الطلب → موجودة.
     const { service, provider } = makeService({ findOneSequence: [null, recentPendingPayment] });
 
     await expect(
       service.payWithProvider('user-1', 'order-1', 'new-idempotency-key', PaymentMethod.CARD),
-    ).rejects.toThrow('محاولة دفع سابقة لسه معلّقة');
+    ).rejects.toThrow('محاولة دفع سابقة معلّقة');
     expect(provider.createPayment).not.toHaveBeenCalled();
   });
 
@@ -132,6 +132,24 @@ describe('PaymentsService — حماية من دفع مزدوج (§90.2)', () =>
     expect(result.payment.id).toBe('payment-winner');
     expect(result.result.providerReference).toBe('ref-winner');
     // الخاسر ما نادىش provider.createPayment تاني — استخدم النتيجة المخزّنة من اللي كسب.
+    expect(provider.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('لا يعيد نتيجة محفوظة لمستخدم آخر حتى لو عرف idempotency key ورقم الطلب', async () => {
+    const foreignPayment = {
+      id: 'payment-foreign',
+      orderId: 'order-1',
+      customerId: 'customer-foreign',
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      gatewayResponse: { cached_result: { kind: 'redirect', providerReference: 'ref', redirectUrl: 'https://pay.example/foreign' } },
+    } as unknown as Payment;
+    const { service, provider } = makeService({ findOneSequence: [foreignPayment] });
+    const internals = service as unknown as {
+      customerProfiles: { findByProfileIdOrThrow: jest.Mock };
+    };
+    internals.customerProfiles.findByProfileIdOrThrow.mockResolvedValue({ id: 'customer-foreign', userId: 'user-2' });
+
+    await expect(service.payWithProvider('user-1', 'order-1', 'known-key', PaymentMethod.CARD)).rejects.toThrow('مش خاصة بحسابك');
     expect(provider.createPayment).not.toHaveBeenCalled();
   });
 

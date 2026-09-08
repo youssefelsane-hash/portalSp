@@ -385,14 +385,28 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
       if (!res.ok || body.success === false) {
         return {
           succeeded: false,
+          outcome: 'rejected',
           providerRefundId: null,
           status: PaymentProviderStatus.FAILED,
           failureReason: body.data?.message ?? `Paymob refund رفض: ${res.status}`,
         };
       }
+      if (body.success !== true || !body.id) {
+        // HTTP 2xx without a complete refund acknowledgement is not confirmation.
+        // Treating an empty/malformed JSON object as success would create a local
+        // completed refund with no provider proof.
+        return {
+          succeeded: false,
+          outcome: 'unknown',
+          providerRefundId: null,
+          status: PaymentProviderStatus.PROCESSING,
+          failureReason: 'Paymob refund returned an incomplete acknowledgement; reconciliation is required',
+        };
+      }
       return {
         succeeded: true,
-        providerRefundId: body.id ? String(body.id) : null,
+        outcome: 'confirmed',
+        providerRefundId: String(body.id),
         status: PaymentProviderStatus.REFUNDED,
         failureReason: null,
       };
@@ -400,6 +414,9 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
       this.logger.error('فشل استرداد Paymob', err instanceof Error ? err.stack : err);
       return {
         succeeded: false,
+        // The request may have reached Paymob before the network failed. Keep the
+        // local refund reserved until an operator reconciles it instead of retrying.
+        outcome: 'unknown',
         providerRefundId: null,
         status: PaymentProviderStatus.FAILED,
         failureReason: err instanceof Error ? err.message : String(err),
@@ -525,18 +542,34 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
           payment_token: paymentKey.token,
         }),
       });
-      const body = (await payRes.json().catch(() => ({}))) as PaymobPayResponse;
-      if (!payRes.ok || body.success === false) {
+      const body = (await payRes.json().catch(() => null)) as PaymobPayResponse | null;
+      // 4xx مع رد مفهوم أو success=false رفض مؤكد. أما 5xx/JSON ناقص فالمزود قد يكون
+      // نفّذ السحب ثم فشل الرد، لذلك لا نبلّغ scheduler أنه فشل.
+      if (body?.success === false || (payRes.status >= 400 && payRes.status < 500)) {
         return {
           succeeded: false,
-          providerReference: body.id ? String(body.id) : null,
-          failureReason: body.data?.message ?? `Paymob token charge رفض: ${payRes.status}`,
+          outcome: 'confirmed',
+          providerReference: body?.id ? String(body.id) : null,
+          failureReason: body?.data?.message ?? `Paymob token charge رفض: ${payRes.status}`,
         };
       }
-      return { succeeded: body.success === true, providerReference: body.id ? String(body.id) : null, failureReason: null };
+      if (!payRes.ok || !body || body.success !== true) {
+        return {
+          succeeded: false,
+          outcome: 'unknown',
+          providerReference: body?.id ? String(body.id) : null,
+          failureReason: `تعذر تأكيد نتيجة Paymob token charge: ${payRes.status}`,
+        };
+      }
+      return { succeeded: true, outcome: 'confirmed', providerReference: body.id ? String(body.id) : null, failureReason: null };
     } catch (err) {
       this.logger.error('فشل تحصيل بوسيلة دفع محفوظة (chargeToken) Paymob', err instanceof Error ? err.stack : err);
-      return { succeeded: false, providerReference: null, failureReason: err instanceof Error ? err.message : String(err) };
+      return {
+        succeeded: false,
+        outcome: 'unknown',
+        providerReference: null,
+        failureReason: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
