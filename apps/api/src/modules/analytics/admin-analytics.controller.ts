@@ -7,6 +7,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { AnalyticsRangeQueryDto, FunnelByServiceQueryDto, resolveRange } from './dto/analytics-range-query.dto';
 import { UpsertMarketingSpendDto } from './dto/marketing-spend.dto';
 import { ExecutiveKpisService } from './executive-kpis.service';
+import { FinancialDashboardService } from './financial-dashboard.service';
 import { FunnelService } from './funnel.service';
 import { MarketingSpendService } from './marketing-spend.service';
 
@@ -27,6 +28,7 @@ export class AdminAnalyticsController {
     private readonly funnel: FunnelService,
     private readonly kpis: ExecutiveKpisService,
     private readonly marketingSpend: MarketingSpendService,
+    private readonly financial: FinancialDashboardService,
   ) {}
 
   @Get('funnel')
@@ -46,6 +48,24 @@ export class AdminAnalyticsController {
   executive(@Query() query: AnalyticsRangeQueryDto) {
     const { from, to } = resolveRange(query);
     return this.kpis.executiveKpis(from, to);
+  }
+
+  /** لوحة المال — كل سطر طلبه المالك، وآخر سطر فيها هو فحص التسوية. */
+  @Get('money')
+  @RequirePermission('analytics.financial.view')
+  money(@Query() query: AnalyticsRangeQueryDto) {
+    const { from, to } = resolveRange(query);
+    return this.financial.moneySnapshot(from, to);
+  }
+
+  /**
+   * تفاصيل مخالفات التسوية — بيترد بالمحفظة والحركة والفرق بالقرش، مش «فيه مشكلة».
+   * منفصل عن `money` عشان اللوحة تفضل خفيفة والتفاصيل تتطلب لما الرقم مايبقاش صفر.
+   */
+  @Get('money/reconciliation')
+  @RequirePermission('analytics.financial.view')
+  reconciliation() {
+    return this.financial.reconciliationCheck();
   }
 
   @Get('marketing-spend')
