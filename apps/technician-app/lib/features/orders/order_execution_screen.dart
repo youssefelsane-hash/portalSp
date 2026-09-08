@@ -370,19 +370,6 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     return crew.optionalAssistantSlots > 0 || crew.optionalAssistantsAdded > 0;
   }
 
-  /// ADR-0052 — شيل المساعد الاختياري. القائد يقدر يتراجع قبل ما الشغل يخلص، فالخانة بترجع
-  /// تفتح تاني (الباك-إند بيعيد حساب crew_status من صفوف الطاقم الفعلية).
-  Future<void> _removeOptionalAssistant(String memberId) async {
-    if (mounted) setState(() => _error = null);
-    try {
-      await _repository.removeTeamMember(_order.id, memberId);
-      await _refreshFromServer();
-      await _loadTeamMembersIfApplicable();
-    } catch (e) {
-      if (mounted) setState(() => _error = 'مقدرناش نشيل المساعد: $e');
-    }
-  }
-
   Future<void> _openRecruitTeam(String role) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -867,7 +854,6 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 crewStatus: _order.crewStatus!,
                 members: _teamMembers,
                 onAddAssistant: () => _openRecruitTeam('assistant'),
-                onRemove: _removeOptionalAssistant,
               ),
             ],
             if (_order.bookingMode == 'team' || _requiresMandatoryCrew) ...[
@@ -1782,13 +1768,11 @@ class _OptionalAssistantCard extends StatelessWidget {
     required this.crewStatus,
     required this.members,
     required this.onAddAssistant,
-    required this.onRemove,
   });
 
   final CrewStatus crewStatus;
   final List<TeamMember>? members;
   final VoidCallback onAddAssistant;
-  final Future<void> Function(String memberId) onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -1825,7 +1809,7 @@ class _OptionalAssistantCard extends StatelessWidget {
                 'وهياخد نسبته من قيمة الشغلانة.',
                 style: theme.textTheme.bodySmall,
               )
-            else
+            else ...[
               ...assistants.map(
                 (m) => ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1840,13 +1824,15 @@ class _OptionalAssistantCard extends StatelessWidget {
                   ),
                   title: Text(m.fullName),
                   subtitle: Text(m.roleLabel),
-                  trailing: IconButton(
-                    tooltip: 'شيل المساعد',
-                    icon: const Icon(Icons.person_remove_outlined),
-                    onPressed: () => onRemove(m.id),
-                  ),
                 ),
               ),
+              Text(
+                'لتعديل الطاقم بعد إضافته، تواصل مع الإدارة.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             if (crewStatus.optionalAssistantSlots > 0) ...[
               const SizedBox(height: 4),
               TextButton.icon(

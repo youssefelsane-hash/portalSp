@@ -527,6 +527,22 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     expect(afterAssistant).toMatchObject({ assignedAssistants: 1, missingAssistants: 1, assignedTechnicians: 1, missingTechnicians: 2 });
   });
 
+  it('removeMember — القائد لا يستطيع إزالة فني أو مساعد أُضيف للطاقم؛ العضوية تُدار إداريًا فقط', async () => {
+    const orderId = await insertOrder(`remove-locked-${runId}`, { requiredTechnicians: 1, requiredAssistants: 1 });
+    await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.assistantProfile, 'assistant');
+    const [member] = await q(`SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
+      orderId,
+      ids.assistantProfile,
+    ]);
+
+    await expect(orderTeamService.removeMember(ids.leaderUser, orderId, member.id)).rejects.toThrow(
+      'بعد إضافة عضو للطاقم، الإزالة تتم من الإدارة فقط',
+    );
+
+    const rows = await q(`SELECT id FROM order_team_members WHERE id = $1`, [member.id]);
+    expect(rows).toHaveLength(1);
+  });
+
   it('findVisibleForTechnician — عضو الفريق المُضاف يقدر يشوف تفاصيل الطلب دلوقتي (بَقّة حقيقية اتصلحت)', async () => {
     const orderId = await insertOrder(`visible-${runId}`, { requiredTechnicians: 3 });
     await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'technician');

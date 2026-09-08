@@ -317,33 +317,20 @@ export class OrderTeamService {
     return this.recruitMember(userId, orderId, dto.technician_id, role, dto.role_label);
   }
 
-  async removeMember(userId: string, orderId: string, memberId: string): Promise<void> {
+  async removeMember(userId: string, orderId: string, _memberId: string): Promise<void> {
+    // عضوية الطاقم التزام تشغيلي ومالي، وليست اختيارًا يمكن للقائد التراجع عنه. الاحتفاظ
+    // بالـ endpoint (مع الرفض) يحمي الإصدارات القديمة من التطبيق بدل ما تظل قادرة على حذف
+    // عضو أُضيف بالفعل. الإزالة متاحة للإدارة فقط عبر AdminOrdersService.removeCrewMember().
     const leaderProfile = await this.techniciansService.findByUserIdOrThrow(userId);
-    let removedTechnicianId: string | null = null;
-    await this.orders.manager.transaction(async (manager) => {
-      const order = await manager
-        .createQueryBuilder(Order, 'order')
-        .setLock('pessimistic_write')
-        .where('order.id = :orderId AND order.technician_id = :leaderId', { orderId, leaderId: leaderProfile.id })
-        .getOne();
-      if (!order) {
-        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
-      }
-      assertCrewMembershipMutable(order);
-      const member = await manager
-        .createQueryBuilder(OrderTeamMember, 'member')
-        .setLock('pessimistic_write')
-        .where('member.id = :memberId AND member.order_id = :orderId', { memberId, orderId })
-        .getOne();
-      if (!member) {
-        throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
-      }
-      await manager.remove(member);
-      removedTechnicianId = member.technicianId;
-    });
-    if (removedTechnicianId) {
-      this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'removed', null, removedTechnicianId, 'technician'));
+    const order = await this.orders.findOne({ where: { id: orderId, technicianId: leaderProfile.id } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
+    throw new ApiException(
+      ErrorCode.ORDR_003,
+      'بعد إضافة عضو للطاقم، الإزالة تتم من الإدارة فقط حتى يظل سجل التنفيذ والمستحقات صحيحًا',
+      HttpStatus.FORBIDDEN,
+    );
   }
 
   /** عام عمداً (بدون فحص ملكية) — بيتنادى من واجهة الفني (القائد) والعميل والأدمن كلهم لعرض نفس القايمة. */

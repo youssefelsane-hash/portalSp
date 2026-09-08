@@ -116,4 +116,8 @@ describe('order-state-machine — تسعير الإدارة من الصور', ()
   it('يسمح للأدمن بإغلاق عرض المعاينة الذي تركه العميل بلا رد', () => {
     expect(canTransition(OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
   });
+
+  it('يسمح للأدمن بإغلاق عرض العمل الإضافي المعلّق حتى لا يظل الطلب في شاشة الفني إلى الأبد', () => {
+    expect(canTransition(OrderStatus.AWAITING_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+  });
 });

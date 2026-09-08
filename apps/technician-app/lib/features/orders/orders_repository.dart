@@ -197,12 +197,6 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
-  // شيل عضو من طاقم الطلب — القائد بس (فحص الملكية في الباك-إند). ADR-0052: ده اللي بيخلي
-  // المساعد الاختياري **اختياري فعلاً** — الفني يقدر يتراجع، مش قرار نهائي بضغطة واحدة.
-  Future<void> removeTeamMember(String orderId, String memberId) async {
-    await authRepository.authedRequest('DELETE', '/technician/orders/$orderId/team-members/$memberId');
-  }
-
   // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من
   // مجمع كل الفنيين المتاحين المؤهلين للصنعة (مش بس شركته)، مرتّبين بالمسافة (فريقه الدائم
   // أولاً)، مفلترين برتبة (TechnicianLevel) أقل من أو تساوي رتبته. role إجباري (فني/مساعد) —
