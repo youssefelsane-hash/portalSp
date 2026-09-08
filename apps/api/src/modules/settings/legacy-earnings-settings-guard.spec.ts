@@ -35,4 +35,20 @@ describe('legacy earnings settings cutover guard', () => {
       status: 409,
     });
   });
+
+  it('keeps the configurable workday within the owner-approved 12-hour ceiling', async () => {
+    const service = new SettingsService(
+      {} as never,
+      {} as AuditLogService,
+      {} as RedisCacheService,
+    );
+    jest.spyOn(service, 'getOrThrow').mockResolvedValue({
+      key: 'matching.daily_capacity_minutes',
+      valueType: 'number',
+    } as Setting);
+
+    await expect(service.update('admin-id', 'matching.daily_capacity_minutes', 721)).rejects.toMatchObject({
+      status: 400,
+    });
+  });
 });

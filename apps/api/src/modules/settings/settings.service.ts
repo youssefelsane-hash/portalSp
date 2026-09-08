@@ -167,6 +167,16 @@ export class SettingsService {
         (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100)) {
       throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100', HttpStatus.BAD_REQUEST);
     }
+    if (
+      key === 'matching.daily_capacity_minutes' &&
+      (typeof value !== 'number' || !Number.isInteger(value) || value < 60 || value > 12 * 60)
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'يوم العمل لازم يكون عدد دقائق صحيحًا من ساعة إلى 12 ساعة كحد أقصى',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     if (isLegacyEarningsSettingKey(key)) {
       throw new ApiException(
