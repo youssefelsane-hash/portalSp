@@ -344,6 +344,10 @@ export default function OrderDetailPage() {
   const [showRefundForm, setShowRefundForm] = useState(false);
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [reconcilingRefundId, setReconcilingRefundId] = useState<string | null>(null);
+  const [refundReconciliationOutcome, setRefundReconciliationOutcome] = useState<'confirmed' | 'rejected'>('confirmed');
+  const [refundProviderReference, setRefundProviderReference] = useState('');
+  const [refundReconciliationEvidence, setRefundReconciliationEvidence] = useState('');
   const [rejectInstaPayPaymentId, setRejectInstaPayPaymentId] = useState<string | null>(null);
   const [rejectInstaPayReason, setRejectInstaPayReason] = useState('');
 
@@ -608,6 +612,38 @@ export default function OrderDetailPage() {
       setShowRefundForm(false);
       setRefundAmountEgp('');
       setRefundReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRefundReconciliation(e: FormEvent) {
+    e.preventDefault();
+    if (!reconcilingRefundId || refundReconciliationEvidence.trim().length < 8) {
+      window.alert('اكتب دليل المراجعة من لوحة مزود الدفع (8 حروف على الأقل)');
+      return;
+    }
+    if (refundReconciliationOutcome === 'confirmed' && refundProviderReference.trim().length < 3) {
+      window.alert('مرجع استرداد البوابة مطلوب عند التأكيد');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/refunds/${reconcilingRefundId}/reconcile`, {
+        method: 'POST',
+        body: JSON.stringify({
+          outcome: refundReconciliationOutcome,
+          evidence: refundReconciliationEvidence,
+          ...(refundReconciliationOutcome === 'confirmed' ? { provider_refund_id: refundProviderReference } : {}),
+        }),
+      });
+      setReconcilingRefundId(null);
+      setRefundProviderReference('');
+      setRefundReconciliationEvidence('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -2362,11 +2398,68 @@ export default function OrderDetailPage() {
                     <p className="mb-1 font-medium">الاستردادات ({financialSummary.refunds.length})</p>
                     <ul className="flex flex-col gap-1">
                       {financialSummary.refunds.map((r) => (
-                        <li key={r.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
-                          <span>
-                            {REFUND_METHOD_LABELS[r.refund_method]} · {REFUND_STATUS_LABELS[r.refund_status]}
-                          </span>
-                          <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
+                        <li key={r.id} className="flex flex-col gap-2 border-b pb-2 text-xs last:border-0">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {REFUND_METHOD_LABELS[r.refund_method]} · {REFUND_STATUS_LABELS[r.refund_status]}
+                            </span>
+                            <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
+                          </div>
+                          {r.refund_status === 'processing' && r.refund_method === 'original_method' && (
+                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-950">
+                              <p>
+                                النتيجة عند البوابة غير مؤكدة. لا تُنشئ استردادًا آخر؛ راجع لوحة المزود ثم اقفل نفس العملية بدليل.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="mt-2"
+                                disabled={isSaving}
+                                onClick={() => {
+                                  setReconcilingRefundId(reconcilingRefundId === r.id ? null : r.id);
+                                  setRefundReconciliationOutcome('confirmed');
+                                  setRefundProviderReference('');
+                                  setRefundReconciliationEvidence('');
+                                }}
+                              >
+                                مراجعة نتيجة الاسترداد
+                              </Button>
+                              {reconcilingRefundId === r.id && (
+                                <form onSubmit={handleRefundReconciliation} className="mt-2 flex flex-col gap-2">
+                                  <Label htmlFor={`refund_reconciliation_outcome_${r.id}`}>نتيجة مراجعة البوابة</Label>
+                                  <SelectNative
+                                    id={`refund_reconciliation_outcome_${r.id}`}
+                                    value={refundReconciliationOutcome}
+                                    onChange={(event) => setRefundReconciliationOutcome(event.target.value as 'confirmed' | 'rejected')}
+                                  >
+                                    <option value="confirmed">تم الاسترداد فعليًا</option>
+                                    <option value="rejected">البوابة رفضت الاسترداد صراحة</option>
+                                  </SelectNative>
+                                  {refundReconciliationOutcome === 'confirmed' && (
+                                    <Input
+                                      value={refundProviderReference}
+                                      onChange={(event) => setRefundProviderReference(event.target.value)}
+                                      placeholder="مرجع استرداد البوابة"
+                                      minLength={3}
+                                      required
+                                    />
+                                  )}
+                                  <Input
+                                    value={refundReconciliationEvidence}
+                                    onChange={(event) => setRefundReconciliationEvidence(event.target.value)}
+                                    placeholder="الدليل: رابط/رقم عملية أو ملاحظة من لوحة المزود"
+                                    minLength={8}
+                                    required
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button type="submit" size="sm" disabled={isSaving}>تأكيد القرار الموثق</Button>
+                                    <Button type="button" size="sm" variant="outline" onClick={() => setReconcilingRefundId(null)}>إلغاء</Button>
+                                  </div>
+                                </form>
+                              )}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>
