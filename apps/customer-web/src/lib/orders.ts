@@ -325,12 +325,33 @@ export const confirmCashHandover = (authedFetch: AuthedFetch, id: string) =>
 export const approveInitialQuote = (
   authedFetch: AuthedFetch,
   id: string,
+  quoteId: string,
+  quoteVersion: number,
   paymentChoice: 'cash' | 'electronic' = 'electronic',
 ) =>
   authedFetch<OrderResponseDto>(`/orders/${id}/approve-initial-quote`, {
     method: 'POST',
-    body: JSON.stringify({ payment_choice: paymentChoice }),
+    body: JSON.stringify({ quote_id: quoteId, quote_version: quoteVersion, payment_choice: paymentChoice }),
   });
+
+export interface OrderQuoteDto {
+  id: string;
+  order_id: string;
+  version: number;
+  source: string;
+  status: string;
+  amount_cents: number;
+  diagnosis: string | null;
+  scope_included: string | null;
+  scope_excluded: string | null;
+  estimated_duration_minutes: number | null;
+  required_technicians: number | null;
+  required_assistants: number | null;
+  valid_until: string;
+}
+
+export const getCurrentQuote = (authedFetch: AuthedFetch, id: string) =>
+  authedFetch<OrderQuoteDto>(`/orders/${id}/current-quote`);
 
 export interface OrderItemDto {
   id: string;

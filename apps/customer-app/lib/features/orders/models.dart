@@ -49,6 +49,30 @@ class OrderCustomerNotice {
   );
 }
 
+/// النسخة الحالية من عرض السعر. الموافقة تربط هذا المعرّف والإصدار معًا حتى لا يقبل العميل
+/// عرضًا جديدًا وصل بعد أن فتح الشاشة.
+class InitialOrderQuote {
+  final String id;
+  final int version;
+  final int amountCents;
+  final String? diagnosis;
+
+  const InitialOrderQuote({
+    required this.id,
+    required this.version,
+    required this.amountCents,
+    required this.diagnosis,
+  });
+
+  factory InitialOrderQuote.fromJson(Map<String, dynamic> json) =>
+      InitialOrderQuote(
+        id: json['id'] as String,
+        version: (json['version'] as num).round(),
+        amountCents: (json['amount_cents'] as num).round(),
+        diagnosis: json['diagnosis'] as String?,
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts
 class Order {
   final String id;

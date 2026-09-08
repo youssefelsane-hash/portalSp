@@ -718,6 +718,7 @@ export class InspectionQuoteService {
     userId: string,
     orderId: string,
     paymentChoice: 'cash' | 'electronic' = 'electronic',
+    expectedQuote?: { id: string; version: number },
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -736,6 +737,17 @@ export class InspectionQuoteService {
         .where('q.order_id = :orderId', { orderId: order.id })
         .orderBy('q.version', 'DESC')
         .getOne();
+
+      if (
+        expectedQuote &&
+        (!quote || quote.id !== expectedQuote.id || quote.version !== expectedQuote.version)
+      ) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'عرض السعر اتحدّث. راجع السعر الجديد قبل الموافقة.',
+          HttpStatus.CONFLICT,
+        );
+      }
 
       if (
         quote?.status === OrderQuoteStatus.APPROVED &&

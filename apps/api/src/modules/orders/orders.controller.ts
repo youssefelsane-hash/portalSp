@@ -274,7 +274,12 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ApproveInitialQuoteDto,
   ) {
-    const order = await this.inspectionQuoteService.approveInitialQuote(user.sub, id, dto.payment_choice ?? 'electronic');
+    const order = await this.inspectionQuoteService.approveInitialQuote(
+      user.sub,
+      id,
+      dto.payment_choice ?? 'electronic',
+      { id: dto.quote_id, version: dto.quote_version },
+    );
     return this.enrichedResponse(user.sub, order);
   }
 

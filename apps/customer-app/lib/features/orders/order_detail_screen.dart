@@ -71,6 +71,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _requestingRematch = false;
   bool _confirmingCashHandover = false;
   List<OrderItem> _quoteItems = [];
+  InitialOrderQuote? _initialQuote;
+  String? _initialQuoteError;
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
   List<OrderMedia> _media = [];
@@ -121,6 +123,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) setState(() => _order = order);
       if (order.orderStatus == 'awaiting_quote_approval') {
         await _loadQuoteItems();
+      }
+      if (order.orderStatus == 'awaiting_initial_quote_approval') {
+        try {
+          final quote = await _repository.getCurrentQuote(widget.orderId);
+          if (mounted) {
+            setState(() {
+              _initialQuote = quote;
+              _initialQuoteError = null;
+            });
+          }
+        } on ApiException catch (err) {
+          if (mounted) setState(() => _initialQuoteError = err.message);
+        }
+      } else if (mounted) {
+        setState(() {
+          _initialQuote = null;
+          _initialQuoteError = null;
+        });
       }
       if (order.bookingMode == 'team' && order.technicianId != null) {
         final members = await _repository.fetchTeamMembers(widget.orderId);
@@ -368,9 +388,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _approveInitialQuote() async {
+    final quote = _initialQuote;
+    if (quote == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_initialQuoteError ?? 'جارٍ تحميل عرض السعر الحالي')),
+      );
+      return;
+    }
     setState(() => _decidingQuote = true);
     try {
-      final order = await _repository.approveInitialQuote(widget.orderId);
+      final order = await _repository.approveInitialQuote(widget.orderId, quote);
       if (mounted) {
         setState(() => _order = order);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -384,6 +411,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         );
       }
     } on ApiException catch (err) {
+      // العرض قد يتغير بينما العميل فاتح الشاشة. نحمّل النسخة الجديدة فورًا بعد رد التعارض.
+      if (err.statusCode == 409) await _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _decidingQuote = false);
@@ -810,7 +839,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 order.orderStatus == 'awaiting_admin_quote'
                                     ? 'السعر: الإدارة بتراجعه'
                                     : order.orderStatus == 'awaiting_initial_quote_approval'
-                                        ? 'السعر المقترح: ${_formatEgp(order.estimatedPriceCents ?? 0)}'
+                                        ? _initialQuote == null
+                                            ? 'السعر المقترح: جارٍ تحميله'
+                                            : 'السعر المقترح: ${_formatEgp(_initialQuote!.amountCents)}'
                                         : 'السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}',
                               ),
                               // الخصم بيظهر بس لو فيه خصم فعلي (ممنوع «الخصم 0 ج»). كان
@@ -1249,7 +1280,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 Text('عرض السعر جاهز', style: Theme.of(context).textTheme.titleMedium),
                                 const SizedBox(height: 6),
                                 Text(
-                                  _formatEgp(order.estimatedPriceCents ?? 0),
+                                  _initialQuote == null
+                                      ? (_initialQuoteError ?? 'جارٍ تحميل السعر...')
+                                      : _formatEgp(_initialQuote!.amountCents),
                                   style: Theme.of(context)
                                       .textTheme
                                       .headlineSmall
@@ -1261,9 +1294,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                       ? 'السعر اتحدد من الصور. بعد الموافقة هنبدأ اختيار الفني.'
                                       : 'السعر اتحدد بعد المعاينة، راجعه قبل استمرار الشغل.',
                                 ),
-                                if (order.initialQuoteNote != null && order.initialQuoteNote!.trim().isNotEmpty) ...[
+                                if ((_initialQuote?.diagnosis ?? order.initialQuoteNote)?.trim().isNotEmpty ?? false) ...[
                                   const SizedBox(height: 8),
-                                  Text(order.initialQuoteNote!),
+                                  Text(_initialQuote?.diagnosis ?? order.initialQuoteNote!),
                                 ],
                                 const SizedBox(height: 12),
                                 Row(
@@ -1277,7 +1310,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: FilledButton(
-                                        onPressed: _decidingQuote ? null : _approveInitialQuote,
+                                        onPressed: _decidingQuote || _initialQuote == null ? null : _approveInitialQuote,
                                         child: _decidingQuote
                                             ? const SizedBox(
                                                 width: 20,
