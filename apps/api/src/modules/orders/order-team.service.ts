@@ -671,6 +671,7 @@ export class OrderTeamService {
   async acceptCrewOpportunity(userId: string, opportunityId: string): Promise<OrderTeamMemberRow[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     let orderId: string;
+    let crewChangedEvent: OrderCrewChangedEvent | null = null;
     try {
       // بَقّة حقيقية اتلقطت وقت كتابة اختبار التزامن (docs/08 §35.19): كان listForOrder() بيتنادى
       // *جوّه* المعاملة، بس listForOrder() بيستخدم this.teamMembers.manager (اتصال منفصل مش جزء من
@@ -741,7 +742,9 @@ export class OrderTeamService {
         await manager.save(member);
         await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');
 
-        this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(order.id, 'added', profile.id, null, 'technician'));
+        // لا نُشغّل listener أو realtime داخل المعاملة: قد يصل للمستخدم «اتضفت» ثم تفشل
+        // المعاملة. نحتفظ بالحدث ونبثه بعد نجاح الـcommit فقط.
+        crewChangedEvent = new OrderCrewChangedEvent(order.id, 'added', profile.id, null, 'technician');
         return order.id;
       });
     } catch (err) {
@@ -751,6 +754,7 @@ export class OrderTeamService {
       }
       throw err;
     }
+    if (crewChangedEvent) this.events.emit(ORDER_CREW_CHANGED_EVENT, crewChangedEvent);
     return this.listForOrder(orderId);
   }
 
