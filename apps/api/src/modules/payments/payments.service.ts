@@ -3330,7 +3330,6 @@ export class PaymentsService {
       const payment = paidPayments.find(
         (candidate) => candidate.paymentStatus === PaymentGatewayStatus.SUCCEEDED && !refundByPaymentId.has(candidate.id),
       );
-      if (!payment) return null;
 
       // ADR-0069 — رسم معاينة مقابل زيارة **حصلت فعلاً** ممكن يتحجز، حسب سياسة الخدمة المحفوظة
       // على الطلب. الافتراضي بيرجّع الكل زي ما كان بالظبط.
@@ -3362,6 +3361,26 @@ export class PaymentsService {
         return null;
       }
 
+      // صف محفظة PROCESSING يعني أن التحضير نجح لكن العملية توقفت قبل القيد النهائي. نكمل
+      // نفس الصف بالمعرّف المالي نفسه بدل إنشاء Refund جديد أو الادعاء أن المال عاد بالفعل.
+      const resumableWalletRefund = existingRefunds.find(
+        (existing) => existing.refundStatus === RefundStatus.PROCESSING && existing.refundMethod === RefundMethod.WALLET_CREDIT,
+      );
+      if (resumableWalletRefund) {
+        const resumablePayment = paidPayments.find((candidate) => candidate.id === resumableWalletRefund.paymentId);
+        if (resumablePayment) {
+          return {
+            order,
+            payment: resumablePayment,
+            goesThroughGateway: false,
+            provider: this.paymentProviders.getProvider(resumablePayment.paymentMethod),
+            refund: resumableWalletRefund,
+            refundDecision,
+          };
+        }
+      }
+      if (!payment) return null;
+
       // الدفعات التي تم إنشاء Refund مكتمل/قيد التنفيذ لها محجوزة بالفعل؛ المتبقي فقط هو الذي
       // يجوز تحضيره هنا. `idx_refunds_payment_id_unique` يبقى طبقة الأمان الأخيرة للسباقات.
       const reservedRefundCents = existingRefunds
@@ -3382,12 +3401,13 @@ export class PaymentsService {
         refundType: payment.amountCents > remainingRefundCents ? RefundType.PARTIAL : RefundType.FULL,
         reasonNotes,
         refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
-        refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
+        // لا تكتمل محفظة العميل إلا مع قيد double-entry الفعلي في المرحلة النهائية.
+        refundStatus: RefundStatus.PROCESSING,
         requestedByUserId: PLATFORM_SYSTEM_USER_ID,
         approvedByUserId: PLATFORM_SYSTEM_USER_ID,
         requestedAt: new Date(),
         approvedAt: new Date(),
-        completedAt: goesThroughGateway ? null : new Date(),
+        completedAt: null,
         providerRefundId: null,
       });
       await manager.save(refund);
@@ -3412,20 +3432,30 @@ export class PaymentsService {
     }
 
     const finalRefund = await this.dataSource.transaction(async (manager) => {
+      const lockedRefund = await manager
+        .createQueryBuilder(Refund, 'refund')
+        .setLock('pessimistic_write')
+        .where('refund.id = :refundId', { refundId: refund.id })
+        .getOne();
+      if (!lockedRefund) {
+        throw new ApiException(ErrorCode.PAY_003, 'سجل الاسترداد اختفى قبل الإقفال', HttpStatus.CONFLICT);
+      }
+      // استدعاء متزامن أو retry بعد نجاح سابق لا ينشئ قيد محفظة ثانياً.
+      if (lockedRefund.refundStatus !== RefundStatus.PROCESSING) return lockedRefund;
       const recordRefundAudit = () =>
         this.auditLog.record(
           {
             actorUserId: PLATFORM_SYSTEM_USER_ID,
             actorRole: 'system',
             action:
-              refund.refundStatus === RefundStatus.REJECTED
+              lockedRefund.refundStatus === RefundStatus.REJECTED
                 ? 'order.refund_rejected'
                 : 'order.refunded',
             entityType: 'order',
             entityId: orderId,
             newValues: {
-              refund_id: refund.id,
-              amount_cents: refund.amountCents,
+              refund_id: lockedRefund.id,
+              amount_cents: lockedRefund.amountCents,
               // ADR-0068 §3 — المبلغ المحجوز مسجّل صراحة: مفيش جنيه بيقف من غير سطر بيقول ليه.
               withheld_for_completed_visit_cents: refundDecision.withheldCents,
               refund_status: refund.refundStatus,
@@ -3435,20 +3465,17 @@ export class PaymentsService {
           manager,
         );
       if (goesThroughGateway && !providerSucceeded) {
-        refund.refundStatus = RefundStatus.REJECTED;
-        await manager.save(refund);
+        lockedRefund.refundStatus = RefundStatus.REJECTED;
+        await manager.save(lockedRefund);
         await recordRefundAudit();
-        return refund;
+        return lockedRefund;
       }
 
       if (goesThroughGateway) {
-        refund.refundStatus = RefundStatus.COMPLETED;
-        refund.providerRefundId = providerRefundId;
-        refund.completedAt = new Date();
-        await manager.save(refund);
+        lockedRefund.providerRefundId = providerRefundId;
       }
 
-      if (refund.refundMethod === RefundMethod.WALLET_CREDIT) {
+      if (lockedRefund.refundMethod === RefundMethod.WALLET_CREDIT) {
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
@@ -3463,10 +3490,10 @@ export class PaymentsService {
             toWalletId: customerWallet.id,
             // المبلغ المسترد فعلاً مش المدفوع (ADR-0069) — لولا كده مسار المحفظة كان هيرجّع الكل
             // بينما مسار البوابة بيرجّع الجزئي، يعني نفس القرار بنتيجتين ماليتين مختلفتين.
-            amountCents: refund.amountCents,
+            amountCents: lockedRefund.amountCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
-            referenceId: refund.id,
+            referenceId: lockedRefund.id,
             descriptionAr: `استرجاع طلب ${order.orderNumber} — ${
               triggeredBy === 'customer_cancel' ? 'إلغاء العميل' : 'إلغاء نظامي'
             }`,
@@ -3476,7 +3503,13 @@ export class PaymentsService {
         );
       }
 
-      const paymentPartiallyRefunded = refund.amountCents < payment.amountCents;
+      // لا يصبح الاسترداد مكتملًا إلا هنا: بعد تأكيد البوابة أو قيد المحفظة الفعلي ضمن نفس
+      // المعاملة. توقف قبل ذلك يترك PROCESSING قابلًا للاستئناف، لا COMPLETED كاذبًا.
+      lockedRefund.refundStatus = RefundStatus.COMPLETED;
+      lockedRefund.completedAt = new Date();
+      await manager.save(lockedRefund);
+
+      const paymentPartiallyRefunded = lockedRefund.amountCents < payment.amountCents;
       payment.paymentStatus = paymentPartiallyRefunded
         ? PaymentGatewayStatus.PARTIALLY_REFUNDED
         : PaymentGatewayStatus.REFUNDED;
@@ -3496,7 +3529,7 @@ export class PaymentsService {
       // سجّل بالفعل صف انتقال الحالة نفسه.
 
       await recordRefundAudit();
-      return refund;
+      return lockedRefund;
     });
 
     this.emitRefundResolved(finalRefund, order);
