@@ -33,6 +33,7 @@ import { AdminRealtimeModule } from './common/websocket/admin-realtime.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
@@ -118,6 +119,7 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     SupportModule,
     NotificationsModule,
     PromotionsModule,
+    AnalyticsModule,
     CampaignsModule,
     ReferralsModule,
     FavoritesModule,
