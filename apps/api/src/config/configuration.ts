@@ -31,6 +31,10 @@ export default () => ({
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
+    // عدد الـproxies الموثوقة بين العميل والتطبيق (تدقيق `docs/29` P0-2). صفر = مفيش proxy
+    // (تشغيل محلي مباشر). واحد = load balancer واحد (Railway، nginx). اتنين = CDN فوق LB.
+    // **متتحطش `true`** — ده معناه «صدّق أي X-Forwarded-For» ويسمح بانتحال هوية شبكية.
+    trustedProxyHops: parseInt(process.env.TRUSTED_PROXY_HOPS ?? '1', 10),
   },
 
   otp: {

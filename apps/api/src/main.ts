@@ -41,6 +41,7 @@ async function bootstrap() {
     uploadsDir: resolve(config.get<string>('storage.localDir')!),
     apiPrefix: config.get<string>('apiPrefix')!,
     corsOrigins: config.get<string[]>('security.corsOrigins')!,
+    trustedProxyHops: config.get<number>('security.trustedProxyHops')!,
   });
 
   const port = config.get<number>('port')!;

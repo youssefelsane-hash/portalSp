@@ -3,7 +3,8 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, DiscoveryModule } from '@nestjs
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { IdentityThrottlerGuard } from './common/throttling/identity-throttler.guard';
 import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
@@ -150,7 +151,7 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     AdminRouteRbacValidator,
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: IdentityThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

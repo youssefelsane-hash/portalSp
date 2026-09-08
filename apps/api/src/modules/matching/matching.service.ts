@@ -240,6 +240,18 @@ export class MatchingService {
   // مش private عمدًا (docs/08 §36.6) — MatchingExplainabilityService بيعيد استخدامها بالحرف
   // (batchSize كبير) عشان يحسب rank_score/ترتيب فني معيّن بين المرشّحين المؤهّلين الحقيقيين، بدل
   // ما يخترع صيغة ترتيب موازية في التفسير. الموديولين مسجّلين في نفس MatchingModule، صفر دورة.
+  /**
+   * **`manager` مش اختياري تجميلي — هو الفرق بين نظام شغّال ونظام متجمّد** (تدقيق `docs/29` P0-1).
+   *
+   * الدالة دي بتتنادى من جوّه ترانزاكشن في ٩ مواضع. من غير `manager` بتنفّذ استعلامها على
+   * `this.dataSource`، يعني **بتسحب اتصال تاني من نفس الـpool** والترانزاكشن لسه ماسك اتصال.
+   * مع `DATABASE_POOL_MAX=10`: عشر حجوزات متزامنة بتاخد الـ١٠ اتصالات، وكل واحدة تطلب الحادي
+   * عشر، ومحدش يقدر يسيب اتصاله لأنه هو نفسه مستني ⇒ **قفلة كاملة** لحد `connectionTimeoutMillis`.
+   * اتقاس حيًا: p50 قفز من ٤٣٧ms لـ١٠٫٨ ثانية بين ١٠ و٢٠ طلب متزامن، و500 للعميل عند ٤٠.
+   *
+   * وفيه سبب تاني مش أقل أهمية: القراءة جوّه الترانزاكشن لازم تشوف **نفس اللقطة** بتاعت الصفوف
+   * المقفولة. القراءة برّه بتشوف لقطة أقدم — يعني كانت غلط منطقيًا كمان، مش بطيئة وبس.
+   */
   async findEligibleTechnicians(
     order: Order,
     batchSize: number,
@@ -248,7 +260,9 @@ export class MatchingService {
     preferredCompanyId?: string | null,
     ignoreActiveOrderConflict = false,
     previewLoad?: CandidateOperationalLoad,
+    manager?: EntityManager,
   ): Promise<EligibleTechnicianRow[]> {
+    const executor = manager ?? this.dataSource;
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     // **بث الطوارئ للكل** (طلب مالك صريح 2026-09-05) — نفس محرك التوزيع بنفس كل إعداداته
     // (حجم الدفعة، المهلة، عدد الجولات، وزن المسافة)، والفرق **الوحيد** إنه بيتجاهل جدول
@@ -295,7 +309,7 @@ export class MatchingService {
     // نافذة أكبر قبل تمثيل كل شركة مرة واحدة؛ شركة كبيرة لا يجوز أن تملأ LIMIT بأعضائها ثم
     // يترك dedupe دفعة ناقصة. السقف يحافظ على زمن الاستعلام، ونداء التفسير الكبير يحتفظ بحجمه.
     const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 20, 500));
-    const candidates = await this.dataSource.query<EligibleTechnicianRow[]>(
+    const candidates = await executor.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km,
@@ -853,6 +867,8 @@ export class MatchingService {
           null,
           // مشغول بطلب تاني دلوقتي مش سبب لتحويل إعادة الزيارة لحد تاني — عنده المهلة كلها يرد.
           true,
+          undefined,
+          manager,
         );
         if (pinnedCandidates.length === 0) {
           return { kind: 'noop' as const };
@@ -880,7 +896,16 @@ export class MatchingService {
         } else if (priorAssignments.some((a) => a.assignmentStatus === AssignmentStatus.TIMEOUT)) {
           lockedProviderLost = 'offer_expired';
         } else {
-          const lockedCandidates = await this.findEligibleTechnicians(order, 1, lockedTechnicianId, isEmergency);
+          const lockedCandidates = await this.findEligibleTechnicians(
+            order,
+            1,
+            lockedTechnicianId,
+            isEmergency,
+            null,
+            false,
+            undefined,
+            manager,
+          );
           if (lockedCandidates.length === 0) {
             lockedProviderLost = 'technician_unavailable';
           } else {
@@ -899,7 +924,16 @@ export class MatchingService {
       let candidates =
         pinnedOnlyCandidates ??
         (nextRound === 1 && order.requestedTechnicianId
-          ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
+          ? await this.findEligibleTechnicians(
+              order,
+              batchSize,
+              order.requestedTechnicianId,
+              isEmergency,
+              null,
+              false,
+              undefined,
+              manager,
+            )
           : []);
       // "اعتماد" بشركة محدّدة (docs/06 §1.5، docs/07 الجزء أ — كانت فجوة موثّقة صراحة، اتقفلت):
       // أول جولة بس بتحاول تعرض حصريًا على فنيي الشركة المطلوبة. لو محدش مؤهّل متاح فيها، بيرجع
@@ -911,10 +945,13 @@ export class MatchingService {
           null,
           isEmergency,
           order.requestedTechnicianCompanyId,
+          false,
+          undefined,
+          manager,
         );
       }
       if (!pinnedOnlyCandidates && candidates.length === 0) {
-        candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
+        candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency, null, false, undefined, manager);
       }
       // ADR-0017 بند 10 — Fallback توسيع النطاق: لو نضبت قايمة الفنيين "المثاليين" (مؤهلين
       // ومتاحين فعلاً) وعدّينا جولة العتبة القابلة للإعداد، نوسّع البحث لفنيين مؤهلين لنفس
@@ -927,7 +964,7 @@ export class MatchingService {
           BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK,
         );
         if (nextRound >= broadenAfterRound) {
-          candidates = await this.findEligibleTechnicians(order, batchSize, null, false, null, true);
+          candidates = await this.findEligibleTechnicians(order, batchSize, null, false, null, true, undefined, manager);
         }
       }
       // قرار عمل صريح من المالك (2026-08-19) — مفيش إلغاء تلقائي خالص لمجرد مفيش فني اتلاقاله
@@ -1237,7 +1274,7 @@ export class MatchingService {
       // ADR-0078: دخول مسار الطلبات قرار دائم؛ تغيّر الحمل لا يحوّله لتعيين بلا موافقة.
       const decision = await this.scheduledDispatchDecision(order, manager);
       if (decision.route === 'rounds') return { kind: 'request' as const, order };
-      const candidate = await this.firstScheduledCandidate(order);
+      const candidate = await this.firstScheduledCandidate(order, manager);
       if (!candidate) return { kind: 'stalled' as const, order };
 
       const technicianId = candidate.technician_id;
@@ -1267,16 +1304,34 @@ export class MatchingService {
     return { dispatched: 1 };
   }
 
-  private async firstScheduledCandidate(order: Order): Promise<EligibleTechnicianRow | undefined> {
+  private async firstScheduledCandidate(order: Order, manager?: EntityManager): Promise<EligibleTechnicianRow | undefined> {
     if (order.requestedTechnicianId) {
-      const selected = await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false);
+      const selected = await this.findEligibleTechnicians(
+        order,
+        1,
+        order.requestedTechnicianId,
+        false,
+        null,
+        false,
+        undefined,
+        manager,
+      );
       if (selected.length || orderHasLockedProvider(order)) return selected[0];
     }
     if (order.requestedTechnicianCompanyId) {
-      const members = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
+      const members = await this.findEligibleTechnicians(
+        order,
+        1,
+        null,
+        false,
+        order.requestedTechnicianCompanyId,
+        false,
+        undefined,
+        manager,
+      );
       return members[0];
     }
-    return (await this.findEligibleTechnicians(order, 1, null, false))[0];
+    return (await this.findEligibleTechnicians(order, 1, null, false, null, false, undefined, manager))[0];
   }
 
   async scheduledDispatchDecision(order: Order, manager = this.dataSource.manager): Promise<DispatchRouteDecision> {
@@ -1286,7 +1341,7 @@ export class MatchingService {
     if (previousRequests > 0 || await this.workOpportunities.hasOpenOfferForOrder(order.id, manager)) {
       return { ...base, route: 'rounds', reason: 'existing_requests' };
     }
-    const candidate = await this.firstScheduledCandidate(order);
+    const candidate = await this.firstScheduledCandidate(order, manager);
     if (!candidate) {
       // القفل يتفك من المسار الرسمي فقط، مع إبلاغ العميل؛ لا fallback صامت لمنفذ آخر.
       return orderHasLockedProvider(order) ? { ...base, route: 'rounds', reason: 'selected_provider_request' } : base;
