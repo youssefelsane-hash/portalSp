@@ -4,6 +4,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { AnalyticsRollupService } from './analytics-rollup.service';
 import {
   AnalyticsRangeQueryDto,
   FunnelByServiceQueryDto,
@@ -36,12 +37,23 @@ export class AdminAnalyticsController {
     private readonly marketingSpend: MarketingSpendService,
     private readonly financial: FinancialDashboardService,
     private readonly workforce: WorkforceAnalyticsService,
+    private readonly rollup: AnalyticsRollupService,
   ) {}
 
   @Get('funnel')
   bookingFunnel(@Query() query: AnalyticsRangeQueryDto) {
     const { from, to } = resolveRange(query);
     return this.funnel.bookingFunnel(from, to);
+  }
+
+  /**
+   * الفنل التاريخي من الجدول المجمّع — للمدى اللي الأحداث الخام اتمسحت منه (بعد ١٨٠ يوم).
+   * منفصل عن `funnel` لأنه بيرد على سؤال تاني: «الاتجاه عبر الشهور» مش «الحالة دلوقتي».
+   */
+  @Get('funnel/daily')
+  funnelDaily(@Query() query: AnalyticsRangeQueryDto) {
+    const { from, to } = resolveRange(query);
+    return this.rollup.historicalDaily(from, to);
   }
 
   @Get('funnel/by-service')

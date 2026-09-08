@@ -23,6 +23,7 @@ import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LE
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
+import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
@@ -144,6 +145,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         // مابنضبطش الوضع من قايمة الخدمة بعد ADR-0048 — بيتحسب من التاريخ في الـeffect تحت.
       })
       .catch(() => setService(null));
+  }, [id]);
+
+  // أول مرحلتين في الفنل (ADR-0081 §3): «شاف الخدمة» و«بدأ الحجز» بيحصلوا هنا **من غير أي
+  // نداء سيرفر**، فلو ما اتسجّلوش من المتصفح مفيش حد هيعرف كام واحد فتح الصفحة وما كمّلش.
+  // الصفحة دي هي الاتنين مع بعض: فتحها = عرض الخدمة + بداية الحجز.
+  useEffect(() => {
+    trackFunnelStage('service_viewed', { service_id: id });
+    trackFunnelStage('booking_started', { service_id: id });
   }, [id]);
 
   useEffect(() => {

@@ -25,6 +25,7 @@ import 'orders_repository.dart';
 import 'qr_code_scan_screen.dart';
 import '../technicians/technicians_repository.dart';
 import 'schedule_selection_screen.dart';
+import '../../core/funnel_tracker.dart';
 
 class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
@@ -328,6 +329,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
+    // أول مرحلتين في الفنل (ADR-0081 §3): «شاف الخدمة» و«بدأ الحجز» بيحصلوا هنا **من غير أي
+    // نداء سيرفر**، فمن غير التسجيل ده مفيش حد هيعرف كام واحد فتح الشاشة وما كمّلش. باقي
+    // المراحل ليها نداءات حقيقية والسيرفر بيسجّلها بنفسه.
+    FunnelTracker.instance.track('service_viewed', serviceId: widget.service.id);
+    FunnelTracker.instance.track('booking_started', serviceId: widget.service.id);
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
     _requestedAt = widget.requestedAt;

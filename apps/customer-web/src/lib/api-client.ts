@@ -1,4 +1,5 @@
 import { ApiEnvelope } from './api-types';
+import { funnelHeaders } from './funnel';
 
 export class ApiError extends Error {
   code: string;
@@ -24,6 +25,10 @@ export async function apiFetch<T>(path: string, accessToken: string | null, opti
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      // معرّف محاولة الحجز على **كل** نداء (ADR-0081 §3): السيرفر بيسجّل مراحله بنفسه، وبيحتاج
+      // المعرّف ده عشان يربطها بخطوات المتصفح. حطه هنا مرة واحدة بدل ما كل نداء حجز يفتكره —
+      // النسيان في نداء واحد كان بيقطع الرحلة نصّين في التقرير.
+      ...funnelHeaders(),
       ...options.headers,
     },
   });
