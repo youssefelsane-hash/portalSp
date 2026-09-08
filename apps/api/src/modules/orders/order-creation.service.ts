@@ -1,8 +1,9 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { autoIdempotencyKeys, DUPLICATE_GUARD_WINDOW_SECONDS_FALLBACK } from './order-duplicate-guard';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { BuildingsService } from '../buildings/buildings.service';
@@ -461,6 +462,28 @@ export class OrderCreationService {
     if (idempotencyKey) {
       const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
       if (existing) return existing;
+    }
+
+    // **حماية الدوسة المزدوجة للكلاينتات اللي مش بتبعت مفتاح** (تدقيق `docs/29` P0-4).
+    // الهيدر اختياري عمدًا (عشان الكلاينتات القديمة)، فالنتيجة كانت إن أي كلاينت مش بيبعته
+    // مكشوف تمامًا — اتأكد حيًا إن طلبين متوازيين بنفس الـbody بيعملوا طلبين. هنا السيرفر
+    // بيشتق مفتاح بنفسه من بصمة الطلب + شريحة زمنية (راجع `order-duplicate-guard.ts`).
+    // المسار الداخلي للطلبات المتكررة مستثنى — عنده حمايته الخاصة ومن حقه يولّد نفس الطلب
+    // في مواعيد متتالية.
+    let effectiveIdempotencyKey = idempotencyKey;
+    if (!effectiveIdempotencyKey && !recurringIdentity) {
+      const windowSeconds = await this.settingsService.getNumber(
+        'orders.duplicate_guard_window_seconds',
+        DUPLICATE_GUARD_WINDOW_SECONDS_FALLBACK,
+      );
+      if (windowSeconds > 0) {
+        const [currentKey, previousKey] = autoIdempotencyKeys(customerProfile.id, dto, Date.now(), windowSeconds);
+        const duplicate = await this.orders.findOne({
+          where: { customerId: customerProfile.id, idempotencyKey: In([currentKey, previousKey]) },
+        });
+        if (duplicate) return duplicate;
+        effectiveIdempotencyKey = currentKey;
+      }
     }
 
     let selectedMatchPreview: BookingMatchPreview | null = null;
@@ -1272,7 +1295,7 @@ export class OrderCreationService {
         // ADR-0060 §3 — مفيش طريقة حساب بتاخد كمية من العميل تاني. العمود بيفضل للطلبات
         // التاريخية والتقارير، وبيتكتب null لأي طلب جديد.
         pricingQuantity: null,
-        idempotencyKey: idempotencyKey ?? null,
+        idempotencyKey: effectiveIdempotencyKey ?? null,
       });
       await manager.save(order);
 
@@ -1556,8 +1579,10 @@ export class OrderCreationService {
       // (migration 0139) بيرفض التاني، والـtransaction بتاعته بتترول باك بالكامل — بدل ما
       // نسرّب خطأ DB خام للعميل، نرجّع نفس الطلب اللي الأول عمله فعلاً (نفس فلسفة
       // PaymentsService.payWithWallet() بالحرف).
-      if (idempotencyKey && this.isIdempotencyKeyViolation(err)) {
-        const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
+      if (effectiveIdempotencyKey && this.isIdempotencyKeyViolation(err)) {
+        const existing = await this.orders.findOne({
+          where: { customerId: customerProfile.id, idempotencyKey: effectiveIdempotencyKey },
+        });
         if (existing) return existing;
       }
       // ADR-0065 §5 — التأكيد فشل والطلب اترول باك. التذكرة **لازم تموت** بره الترانزاكشن
