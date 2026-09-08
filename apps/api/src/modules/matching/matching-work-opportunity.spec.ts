@@ -40,8 +40,8 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
 
   async function insertOrder(label: string): Promise<string> {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',10000) RETURNING id`,
       // رقم الطلب لازم يبقى فريد **بعد** القصّ على 24 حرف. الصيغة القديمة
       // (`WO-${label}-${runId}`.slice(0,24)) كانت بتقصّ معرّف التشغيلة نفسه مع الـlabels الطويلة،
       // فبيحصل تصادم بين تشغيلتين — وكمان بين labels في نفس التشغيلة لو أول 12 حرف متشابهين

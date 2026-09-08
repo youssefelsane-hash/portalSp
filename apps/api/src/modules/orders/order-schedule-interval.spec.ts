@@ -71,9 +71,9 @@ describe('فترة الموعد وفحص التعارض — نسخة موحّد�
     ids.address = addr.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents,
                            booking_mode, order_type, technician_id, scheduled_at, scheduled_end_at)
-       VALUES ($1,$2,$3,$4,$5,'accepted',0,'individual','scheduled',$6,$7::timestamptz,$8::timestamptz) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'accepted',0,'individual','scheduled',$6,$7::timestamptz,$8::timestamptz) RETURNING id`,
       [`TOVL-${runId}`.slice(0, 24), ids.profile, ids.service, ids.address, ids.zone, ids.technician,
        existingStart.toISOString(), existingEnd.toISOString()],
     );

@@ -65,9 +65,9 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     orderStatus?: string;
   }) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status,
          booking_mode, required_technicians, required_assistants, total_amount_cents, technician_earning_cents, scheduled_at, crew_shortage_escalated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending','team',$8,$9,50000,0,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending','team',$8,$9,50000,0,
          now() - ($10::text || ' hours')::interval,
          CASE WHEN $11::boolean THEN now() - interval '1 hour' ELSE NULL END)
        RETURNING id`,

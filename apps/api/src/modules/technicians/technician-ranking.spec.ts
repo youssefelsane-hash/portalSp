@@ -140,10 +140,9 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
     );
     ids.orderCustomerProfileId = customerProfile.id;
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number,customer_id,technician_id,service_id,address_id,scheduled_at,
+      `INSERT INTO orders (commission_rate_applied,order_number,customer_id,technician_id,service_id,address_id,scheduled_at,
           technician_departed_at,technician_arrived_at)
-       VALUES ($1,$2,$3,$4,$5, now(), now() - interval '15 minutes', now() + interval '5 minutes')
+       VALUES (20,$1,$2,$3,$4,$5, now(), now() - interval '15 minutes', now() + interval '5 minutes')
        RETURNING id`,
       [`ORD-RANK-${runId}`.slice(0, 24), ids.orderCustomerProfileId, ids.lowVolumeTechId, ids.serviceId, ids.addressId],
     );

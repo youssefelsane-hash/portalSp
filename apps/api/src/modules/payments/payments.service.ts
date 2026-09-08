@@ -3192,7 +3192,7 @@ export class PaymentsService {
       return { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund };
     });
 
-    const { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
+    const { payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
 
     // المرحلة (ب) — برّه أي DB transaction تمامًا. صف الـrefund اتسجّل بالفعل PROCESSING فوق
     // قبل النداء ده، فحتى لو الـprocess وقع دلوقتي بعد نجاح فعلي عند البوابة، فحص existingRefund

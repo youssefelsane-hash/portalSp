@@ -1099,7 +1099,7 @@ export class OrderCreationService {
 
     // سياسة الأرباح الموحدة هي المسار الوحيد لإنشاء أي طلب جديد. V1 يبقى قراءة تاريخية فقط؛
     // زر تحويله كان يسمح بإنشاء طلبات حديثة بحقائق مالية من مسار متقاعد.
-    const settlementPolicyVersion: 2 = 2;
+    const settlementPolicyVersion = 2 as const;
     const platformCommissionCentsSnapshot = null;
     const commissionRateApplied = settlementPolicyVersion === 2 ? (originalOrder ? 0 : Number(service.commissionPercentage)) : null;
     if (commissionRateApplied !== null && (!Number.isFinite(commissionRateApplied) || commissionRateApplied < 0 || commissionRateApplied > 100)) {
@@ -1107,15 +1107,6 @@ export class OrderCreationService {
     }
 
     const remoteAssessmentFeeCents = remoteQuoteRequested ? service.remoteAssessmentFeeCents : 0;
-    const initialOrderTotalCents = originalOrder
-      ? 0
-      : remoteQuoteRequested
-        ? remoteAssessmentFeeCents
-      : estimate.estimated_total_cents +
-        estimate.inspection_fee_cents +
-        estimate.emergency_surcharge_cents +
-        addonsTotalCents;
-
     let createdOrder: Order;
     try {
       createdOrder = await this.dataSource.transaction(async (manager) => {

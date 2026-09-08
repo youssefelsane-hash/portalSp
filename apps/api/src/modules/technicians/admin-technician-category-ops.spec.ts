@@ -174,8 +174,8 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
 
     // القائد (techOnline) عنده طلب فريق طاقمه ناقص — required_technicians=2، مفيش أعضاء.
     const [crewOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team',2) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team',2) RETURNING id`,
       [`TESTOPS-CREW-${runId}`.slice(0, 24), ids.customerProfile, ids.techOnline, ids.service, ids.address, ids.zone],
     );
     ids.orderCrewShortage = crewOrder.id;
@@ -183,8 +183,8 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     // techBlocked عنده طلب **مشتغل فيه فعلًا دلوقتي** (working_now=true) — docs/08 §72: الحالة
     // لازم تكون من ENGAGED_TECHNICIAN_ORDER_STATUSES (في الطريق/وصل/شغال)، مش مجرد `accepted`.
     const [workingOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_on_way','pending',30000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_on_way','pending',30000,0,'individual') RETURNING id`,
       [`TESTOPS-WORK-${runId}`.slice(0, 24), ids.customerProfile, ids.techBlocked, ids.service, ids.address, ids.zone],
     );
     ids.orderWorking = workingOrder.id;

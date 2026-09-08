@@ -131,9 +131,9 @@ describe('وزن المسافة الديناميكي في المطابقة (ADR-
     // طلب رخيص (10000 قرش = 100 جنيه) مجدول بعد شهر — بره نافذة الشغل العاجل عمدًا، عشان كل
     // سياق يتفحص لوحده بلا تداخل.
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, scheduled_at, total_amount_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician', now() + interval '30 days', 10000, 'individual') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician', now() + interval '30 days', 10000, 'individual') RETURNING id`,
       [`DST-${runId}`, ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;

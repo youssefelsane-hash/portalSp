@@ -30,10 +30,10 @@ describe('معاينة حصص المستحقات لطلب لسه سعره ما �
 
   const makeOrder = async (totalCents: number, commissionCents: number): Promise<string> => {
     const [o] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, total_amount_cents, settlement_policy_version,
                            platform_commission_cents_snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted',$7,2,$8) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',$7,2,$8) RETURNING id`,
       [
         `AES-${runId}-${totalCents}`,
         ids.customerProfile, ids.service, ids.address, ids.zone, ids.tech, totalCents, commissionCents,

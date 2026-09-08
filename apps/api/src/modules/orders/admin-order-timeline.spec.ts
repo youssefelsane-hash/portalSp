@@ -115,8 +115,8 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
     ids.cancellationReason = reason.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'individual') RETURNING id`,
       [`TESTTL-${runId}`.slice(0, 24), ids.customerProfile, ids.leaderProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;
@@ -237,8 +237,8 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
 
   it('يرجّع مصفوفة فاضية لطلب مفيهوش أي أحداث لسه', async () => {
     const [freshOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'individual') RETURNING id`,
       [`TESTTL-empty-${runId}`.slice(0, 24), ids.customerProfile, null, ids.service, ids.address, ids.zone],
     );
     const timeline = await adminOrdersService.getTimeline(freshOrder.id);

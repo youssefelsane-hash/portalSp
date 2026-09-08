@@ -471,5 +471,5 @@ default_channels` كان افتراضيًا `'["push","in_app"]'` (`infra/migrat
 - `NotificationsService.resolveConfiguredChannels()` بتضيف `IN_APP` دايمًا (اتحاد، مش استبدال).
 - `NotificationTypeConfigService.normalizeChannels()` بترجّعها تلقائيًا عند الحفظ (مش رفض —
   قصد الأدمن يضيف/يشيل توصيل، والرفض كان هيبقى عائق بلا فايدة).
-- migration 0273 صلّحت الـ٣٦ صف الموجودين (إضافة بحتة: مابتشيلش أي قناة اختارها الأدمن).
+- migration 0293 صلّحت الـ٣٦ صف الموجودين (إضافة بحتة: مابتشيلش أي قناة اختارها الأدمن).
 - `in-app-channel-guarantee.spec.ts` بيحرس القاعدة في الاتجاهين.

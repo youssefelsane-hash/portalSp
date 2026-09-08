@@ -36,8 +36,8 @@ describe('OrdersService.cancel() — سبب الإلغاء إجباري لما �
 
   async function insertOrder(label: string) {
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0, now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,0, now()) RETURNING id`,
       [
         `TESTCRR-${label}-${runId}`.slice(0, 24),
         ids.customerProfile,

@@ -101,9 +101,9 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     ids.address = address.id;
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
          payment_status, total_amount_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
       [`TESTIP-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;
@@ -127,9 +127,9 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     // (confirmInstaPayTransferByCustomer بيدوّر على "أحدث دفعة instapay pending للطلب" —
     // لازم يبقى طلب مختلف تمامًا عشان مايتلخبطش مع الدفعة التانية).
     const [order2] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
          payment_status, total_amount_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
       [`TESTIP2-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order2 = order2.id;

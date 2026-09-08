@@ -53,9 +53,9 @@ describe('ترتيب قايمة الطلبات عند الأدمن (docs/08 §63
     // ثلاث طلبات: قديم، حديث، وواحد **بلا placed_at** (ده اللي كان بيقفز فوق).
     const seed = async (num: string, placedAt: string | null, createdOffsetHours: number) => {
       const [row] = await dataSource.query(
-        `INSERT INTO orders (order_number, customer_id, address_id, service_id, order_status, payment_method,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, address_id, service_id, order_status, payment_method,
                              total_amount_cents, placed_at, created_at)
-         VALUES ($1,$2,$3,$4,'searching_technician','cash',10000,$5, now() - ($6 || ' hours')::interval)
+         VALUES (20,$1,$2,$3,$4,'searching_technician','cash',10000,$5, now() - ($6 || ' hours')::interval)
          RETURNING id`,
         [`ORD-SORT-${runId}-${num}`, ids.customerId, ids.addressId, ids.serviceId, placedAt, String(createdOffsetHours)],
       );

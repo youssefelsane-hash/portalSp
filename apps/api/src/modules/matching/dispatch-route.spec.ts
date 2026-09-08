@@ -61,10 +61,10 @@ describe('مسار التوزيع — الشرح المعروض للأدمن = �
     revisitPinnedTechnicianId?: string | null;
   }): Promise<string> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
                            total_amount_cents, booking_mode, order_type, scheduled_at,
                            revisit_pinned_technician_id, revisit_pinned_at)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',0,$6,$7,$8::timestamptz,$9,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',0,$6,$7,$8::timestamptz,$9,
                CASE WHEN $9::uuid IS NULL THEN NULL ELSE now() END)
        RETURNING id`,
       [

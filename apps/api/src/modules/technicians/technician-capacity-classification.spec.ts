@@ -22,10 +22,9 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
 
   async function insertOrder(status: OrderStatus, opts: { scheduledAt?: Date | null; durationDays?: number | null } = {}) {
     const [order] = await q(
-      `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status,
           total_amount_cents, scheduled_at, estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,10000,$8,$9) RETURNING id`,
       [
         `CAP-${orderIds.length}-${runId}`.slice(0, 24),
         ids.customer,
@@ -44,8 +43,8 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
 
   async function classify(scheduledAt: Date | null, durationMinutes = 60) {
     const [candidate] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000,$6) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',10000,$6) RETURNING id`,
       [`CAND-${orderIds.length}-${runId}`.slice(0, 24), ids.customer, ids.service, ids.address, ids.zone, scheduledAt],
     );
     orderIds.push(candidate.id as string);
@@ -362,8 +361,8 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
   it('MEANINGFUL/HEAVY — عضو طاقم (مساعد) على طلب حد تاني نفس اليوم، بالظبط زي القائد', async () => {
     // طلب طوله ساعة بس (مش شاغل يوم كامل) — عشان نتأكد الالتزام اتحسب أصلاً كـ"عضو"، مش قائد.
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
       [`MEMB-1-${runId}`.slice(0, 24), ids.customer, ids.leader, ids.service, ids.address, ids.zone],
     );
     orderIds.push(order.id as string);
@@ -406,8 +405,8 @@ describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتح
 
   it('عضو طاقم على طلب اتلغى/اتشال مايتحسبش خالص — مصدر الحقيقة هو الصف الحالي بس', async () => {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
       [`MEMB-2-${runId}`.slice(0, 24), ids.customer, ids.leader, ids.service, ids.address, ids.zone],
     );
     orderIds.push(order.id as string);

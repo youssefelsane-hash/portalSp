@@ -163,8 +163,8 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
       [userId, `شارع اختبار ${runId}`],
     );
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
+       VALUES (20,$1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
       [`TESTWCF-${runId}`.slice(0, 24), customerId, service.id, address.id],
     );
     await dataSource.query(`UPDATE warranty_claims SET order_id = $1 WHERE warranty_id = $2`, [order.id, warrantyId]);

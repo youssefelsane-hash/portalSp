@@ -58,8 +58,8 @@ describe('AdminCoverageIntelligenceService.getCoverage() (docs/08 §36.10)', () 
 
   async function insertOrder(opts: { zoneId: string; technicianId?: string; orderStatus: OrderStatus }) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
       [
         `TESTCOV-${randomUUID().slice(0, 8)}`,
         ids.customerProfile,

@@ -46,8 +46,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     assignedToTechnician?: boolean;
   }) {
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, duration_hours)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, duration_hours)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,10000,$8,$9) RETURNING id`,
       [
         nextOrderNumber(),
         ids.customerProfile,
@@ -303,8 +303,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [activeTodayOrderId]);
     await setTechnicianOnline(false);
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,10000,'emergency') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,10000,'emergency') RETURNING id`,
       [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
     );
     orderIds.push(order.id as string);
@@ -327,8 +327,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   describe('بوابة مستوى "اعتماد" (eligible_for_team_booking) — docs/08 §38', () => {
     it('طلب اعتماد يترفض لفني مستواه new (eligible_for_team_booking=false افتراضيًا)', async () => {
       const [order] = await dataSource.query(
-        `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
-         VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+         VALUES (20,$1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
         [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
       );
       orderIds.push(order.id as string);
@@ -345,8 +345,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       await dataSource.query(`UPDATE technician_profiles SET current_level = 'professional' WHERE id = $1`, [ids.technicianProfile]);
       try {
         const [order] = await dataSource.query(
-          `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
-           VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
+          `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+           VALUES (20,$1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
           [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
         );
         orderIds.push(order.id as string);
@@ -363,8 +363,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
 
     it('طلب فردي (individual) بلا أي تأثير — فني new يعدّي عادي (regression)', async () => {
       const [order] = await dataSource.query(
-        `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
-         VALUES ($1,$2,$3,$4,$5,$6,10000,'individual') RETURNING id`,
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+         VALUES (20,$1,$2,$3,$4,$5,$6,10000,'individual') RETURNING id`,
         [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
       );
       orderIds.push(order.id as string);

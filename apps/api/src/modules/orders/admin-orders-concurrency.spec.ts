@@ -77,8 +77,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     opts: { bookingMode: BookingMode; technicianId: string | null; orderStatus: OrderStatus },
   ) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',10000,0,$8) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',10000,0,$8) RETURNING id`,
       [`TESTCC-${label}`.slice(0, 24), ids.customerProfile, opts.technicianId, ids.service, ids.address, ids.zone, opts.orderStatus, opts.bookingMode],
     );
     return order.id as string;

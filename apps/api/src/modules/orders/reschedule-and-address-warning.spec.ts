@@ -54,8 +54,8 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
   async function insertOrder(label: string, orderStatus: OrderStatus) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
       [`TESTRSC-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, orderStatus],
     );
     return order.id as string;
@@ -471,8 +471,8 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     expect(await addressesService.hasActiveOrder(freshAddressId)).toBe(false);
 
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',30000,0) RETURNING id`,
       [`TESTRSC-addrwarn-${runId}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, freshAddressId, ids.zone],
     );
     const orderId = order.id as string;
@@ -512,8 +512,8 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
 
   async function insertOrder(label: string, orderStatus: OrderStatus) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',30000,0) RETURNING id`,
       [`TESTARSC-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, orderStatus],
     );
     return order.id as string;

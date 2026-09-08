@@ -72,8 +72,8 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     opts: { bookingMode: BookingMode; technicianId: string; requiredTechnicians: number | null; requiredAssistants?: number | null },
   ) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
       [
         `TESTCRW-${label}`.slice(0, 24),
         ids.customerProfile,

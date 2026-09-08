@@ -84,8 +84,8 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
   ) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,30000,20000) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,30000,20000) RETURNING id`,
       [
         `TS22C-${label}`.slice(0, 24),
         extra.customerId ?? ids.customerProfile,

@@ -78,9 +78,9 @@ describe('حصة المساعد داخل الطاقم (ADR-0043، docs/08 §66)'
     );
     ids.service = svc.id;
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, technician_id,
                            order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,'work_completed','unpaid',100000,80000) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'work_completed','unpaid',100000,80000) RETURNING id`,
       [`CREW-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.leader],
     );
     ids.order = order.id;

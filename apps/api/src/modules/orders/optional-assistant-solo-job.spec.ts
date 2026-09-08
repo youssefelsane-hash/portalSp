@@ -146,10 +146,10 @@ describe('ADR-0052 — مساعد اختياري واحد للشغلانة ال�
 
     // شغلانة فردية بالمعنى الحرفي: فرد واحد، صفر مساعدين مطلوبين، حجز individual.
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, payment_status, total_amount_cents, booking_mode, order_type,
                            required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','unpaid',50000,'individual','standard',1,0) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','unpaid',50000,'individual','standard',1,0) RETURNING id`,
       [`OASOLO-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, ids.leaderProfile],
     );
     ids.soloOrder = order.id;

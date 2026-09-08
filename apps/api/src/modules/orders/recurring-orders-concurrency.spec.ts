@@ -109,11 +109,10 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
     const create = jest.fn(
       async (_userId: string, _dto: unknown, identity: { templateId: string; scheduledFor: Date }) => {
         const [order] = await dataSource.query(
-          `INSERT INTO orders
-             (order_number, customer_id, service_id, address_id, order_status,
+          `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status,
               total_amount_cents, technician_earning_cents, order_type,
               recurring_template_id, recurring_occurrence_at)
-           VALUES ($1, $2, $3, $4, 'searching_technician', 0, 0, 'recurring', $5, $6)
+           VALUES (20,$1, $2, $3, $4, 'searching_technician', 0, 0, 'recurring', $5, $6)
            RETURNING id`,
           [
             `RC-${randomUUID().slice(0, 18)}`,
@@ -154,11 +153,10 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
       [ids.template, scheduledFor],
     );
     const [order] = await dataSource.query(
-      `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status,
           total_amount_cents, technician_earning_cents, order_type,
           recurring_template_id, recurring_occurrence_at)
-       VALUES ($1, $2, $3, $4, 'searching_technician', 0, 0, 'recurring', $5, $6)
+       VALUES (20,$1, $2, $3, $4, 'searching_technician', 0, 0, 'recurring', $5, $6)
        RETURNING id`,
       [`CR-${randomUUID().slice(0, 18)}`, ids.customer, ids.service, ids.address, ids.template, scheduledFor],
     );

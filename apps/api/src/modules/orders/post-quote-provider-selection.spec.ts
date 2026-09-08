@@ -74,10 +74,10 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
   async function seedAwaitingSelectionOrder(): Promise<string> {
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
                             order_status, scheduled_at, total_amount_cents, estimated_price_cents, commissionable_base_cents,
                             level_premium_cents, payment_status, placed_at, source_channel, initial_quote_source, price_status)
-       VALUES ($1,$2,$3,$4,$5,'standard','individual','awaiting_technician_selection',$6,$7,0,$7,0,'unpaid', now(),
+       VALUES (20,$1,$2,$3,$4,$5,'standard','individual','awaiting_technician_selection',$6,$7,0,$7,0,'unpaid', now(),
                'customer_app','admin_remote','confirmed') RETURNING id`,
       [orderNumber, ids.customerProfile, ids.service, ids.address, ids.zone, bookingDay(), QUOTE_CENTS],
     );
@@ -168,7 +168,7 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     const geoService = new GeoService(
       dataSource.getRepository(City), dataSource.getRepository(Area), dataSource.getRepository(ServiceZone), dataSource,
     );
-    const catalogService = new CatalogService(
+    const _catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory), dataSource.getRepository(Service),
       dataSource.getRepository(ServiceZonePricing), dataSource.getRepository(ServiceLevelPricing),
       dataSource.getRepository(ServiceAddon), dataSource.getRepository(ServiceStandardData),
@@ -286,10 +286,10 @@ describe('اختيار المنفّذ بعد عرض السعر + فرق المس
     // `AWAITING_TECHNICIAN_SELECTION` مش في طريقه، فالخدمة دي بترفضه صراحة.
     const [{ next_human_readable_number: orderNumber }] = await q("SELECT next_human_readable_number('ORD')");
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id, order_type,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id, order_type,
                             booking_mode, order_status, scheduled_at, total_amount_cents, estimated_price_cents,
                             level_premium_cents, payment_status, placed_at, source_channel, price_status)
-       VALUES ($1,$2,$3,$4,$5,$6,'standard','individual','in_progress',$7,$8,0,0,'unpaid', now(),'customer_app','locked')
+       VALUES (20,$1,$2,$3,$4,$5,$6,'standard','individual','in_progress',$7,$8,0,0,'unpaid', now(),'customer_app','locked')
        RETURNING id`,
       [orderNumber, ids.customerProfile, ids.service, ids.address, ids.zone, ids.premiumTech, bookingDay(), QUOTE_CENTS],
     );

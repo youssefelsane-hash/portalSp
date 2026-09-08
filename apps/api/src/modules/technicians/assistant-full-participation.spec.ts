@@ -117,9 +117,9 @@ describe('ADR-0055 — المساعد مشارك كامل (حارس التعيي
     ]);
 
     const [order] = await q(
-      `INSERT INTO orders (order_number,customer_id,service_id,address_id,service_zone_id,order_status,payment_status,
+      `INSERT INTO orders (commission_rate_applied,order_number,customer_id,service_id,address_id,service_zone_id,order_status,payment_status,
                            total_amount_cents,booking_mode,order_type)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician','unpaid',15000,'individual','standard') RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician','unpaid',15000,'individual','standard') RETURNING id`,
       [`PART-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;

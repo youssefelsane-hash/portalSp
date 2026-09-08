@@ -17,6 +17,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { FunnelTrackerService } from '../analytics/funnel-tracker.service';
+import { describeFunnelFailure, resolveFunnelSession } from '../analytics/funnel-request.util';
 import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -67,6 +69,7 @@ export class OrdersController {
     private readonly paymentsService: PaymentsService,
     private readonly bookingMatchPreviews: BookingMatchPreviewService,
     private readonly postQuoteProviderSelection: PostQuoteProviderSelectionService,
+    private readonly funnelTracker: FunnelTrackerService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -145,6 +148,7 @@ export class OrdersController {
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateOrderDto,
+    @Headers('x-funnel-session') funnelSession: string | undefined,
     // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — اختياري (مش زي عمليات
     // الدفع اللي بتفرضه إجباري) عشان مانكسرش الأكلاينتات القديمة اللي لسه ما بعتوش الهيدر ده،
     // لكن أي كلاينت يبعته بيدّيه حماية idempotency حقيقية ضد double-click/retry شبكة.
@@ -154,21 +158,104 @@ export class OrdersController {
     @Headers('x-client-channel') clientChannel: string | undefined,
   ) {
     const key = idempotencyKey?.trim() || undefined;
-    return this.enrichedResponse(
-      user.sub,
-      await this.ordersService.create(user.sub, dto, undefined, undefined, key, resolveClientChannel(clientChannel)),
-    );
+    const channel = resolveClientChannel(clientChannel);
+    const session = resolveFunnelSession(funnelSession);
+    try {
+      const order = await this.ordersService.create(user.sub, dto, undefined, undefined, key, channel);
+      // ADR-0081: `order_id` هنا هو الجسر اللي بيخلّي المراحل المشتقة من `order_status_history`
+      // (تعيين/وصول/اكتمال) تنضم لنفس الرحلة اللي بدأت قبل ما الطلب يتولد.
+      this.funnelTracker.trackDetached({
+        stage: 'order_placed',
+        source: 'server',
+        funnelSessionId: session,
+        userId: user.sub,
+        serviceId: dto.service_id,
+        clientChannel: channel,
+        orderId: order.id,
+      });
+      return this.enrichedResponse(user.sub, order);
+    } catch (err) {
+      this.funnelTracker.trackDetached({
+        stage: 'order_placed',
+        source: 'server',
+        outcome: 'failed',
+        failureReason: describeFunnelFailure(err),
+        funnelSessionId: session,
+        userId: user.sub,
+        serviceId: dto.service_id,
+        clientChannel: channel,
+      });
+      throw err;
+    }
   }
 
   // معاينة السعر الكامل قبل التأكيد (docs/08 §1/§2) — read-only، نفس منطق create() بالحرف.
   @Post('preview')
-  async preview(@CurrentUser() user: JwtPayload, @Body() dto: PreviewOrderDto) {
-    return this.ordersService.previewPrice(user.sub, dto);
+  async preview(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: PreviewOrderDto,
+    @Headers('x-funnel-session') funnelSession: string | undefined,
+    @Headers('x-client-channel') clientChannel: string | undefined,
+  ) {
+    return this.trackedBookingStep('price_previewed', user, dto.service_id, funnelSession, clientChannel, () =>
+      this.ordersService.previewPrice(user.sub, dto),
+    );
   }
 
   @Post('match-preview')
-  async matchPreview(@CurrentUser() user: JwtPayload, @Body() dto: CreateBookingMatchPreviewDto) {
-    return this.bookingMatchPreviews.create(user.sub, dto);
+  async matchPreview(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateBookingMatchPreviewDto,
+    @Headers('x-funnel-session') funnelSession: string | undefined,
+    @Headers('x-client-channel') clientChannel: string | undefined,
+  ) {
+    return this.trackedBookingStep('providers_viewed', user, dto.service_id, funnelSession, clientChannel, () =>
+      this.bookingMatchPreviews.create(user.sub, dto),
+    );
+  }
+
+  /**
+   * ADR-0081 §3 — تسجيل مرحلة من مراحل رحلة الحجز من **السيرفر**، بنجاحها وفشلها.
+   *
+   * تسجيل الفشل هو نص قيمة الفنل: «١٠٠ واحد وصلوا لصفحة السعر و٤٠ بس كمّلوا» سؤال مختلف
+   * تمامًا عن «٤٠ منهم المنتج رماله خطأ». الأول تحسين تجربة، والتاني بَقّة.
+   *
+   * الاستثناء بيتعاد رميه زي ما هو — التتبّع مابيغيّرش أي سلوك للعميل.
+   */
+  private async trackedBookingStep<T>(
+    stage: 'price_previewed' | 'providers_viewed',
+    user: JwtPayload,
+    serviceId: string,
+    funnelSession: string | undefined,
+    clientChannel: string | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const channel = resolveClientChannel(clientChannel);
+    const session = resolveFunnelSession(funnelSession);
+    try {
+      const result = await run();
+      this.funnelTracker.trackDetached({
+        stage,
+        source: 'server',
+        funnelSessionId: session,
+        userId: user.sub,
+        serviceId,
+        clientChannel: channel,
+      });
+      return result;
+    } catch (err) {
+      this.funnelTracker.trackDetached({
+        stage,
+        source: 'server',
+        outcome: 'failed',
+        failureReason: describeFunnelFailure(err),
+        funnelSessionId: session,
+        userId: user.sub,
+        serviceId,
+        clientChannel: channel,
+      });
+      throw err;
+    }
   }
 
   @Post(':id/cancel')

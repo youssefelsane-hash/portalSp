@@ -30,8 +30,8 @@ describe('PromoCodesService.releaseUsage() — ترجيع استخدام كود 
   async function insertOrder(label: string) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician','unpaid',10000,0, now()) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at)
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician','unpaid',10000,0, now()) RETURNING id`,
       [`TESTREL-${label}-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     return order.id as string;

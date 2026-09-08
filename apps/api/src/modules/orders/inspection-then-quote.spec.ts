@@ -76,8 +76,8 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
   ): Promise<string> {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, estimated_price_cents, inspection_fee_cents, commissionable_base_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, estimated_price_cents, inspection_fee_cents, commissionable_base_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0) RETURNING id`,
       [
         `TESTITQ-${label}`.slice(0, 24),
         ids.customerProfile,

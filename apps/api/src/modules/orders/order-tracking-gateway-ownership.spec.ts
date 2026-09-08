@@ -123,8 +123,8 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
     );
     ids.address = address.id;
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,'accepted',0,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,'accepted',0,0) RETURNING id`,
       [`TESTWS-${runId}`.slice(0, 24), ids.ownerProfile, ids.service, ids.address],
     );
     ids.order = order.id;

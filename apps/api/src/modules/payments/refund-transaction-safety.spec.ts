@@ -93,8 +93,8 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
   ) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,'completed','paid',$6,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,'completed','paid',$6,0) RETURNING id`,
       [`TESTRF-${label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, totalAmountCents],
     );
     const [payment] = await q(

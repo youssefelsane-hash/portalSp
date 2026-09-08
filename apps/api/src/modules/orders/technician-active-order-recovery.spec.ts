@@ -98,18 +98,18 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
     // الطلب "الشغال فعليًا دلوقتي" — ASAP (scheduled_at NULL)، حالة أبعد من accepted عشان
     // نتأكد إن الفلتر الجديد بيرجّعه صح حتى لو مش في accepted بالظبط.
     const [asapOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
          order_status, payment_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_on_way','pending',10000, NULL, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_on_way','pending',10000, NULL, now()) RETURNING id`,
       [`TESTTAR-ASAP-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, ids.technicianProfile],
     );
     ids.asapOrder = asapOrder.id;
 
     // الطلب المجدول المؤكّد مستقبلاً — accepted بس معاداش موعده لسه (بعد 3 أيام).
     const [futureOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
          order_status, payment_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',10000, now() + interval '3 days', now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',10000, now() + interval '3 days', now()) RETURNING id`,
       [`TESTTAR-FUTURE-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, ids.technicianProfile],
     );
     ids.futureOrder = futureOrder.id;
@@ -165,9 +165,9 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
 
   it('findActiveOrdersForTechnician() بترجّع كل الطلبات الجارية المتزامنة بدل ما تخفي واحد منهم', async () => {
     const [secondActive] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
          order_status, payment_status, total_amount_cents, scheduled_at, placed_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'in_progress','pending',10000, NULL, now(), now() + interval '1 minute')
+       VALUES (20,$1,$2,$3,$4,$5,$6,'in_progress','pending',10000, NULL, now(), now() + interval '1 minute')
        RETURNING id`,
       [
         `TESTTAR-ACT2-${runId}`.slice(0, 24),

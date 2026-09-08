@@ -65,10 +65,10 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     estimatedDurationDays?: number | null;
   }): Promise<string> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, total_amount_cents, technician_id, scheduled_at, duration_minutes,
                            estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9,$10) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,10000,$7,$8::timestamptz,$9,$10) RETURNING id`,
       [
         `SCN-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
         opts.status, ids.techProfile, opts.scheduledAt, opts.durationMinutes ?? null,
@@ -94,10 +94,10 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     estimatedDurationDays: number | null = null,
   ): Promise<Order> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id,
                            order_status, total_amount_cents, scheduled_at, duration_minutes, booking_mode,
                            estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8,$9) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'searching_technician',10000,$6::timestamptz,$7,$8,$9) RETURNING id`,
       [
         `CND-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone,
         scheduledAt, durationMinutes, emergency ? 'emergency' : 'individual', estimatedDurationDays,

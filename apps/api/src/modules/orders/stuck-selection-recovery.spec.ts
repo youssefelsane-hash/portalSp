@@ -75,9 +75,9 @@ describe('إنقاذ الطلبات العالقة في اختيار الفني 
 
   async function seedStuckOrder(): Promise<string> {
     const [row] = await q<{ id: string }[]>(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, price_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status, price_status,
                            total_amount_cents, scheduled_at, booking_mode)
-       VALUES ('STUCK-' || substr(md5(random()::text), 1, 10), $1, $2, $3, $4, 'confirmed',
+       VALUES (20,'STUCK-' || substr(md5(random()::text), 1, 10), $1, $2, $3, $4, 'confirmed',
                70000, now() + interval '2 days', 'individual')
        RETURNING id`,
       [seed!.customerProfile, seed!.service, seed!.address, OrderStatus.AWAITING_TECHNICIAN_SELECTION],

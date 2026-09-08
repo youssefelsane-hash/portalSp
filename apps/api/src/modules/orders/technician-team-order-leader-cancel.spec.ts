@@ -117,9 +117,9 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
     // طلب "اعتماد" (فريق) — الفني ده هو orders.technician_id بالذات (قائد الطلب الفعلي)،
     // مقبول من دقيقة واحدة (جوّه نافذة الإلغاء)، ASAP (بلا scheduled_at) عشان نتجنب فحص الموعد.
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
          order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, accepted_at, placed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team', now() - interval '1 minute', now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'team', now() - interval '1 minute', now()) RETURNING id`,
       [`TESTLDRCXL-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;

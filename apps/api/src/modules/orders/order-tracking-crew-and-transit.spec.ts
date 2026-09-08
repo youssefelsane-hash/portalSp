@@ -57,9 +57,9 @@ describe('تتبّع الطلب — انتماء الطاقم وحتمية «ف�
 
   async function makeOrder(status: OrderStatus, technicianProfileId: string | null, scheduledAt: string | null = null): Promise<string> {
     const [row] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, order_status,
                            total_amount_cents, technician_earning_cents, technician_id, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,0,0,$6,$7::timestamptz) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,0,0,$6,$7::timestamptz) RETURNING id`,
       [`TRK-${runId}-${++seq}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, status, technicianProfileId, scheduledAt],
     );
     orderIds.push(row.id as string);

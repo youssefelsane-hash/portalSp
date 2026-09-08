@@ -45,9 +45,9 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
     opts: { minutes?: number | null; days?: number | null },
   ): Promise<string> => {
     const [o] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, scheduled_at, duration_minutes, estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted', ($7 || ' ' || $8)::timestamp AT TIME ZONE 'Africa/Cairo', $9, $10)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted', ($7 || ' ' || $8)::timestamp AT TIME ZONE 'Africa/Cairo', $9, $10)
        RETURNING id`,
       [
         `HRB-${runId}-${ids.orders.length}`,

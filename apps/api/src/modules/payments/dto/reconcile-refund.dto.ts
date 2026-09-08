@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { IsIn, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 /** قرار بشري موثق فقط بعد التحقق من لوحة/مرجع مزود الدفع. */
 export class ReconcileRefundDto {

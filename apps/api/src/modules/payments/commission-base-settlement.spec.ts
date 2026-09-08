@@ -69,8 +69,8 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const totalAmountCents = workPriceCents + warrantyPriceCents;
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, payment_method, estimated_price_cents, warranty_plan_id, warranty_plan_snapshot, warranty_price_cents, total_amount_cents, commissionable_base_cents, technician_earning_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,'work_completed','paid','card',$7,$8,$9,$10,$11,$12,0) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, payment_method, estimated_price_cents, warranty_plan_id, warranty_plan_snapshot, warranty_price_cents, total_amount_cents, commissionable_base_cents, technician_earning_cents)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'work_completed','paid','card',$7,$8,$9,$10,$11,$12,0) RETURNING id`,
       [
         `CBS${runId}-${label}`.slice(0, 24),
         ids.customerProfile,

@@ -165,11 +165,11 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
     // طلب كاش مكتمل الشغل (مش مدفوع لسه) — بديل واقعي لدورة التنفيذ الكاملة (مختبرة بعمق منفصل
     // في golden-path-cash-booking.e2e.spec.ts)، التركيز هنا على السلسلة المالية بعد الاكتمال.
     const [order] = await q(
-      `INSERT INTO orders (
+      `INSERT INTO orders (commission_rate_applied,
          order_number, customer_id, service_id, address_id, service_zone_id, technician_id, order_type,
          booking_mode, order_status, estimated_price_cents, inspection_fee_cents, surge_amount_cents,
          total_amount_cents, payment_status, placed_at, source_channel
-       ) VALUES (
+       ) VALUES (20,
          $1,$2,$3,$4,$5,$6,'standard','individual','work_completed',100000,0,0,100000,'unpaid',now(),'customer_app'
        ) RETURNING id`,
       [`ORD-RECON-${runId}`, ids.customerProfile, ids.service, ids.address, ids.zone, ids.technicianProfile],

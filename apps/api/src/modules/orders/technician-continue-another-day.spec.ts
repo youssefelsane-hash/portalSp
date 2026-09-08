@@ -70,9 +70,9 @@ describe('OrdersService.continueWorkAnotherDay (ADR-0047)', () => {
     );
     ids.address = addr.id;
     const [ord] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id,
                            order_status, payment_status, total_amount_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,'in_progress','pending',50000, now()) RETURNING id`,
+       VALUES (20,$1,$2,$3,$4,$5,'in_progress','pending',50000, now()) RETURNING id`,
       [`CONT${runId}`, ids.profile, ids.tech, ids.service, ids.address],
     );
     ids.order = ord.id;

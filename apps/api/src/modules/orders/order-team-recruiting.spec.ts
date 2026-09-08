@@ -111,8 +111,8 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
 
   async function insertOrder(label: string, opts: { requiredTechnicians: number | null; requiredAssistants?: number | null; bookingMode?: BookingMode }) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
       [
         `TESTREC-${label}`.slice(0, 24),
         ids.customerProfile,
@@ -463,8 +463,8 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     const orderId = await insertOrder(`recruit-meaningful-${runId}`, { requiredTechnicians: 3 });
     // نشغّل الجونيور بشغلانة مؤكدة تانية نفس اليوم (ASAP، بلا scheduled_at) — يبقى MEANINGFUL على الأقل.
     const [busyOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',10000,0,'individual') RETURNING id`,
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted','pending',10000,0,'individual') RETURNING id`,
       [`TESTREC-busy-${runId}`.slice(0, 24), ids.customerProfile, ids.juniorProfile, ids.service, ids.address, ids.zone],
     );
 
