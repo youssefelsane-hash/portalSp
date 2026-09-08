@@ -66,7 +66,7 @@ describe('AdminOperationsController.getDispatchDelivery() — تمرير order_n
 // لأي واجهة — يعني إعادة زيارة معلّقة على فني مبقاش عنده الطلب ممكن تفضل معلّقة للأبد ومحدش
 // يشوفها. اختبار على مستوى الخدمة مايمسكش ده لأن الخدمة كانت بترجّعه صح.
 describe('AdminOperationsController.getExceptions() — كل مجموعة محسوبة توصل الرد', () => {
-  it('بيمرّر الخمس مجموعات (متأخرة/نقص طاقم/توزيع متأخر/إعادة زيارة معلّقة/مطابقة واقفة)', async () => {
+  it('بيمرّر مجموعات التشغيل كاملة، بما فيها الطلبات التي تحتاج مراجعة يدوية', async () => {
     const exceptionCenterService = {
       getExceptions: jest.fn().mockResolvedValue({
         overdueOrders: {
@@ -100,6 +100,33 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
               deadlineAt: '2026-08-28T10:00:00.000Z',
               reason: 'rejected',
               chargebackCents: 12_500,
+            },
+          ],
+          total: 1,
+        },
+        staleMatching: {
+          items: [
+            {
+              orderId: 'o4',
+              orderNumber: 'ORD-4',
+              placedAt: '2026-08-26T10:00:00.000Z',
+              lastAttemptAt: '2026-08-28T10:00:00.000Z',
+              nextAttemptAt: '2026-08-28T11:00:00.000Z',
+              attemptCount: 4,
+              ageSeconds: 172_800,
+            },
+          ],
+          total: 1,
+        },
+        staleInProgress: {
+          items: [
+            {
+              orderId: 'o5',
+              orderNumber: 'ORD-5',
+              workStartedAt: '2026-08-26T10:00:00.000Z',
+              technicianId: 't5',
+              fullName: 'فني تنفيذ متوقف',
+              ageSeconds: 172_800,
             },
           ],
           total: 1,
@@ -145,6 +172,16 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
       max_rounds: 4,
       delay_seconds: 900,
       technicians_contacted: 6,
+    });
+    expect(result.stale_matching.items[0]).toMatchObject({
+      order_number: 'ORD-4',
+      attempt_count: 4,
+      age_seconds: 172_800,
+    });
+    expect(result.stale_in_progress.items[0]).toMatchObject({
+      order_number: 'ORD-5',
+      technician_id: 't5',
+      age_seconds: 172_800,
     });
   });
 });

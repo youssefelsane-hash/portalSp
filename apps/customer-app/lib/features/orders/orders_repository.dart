@@ -51,9 +51,15 @@ class OrdersRepository {
     return items.map(CancellationReason.fromJson).toList();
   }
 
-  Future<List<Order>> list() async {
-    final items = await auth.authedRequestList('/orders');
-    return items.map(Order.fromJson).toList();
+  Future<OrdersPage> list({String? cursor}) async {
+    final suffix = cursor == null ? '' : '&cursor=${Uri.encodeComponent(cursor)}';
+    final data = await auth.authedRequest('GET', '/orders?limit=20$suffix');
+    final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final meta = data?['meta'] as Map<String, dynamic>? ?? const {};
+    return OrdersPage(
+      items: items.map(Order.fromJson).toList(),
+      nextCursor: meta['next_cursor'] as String?,
+    );
   }
 
   Future<Order> getOne(String orderId) async {
@@ -205,7 +211,7 @@ class OrdersRepository {
         'match_preview_id': ?matchPreviewId,
         'standard_data_id': ?standardDataId,
         'requested_units': ?requestedUnits,
-        'payment_method': ?paymentMethod,
+        'prepayment_method': ?paymentMethod,
         'warranty_plan_id': ?warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
         'booking_mode': bookingMode.apiValue,
@@ -441,4 +447,11 @@ class OrdersRepository {
     );
     return Order.fromJson(data!);
   }
+}
+
+class OrdersPage {
+  final List<Order> items;
+  final String? nextCursor;
+
+  const OrdersPage({required this.items, required this.nextCursor});
 }

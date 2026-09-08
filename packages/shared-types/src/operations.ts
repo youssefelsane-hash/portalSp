@@ -165,8 +165,29 @@ export interface MatchingWorkflowDelayedItemDto {
   technicians_contacted: number;
 }
 
+export interface StaleMatchingExceptionItemDto {
+  order_id: string;
+  order_number: string;
+  placed_at: string;
+  last_attempt_at: string | null;
+  next_attempt_at: string | null;
+  attempt_count: number;
+  age_seconds: number;
+}
+
+export interface StaleInProgressExceptionItemDto {
+  order_id: string;
+  order_number: string;
+  work_started_at: string;
+  technician_id: string | null;
+  full_name: string | null;
+  age_seconds: number;
+}
+
 export interface ExceptionCenterResponseDto {
   overdue_orders: { items: OverdueOrderExceptionItemDto[]; total: number };
+  stale_matching: { items: StaleMatchingExceptionItemDto[]; total: number };
+  stale_in_progress: { items: StaleInProgressExceptionItemDto[]; total: number };
   crew_shortage: { items: CrewShortageExceptionItemDto[]; total: number };
   stale_dispatch: { items: StaleDispatchExceptionItemDto[]; total: number };
   stalled_revisits: { items: StalledRevisitExceptionItemDto[]; total: number };

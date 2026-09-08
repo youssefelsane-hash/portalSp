@@ -70,8 +70,8 @@ export class OrderCancellationService {
     // تنطبق عليه أصلاً — يسيب الراديو من غير اختيار فيخرج بصفر رسوم مهما كانت سياسة الأدمن.
     // القاعدة دلوقتي: لو الأدمن معرّف أسباب إلغاء للعميل، الاختيار إجباري. لو مفيش أسباب معرّفة
     // خالص، الإلغاء بيفضل شغّال بنص حر (ما نقفلش على العميل باب الإلغاء بسبب داتا ناقصة).
-    let feeCents = 0;
     let cancellationReasonId: string | null = null;
+    let cancellationFeePercentage: number | null = null;
     if (!dto.cancellation_reason_id) {
       const availableReasons = await this.cancellationReasonsService.listActive(CancellationAppliesTo.CUSTOMER);
       if (availableReasons.length > 0) {
@@ -88,18 +88,17 @@ export class OrderCancellationService {
         throw new ApiException(ErrorCode.VAL_001, 'سبب الإلغاء ده مش لإلغاء العميل', HttpStatus.BAD_REQUEST);
       }
       cancellationReasonId = cancellationReason.id;
+      cancellationFeePercentage = cancellationReason.chargesFee ? Number(cancellationReason.feePercentage) : null;
+    }
 
-      if (cancellationReason.chargesFee) {
-        const freeWindowMinutes = await this.settingsService.getNumber(
+    // الإعداد مستقل عن نسخة الطلب، فقراءته قبل القفل لا يخلق قرارًا ماليًا قديمًا. أما قيمة
+    // الرسم نفسها فتُحسب تحت بعد قفل أحدث `total_amount_cents` في المعاملة.
+    const freeWindowMinutes = cancellationFeePercentage === null
+      ? 0
+      : await this.settingsService.getNumber(
           'orders.cancellation_free_window_min',
           CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES,
         );
-        const minutesSincePlaced = order.placedAt ? (Date.now() - order.placedAt.getTime()) / 60_000 : Infinity;
-        if (minutesSincePlaced > freeWindowMinutes) {
-          feeCents = Math.round((order.totalAmountCents * Number(cancellationReason.feePercentage)) / 100);
-        }
-      }
-    }
 
     const previousStatus = order.orderStatus;
     const cancelledOrder = await this.dataSource.transaction(async (manager) => {
@@ -116,6 +115,11 @@ export class OrderCancellationService {
       ) {
         throw new ApiException(ErrorCode.ORDR_003, 'حالة الطلب اتغيّرت بالفعل — حاول تاني', HttpStatus.CONFLICT);
       }
+      const minutesSincePlaced = lockedOrder.placedAt ? (Date.now() - lockedOrder.placedAt.getTime()) / 60_000 : Infinity;
+      const feeCents =
+        cancellationFeePercentage !== null && minutesSincePlaced > freeWindowMinutes
+          ? Math.round((lockedOrder.totalAmountCents * cancellationFeePercentage) / 100)
+          : 0;
       lockedOrder.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
       lockedOrder.cancelledAt = new Date();
       lockedOrder.cancelledByUserId = userId;

@@ -120,4 +120,9 @@ describe('order-state-machine — تسعير الإدارة من الصور', ()
   it('يسمح للأدمن بإغلاق عرض العمل الإضافي المعلّق حتى لا يظل الطلب في شاشة الفني إلى الأبد', () => {
     expect(canTransition(OrderStatus.AWAITING_QUOTE_APPROVAL, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
   });
+
+  it('يسمح فقط لمسار الإدارة بإغلاق تنفيذ متوقف، من غير ادعاء أن النظام ألغاه تلقائيًا', () => {
+    expect(canTransition(OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+    expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.IN_PROGRESS)).toBe(false);
+  });
 });

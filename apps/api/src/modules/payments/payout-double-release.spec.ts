@@ -13,6 +13,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
+import { FinancialDashboardService } from '../analytics/financial-dashboard.service';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت واتصلحت في docs/08 §20 بند 9:
 // WalletsService.releaseReservation() (بتنادى من PayoutsService.adminReject()) كانت بتطرح
@@ -46,6 +47,12 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
       amount_cents: amountCents,
       payout_method: PayoutMethod.BANK_TRANSFER,
     });
+  }
+
+  async function expectWalletLedgerBalanced(walletId: string): Promise<void> {
+    const report = await new FinancialDashboardService(dataSource).reconciliationCheck(walletId);
+    expect(report.is_balanced).toBe(true);
+    expect(report.total_issues).toBe(0);
   }
 
   beforeAll(async () => {
@@ -149,6 +156,8 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
     const walletAfterRequest = await walletsService.findByUserIdOrThrow(ids.techUser);
     expect(walletAfterRequest.balanceCents).toBe(0); // الكل اتحجز
     expect(walletAfterRequest.reservedBalanceCents).toBe(150000);
+    // الحجز نقل داخلي بين المتاح والمحجوز؛ لا يكسر إجمالي الدفتر ولا تسلسل صفوفه.
+    await expectWalletLedgerBalanced(walletAfterRequest.id);
 
     // أول رفض — لازم ينجح ويرجّع المبلغ لـbalance_cents
     const firstReject = await payoutsService.adminReject(ids.adminUser, payout.id, 'رفض أول — بيانات ناقصة');
@@ -157,6 +166,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
     const walletAfterFirstReject = await walletsService.findByUserIdOrThrow(ids.techUser);
     expect(walletAfterFirstReject.balanceCents).toBe(150000); // رجع كامل
     expect(walletAfterFirstReject.reservedBalanceCents).toBe(0);
+    await expectWalletLedgerBalanced(walletAfterFirstReject.id);
 
     // رفض تاني على نفس الصرف (المُرفوض بالفعل) — قبل الإصلاح كان بيرجّع 150000 تانية للرصيد
     // (فلوس مخترعة). دلوقتي لازم يترفض بوضوح — الـstate machine guard (payoutStatus === REJECTED)
@@ -232,6 +242,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
       [wallet.id, payout.id],
     );
     expect(count).toBe(1);
+    await expectWalletLedgerBalanced(wallet.id);
   });
 
   it('complete×reject: فائز طرفي واحد، إما خروج نهائي أو تحرير كامل بلا حالة هجينة', async () => {

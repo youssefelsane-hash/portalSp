@@ -118,6 +118,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ── limits ────────────────────────────────────────────────────────────
   'orders.cancellation_free_window_min': { type: 'number', default: 5, group: 'limits', description: 'مهلة الإلغاء المجاني بالدقايق' },
   'orders.no_show_visit_fee_cents': { type: 'number', default: 5000, group: 'limits', description: 'رسوم الزيارة الفاشلة (عدم حضور/رفض شغل ضروري) اللي الأدمن بيطبّقها على الطلبات المدفوعة مسبقًا بالقرش' },
+  'orders.stale_in_progress_hours': { type: 'number', default: 48, group: 'limits', description: 'بعد كام ساعة من بداية التنفيذ يظهر الطلب المتوقف في مركز العمليات للمراجعة اليدوية. لا يلغي النظام الطلب أو أي مدفوعات تلقائيًا.' },
+  'orders.stale_matching_hours': { type: 'number', default: 24, group: 'limits', description: 'بعد كام ساعة من البحث بلا عرض مطابقة حي يظهر الطلب في مركز العمليات للمراجعة اليدوية. إعادة المحاولة تستمر ولا يوجد إلغاء تلقائي.' },
+  'payments.stale_payment_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة تظهر الدفعة pending أو processing أو manual_review في فحص التسوية للمراجعة البشرية. لا ينشئ النظام محاولة تحصيل بديلة تلقائيًا.' },
+  'payments.stale_refund_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة يظهر الاسترداد العالق عند بوابة الدفع في فحص التسوية للمراجعة البشرية. لا يعيد النظام الاسترداد ولا يخرج أي أموال تلقائيًا.' },
   'orders.payment_timeout_minutes': { type: 'number', default: 15, group: 'limits', description: 'إلغاء تلقائي لطلب PENDING_PAYMENT لو الدفع ماتمش' },
   'payouts.auto_approve_limit_cents': { type: 'number', default: 100000, group: 'limits', description: 'أقصى مبلغ صرف بدون مراجعة بشرية' },
   'payouts.min_amount_cents': { type: 'number', default: 20000, group: 'limits', description: 'أقل مبلغ صرف مسموح' },
@@ -187,6 +191,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // تدقيق `docs/29` P0-4 — الهيدر `Idempotency-Key` اختياري، فأي كلاينت مش بيبعته كان مكشوف
   // تمامًا لدوسة مزدوجة. السيرفر بيشتق مفتاح بنفسه خلال النافذة دي. صفر = تعطيل.
   'orders.duplicate_guard_window_seconds': { type: 'number', default: 90, group: 'orders', description: 'نافذة حماية الدوسة المزدوجة بالثواني — طلب تاني بنفس البيانات بالظبط من نفس العميل خلالها بيرجّع الطلب الأصلي بدل ما يعمل نسخة. صفر = تعطيل.' },
+  'orders.max_advance_booking_days': { type: 'number', default: 90, group: 'orders', description: 'أقصى عدد أيام مسموح بحجزها مقدمًا من تاريخ اليوم بتوقيت القاهرة. صفر = حجز نفس اليوم فقط.' },
   'orders.max_work_sessions_per_order': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد زيارات لطلب واحد (استكمال الشغل يوم تاني). بعده لازم تدخّل الدعم.' },
   'orders.technician_reschedule_max_requests': { type: 'number', default: 2, group: 'orders', description: 'أقصى عدد طلبات تأجيل يستطيع الفني إرسالها لنفس الطلب قبل تدخل الدعم' },
   'revisit.original_technician_response_hours': { type: 'number', default: 48, group: 'orders', description: 'مهلة رد الفني الأصلي على إعادة زيارة مثبّتة عليه (بالساعات). بعدها بتظهر عند الأدمن كبند محتاج تصرّف — التحرير قرار أدمن مش تلقائي لأن وراه خصم مالي.' },

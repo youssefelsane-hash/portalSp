@@ -1,6 +1,20 @@
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode, OrderType } from '../entities/order.entity';
 
+/**
+ * Values accepted at the HTTP boundary so the API can return a useful Arabic
+ * explanation when a post-paid method is accidentally sent as pre-payment.
+ * `prepayment_method` itself is normalized to the first three values only.
+ */
+export type PrepaymentMethodInput =
+  | 'card'
+  | 'instapay'
+  | 'fawry_reference'
+  | 'cash'
+  | 'wallet'
+  | 'bank_transfer'
+  | 'corporate_credit';
+
 export class CreateOrderDto {
   @IsUUID()
   service_id: string;
@@ -138,8 +152,16 @@ export class CreateOrderDto {
   // SEARCHING_TECHNICIAN، والتوزيع بيتأجل لحد ما الدفع يتأكد فعليًا. كاش/محفظة
   // مالهمش داعي هنا — دفعهم بيحصل بعد اكتمال الشغل زي زمان، مش قبل التوزيع.
   @IsOptional()
-  @IsIn(['card', 'instapay', 'fawry_reference'])
-  payment_method?: 'card' | 'instapay' | 'fawry_reference';
+  @IsIn(['card', 'instapay', 'fawry_reference', 'cash', 'wallet', 'bank_transfer', 'corporate_credit'])
+  prepayment_method?: PrepaymentMethodInput;
+
+  /**
+   * الاسم القديم للتوافق مع التطبيقات التي لم تُحدّث بعد. لا تضيف تطبيقات جديدة هذا
+   * الحقل: مصدر الحقيقة في عقد الإنشاء هو `prepayment_method`.
+   */
+  @IsOptional()
+  @IsIn(['card', 'instapay', 'fawry_reference', 'cash', 'wallet', 'bank_transfer', 'corporate_credit'])
+  payment_method?: PrepaymentMethodInput;
 
   // ضمان إضافي اختياري مربوط بالخدمة. السعر ونسخة الشروط بيتحسبوا ويتجمّدوا من الباك-إند؛
   // العميل لا يرسل أي مبلغ قابل للتلاعب.

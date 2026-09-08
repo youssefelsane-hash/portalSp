@@ -268,8 +268,8 @@ export class OrdersService {
   }
 
 
-  findAllForCustomerUser(userId: string): Promise<Order[]> {
-    return this.queries.findAllForCustomerUser(userId);
+  findAllForCustomerUser(userId: string, limit?: number, cursor?: string) {
+    return this.queries.findAllForCustomerUser(userId, limit, cursor);
   }
 
   listCustomerNotices(orderId: string): Promise<OrderCustomerNotice[]> {

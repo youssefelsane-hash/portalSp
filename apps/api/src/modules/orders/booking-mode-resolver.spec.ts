@@ -37,8 +37,8 @@ describe('booking-mode-resolver — وضع الحجز مشتق مش مختار (
       expect(isSameDayUrgent({ scheduledAt: null, now })).toBe(false);
     });
 
-    it('يوم فات = مستعجل (أأمن من معالجته كشغل بعيد يتأجل بثه)', () => {
-      expect(isSameDayUrgent({ scheduledAt: new Date('2026-08-20T08:00:00Z'), now })).toBe(true);
+    it('يوم فات مش طوارئ — بوابة تاريخ الحجز ترفضه قبل التسعير', () => {
+      expect(isSameDayUrgent({ scheduledAt: new Date('2026-08-20T08:00:00Z'), now })).toBe(false);
     });
 
     // الحالة الحدّية اللي بتكسر أي حساب بيعتمد على توقيت السيرفر: الساعة 23:00 بتوقيت القاهرة

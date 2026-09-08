@@ -140,6 +140,26 @@ export interface ReconciliationReport {
   issues: ReconciliationIssue[];
   issues_truncated: boolean;
   is_balanced: boolean;
+  ledger_issues_total: number;
+  operational_issues_total: number;
+  operational_issues: FinancialOperationalIssue[];
+  operational_issues_truncated: boolean;
+}
+
+export type FinancialOperationalIssueKind =
+  | 'stale_refund'
+  | 'stale_payment'
+  | 'cancelled_paid_missing_refund'
+  | 'completed_unpaid';
+
+export interface FinancialOperationalIssue {
+  kind: FinancialOperationalIssueKind;
+  order_id: string | null;
+  order_number: string | null;
+  related_id: string;
+  amount_cents: number;
+  occurred_at: string;
+  detail: string;
 }
 
 export interface MarketingSpendRow {

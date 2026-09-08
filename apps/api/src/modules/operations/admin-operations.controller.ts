@@ -225,6 +225,29 @@ export class AdminOperationsController {
         })),
         total: result.overdueOrders.total,
       },
+      stale_matching: {
+        items: result.staleMatching.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          placed_at: i.placedAt,
+          last_attempt_at: i.lastAttemptAt,
+          next_attempt_at: i.nextAttemptAt,
+          attempt_count: i.attemptCount,
+          age_seconds: i.ageSeconds,
+        })),
+        total: result.staleMatching.total,
+      },
+      stale_in_progress: {
+        items: result.staleInProgress.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          work_started_at: i.workStartedAt,
+          technician_id: i.technicianId,
+          full_name: i.fullName,
+          age_seconds: i.ageSeconds,
+        })),
+        total: result.staleInProgress.total,
+      },
       crew_shortage: {
         items: result.crewShortage.items.map((i) => ({
           order_id: i.orderId,

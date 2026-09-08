@@ -28,7 +28,7 @@ import { estimatedDisplayRange } from '../catalog/estimated-display-range';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, PrepaymentMethodInput } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
 import {
@@ -50,6 +50,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { bookingDateWindowViolation, MAX_ADVANCE_BOOKING_DAYS_FALLBACK } from './booking-date-window';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
@@ -107,6 +108,45 @@ interface StandardDurationInput {
   requested_units?: number;
 }
 
+type PrepaymentMethod = 'card' | 'instapay' | 'fawry_reference';
+
+/**
+ * Keep the old wire name working during the mobile-app rollout, but make the
+ * meaning explicit. Cash and the other post-paid methods must never silently
+ * be treated as a failed pre-payment selection.
+ */
+export function resolvePrepaymentMethod(
+  dto: Pick<CreateOrderDto, 'prepayment_method' | 'payment_method'>,
+): PrepaymentMethod | undefined {
+  const modern = dto.prepayment_method;
+  const legacy = dto.payment_method;
+  if (modern && legacy && modern !== legacy) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      'تم إرسال وسيلتي دفع مقدّم مختلفتين. استخدم prepayment_method فقط.',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  const method = (modern ?? legacy) as PrepaymentMethodInput | undefined;
+  if (!method) return undefined;
+  if (method === 'cash') {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      'للدفع كاش سيب حقل وسيلة الدفع المسبق فاضي.',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+  if (method === 'wallet' || method === 'bank_transfer' || method === 'corporate_credit') {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      'وسيلة الدفع دي تُستخدم بعد الخدمة وليست دفعًا مقدّمًا. استخدم بطاقة أو InstaPay أو فوري، أو اترك الحقل فارغًا.',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+  return method;
+}
+
 /**
  * **إنشاء الطلب وتسعيره — الشريحة ٦ (الأخيرة) من تقسيم `OrdersService`** (تدقيق A-1).
  *
@@ -154,6 +194,28 @@ export class OrderCreationService {
     private readonly events: EventEmitter2,
     @Optional() private readonly assignmentGuard?: TechnicianAssignmentGuardService,
   ) {}
+
+  /**
+   * بوابة زمنية واحدة للمعاينة والتأكيد. عدم توحيدها كان يسمح للعميل برؤية سعر لطلب لن يقبله
+   * السيرفر عند الإنشاء، أو - أسوأ - بتحويل تاريخ منتهٍ إلى طوارئ برسوم إضافية.
+   */
+  private async assertBookingDateWindow(scheduledAt?: string, scheduledAtRangeEnd?: string): Promise<void> {
+    const maxAdvanceDays = await this.settingsService.getNumber(
+      'orders.max_advance_booking_days',
+      MAX_ADVANCE_BOOKING_DAYS_FALLBACK,
+    );
+    const violation = bookingDateWindowViolation({ scheduledAt, scheduledAtRangeEnd, maxAdvanceDays });
+    if (violation === 'past') {
+      throw new ApiException(ErrorCode.VAL_001, 'التاريخ ده عدّى — اختار يوم من النهارده أو بعده', HttpStatus.BAD_REQUEST);
+    }
+    if (violation === 'too_far') {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مسموح بالحجز مقدمًا حتى ${Math.max(0, Math.floor(maxAdvanceDays))} يوم فقط — اختار موعد أقرب`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 
   private async resolveOptionalWarranty(
     planId: string | undefined,
@@ -454,7 +516,14 @@ export class OrderCreationService {
     // (docs/08 §133). الافتراضي `customer_app` بيحافظ على سلوك أي كلاينت قديم مش بيبعت الهيدر.
     sourceChannel: OrderSourceChannel = OrderSourceChannel.CUSTOMER_APP,
   ): Promise<Order> {
+    const prepaymentMethod = resolvePrepaymentMethod(dto);
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    // الطلب الدوري اتفق عليه تجاريًا عند إنشاء الخطة وقد يُعاد توليده بعد تأخير تشغيل. أما
+    // الإدخال الجديد من عميل/مركز اتصال فلا يجوز أن يحمل تاريخًا انتهى أو خارج أفق الحجز.
+    if (!recurringIdentity) {
+      await this.assertBookingDateWindow(dto.scheduled_at, dto.scheduled_at_range_end);
+    }
 
     // فحص مبكر رخيص قبل أي عمل تاني — الفحص الحاسم فعليًا هو الفهرس الفريد الجزئي على
     // (customer_id, idempotency_key) (migration 0139)، ده بس تحسين أداء لتفادي كل منطق التسعير/
@@ -622,11 +691,11 @@ export class OrderCreationService {
     // تفاصيل ليه محورين مستقلين: ADR-0048 §2.
 
     // قدرة دفع لكل خدمة (ADR-0026، docs/08 §42 Phase A.1) — cash_allowed=false يعني الخدمة دي
-    // مينفعش تتقفل بكاش خالص (لازم كارت/InstaPay مقدّم). غياب dto.payment_method يعني كاش ضمنيًا
+    // مينفعش تتقفل بكاش خالص (لازم كارت/InstaPay مقدّم). غياب prepayment_method يعني كاش ضمنيًا
     // (نفس منطق requestedPrepayMethod تحت بالحرف). إعادة الزيارة تحت الضمان (original_order_id)
     // مستثناة عمدًا — مجانية بالكامل دايمًا (originalOrder ? undefined : ...)، فمفيش كاش فعلي
     // يتحصّل أصلاً عشان يتفحص.
-    if (!dto.payment_method && !dto.original_order_id && !service.cashAllowed) {
+    if (!prepaymentMethod && !dto.original_order_id && !service.cashAllowed) {
       throw new ApiException(ErrorCode.VAL_001, 'الدفع كاش مش متاح لهذه الخدمة — لازم تختار بطاقة أو InstaPay أو فوري', HttpStatus.BAD_REQUEST);
     }
 
@@ -634,7 +703,7 @@ export class OrderCreationService {
     // بعدين" فعليًا (بيتحصّل يدًا بيد مرة واحدة وقت الاستلام)، فخدمة deposit_required=true لازم
     // دفع مقدّم إلكتروني إجباري بغض النظر عن cash_allowed. نفس استثناء إعادة الزيارة فوق بالحرف
     // (مجانية بالكامل، مفيش إيداع يتحصّل أصلاً).
-    if (!dto.payment_method && !dto.original_order_id && service.depositRequired) {
+    if (!prepaymentMethod && !dto.original_order_id && service.depositRequired) {
       throw new ApiException(
         ErrorCode.VAL_001,
         'هذه الخدمة تتطلب دفع إيداع مقدّم — لازم تختار بطاقة أو InstaPay أو فوري',
@@ -1008,19 +1077,19 @@ export class OrderCreationService {
       // ده اللي بيغطّي وقت الفرز حتى لو العميل مكمّلش، وبيقلّل الطلبات العبثية.
       //
       // مشروط بوجود رسم فعلاً: الافتراضي `remote_assessment_fee_cents = 0`، وساعتها مفيش حاجة
-      // تتحصّل والسلوك بيفضل زي ما هو بالحرف (ممنوع payment_method).
+      // تتحصّل والسلوك بيفضل زي ما هو بالحرف (ممنوع prepayment_method).
       //
-      // الكاش ممنوع أصلاً على مستوى الـDTO (`payment_method` بتقبل card/instapay/fawry_reference
-      // بس) — وده مناسب هنا بالضبط: مفيش فني رايح للعميل عشان يستلم منه كاش.
+      // الكاش والوسائل اللاحقة تُرفض برسالة واضحة في resolvePrepaymentMethod() — وده مناسب هنا
+      // بالضبط: مفيش فني رايح للعميل عشان يستلم منه كاش.
       if (service.remoteAssessmentFeeCents > 0) {
-        if (!dto.payment_method) {
+        if (!prepaymentMethod) {
           throw new ApiException(
             ErrorCode.VAL_001,
             'لازم تختار طريقة دفع لرسم التقييم قبل إرسال الصور',
             HttpStatus.BAD_REQUEST,
           );
         }
-      } else if (dto.payment_method) {
+      } else if (prepaymentMethod) {
         throw new ApiException(ErrorCode.VAL_001, 'الدفع يتم بعد ما الإدارة تحدد السعر وتوافق عليه', HttpStatus.BAD_REQUEST);
       }
       if (dto.addon_ids?.length || dto.promo_code || dto.building_code || dto.warranty_plan_id) {
@@ -1045,7 +1114,7 @@ export class OrderCreationService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      if (dto.payment_method === 'fawry_reference') {
+      if (prepaymentMethod === 'fawry_reference') {
         throw new ApiException(
           ErrorCode.VAL_001,
           'فوري متاح للحجز الحالي فقط؛ الحجز المتكرر يحتاج بطاقة أو InstaPay',
@@ -1071,7 +1140,7 @@ export class OrderCreationService {
     // خدمة عليها سياسة required لازم يحمل قبول النسخة الحالية، وإلا رفض واضح. الطلبات المدفوعة
     // مقدمًا (كارت/InstaPay) وإعادة الزيارة المجانية مستثناة — الشروط دي عن "الدفع لاحقًا".
     let postpaidPolicyVersionIds: string[] = [];
-    if (!dto.payment_method && !originalOrder) {
+    if (!prepaymentMethod && !originalOrder) {
       const required = await this.dataSource.query<{ id: string; title_ar: string }[]>(
         `SELECT v.id, p.title_ar
          FROM payment_policies p
@@ -1110,7 +1179,7 @@ export class OrderCreationService {
     const isNewCustomer = dto.promo_code ? await this.customerProfiles.isNewCustomer(customerProfile.id) : false;
 
     // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — إعادة زيارة مجانية بالكامل (originalOrder) دايمًا
-    // بتتوزّع فورًا بغض النظر عن dto.payment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
+    // بتتوزّع فورًا بغض النظر عن prepayment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
     // إجمالي الطلب صفر لأي سبب تاني (خصم كامل مثلاً) — دفع كارت/InstaPay بمبلغ صفر مالوش معنى.
     // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
     // طلب التقييم بالصور بياخد prepay **لرسم التقييم بس** لما الخدمة محددة له رسم (بند 9) —
@@ -1118,7 +1187,7 @@ export class OrderCreationService {
     const requestedPrepayMethod =
       originalOrder || (remoteQuoteRequested && service.remoteAssessmentFeeCents <= 0)
         ? undefined
-        : dto.payment_method;
+        : prepaymentMethod;
 
     // سياسة الأرباح الموحدة هي المسار الوحيد لإنشاء أي طلب جديد. V1 يبقى قراءة تاريخية فقط؛
     // زر تحويله كان يسمح بإنشاء طلبات حديثة بحقائق مالية من مسار متقاعد.
@@ -1666,6 +1735,7 @@ export class OrderCreationService {
   // PromotionsService.previewForOrder() الموجودة من قبل لمعاينة كود الخصم بس).
   async previewPrice(userId: string, dto: PreviewOrderDto): Promise<PreviewOrderResponseDto> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    await this.assertBookingDateWindow(dto.scheduled_at);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const remoteAssessmentRequested = dto.request_remote_quote === true;

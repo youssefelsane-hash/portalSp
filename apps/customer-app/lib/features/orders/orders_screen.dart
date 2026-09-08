@@ -20,6 +20,8 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> {
   late final OrdersRepository _repository;
   List<Order>? _orders;
+  String? _nextCursor;
+  bool _loadingMore = false;
   String? _error;
 
   @override
@@ -31,10 +33,29 @@ class _OrdersScreenState extends State<OrdersScreen> {
 
   Future<void> _load() async {
     try {
-      final orders = await _repository.list();
-      if (mounted) setState(() => _orders = orders);
+      final page = await _repository.list();
+      if (mounted) setState(() {
+        _orders = page.items;
+        _nextCursor = page.nextCursor;
+      });
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _nextCursor == null) return;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await _repository.list(cursor: _nextCursor);
+      if (mounted) setState(() {
+        _orders = [...?_orders, ...page.items];
+        _nextCursor = page.nextCursor;
+      });
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -62,9 +83,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 onRefresh: _load,
                 child: ListView.separated(
                   padding: const EdgeInsets.all(16),
-                  itemCount: _orders!.length,
+                  itemCount: _orders!.length + (_nextCursor == null ? 0 : 1),
                   separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
+                    if (index == _orders!.length) {
+                      return Center(
+                        child: TextButton(
+                          onPressed: _loadingMore ? null : _loadMore,
+                          child: Text(_loadingMore ? 'بيتم تحميل طلبات أقدم...' : 'عرض طلبات أقدم'),
+                        ),
+                      );
+                    }
                     final order = _orders![index];
                     // docs/08 §122 — دخول متدرّج خفيف بعد التحميل: بيوضّح إن دي قايمة
                     // وصلت دلوقتي، بدل ما تظهر دفعة واحدة فجأة. التدرّج بيقف عند

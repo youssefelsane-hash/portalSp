@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { SETTLED_PAYMENT_STATUSES } from './metric-definitions';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * سطر مالي بتعريفه — **التعريف بيترد مع الرقم مش مكتوب في الواجهة**.
@@ -81,6 +82,29 @@ export interface ReconciliationReport {
   issues_truncated: boolean;
   /** الثابتة الوحيدة المقبولة. */
   is_balanced: boolean;
+  /** مخالفات دفتر المحافظ فقط؛ مفصولة عن حالات التشغيل المالي حتى لا تختلط على فريق المالية. */
+  ledger_issues_total: number;
+  /** دفعات/استردادات/طلبات تحتاج قرارًا بشريًا؛ لا يوجد أي إجراء مالي تلقائي هنا. */
+  operational_issues_total: number;
+  operational_issues: FinancialOperationalIssue[];
+  operational_issues_truncated: boolean;
+}
+
+export type FinancialOperationalIssueKind =
+  | 'stale_refund'
+  | 'stale_payment'
+  | 'cancelled_paid_missing_refund'
+  | 'completed_unpaid';
+
+/** حالة مالية عالقة خارج دفتر المحافظ. القراءة فقط حتى يبقى خروج المال قرارًا بشريًا صريحًا. */
+export interface FinancialOperationalIssue {
+  kind: FinancialOperationalIssueKind;
+  order_id: string | null;
+  order_number: string | null;
+  related_id: string;
+  amount_cents: number;
+  occurred_at: string;
+  detail: string;
 }
 
 /** حد العيّنة المرجّعة. الرقم الإجمالي بيتحسب منفصل ومابيتسقّفش. */
@@ -88,7 +112,10 @@ const ISSUE_SAMPLE_LIMIT = 100;
 
 @Injectable()
 export class FinancialDashboardService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @Optional() private readonly settingsService?: SettingsService,
+  ) {}
 
   /**
    * لوحة المال (ADR-0081 §5 + سياسة الشركة).
@@ -287,7 +314,7 @@ export class FinancialDashboardService {
    * ده **فحص ثوابت على دفتر القيود**، مش رقم بيتخزّن أو بيتحسب من عمود. تلات ثوابت، وأي
    * مخالفة بترجع باسم المحفظة والفرق بالقرش:
    *
-   * 1. **رصيد المحفظة = مجموع حركاتها** (دائن − مدين، بلا المعكوسة).
+   * 1. **رصيد الدفتر = مجموع حركاتها** (المتاح + المحجوز = دائن − مدين، بلا المعكوسة).
    * 2. **حساب الصف**: `balance_after = balance_before ± amount`.
    * 3. **سلسلة متصلة**: `balance_before` لأي حركة = `balance_after` للحركة اللي قبلها على
    *    نفس المحفظة.
@@ -316,7 +343,7 @@ export class FinancialDashboardService {
            LEFT JOIN wallet_transactions t ON t.wallet_id = w.id
           WHERE w.deleted_at IS NULL ${walletFilter}
           GROUP BY w.id
-         HAVING w.balance_cents <> COALESCE(SUM(
+         HAVING w.balance_cents + w.reserved_balance_cents <> COALESCE(SUM(
                   CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                 ) FILTER (WHERE t.is_reversed = false), 0)
        ), chain AS (
@@ -339,7 +366,7 @@ export class FinancialDashboardService {
               (SELECT COUNT(*) FROM chain) AS chain_issues`,
       params,
     );
-    const totalIssues =
+    const ledgerIssuesTotal =
       Number(counts?.balance_issues ?? 0) + Number(counts?.arithmetic_issues ?? 0) + Number(counts?.chain_issues ?? 0);
 
     const balanceIssues = await this.dataSource.query<
@@ -347,21 +374,21 @@ export class FinancialDashboardService {
     >(
       `SELECT w.id AS wallet_id,
               w.owner_user_id,
-              (w.balance_cents - COALESCE(SUM(
+              (w.balance_cents + w.reserved_balance_cents - COALESCE(SUM(
                  CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                ) FILTER (WHERE t.is_reversed = false), 0)) AS difference,
               COALESCE(SUM(
                  CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                ) FILTER (WHERE t.is_reversed = false), 0) AS expected,
-              w.balance_cents AS actual
+              w.balance_cents + w.reserved_balance_cents AS actual
          FROM wallets w
          LEFT JOIN wallet_transactions t ON t.wallet_id = w.id
         WHERE w.deleted_at IS NULL ${walletFilter}
         GROUP BY w.id
-       HAVING w.balance_cents <> COALESCE(SUM(
+       HAVING w.balance_cents + w.reserved_balance_cents <> COALESCE(SUM(
                 CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
               ) FILTER (WHERE t.is_reversed = false), 0)
-        ORDER BY ABS(w.balance_cents - COALESCE(SUM(
+        ORDER BY ABS(w.balance_cents + w.reserved_balance_cents - COALESCE(SUM(
                 CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
               ) FILTER (WHERE t.is_reversed = false), 0)) DESC
         LIMIT ${ISSUE_SAMPLE_LIMIT}`,
@@ -410,7 +437,7 @@ export class FinancialDashboardService {
         difference_cents: Number(r.difference),
         transaction_id: null,
         transaction_number: null,
-        detail: `رصيد المحفظة ${r.actual} والمفروض ${r.expected} حسب مجموع حركاتها`,
+        detail: `رصيد الدفتر ${r.actual} (المتاح والمحجوز) والمفروض ${r.expected} حسب مجموع حركاتها`,
       })),
       ...arithmeticIssues.map((r) => ({
         kind: 'row_arithmetic' as const,
@@ -432,13 +459,131 @@ export class FinancialDashboardService {
       })),
     ];
 
+    const operational = await this.findOperationalIssues();
+    const totalIssues = ledgerIssuesTotal + operational.total;
+
     return {
       checked_wallets: Number(counts?.wallets ?? 0),
       checked_transactions: Number(counts?.transactions ?? 0),
       total_issues: totalIssues,
       issues,
-      issues_truncated: totalIssues > issues.length,
+      // التوافق مع عقد endpoint القديم: هذا الحقل يخص عينة دفتر القيود فقط. عينة التشغيل لها
+      // حقلها الصريح حتى لا تفسر الواجهة العدد الإجمالي كمجرد truncation للدفتر.
+      issues_truncated: ledgerIssuesTotal > issues.length,
       is_balanced: totalIssues === 0,
+      ledger_issues_total: ledgerIssuesTotal,
+      operational_issues_total: operational.total,
+      operational_issues: operational.items,
+      operational_issues_truncated: operational.total > operational.items.length,
+    };
+  }
+
+  /**
+   * فحص المسارات المالية المفتوحة التي لا تظهر في دفتر المحفظة. لا يغيّر صفًا واحدًا: الاسترداد
+   * أو تصحيح الدفع لا يزالان قرار Finance/Admin موثقًا، خصوصًا للنتيجة غير المؤكدة عند البوابة.
+   */
+  private async findOperationalIssues(): Promise<{ total: number; items: FinancialOperationalIssue[] }> {
+    const readHours = async (key: string, fallback: number) => {
+      const value = this.settingsService ? await this.settingsService.getNumber(key, fallback) : fallback;
+      return Math.max(1, Math.floor(value));
+    };
+    const [refundHours, paymentHours] = await Promise.all([
+      readHours('payments.stale_refund_hours', 24),
+      readHours('payments.stale_payment_hours', 24),
+    ]);
+
+    const rows = await this.dataSource.query<
+      {
+        kind: FinancialOperationalIssueKind;
+        order_id: string | null;
+        order_number: string | null;
+        related_id: string;
+        amount_cents: string;
+        occurred_at: string;
+        total_count: string;
+      }[]
+    >(
+      `WITH operational_issues AS (
+         -- الاسترداد PROCESSING بعد نافذة المراجعة: لا نعيد إرساله ولا نحرره آليًا، فقط نظهره
+         -- لموظف Finance ليقفل نفس الصف بدليل من المزود.
+         SELECT 'stale_refund'::text AS kind, o.id AS order_id, o.order_number,
+                r.id AS related_id, r.amount_cents, r.requested_at AS occurred_at
+           FROM refunds r
+           LEFT JOIN orders o ON o.id = r.order_id
+          WHERE r.refund_status = 'processing'
+            AND r.requested_at <= now() - make_interval(hours => $1::int)
+
+         UNION ALL
+
+         -- pending/processing/manual_review لا تعني فشلًا. ظهورها هنا مراجعة فقط حتى لا ينشئ
+         -- النظام محاولة تحصيل ثانية بينما نتيجة المزود الأصلية قد تكون وصلت متأخرة.
+         SELECT 'stale_payment'::text, o.id, o.order_number,
+                p.id, p.amount_cents, p.initiated_at
+           FROM payments p
+           LEFT JOIN orders o ON o.id = p.order_id
+          WHERE p.payment_status IN ('pending', 'processing', 'manual_review')
+            AND p.initiated_at <= now() - make_interval(hours => $2::int)
+
+         UNION ALL
+
+         -- إلغاء مدفوع: المتبقي بعد الاستردادات المكتملة ورسوم الإلغاء يستحق قرارًا بشريًا.
+         -- لا نفترض أن كل إلغاء يستحق كامل المبلغ؛ رسوم الإلغاء الصحيحة تظل مستحقة للمنصة.
+         SELECT 'cancelled_paid_missing_refund'::text, o.id, o.order_number,
+                o.id,
+                GREATEST(0,
+                  COALESCE((SELECT SUM(p.amount_cents) FROM payments p
+                            WHERE p.order_id = o.id AND p.payment_status = 'succeeded'), 0)
+                  - COALESCE((SELECT SUM(r.amount_cents) FROM refunds r
+                              WHERE r.order_id = o.id AND r.refund_status = 'completed'), 0)
+                  - COALESCE(o.cancellation_fee_cents, 0)
+                ) AS amount_cents,
+                COALESCE(o.cancelled_at, o.updated_at) AS occurred_at
+           FROM orders o
+          WHERE o.deleted_at IS NULL
+            AND o.order_status IN ('cancelled_by_customer', 'cancelled_by_system')
+            AND o.payment_status IN ('paid', 'partially_refunded')
+            AND COALESCE((SELECT SUM(p.amount_cents) FROM payments p
+                          WHERE p.order_id = o.id AND p.payment_status = 'succeeded'), 0)
+                > COALESCE((SELECT SUM(r.amount_cents) FROM refunds r
+                            WHERE r.order_id = o.id AND r.refund_status = 'completed'), 0)
+                  + COALESCE(o.cancellation_fee_cents, 0)
+
+         UNION ALL
+
+         -- completed + unpaid لا يمكن أن يكون نجاح تحصيل سليمًا، بما في ذلك أي مسار كاش نسي
+         -- تأكيد التحصيل. لا نصحح الحالة هنا حتى لا نخترع دخلًا بلا دليل.
+         SELECT 'completed_unpaid'::text, o.id, o.order_number,
+                o.id, o.total_amount_cents, COALESCE(o.work_completed_at, o.updated_at)
+           FROM orders o
+          WHERE o.deleted_at IS NULL
+            AND o.order_status = 'completed'
+            AND o.payment_status = 'unpaid'
+       )
+       SELECT kind, order_id, order_number, related_id, amount_cents, occurred_at,
+              COUNT(*) OVER() AS total_count
+       FROM operational_issues
+       ORDER BY occurred_at ASC, related_id
+       LIMIT $3`,
+      [refundHours, paymentHours, ISSUE_SAMPLE_LIMIT],
+    );
+
+    const detail: Record<FinancialOperationalIssueKind, string> = {
+      stale_refund: 'استرداد عند البوابة متوقف للمراجعة؛ راجع المزود ثم اقفل نفس الاسترداد بدليل، ولا تنشئ استردادًا جديدًا.',
+      stale_payment: 'دفعة نتيجتها غير محسومة أو متوقفة؛ راجع المزود أو التحويل اليدوي قبل أي محاولة تحصيل أخرى.',
+      cancelled_paid_missing_refund: 'طلب ملغي ما زال به مبلغ مدفوع متبقٍ بعد رسوم الإلغاء والاستردادات المكتملة؛ يحتاج قرار Finance يدوي.',
+      completed_unpaid: 'طلب مكتمل بلا تحصيل مسجل؛ راجع الكاش أو بوابة الدفع قبل اعتماد أي مستحقات أو إيراد.',
+    };
+    return {
+      total: rows.length > 0 ? Number(rows[0].total_count) : 0,
+      items: rows.map((row) => ({
+        kind: row.kind,
+        order_id: row.order_id,
+        order_number: row.order_number,
+        related_id: row.related_id,
+        amount_cents: Number(row.amount_cents),
+        occurred_at: new Date(row.occurred_at).toISOString(),
+        detail: detail[row.kind],
+      })),
     };
   }
 }

@@ -87,8 +87,8 @@ export default function MoneyPage() {
               </p>
               <p className="text-muted-foreground mt-1 text-sm">
                 {balanced
-                  ? 'دفتر القيود متسوّي: كل رصيد محفظة = مجموع حركاتها، وكل حركة حسابها مظبوط.'
-                  : 'فيه مخالفات في دفتر القيود. الرقم ده لازم يفضل صفر — أي حاجة غيره معناها فلوس مش مفسّرة.'}
+                  ? 'دفتر القيود ومسارات الدفع المفتوحة متسوّية: مفيش رصيد أو تحصيل أو استرداد محتاج مراجعة.'
+                  : 'فيه مخالفة في دفتر القيود أو مسار دفع مفتوح يحتاج مراجعة بشرية. الرقم ده لازم يفضل صفر.'}
               </p>
               {!balanced && (
                 <Button
@@ -114,7 +114,9 @@ export default function MoneyPage() {
                   اتفحص {formatCount(reconciliation.data.checked_wallets)} محفظة و
                   {formatCount(reconciliation.data.checked_transactions)} حركة — إجمالي المخالفات{' '}
                   {formatCount(reconciliation.data.total_issues)}
-                  {reconciliation.data.issues_truncated ? ' (معروض عيّنة منها)' : ''}.
+                  {' · '}دفتر القيود {formatCount(reconciliation.data.ledger_issues_total)}
+                  {' · '}مسارات دفع تحتاج مراجعة {formatCount(reconciliation.data.operational_issues_total)}
+                  {reconciliation.data.issues_truncated || reconciliation.data.operational_issues_truncated ? ' (معروض عيّنة منها)' : ''}.
                 </p>
               )}
             </CardHeader>
@@ -146,6 +148,42 @@ export default function MoneyPage() {
                     ))}
                   </TableBody>
                 </Table>
+              )}
+              {(reconciliation.data?.operational_issues.length ?? 0) > 0 && (
+                <div className="mt-6">
+                  <h3 className="mb-2 text-sm font-medium">دفعات واستردادات تحتاج قرار Finance</h3>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    القراءة هنا لا تنشئ استردادًا ولا تحصيلًا جديدًا. افتح الطلب، راجع دليل البوابة، ثم نفّذ القرار اليدوي المناسب.
+                  </p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>الحالة</TableHead>
+                        <TableHead>الطلب</TableHead>
+                        <TableHead>المبلغ</TableHead>
+                        <TableHead>منذ</TableHead>
+                        <TableHead>الإجراء المطلوب</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reconciliation.data?.operational_issues.map((issue) => (
+                        <TableRow key={`${issue.kind}-${issue.related_id}`}>
+                          <TableCell dir="ltr" className="font-mono text-xs">{issue.kind}</TableCell>
+                          <TableCell>
+                            {issue.order_id ? (
+                              <Link href={`/orders/${issue.order_id}`} className="font-medium hover:underline">
+                                {issue.order_number ?? issue.order_id.slice(0, 8)}
+                              </Link>
+                            ) : 'بدون طلب مرتبط'}
+                          </TableCell>
+                          <TableCell className="tabular-nums">{formatEgp(issue.amount_cents)}</TableCell>
+                          <TableCell className="text-xs">{new Date(issue.occurred_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                          <TableCell className="text-sm">{issue.detail}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>

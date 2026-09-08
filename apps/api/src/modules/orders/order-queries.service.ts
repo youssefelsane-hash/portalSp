@@ -8,6 +8,11 @@ import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { Order, OrderStatus } from './entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
 
+export interface CustomerOrdersPage {
+  items: Order[];
+  nextCursor: string | null;
+}
+
 /**
  * **قراءات الطلبات — أول شريحة من تقسيم `OrdersService`** (تدقيق A-1).
  *
@@ -44,10 +49,43 @@ export class OrderQueriesService {
     private readonly techniciansService: TechniciansService,
   ) {}
 
-  findAllForCustomerUser(userId: string): Promise<Order[]> {
-    return this.customerProfiles.findByUserIdOrThrow(userId).then((profile) =>
-      this.orders.find({ where: { customerId: profile.id }, order: { createdAt: 'DESC' } }),
-    );
+  async findAllForCustomerUser(userId: string, limit = 20, cursor?: string): Promise<CustomerOrdersPage> {
+    const profile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    const decoded = cursor ? this.decodeCustomerOrdersCursor(cursor) : null;
+    const query = this.orders
+      .createQueryBuilder('order')
+      .where('order.customer_id = :customerId', { customerId: profile.id })
+      .orderBy('order.created_at', 'DESC')
+      .addOrderBy('order.id', 'DESC')
+      .take(limit + 1);
+    if (decoded) {
+      query.andWhere(
+        '(order.created_at < :cursorCreatedAt OR (order.created_at = :cursorCreatedAt AND order.id < :cursorId))',
+        { cursorCreatedAt: decoded.createdAt, cursorId: decoded.id },
+      );
+    }
+    const rows = await query.getMany();
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items.at(-1);
+    return { items, nextCursor: hasMore && last ? this.encodeCustomerOrdersCursor(last) : null };
+  }
+
+  private encodeCustomerOrdersCursor(order: Order): string {
+    return Buffer.from(JSON.stringify({ createdAt: order.createdAt.toISOString(), id: order.id })).toString('base64url');
+  }
+
+  private decodeCustomerOrdersCursor(cursor: string): { createdAt: Date; id: string } {
+    try {
+      const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { createdAt?: unknown; id?: unknown };
+      const createdAt = typeof decoded.createdAt === 'string' ? new Date(decoded.createdAt) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime()) || typeof decoded.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(decoded.id)) {
+        throw new Error('invalid cursor');
+      }
+      return { createdAt, id: decoded.id };
+    } catch {
+      throw new ApiException(ErrorCode.VAL_001, 'مؤشر تحميل الطلبات غير صحيح أو انتهت صلاحيته', HttpStatus.BAD_REQUEST);
+    }
   }
 
   /**

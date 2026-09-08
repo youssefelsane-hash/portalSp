@@ -1,4 +1,5 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { ThrottlerException } from '@nestjs/throttler';
 import { Response } from 'express';
 import { ApiEnvelope } from '../dto/api-response';
 import { ErrorCode } from '../exceptions/api.exception';
@@ -15,13 +16,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const req = ctx.getRequest<RequestWithId>();
 
     const isHttp = exception instanceof HttpException;
-    const status = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
+    let status = isHttp ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const body = isHttp ? exception.getResponse() : null;
 
     let code: string = ErrorCode.VAL_001;
     let message = 'حصل خطأ غير متوقع، حاول تاني';
 
-    if (typeof body === 'object' && body !== null && 'code' in body) {
+    if (exception instanceof ThrottlerException || status === HttpStatus.TOO_MANY_REQUESTS) {
+      code = ErrorCode.RATE_001;
+      message = 'حاولت كتير في وقت قصير — استنى دقيقة وجرّب تاني';
+      // Nest throttler لا يضمن Retry-After في كل adapter/version؛ نرجعه صراحة بعقد ثابت.
+      res.setHeader('Retry-After', '60');
+    } else if (this.isDatabaseBusy(exception)) {
+      // انتهاء مهلة الـpool لا يعني أن الطلب غير صالح. 503 + Retry-After يقول للعميل إن إعادة
+      // المحاولة آمنة، بعكس 500 المبهم الذي يدفعه للدوس المتكرر أو افتراض أن الحجز فشل.
+      status = HttpStatus.SERVICE_UNAVAILABLE;
+      code = ErrorCode.SYS_001;
+      message = 'النظام مزحوم شوية دلوقتي — جرّب كمان شوية';
+      res.setHeader('Retry-After', '5');
+    } else if (typeof body === 'object' && body !== null && 'code' in body) {
       code = String((body as Record<string, unknown>).code);
       message = String((body as Record<string, unknown>).message ?? message);
     } else if (typeof body === 'object' && body !== null && 'message' in body) {
@@ -32,6 +45,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = exception.message;
     }
 
+    message = this.toCustomerMessage(message, status);
+
     if (!isHttp) {
       // **العطل ده لازم يبقى قابل للتتبّع من الشاشة للوج في خطوة واحدة.**
       //
@@ -41,7 +56,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // بيظهر في التطبيق، فـ`grep <request_id> .dev-logs/api.log` بيوصل للسبب فورًا.
       const actor = (req as { user?: { sub?: string } }).user?.sub ?? null;
       this.logger.error(
-        `500 [${req.requestId}] ${req.method} ${req.originalUrl} — مستخدم: ${actor ?? 'مجهول'}`,
+        `${status} [${req.requestId}] ${req.method} ${req.originalUrl} — مستخدم: ${actor ?? 'مجهول'}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
       // ومعاه سجل مخصّص على القرص: اللوج على الشاشة بيضيع، والكود اللي المستخدم شايفه لازم
@@ -65,5 +80,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
 
     res.status(status).json(envelope);
+  }
+
+  private isDatabaseBusy(exception: unknown): boolean {
+    const error = exception as { code?: string; message?: string; cause?: { code?: string; message?: string } } | null;
+    const code = error?.code ?? error?.cause?.code ?? '';
+    const message = `${error?.message ?? ''} ${error?.cause?.message ?? ''}`.toLowerCase();
+    return (
+      ['ETIMEDOUT', 'ECONNRESET', '53300', '57P03'].includes(code) ||
+      /timeout.*connect|connection.*timeout|too many clients|remaining connection slots|connection terminated/.test(message)
+    );
+  }
+
+  private toCustomerMessage(message: string, status: number): string {
+    // الرسائل التي تكتبها الخدمات بالعربية هي مصدر الحقيقة ولا نلمسها.
+    if (/[\u0600-\u06FF]/.test(message)) return message;
+    const normalized = message.toLowerCase();
+    if (normalized.includes('uuid')) return 'اللينك ده مش صحيح أو قديم';
+    if (status === HttpStatus.BAD_REQUEST) return 'البيانات المرسلة غير صحيحة';
+    if (status === HttpStatus.NOT_FOUND) return 'المطلوب غير موجود أو لم يعد متاحًا';
+    if (status === HttpStatus.FORBIDDEN) return 'مش مسموح لك تعمل العملية دي';
+    if (status === HttpStatus.UNAUTHORIZED) return 'سجّل دخولك تاني وحاول';
+    return 'حصل خطأ غير متوقع، حاول تاني';
   }
 }
