@@ -37,6 +37,10 @@ import {
   MessagesSquare,
   Package,
   PieChart,
+  Gauge,
+  Filter,
+  Wallet,
+  UsersRound,
   QrCode,
   Route as RouteIcon,
   ScrollText,
@@ -138,8 +142,16 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'التقارير',
-    items: [{ href: '/reports', label: 'التقارير', icon: PieChart, permission: 'reports.view' }],
+    label: 'التقارير والتحليلات',
+    items: [
+      // ADR-0081 — أربع شاشات، كل واحدة بترد على سؤال واحد. الصلاحية هنا `analytics.view`
+      // زي الـendpoint بالظبط؛ الأجزاء المالية جوّه الشاشات بتتخفي لوحدها بـ`analytics.financial.view`.
+      { href: '/analytics', label: 'لوحة الإدارة', icon: Gauge, permission: 'analytics.view' },
+      { href: '/analytics/funnel', label: 'رحلة الحجز', icon: Filter, permission: 'analytics.view' },
+      { href: '/analytics/money', label: 'لوحة المال', icon: Wallet, permission: 'analytics.financial.view' },
+      { href: '/analytics/workforce', label: 'القوى العاملة', icon: UsersRound, permission: 'analytics.view' },
+      { href: '/reports', label: 'التقارير', icon: PieChart, permission: 'reports.view' },
+    ],
   },
   {
     label: 'النظام والإعدادات',

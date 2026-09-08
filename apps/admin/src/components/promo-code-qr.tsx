@@ -39,6 +39,9 @@ export function PromoCodeQr({ code }: PromoCodeQrProps) {
       {visible && (
         <div className="rounded-md border bg-white p-2 text-center shadow-sm">
           {imageUrl ? (
+            // الصورة `data:` مولّدة في المتصفح لحظتها — `next/image` بيحسّن ملفات جاية من
+            // الشبكة، ومالوش أي فايدة هنا (مفيش طلب أصلاً يتحسّن)، فالتحذير مش منطبق.
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={imageUrl} alt={`رمز QR لكود الخصم ${code}`} width={180} height={180} />
           ) : (
             <p className="w-[180px] py-8 text-xs text-muted-foreground">جاري إنشاء الرمز…</p>
