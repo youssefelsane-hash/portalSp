@@ -176,30 +176,197 @@ describe('FinancialDashboardService — لوحة المال وفحص التسو�
     });
   });
 
-  describe('لقطة المال', () => {
-    it('بترجّع كل السطور اللي المالك طلبها', async () => {
+  describe('لقطة المال — السلّم الخماسي اللي السياسة نصّت عليه', () => {
+    it('بترجّع الخمس سطور بالاسم وبالترتيب، وكل واحد معاه تعريفه', async () => {
       const snapshot = await service.moneySnapshot(new Date('2031-04-01T00:00:00Z'), new Date('2031-04-02T00:00:00Z'));
-      expect(snapshot).toMatchObject({
-        gmv_cents: 0,
-        platform_revenue_cents: 0,
-        technician_earnings_cents: 0,
-        assistant_earnings_cents: 0,
-        discounts_cents: 0,
-        refunds_cents: 0,
-        failed_payments_count: 0,
-      });
+      expect(snapshot.lines.map((l) => l.key)).toEqual([
+        'gross_sales',
+        'discounts',
+        'refunds',
+        'platform_revenue',
+        'net_platform_revenue',
+      ]);
+      // **التعريف بيترد مع الرقم** — السياسة بتقول «مع تعريف واضح لكل رقم»، ولو التعريف عاش
+      // في نص الواجهة أول تعديل في الحساب كان هيخلّيه كذب.
+      for (const line of snapshot.lines) {
+        expect(line.label_ar.length).toBeGreaterThan(0);
+        expect(line.definition_ar.length).toBeGreaterThan(20);
+      }
+    });
+
+    it('أرباح الفني والمساعد سطرين منفصلين', async () => {
+      const snapshot = await service.moneySnapshot(new Date('2031-04-01T00:00:00Z'), new Date('2031-04-02T00:00:00Z'));
+      expect(typeof snapshot.technician_earnings_cents).toBe('number');
+      expect(typeof snapshot.assistant_earnings_cents).toBe('number');
       expect(typeof snapshot.pending_settlements_cents).toBe('number');
     });
 
-    it('`unreconciled_count` في اللقطة = نفس عدد مخالفات الفحص التفصيلي', async () => {
+    it('`unreconciled_count` في اللقطة = العدد الكامل مش طول العيّنة', async () => {
       const snapshot = await service.moneySnapshot(new Date('2031-04-01T00:00:00Z'), new Date('2031-04-02T00:00:00Z'));
       const report = await service.reconciliationCheck();
-      // **الرقم الرئيسي هو العدد الكامل مش طول العيّنة** — دي البَقّة اللي الاختبار ده
-      // لقاها: العيّنة مسقّفة عند ١٠٠، فلو الرقم اتحسب منها كان هيقول أقل من الحقيقة.
+      // **الرقم الرئيسي هو العدد الكامل** — دي البَقّة اللي الاختبار ده لقاها: العيّنة
+      // مسقّفة عند ١٠٠، فلو الرقم اتحسب منها كان هيقول أقل من الحقيقة.
       expect(snapshot.unreconciled_count).toBe(report.total_issues);
       expect(report.total_issues).toBeGreaterThanOrEqual(report.issues.length);
       expect(report.issues_truncated).toBe(report.total_issues > report.issues.length);
       expect(report.is_balanced).toBe(report.total_issues === 0);
+    });
+  });
+
+  describe('الدفع المزدوج — «حالة واضحة للأدمن، والاسترداد يدوي فقط»', () => {
+    let orderId = '';
+    const paymentIds: string[] = [];
+    const seed = {
+      country: '',
+      city: '',
+      zone: '',
+      category: '',
+      service: '',
+      customerUser: '',
+      customerProfile: '',
+      address: '',
+      adminUser: '',
+    };
+
+    beforeAll(async () => {
+      const [country] = await q<{ id: string }[]>(
+        `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
+         VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
+        [`دولة دفع ${runId}`, `Pay Country ${runId}`, runId.slice(-2).toUpperCase()],
+      );
+      seed.country = country.id;
+      const [city] = await q<{ id: string }[]>(
+        `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,
+        [country.id, `مدينة دفع ${runId}`, `Pay City ${runId}`, `pay-city-${runId}`],
+      );
+      seed.city = city.id;
+      const [zone] = await q<{ id: string }[]>(
+        `INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`,
+        [city.id, `نطاق دفع ${runId}`, `Pay Zone ${runId}`],
+      );
+      seed.zone = zone.id;
+      const [category] = await q<{ id: string }[]>(
+        `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
+        [`فئة دفع ${runId}`, `Pay Category ${runId}`, `pay-cat-${runId}`],
+      );
+      seed.category = category.id;
+      const [svc] = await q<{ id: string }[]>(
+        `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
+         VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
+        [category.id, `خدمة دفع ${runId}`, `pay-svc-${runId}`],
+      );
+      seed.service = svc.id;
+      const [customerUser] = await q<{ id: string }[]>(
+        `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
+        [`+20dp${runId}`.slice(0, 15), `عميل دفع ${runId}`],
+      );
+      seed.customerUser = customerUser.id;
+      const [profile] = await q<{ id: string }[]>(
+        `INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`,
+        [customerUser.id],
+      );
+      seed.customerProfile = profile.id;
+      const [address] = await q<{ id: string }[]>(
+        `INSERT INTO addresses (user_id, street_name, location)
+         VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+        [customerUser.id, `شارع دفع ${runId}`],
+      );
+      seed.address = address.id;
+
+      const [adminUser] = await q<{ id: string }[]>(
+        `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,
+        [`+20da${runId}`.slice(0, 15), `أدمن دفع ${runId}`],
+      );
+      seed.adminUser = adminUser.id;
+
+      const [order] = await q<{ id: string }[]>(
+        `INSERT INTO orders (commission_rate_applied, order_number, customer_id, service_id, address_id, service_zone_id,
+                             order_status, payment_status, total_amount_cents, platform_commission_cents,
+                             technician_earning_cents, worker_pool_cents, calculation_algorithm_version, booking_mode, paid_at)
+         VALUES (20, $1, $2, $3, $4, $5, 'completed', 'paid', 50000, 10000, 40000, 40000, 'v2', 'individual', now())
+         RETURNING id`,
+        [`DBLP-${runId}`.slice(0, 24), seed.customerProfile, seed.service, seed.address, seed.zone],
+      );
+      orderId = order.id;
+    });
+
+    afterAll(async () => {
+      await q(`DELETE FROM payments WHERE id = ANY($1)`, [paymentIds]);
+      await q(`DELETE FROM orders WHERE id = $1`, [orderId]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [seed.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [seed.customerProfile]);
+      await q(`DELETE FROM users WHERE id = ANY($1)`, [[seed.customerUser, seed.adminUser]]);
+      await q(`DELETE FROM services WHERE id = $1`, [seed.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [seed.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [seed.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [seed.city]);
+      await q(`DELETE FROM countries WHERE id = $1`, [seed.country]);
+    });
+
+    const addPayment = async (amount: number): Promise<string> => {
+      const [payment] = await q<{ id: string }[]>(
+        `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
+                               completed_at, idempotency_key)
+         VALUES ($1, $2, $3, $4, 'card', 'succeeded', now(), $5) RETURNING id`,
+        [
+          `PAYD-${runId}-${paymentIds.length}`.slice(0, 24),
+          orderId,
+          seed.customerProfile,
+          amount,
+          `idem-${runId}-${paymentIds.length}`,
+        ],
+      );
+      paymentIds.push(payment.id);
+      return payment.id;
+    };
+
+    const mine = async () => (await service.detectDoublePayments()).filter((c) => c.order_id === orderId);
+
+    it('دفعة واحدة مظبوطة: مفيش حالة', async () => {
+      await addPayment(50_000);
+      expect(await mine()).toEqual([]);
+    });
+
+    it('دفعتين ناجحتين على نفس الطلب: بتظهر كحالة بالزيادة بالقرش', async () => {
+      await addPayment(50_000);
+
+      const cases = await mine();
+      expect(cases).toHaveLength(1);
+      expect(cases[0]).toMatchObject({
+        order_total_cents: 50_000,
+        paid_cents: 100_000,
+        overpaid_cents: 50_000,
+        succeeded_payments: 2,
+      });
+    });
+
+    it('اللقطة بتعرض الحالة والزيادة، **من غير ما تحرّك أي فلوس**', async () => {
+      const beforeRefunds = await q<{ count: string }[]>(`SELECT COUNT(*) FROM refunds WHERE order_id = $1`, [orderId]);
+      const snapshot = await service.moneySnapshot(new Date('2031-04-01T00:00:00Z'), new Date('2031-04-02T00:00:00Z'));
+
+      expect(snapshot.double_payments_count).toBeGreaterThanOrEqual(1);
+      expect(snapshot.double_payments.some((c) => c.order_id === orderId)).toBe(true);
+
+      // **الضمانة اللي السياسة بتطلبها**: «ممنوع خروج أي أموال تلقائيًا بدون إجراء بشري».
+      // الكشف قراءة بحتة — لو حد ضاف استرداد تلقائي هنا يومًا ما، الاختبار ده بيقع.
+      const afterRefunds = await q<{ count: string }[]>(`SELECT COUNT(*) FROM refunds WHERE order_id = $1`, [orderId]);
+      expect(afterRefunds[0].count).toBe(beforeRefunds[0].count);
+    });
+
+    it('بعد استرداد الزيادة **يدويًا**، الحالة بتتقفل', async () => {
+      // `refunds.requested_by_user_id` عمود **NOT NULL** — يعني السياسة «ممنوع خروج أي أموال
+      // تلقائيًا بدون إجراء بشري» مفروضة على مستوى القاعدة نفسها، مش بالاتفاق بس: مفيش صف
+      // استرداد يقدر يتولد من غير ما يبان مين طلبه.
+      const [refund] = await q<{ id: string }[]>(
+        `INSERT INTO refunds (refund_number, order_id, payment_id, amount_cents, refund_type, refund_method,
+                              refund_status, requested_by_user_id, completed_at)
+         VALUES ($1, $2, $3, 50000, 'partial', 'original_method', 'completed', $4, now()) RETURNING id`,
+        [`RFD-${runId}`.slice(0, 24), orderId, paymentIds[0], seed.adminUser],
+      );
+
+      expect(await mine()).toEqual([]);
+
+      await q(`DELETE FROM refunds WHERE id = $1`, [refund.id]);
     });
   });
 });
