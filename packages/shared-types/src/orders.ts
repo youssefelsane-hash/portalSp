@@ -82,6 +82,8 @@ export interface OrderResponseDto {
   /** إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات محلولة، للعرض. */
   customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
   scheduled_at: string | null;
+  /** عدد التأجيلات الذاتية للعميل؛ undefined فقط للردود من خادم قبل migration 0301. */
+  customer_reschedule_count?: number;
   estimated_price_cents: number | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
   initial_quote_note: string | null;

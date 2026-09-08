@@ -15,7 +15,7 @@ import { SettingsService } from '../settings/settings.service';
 import { insertDurableInAppNotification } from './durable-in-app-notification';
 import { Order, OrderStatus } from './entities/order.entity';
 import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
-import { RescheduleOrderDto } from './dto/reschedule-order.dto';
+import { CustomerRescheduleReasonCode, RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQueriesService } from './order-queries.service';
 import { assertNoScheduleOverlap, resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
@@ -45,6 +45,13 @@ const RESCHEDULABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ASSI
 // حالة إضافية للأدمن فقط: الطلب المجدول قد يمر موعده وهو ما زال يبحث عن منفّذ. لا يوجد
 // فني نتحقق من جدوله بعد، لكن لا بد من موعد مستقبلي جديد قبل التعيين اليدوي.
 const ADMIN_RESCHEDULABLE_UNASSIGNED_STATUS = OrderStatus.SEARCHING_TECHNICIAN;
+
+const CUSTOMER_RESCHEDULE_REASON_LABELS_AR: Record<CustomerRescheduleReasonCode, string> = {
+  customer_request: 'تغيير خطة العميل',
+  availability_change: 'تغيّر وقت العميل',
+  address_access: 'تعذّر الدخول إلى العنوان',
+  other: 'سبب آخر',
+};
 
 /**
  * **فلو إعادة جدولة الطلب — الشريحة ٢-ب من تقسيم `OrdersService`** (تدقيق A-1).
@@ -87,6 +94,9 @@ export class OrderRescheduleService {
 
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.queries.findOneOwnedOrThrow(userId, orderId);
+    const configuredLimit = await this.settingsService.getNumber('orders.customer_reschedule_max_count', 3);
+    const customerRescheduleLimit = Math.max(0, Math.min(20, Math.floor(configuredLimit)));
+    const reasonSuffix = this.customerReasonSuffix(dto);
     return this.rescheduleCore(order, {
       newSlotId: dto.new_slot_id,
       newScheduledAt: dto.new_scheduled_at,
@@ -95,6 +105,8 @@ export class OrderRescheduleService {
       userId,
       role: 'customer',
       changeSource: OrderChangeSource.CUSTOMER,
+      reasonSuffix,
+      customerRescheduleLimit,
     });
   }
 
@@ -524,7 +536,13 @@ export class OrderRescheduleService {
   private async rescheduleCore(
     order: Order,
     target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
-    actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
+    actor: {
+      userId: string;
+      role: string;
+      changeSource: OrderChangeSource;
+      reasonSuffix?: string;
+      customerRescheduleLimit?: number;
+    },
   ): Promise<Order> {
     const orderId = order.id;
     if ((target.newSlotId == null) === (target.newScheduledAt == null)) {
@@ -545,7 +563,6 @@ export class OrderRescheduleService {
 
     let newSlot: TechnicianScheduleSlot | null = null;
     let newScheduledAt: Date;
-    let zone: { id: string } | null = null;
 
     if (target.newSlotId != null) {
       const currentSlot = await this.scheduleService.findSlotForOrder(orderId);
@@ -566,7 +583,6 @@ export class OrderRescheduleService {
       if (Number.isNaN(newScheduledAt.getTime())) {
         throw new ApiException(ErrorCode.VAL_001, 'الموعد الجديد مش تاريخ صالح', HttpStatus.BAD_REQUEST);
       }
-      zone = await this.resolveZoneForOrderOrThrow(order);
     }
 
     const previousScheduledAt = order.scheduledAt;
@@ -581,9 +597,30 @@ export class OrderRescheduleService {
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       this.assertReschedulable(fresh);
+      if (
+        actor.role === 'customer' &&
+        actor.customerRescheduleLimit !== undefined &&
+        actor.customerRescheduleLimit > 0 &&
+        fresh.customerRescheduleCount >= actor.customerRescheduleLimit
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'وصلت للحد الأقصى لتغيير موعد الطلب. تواصل مع الدعم لو محتاج مساعدة.',
+          HttpStatus.CONFLICT,
+        );
+      }
       const interval = resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
-      const targetZone = zone ?? await this.resolveZoneForOrderOrThrow(fresh);
-      await this.lockAndAssertCrewAvailability(manager, fresh, targetZone.id, newScheduledAt, interval.durationMinutes);
+      // السلوت المحدد هو حجز ذري لنفس القائد بالفعل. إعادة سؤال أهلية القائد وحده هنا تكرار
+      // مكلف وقد يعتمد على بيانات كتالوج لا تخص نقل سلوت محجوز. أما أي عضو طاقم إضافي فلا
+      // يملك هذا الضمان، لذلك يظل فحصه المركزي إلزاميًا.
+      const assignedIds = await this.assignedTechnicianIds(manager, fresh);
+      if (!newSlot || assignedIds.length > 1) {
+        // الطلب يحتفظ بالنطاق الذي سُعّر وطابق عليه وقت إنشائه. إعادة حله من العنوان في كل
+        // تأجيل كانت استعلامًا زائدًا وقد تفشل لطلب تاريخي حتى مع سلوت صحيح. نستخدم الـsnapshot
+        // أولًا، ولا نقرأ العنوان إلا للطلبات القديمة التي سبق العمود فيها.
+        const targetZoneId = fresh.serviceZoneId ?? (await this.resolveZoneForOrderOrThrow(fresh)).id;
+        await this.lockAndAssertCrewAvailability(manager, fresh, targetZoneId, newScheduledAt, interval.durationMinutes);
+      }
 
       if (newSlot) {
         if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
@@ -624,6 +661,7 @@ export class OrderRescheduleService {
       fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
         ? interval.durationMinutes / 60
         : null;
+      if (actor.role === 'customer') fresh.customerRescheduleCount += 1;
       await manager.save(fresh);
       await manager.save(
         manager.create(OrderStatusHistory, {
@@ -634,6 +672,7 @@ export class OrderRescheduleService {
           changedByRole: actor.role,
           changeSource: actor.changeSource,
           reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}${actor.reasonSuffix ?? ''}`,
+          metadata: { customer_reschedule_count: fresh.customerRescheduleCount },
         }),
       );
       await manager.query(
@@ -684,6 +723,16 @@ export class OrderRescheduleService {
     if (!order.technicianId) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مفيهوش فني معيّن لسه', HttpStatus.CONFLICT);
     }
+  }
+
+  private customerReasonSuffix(dto: RescheduleOrderDto): string {
+    if (!dto.reason_code) return '';
+    const details = dto.reason_details?.trim();
+    if (dto.reason_code === 'other' && !details) {
+      throw new ApiException(ErrorCode.VAL_001, 'اكتب سبب تغيير الموعد عندما تختار "سبب آخر"', HttpStatus.BAD_REQUEST);
+    }
+    const label = CUSTOMER_RESCHEDULE_REASON_LABELS_AR[dto.reason_code];
+    return ` — سبب العميل: ${label}${details ? ` (${details})` : ''}`;
   }
 
   private async assignedTechnicianIds(runner: Pick<DataSource | EntityManager, 'query'>, order: Order): Promise<string[]> {
@@ -781,8 +830,11 @@ export class OrderRescheduleService {
         HttpStatus.CONFLICT,
       );
     }
-    const targetZone = await this.resolveZoneForOrderOrThrow(order);
-    await this.lockAndAssertCrewAvailability(manager, order, targetZone.id, newScheduledAt, interval.durationMinutes);
+    const assignedIds = await this.assignedTechnicianIds(manager, order);
+    if (assignedIds.length > 1) {
+      const targetZoneId = order.serviceZoneId ?? (await this.resolveZoneForOrderOrThrow(order)).id;
+      await this.lockAndAssertCrewAvailability(manager, order, targetZoneId, newScheduledAt, interval.durationMinutes);
+    }
     const booked = await this.scheduleService.rescheduleSlot(order.id, newSlot.id, manager);
     if (!booked) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);

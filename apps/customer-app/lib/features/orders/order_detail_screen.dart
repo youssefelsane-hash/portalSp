@@ -295,14 +295,80 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
     if (chosen == null) return;
 
+    final reason = await _askRescheduleReason();
+    if (reason == null) return;
+
     try {
-      final updated = await _repository.reschedule(order.id, chosen.date);
+      final updated = await _repository.reschedule(
+        order.id,
+        chosen.date,
+        reasonCode: reason.code,
+        reasonDetails: reason.details,
+      );
       if (mounted) {
         setState(() => _order = updated);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));
       }
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    }
+  }
+
+  Future<({String code, String? details})?> _askRescheduleReason() async {
+    var code = 'customer_request';
+    final details = TextEditingController();
+    try {
+      return await showDialog<({String code, String? details})>(
+        context: context,
+        builder: (context) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('سبب تغيير الموعد'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: code,
+                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                    items: const [
+                      DropdownMenuItem(value: 'customer_request', child: Text('تغيير خطتي')),
+                      DropdownMenuItem(value: 'availability_change', child: Text('تغيّر وقتي المتاح')),
+                      DropdownMenuItem(value: 'address_access', child: Text('تعذّر الدخول إلى العنوان')),
+                      DropdownMenuItem(value: 'other', child: Text('سبب آخر')),
+                    ],
+                    onChanged: (value) => setDialogState(() => code = value ?? code),
+                  ),
+                  if (code == 'other') ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: details,
+                      maxLength: 500,
+                      autofocus: true,
+                      onChanged: (_) => setDialogState(() {}),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'اكتب السبب',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+                FilledButton(
+                  onPressed: code == 'other' && details.text.trim().isEmpty
+                      ? null
+                      : () => Navigator.of(context).pop((code: code, details: details.text.trim().isEmpty ? null : details.text.trim())),
+                  child: const Text('متابعة'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } finally {
+      details.dispose();
     }
   }
 
@@ -985,7 +1051,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
-                      if (_rescheduleRequests.any((request) => request.isPending)) ...[
+                    if (_rescheduleRequests.any((request) => request.isPending)) ...[
                         const SizedBox(height: 16),
                         Builder(builder: (context) {
                           final request = _rescheduleRequests.firstWhere((item) => item.isPending);

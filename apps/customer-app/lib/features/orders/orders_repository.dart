@@ -316,11 +316,21 @@ class OrdersRepository {
 
   // نموذج الإتاحة opt-out: عدم وجود صف في جدول الفني يعني أن اليوم متاح. لذلك إعادة الجدولة
   // باليوم هي المسار الافتراضي، بدل الاعتماد على slots صريحة قد تكون القائمة فيها فارغة.
-  Future<Order> reschedule(String orderId, String newDate) async {
+  Future<Order> reschedule(
+    String orderId,
+    String newDate, {
+    String? reasonCode,
+    String? reasonDetails,
+  }) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/reschedule',
-      body: {'new_scheduled_at': '${newDate}T00:00:00.000Z'},
+      body: {
+        'new_scheduled_at': '${newDate}T00:00:00.000Z',
+        if (reasonCode != null) 'reason_code': reasonCode,
+        if (reasonDetails != null && reasonDetails.trim().isNotEmpty)
+          'reason_details': reasonDetails.trim(),
+      },
     );
     return Order.fromJson(data!);
   }

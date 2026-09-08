@@ -169,6 +169,10 @@ export class Order {
   @Column({ name: 'scheduled_end_at', type: 'timestamptz', nullable: true })
   scheduledEndAt: Date | null;
 
+  /** عدد مرات تأجيل العميل بنفسه؛ منفصل عن تدخل الإدارة حتى لا يعاقَب العميل على تغيير تشغيلي. */
+  @Column({ name: 'customer_reschedule_count', type: 'integer', default: 0 })
+  customerRescheduleCount: number;
+
   // ADR-0050 §4 (migration 0240) — فترة التعاقد (اشتراك/إيجار) اللي السعر اتحسب منها. **مش**
   // موعد الزيارة فوق: اشتراك 3 شهور ممكن يتنفّذ بزيارة واحدة ساعتين.
   @Column({ name: 'pricing_period_start', type: 'timestamptz', nullable: true })
