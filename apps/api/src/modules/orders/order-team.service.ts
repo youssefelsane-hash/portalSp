@@ -5,7 +5,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
-import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
+import { TechnicianKind, TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import {
@@ -32,6 +32,62 @@ export const OPTIONAL_ASSISTANT_MAX_SETTING = 'crew.optional_assistant_max_per_o
 export const OPTIONAL_ASSISTANT_MAX_FALLBACK = 1;
 
 export type CrewRole = 'technician' | 'assistant';
+
+/**
+ * بوابة أهلية واحدة لكل من يكتب عضوًا في طاقم طلب. القائمة الظاهرة للمستخدم ليست حماية:
+ * يجب إعادة الفحص عند الكتابة نفسها، سواء كان الفاعل قائدًا أو أدمن.
+ */
+export async function assertCrewCandidateScope(
+  manager: EntityManager,
+  order: Order,
+  technicianId: string,
+  role: CrewRole,
+): Promise<void> {
+  const params = role === 'assistant'
+    ? [technicianId, order.serviceId, order.serviceZoneId]
+    : [technicianId, order.serviceId];
+  const [scope] = await manager.query<{
+    active_profile: boolean;
+    correct_kind: boolean;
+    approved_specialty: boolean;
+    same_city: boolean;
+  }[]>(
+    `SELECT
+       (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
+       (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
+       (${technicianServiceQualificationCondition({
+         technicianIdExpr: 'tp.id',
+         serviceIdExpr: 'svc.id',
+         categoryIdExpr: 'svc.category_id',
+       })}) AS approved_specialty,
+       (${role === 'assistant'
+         ? technicianCityCoverageCondition({
+             technicianIdExpr: 'tp.id',
+             requestedServiceZoneIdExpr: '$3',
+           })
+         : 'true'}) AS same_city
+     FROM technician_profiles tp
+     JOIN services svc ON svc.id = $2
+     WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
+    params,
+  );
+  if (!scope?.active_profile) {
+    throw new ApiException(ErrorCode.TECH_001, 'الشخص غير معتمد أو مفيش موقع حالي له', HttpStatus.CONFLICT);
+  }
+  if (!scope.correct_kind) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      role === 'assistant' ? 'الشخص ده مش مسجل حاليًا كمساعد' : 'الشخص ده مش مسجل حاليًا كفني',
+      HttpStatus.CONFLICT,
+    );
+  }
+  if (!scope.approved_specialty) {
+    throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
+  }
+  if (!scope.same_city) {
+    throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
+  }
+}
 
 // ترتيب رتبة الفني (docs/08 §31) — نفس ترتيب تعريف enum TechnicianLevel التصريحي بالحرف، قرار
 // مقصود للبساطة (طلب المالك صراحة) بدل الاعتماد على order_priority_weight القابل للتعديل في
@@ -219,7 +275,7 @@ export class OrderTeamService {
     return { order, leaderProfileId: leaderProfile.id };
   }
 
-  async addMember(userId: string, orderId: string, dto: AddTeamMemberDto): Promise<void> {
+  async addMember(userId: string, orderId: string, dto: AddTeamMemberDto): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
 
     if (order.bookingMode !== BookingMode.TEAM) {
@@ -235,28 +291,10 @@ export class OrderTeamService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مش في نفس فريقك/شركتك', HttpStatus.BAD_REQUEST);
     }
 
-    const existingCount = await this.teamMembers.count({ where: { orderId } });
-    if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
-      throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
-    }
-    const alreadyAdded = await this.teamMembers.findOne({
-      where: { orderId, technicianId: dto.technician_id },
-    });
-    if (alreadyAdded) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
-    }
-
-    const member = this.teamMembers.create({
-      orderId,
-      technicianId: dto.technician_id,
-      roleLabel: dto.role_label,
-      addedByTechnicianId: leaderProfileId,
-      // ADR-0050 — المسار القديم ده مكانش بيحدد memberType خالص (كان بيعتمد على default الجدول
-      // 'team_member')، يعني مساعد مضاف من هنا كان بياخد نصيب عضو فريق كامل. الفرض هنا بيقفل
-      // الثغرة دي من غير ما يغيّر سلوك الفنيين العاديين.
-      memberType: resolveEffectiveMemberType('team_member', memberProfile.technicianKind),
-    });
-    await this.teamMembers.save(member);
+    // هذا endpoint موجود للتوافق فقط، لكنه لم يعد يكتب مباشرة. إعادة استخدام التجنيد الحديث
+    // تمنع تجاوز التخصص/المدينة/السعة أو تحميل شخص مثقل بصمت.
+    const role: CrewRole = memberProfile.technicianKind === TechnicianKind.ASSISTANT ? 'assistant' : 'technician';
+    return this.recruitMember(userId, orderId, dto.technician_id, role, dto.role_label);
   }
 
   async removeMember(userId: string, orderId: string, memberId: string): Promise<void> {
@@ -368,62 +406,6 @@ export class OrderTeamService {
       candidateEstimatedDurationDays: load.estimatedDurationDays,
       serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
     };
-  }
-
-  /**
-   * حارس نطاق المرشح وقت التنفيذ، مش مجرد فلتر شاشة. الاعتماد مطلوب للدورين، وحد المدينة يضاف
-   * للمساعد فقط حسب سياسة التجنيد؛ كده نمنع نداء API مباشر من تجاوز القائمة المعروضة.
-   */
-  private async assertRecruitCandidateScope(
-    order: Order,
-    technicianId: string,
-    role: CrewRole,
-    manager: EntityManager = this.teamMembers.manager,
-  ): Promise<void> {
-    const params = role === 'assistant'
-      ? [technicianId, order.serviceId, order.serviceZoneId]
-      : [technicianId, order.serviceId];
-    const [scope] = await manager.query<{
-      active_profile: boolean;
-      correct_kind: boolean;
-      approved_specialty: boolean;
-      same_city: boolean;
-    }[]>(
-      `SELECT
-         (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
-         (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
-         (${technicianServiceQualificationCondition({
-           technicianIdExpr: 'tp.id',
-           serviceIdExpr: 'svc.id',
-           categoryIdExpr: 'svc.category_id',
-         })}) AS approved_specialty,
-         (${role === 'assistant'
-           ? technicianCityCoverageCondition({
-               technicianIdExpr: 'tp.id',
-               requestedServiceZoneIdExpr: '$3',
-             })
-           : 'true'}) AS same_city
-       FROM technician_profiles tp
-       JOIN services svc ON svc.id = $2
-       WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
-      params,
-    );
-    if (!scope?.active_profile) {
-      throw new ApiException(ErrorCode.TECH_001, 'الشخص غير معتمد أو مفيش موقع حالي له', HttpStatus.CONFLICT);
-    }
-    if (!scope?.correct_kind) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        role === 'assistant' ? 'الشخص ده مش مسجل حاليًا كمساعد' : 'الشخص ده مش مسجل حاليًا كفني',
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (!scope.approved_specialty) {
-      throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
-    }
-    if (!scope.same_city) {
-      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
-    }
   }
 
   /**
@@ -581,7 +563,7 @@ export class OrderTeamService {
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
-    await this.assertRecruitCandidateScope(order, technicianId, role);
+    await assertCrewCandidateScope(this.teamMembers.manager, order, technicianId, role);
     if (TECHNICIAN_LEVEL_RANK[candidateProfile.currentLevel] > TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel]) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده رتبته أعلى منك — مينفعش تجنّده', HttpStatus.FORBIDDEN);
     }
@@ -687,7 +669,7 @@ export class OrderTeamService {
         if (role === 'assistant') {
           // المساعد نطاقه المدينة كلها، بينما حارس قيادة الطلب يقصد النطاق الدقيق. استخدام الحارس
           // الخاص بالتجنيد هنا يحافظ على فرق السياسة من غير ما يرخّي مسار الفني القائد.
-          await this.assertRecruitCandidateScope(order, lockedTechnician.id, role, manager);
+          await assertCrewCandidateScope(manager, order, lockedTechnician.id, role);
         } else {
           await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
         }

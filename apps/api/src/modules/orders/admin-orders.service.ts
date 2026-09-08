@@ -31,7 +31,7 @@ import { TechnicianWorkOpportunitiesService } from '../technicians/technician-wo
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
+import { assertCrewCandidateScope, CrewRole, MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { classifyPriceChange, FULL_PRICE_AUTHORITY, PriceChangeAuthority } from './price-change-authority';
@@ -1332,7 +1332,11 @@ export class AdminOrdersService {
    * المالك صحّح الاستثناء ده صراحة: نفس قاعدة `recruitMember()` بالحرف، صفر فرق لكون الفاعل
    * أدمن. `assertScheduleAvailable` هنا حارس صارم زيه بالظبط في المسار الذاتي.
    */
-  private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<TechnicianCapacityTier> {
+  private async validateCrewCandidateOrThrow(
+    order: Order,
+    technicianProfileId: string,
+    memberType: CrewMemberType,
+  ): Promise<TechnicianCapacityTier> {
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'إدارة طاقم الفريق متاحة بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
@@ -1340,6 +1344,9 @@ export class AdminOrdersService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
+    const effectiveMemberType = resolveEffectiveMemberType(memberType, technician.technicianKind);
+    const role: CrewRole = effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician';
+    await assertCrewCandidateScope(this.dataSource.manager, order, technician.id, role);
     if (order.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل', HttpStatus.CONFLICT);
     }
@@ -1385,7 +1392,7 @@ export class AdminOrdersService {
     meta?: AuditActorMeta,
   ): Promise<CrewAssignOutcome> {
     const order = await this.findOrThrow(orderId);
-    const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
+    const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId, memberType);
     // ADR-0050 — حتى الأدمن ما يقدرش يضيف مساعد بنصيب عضو فريق كامل: الدور صفة على الشخص،
     // والنسبة بتتبعه. لو الأدمن عايز يديه نصيب كامل، الطريق الصح إنه يرقّيه لفني في بروفايله.
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
@@ -1506,7 +1513,9 @@ export class AdminOrdersService {
     if (newTechnicianId === existingMember.technicianId) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
     }
-    const capacityTier = await this.validateCrewCandidateOrThrow(order, newTechnicianId);
+    const replacementMemberType: CrewMemberType =
+      existingMember.memberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'team_member';
+    const capacityTier = await this.validateCrewCandidateOrThrow(order, newTechnicianId, replacementMemberType);
 
     const oldMember = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(OrderTeamMember);

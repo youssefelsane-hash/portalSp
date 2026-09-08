@@ -467,8 +467,11 @@ export class TechnicianOrderExecutionController {
   // على طلبات "اعتماد" (فريق)، وبس لأعضاء من نفس الشركة/الفريق. تفاصيل كاملة في orders/README.md.
   @Post(':id/team-members')
   async addTeamMember(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AddTeamMemberDto) {
-    await this.orderTeamService.addMember(user.sub, id, dto);
-    return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+    const outcome = await this.orderTeamService.addMember(user.sub, id, dto);
+    if (outcome.status === 'offer_sent') {
+      return { status: outcome.status, opportunity_id: outcome.opportunityId, capacity_tier: outcome.capacityTier };
+    }
+    return { status: outcome.status, items: (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto) };
   }
 
   @Get(':id/team-members')
