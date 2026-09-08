@@ -287,7 +287,7 @@ export class FinancialDashboardService {
    * ده **فحص ثوابت على دفتر القيود**، مش رقم بيتخزّن أو بيتحسب من عمود. تلات ثوابت، وأي
    * مخالفة بترجع باسم المحفظة والفرق بالقرش:
    *
-   * 1. **رصيد المحفظة = مجموع حركاتها** (دائن − مدين، بلا المعكوسة).
+   * 1. **رصيد الدفتر = مجموع حركاتها** (المتاح + المحجوز = دائن − مدين، بلا المعكوسة).
    * 2. **حساب الصف**: `balance_after = balance_before ± amount`.
    * 3. **سلسلة متصلة**: `balance_before` لأي حركة = `balance_after` للحركة اللي قبلها على
    *    نفس المحفظة.
@@ -316,7 +316,7 @@ export class FinancialDashboardService {
            LEFT JOIN wallet_transactions t ON t.wallet_id = w.id
           WHERE w.deleted_at IS NULL ${walletFilter}
           GROUP BY w.id
-         HAVING w.balance_cents <> COALESCE(SUM(
+         HAVING w.balance_cents + w.reserved_balance_cents <> COALESCE(SUM(
                   CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                 ) FILTER (WHERE t.is_reversed = false), 0)
        ), chain AS (
@@ -347,21 +347,21 @@ export class FinancialDashboardService {
     >(
       `SELECT w.id AS wallet_id,
               w.owner_user_id,
-              (w.balance_cents - COALESCE(SUM(
+              (w.balance_cents + w.reserved_balance_cents - COALESCE(SUM(
                  CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                ) FILTER (WHERE t.is_reversed = false), 0)) AS difference,
               COALESCE(SUM(
                  CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
                ) FILTER (WHERE t.is_reversed = false), 0) AS expected,
-              w.balance_cents AS actual
+              w.balance_cents + w.reserved_balance_cents AS actual
          FROM wallets w
          LEFT JOIN wallet_transactions t ON t.wallet_id = w.id
         WHERE w.deleted_at IS NULL ${walletFilter}
         GROUP BY w.id
-       HAVING w.balance_cents <> COALESCE(SUM(
+       HAVING w.balance_cents + w.reserved_balance_cents <> COALESCE(SUM(
                 CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
               ) FILTER (WHERE t.is_reversed = false), 0)
-        ORDER BY ABS(w.balance_cents - COALESCE(SUM(
+        ORDER BY ABS(w.balance_cents + w.reserved_balance_cents - COALESCE(SUM(
                 CASE WHEN t.direction = 'credit' THEN t.amount_cents ELSE -t.amount_cents END
               ) FILTER (WHERE t.is_reversed = false), 0)) DESC
         LIMIT ${ISSUE_SAMPLE_LIMIT}`,
@@ -410,7 +410,7 @@ export class FinancialDashboardService {
         difference_cents: Number(r.difference),
         transaction_id: null,
         transaction_number: null,
-        detail: `رصيد المحفظة ${r.actual} والمفروض ${r.expected} حسب مجموع حركاتها`,
+        detail: `رصيد الدفتر ${r.actual} (المتاح والمحجوز) والمفروض ${r.expected} حسب مجموع حركاتها`,
       })),
       ...arithmeticIssues.map((r) => ({
         kind: 'row_arithmetic' as const,

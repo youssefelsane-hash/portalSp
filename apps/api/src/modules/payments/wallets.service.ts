@@ -26,6 +26,15 @@ export class WalletsService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * رصيد الدفتر لا يساوي الرصيد المتاح فقط: المبلغ المحجوز للصرف ما زال ملك صاحب المحفظة ولم
+   * يخرج من النظام حتى يُستكمل الصرف. فصل المتاح عن المحجوز يحمي من الصرف المزدوج، وجمعهما
+   * هو المصدر الصحيح لسلسلة القيود والتسوية.
+   */
+  private ledgerBalance(wallet: Wallet): number {
+    return wallet.balanceCents + wallet.reservedBalanceCents;
+  }
+
   async getOrCreateWallet(userId: string, ownerType: WalletOwnerType, manager?: EntityManager): Promise<Wallet> {
     const repository = manager?.getRepository(Wallet) ?? this.wallets;
     const existing = await repository.findOne({ where: { ownerUserId: userId } });
@@ -129,14 +138,14 @@ export class WalletsService {
     const txNumberDebit = await this.nextTransactionNumber(manager);
     const txNumberCredit = await this.nextTransactionNumber(manager);
 
-    const fromBalanceBefore = fromWallet.balanceCents;
+    const fromBalanceBefore = this.ledgerBalance(fromWallet);
     fromWallet.balanceCents -= params.amountCents;
     if (params.transactionType === WalletTxType.WITHDRAWAL) {
       fromWallet.totalWithdrawnCents += params.amountCents;
     }
     await manager.save(fromWallet);
 
-    const toBalanceBefore = toWallet.balanceCents;
+    const toBalanceBefore = this.ledgerBalance(toWallet);
     toWallet.balanceCents += params.amountCents;
     if (params.transactionType === WalletTxType.ORDER_EARNING || params.transactionType === WalletTxType.BONUS) {
       toWallet.totalEarnedCents += params.amountCents;
@@ -150,7 +159,7 @@ export class WalletsService {
       transactionType: params.transactionType,
       amountCents: params.amountCents,
       balanceBeforeCents: fromBalanceBefore,
-      balanceAfterCents: fromWallet.balanceCents,
+      balanceAfterCents: this.ledgerBalance(fromWallet),
       referenceType: params.referenceType,
       referenceId: params.referenceId,
       descriptionAr: params.descriptionAr,
@@ -165,7 +174,7 @@ export class WalletsService {
       transactionType: params.transactionType,
       amountCents: params.amountCents,
       balanceBeforeCents: toBalanceBefore,
-      balanceAfterCents: toWallet.balanceCents,
+      balanceAfterCents: this.ledgerBalance(toWallet),
       referenceType: params.referenceType,
       referenceId: params.referenceId,
       descriptionAr: params.descriptionAr,
@@ -353,12 +362,15 @@ export class WalletsService {
       throw new ApiException(ErrorCode.PAY_002, 'المبلغ المحجوز أقل من مبلغ الصرف', HttpStatus.CONFLICT);
     }
 
-    const walletBalanceBefore = wallet.balanceCents; // مبيتغيّرش (كان اتخصم وقت الحجز)، بنسجله كمرجع بس
+    // قيد الصرف يخصم من إجمالي حق صاحب المحفظة (متاح + محجوز)، لا من المتاح وحده. الحجز
+    // السابق لا يكتب قيدًا لأنه نقل داخلي بين حقلين؛ ولذلك لو سجلنا 0 -> 0 هنا كانت سلسلة
+    // الدفتر تكذب رغم أن الفلوس خرجت فعلًا.
+    const walletBalanceBefore = this.ledgerBalance(wallet);
     wallet.reservedBalanceCents -= amountCents;
     wallet.totalWithdrawnCents += amountCents;
     await manager.save(wallet);
 
-    const platformBalanceBefore = platformWallet.balanceCents;
+    const platformBalanceBefore = this.ledgerBalance(platformWallet);
     platformWallet.balanceCents += amountCents;
     await manager.save(platformWallet);
 
@@ -370,7 +382,7 @@ export class WalletsService {
       transactionType: WalletTxType.WITHDRAWAL,
       amountCents,
       balanceBeforeCents: walletBalanceBefore,
-      balanceAfterCents: wallet.balanceCents,
+      balanceAfterCents: this.ledgerBalance(wallet),
       referenceType: 'payout',
       referenceId,
       descriptionAr,
@@ -385,7 +397,7 @@ export class WalletsService {
       transactionType: WalletTxType.WITHDRAWAL,
       amountCents,
       balanceBeforeCents: platformBalanceBefore,
-      balanceAfterCents: platformWallet.balanceCents,
+      balanceAfterCents: this.ledgerBalance(platformWallet),
       referenceType: 'payout',
       referenceId,
       descriptionAr,
