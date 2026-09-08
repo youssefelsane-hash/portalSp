@@ -118,6 +118,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ── limits ────────────────────────────────────────────────────────────
   'orders.cancellation_free_window_min': { type: 'number', default: 5, group: 'limits', description: 'مهلة الإلغاء المجاني بالدقايق' },
   'orders.no_show_visit_fee_cents': { type: 'number', default: 5000, group: 'limits', description: 'رسوم الزيارة الفاشلة (عدم حضور/رفض شغل ضروري) اللي الأدمن بيطبّقها على الطلبات المدفوعة مسبقًا بالقرش' },
+  'orders.stale_in_progress_hours': { type: 'number', default: 48, group: 'limits', description: 'بعد كام ساعة من بداية التنفيذ يظهر الطلب المتوقف في مركز العمليات للمراجعة اليدوية. لا يلغي النظام الطلب أو أي مدفوعات تلقائيًا.' },
+  'orders.stale_matching_hours': { type: 'number', default: 24, group: 'limits', description: 'بعد كام ساعة من البحث بلا عرض مطابقة حي يظهر الطلب في مركز العمليات للمراجعة اليدوية. إعادة المحاولة تستمر ولا يوجد إلغاء تلقائي.' },
   'orders.payment_timeout_minutes': { type: 'number', default: 15, group: 'limits', description: 'إلغاء تلقائي لطلب PENDING_PAYMENT لو الدفع ماتمش' },
   'payouts.auto_approve_limit_cents': { type: 'number', default: 100000, group: 'limits', description: 'أقصى مبلغ صرف بدون مراجعة بشرية' },
   'payouts.min_amount_cents': { type: 'number', default: 20000, group: 'limits', description: 'أقل مبلغ صرف مسموح' },

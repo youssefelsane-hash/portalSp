@@ -77,6 +77,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.AWAITING_QUOTE_APPROVAL,
     OrderStatus.WORK_COMPLETED,
     OrderStatus.DISPUTED,
+    // الطلب الذي بدأ بالفعل لا يُلغى تلقائيًا أبدًا. لكن لو توقف التنفيذ (فني اختفى أو العميل
+    // أغلق الموقع) فالإدارة تحتاج قرارًا موثقًا لتحريره من قوائم العمل؛ أي تسوية مالية تبقى
+    // في مسار المدفوعات اليدوي المستقل.
+    OrderStatus.CANCELLED_BY_SYSTEM,
   ],
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: [
     OrderStatus.IN_PROGRESS,

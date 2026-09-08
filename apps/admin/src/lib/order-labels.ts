@@ -51,6 +51,9 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   // العميل لسه ما اختارش منفّذ — الإلغاء مسموح، ومطابق لـCUSTOMER_CANCELLABLE_STATUSES في
   // apps/api/src/modules/orders/order-state-machine.ts.
   'awaiting_technician_selection',
+  // الإلغاء هنا إداري موثق فقط لحالة تنفيذ متوقفة؛ ليس زر إلغاء عاديًا للعميل أو للفني، ولا
+  // يطلق استردادًا تلقائيًا.
+  'in_progress',
 ];
 
 export function isOrderCancellable(status: OrderStatus): boolean {

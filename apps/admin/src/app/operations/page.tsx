@@ -338,11 +338,13 @@ function ExceptionCenterSection({
   useAdminLiveRefresh(['orders', 'technicians'], refresh);
 
   const overdueCount = data?.overdue_orders.total ?? 0;
+  const staleMatchingCount = data?.stale_matching.total ?? 0;
+  const staleInProgressCount = data?.stale_in_progress.total ?? 0;
   const workflowCount = data?.matching_workflow_delayed.total ?? 0;
   const crewCount = data?.crew_shortage.total ?? 0;
   const staleCount = data?.stale_dispatch.total ?? 0;
   const revisitCount = data?.stalled_revisits.total ?? 0;
-  const totalCount = overdueCount + workflowCount + crewCount + staleCount + revisitCount;
+  const totalCount = overdueCount + staleMatchingCount + staleInProgressCount + workflowCount + crewCount + staleCount + revisitCount;
 
   return (
     <section>
@@ -381,6 +383,38 @@ function ExceptionCenterSection({
                       معاده: {arDateTime(item.scheduled_at)}
                     </span>
                     <Badge variant="destructive">متأخر {item.days_late} يوم</Badge>
+                  </li>
+                ))}
+              </ul>
+            </ExceptionGroup>
+          )}
+
+          {staleInProgressCount > 0 && (
+            <ExceptionGroup title="تنفيذ بدأ ومتوقف — يحتاج قرارًا إداريًا" count={staleInProgressCount} tone="danger">
+              <p className="mb-2 text-xs text-muted-foreground">لا يتم الإلغاء أو الاسترداد تلقائيًا. افتح الطلب للمراجعة واتخذ الإجراء الموثق المناسب.</p>
+              <ul className="flex flex-col gap-1.5">
+                {data.stale_in_progress.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">{item.order_number}</Link>
+                    {item.technician_id && <Link href={`/technicians/${item.technician_id}`} className="hover:underline">{item.full_name}</Link>}
+                    <span className="text-xs text-muted-foreground">بدأ: {arDateTime(item.work_started_at)}</span>
+                    <Badge variant="destructive">متوقف {formatDelay(item.age_seconds)}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </ExceptionGroup>
+          )}
+
+          {staleMatchingCount > 0 && (
+            <ExceptionGroup title="طلب يبحث عن فني منذ مدة — يحتاج متابعة" count={staleMatchingCount} tone="warning">
+              <p className="mb-2 text-xs text-muted-foreground">المحرك يستمر في إعادة المحاولة؛ الظهور هنا للمراجعة اليدوية فقط وليس إلغاءً تلقائيًا.</p>
+              <ul className="flex flex-col gap-1.5">
+                {data.stale_matching.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">{item.order_number}</Link>
+                    <Badge variant="outline">محاولات: {item.attempt_count}</Badge>
+                    <span className="text-xs text-muted-foreground">أنشئ: {arDateTime(item.placed_at)}</span>
+                    <Badge variant="destructive">منذ {formatDelay(item.age_seconds)}</Badge>
                   </li>
                 ))}
               </ul>

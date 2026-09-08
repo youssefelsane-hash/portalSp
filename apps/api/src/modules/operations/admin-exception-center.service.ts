@@ -97,12 +97,35 @@ export interface MatchingWorkflowDelayedItem {
   techniciansContacted: number;
 }
 
+/** طلب استنفد أو ينتظر استرداد المطابقة وقتًا طويلًا؛ تنبيه يدوي وليس إلغاءً آليًا. */
+export interface StaleMatchingExceptionItem {
+  orderId: string;
+  orderNumber: string;
+  placedAt: string;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  attemptCount: number;
+  ageSeconds: number;
+}
+
+/** تنفيذ بدأ فعليًا ثم توقف طويلًا؛ القرار المالي والتشغيلي يبقى للأدمن فقط. */
+export interface StaleInProgressExceptionItem {
+  orderId: string;
+  orderNumber: string;
+  workStartedAt: string;
+  technicianId: string | null;
+  fullName: string | null;
+  ageSeconds: number;
+}
+
 export interface AdminExceptionCenterResult {
   crewShortage: { items: CrewShortageExceptionItem[]; total: number };
   staleDispatch: { items: StaleDispatchExceptionItem[]; total: number };
   overdueOrders: { items: OverdueOrderExceptionItem[]; total: number };
   stalledRevisits: { items: StalledRevisitExceptionItem[]; total: number };
   matchingWorkflowDelayed: { items: MatchingWorkflowDelayedItem[]; total: number };
+  staleMatching: { items: StaleMatchingExceptionItem[]; total: number };
+  staleInProgress: { items: StaleInProgressExceptionItem[]; total: number };
 }
 
 interface RawWorkflowDelayedRow {
@@ -162,6 +185,27 @@ interface RawStaleDispatchRow {
   full_name: string;
   sent_at: string;
   expires_at: string;
+  total_count: string;
+}
+
+interface RawStaleMatchingRow {
+  id: string;
+  order_number: string;
+  placed_at: string;
+  last_matching_attempt_at: string | null;
+  next_matching_attempt_at: string | null;
+  matching_attempt_count: string;
+  age_seconds: string;
+  total_count: string;
+}
+
+interface RawStaleInProgressRow {
+  id: string;
+  order_number: string;
+  work_started_at: string;
+  technician_id: string | null;
+  full_name: string | null;
+  age_seconds: string;
   total_count: string;
 }
 
@@ -429,7 +473,87 @@ export class AdminExceptionCenterService {
       techniciansContacted: Number(r.technicians_contacted),
     }));
 
+    // الطلبات التي فشلت جولات مطابقتها تظل قابلة لإعادة المحاولة عمدًا (لا إسقاط صامت ولا
+    // إلغاء آلي). هذا التنبيه فقط يمنعها من الاختفاء من عمليات الإدارة بعد نفاد max_rounds.
+    const staleMatchingHours = Math.max(
+      1,
+      Math.floor(await this.settingsService.getNumber('orders.stale_matching_hours', 24)),
+    );
+    const staleMatchingRows = await this.dataSource.query<RawStaleMatchingRow[]>(
+      `
+      SELECT o.id, o.order_number, COALESCE(o.placed_at, o.created_at) AS placed_at,
+             o.last_matching_attempt_at, o.next_matching_attempt_at, o.matching_attempt_count,
+             EXTRACT(EPOCH FROM (now() - COALESCE(o.placed_at, o.created_at)))::int AS age_seconds,
+             COUNT(*) OVER() AS total_count
+      FROM orders o
+      JOIN services s ON s.id = o.service_id
+      WHERE o.deleted_at IS NULL
+        AND o.order_status = 'searching_technician'
+        AND COALESCE(o.placed_at, o.created_at) <= now() - make_interval(hours => $3::int)
+        AND NOT EXISTS (
+          SELECT 1 FROM order_assignments oa
+          WHERE oa.order_id = o.id AND oa.assignment_status IN ('sent', 'viewed') AND oa.expires_at > now()
+        )
+        AND NOT (o.revisit_pinned_technician_id IS NOT NULL AND o.revisit_released_at IS NULL)
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY COALESCE(o.placed_at, o.created_at) ASC
+      LIMIT $4
+      `,
+      [categoryId, zoneId, staleMatchingHours, EXCEPTION_LIST_LIMIT],
+    );
+    const staleMatchingItems: StaleMatchingExceptionItem[] = staleMatchingRows.map((r) => ({
+      orderId: r.id,
+      orderNumber: r.order_number,
+      placedAt: r.placed_at,
+      lastAttemptAt: r.last_matching_attempt_at,
+      nextAttemptAt: r.next_matching_attempt_at,
+      attemptCount: Number(r.matching_attempt_count),
+      ageSeconds: Number(r.age_seconds),
+    }));
+
+    const staleInProgressHours = Math.max(
+      1,
+      Math.floor(await this.settingsService.getNumber('orders.stale_in_progress_hours', 48)),
+    );
+    const staleInProgressRows = await this.dataSource.query<RawStaleInProgressRow[]>(
+      `
+      SELECT o.id, o.order_number, o.work_started_at, o.technician_id, u.full_name,
+             EXTRACT(EPOCH FROM (now() - o.work_started_at))::int AS age_seconds,
+             COUNT(*) OVER() AS total_count
+      FROM orders o
+      JOIN services s ON s.id = o.service_id
+      LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
+      LEFT JOIN users u ON u.id = tp.user_id
+      WHERE o.deleted_at IS NULL
+        AND o.order_status = 'in_progress'
+        AND o.work_started_at IS NOT NULL
+        AND o.work_started_at <= now() - make_interval(hours => $3::int)
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY o.work_started_at ASC
+      LIMIT $4
+      `,
+      [categoryId, zoneId, staleInProgressHours, EXCEPTION_LIST_LIMIT],
+    );
+    const staleInProgressItems: StaleInProgressExceptionItem[] = staleInProgressRows.map((r) => ({
+      orderId: r.id,
+      orderNumber: r.order_number,
+      workStartedAt: r.work_started_at,
+      technicianId: r.technician_id,
+      fullName: r.full_name,
+      ageSeconds: Number(r.age_seconds),
+    }));
+
     return {
+      staleMatching: {
+        items: staleMatchingItems,
+        total: staleMatchingRows.length > 0 ? Number(staleMatchingRows[0].total_count) : 0,
+      },
+      staleInProgress: {
+        items: staleInProgressItems,
+        total: staleInProgressRows.length > 0 ? Number(staleInProgressRows[0].total_count) : 0,
+      },
       matchingWorkflowDelayed: {
         items: workflowDelayedItems,
         total: workflowDelayedRows.length > 0 ? Number(workflowDelayedRows[0].total_count) : 0,
