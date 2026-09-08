@@ -9,11 +9,12 @@ import { RatingsController } from './ratings.controller';
 import { TechnicianRatingsController } from './technician-ratings.controller';
 import { RatingsService } from './ratings.service';
 import { Rating } from './entities/rating.entity';
+import { CustomerRatingEligibilityGuard } from './rating-eligibility.guard';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Rating, Order, OrderMedia]), CustomersModule, TechniciansModule, SettingsModule],
   controllers: [RatingsController, TechnicianRatingsController],
-  providers: [RatingsService],
+  providers: [RatingsService, CustomerRatingEligibilityGuard],
   exports: [RatingsService],
 })
 export class RatingsModule {}

@@ -85,6 +85,19 @@ export class RatingsService {
     return rating;
   }
 
+  /** نفس فحص الحارس قبل body؛ يظل `rateAsCustomer` يعيده لحماية أي نداء داخلي أو سباق. */
+  async assertCustomerCanRate(userId: string, orderId: string): Promise<void> {
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    const order = await this.orders.findOne({ where: { id: orderId, customerId: customerProfile.id } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (!order.technicianId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش فني اتعيّن عليه', HttpStatus.BAD_REQUEST);
+    }
+    this.assertRatable(order);
+  }
+
   /**
    * طلب مراجعة Google (docs/10 بند 40) — بس بعد تقييم عميل عالي (>= الحد الأدنى القابل للتعديل)،
    * وبس لو رابط المراجعة اتحط فعلاً من الأدمن. عمداً بعد تقييم الفني (customer_to_technician)
@@ -122,6 +135,14 @@ export class RatingsService {
   }
 
   private assertRatable(order: Order): void {
+    if (
+      order.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER ||
+      order.orderStatus === OrderStatus.CANCELLED_BY_TECHNICIAN ||
+      order.orderStatus === OrderStatus.CANCELLED_BY_SYSTEM ||
+      order.orderStatus === OrderStatus.EXPIRED
+    ) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الطلب ده اتلغى ومينفعش يتقيّم', HttpStatus.CONFLICT);
+    }
     if (order.orderStatus !== OrderStatus.COMPLETED) {
       throw new ApiException(
         ErrorCode.ORDR_003,
