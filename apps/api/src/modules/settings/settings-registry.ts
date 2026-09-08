@@ -218,7 +218,6 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.paymob.secret_key': { type: 'string', default: '', group: 'payments_paymob', description: 'Paymob Intention API secret key (secret, encrypted)' },
 
   // ── pricing ───────────────────────────────────────────────────────────
-  'commission_base.discount_reduces_technician_share': { type: 'boolean', default: false, group: 'pricing', description: 'false = الخصم (كوبون/عمارة) بيتحمّله نصيب الشركة وحدها، والفني بياخد على سعر الشغل الكامل قبل الخصم.' },
   'commission_base.include_additional_items': { type: 'boolean', default: true, group: 'pricing', description: 'البنود الإضافية المعتمدة أثناء الشغل داخل الوعاء (طلب مالك صريح: "ده برضه بيعتبر ضمن الشغل").' },
   'commission_base.include_addons': { type: 'boolean', default: true, group: 'pricing', description: 'إضافات الكتالوج المختارة وقت الحجز داخل الوعاء — شغل إضافي حقيقي بينفّذه الفني.' },
   'commission_base.include_emergency_surcharge': { type: 'boolean', default: false, group: 'pricing', description: 'رسوم الطوارئ الإضافية: false = 100% للشركة.' },

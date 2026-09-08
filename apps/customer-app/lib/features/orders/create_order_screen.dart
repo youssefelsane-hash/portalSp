@@ -732,9 +732,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       try {
         result = await attempt(asBuilding: false);
         kind = 'promo';
-      } on ApiException {
-        // الكود مش كود خصم صالح — يبقى يمكن كود عمارة. لو ده كمان فشل، الاستثناء بيطلع
-        // للـcatch اللي تحت ويتعرض كرسالة واحدة.
+      } on ApiException catch (error) {
+        // نجرّب كود عمارة فقط لو كود الخصم غير موجود. أي خطأ آخر (منتهي، غير صالح للخدمة،
+        // تجاوز الحد...) يخص كود الخصم نفسه ويجب أن يراه العميل بدل رسالة عمارة مضللة.
+        if (error.statusCode != 404) rethrow;
         result = await attempt(asBuilding: true);
         kind = 'building';
       }

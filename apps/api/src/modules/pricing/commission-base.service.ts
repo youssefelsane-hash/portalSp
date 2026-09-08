@@ -29,7 +29,6 @@ export class CommissionBaseService {
       includeAdditionalItems,
       includeWarranty,
       includeInstallmentInterest,
-      discountReducesTechnicianShare,
     ] = await Promise.all([
       this.settingsService.getBoolean(keys.includeLevelPremium, defaults.includeLevelPremium),
       this.settingsService.getBoolean(keys.includeZoneSurge, defaults.includeZoneSurge),
@@ -39,7 +38,6 @@ export class CommissionBaseService {
       this.settingsService.getBoolean(keys.includeAdditionalItems, defaults.includeAdditionalItems),
       this.settingsService.getBoolean(keys.includeWarranty, defaults.includeWarranty),
       this.settingsService.getBoolean(keys.includeInstallmentInterest, defaults.includeInstallmentInterest),
-      this.settingsService.getBoolean(keys.discountReducesTechnicianShare, defaults.discountReducesTechnicianShare),
     ]);
 
     return {
@@ -51,7 +49,6 @@ export class CommissionBaseService {
       includeAdditionalItems,
       includeWarranty,
       includeInstallmentInterest,
-      discountReducesTechnicianShare,
     };
   }
 }

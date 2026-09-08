@@ -94,7 +94,7 @@ export class PromoCodesService {
   }
 
   async preview(code: string, userId: string, ctx: PromoApplicationContext): Promise<PromoApplicationResult> {
-    const promoCode = await this.promoCodes.findOne({ where: { code: code.toUpperCase() } });
+    const promoCode = await this.promoCodes.findOne({ where: { code: code.trim().toUpperCase() } });
     if (!promoCode) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم غير موجود', HttpStatus.NOT_FOUND);
     }
@@ -118,7 +118,7 @@ export class PromoCodesService {
     const promoCode = await manager
       .createQueryBuilder(PromoCode, 'p')
       .setLock('pessimistic_write')
-      .where('p.code = :code', { code: code.toUpperCase() })
+        .where('p.code = :code', { code: code.trim().toUpperCase() })
       .andWhere('p.deleted_at IS NULL')
       .getOne();
 
@@ -174,7 +174,7 @@ export class PromoCodesService {
     adminUserId: string,
     dto: CreatePromoCodeDto,
   ): Promise<PromoCode> {
-    const code = dto.code.toUpperCase();
+    const code = dto.code.trim().toUpperCase();
     const existing = await repository.findOne({ where: { code } });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الكود ده مستخدم قبل كده', HttpStatus.CONFLICT);

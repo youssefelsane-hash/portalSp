@@ -79,12 +79,13 @@ export default function PromotionsPage() {
     const form = new FormData(e.target as HTMLFormElement);
     const discountType = form.get('discount_type') as DiscountType;
     const body: CreatePromoCodeBody = {
-      code: (form.get('code') as string).toUpperCase(),
+      code: (form.get('code') as string).trim().toUpperCase(),
       name_ar: form.get('name_ar') as string,
       discount_type: discountType,
       discount_value: discountType === 'free_inspection' ? 0 : Number(form.get('discount_value')),
-      valid_from: new Date(form.get('valid_from') as string).toISOString(),
-      valid_until: new Date(form.get('valid_until') as string).toISOString(),
+      // `type=date` بلا وقت؛ من تاريخ يبدأ من أوله، و"لحد تاريخ" لازم يظل صالحًا حتى آخره.
+      valid_from: new Date(`${form.get('valid_from') as string}T00:00:00`).toISOString(),
+      valid_until: new Date(`${form.get('valid_until') as string}T23:59:59.999`).toISOString(),
       new_customers_only: form.get('new_customers_only') === 'on',
     };
     const minOrder = form.get('min_order_amount_cents') as string;
