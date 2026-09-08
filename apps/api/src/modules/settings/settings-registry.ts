@@ -174,6 +174,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'notification_engine.scheduled_job_reminder_after_minutes': { type: 'number', default: 60, group: 'notification_engine', description: 'أول تذكير scheduled_job بعد كام دقيقة من القبول لو الفني لسه ما فتحش الإشعار الأول' },
 
   // ── ops ───────────────────────────────────────────────────────────────
+  'analytics.funnel_retention_days': { type: 'number', default: 180, group: 'ops', description: 'ADR-0081 §4: كام يوم نحتفظ بأحداث رحلة الحجز الخام. الأقدم من كده بيتمسح بعد ما يكون اتجمّع في booking_funnel_daily — التقارير التاريخية بتقرا من التجميع مش من الخام. الحد الأدنى المسموح ٧ أيام مهما كان الرقم المدخل.' },
   'ops.queue_watchdog_check_interval_minutes': { type: 'number', default: 2, group: 'ops', description: 'كل قد إيه (بالدقايق) الـwatchdog بيفحص الطوابير' },
   'ops.queue_watchdog_enabled': { type: 'boolean', default: true, group: 'ops', description: 'تفعيل/تعطيل مراقبة تعليق طوابير BullMQ (matching-rounds/customer-stats/technician-stats) — لو اتعطّل، مفيش exit تلقائي للـprocess حتى لو طابور معلّق' },
   'ops.queue_watchdog_shutdown_grace_seconds': { type: 'number', default: 10, group: 'ops', description: 'مهلة الإغلاق الرشيق بالثواني قبل الخروج القسري لما الـwatchdog يكتشف طابور توزيع معلّق (لازم تفضل أقل من TimeoutStopSec في systemd)' },

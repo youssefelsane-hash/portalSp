@@ -3,12 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AdminAnalyticsController } from './admin-analytics.controller';
+import { AnalyticsRollupService } from './analytics-rollup.service';
 import { BookingFunnelEvent } from './entities/booking-funnel-event.entity';
 import { MarketingSpend } from './entities/marketing-spend.entity';
 import { ExecutiveKpisService } from './executive-kpis.service';
 import { FinancialDashboardService } from './financial-dashboard.service';
 import { FunnelService } from './funnel.service';
 import { FunnelTrackerService } from './funnel-tracker.service';
+import { FunnelTrackingController } from './funnel-tracking.controller';
 import { MarketingSpendService } from './marketing-spend.service';
 import { WorkforceAnalyticsService } from './workforce-analytics.service';
 
@@ -25,7 +27,7 @@ import { WorkforceAnalyticsService } from './workforce-analytics.service';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([BookingFunnelEvent, MarketingSpend]), SettingsModule, AuditModule],
-  controllers: [AdminAnalyticsController],
+  controllers: [AdminAnalyticsController, FunnelTrackingController],
   providers: [
     FunnelService,
     FunnelTrackerService,
@@ -33,6 +35,7 @@ import { WorkforceAnalyticsService } from './workforce-analytics.service';
     MarketingSpendService,
     FinancialDashboardService,
     WorkforceAnalyticsService,
+    AnalyticsRollupService,
   ],
   exports: [FunnelTrackerService],
 })

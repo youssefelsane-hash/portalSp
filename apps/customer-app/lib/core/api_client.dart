@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
+import 'funnel_tracker.dart';
 
 // الباك-إند بيرفض أي ملف Content-Type مش image/jpeg|png|webp صراحة — MultipartFile.fromBytes
 // من غير contentType بيبعت application/octet-stream افتراضياً فبيترفض. بنحدده يدوياً من امتداد
@@ -25,6 +26,10 @@ Future<http.Response> _send(
   final headers = {
     'Content-Type': 'application/json',
     if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+    // معرّف محاولة الحجز على **كل** نداء (ADR-0081 §3): السيرفر بيسجّل مراحله بنفسه، ومحتاج
+    // المعرّف ده عشان يربطها بخطوات التطبيق. حطه هنا مرة واحدة بدل ما كل نداء حجز يفتكره —
+    // النسيان في نداء واحد بيقطع الرحلة نصّين في التقرير.
+    ...FunnelTracker.instance.headers,
     ...?extraHeaders,
   };
 
