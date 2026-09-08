@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
+import { PromoCodeQr } from '@/components/promo-code-qr';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 
@@ -261,6 +262,7 @@ export default function PromotionsPage() {
                 <TableHead>الاستخدام</TableHead>
                 <TableHead>الميزانية المتبقية</TableHead>
                 <TableHead>الحالة</TableHead>
+                <TableHead>QR</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
@@ -282,6 +284,7 @@ export default function PromotionsPage() {
                       {promo.is_active ? 'مفعّل' : 'معطّل'}
                     </Badge>
                   </TableCell>
+                  <TableCell><PromoCodeQr code={promo.code} /></TableCell>
                   <TableCell>
                     {promo.is_active && (
                       <ConfirmDialog
