@@ -7,6 +7,7 @@ import {
   CANCELLED_ORDER_STATUSES,
   NET_PARTICIPANT_EARNINGS_SQL,
   NET_PLATFORM_COMMISSION_SQL,
+  orderWorkedMinutesSql,
   REPEAT_WINDOW_DAYS,
   SETTLED_PAYMENT_STATUSES,
 } from './metric-definitions';
@@ -249,7 +250,7 @@ export class ExecutiveKpisService {
       { booked_minutes: string; approved_technicians: string; active_before: string; retained: string }[]
     >(
       `SELECT
-         COALESCE((SELECT SUM(COALESCE(o.duration_minutes, o.actual_duration_minutes, 0))
+         COALESCE((SELECT SUM(${orderWorkedMinutesSql('o')})
                      FROM orders o
                     WHERE o.deleted_at IS NULL AND o.technician_id IS NOT NULL
                       AND o.order_status = ANY($3::order_status[])

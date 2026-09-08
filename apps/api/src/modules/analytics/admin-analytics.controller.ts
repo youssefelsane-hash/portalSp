@@ -4,12 +4,18 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
-import { AnalyticsRangeQueryDto, FunnelByServiceQueryDto, resolveRange } from './dto/analytics-range-query.dto';
+import {
+  AnalyticsRangeQueryDto,
+  FunnelByServiceQueryDto,
+  resolveRange,
+  WorkforceQueryDto,
+} from './dto/analytics-range-query.dto';
 import { UpsertMarketingSpendDto } from './dto/marketing-spend.dto';
 import { ExecutiveKpisService } from './executive-kpis.service';
 import { FinancialDashboardService } from './financial-dashboard.service';
 import { FunnelService } from './funnel.service';
 import { MarketingSpendService } from './marketing-spend.service';
+import { WorkforceAnalyticsService } from './workforce-analytics.service';
 
 /**
  * لوحة التحليلات (ADR-0081).
@@ -29,6 +35,7 @@ export class AdminAnalyticsController {
     private readonly kpis: ExecutiveKpisService,
     private readonly marketingSpend: MarketingSpendService,
     private readonly financial: FinancialDashboardService,
+    private readonly workforce: WorkforceAnalyticsService,
   ) {}
 
   @Get('funnel')
@@ -66,6 +73,45 @@ export class AdminAnalyticsController {
   @RequirePermission('analytics.financial.view')
   reconciliation() {
     return this.financial.reconciliationCheck();
+  }
+
+  /**
+   * لقطة العرض: كام حد عندنا، مشغولين قد إيه، وكام واحد فيهم واقف أو مديون.
+   * `analytics.view` كفاية — دي أرقام تشغيلية، والأرقام المالية اللي جواها (المديونية) بتفضل
+   * تجميعة بلا تفاصيل شخص.
+   */
+  @Get('workforce')
+  workforceSupply(@Query() query: WorkforceQueryDto) {
+    const { from, to } = resolveRange(query);
+    return this.workforce.supplySnapshot(from, to, query.company_id ?? null);
+  }
+
+  /**
+   * كشف أداء فردي لكل فني. **`analytics.financial.view` مطلوبة** لأن الصف فيه أرباح الشخص
+   * ومديونيته بالاسم — ده مستوى تانٍ من الخصوصية غير الأرقام المجمّعة فوق.
+   */
+  @Get('workforce/technicians')
+  @RequirePermission('analytics.financial.view')
+  technicianScorecards(@Query() query: WorkforceQueryDto) {
+    const { from, to } = resolveRange(query);
+    return this.workforce.technicianScorecards(from, to, {
+      companyId: query.company_id ?? null,
+      sort: query.sort,
+      limit: query.limit,
+    });
+  }
+
+  /** فين الطلب موجود وفين الناس مش موجودة — أول مكان تتوظّف فيه. */
+  @Get('workforce/coverage')
+  coverage(@Query() query: WorkforceQueryDto) {
+    const { from, to } = resolveRange(query);
+    return this.workforce.areaCoverage(from, to, query.limit ?? 50);
+  }
+
+  /** الحمل اللحظي — حالة اللحظة مش تاريخ، فمالهاش مدى زمني. */
+  @Get('workforce/live')
+  liveLoad(@Query() query: WorkforceQueryDto) {
+    return this.workforce.liveLoad(query.company_id ?? null);
   }
 
   @Get('marketing-spend')
