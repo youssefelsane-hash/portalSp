@@ -20,7 +20,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { resolveEffectiveMemberType } from './crew-member-type';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
-import { BookingMode, Order, OrderType } from './entities/order.entity';
+import { BookingMode, Order, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { orderCandidateLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
@@ -32,6 +32,25 @@ export const OPTIONAL_ASSISTANT_MAX_SETTING = 'crew.optional_assistant_max_per_o
 export const OPTIONAL_ASSISTANT_MAX_FALLBACK = 1;
 
 export type CrewRole = 'technician' | 'assistant';
+
+const CREW_MUTABLE_STATUSES = new Set<OrderStatus>([
+  OrderStatus.SEARCHING_TECHNICIAN,
+  OrderStatus.TECHNICIAN_ASSIGNED,
+  OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+]);
+
+/** لا نعيد كتابة سجل المشاركين بعد بدء العمل أو تثبيت الحقوق المالية. */
+export function assertCrewMembershipMutable(order: Pick<Order, 'orderStatus'>): void {
+  if (!CREW_MUTABLE_STATUSES.has(order.orderStatus)) {
+    throw new ApiException(
+      ErrorCode.ORDR_003,
+      'لا يمكن تعديل طاقم الطلب بعد بدء الشغل أو إغلاقه ماليًا',
+      HttpStatus.CONFLICT,
+    );
+  }
+}
 
 /**
  * بوابة أهلية واحدة لكل من يكتب عضوًا في طاقم طلب. القائمة الظاهرة للمستخدم ليست حماية:
@@ -277,6 +296,7 @@ export class OrderTeamService {
 
   async addMember(userId: string, orderId: string, dto: AddTeamMemberDto): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
+    assertCrewMembershipMutable(order);
 
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'توزيع أعضاء الفريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
@@ -298,7 +318,8 @@ export class OrderTeamService {
   }
 
   async removeMember(userId: string, orderId: string, memberId: string): Promise<void> {
-    await this.findOwnedOrderOrThrow(userId, orderId);
+    const { order } = await this.findOwnedOrderOrThrow(userId, orderId);
+    assertCrewMembershipMutable(order);
     const member = await this.teamMembers.findOne({
       where: { id: memberId, orderId },
     });
@@ -430,6 +451,7 @@ export class OrderTeamService {
    */
   async listRecruitCandidates(userId: string, orderId: string, role: CrewRole): Promise<RecruitCandidateRow[]> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
+    assertCrewMembershipMutable(order);
     await this.assertCrewSlotOpen(orderId, order, role);
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
@@ -549,6 +571,7 @@ export class OrderTeamService {
    */
   async recruitMember(userId: string, orderId: string, technicianId: string, role: CrewRole, roleLabel?: string): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
+    assertCrewMembershipMutable(order);
     if (role === 'assistant' && order.orderType === OrderType.REVISIT) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -662,6 +685,7 @@ export class OrderTeamService {
         if (!order || order.bookingMode !== BookingMode.TEAM || !order.technicianId) {
           throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
         }
+        assertCrewMembershipMutable(order);
 
         const role = opportunity.crew_role;
         const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);

@@ -31,7 +31,13 @@ import { TechnicianWorkOpportunitiesService } from '../technicians/technician-wo
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { assertCrewCandidateScope, CrewRole, MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
+import {
+  assertCrewCandidateScope,
+  assertCrewMembershipMutable,
+  CrewRole,
+  MAX_TEAM_MEMBERS_PER_ORDER,
+  computeCrewComposition,
+} from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { classifyPriceChange, FULL_PRICE_AUTHORITY, PriceChangeAuthority } from './price-change-authority';
@@ -1337,6 +1343,7 @@ export class AdminOrdersService {
     technicianProfileId: string,
     memberType: CrewMemberType,
   ): Promise<TechnicianCapacityTier> {
+    assertCrewMembershipMutable(order);
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'إدارة طاقم الفريق متاحة بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
@@ -1460,6 +1467,7 @@ export class AdminOrdersService {
   /** إزالة عضو طاقم — سبب إلزامي (Script 4 §38-41: "require appropriate state, reason, authorization"). */
   async removeCrewMember(adminUserId: string, orderId: string, memberId: string, reason: string, meta?: AuditActorMeta): Promise<{ crewShortage: boolean }> {
     const order = await this.findOrThrow(orderId);
+    assertCrewMembershipMutable(order);
     const member = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
     if (!member) {
       throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
@@ -1506,6 +1514,7 @@ export class AdminOrdersService {
     meta?: AuditActorMeta,
   ): Promise<Order> {
     const order = await this.findOrThrow(orderId);
+    assertCrewMembershipMutable(order);
     const existingMember = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
     if (!existingMember) {
       throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
