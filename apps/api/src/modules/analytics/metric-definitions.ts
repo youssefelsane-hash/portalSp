@@ -52,6 +52,24 @@ export const NET_PARTICIPANT_EARNINGS_SQL = `(o.technician_earning_cents - COALE
  */
 export const GMV_SQL = `o.total_amount_cents`;
 
+/**
+ * **دقايق الشغل لطلب واحد** — تعريف واحد لكل لوحة بتقيس الاستغلال (ADR-0081 §2).
+ *
+ * الترتيب مقصود ومطابق لمسطرة القدرة اليومية في `technician-day-capacity.sql.ts`: القيمة اللي
+ * محرك التسعير طلّعها (`duration_minutes`) هي اللي المطابقة بتحجز بيها فعلاً، فلازم تكون هي
+ * نفسها اللي الاستغلال بيتقاس بيها — وإلا اللوحة تقول الفني فاضي والمحرك يقول مليان.
+ *
+ * `duration_hours * 60` في النص مش زيادة تجميلية: قبل ما تتضاف هنا كان الاستغلال بيقرا
+ * `COALESCE(duration_minutes, actual_duration_minutes, 0)` بس، فأي طلب متسعّر بالساعة (وده
+ * قالب كامل في المحرك) كان بيتحسب **صفر دقيقة** ويقلّل الاستغلال المعروض من غير ما حد ياخد باله.
+ *
+ * `actual_duration_minutes` آخر خيار: هي بتتسجّل بعد التنفيذ بس، فالطلب اللي لسه شغّال ماكانش
+ * ليه أي قيمة من غيرها.
+ */
+export function orderWorkedMinutesSql(alias = 'o'): string {
+  return `COALESCE(${alias}.duration_minutes, ${alias}.duration_hours * 60, ${alias}.actual_duration_minutes, 0)`;
+}
+
 /** نافذة «العميل الراجع» — طلب تاني خلال المدة دي من الأول. */
 export const REPEAT_WINDOW_DAYS = 90;
 

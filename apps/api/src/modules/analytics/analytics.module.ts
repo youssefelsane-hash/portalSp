@@ -10,6 +10,7 @@ import { FinancialDashboardService } from './financial-dashboard.service';
 import { FunnelService } from './funnel.service';
 import { FunnelTrackerService } from './funnel-tracker.service';
 import { MarketingSpendService } from './marketing-spend.service';
+import { WorkforceAnalyticsService } from './workforce-analytics.service';
 
 /**
  * موديول التحليلات (ADR-0081).
@@ -31,6 +32,7 @@ import { MarketingSpendService } from './marketing-spend.service';
     ExecutiveKpisService,
     MarketingSpendService,
     FinancialDashboardService,
+    WorkforceAnalyticsService,
   ],
   exports: [FunnelTrackerService],
 })
