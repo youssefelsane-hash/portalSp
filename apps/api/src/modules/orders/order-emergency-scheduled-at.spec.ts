@@ -333,6 +333,16 @@ describe('OrdersService.create() — اشتقاق الاستعجال من الت
     expect(order.surgeAmountCents).toBe(0);
   });
 
+  it('تاريخ انتهى يُرفض صراحةً ولا يتحول إلى طوارئ برسوم إضافية', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.service,
+        address_id: ids.address,
+        scheduled_at: cairoDay(-1),
+      } as never),
+    ).rejects.toMatchObject({ message: 'التاريخ ده عدّى — اختار يوم من النهارده أو بعده' });
+  });
+
   // التصحيح اللي اتاخد أثناء التنفيذ (ADR-0048، الشرح الكامل في `isSameDayUrgent`): طلب من قناة
   // مابتبعتش تاريخ محدش وراه شاف تنبيه الرسوم، فمينفعش يتحاسب عليها.
   it('طلب بلا تاريخ خالص: مش طوارئ ومفيش رسوم — محدش اتخطر بيها', async () => {

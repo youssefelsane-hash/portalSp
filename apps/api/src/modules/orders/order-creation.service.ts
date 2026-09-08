@@ -50,6 +50,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { bookingDateWindowViolation, MAX_ADVANCE_BOOKING_DAYS_FALLBACK } from './booking-date-window';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { BookingMatchPreview } from './entities/booking-match-preview.entity';
@@ -154,6 +155,28 @@ export class OrderCreationService {
     private readonly events: EventEmitter2,
     @Optional() private readonly assignmentGuard?: TechnicianAssignmentGuardService,
   ) {}
+
+  /**
+   * بوابة زمنية واحدة للمعاينة والتأكيد. عدم توحيدها كان يسمح للعميل برؤية سعر لطلب لن يقبله
+   * السيرفر عند الإنشاء، أو - أسوأ - بتحويل تاريخ منتهٍ إلى طوارئ برسوم إضافية.
+   */
+  private async assertBookingDateWindow(scheduledAt?: string, scheduledAtRangeEnd?: string): Promise<void> {
+    const maxAdvanceDays = await this.settingsService.getNumber(
+      'orders.max_advance_booking_days',
+      MAX_ADVANCE_BOOKING_DAYS_FALLBACK,
+    );
+    const violation = bookingDateWindowViolation({ scheduledAt, scheduledAtRangeEnd, maxAdvanceDays });
+    if (violation === 'past') {
+      throw new ApiException(ErrorCode.VAL_001, 'التاريخ ده عدّى — اختار يوم من النهارده أو بعده', HttpStatus.BAD_REQUEST);
+    }
+    if (violation === 'too_far') {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مسموح بالحجز مقدمًا حتى ${Math.max(0, Math.floor(maxAdvanceDays))} يوم فقط — اختار موعد أقرب`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 
   private async resolveOptionalWarranty(
     planId: string | undefined,
@@ -455,6 +478,12 @@ export class OrderCreationService {
     sourceChannel: OrderSourceChannel = OrderSourceChannel.CUSTOMER_APP,
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    // الطلب الدوري اتفق عليه تجاريًا عند إنشاء الخطة وقد يُعاد توليده بعد تأخير تشغيل. أما
+    // الإدخال الجديد من عميل/مركز اتصال فلا يجوز أن يحمل تاريخًا انتهى أو خارج أفق الحجز.
+    if (!recurringIdentity) {
+      await this.assertBookingDateWindow(dto.scheduled_at, dto.scheduled_at_range_end);
+    }
 
     // فحص مبكر رخيص قبل أي عمل تاني — الفحص الحاسم فعليًا هو الفهرس الفريد الجزئي على
     // (customer_id, idempotency_key) (migration 0139)، ده بس تحسين أداء لتفادي كل منطق التسعير/
@@ -1666,6 +1695,7 @@ export class OrderCreationService {
   // PromotionsService.previewForOrder() الموجودة من قبل لمعاينة كود الخصم بس).
   async previewPrice(userId: string, dto: PreviewOrderDto): Promise<PreviewOrderResponseDto> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    await this.assertBookingDateWindow(dto.scheduled_at);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const remoteAssessmentRequested = dto.request_remote_quote === true;

@@ -49,13 +49,13 @@ export interface UrgencyInput {
  * البث بقى فوري لكل طلب بلا استثناء بعد ما آلية التأجيل اتشالت (docs/08 §131) — يعني مفيش
  * تأخير، بس كمان مفيش رسوم ولا بوابة.
  *
- * **يوم فات** بيتحسب استعجالي — مش حالة صالحة أصلاً (التحقق بيرفضها قبل كده)، بس لو عدّت لأي
- * سبب فمعالجتها كشغل النهارده أأمن من معالجتها كشغل مجدول بعيد يتأجل بثه.
+ * التاريخ الماضي ليس طوارئ. طبقة التحقق ترفضه صراحة قبل الوصول هنا؛ والإبقاء على هذه الدالة
+ * صادقة مع اسمها يمنع أي مسار داخلي جديد من تحويل تاريخ خاطئ إلى رسوم استعجال.
  */
 export function isSameDayUrgent(input: UrgencyInput): boolean {
   if (!input.scheduledAt) return false;
   const today = platformDayOf(input.now ?? new Date());
-  return platformDayOf(input.scheduledAt) <= today;
+  return platformDayOf(input.scheduledAt) === today;
 }
 
 /** قدرات الخدمة زي ما الأدمن ضابطها — قيود حقيقية على الناتج، مش تلميحات. */

@@ -187,6 +187,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // تدقيق `docs/29` P0-4 — الهيدر `Idempotency-Key` اختياري، فأي كلاينت مش بيبعته كان مكشوف
   // تمامًا لدوسة مزدوجة. السيرفر بيشتق مفتاح بنفسه خلال النافذة دي. صفر = تعطيل.
   'orders.duplicate_guard_window_seconds': { type: 'number', default: 90, group: 'orders', description: 'نافذة حماية الدوسة المزدوجة بالثواني — طلب تاني بنفس البيانات بالظبط من نفس العميل خلالها بيرجّع الطلب الأصلي بدل ما يعمل نسخة. صفر = تعطيل.' },
+  'orders.max_advance_booking_days': { type: 'number', default: 90, group: 'orders', description: 'أقصى عدد أيام مسموح بحجزها مقدمًا من تاريخ اليوم بتوقيت القاهرة. صفر = حجز نفس اليوم فقط.' },
   'orders.max_work_sessions_per_order': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد زيارات لطلب واحد (استكمال الشغل يوم تاني). بعده لازم تدخّل الدعم.' },
   'orders.technician_reschedule_max_requests': { type: 'number', default: 2, group: 'orders', description: 'أقصى عدد طلبات تأجيل يستطيع الفني إرسالها لنفس الطلب قبل تدخل الدعم' },
   'revisit.original_technician_response_hours': { type: 'number', default: 48, group: 'orders', description: 'مهلة رد الفني الأصلي على إعادة زيارة مثبّتة عليه (بالساعات). بعدها بتظهر عند الأدمن كبند محتاج تصرّف — التحرير قرار أدمن مش تلقائي لأن وراه خصم مالي.' },
