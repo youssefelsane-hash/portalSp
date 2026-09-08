@@ -51,9 +51,15 @@ class OrdersRepository {
     return items.map(CancellationReason.fromJson).toList();
   }
 
-  Future<List<Order>> list() async {
-    final items = await auth.authedRequestList('/orders');
-    return items.map(Order.fromJson).toList();
+  Future<OrdersPage> list({String? cursor}) async {
+    final suffix = cursor == null ? '' : '&cursor=${Uri.encodeComponent(cursor)}';
+    final data = await auth.authedRequest('GET', '/orders?limit=20$suffix');
+    final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final meta = data?['meta'] as Map<String, dynamic>? ?? const {};
+    return OrdersPage(
+      items: items.map(Order.fromJson).toList(),
+      nextCursor: meta['next_cursor'] as String?,
+    );
   }
 
   Future<Order> getOne(String orderId) async {
@@ -441,4 +447,11 @@ class OrdersRepository {
     );
     return Order.fromJson(data!);
   }
+}
+
+class OrdersPage {
+  final List<Order> items;
+  final String? nextCursor;
+
+  const OrdersPage({required this.items, required this.nextCursor});
 }

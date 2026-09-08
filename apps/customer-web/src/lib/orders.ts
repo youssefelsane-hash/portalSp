@@ -312,7 +312,13 @@ export const createMatchPreview = (authedFetch: AuthedFetch, body: CreateMatchPr
     body: JSON.stringify(body),
   });
 
-export const listMyOrders = (authedFetch: AuthedFetch) => authedFetch<OrderResponseDto[]>('/orders');
+export interface MyOrdersPageDto {
+  items: OrderResponseDto[];
+  meta: { next_cursor: string | null; has_more: boolean };
+}
+
+export const listMyOrders = (authedFetch: AuthedFetch, cursor?: string) =>
+  authedFetch<MyOrdersPageDto>(`/orders?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
 
 export const getMyOrder = (authedFetch: AuthedFetch, id: string) => authedFetch<OrderResponseDto>(`/orders/${id}`);
 

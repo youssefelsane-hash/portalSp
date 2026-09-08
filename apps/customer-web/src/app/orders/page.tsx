@@ -10,6 +10,8 @@ export default function OrdersPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading, authedFetch } = useAuth();
   const [orders, setOrders] = useState<OrderResponseDto[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -17,14 +19,28 @@ export default function OrdersPage() {
       return;
     }
     if (isAuthenticated) {
-      listMyOrders(authedFetch).then((list) =>
-        setOrders([...list].sort((a, b) => (b.placed_at ?? '').localeCompare(a.placed_at ?? ''))),
+      listMyOrders(authedFetch).then((page) => {
+        setOrders(page.items);
+        setNextCursor(page.meta.next_cursor);
+      },
       )
         // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
         .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, authLoading]);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await listMyOrders(authedFetch, nextCursor);
+      setOrders((current) => [...(current ?? []), ...page.items]);
+      setNextCursor(page.meta.next_cursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (authLoading || (isAuthenticated && orders === null)) {
     return (
@@ -63,6 +79,11 @@ export default function OrdersPage() {
               <span className="font-semibold text-primary">{formatEgp(o.total_amount_cents)}</span>
             </Link>
           ))}
+          {nextCursor && (
+            <button onClick={loadMore} disabled={loadingMore} className="w-full rounded-xl border border-border bg-surface p-3 text-sm font-medium text-primary disabled:opacity-60">
+              {loadingMore ? 'بيتم تحميل طلبات أقدم...' : 'عرض طلبات أقدم'}
+            </button>
+          )}
         </div>
       )}
     </div>

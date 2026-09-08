@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -26,6 +27,7 @@ import { ApproveQuoteItemsDto } from './dto/approve-quote-items.dto';
 import { ApproveInitialQuoteDto } from './dto/approve-initial-quote.dto';
 import { SelectProviderDto } from './dto/select-provider.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { ListMyOrdersQueryDto } from './dto/list-my-orders-query.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { RequestRematchDto } from './dto/request-rematch.dto';
@@ -108,9 +110,12 @@ export class OrdersController {
   }
 
   @Get()
-  async list(@CurrentUser() user: JwtPayload) {
-    const orders = await this.ordersService.findAllForCustomerUser(user.sub);
-    return orders.map((order) => toOrderResponseDto(order));
+  async list(@CurrentUser() user: JwtPayload, @Query() query: ListMyOrdersQueryDto) {
+    const page = await this.ordersService.findAllForCustomerUser(user.sub, query.limit, query.cursor);
+    return {
+      items: page.items.map((order) => toOrderResponseDto(order)),
+      meta: { next_cursor: page.nextCursor, has_more: page.nextCursor !== null },
+    };
   }
 
   @Get(':id')
