@@ -98,4 +98,15 @@ describe('RecurringOrdersService — تحصيل بطاقة الحجز المتك
     expect(query.mock.calls[1][0]).toContain('recurring_payment_next_attempt_at = NULL');
     expect((eventEmitter.emit as jest.Mock)).not.toHaveBeenCalled();
   });
+
+  it('تذكير الكاش لا يستهدف المسودات أو الدفعات المنتظرة أو الطلبات المنتهية', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const { service } = buildService(query, { status: PaymentGatewayStatus.PENDING, failureReason: null });
+
+    await (service as unknown as { sendRecurringCashReminders(): Promise<void> }).sendRecurringCashReminders();
+
+    expect(query.mock.calls[0][0]).toContain("o.order_status IN (");
+    expect(query.mock.calls[0][0]).toContain("'searching_technician'");
+    expect(query.mock.calls[0][0]).not.toContain("o.order_status NOT IN ('cancelled_by_customer'");
+  });
 });

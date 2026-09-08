@@ -516,7 +516,14 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
          SELECT o.id
          FROM orders o
          WHERE o.order_type = 'recurring'
-           AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired')
+           -- Reminder is operational, not marketing: never revive a draft/payment/terminal
+           -- occurrence just because its scheduled time is still in the future.
+           AND o.order_status IN (
+             'searching_technician', 'technician_assigned', 'accepted', 'technician_on_way',
+             'technician_arrived', 'in_progress', 'awaiting_quote_approval',
+             'awaiting_admin_quote', 'awaiting_initial_quote_approval',
+             'awaiting_technician_selection', 'awaiting_technician_reselection'
+           )
            AND (o.payment_method IS NULL OR o.payment_method = 'cash')
            AND o.recurring_cash_reminder_sent_at IS NULL
            AND (
