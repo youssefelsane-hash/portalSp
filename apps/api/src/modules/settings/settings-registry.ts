@@ -188,6 +188,11 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'revisit.original_technician_response_hours': { type: 'number', default: 48, group: 'orders', description: 'مهلة رد الفني الأصلي على إعادة زيارة مثبّتة عليه (بالساعات). بعدها بتظهر عند الأدمن كبند محتاج تصرّف — التحرير قرار أدمن مش تلقائي لأن وراه خصم مالي.' },
 
   // ── payments ──────────────────────────────────────────────────────────
+  // مجمّد على `true` نهائيًا بـmigration 0288 (V1 بقى قراءة تاريخية بس، والافتراضي
+  // على `orders.settlement_policy_version` بقى 2). الصف فاضل في القاعدة كسجل للقرار،
+  // ومسجّل هنا عشان الثابتة «كل صف مسجّل» تفضل صح — و`isLegacyEarningsSettingKey`
+  // بيمنع أي تعديل عليه من لوحة الأدمن.
+  'earnings.v2_cutover_enabled': { type: 'boolean', default: true, group: 'payments', description: 'مفتاح تحويل سياسة الأرباح للنسخة الموحّدة — مجمّد على مفعّل بعد 0288، ومقفول ضد التعديل.' },
   'crew.assistant_share_ratio': { type: 'number', default: 0.65, group: 'payments', description: 'نسبة حصة المساعد من حصة الفني في نفس المستوى داخل الطاقم (0.65 = المساعد بياخد 65% من اللي الفني بياخده). بتتضرب في وزن المستوى، مش بديل عنه.' },
   'earnings.v2_shadow_enabled': { type: 'boolean', default: true, group: 'payments', description: 'Compare legacy and V2 results without posting V2 wallet movements.' },
   'payments.card_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار الدفع بالبطاقة عبر Paymob للعملاء عند اكتمال الإعداد' },
