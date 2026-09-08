@@ -70,6 +70,12 @@ export interface RefundInput {
 
 export interface RefundResult {
   succeeded: boolean;
+  /**
+   * `unknown` means the provider call reached an indeterminate network/server failure.
+   * The caller must keep the refund reserved and require reconciliation; it must never
+   * treat this as a definitive rejection and risk sending the same refund twice.
+   */
+  outcome?: 'confirmed' | 'rejected' | 'unknown';
   providerRefundId: string | null;
   status: PaymentProviderStatus;
   failureReason: string | null;

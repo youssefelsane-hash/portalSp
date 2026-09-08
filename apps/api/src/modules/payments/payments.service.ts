@@ -2803,8 +2803,8 @@ export class PaymentsService {
    * (Paymob مثلاً)، وبيرجع لـwallet credit بس للطرق اللي مش بتدعم استرداد حقيقي (كاش/محفظة/
    * InstaPay/فوري). لو البوابة رفضت الاسترداد صراحة (رد نهائي، مش خطأ شبكة)، بيتسجّل
    * refund_status=rejected بلا أي حركة فلوس — أبداً مبيتقالش "اترد" من غير ما الفلوس ترجع فعلاً.
-   * خطأ شبكة/داخلي غير متوقّع بيرمي الاستثناء عادي (transaction بترجع لورا، مفيش صف refund
-   * اتسجّل خالص) عشان الأدمن يقدر يعيد المحاولة — مش قفل دائم زي الرفض النهائي.
+   * نتيجة شبكة/داخلية غير مؤكدة تظل PROCESSING ومعلّقة للمراجعة؛ لا يجوز تحرير الحجز أو
+   * إعادة إرسال الاسترداد لأن البوابة ربما تكون نفّذته بالفعل رغم أننا لم نستلم الرد.
    */
   // كانت فجوة موثّقة صراحة اتلقطت أثناء تحقيق Script 7 Phase 17 ("refund عالق PROCESSING"):
   // رسالة الرفض في refundOrder() بتحول الأدمن لمراجعة يدوية، لكن مفيش أي endpoint كان بيرجّع
@@ -2991,6 +2991,8 @@ export class PaymentsService {
     // هيفضل PROCESSING محتاج مراجعة يدوية (provider.reconcile()) لقفله، موثّق كفجوة تشغيلية
     // معروفة مش حل تلقائي كامل (خارج نطاق هذا الإصلاح، نفس تعليق reconcile() في الـinterface).
     let providerSucceeded = true;
+    let providerOutcome: 'confirmed' | 'rejected' | 'unknown' = 'confirmed';
+    let providerFailureReason: string | null = null;
     let providerRefundId: string | null = null;
     if (goesThroughGateway) {
       const providerResult = await provider.refund({
@@ -2999,6 +3001,8 @@ export class PaymentsService {
         reasonAr: reasonNotes,
       });
       providerSucceeded = providerResult.succeeded;
+      providerOutcome = providerResult.outcome ?? (providerResult.succeeded ? 'confirmed' : 'rejected');
+      providerFailureReason = providerResult.failureReason;
       providerRefundId = providerResult.succeeded ? providerResult.providerRefundId : null;
     }
 
@@ -3046,9 +3050,30 @@ export class PaymentsService {
           manager,
         );
 
-      if (goesThroughGateway && !providerSucceeded) {
-        // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — قرار نهائي حسب تبسيط Phase 1،
-        // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
+      if (goesThroughGateway && providerOutcome === 'unknown') {
+        // لا نعرف هل البوابة نفّذت الاسترداد أم لا. يبقى الصف PROCESSING، فيحجز المبلغ ويمنع
+        // استردادًا ثانيًا إلى أن يراجعه الأدمن يدويًا مع البوابة.
+        await this.auditLog.record(
+          {
+            actorUserId: performedByUserId,
+            actorRole: 'admin',
+            action: 'order.refund_reconciliation_required',
+            entityType: 'order',
+            entityId: orderId,
+            newValues: {
+              refund_id: lockedRefund.id,
+              amount_cents: lockedRefund.amountCents,
+              provider_failure_reason: providerFailureReason,
+            },
+            meta,
+          },
+          manager,
+        );
+        return lockedRefund;
+      }
+
+      if (goesThroughGateway && (!providerSucceeded || providerOutcome === 'rejected')) {
+        // رد نهائي من البوابة نفسها — لا حركة فلوس محلية لأن الاسترداد لم يتم.
         lockedRefund.refundStatus = RefundStatus.REJECTED;
         await manager.save(lockedRefund);
         await recordRefundAudit();
@@ -3419,6 +3444,8 @@ export class PaymentsService {
     const { order, payment, goesThroughGateway, provider, refund, refundDecision } = prepared;
 
     let providerSucceeded = true;
+    let providerOutcome: 'confirmed' | 'rejected' | 'unknown' = 'confirmed';
+    let providerFailureReason: string | null = null;
     let providerRefundId: string | null = null;
     if (goesThroughGateway) {
       const providerResult = await provider.refund({
@@ -3428,6 +3455,8 @@ export class PaymentsService {
         reasonAr: reasonNotes,
       });
       providerSucceeded = providerResult.succeeded;
+      providerOutcome = providerResult.outcome ?? (providerResult.succeeded ? 'confirmed' : 'rejected');
+      providerFailureReason = providerResult.failureReason;
       providerRefundId = providerResult.succeeded ? providerResult.providerRefundId : null;
     }
 
@@ -3464,7 +3493,26 @@ export class PaymentsService {
           },
           manager,
         );
-      if (goesThroughGateway && !providerSucceeded) {
+      if (goesThroughGateway && providerOutcome === 'unknown') {
+        await this.auditLog.record(
+          {
+            actorUserId: PLATFORM_SYSTEM_USER_ID,
+            actorRole: 'system',
+            action: 'order.refund_reconciliation_required',
+            entityType: 'order',
+            entityId: orderId,
+            newValues: {
+              refund_id: lockedRefund.id,
+              amount_cents: lockedRefund.amountCents,
+              provider_failure_reason: providerFailureReason,
+              trigger: triggeredBy,
+            },
+          },
+          manager,
+        );
+        return lockedRefund;
+      }
+      if (goesThroughGateway && (!providerSucceeded || providerOutcome === 'rejected')) {
         lockedRefund.refundStatus = RefundStatus.REJECTED;
         await manager.save(lockedRefund);
         await recordRefundAudit();

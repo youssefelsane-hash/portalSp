@@ -385,6 +385,7 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
       if (!res.ok || body.success === false) {
         return {
           succeeded: false,
+          outcome: 'rejected',
           providerRefundId: null,
           status: PaymentProviderStatus.FAILED,
           failureReason: body.data?.message ?? `Paymob refund رفض: ${res.status}`,
@@ -392,6 +393,7 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
       }
       return {
         succeeded: true,
+        outcome: 'confirmed',
         providerRefundId: body.id ? String(body.id) : null,
         status: PaymentProviderStatus.REFUNDED,
         failureReason: null,
@@ -400,6 +402,9 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
       this.logger.error('فشل استرداد Paymob', err instanceof Error ? err.stack : err);
       return {
         succeeded: false,
+        // The request may have reached Paymob before the network failed. Keep the
+        // local refund reserved until an operator reconciles it instead of retrying.
+        outcome: 'unknown',
         providerRefundId: null,
         status: PaymentProviderStatus.FAILED,
         failureReason: err instanceof Error ? err.message : String(err),
