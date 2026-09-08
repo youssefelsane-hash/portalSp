@@ -67,10 +67,14 @@ export interface WorkforceSupplySnapshot {
   by_level: { level: string; count: number }[];
 
   active_in_period: number;
-  /** فنيين معتمدين ومحدش وصّلهم شغلانة خلصت في الفترة — طاقة موجودة وواقفة. */
+  /**
+   * معتمدين وماخدوش أي شغل في الفترة — طاقة موجودة وواقفة. متمّم لـ`active_in_period` بنفس
+   * تعريف النشاط بالظبط، فمجموعهم = `headcount.approved` دايمًا.
+   */
   idle_approved: number;
   churned: number;
 
+  /** كل أرقام الطاقة والنشاط دي **للمعتمدين بس** — نفس مجموعة المقام والبسط. */
   capacity_minutes: number;
   booked_minutes: number;
   utilization_percent: number | null;
@@ -202,9 +206,13 @@ export class WorkforceAnalyticsService {
       { booked_minutes: string; active_in_period: string; churned: string }[]
     >(
       `WITH ${this.participationCte()},
+       -- **المعتمدون بس.** القدرة في المقام بتتحسب على المعتمدين، فلو البسط (الدقايق
+       -- المحجوزة والنشطين) شمل غير المعتمدين كمان، الاستغلال بيطلع أعلى من الحقيقة
+       -- و«نشط + واقف» ماكانش بيساوي عدد المعتمدين. اتلقط بصريًا: ١٠ + ١٨٥ ≠ ١٩١.
        scoped AS (
          SELECT tp.id FROM technician_profiles tp
-          WHERE tp.deleted_at IS NULL AND ($4::uuid IS NULL OR tp.company_id = $4::uuid)
+          WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
+            AND ($4::uuid IS NULL OR tp.company_id = $4::uuid)
        ),
        -- الشغل اللي **اتحجز فعلاً** في الفترة: أي طلب حالته بتثبت إن فيه فني ملتزم بيه.
        -- الأساس الزمني هنا placed_at لأن السؤال «الطاقة اتحجزت امتى» مش «الشغل خلص امتى».
@@ -234,18 +242,22 @@ export class WorkforceAnalyticsService {
     );
 
     const [idle] = await this.dataSource.query<{ idle_approved: string }[]>(
+      // **نفس تعريف النشاط بالظبط** اللي `active_in_period` بيستخدمه (طلب محجوز في الفترة)،
+      // مش «شغل خلص». لو الاتنين اتقاسوا بمسطرتين، الفني اللي ماسك شغلانة لسه ما خلصتش كان
+      // بيتعدّ **نشط وواقف في نفس الوقت** — واللوحة بتقول ١٠ اشتغلوا و١٩١ واقفين من ١٩١
+      // معتمد. اتلقطت في المراجعة البصرية الحية. دلوقتي: نشط + واقف = المعتمدون، دايمًا.
       `WITH ${this.participationCte()}
        SELECT COUNT(*) AS idle_approved
          FROM technician_profiles tp
         WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
-          AND ($3::uuid IS NULL OR tp.company_id = $3::uuid)
+          AND ($4::uuid IS NULL OR tp.company_id = $4::uuid)
           AND NOT EXISTS (
             SELECT 1 FROM participation p
               JOIN orders o ON o.id = p.order_id
              WHERE p.technician_id = tp.id
-               AND o.order_status = 'completed'
-               AND o.work_completed_at >= $1 AND o.work_completed_at < $2)`,
-      [from, to, companyId],
+               AND o.order_status = ANY($3::order_status[])
+               AND o.placed_at >= $1 AND o.placed_at < $2)`,
+      [from, to, [...ASSIGNED_ORDER_STATUSES], companyId],
     );
 
     const [debt] = await this.dataSource.query<

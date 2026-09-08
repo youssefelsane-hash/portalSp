@@ -404,9 +404,28 @@ describe('WorkforceAnalyticsService — إحصائيات القوى العامل
       expect(snap.debt.threshold_cents).toBe(50_000);
     });
 
-    it('مفيش واقفين: الاتنين خلّصوا أو شاركوا في شغل مكتمل', async () => {
+    it('«نشط» و«واقف» بنفس المسطرة — مجموعهم = المعتمدون بالظبط', async () => {
+      // الحارس ده بيقفل بَقّة حقيقية اتلقطت بصريًا: الواقف كان بيتقاس بـ«شغل خلص» والنشط
+      // بـ«شغل اتحجز»، فالفني اللي ماسك شغلانة شغّالة كان بيتعدّ في الاتنين.
       const snap = await snapshot();
       expect(snap.idle_approved).toBe(0);
+      expect(snap.active_in_period + snap.idle_approved).toBe(snap.headcount.approved);
+    });
+
+    it('غير المعتمد مايدخلش في البسط ولا المقام — الاستغلال مايتضخّمش', async () => {
+      // بنعلّق اعتماد المساعد: بيخرج من المعتمدين، ولازم شغله يخرج من الدقايق المحجوزة كمان،
+      // وإلا القدرة (على المعتمدين) والحمل (على الكل) بيتقاسوا بمجموعتين مختلفتين.
+      await q(`UPDATE technician_profiles SET verification_status = 'suspended' WHERE id = $1`, [
+        ids.assistantProfile,
+      ]);
+      const suspended = await snapshot();
+      expect(suspended.headcount.approved).toBe(1);
+      expect(suspended.booked_minutes).toBe(480); // شغل القائد بس، من غير الـ٢٤٠ بتاعة المساعد
+      expect(suspended.active_in_period + suspended.idle_approved).toBe(1);
+
+      await q(`UPDATE technician_profiles SET verification_status = 'approved' WHERE id = $1`, [
+        ids.assistantProfile,
+      ]);
     });
 
     it('نافذة بلا أي شغل بتقول صفر محجوز ومابتكسرش الاستغلال', async () => {

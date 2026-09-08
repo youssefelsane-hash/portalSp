@@ -374,6 +374,9 @@ export default function OrderDetailPage() {
   // فاضية دايمًا بعد ما النموذج اتقلب لـopt-out (ADR-0017): غياب الصف = متاح، فمفيش صفوف تتعرض.
   const [adminRescheduleOptions, setAdminRescheduleOptions] = useState<RescheduleOptionDto[] | null>(null);
   const [adminRescheduleDate, setAdminRescheduleDate] = useState('');
+  // أقرب يوم مسموح لإعادة الجدولة (بكرة). `useState` بمُهيّئ كسول لأن `Date.now()` جوّه الرندر
+  // مباشرةً غير نقي — `react-hooks/purity` كان بيرفضه، والنتيجة كانت بتتحسب من جديد مع كل رندر.
+  const [minRescheduleDate] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [adminRescheduleReason, setAdminRescheduleReason] = useState('');
   // مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
   // (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. funnelError متوقّع/هادئ لطلبات بلا service_zone_id
@@ -1840,7 +1843,7 @@ export default function OrderDetailPage() {
                       id="admin_reschedule_date"
                       type="date"
                       value={adminRescheduleDate}
-                      min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+                      min={minRescheduleDate}
                       onChange={(e) => setAdminRescheduleDate(e.target.value)}
                       required
                     />
