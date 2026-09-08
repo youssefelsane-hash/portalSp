@@ -1,4 +1,4 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe, type ValidationError } from '@nestjs/common';
 import helmet from 'helmet';
 import { ApiException, ErrorCode } from './common/exceptions/api.exception';
 
@@ -19,6 +19,47 @@ export interface HttpLayerOptions {
   corsOrigins: string[];
   /** عدد الـproxies الموثوقة بين العميل والتطبيق (راجع الشرح جوّه `configureHttpLayer`). */
   trustedProxyHops: number;
+}
+
+/**
+ * ترجمة أخطاء class-validator عند الباب بدل ما تتسرّب أسماء validators أو حقول تقنية للعميل.
+ * الرسائل اليدوية داخل الخدمات تظل كما هي؛ هذه الدالة فقط لما الإطار هو صاحب الخطأ.
+ */
+export function validationErrorsToArabic(errors: ValidationError[]): string {
+  const findLeaf = (items: ValidationError[]): ValidationError | null => {
+    for (const item of items) {
+      if (item.constraints && Object.keys(item.constraints).length > 0) return item;
+      const child = findLeaf(item.children ?? []);
+      if (child) return child;
+    }
+    return null;
+  };
+  const error = findLeaf(errors);
+  if (!error) return 'البيانات المرسلة غير صحيحة';
+
+  const constraint = Object.keys(error.constraints ?? {})[0] ?? '';
+  // أسماء API لا ينبغي أن تصبح جزءًا من لغة المنتج. نذكر «الحقل» بشكل بسيط لأن الواجهة أصلًا
+  // تعرف اسم المدخل المعروض للمستخدم، بينما الاسم الداخلي قد يتغير.
+  const label = 'الحقل';
+  const messages: Record<string, string> = {
+    whitelistValidation: `${label} غير مسموح`,
+    isUuid: `${label} غير صحيح أو الرابط قديم`,
+    isDateString: `${label} لازم يكون تاريخًا صحيحًا`,
+    isEnum: `${label} يحتوي اختيارًا غير مسموح`,
+    isPositive: `${label} لازم يكون رقمًا أكبر من صفر`,
+    isNumber: `${label} لازم يكون رقمًا صحيحًا`,
+    isInt: `${label} لازم يكون رقمًا صحيحًا بدون كسور`,
+    isString: `${label} لازم يكون نصًا`,
+    isBoolean: `${label} لازم يكون صحيحًا أو خطأ`,
+    isNotEmpty: `${label} مطلوب`,
+    minLength: `${label} أقصر من الحد المسموح`,
+    maxLength: `${label} أطول من الحد المسموح`,
+    min: `${label} أقل من الحد المسموح`,
+    max: `${label} أكبر من الحد المسموح`,
+    arrayMaxSize: `${label} يحتوي عناصر أكثر من المسموح`,
+    arrayMinSize: `${label} يحتاج عناصر إضافية`,
+  };
+  return messages[constraint] ?? 'البيانات المرسلة غير صحيحة';
 }
 
 /**
@@ -82,14 +123,7 @@ export function configureHttpLayer(app: HttpLayerTarget, options: HttpLayerOptio
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
-      exceptionFactory: (errors) =>
-        new ApiException(
-          ErrorCode.VAL_001,
-          errors
-            .map((e) => Object.values(e.constraints ?? {}).join(', '))
-            .filter(Boolean)
-            .join(' | ') || 'بيانات غير صحيحة',
-        ),
+      exceptionFactory: (errors) => new ApiException(ErrorCode.VAL_001, validationErrorsToArabic(errors)),
     }),
   );
 }

@@ -24,6 +24,7 @@ export const ErrorCode = {
   TECH_004: 'TECH_004', // الرقم القومي مش بيتغيّر بعد اعتماد الحساب (ADR-0045)
   VAL_001: 'VAL_001', // بيانات غير صحيحة
   RATE_001: 'RATE_001', // تجاوزت عدد الطلبات المسموح
+  SYS_001: 'SYS_001', // النظام مشغول مؤقتًا؛ إعادة المحاولة آمنة
 } as const;
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
