@@ -184,11 +184,18 @@ describe('WorkforceAnalyticsService — إحصائيات القوى العامل
     ids.assistantUser = await mkUser('مساعد', 'technician');
     const [assistant] = await q<{ id: string }[]>(
       `INSERT INTO technician_profiles (user_id, technician_code, verification_status, approved_at, company_id,
-                                        technician_kind, current_level, home_area_id)
-       VALUES ($1,$2,'approved',$3::timestamptz,$4,'assistant','new',$5) RETURNING id`,
-      [ids.assistantUser, `WFA-${runId}`.slice(0, 20), '2032-05-11T00:00:00Z', ids.company, ids.area],
+                                        technician_kind, current_level)
+       VALUES ($1,$2,'approved',$3::timestamptz,$4,'assistant','new') RETURNING id`,
+      [ids.assistantUser, `WFA-${runId}`.slice(0, 20), '2032-05-11T00:00:00Z', ids.company],
     );
     ids.assistantProfile = assistant.id;
+
+    // التغطية التشغيلية تُقاس بنطاق الخدمة، لا بعنوان السكن فقط. الاتنين يغطيان نطاق
+    // المنطقة حتى لو تغيّر عنوان أحدهما لاحقًا.
+    await q(
+      `INSERT INTO technician_zones (technician_id, service_zone_id) VALUES ($1,$2), ($3,$2)`,
+      [ids.leadProfile, ids.zone, ids.assistantProfile],
+    );
 
     ids.customerUser = await mkUser('عميل', 'customer');
     const [customer] = await q<{ id: string }[]>(
@@ -328,6 +335,7 @@ describe('WorkforceAnalyticsService — إحصائيات القوى العامل
     await del(`DELETE FROM wallets WHERE id = ANY($1)`, [ids.leadWallet, ids.assistantWallet]);
     await del(`DELETE FROM addresses WHERE id = ANY($1)`, [ids.address]);
     await del(`DELETE FROM customer_profiles WHERE id = ANY($1)`, [ids.customerProfile]);
+    await del(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [ids.leadProfile, ids.assistantProfile]);
     await del(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [ids.leadProfile, ids.assistantProfile]);
     await del(`DELETE FROM technician_companies WHERE id = ANY($1)`, [ids.company]);
     await del(`DELETE FROM users WHERE id = ANY($1)`, [
@@ -552,7 +560,10 @@ describe('WorkforceAnalyticsService — إحصائيات القوى العامل
       // الطلبات التلاتة كلها ليها فني (مكتمل ×٢ + إعادة زيارة شغّالة).
       expect(mine.orders_matched).toBe(3);
       expect(mine.orders_unmatched).toBe(0);
-      expect(mine.technicians_home_based).toBe(2);
+      expect(mine.technicians_serving_area).toBe(2);
+      // واحد فقط عنوانه هنا، لكن الاتنين معتمدين لتغطية نطاق الخدمة؛ ده بالضبط الفرق
+      // بين لوجستيات السكن والتغطية التي يستخدمها التوزيع فعليًا.
+      expect(mine.technicians_home_based).toBe(1);
       expect(mine.orders_per_technician).toBe(1.5);
     });
 

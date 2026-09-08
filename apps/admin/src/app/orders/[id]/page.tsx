@@ -47,15 +47,6 @@ const EARNING_SHARE_ROLE_LABELS: Record<OrderEarningShareResponseDto['participan
   assistant: 'مساعد',
 };
 
-// GET /technicians/:id/schedule (نسخة العميل — is_available بس، docs/08 §25.2 فتحها للأدمن كمان)
-interface ScheduleSlot {
-  id: string;
-  slot_date: string;
-  start_time: string;
-  end_time: string;
-  is_available: boolean;
-}
-
 // GET /admin/orders/:id/reschedule-options (ADR-0034) — يوم + هل الفني المعيّن متاح فيه فعلاً.
 interface RescheduleOptionDto {
   date: string;
@@ -333,11 +324,11 @@ export default function OrderDetailPage() {
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
-  // إعادة جدولة زيارة فاشلة (docs/08 §25.2) — لازم موعد جديد فعلي بيتحقق من availability الفني،
-  // مش زرار بيرجّع الطلب ACCEPTED بنفس الموعد القديم بصمت.
+  // حل زيارة فاشلة يستعمل نفس أيام الإتاحة الحقيقية لإعادة الجدولة العامة. الـslots اليدوية
+  // اختيارية في النظام، لذلك لا يجوز أن تكون شرطًا لاستكمال طلب العميل.
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
-  const [availableSlots, setAvailableSlots] = useState<ScheduleSlot[] | null>(null);
-  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [failedVisitRescheduleOptions, setFailedVisitRescheduleOptions] = useState<RescheduleOptionDto[] | null>(null);
+  const [failedVisitRescheduleDate, setFailedVisitRescheduleDate] = useState('');
   const [rescheduleNotes, setRescheduleNotes] = useState('');
   const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
   const [cashDisputeNotes, setCashDisputeNotes] = useState('');
@@ -864,29 +855,23 @@ export default function OrderDetailPage() {
   // الأدمن بيحل بعد المراجعة: reschedule (موعد جديد فعلي، راجع docs/08 §25.2) أو cancel_with_fee
   // (رسوم + استرداد الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
   //
-  // بَقّة حقيقية اتصلحت (§25.2، قرار مالك صريح 2026-08-15): الزرار كان بيبعت request فوري يرجّع
-  // الطلب ACCEPTED بنفس الموعد القديم بالظبط، صفر اختيار موعد جديد وصفر فحص availability —
-  // بالظبط زي ما الباك-إند كان بيقبله قبل الإصلاح. دلوقتي بيفتح فورم بيجيب سلوتات الفني المتاحة
-  // فعليًا (GET /technicians/:id/schedule، نفس الـendpoint اللي العميل بيستخدمه وقت الحجز الأصلي).
+  // لا نسمح بعودة الطلب إلى ACCEPTED بنفس الموعد القديم، لكن لا نطلب من الفني أن ينشئ
+  // slot يدويًا: هذا نفس endpoint ومحرك الإتاحة الذي تستخدمه إعادة الجدولة العامة.
   async function handleOpenRescheduleForm() {
     setShowRescheduleForm((s) => !s);
-    if (availableSlots !== null || !order?.technician_id) return;
+    if (failedVisitRescheduleOptions !== null || !order?.technician_id) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const slots = await authedFetch<ScheduleSlot[]>(
-        `/technicians/${order.technician_id}/schedule?from=${today}&to=${to}`,
-      );
-      setAvailableSlots(slots.filter((s) => s.is_available));
+      const options = await authedFetch<RescheduleOptionDto[]>(`/admin/orders/${id}/reschedule-options`);
+      setFailedVisitRescheduleOptions(options);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل جدول الفني');
+      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل أيام الفني المتاحة');
     }
   }
 
   async function handleResolveFailedVisitReschedule(e: FormEvent) {
     e.preventDefault();
-    if (!selectedSlotId) {
-      window.alert('لازم تختار موعد جديد من الجدول');
+    if (!failedVisitRescheduleDate) {
+      window.alert('لازم تختار يوم جديد');
       return;
     }
     if (rescheduleNotes.trim().length < 5) {
@@ -898,11 +883,15 @@ export default function OrderDetailPage() {
     try {
       await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
         method: 'POST',
-        body: JSON.stringify({ outcome: 'reschedule', admin_notes: rescheduleNotes, new_slot_id: selectedSlotId }),
+        body: JSON.stringify({
+          outcome: 'reschedule',
+          admin_notes: rescheduleNotes,
+          new_scheduled_at: new Date(`${failedVisitRescheduleDate}T00:00:00Z`).toISOString(),
+        }),
       });
       setShowRescheduleForm(false);
-      setAvailableSlots(null);
-      setSelectedSlotId('');
+      setFailedVisitRescheduleOptions(null);
+      setFailedVisitRescheduleDate('');
       setRescheduleNotes('');
       load();
     } catch (err) {
@@ -1965,25 +1954,29 @@ export default function OrderDetailPage() {
               {showRescheduleForm && (
                 <form onSubmit={handleResolveFailedVisitReschedule} className="flex flex-col gap-2">
                   <div>
-                    <Label htmlFor="new_slot_id">الموعد الجديد</Label>
-                    {availableSlots === null && <p className="text-xs text-muted-foreground">جاري تحميل جدول الفني…</p>}
-                    {availableSlots !== null && availableSlots.length === 0 && (
-                      <p className="text-xs text-destructive">مفيش سلوتات متاحة للفني ده حاليًا — لازم يضيف مواعيد فاضية الأول.</p>
+                    <Label htmlFor="failed_visit_reschedule_date">اليوم الجديد</Label>
+                    {failedVisitRescheduleOptions === null && (
+                      <p className="text-xs text-muted-foreground">جاري تحميل أيام الفني المتاحة…</p>
                     )}
-                    {availableSlots !== null && availableSlots.length > 0 && (
+                    {failedVisitRescheduleOptions !== null && (
                       <SelectNative
-                        id="new_slot_id"
-                        value={selectedSlotId}
-                        onChange={(e) => setSelectedSlotId(e.target.value)}
+                        id="failed_visit_reschedule_date"
+                        value={failedVisitRescheduleDate}
+                        onChange={(e) => setFailedVisitRescheduleDate(e.target.value)}
                         required
                       >
-                        <option value="">اختار موعد</option>
-                        {availableSlots.map((slot) => (
-                          <option key={slot.id} value={slot.id}>
-                            {slot.slot_date} — {slot.start_time.slice(0, 5)} إلى {slot.end_time.slice(0, 5)}
+                        <option value="" disabled>اختار يوم</option>
+                        {failedVisitRescheduleOptions.map((option) => (
+                          <option key={option.date} value={option.date} disabled={!option.available}>
+                            {option.date}{option.available ? '' : ' — الفني مشغول/مش متاح'}
                           </option>
                         ))}
                       </SelectNative>
+                    )}
+                    {failedVisitRescheduleOptions?.every((option) => !option.available) && (
+                      <p className="text-xs text-destructive">
+                        الفني غير متاح في الأيام المعروضة. اختَر إعادة تعيين فني أو راجع جدول الطاقم، وليس مطلوبًا إنشاء slots يدويًا.
+                      </p>
                     )}
                   </div>
                   <div>
@@ -1999,7 +1992,12 @@ export default function OrderDetailPage() {
                   <Button
                     type="submit"
                     size="sm"
-                    disabled={isSaving || !availableSlots || availableSlots.length === 0}
+                    disabled={
+                      isSaving ||
+                      !failedVisitRescheduleDate ||
+                      failedVisitRescheduleOptions === null ||
+                      !failedVisitRescheduleOptions.some((option) => option.date === failedVisitRescheduleDate && option.available)
+                    }
                     className="w-fit"
                   >
                     تأكيد إعادة الجدولة

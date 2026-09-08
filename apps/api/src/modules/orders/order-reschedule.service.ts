@@ -18,6 +18,7 @@ import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-re
 import { CustomerRescheduleReasonCode, RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQueriesService } from './order-queries.service';
+import { canTransition } from './order-state-machine';
 import { assertNoScheduleOverlap, resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
 import { orderCandidateLoad } from '../technicians/technician-day-capacity.sql';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
@@ -384,6 +385,33 @@ export class OrderRescheduleService {
   }
 
   /**
+   * حل زيارة فاشلة مع استمرار العميل: نفس محرك إعادة الجدولة الذرّي، لكن الطلب يبدأ من
+   * `disputed` وينتقل إلى `accepted` داخل المعاملة نفسها. وجوده هنا يمنع مسار نزاعات ثانٍ
+   * يعتمد على slots يدوية ويعطي إجابة مختلفة عن الحجز وإعادة الجدولة العامة.
+   */
+  async rescheduleFailedVisitByAdmin(
+    adminUserId: string,
+    orderId: string,
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
+    notes: string,
+  ): Promise<Order> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (order.orderStatus !== OrderStatus.DISPUTED) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتغيّر بالفعل — حدّث الصفحة قبل إعادة المحاولة', HttpStatus.CONFLICT);
+    }
+    return this.rescheduleCore(order, target, {
+      userId: adminUserId,
+      role: 'admin',
+      changeSource: OrderChangeSource.ADMIN,
+      reasonSuffix: ` — حل زيارة فاشلة: ${notes}`,
+      transitionDisputedToAccepted: true,
+    });
+  }
+
+  /**
    * يعيد جدولة طلب لم يُسند بعد. هذا ليس استثناءً متساهلًا من فحص التوافر: لا يوجد منفّذ
    * أصلًا لفحصه، ولذلك لا يسمح إلا بموعد عام مستقبلي ثم يظل التعيين مسارًا منفصلًا يطبق
    * كامل أهلية الفني/المساعد على الموعد الجديد.
@@ -542,6 +570,8 @@ export class OrderRescheduleService {
       changeSource: OrderChangeSource;
       reasonSuffix?: string;
       customerRescheduleLimit?: number;
+      /** مسار حل الزيارة الفاشلة فقط؛ ينتقل من disputed إلى accepted تحت نفس القفل. */
+      transitionDisputedToAccepted?: boolean;
     },
   ): Promise<Order> {
     const orderId = order.id;
@@ -559,7 +589,7 @@ export class OrderRescheduleService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    this.assertReschedulable(order);
+    this.assertReschedulable(order, actor.transitionDisputedToAccepted === true);
 
     let newSlot: TechnicianScheduleSlot | null = null;
     let newScheduledAt: Date;
@@ -596,7 +626,7 @@ export class OrderRescheduleService {
         .where('o.id = :orderId', { orderId })
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-      this.assertReschedulable(fresh);
+      this.assertReschedulable(fresh, actor.transitionDisputedToAccepted === true);
       if (
         actor.role === 'customer' &&
         actor.customerRescheduleLimit !== undefined &&
@@ -655,6 +685,13 @@ export class OrderRescheduleService {
           .execute();
       }
 
+      const previousStatus = fresh.orderStatus;
+      if (actor.transitionDisputedToAccepted) {
+        if (!canTransition(fresh.orderStatus, OrderStatus.ACCEPTED)) {
+          throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+        }
+        fresh.orderStatus = OrderStatus.ACCEPTED;
+      }
       fresh.scheduledAt = newScheduledAt;
       fresh.scheduledEndAt = interval.scheduledEndAt;
       fresh.durationMinutes = interval.durationMinutes;
@@ -666,7 +703,7 @@ export class OrderRescheduleService {
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId,
-          previousStatus: fresh.orderStatus,
+          previousStatus,
           newStatus: fresh.orderStatus,
           changedByUserId: actor.userId,
           changedByRole: actor.role,
@@ -712,8 +749,8 @@ export class OrderRescheduleService {
     return updatedOrder;
   }
 
-  private assertReschedulable(order: Order): void {
-    if (!RESCHEDULABLE_STATUSES.has(order.orderStatus)) {
+  private assertReschedulable(order: Order, allowDisputedFailedVisit = false): void {
+    if (!RESCHEDULABLE_STATUSES.has(order.orderStatus) && !(allowDisputedFailedVisit && order.orderStatus === OrderStatus.DISPUTED)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
         `مينفعش تعيد جدولة الطلب والفني في حالة ${order.orderStatus}`,

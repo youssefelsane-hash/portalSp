@@ -247,6 +247,9 @@ export interface AreaCoverageRow {
   orders_matched: number;
   orders_unmatched: number;
   match_rate: number | null;
+  /** فنيون معتمدون لهم نطاق خدمة نشط يغطي نطاق طلبات المنطقة. */
+  technicians_serving_area: number;
+  /** عنوان السكن فقط؛ لا يستخدمه محرك المطابقة كمعيار للتغطية. */
   technicians_home_based: number;
   orders_per_technician: number | null;
 }

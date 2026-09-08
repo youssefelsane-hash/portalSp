@@ -183,8 +183,8 @@ export default function WorkforceAnalyticsPage() {
               <CardTitle className="text-base">التغطية الجغرافية</CardTitle>
               <p className="text-muted-foreground text-sm">
                 {coverage.data.uncovered_with_demand.length > 0
-                  ? `${coverage.data.uncovered_with_demand.length} منطقة فيها طلب حقيقي وصفر فنيين ساكنين — دي أول أماكن التوظيف.`
-                  : 'كل منطقة فيها طلب فيها فنيين.'}
+                  ? `${coverage.data.uncovered_with_demand.length} منطقة فيها طلب حقيقي وصفر فنيين معتمدين لتغطية نطاقها — دي أول أماكن التوظيف.`
+                  : 'كل منطقة فيها طلب لها تغطية تشغيلية.'}
               </p>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -199,7 +199,8 @@ export default function WorkforceAnalyticsPage() {
                       <TableHead>طلبات</TableHead>
                       <TableHead>اتطابقت</TableHead>
                       <TableHead>من غير فني</TableHead>
-                      <TableHead>فنيين</TableHead>
+                      <TableHead>فنيين بالنطاق</TableHead>
+                      <TableHead>ساكنين بالمنطقة</TableHead>
                       <TableHead>طلب لكل فني</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -207,13 +208,14 @@ export default function WorkforceAnalyticsPage() {
                     {coverage.data.areas.map((area) => (
                       <TableRow
                         key={area.area_id}
-                        className={area.technicians_home_based === 0 && area.orders_placed > 0 ? 'bg-amber-500/10' : undefined}
+                        className={area.technicians_serving_area === 0 && area.orders_placed > 0 ? 'bg-amber-500/10' : undefined}
                       >
                         <TableCell>{area.area_name_ar}</TableCell>
                         <TableCell>{area.city_name_ar}</TableCell>
                         <TableCell className="tabular-nums">{formatCount(area.orders_placed)}</TableCell>
                         <TableCell className="tabular-nums">{formatCount(area.orders_matched)}</TableCell>
                         <TableCell className="tabular-nums">{formatCount(area.orders_unmatched)}</TableCell>
+                        <TableCell className="tabular-nums">{formatCount(area.technicians_serving_area)}</TableCell>
                         <TableCell className="tabular-nums">{formatCount(area.technicians_home_based)}</TableCell>
                         <TableCell className="tabular-nums">
                           {area.orders_per_technician === null ? '—' : area.orders_per_technician}

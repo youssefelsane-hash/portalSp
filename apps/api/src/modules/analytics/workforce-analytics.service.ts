@@ -95,8 +95,11 @@ export interface AreaCoverageRow {
   orders_matched: number;
   orders_unmatched: number;
   match_rate: number | null;
+  /** معتمدون لديهم نطاق خدمة نشط يغطي نطاق طلبات هذه المنطقة في الفترة. */
+  technicians_serving_area: number;
+  /** معلومة لوجستية ثانوية: عنوان سكن الفني، وليس معيار المطابقة أو التغطية. */
   technicians_home_based: number;
-  /** طلبات في الفترة لكل فني ساكن في المنطقة — `null` لو مفيش أي فني (وده بالظبط اللي بيهم). */
+  /** طلبات في الفترة لكل فني يغطي نطاق المنطقة فعليًا. */
   orders_per_technician: number | null;
 }
 
@@ -104,7 +107,7 @@ export interface AreaCoverageReport {
   from: string;
   to: string;
   areas: AreaCoverageRow[];
-  /** مناطق فيها طلب حقيقي وصفر فنيين — أول مكان تتوظّف فيه. */
+  /** مناطق فيها طلب حقيقي وصفر فنيين معتمدين يغطي نطاقها — أول مكان تتوظّف فيه. */
   uncovered_with_demand: AreaCoverageRow[];
 }
 
@@ -532,11 +535,9 @@ export class WorkforceAnalyticsService {
   }
 
   /**
-   * تغطية جغرافية: فين الطلب موجود وفين الناس موجودة — والفجوة بينهم.
-   *
-   * العرض بيتقاس بـ`home_area_id` (منطقة سكن الفني) مش بمناطق الخدمة، وده اختيار متعمّد:
-   * `technician_zones` بتقول «مستعد يروح فين» واللي بيهم هنا «فين الناس أصلاً ساكنة»، لأن
-   * المنطقة اللي فيها طلب وصفر ساكنين هي اللي محتاجة توظيف.
+   * تغطية جغرافية تشغيلية: هل يوجد فني معتمد يغطي **نطاق خدمة** الطلبات الفعلية في المنطقة؟
+   * `home_area_id` يظل سياقًا لوجستيًا، لكنه لا يصلح كقرار تغطية؛ المطابقة نفسها لا تستخدمه.
+   * ربط البطاقة بـ`technician_zones` يمنع إنذار توظيف كاذب لمنطقة فيها فنيون مسموح لهم العمل.
    */
   async areaCoverage(from: Date, to: Date, limit = 50): Promise<AreaCoverageReport> {
     const rows = await this.dataSource.query<
@@ -546,34 +547,50 @@ export class WorkforceAnalyticsService {
         city_name_ar: string;
         orders_placed: string;
         orders_matched: string;
+        technicians_serving_area: string;
         technicians_home_based: string;
       }[]
     >(
-      `SELECT a.id AS area_id, a.name_ar AS area_name_ar, c.name_ar AS city_name_ar,
+      `WITH demand AS (
+         SELECT ad.area_id,
+                o.service_zone_id,
+                COUNT(*) AS orders_placed,
+                COUNT(*) FILTER (WHERE o.order_status = ANY($3::order_status[])) AS orders_matched
+           FROM orders o
+           JOIN addresses ad ON ad.id = o.address_id
+          WHERE o.deleted_at IS NULL AND ad.area_id IS NOT NULL AND o.service_zone_id IS NOT NULL
+            AND o.placed_at >= $1 AND o.placed_at < $2
+          GROUP BY ad.area_id, o.service_zone_id
+       ), demand_by_area AS (
+         SELECT area_id, SUM(orders_placed) AS orders_placed, SUM(orders_matched) AS orders_matched
+           FROM demand
+          GROUP BY area_id
+       ), operational_supply AS (
+         SELECT d.area_id, COUNT(DISTINCT tz.technician_id) AS technicians_serving_area
+           FROM demand d
+           JOIN technician_zones tz
+             ON tz.service_zone_id = d.service_zone_id AND tz.is_active = true AND tz.deleted_at IS NULL
+           JOIN technician_profiles tp
+             ON tp.id = tz.technician_id AND tp.deleted_at IS NULL AND tp.verification_status = 'approved'
+          GROUP BY d.area_id
+       ), home_supply AS (
+         SELECT tp.home_area_id, COUNT(*) AS technicians_home_based
+           FROM technician_profiles tp
+          WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved' AND tp.home_area_id IS NOT NULL
+          GROUP BY tp.home_area_id
+       )
+       SELECT a.id AS area_id, a.name_ar AS area_name_ar, c.name_ar AS city_name_ar,
               COALESCE(od.orders_placed, 0) AS orders_placed,
               COALESCE(od.orders_matched, 0) AS orders_matched,
+              COALESCE(os.technicians_serving_area, 0) AS technicians_serving_area,
               COALESCE(sp.technicians_home_based, 0) AS technicians_home_based
          FROM areas a
          JOIN cities c ON c.id = a.city_id
-         LEFT JOIN (
-           SELECT ad.area_id,
-                  COUNT(*) AS orders_placed,
-                  COUNT(*) FILTER (WHERE o.order_status = ANY($3::order_status[])) AS orders_matched
-             FROM orders o
-             JOIN addresses ad ON ad.id = o.address_id
-            WHERE o.deleted_at IS NULL AND ad.area_id IS NOT NULL
-              AND o.placed_at >= $1 AND o.placed_at < $2
-            GROUP BY ad.area_id
-         ) od ON od.area_id = a.id
-         LEFT JOIN (
-           SELECT tp.home_area_id, COUNT(*) AS technicians_home_based
-             FROM technician_profiles tp
-            WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
-              AND tp.home_area_id IS NOT NULL
-            GROUP BY tp.home_area_id
-         ) sp ON sp.home_area_id = a.id
+         LEFT JOIN demand_by_area od ON od.area_id = a.id
+         LEFT JOIN operational_supply os ON os.area_id = a.id
+         LEFT JOIN home_supply sp ON sp.home_area_id = a.id
         WHERE a.deleted_at IS NULL AND a.is_active
-          AND (COALESCE(od.orders_placed, 0) > 0 OR COALESCE(sp.technicians_home_based, 0) > 0)
+          AND (COALESCE(od.orders_placed, 0) > 0 OR COALESCE(os.technicians_serving_area, 0) > 0 OR COALESCE(sp.technicians_home_based, 0) > 0)
         ORDER BY COALESCE(od.orders_placed, 0) DESC, a.name_ar ASC
         LIMIT $4`,
       [from, to, [...ASSIGNED_ORDER_STATUSES], Math.min(Math.max(limit, 1), 200)],
@@ -582,7 +599,8 @@ export class WorkforceAnalyticsService {
     const areas: AreaCoverageRow[] = rows.map((r) => {
       const placed = Number(r.orders_placed);
       const matched = Number(r.orders_matched);
-      const technicians = Number(r.technicians_home_based);
+      const techniciansServingArea = Number(r.technicians_serving_area);
+      const techniciansHomeBased = Number(r.technicians_home_based);
       return {
         area_id: r.area_id,
         area_name_ar: r.area_name_ar,
@@ -591,8 +609,9 @@ export class WorkforceAnalyticsService {
         orders_matched: matched,
         orders_unmatched: placed - matched,
         match_rate: placed > 0 ? Number(((matched / placed) * 100).toFixed(2)) : null,
-        technicians_home_based: technicians,
-        orders_per_technician: technicians > 0 ? Number((placed / technicians).toFixed(2)) : null,
+        technicians_serving_area: techniciansServingArea,
+        technicians_home_based: techniciansHomeBased,
+        orders_per_technician: techniciansServingArea > 0 ? Number((placed / techniciansServingArea).toFixed(2)) : null,
       };
     });
 
@@ -600,7 +619,7 @@ export class WorkforceAnalyticsService {
       from: from.toISOString(),
       to: to.toISOString(),
       areas,
-      uncovered_with_demand: areas.filter((a) => a.technicians_home_based === 0 && a.orders_placed > 0),
+      uncovered_with_demand: areas.filter((a) => a.technicians_serving_area === 0 && a.orders_placed > 0),
     };
   }
 

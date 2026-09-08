@@ -166,7 +166,7 @@ export class OrdersService {
       this.orders,
       this.dataSource,
       this.queries,
-      this.scheduleService,
+      this.rescheduleFlow,
       this.paymentsService,
       this.supportService,
       this.settingsService,

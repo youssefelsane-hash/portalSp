@@ -3027,6 +3027,27 @@ export class PaymentsService {
     });
   }
 
+  /**
+   * يمنع إرسال refund للبوابة قبل اكتشاف أن الطلب صرف بالفعل بحصص غير مكتملة. لو لم تُنشأ
+   * تسوية أصلًا فلا يوجد رصيد فني لعكسه، وهذا طبيعي لطلب مدفوع أُلغي قبل التنفيذ.
+   */
+  private async assertV2SettlementSnapshotRefundable(manager: EntityManager, order: Order): Promise<void> {
+    if (order.settlementPolicyVersion !== 2 || order.totalAmountCents <= 0) return;
+    const shares = await this.crewEarningsService.listForOrder(manager, order.id);
+    const bucketTotal = order.platformCommissionCents + shares.reduce((sum, share) => sum + share.shareCents, 0);
+    if (bucketTotal === order.totalAmountCents) return;
+
+    if (shares.length === 0 && order.technicianEarningCents === 0) {
+      // لم تصل أي أجرة إلى شخص بعد، لذلك لا يوجد توزيع يحتاج إلى reversal.
+      return;
+    }
+    throw new ApiException(
+      ErrorCode.PAY_001,
+      'تعذّر الاسترداد تلقائيًا: توزيع مستحقات الطلب غير مكتمل. راجع التسوية قبل إعادة المحاولة.',
+      HttpStatus.CONFLICT,
+    );
+  }
+
   async refundOrder(
     performedByUserId: string,
     orderId: string,
@@ -3058,6 +3079,9 @@ export class PaymentsService {
       if (order.paymentStatus !== OrderPaymentStatus.PAID && order.paymentStatus !== OrderPaymentStatus.PARTIALLY_REFUNDED) {
         throw new ApiException(ErrorCode.PAY_003, 'الطلب لازم يكون مدفوع الأول عشان يترد', HttpStatus.CONFLICT);
       }
+      // التحقق هنا، قبل إنشاء صف PROCESSING وقبل أي نداء خارجي للبوابة. لا يجوز اكتشاف
+      // snapshot ناقص بعد أن يكون مال العميل خرج بالفعل من المنصة.
+      await this.assertV2SettlementSnapshotRefundable(manager, order);
 
       const refundablePayments = await manager.find(Payment, {
         where: {
@@ -3299,61 +3323,82 @@ export class PaymentsService {
         (lockedOrder.settlementPolicyVersion === 2 ||
           (lockedOrder.technicianEarningCents > 0 && lockedOrder.technicianId))
       ) {
-        const previousRefundRows = await manager.find(Refund, {
-          where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
-          select: ['amountCents'],
-        });
-        const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
         const recordedShares = await this.crewEarningsService.listForOrder(manager, lockedOrder.id);
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         if (lockedOrder.settlementPolicyVersion === 2) {
-          const reversals = allocateSettlementRefundReversal({
-            orderTotalCents: lockedOrder.totalAmountCents,
-            previouslyRefundedCents,
-            currentRefundCents: amountCents,
-            buckets: [
-              {
-                bucketType: 'platform',
-                technicianId: null,
-                originalCents: lockedOrder.platformCommissionCents,
-              },
-              ...recordedShares.map((share) => ({
-                bucketType: 'participant' as const,
-                technicianId: share.technicianId,
-                originalCents: share.shareCents,
-              })),
-            ],
-          });
+          const buckets = [
+            {
+              bucketType: 'platform' as const,
+              technicianId: null,
+              originalCents: lockedOrder.platformCommissionCents,
+            },
+            ...recordedShares.map((share) => ({
+              bucketType: 'participant' as const,
+              technicianId: share.technicianId,
+              originalCents: share.shareCents,
+            })),
+          ];
+          const bucketTotal = buckets.reduce((sum, bucket) => sum + bucket.originalCents, 0);
 
-          for (const reversal of reversals) {
-            await manager.query(
-              `INSERT INTO refund_settlement_reversals
-                 (refund_id, order_id, bucket_type, technician_id, original_bucket_cents, reversal_cents)
-               VALUES ($1,$2,$3,$4,$5,$6)
-               ON CONFLICT DO NOTHING`,
-              [
-                lockedRefund.id,
-                lockedOrder.id,
-                reversal.bucketType,
-                reversal.technicianId,
-                reversal.originalCents,
-                reversal.reversalCents,
-              ],
-            );
-            if (reversal.bucketType !== 'participant' || !reversal.technicianId || reversal.reversalCents <= 0) {
-              continue;
+          // الطلب المدفوع قبل تسوية فعلية لا يملك نصيب فني لعكسه. الـpreflight قبل نداء
+          // البوابة منع حالة snapshot ناقص بعد صرف فني؛ هنا لا نرمي خطأ جديدًا بعد refund خارجي.
+          const hasRecordedParticipantPayout = recordedShares.length > 0 || lockedOrder.technicianEarningCents > 0;
+          if (bucketTotal !== lockedOrder.totalAmountCents) {
+            if (hasRecordedParticipantPayout) {
+              throw new Error(`Settlement snapshot changed after refund preflight for order ${lockedOrder.orderNumber}`);
             }
-            await this.reverseParticipantRefund(
-              manager,
-              reversal.technicianId,
-              reversal.reversalCents,
-              platformWallet.id,
-              lockedRefund.id,
-              lockedOrder.orderNumber,
+            this.logger.warn(
+              `Skipping settlement reversal for unmaterialized order ${lockedOrder.orderNumber}: buckets=${bucketTotal}, total=${lockedOrder.totalAmountCents}`,
             );
+          } else {
+            const previousRefundRows = await manager.find(Refund, {
+              where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+              select: ['amountCents'],
+            });
+            const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
+            const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+            const reversals = allocateSettlementRefundReversal({
+              orderTotalCents: lockedOrder.totalAmountCents,
+              previouslyRefundedCents,
+              currentRefundCents: amountCents,
+              buckets,
+            });
+
+            for (const reversal of reversals) {
+              await manager.query(
+                `INSERT INTO refund_settlement_reversals
+                   (refund_id, order_id, bucket_type, technician_id, original_bucket_cents, reversal_cents)
+                 VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT DO NOTHING`,
+                [
+                  lockedRefund.id,
+                  lockedOrder.id,
+                  reversal.bucketType,
+                  reversal.technicianId,
+                  reversal.originalCents,
+                  reversal.reversalCents,
+                ],
+              );
+              if (reversal.bucketType !== 'participant' || !reversal.technicianId || reversal.reversalCents <= 0) {
+                continue;
+              }
+              await this.reverseParticipantRefund(
+                manager,
+                reversal.technicianId,
+                reversal.reversalCents,
+                platformWallet.id,
+                lockedRefund.id,
+                lockedOrder.orderNumber,
+              );
+            }
           }
         } else {
+          const previousRefundRows = await manager.find(Refund, {
+            where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+            select: ['amountCents'],
+          });
+          const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
+          const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
           const sourceShares =
             recordedShares.length > 0
               ? recordedShares.map((share) => ({

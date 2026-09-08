@@ -2,7 +2,6 @@ import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { ORDER_RESCHEDULED_EVENT, OrderRescheduledEvent } from '../../common/events/order-rescheduled.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
@@ -11,16 +10,15 @@ import { PaymentGatewayStatus } from '../payments/entities/payment.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { SettingsService } from '../settings/settings.service';
 import { SupportService } from '../support/support.service';
-import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { ComplaintCategory } from '../support/entities/complaint.entity';
 import { FailedVisitReason, ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
-import { resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderQueriesService } from './order-queries.service';
+import { OrderRescheduleService } from './order-reschedule.service';
 import { canTransition } from './order-state-machine';
 
 const FAILED_VISIT_REASON_TO_COMPLAINT_CATEGORY: Record<FailedVisitReason, ComplaintCategory> = {
@@ -68,7 +66,7 @@ export class OrderDisputeService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly queries: OrderQueriesService,
-    private readonly scheduleService: TechnicianScheduleService,
+    private readonly rescheduleService: OrderRescheduleService,
     private readonly paymentsService: PaymentsService,
     private readonly supportService: SupportService,
     private readonly settingsService: SettingsService,
@@ -194,65 +192,37 @@ export class OrderDisputeService {
       if (!canTransition(order.orderStatus, OrderStatus.ACCEPTED)) {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
-      // بَقّة حقيقية اتصلحت (docs/08 §25.2، قرار مالك صريح 2026-08-15): "إعادة الجدولة" كانت
-      // بترجّع الطلب لـACCEPTED بس — نفس الموعد القديم بالظبط، صفر اختيار موعد جديد، صفر فحص
-      // availability. دلوقتي `new_slot_id` إجباري فعليًا هنا — نفس فحوصات POST /orders/:id/reschedule
-      // بالحرف (السلوت لازم يكون لنفس الفني ومتاح فعلاً)، جوّه نفس transaction قفل الـdispute.
-      if (!dto.new_slot_id) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تختار موعد جديد (new_slot_id) لإعادة الجدولة', HttpStatus.BAD_REQUEST);
-      }
-      const newSlot = await this.scheduleService.findAvailableSlotOrThrow(dto.new_slot_id);
-      if (newSlot.technicianId !== order.technicianId) {
+      // ما ينفعش نرجّع الطلب لنفس الموعد القديم بصمت. الموعد العام هو الافتراضي، والـslot
+      // الصريح يفضل متاحًا للتوافق مع الحجوزات القديمة؛ كلاهما يمر بمحرك الإتاحة المركزي.
+      if ((dto.new_slot_id == null) === (dto.new_scheduled_at == null)) {
         throw new ApiException(
           ErrorCode.VAL_001,
-          'السلوت الجديد لازم يكون لنفس الفني المعيّن على الطلب',
+          'اختار موعدًا جديدًا (new_scheduled_at) أو سلوت محددًا (new_slot_id) — واحد فقط',
           HttpStatus.BAD_REQUEST,
         );
       }
       const previousStatus = order.orderStatus;
-      const previousScheduledAt = order.scheduledAt;
-      const newScheduledAt = slotStart(newSlot);
-      await this.dataSource.transaction(async (manager) => {
-        const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
-        const interval = resolveRescheduledInterval(fresh, newScheduledAt);
-        if (interval.scheduledEndAt && interval.scheduledEndAt > slotEnd(newSlot)) {
-          throw new ApiException(
-            ErrorCode.VAL_001,
-            'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
-            HttpStatus.CONFLICT,
-          );
-        }
-        const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
-        if (!booked) {
-          throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
-        }
-        fresh.orderStatus = OrderStatus.ACCEPTED;
-        fresh.scheduledAt = newScheduledAt;
-        fresh.scheduledEndAt = interval.scheduledEndAt;
-        fresh.durationMinutes = interval.durationMinutes;
-        fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
-          ? interval.durationMinutes / 60
-          : null;
-        await manager.save(fresh);
-        await manager.save(
-          manager.create(OrderStatusHistory, {
-            orderId: order.id,
-            previousStatus,
-            newStatus: OrderStatus.ACCEPTED,
-            changedByUserId: adminUserId,
-            changedByRole: 'admin',
-            changeSource: OrderChangeSource.ADMIN,
-            reason: `${dto.admin_notes} — موعد جديد: ${newScheduledAt.toISOString()}`,
-          }),
-        );
-      });
+      const resolved = await this.rescheduleService.rescheduleFailedVisitByAdmin(
+        adminUserId,
+        orderId,
+        {
+          newSlotId: dto.new_slot_id,
+          newScheduledAt: dto.new_scheduled_at,
+          newScheduledEndAt: dto.new_scheduled_end_at,
+        },
+        dto.admin_notes,
+      );
       await this.auditLog.record({
         actorUserId: adminUserId,
         actorRole: 'admin',
         action: 'order.failed_visit_resolved',
         entityType: 'order',
         entityId: order.id,
-        newValues: { outcome: 'reschedule', order_status: OrderStatus.ACCEPTED, new_scheduled_at: newScheduledAt.toISOString() },
+        newValues: {
+          outcome: 'reschedule',
+          order_status: OrderStatus.ACCEPTED,
+          new_scheduled_at: resolved.scheduledAt?.toISOString() ?? null,
+        },
         meta,
       });
       this.events.emit(
@@ -267,14 +237,10 @@ export class OrderDisputeService {
           dto.admin_notes,
         ),
       );
-      this.events.emit(
-        ORDER_RESCHEDULED_EVENT,
-        new OrderRescheduledEvent(order.id, order.orderNumber, order.technicianId, order.customerId, previousScheduledAt, newScheduledAt),
-      );
       // القفل والكتابة الفعلية حصلوا على fresh (نسخة مقفولة جوّه الـtransaction)، مش order —
       // بنرجّع قراءة طازة من الـDB بدل order القديمة عشان القيمة المرجّعة تطابق الحالة الحقيقية
       // بالظبط (نفس بَقّة "lost update on the return value" اللي docs/08 §22 بند 31-32 لقطها).
-      return (await this.orders.findOne({ where: { id: orderId } }))!;
+      return resolved;
     }
 
     // cancel_with_fee — الطلبات الكاش (مفيش فلوس اتحصّلت أصلاً) صفر رسوم دايمًا، بغض النظر عن

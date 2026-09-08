@@ -40,6 +40,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
   let dataSource: DataSource;
   let ordersService: OrdersService;
   let paymentsService: PaymentsService;
+  let techniciansService: TechniciansService;
   let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
@@ -239,7 +240,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
 
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
-    const techniciansService = new TechniciansService(
+    techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
       {} as never, // technicianServicesRepo
@@ -339,8 +340,11 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
+      await q(`DELETE FROM refund_settlement_reversals WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM notifications WHERE user_id = ANY($1::uuid[])`, [userIds]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
       if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
@@ -422,6 +426,39 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     ).rejects.toThrow();
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.orderStatus).toBe(OrderStatus.DISPUTED); // فضل معلّق، ماترجعش ACCEPTED بصمت
+  });
+
+  it('resolve(reschedule) بموعد عام ينجح من غير أي slot يدوي عندما محرك الإتاحة يؤكد الفني', async () => {
+    const availability = jest.spyOn(techniciansService, 'hasEligibleTechnicianForDate').mockResolvedValue(true);
+    try {
+      const { orderId } = await insertOrder({
+        label: `day-only-${runId}`,
+        orderStatus: OrderStatus.DISPUTED,
+        paymentStatus: OrderPaymentStatus.PENDING,
+        totalAmountCents: 30000,
+      });
+
+      const resolved = await ordersService.resolveFailedVisit(ids.customerUser, orderId, {
+        outcome: FailedVisitOutcome.RESCHEDULE,
+        admin_notes: 'العميل أكد يومًا جديدًا من غير سلوت يدوي',
+        new_scheduled_at: '2031-09-03T00:00:00.000Z',
+      });
+
+      expect(resolved.orderStatus).toBe(OrderStatus.ACCEPTED);
+      expect(resolved.scheduledAt?.toISOString()).toBe('2031-09-03T00:00:00.000Z');
+      expect(availability).toHaveBeenCalledWith(
+        ids.service,
+        ids.zone,
+        ids.address,
+        expect.any(Date),
+        ids.techProfile,
+        orderId,
+        expect.anything(),
+      );
+      expect(await dataSource.getRepository(TechnicianScheduleSlot).count({ where: { orderId } })).toBe(0);
+    } finally {
+      availability.mockRestore();
+    }
   });
 
   it('resolve(reschedule) بسلوت فني تاني يترفض — مينفعش تغيّر الفني نفسه من مسار حل النزاع', async () => {
