@@ -1722,6 +1722,9 @@ export default function OrderDetailPage() {
                 <Badge variant="secondary">في أقرب وقت ممكن</Badge>
               )}
             </p>
+            <p>
+              تأجيلات العميل الذاتية: <Badge variant="secondary">{order.customer_reschedule_count ?? 0}</Badge>
+            </p>
             {order.warranty_expires_at && (
               <p>
                 الضمان لحد: {new Date(order.warranty_expires_at).toLocaleString('ar-EG-u-nu-latn')}

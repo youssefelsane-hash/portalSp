@@ -36,7 +36,9 @@ import { City } from '../geo/entities/city.entity';
 import { Area } from '../geo/entities/area.entity';
 import { ServiceZone } from '../geo/entities/service-zone.entity';
 import { Address } from '../customers/entities/address.entity';
-import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { EarningsPolicyService } from './earnings-policy.service';
+import { CrewEarningsService } from './crew-earnings.service';
+import { OrderEarningShare } from './entities/order-earning-share.entity';
 
 /**
  * Script 7 Phase 35 — Financial Reconciliation Test. الأسئلة الحاكمة من تعليمات الـaudit الأصلية
@@ -104,6 +106,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
         TechnicianLevelConfig,
         LoyaltyTransaction,
         OrderStatusHistory,
+        OrderEarningShare,
       ],
     });
     await dataSource.initialize();
@@ -250,7 +253,8 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       fakePaymentProviders,
       {} as never,
       {} as never, // installments repo (migration 0177)
-      crewEarningsServiceStub(),
+      new CrewEarningsService(settingsService),
+      new EarningsPolicyService(dataSource),
     );
 
     payoutsService = new PayoutsService(
@@ -274,7 +278,9 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
         ids.technicianProfile,
       ]);
       await q(`DELETE FROM payouts WHERE technician_id = $1`, [ids.technicianProfile]);
+      await q(`DELETE FROM payment_notification_outbox WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM refunds WHERE order_id = $1`, [ids.order]);
+      await q(`DELETE FROM order_earning_shares WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = ANY($1))`, [
         [ids.customerUser, ids.technicianUser],
       ]);

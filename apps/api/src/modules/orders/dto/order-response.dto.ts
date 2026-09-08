@@ -36,6 +36,8 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
+  /** عدد مرات تغيير العميل لموعده؛ ظاهر للإدارة والعميل كسياق تشغيلي، لا كرسوم مالية. */
+  customer_reschedule_count: number;
   /** ADR-0050 §4 — فترة التعاقد اللي السعر اتحسب منها (اشتراك/إيجار)، مش موعد الزيارة. */
   pricing_period_start: string | null;
   pricing_period_end: string | null;
@@ -201,6 +203,7 @@ export function toOrderResponseDto(
     customer_inputs: order.customerInputs ?? null,
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
+    customer_reschedule_count: order.customerRescheduleCount,
     pricing_period_start: order.pricingPeriodStart ? order.pricingPeriodStart.toISOString() : null,
     pricing_period_end: order.pricingPeriodEnd ? order.pricingPeriodEnd.toISOString() : null,
     duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),

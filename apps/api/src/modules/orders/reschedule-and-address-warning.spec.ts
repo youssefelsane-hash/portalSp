@@ -272,8 +272,12 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     const oldSlotId = await insertSlot('old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
     const newSlotId = await insertSlot('new', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
 
-    const updated = await ordersService.reschedule(ids.customerUser, orderId, { new_slot_id: newSlotId });
+    const updated = await ordersService.reschedule(ids.customerUser, orderId, {
+      new_slot_id: newSlotId,
+      reason_code: 'address_access',
+    });
     expect(updated.scheduledAt).not.toBeNull();
+    expect(updated.customerRescheduleCount).toBe(1);
 
     const oldSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: oldSlotId } });
     expect(oldSlot.status).toBe(TechnicianScheduleSlotStatus.AVAILABLE);
@@ -282,6 +286,28 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     const newSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: newSlotId } });
     expect(newSlot.status).toBe(TechnicianScheduleSlotStatus.BOOKED);
     expect(newSlot.orderId).toBe(orderId);
+
+    const [history] = await dataSource.query<{ reason: string; metadata: { customer_reschedule_count: number } }[]>(
+      `SELECT reason, metadata FROM order_status_history WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [orderId],
+    );
+    expect(history.reason).toContain('تعذّر الدخول إلى العنوان');
+    expect(history.metadata.customer_reschedule_count).toBe(1);
+  });
+
+  it('سقف تأجيل العميل يُفحص داخل قفل الطلب ولا يحرر سلوتًا أو يحجز آخر عند الرفض', async () => {
+    const orderId = await insertOrder(`limit-${runId}`, OrderStatus.ACCEPTED);
+    const oldSlotId = await insertSlot('limit-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
+    const newSlotId = await insertSlot('limit-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
+    await dataSource.query(`UPDATE orders SET customer_reschedule_count = 3 WHERE id = $1`, [orderId]);
+
+    await expect(ordersService.reschedule(ids.customerUser, orderId, { new_slot_id: newSlotId })).rejects.toThrow(
+      'وصلت للحد الأقصى لتغيير موعد الطلب',
+    );
+    const oldSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: oldSlotId } });
+    const newSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: newSlotId } });
+    expect(oldSlot.status).toBe(TechnicianScheduleSlotStatus.BOOKED);
+    expect(newSlot.status).toBe(TechnicianScheduleSlotStatus.AVAILABLE);
   });
 
   it('مينفعش تعيد جدولة بعد ما الفني يبقى في الطريق فعلاً (technician_on_way)', async () => {

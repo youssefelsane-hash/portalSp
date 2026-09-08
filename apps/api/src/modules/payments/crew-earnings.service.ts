@@ -161,6 +161,10 @@ export class CrewEarningsService {
               ? share.assistantLevelMultiplier.toFixed(2)
               : null,
           assistantTargetCents: share.assistantTargetCents ?? null,
+          // `recordShares` هو مسار V1 التاريخي فقط. ترك default الجدول (2) كان يوسم حصص V1
+          // كأنها V2 ناقصة ثم يصطدم بقيد snapshot؛ النسخة يجب أن تُكتب صراحة لا بالـdefault.
+          settlementPolicyVersion: 1,
+          calculationAlgorithmVersion: null,
         })
         .orIgnore()
         .execute();

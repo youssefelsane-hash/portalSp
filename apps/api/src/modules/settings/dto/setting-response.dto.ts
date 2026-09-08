@@ -1,4 +1,5 @@
 import { Setting } from '../entities/setting.entity';
+import { SETTINGS_REGISTRY } from '../settings-registry';
 import { isSecretSettingKey } from '../settings.service';
 
 export interface SettingResponseDto {
@@ -11,9 +12,12 @@ export interface SettingResponseDto {
   is_public: boolean;
   updated_by_user_id: string | null;
   updated_at: string;
+  is_deprecated: boolean;
+  deprecation_reason: string | null;
 }
 
 export function toSettingResponseDto(setting: Setting): SettingResponseDto {
+  const definition = SETTINGS_REGISTRY[setting.key];
   return {
     id: setting.id,
     key: setting.key,
@@ -24,5 +28,7 @@ export function toSettingResponseDto(setting: Setting): SettingResponseDto {
     is_public: setting.isPublic,
     updated_by_user_id: setting.updatedByUserId,
     updated_at: setting.updatedAt.toISOString(),
+    is_deprecated: definition?.deprecated === true,
+    deprecation_reason: definition?.deprecationReason ?? null,
   };
 }

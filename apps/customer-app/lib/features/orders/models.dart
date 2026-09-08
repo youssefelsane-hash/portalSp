@@ -135,6 +135,8 @@ class Order {
   final String? technicianCashNotReceivedAt;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — null = ASAP (اختيار العميل الصريح وقت الحجز، مش سهو).
   final String? scheduledAt;
+  /// عدد المرات التي غيّر فيها العميل الموعد بنفسه؛ يحمي وقت الفني من التأجيلات المفتوحة.
+  final int customerRescheduleCount;
   // أول حجز في الخطة والطلبات المولدة لاحقًا يحملان نفس هوية التكرار، فيظهران في "طلباتي"
   // وفي قسم الحجوزات المتكررة من غير فقدان أو ازدواج دلالي.
   final String? recurringTemplateId;
@@ -179,6 +181,7 @@ class Order {
     this.customerCashConfirmedAt,
     this.technicianCashNotReceivedAt,
     this.scheduledAt,
+    this.customerRescheduleCount = 0,
     this.recurringTemplateId,
     this.recurringOccurrenceAt,
     this.levelPremiumCents = 0,
@@ -237,6 +240,8 @@ class Order {
     technicianCashNotReceivedAt:
         json['technician_cash_not_received_at'] as String?,
     scheduledAt: json['scheduled_at'] as String?,
+    customerRescheduleCount:
+        (json['customer_reschedule_count'] as num?)?.round() ?? 0,
     recurringTemplateId: json['recurring_template_id'] as String?,
     recurringOccurrenceAt: json['recurring_occurrence_at'] as String?,
   );

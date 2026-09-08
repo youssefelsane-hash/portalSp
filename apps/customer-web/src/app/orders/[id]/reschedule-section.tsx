@@ -23,6 +23,8 @@ export function RescheduleSection({
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<RescheduleDateOptionDto[] | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [reasonCode, setReasonCode] = useState<'customer_request' | 'availability_change' | 'address_access' | 'other'>('customer_request');
+  const [reasonDetails, setReasonDetails] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +42,7 @@ export function RescheduleSection({
     setBusy(true);
     setError(null);
     try {
-      const order = await rescheduleOrder(authedFetch, orderId, selectedDate);
+      const order = await rescheduleOrder(authedFetch, orderId, selectedDate, reasonCode, reasonDetails);
       onRescheduled(order);
       setOpen(false);
     } catch (err) {
@@ -86,9 +88,34 @@ export function RescheduleSection({
         </div>
       )}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      <label className="mt-4 block text-sm font-medium">
+        سبب تغيير الموعد
+        <select
+          value={reasonCode}
+          onChange={(event) => setReasonCode(event.target.value as typeof reasonCode)}
+          className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2"
+        >
+          <option value="customer_request">تغيير خطة العميل</option>
+          <option value="availability_change">تغيّر وقتي المتاح</option>
+          <option value="address_access">تعذّر الدخول إلى العنوان</option>
+          <option value="other">سبب آخر</option>
+        </select>
+      </label>
+      {reasonCode === 'other' && (
+        <label className="mt-3 block text-sm font-medium">
+          اكتب السبب
+          <input
+            value={reasonDetails}
+            onChange={(event) => setReasonDetails(event.target.value)}
+            maxLength={500}
+            required
+            className="mt-1 block w-full rounded-lg border border-border bg-surface px-3 py-2"
+          />
+        </label>
+      )}
       <div className="mt-4 flex gap-2">
         <button
-          disabled={busy || !selectedDate}
+          disabled={busy || !selectedDate || (reasonCode === 'other' && !reasonDetails.trim())}
           onClick={submit}
           className="rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >

@@ -169,6 +169,7 @@ function SettingValueEditor({
     'payments.paymob.secret_key',
     'payments.paymob.hmac_secret',
   ]).has(setting.key);
+  const isDeprecated = setting.is_deprecated === true;
   const [draft, setDraft] = useState(
     isSecret
       ? ''
@@ -202,7 +203,7 @@ function SettingValueEditor({
         <Button
           size="sm"
           variant={draft === 'true' ? 'default' : 'outline'}
-          disabled={isSaving}
+          disabled={isSaving || isDeprecated}
           onClick={() => {
             setDraft('true');
             onSave(true);
@@ -213,7 +214,7 @@ function SettingValueEditor({
         <Button
           size="sm"
           variant={draft === 'false' ? 'default' : 'outline'}
-          disabled={isSaving}
+          disabled={isSaving || isDeprecated}
           onClick={() => {
             setDraft('false');
             onSave(false);
@@ -232,13 +233,17 @@ function SettingValueEditor({
         value={draft}
         placeholder={isSecret && setting.value ? 'مُعدّ بالفعل — اكتب قيمة جديدة للتغيير' : undefined}
         onChange={(e) => setDraft(e.target.value)}
+        disabled={isDeprecated}
         dir={setting.value_type === 'number' ? 'ltr' : undefined}
         className="max-w-xs"
       />
-      {isDirty && (
+      {isDirty && !isDeprecated && (
         <Button size="sm" disabled={isSaving} onClick={handleSave}>
           حفظ
         </Button>
+      )}
+      {isDeprecated && (
+        <p className="text-xs text-muted-foreground">{setting.deprecation_reason ?? 'إعداد تاريخي غير قابل للتعديل'}</p>
       )}
     </div>
   );

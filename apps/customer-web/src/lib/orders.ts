@@ -186,6 +186,7 @@ export interface OrderResponseDto {
   problem_description: string | null;
   customer_notes: string | null;
   scheduled_at: string | null;
+  customer_reschedule_count?: number;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
   surge_amount_cents: number;
@@ -402,8 +403,18 @@ export const fetchRescheduleOptions = (authedFetch: AuthedFetch, orderId: string
   authedFetch<RescheduleDateOptionDto[]>(`/orders/${orderId}/reschedule-options`);
 
 // new_scheduled_at يوم بس (مسار ADR-0034 الافتراضي) — نفس الصيغة اللي customer-app بيبعتها بالحرف.
-export const rescheduleOrder = (authedFetch: AuthedFetch, orderId: string, date: string) =>
+export const rescheduleOrder = (
+  authedFetch: AuthedFetch,
+  orderId: string,
+  date: string,
+  reasonCode?: 'customer_request' | 'availability_change' | 'address_access' | 'other',
+  reasonDetails?: string,
+) =>
   authedFetch<OrderResponseDto>(`/orders/${orderId}/reschedule`, {
     method: 'POST',
-    body: JSON.stringify({ new_scheduled_at: `${date}T00:00:00.000Z` }),
+    body: JSON.stringify({
+      new_scheduled_at: `${date}T00:00:00.000Z`,
+      reason_code: reasonCode,
+      reason_details: reasonDetails?.trim() || undefined,
+    }),
   });

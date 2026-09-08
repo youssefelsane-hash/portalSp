@@ -39,6 +39,10 @@ export interface SettingDefinition {
   group: string;
   /** بيظهر للأدمن جنب المفتاح — لازم يقول **إيه اللي بيتغيّر فعلاً** لما القيمة تتغيّر. */
   description: string;
+  /** إعداد تاريخي فقط؛ لا يظهر كتحكم حي ولا يجوز تعديله. */
+  deprecated?: boolean;
+  /** تفسير موجز للوحة الإدارة بدل أن يبدو المفتاح معطلاً بلا سبب. */
+  deprecationReason?: string;
 }
 
 export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
@@ -71,9 +75,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'cancellation.window_minutes_after_acceptance': { type: 'number', default: 10, group: 'cancellation', description: 'عدد الدقايق المسموحة بعد قبول الفني للطلب اللي يقدر يلغي فيها بنفسه من غير تدخّل الدعم' },
 
   // ── commission ────────────────────────────────────────────────────────
-  'commission.emergency_adjustment_percentage': { type: 'number', default: 5, group: 'commission', description: 'فرق عمولة إضافي (نقاط مئوية) لطلبات "طوارئ" — فوق عمولة الخدمة الأساسية وفرق مستوى الفني، قيمة افتراضية تجريبية مش نهائية' },
-  'commission.individual_adjustment_percentage': { type: 'number', default: 0, group: 'commission', description: 'فرق عمولة إضافي (نقاط مئوية) لطلبات "أفراد" — فوق عمولة الخدمة الأساسية وفرق مستوى الفني' },
-  'commission.team_adjustment_percentage': { type: 'number', default: 0, group: 'commission', description: 'فرق عمولة إضافي (نقاط مئوية) لطلبات "اعتماد" — فوق عمولة الخدمة الأساسية وفرق مستوى الفني' },
+  // صفوف محفوظة لتفسير الطلبات التاريخية فقط؛ تسوية الأرباح الموحّدة لا تقرأها.
+  'commission.emergency_adjustment_percentage': { type: 'number', default: 5, group: 'commission', description: 'إعداد عمولة V1 تاريخي فقط؛ لا يؤثر في أي طلب جديد.', deprecated: true, deprecationReason: 'تم توحيد تسوية الأرباح؛ سياسة المستحقات الحالية هي مصدر الحقيقة.' },
+  'commission.individual_adjustment_percentage': { type: 'number', default: 0, group: 'commission', description: 'إعداد عمولة V1 تاريخي فقط؛ لا يؤثر في أي طلب جديد.', deprecated: true, deprecationReason: 'تم توحيد تسوية الأرباح؛ سياسة المستحقات الحالية هي مصدر الحقيقة.' },
+  'commission.team_adjustment_percentage': { type: 'number', default: 0, group: 'commission', description: 'إعداد عمولة V1 تاريخي فقط؛ لا يؤثر في أي طلب جديد.', deprecated: true, deprecationReason: 'تم توحيد تسوية الأرباح؛ سياسة المستحقات الحالية هي مصدر الحقيقة.' },
 
   // ── homepage ──────────────────────────────────────────────────────────
   'homepage.hero_images': { type: 'json', default: [], group: 'homepage', description: 'Ordered homepage hero image URLs (up to 4) shared by customer web and mobile' },
@@ -193,6 +198,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'orders.duplicate_guard_window_seconds': { type: 'number', default: 90, group: 'orders', description: 'نافذة حماية الدوسة المزدوجة بالثواني — طلب تاني بنفس البيانات بالظبط من نفس العميل خلالها بيرجّع الطلب الأصلي بدل ما يعمل نسخة. صفر = تعطيل.' },
   'orders.max_advance_booking_days': { type: 'number', default: 90, group: 'orders', description: 'أقصى عدد أيام مسموح بحجزها مقدمًا من تاريخ اليوم بتوقيت القاهرة. صفر = حجز نفس اليوم فقط.' },
   'orders.max_work_sessions_per_order': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد زيارات لطلب واحد (استكمال الشغل يوم تاني). بعده لازم تدخّل الدعم.' },
+  'orders.customer_reschedule_max_count': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد مرات يغيّر فيها العميل موعد نفس الطلب بنفسه. صفر = بلا حد؛ بعد الحد يلزم تدخل الدعم ولا توجد رسوم تلقائية.' },
   'orders.technician_reschedule_max_requests': { type: 'number', default: 2, group: 'orders', description: 'أقصى عدد طلبات تأجيل يستطيع الفني إرسالها لنفس الطلب قبل تدخل الدعم' },
   'revisit.original_technician_response_hours': { type: 'number', default: 48, group: 'orders', description: 'مهلة رد الفني الأصلي على إعادة زيارة مثبّتة عليه (بالساعات). بعدها بتظهر عند الأدمن كبند محتاج تصرّف — التحرير قرار أدمن مش تلقائي لأن وراه خصم مالي.' },
 

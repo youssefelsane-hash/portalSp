@@ -9,4 +9,6 @@ export interface SettingResponseDto {
   is_public: boolean;
   updated_by_user_id: string | null;
   updated_at: string;
+  is_deprecated: boolean;
+  deprecation_reason: string | null;
 }
