@@ -49,6 +49,7 @@ export {
 } from './order-reschedule.service';
 import { OrderCancellationService } from './order-cancellation.service';
 import { OrderCreationService } from './order-creation.service';
+import { BookingAvailabilityGuard } from './booking-availability.guard';
 import { OrderDisputeService } from './order-dispute.service';
 import { OrderTechnicianOpsService } from './order-technician-ops.service';
 import { OrderRescheduleService, type OrderRescheduleRequestResponse } from './order-reschedule.service';
@@ -226,6 +227,12 @@ export class OrdersService {
       this.settingsService,
       this.commissionBaseService,
       this.auditLog,
+      // مفاتيح طوارئ الحجز (ج-١٧) — **مبني هنا مش محقون، و«إجباري» مش `@Optional()`**. السبب
+      // إن الحارس ده كله `SettingsService` (اللي موجود فوق أصلاً) ملفوف في منطق قرار، فبناؤه
+      // مجاني. والأهم: مفتاح طوارئ بيتخطّى بصمت لما الحقن ينقص **أسوأ من غياب المفتاح** — لأن
+      // المالك هيفتكر إنه قفل الحجز فعلاً وهو مفتوح. `@Optional()` هنا كانت هتشتري توافق مع
+      // سبيكات قديمة بتمن إن الإيقاف ميشتغلش وقت الحادثة.
+      new BookingAvailabilityGuard(this.settingsService),
       this.events,
       this.assignmentGuard,
     ));

@@ -183,6 +183,20 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'notification_engine.scheduled_job_reminder_after_minutes': { type: 'number', default: 60, group: 'notification_engine', description: 'أول تذكير scheduled_job بعد كام دقيقة من القبول لو الفني لسه ما فتحش الإشعار الأول' },
 
   // ── ops ───────────────────────────────────────────────────────────────
+  // عتبات إنذارات المراقبة (ج-٧، migration 0304). القيم مطابقة للـfallback في `OpsMetricsService`
+  // بالحرف — التسجيل هنا مش بيغيّر سياسة، هو اللي بيخلّي الصفوف **ظاهرة وقابلة للتعديل** في شاشة
+  // الإعدادات (السجل ده هو مصدر الحقيقة لعرض الأدمن). 0304 بذر الصفوف وماسجّلهاش، فكانت موجودة
+  // في القاعدة وغير معروضة — والحارس `settings-registry.spec` بيمنع تكرار ده.
+  'ops.alert_server_error_rate': { type: 'number', default: 0.05, group: 'ops', description: 'نسبة أعطال 5xx خلال آخر ١٥ دقيقة اللي بعدها يترفع تحذير (0.05 = ٥٪)' },
+  'ops.alert_server_error_rate_critical': { type: 'number', default: 0.2, group: 'ops', description: 'نسبة أعطال 5xx اللي بعدها يترفع إنذار حرج (0.2 = ٢٠٪)' },
+  'ops.alert_latency_p95_ms': { type: 'number', default: 3000, group: 'ops', description: 'زمن استجابة p95 بالمللي ثانية اللي بعده يترفع تحذير' },
+  'ops.alert_latency_p95_critical_ms': { type: 'number', default: 10000, group: 'ops', description: 'زمن استجابة p95 بالمللي ثانية اللي بعده يترفع إنذار حرج' },
+  'ops.alert_pool_waiting': { type: 'number', default: 1, group: 'ops', description: 'عدد الطلبات المستنية اتصال قاعدة اللي بعده يترفع تحذير (أي انتظار مستمر = ضغط حقيقي)' },
+  'ops.alert_queue_stall_minutes': { type: 'number', default: 5, group: 'ops', description: 'مدة وقوف أقدم وظيفة في طابور بالدقايق اللي بعدها يترفع إنذار حرج' },
+  'ops.alert_queue_failed': { type: 'number', default: 20, group: 'ops', description: 'عدد الوظايف الفاشلة في طابور اللي بعده يترفع تحذير' },
+  'ops.alert_failed_payments_per_hour': { type: 'number', default: 10, group: 'ops', description: 'عدد عمليات الدفع الفاشلة في الساعة اللي بعده يترفع إنذار حرج' },
+  'ops.alert_stuck_searching_minutes': { type: 'number', default: 30, group: 'ops', description: 'مدة بقاء الطلب بيدوّر على فني بالدقايق اللي بعدها يعتبر عالق' },
+  'ops.alert_memory_rss_mb': { type: 'number', default: 1500, group: 'ops', description: 'استهلاك الذاكرة بالميجابايت اللي بعده يترفع تحذير' },
   'analytics.funnel_retention_days': { type: 'number', default: 180, group: 'ops', description: 'ADR-0081 §4: كام يوم نحتفظ بأحداث رحلة الحجز الخام. الأقدم من كده بيتمسح بعد ما يكون اتجمّع في booking_funnel_daily — التقارير التاريخية بتقرا من التجميع مش من الخام. الحد الأدنى المسموح ٧ أيام مهما كان الرقم المدخل.' },
   'ops.queue_watchdog_check_interval_minutes': { type: 'number', default: 2, group: 'ops', description: 'كل قد إيه (بالدقايق) الـwatchdog بيفحص الطوابير' },
   'ops.queue_watchdog_enabled': { type: 'boolean', default: true, group: 'ops', description: 'تفعيل/تعطيل مراقبة تعليق طوابير BullMQ (matching-rounds/customer-stats/technician-stats) — لو اتعطّل، مفيش exit تلقائي للـprocess حتى لو طابور معلّق' },
@@ -193,6 +207,11 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'crew.optional_assistant_enabled': { type: 'boolean', default: true, group: 'orders', description: 'يسمح لفني الشغلانة الفردية إنه يضم مساعد اختياري. الاختياري عمره ما يتحسب "نقص طاقم" — مفيش تصعيد ولا كارت أحمر.' },
   'crew.optional_assistant_max_per_order': { type: 'number', default: 1, group: 'orders', description: 'أقصى عدد مساعدين اختياريين في الشغلانة الفردية الواحدة (طلب المالك: واحد بس).' },
   'orders.crew_shortage_escalation_hours_before': { type: 'number', default: 24, group: 'orders', description: 'قد إيه قبل موعد طلب الفريق (بالساعات) نصعّد للأدمن لو الطاقم لسه ناقص' },
+  // مفاتيح طوارئ لإيقاف الحجز الجديد بلا نشر كود (ج-١٧/ج-١٨). التدهور **انتقائي**: الشغل
+  // الجاري (تنفيذ الفني، الدفع لشغل خلص، الإلغاء، الطلب الدوري المتولّد) بيكمّل عادي —
+  // الشرح الكامل والسبب في `orders/booking-availability.guard.ts`.
+  'orders.new_bookings_enabled': { type: 'boolean', default: true, group: 'orders', description: 'مفتاح طوارئ: لما يتقفل، أي طلب جديد بيترفض برسالة عربية مؤقتة. الطلبات القائمة وتنفيذها ودفعها وإلغاؤها بتفضل شغّالة عادي.' },
+  'orders.emergency_bookings_enabled': { type: 'boolean', default: true, group: 'orders', description: 'مفتاح طوارئ أضيق: بيوقف حجوزات نفس اليوم (الطوارئ) وحدها والحجز العادي يفضل شغّال. مفيد لما المشكلة في الطوارئ بس فإيقاف الحجز كله يبقى عقوبة جماعية.' },
   // تدقيق `docs/29` P0-4 — الهيدر `Idempotency-Key` اختياري، فأي كلاينت مش بيبعته كان مكشوف
   // تمامًا لدوسة مزدوجة. السيرفر بيشتق مفتاح بنفسه خلال النافذة دي. صفر = تعطيل.
   'orders.duplicate_guard_window_seconds': { type: 'number', default: 90, group: 'orders', description: 'نافذة حماية الدوسة المزدوجة بالثواني — طلب تاني بنفس البيانات بالظبط من نفس العميل خلالها بيرجّع الطلب الأصلي بدل ما يعمل نسخة. صفر = تعطيل.' },

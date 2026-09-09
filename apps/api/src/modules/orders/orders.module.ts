@@ -27,6 +27,7 @@ import { RecurringOrdersController } from './recurring-orders.controller';
 import { OrderDisputeService } from './order-dispute.service';
 import { OrderCancellationService } from './order-cancellation.service';
 import { OrderCreationService } from './order-creation.service';
+import { BookingAvailabilityGuard } from './booking-availability.guard';
 import { OrderQueriesService } from './order-queries.service';
 import { OrderTechnicianOpsService } from './order-technician-ops.service';
 import { OrderRescheduleService } from './order-reschedule.service';
@@ -110,6 +111,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderDisputeService,
     OrderTechnicianOpsService,
     OrderCreationService,
+    BookingAvailabilityGuard,
     OrderCancellationService,
     PostQuoteProviderSelectionService,
     OrderAutoCancelService,

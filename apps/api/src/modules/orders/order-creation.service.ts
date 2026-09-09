@@ -12,6 +12,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { CatalogService } from '../catalog/catalog.service';
 import { PriceCertaintyMode, PricingModel, Service } from '../catalog/entities/service.entity';
 import { assessmentRouteRejection } from './assessment-route-guard';
+import { BookingAvailabilityGuard } from './booking-availability.guard';
 import { GeoService } from '../geo/geo.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -191,6 +192,7 @@ export class OrderCreationService {
     private readonly settingsService: SettingsService,
     private readonly commissionBaseService: CommissionBaseService,
     private readonly auditLog: AuditLogService,
+    private readonly bookingAvailability: BookingAvailabilityGuard,
     private readonly events: EventEmitter2,
     @Optional() private readonly assignmentGuard?: TechnicianAssignmentGuardService,
   ) {}
@@ -521,6 +523,11 @@ export class OrderCreationService {
 
     // الطلب الدوري اتفق عليه تجاريًا عند إنشاء الخطة وقد يُعاد توليده بعد تأخير تشغيل. أما
     // الإدخال الجديد من عميل/مركز اتصال فلا يجوز أن يحمل تاريخًا انتهى أو خارج أفق الحجز.
+    // مفتاح طوارئ الحجز (ج-١٧) — **أول فحص خالص**، قبل أي تسعير أو مطابقة أو كتابة. لو الأدمن
+    // قافل الحجز وقت حادثة، الرفض هنا بيوفّر كل الشغل اللي وراه — وده مقصود: لو سبب الإيقاف
+    // أصلاً ضغط على القاعدة، فحص متأخر كان هيزوّد الحمل بدل ما يخفّفه.
+    await this.bookingAvailability.assertNewBookingsAllowed(!!recurringIdentity);
+
     if (!recurringIdentity) {
       await this.assertBookingDateWindow(dto.scheduled_at, dto.scheduled_at_range_end);
     }
@@ -855,6 +862,11 @@ export class OrderCreationService {
     const urgent = !recurringIdentity
       && !scheduleSlot
       && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    // المفتاح الأضيق (ج-١٧): الطوارئ وحدها. مكانه هنا بالذات لأن `urgent` لسه اتحسب دلوقتي —
+    // قبل السطر ده مفيش إجابة على «ده طوارئ ولا لأ» (ADR-0048: الوضع مشتق مش مختار). وقبل
+    // التسعير مباشرةً، فمفيش رسوم طوارئ بتتحسب لطلب هيترفض بعدها.
+    if (urgent) await this.bookingAvailability.assertEmergencyBookingsAllowed(!!recurringIdentity);
+
     // الجهة التانية من نفس البوابة: الأدمن قافل الجدولة (`allows_scheduling = false`) والعميل
     // اختار يوم جاي. كان إعداد ميت بالكامل — بيتحفظ وماليهوش أي أثر (اتأكد بفحص حي على الـ16
     // تركيبة قدرات: كلها قبلت حجز «بكرة»).

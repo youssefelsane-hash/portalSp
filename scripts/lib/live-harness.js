@@ -176,11 +176,28 @@ class LiveHarness {
    * حذف صف أب مع كل اللي بيشاور عليه بالتعمّق — من `pg_constraint` مش من قايمة مكتوبة بالإيد.
    * (`wallet_transactions → wallets → users` و`refunds → payments` الاتنين اتلقطوا بالطريقة
    * الصعبة في تدقيقات سابقة.)
+   *
+   * ## العمود اللي بيقبل NULL بيتفضّى، ما بيتحذفش (بَقّة حقيقية بضرر واقع فعلاً)
+   *
+   * النسخة الأولى كانت بتحذف **أي** صف بيشاور على الأب. المشكلة إن كتير من الأعمدة دي مش
+   * «ملكية» — دي **بصمة مين عمل الحاجة** (`settings.updated_by_user_id`،
+   * `orders.cancelled_by_user_id`، `complaints.resolved_by_user_id`، `earnings_skill_policy.
+   * updated_by_user_id` وأكتر من ٢٠ غيرهم). فحذف أدمن الاختبار كان بيمسح **صفوف عامة مملوكة
+   * للنظام** لمجرد إن الأدمن ده آخر واحد لمسها.
+   *
+   * **الضرر مش نظري — اتقاس**: تدقيق ج-٧ عدّل `ops.alert_stuck_searching_minutes` من مسار
+   * الأدمن، وتنظيفه بعد كده **مسح الصف من القاعدة نهائيًا**. ونفس الحاجة حصلت لمفتاحي إيقاف
+   * الحجز في أول تشغيلة لتدقيق ج-١٧. النتيجة كانت `PATCH → 404 الإعداد غير موجود` — يعني
+   * «مفتاح الطوارئ اختفى» من غير أي رسالة خطأ وقت الحذف.
+   *
+   * القاعدة الصح مشتقّة من الـschema نفسه مش من قايمة استثناءات: عمود FK **بيقبل NULL** معناه
+   * «علاقة اختيارية»، فقطعها هو التنظيف السليم. عمود **NOT NULL** معناه إن الابن ما ينفعش يعيش
+   * من غير الأب، فالحذف هو السليم.
    */
   async cascadeDelete(table, ids, depth = 0) {
     if (!ids.length || depth > 4) return;
     const refs = await this.q(
-      `SELECT c.conrelid::regclass::text AS table_name, a.attname AS column_name
+      `SELECT c.conrelid::regclass::text AS table_name, a.attname AS column_name, a.attnotnull AS required
          FROM pg_constraint c
          JOIN unnest(c.conkey) k(attnum) ON true
          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
@@ -192,6 +209,14 @@ class LiveHarness {
       // `audit_logs` append-only بقرار معماري (trigger بيرفض DELETE) — مستخدم كتب سجل تدقيق
       // مش هينحذف، وده مقصود مش عطل تنظيف.
       if (ref.table_name === 'audit_logs') continue;
+      if (!ref.required) {
+        // علاقة اختيارية = بصمة فاعل، مش ملكية. اقطعها وسيب الصف.
+        await this.q(
+          `UPDATE ${ref.table_name} SET ${ref.column_name} = NULL WHERE ${ref.column_name} = ANY($1::uuid[])`,
+          [ids],
+        ).catch(() => {});
+        continue;
+      }
       const rows = await this.q(
         `SELECT id FROM ${ref.table_name} WHERE ${ref.column_name} = ANY($1::uuid[])`,
         [ids],
@@ -499,10 +524,14 @@ class LiveHarness {
         // مستخدم كتب سجل تدقيق append-only — بيفضل، وده مقصود.
       }
     }
-    await this.q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [this.created.serviceIds]);
-    await this.q(`DELETE FROM service_zones WHERE id = ANY($1::uuid[])`, [this.created.zoneIds]);
-    await this.q(`DELETE FROM service_categories WHERE id = ANY($1::uuid[])`, [this.created.categoryIds]);
-    await this.q(`DELETE FROM cities WHERE id = ANY($1::uuid[])`, [this.created.cityIds]);
+    // `cascadeDelete` مش `DELETE` خام: `clean-test-data.js` فوق بيمسح **الطلبات** بس، لكن فيه
+    // صفوف بتشاور على الخدمة من غير أي طلب — أوضحها `booking_funnel_events` اللي بيتسجّل على
+    // **مجرد عرض** الخدمة قبل ما يبقى في طلب أصلاً. الصفوف اليتيمة دي كانت بتوقّع
+    // `DELETE FROM services` على FK، والتنظيف بيقع بعد تدقيق ناجح فيسيب بيانات وراه.
+    await this.cascadeDelete('services', this.created.serviceIds);
+    await this.cascadeDelete('service_zones', this.created.zoneIds);
+    await this.cascadeDelete('service_categories', this.created.categoryIds);
+    await this.cascadeDelete('cities', this.created.cityIds);
     // الأدوار آخر حاجة: `user_roles` بيتمسح مع المستخدم فوق، فالدور بيبقى بلا مراجع هنا.
     await this.q(`DELETE FROM roles WHERE id = ANY($1::uuid[])`, [this.created.roles]);
   }
