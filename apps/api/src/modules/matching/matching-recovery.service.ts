@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { returningRows } from '../../common/db/returning-rows';
 import { Order } from '../orders/entities/order.entity';
 import { SettingsService } from '../settings/settings.service';
-import { MatchingService } from './matching.service';
+import { MatchingDispatchQueueClient } from './matching-dispatch-queue.client';
 
 const RECOVERY_INTERVAL_SECONDS_FALLBACK = 60;
 const RECOVERY_BATCH_SIZE_FALLBACK = 25;
@@ -21,7 +22,7 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
-    private readonly matchingService: MatchingService,
+    private readonly dispatchQueue: MatchingDispatchQueueClient,
     private readonly settingsService: SettingsService,
   ) {}
 
@@ -96,7 +97,16 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
 
     // Claim + postpone happen in one transaction. Concurrent API instances cannot recover the
     // same order, and a permanently stalled old order leaves the front of the queue immediately.
-    const rows = await this.orders.manager.transaction((manager) => manager.query<Array<{ id: string }>>(
+    // **بَقّة حقيقية اتقاست في تدقيق ج-٤ (2026-09-09)**: النتيجة هنا كانت بتتقرا مباشرةً كأنها
+    // مصفوفة صفوف، وTypeORM بترجّع `UPDATE … RETURNING` كـ`[rows, affectedCount]`. النتيجة إن
+    // الحلقة تحت كانت بتلف على **عنصرين** (مصفوفة الصفوف، والرقم)، والاتنين `.id` بتاعهم
+    // `undefined` — يعني `enqueueDispatch(undefined)` مرتين، والـ`jobId` بقى `dispatch-undefined`
+    // فBullMQ بيدمجهم في وظيفة واحدة، والوظيفة دي بتنادي `dispatchOrAutoConfirm(undefined)` اللي
+    // بترجّع فورًا بلا أي أثر. **الـsweep فضلت شغّالة شكليًا وهي فعليًا ما أعادت توزيع ولا طلب
+    // واحد**: بتزوّد `matching_attempt_count` وبتأجّل `next_matching_attempt_at` (فالأدمن بيشوف
+    // «٤ محاولات» ويفتكرها بتحاول)، والطلب اللي فشل توزيعه أول مرة بيفضل `searching_technician`
+    // للأبد لحد ما أدمن يتدخّل بإيده. `returningRows()` هو المصدر الواحد لفك الشكل ده.
+    const raw = await this.orders.manager.transaction((manager) => manager.query(
       `WITH due_orders AS (
          SELECT orders.id
          FROM orders
@@ -129,16 +139,29 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
        RETURNING orders.id`,
       [batchSize, initialBackoffSeconds, maxBackoffSeconds],
     ));
+    const rows = returningRows<{ id: string }>(raw);
 
-    let processed = 0;
+    // **الـsweep بتجدول، مش بتنفّذ.**
+    //
+    // اللي كان هنا: `await dispatchOrAutoConfirm(row.id)` لكل صف، **واحد ورا التاني في نفس
+    // العملية**. كل نداء بياخد اتصال قاعدة ويشغّل استعلام المطابقة التقيل، فدفعة ٢٥ طلب عالق
+    // كانت بتستحوذ على اتصالات الـpool لحوالي ١٠ ثواني متواصلة كل دورة — وفي الوقت ده **عملاء
+    // حقيقيين بياخدوا 503** (القياس والدليل في `matching-dispatch-queue.client.ts`).
+    //
+    // المفارقة اللي بتخلي ده خطير: كل ما الطلبات العالقة تزيد، كل ما الـsweep تتقل، كل ما
+    // العملاء الجداد يترفضوا أكتر — فيعلقوا هما كمان. حلقة تدهور بتبدأ من مشكلة عرض عادية.
+    //
+    // دلوقتي الـsweep بتحجز وظيفة لكل طلب والـworker بيصرّفها بسقف تزامن ثابت مشترك مع الحجوزات
+    // الجديدة. لو الحجز فشل (Redis واقع) **مابننفّذش مباشرة عمدًا**: صف الطلب اتأجّل بالفعل
+    // بـ`next_matching_attempt_at` فوق، يعني الدورة الجاية هتحاول تاني — الطلب مش ضايع، والـpool
+    // مش متستنزف.
+    let scheduled = 0;
     for (const row of rows) {
-      try {
-        await this.matchingService.dispatchOrAutoConfirm(row.id);
-        processed += 1;
-      } catch (error) {
-        this.logger.error(`فشل استرداد توزيع الطلب ${row.id}`, error instanceof Error ? error.stack : error);
-      }
+      if (await this.dispatchQueue.enqueueDispatch(row.id)) scheduled += 1;
     }
-    return processed;
+    if (scheduled < rows.length) {
+      this.logger.warn(`اتجدول ${scheduled} من ${rows.length} طلب عالق — الباقي هيتحاول في الدورة الجاية.`);
+    }
+    return scheduled;
   }
 }

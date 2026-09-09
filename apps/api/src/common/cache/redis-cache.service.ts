@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { throttleMessage } from '../logging/throttled-log';
 
 // طبقة كاش خفيفة فوق Redis — مش مصدر الحقيقة أبداً، مجرد تسريع قراءة. أي فشل (Redis واقع،
 // شبكة، ...) بيتلقّط ويترجع كأنه cache miss عادي، مش استثناء — القاعدة (المصدر الحقيقي)
@@ -19,7 +20,11 @@ export class RedisCacheService implements OnModuleDestroy {
       maxRetriesPerRequest: 1,
       retryStrategy: (times) => Math.min(times * 200, 5000),
     });
-    this.client.on('error', (err) => this.logger.warn(`Redis error: ${err.message}`));
+    // نفس سبب الخنق في `main.ts`: أثناء انقطاع طويل، الحدث ده بيتطلق عشرات المرات في الثانية.
+    this.client.on('error', (err) => {
+      const line = throttleMessage(`redis-cache-error:${err.message}`, `Redis error: ${err.message}`);
+      if (line) this.logger.warn(line);
+    });
     this.client.connect().catch((err) => this.logger.warn(`فشل الاتصال بـ Redis وقت البدء: ${err.message}`));
   }
 
@@ -27,7 +32,11 @@ export class RedisCacheService implements OnModuleDestroy {
     try {
       return await this.client.get(key);
     } catch (err) {
-      this.logger.warn(`فشلت قراءة الكاش لـ ${key}: ${err instanceof Error ? err.message : err}`);
+      {
+        const msg = err instanceof Error ? err.message : String(err);
+        const line = throttleMessage(`cache-get:${msg}`, `فشلت قراءة الكاش (آخر مفتاح: ${key}): ${msg}`);
+        if (line) this.logger.warn(line);
+      }
       return null;
     }
   }
@@ -36,7 +45,11 @@ export class RedisCacheService implements OnModuleDestroy {
     try {
       await this.client.set(key, value, 'EX', ttlSeconds);
     } catch (err) {
-      this.logger.warn(`فشلت كتابة الكاش لـ ${key}: ${err instanceof Error ? err.message : err}`);
+      {
+        const msg = err instanceof Error ? err.message : String(err);
+        const line = throttleMessage(`cache-set:${msg}`, `فشلت كتابة الكاش (آخر مفتاح: ${key}): ${msg}`);
+        if (line) this.logger.warn(line);
+      }
     }
   }
 
@@ -44,7 +57,11 @@ export class RedisCacheService implements OnModuleDestroy {
     try {
       await this.client.del(key);
     } catch (err) {
-      this.logger.warn(`فشل إبطال الكاش لـ ${key}: ${err instanceof Error ? err.message : err}`);
+      {
+        const msg = err instanceof Error ? err.message : String(err);
+        const line = throttleMessage(`cache-del:${msg}`, `فشل إبطال الكاش (آخر مفتاح: ${key}): ${msg}`);
+        if (line) this.logger.warn(line);
+      }
     }
   }
 

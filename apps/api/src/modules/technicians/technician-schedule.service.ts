@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, EntityManager, QueryFailedError, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { returningRows } from '../../common/db/returning-rows';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from './entities/technician-schedule-slot.entity';
 
@@ -201,7 +202,10 @@ export class TechnicianScheduleService {
 
   /** Rebuilds missed release events from durable order state without an unbounded scan. */
   async reconcileReleasedSlots(batchSize = 25): Promise<number> {
-    const rows = await this.slots.query(
+    // TypeORM بترجّع `UPDATE … RETURNING` كـ`[rows, affectedCount]` — من غير التطبيع ده الرقم
+    // المرجّع كان **٢ دايمًا** (طول التابل) بدل عدد السلوتس اللي اتفكّت فعلاً. القاعدة المشتركة
+    // في `common/db/returning-rows.ts`.
+    const raw = await this.slots.query(
       `WITH candidates AS (
          SELECT slot.id
          FROM technician_schedule_slots slot
@@ -224,7 +228,7 @@ export class TechnicianScheduleService {
        RETURNING slot.id`,
       [Math.max(1, Math.floor(batchSize))],
     );
-    return rows.length;
+    return returningRows<{ id: string }>(raw).length;
   }
 }
 

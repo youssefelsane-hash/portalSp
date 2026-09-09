@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { returningRows } from '../../common/db/returning-rows';
 import { OrderStatus } from './entities/order.entity';
 import { OrderChangeSource } from './entities/order-status-history.entity';
 
@@ -59,10 +60,7 @@ export class StuckSelectionRecoveryService implements OnModuleInit, OnModuleDest
     // التحديث والقراءة في عبارة واحدة: الطلب بيخرج من الحالة العالقة **قبل** ما نبثّه، فحتى لو
     // الدورة اتكررت مايتبعتش مرتين. `FOR UPDATE SKIP LOCKED` مش محتاجينه — الشرط نفسه بيمنع
     // التكرار لأن الحالة بتتغيّر ذرّيًا.
-    // TypeORM بترجّع `[rows, affected]` لـUPDATE…RETURNING أحيانًا و`rows` أحيانًا، حسب
-    // الدرايفر والنسخة. التطبيع هنا بيمنع `rows[0].id === undefined` الصامت (اتلقط حيًا:
-    // «null value in column order_id» بدل خطأ واضح).
-    const raw = (await this.dataSource.query(
+    const raw = await this.dataSource.query(
       `UPDATE orders
           SET order_status = $1, updated_at = now()
         WHERE id IN (
@@ -73,15 +71,15 @@ export class StuckSelectionRecoveryService implements OnModuleInit, OnModuleDest
         )
       RETURNING id, order_number, customer_id, technician_id`,
       [OrderStatus.SEARCHING_TECHNICIAN, OrderStatus.AWAITING_TECHNICIAN_SELECTION, limit],
-    )) as unknown;
-    const rows = (Array.isArray(raw) && Array.isArray(raw[0]) ? raw[0] : raw) as {
+    );
+    const rows = returningRows<{
       id: string;
       order_number: string;
       customer_id: string;
       technician_id: string | null;
-    }[];
+    }>(raw);
 
-    if (!Array.isArray(rows) || rows.length === 0) return 0;
+    if (rows.length === 0) return 0;
 
     for (const row of rows) {
       await this.dataSource.query(

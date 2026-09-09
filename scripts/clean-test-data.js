@@ -45,18 +45,52 @@ const param = serviceId ?? orderId ?? numberLike;
         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
        WHERE c.confrelid = 'orders'::regclass AND c.contype = 'f'`);
 
+    /**
+     * حذف صفوف جدول **مع أحفاده** — جدول بيشاور على `orders` ممكن يكون هو نفسه مشار إليه من
+     * جدول تالت. اتلقطت حيًا: `refunds.payment_id → payments.id`، فحذف `payments` قبل `refunds`
+     * بيفشل على `refunds_payment_id_fkey`. الحالة الخاصة القديمة (`chat_messages` تحت
+     * `chat_threads`) كانت نفس الفئة بالظبط، متعالجة بالإيد لجدول واحد بس؛ دي بتعمّمها من
+     * الكتالوج فمفيش جدول تالت جديد هيرجّع نفس الفشل تاني.
+     */
+    const deleteWithDependents = async (table, column, values, depth = 0) => {
+      if (depth > 3) return 0;
+      let removed = 0;
+      const { rows: children } = await db.query(`
+        SELECT c.conrelid::regclass::text AS table_name,
+               a.attname                  AS column_name,
+               c.confdeltype              AS on_delete
+          FROM pg_constraint c
+          JOIN unnest(c.conkey) k(attnum) ON true
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+         WHERE c.confrelid = $1::regclass AND c.contype = 'f'`, [table]);
+      for (const child of children) {
+        if (child.table_name === table) continue;
+        if (child.on_delete === 'c' || child.on_delete === 'n') continue;
+        const { rows: doomed } = await db.query(
+          `SELECT id FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
+          [values],
+        ).catch(() => ({ rows: null })); // جدول بلا عمود `id` — بيتحذف مباشرةً تحت
+        if (doomed && doomed.length) {
+          removed += await deleteWithDependents(child.table_name, 'id', doomed.map((d) => d.id), depth + 1);
+        } else {
+          const res = await db.query(
+            `DELETE FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
+            [values],
+          );
+          if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${child.table_name}`);
+          removed += res.rowCount;
+        }
+      }
+      const res = await db.query(`DELETE FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [values]);
+      if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${table}`);
+      return removed + res.rowCount;
+    };
+
     let total = 0;
     for (const r of refs) {
       if (r.table_name === 'orders') continue;            // parent_order_id — بيتعامل معاه بالحذف نفسه
       if (r.on_delete === 'c' || r.on_delete === 'n') continue; // CASCADE/SET NULL بيتصرفوا لوحدهم
-      // chat_messages مش بتشاور على orders مباشرة — بتشاور على chat_threads.
-      if (r.table_name === 'chat_threads') {
-        const m = await db.query(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`, [ids]);
-        total += m.rowCount;
-      }
-      const res = await db.query(`DELETE FROM ${r.table_name} WHERE ${r.column_name} = ANY($1::uuid[])`, [ids]);
-      if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${r.table_name}`);
-      total += res.rowCount;
+      total += await deleteWithDependents(r.table_name, r.column_name, ids);
     }
     const del = await db.query(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids]);
     await db.query('COMMIT');

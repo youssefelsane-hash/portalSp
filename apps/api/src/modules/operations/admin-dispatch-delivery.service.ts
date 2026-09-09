@@ -51,7 +51,7 @@ export interface DispatchDeliveryRow {
    * **مهلة توسيع الجولة**، مش انتهاء صلاحية العرض.
    *
    * العرض بيفضل قابل للقبول بعد الوقت ده لحد ما فني تاني ياخد الطلب أو الفني ده يرفض صراحة —
-   * راجع `matching-round-expiry.processor.ts`. تسميته «منتهي» في أي واجهة غلط.
+   * راجع `matching-queue.processor.ts`. تسميته «منتهي» في أي واجهة غلط.
    */
   expiresAt: string | null;
   /** رقم جولة المطابقة. null لفرص الشغل (مالهاش جولات). */
@@ -103,7 +103,7 @@ interface SummaryRow {
  * بيجمع مصدرين حقيقيين موجودين بالفعل بلا أي طبقة تتبّع توصيل موازية جديدة:
  *  - `order_assignments` (البث المباشر/الطوارئ لكل جولة، `AssignmentStatus`) — عنده `expires_at`
  *    حقيقي، فبنقدر نحسب `stale_sent_count` (صف لسه `sent` بعد ما فات معاده — يعني على الأغلب
- *    processor انتهاء الجولة (`matching-round-expiry.processor.ts`) لسه ما لحقهوش، مش حالة مخترعة،
+ *    processor انتهاء الجولة (`matching-queue.processor.ts`) لسه ما لحقهوش، مش حالة مخترعة،
  *    استنتاج مباشر من `expires_at` الحقيقي المخزّن وقت الإرسال).
  *  - `technician_work_opportunities` (فرص الشغل الإضافي الاختياري/تجنيد الفريق، docs/08 §34.1/§35)
  *    — **مفيهاش `expires_at`** أصلاً (migration 0153: الفرصة تفضل صالحة لحد قرار/تغطية الطلب)،

@@ -6,9 +6,9 @@ import { AssistantMatchingService } from './assistant-matching.service';
 import { ASSISTANT_MATCHING_QUEUE, AssistantOffersExpiredJobData } from './assistant-matching.queue';
 
 /**
- * بيتنفّذ لحظة انتهاء مهلة رد المساعدين على بث المطابقة — نفس نمط MatchingRoundExpiryProcessor
+ * بيتنفّذ لحظة انتهاء مهلة رد المساعدين على بث المطابقة — نفس نمط MatchingQueueProcessor
  * بالحرف (اتصال Redis منفصل مباشر override، enableOfflineQueue:false، مستمع 'error' إجباري —
- * التفاصيل والمبررات الكاملة موثّقة في matching/matching-round-expiry.processor.ts، مش هتتكرر هنا).
+ * التفاصيل والمبررات الكاملة موثّقة في matchin./matching-queue.processor.ts، مش هتتكرر هنا).
  */
 @Processor(
   { name: ASSISTANT_MATCHING_QUEUE },

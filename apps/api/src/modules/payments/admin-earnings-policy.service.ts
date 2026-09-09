@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { returningFirst } from '../../common/db/returning-rows';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { calculateEarningsV2 } from './earnings-calculator';
 import {
@@ -167,13 +168,16 @@ export class AdminEarningsPolicyService {
     if (!allowed.has(skillLevel)) {
       throw new ApiException(ErrorCode.VAL_001, 'مستوى المهارة غير صحيح', HttpStatus.BAD_REQUEST);
     }
-    const [updated] = await this.dataSource.query(
+    // `returningFirst` مش `const [updated] =`: TypeORM بترجّع `UPDATE … RETURNING` كـ
+    // `[rows, affectedCount]`، فالتفكيك المباشر كان بيحط **مصفوفة الصفوف** في `updated`
+    // فيتكتب صف تدقيق مشوّه (`newValues: { "0": {...} }`) بدل قيم السياسة الجديدة.
+    const updated = returningFirst<Record<string, unknown>>(await this.dataSource.query(
       `UPDATE earnings_skill_policy
           SET factor_bps = $2, updated_by_user_id = $3, updated_at = now()
         WHERE skill_level = $1
         RETURNING skill_level, factor_bps, updated_at`,
       [skillLevel, dto.factor_bps, adminUserId],
-    );
+    ));
     await this.auditLog.record({
       actorUserId: adminUserId,
       actorRole: 'admin',
@@ -339,10 +343,13 @@ export class AdminEarningsPolicyService {
   ) {
     return this.dataSource.transaction(async (manager) => {
       const keyColumn = table === 'service_earnings_level_overrides' ? 'technician_level' : 'skill_level';
-      const [deleted] = await manager.query(
+      // نفس السبب فوق: `const [deleted] =` كان بياخد **مصفوفة** الصفوف، ومصفوفة فاضية قيمتها
+      // truthy — يعني حارس «لا يوجد استثناء لإزالته» **ماكانش بيشتغل أبدًا**، وحذف استثناء
+      // مش موجود كان بيرجّع نجاح ويكتب صف تدقيق بـ`entityId: undefined`.
+      const deleted = returningFirst<Record<string, unknown> & { id: string }>(await manager.query(
         `DELETE FROM ${table} WHERE service_id = $1 AND ${keyColumn} = $2 RETURNING *`,
         [serviceId, policyKey],
-      );
+      ));
       if (!deleted) throw new ApiException(ErrorCode.VAL_001, 'لا يوجد استثناء لإزالته', HttpStatus.NOT_FOUND);
       await this.auditLog.record(
         {

@@ -2,6 +2,8 @@ import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { withTransactionRetry } from '../../common/db/transaction-retry';
+import { returningRows } from '../../common/db/returning-rows';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import {
@@ -261,12 +263,38 @@ export class PaymentsService {
       if (!this.earningsPolicyService) {
         throw new Error('EarningsPolicyService is required to settle a unified earnings order');
       }
-      const calculation = await this.earningsPolicyService.calculateOrder(
-        order.id,
-        order.totalAmountCents,
-        manager,
-        lockOrder,
-      );
+      // **ج-٢ — تحويل خلل بيانات لرسالة مفهومة بدل `500` خام.**
+      //
+      // `calculateEarningsV2()` بترمي `Error` عادي («V2 paid worker pool requires at least one
+      // participant») لو الطلب وصل التسوية وهو مالوش أي مشارك مسجّل. اتقاست حيًا: العميل ضغط
+      // «ادفع» فشاف «حصل خطأ غير متوقع، حاول تاني» — ونصيحة «حاول تاني» كذب، لأن إعادة المحاولة
+      // هتفشل بنفس الطريقة للأبد، والعميل مالوش أي طريق يخرج بيها من الموقف.
+      //
+      // الحالة دي **مش قابلة للوصول من مسارات التطبيق الحقيقية** (`accept()`/`reassign()` بيحطوا
+      // الفني قبل أي حالة قابلة للدفع)، فوجودها معناه صف طلب متناقض — خلل بيانات محتاج تدخل بشري
+      // مش إعادة محاولة. فبنسيب الفلوس ما تتلمسش (الـtransaction بترجع بالكامل)، وبنرجّع رسالة
+      // عربية بتوجّه العميل للدعم وكود `PAY_003` مميّز يخلّي الحالة قابلة للرصد عند الأوبس بدل
+      // ما تضيع وسط 5xx العام.
+      let calculation: EarningsCalculationResult;
+      try {
+        calculation = await this.earningsPolicyService.calculateOrder(
+          order.id,
+          order.totalAmountCents,
+          manager,
+          lockOrder,
+        );
+      } catch (err) {
+        if (err instanceof ApiException) throw err;
+        this.logger.error(
+          `تعذّر حساب مستحقات الطلب ${order.orderNumber} (${order.id}) — تسوية متوقفة على خلل بيانات`,
+          err instanceof Error ? err.stack : err,
+        );
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          'تعذّر إتمام العملية المالية للطلب ده — بيانات المنفّذين غير مكتملة. تواصل مع الدعم ومعاك رقم الطلب.',
+          HttpStatus.CONFLICT,
+        );
+      }
       return {
         platformCommissionCents: calculation.platformCommissionCents,
         technicianEarningCents: calculation.workerPoolCents,
@@ -971,7 +999,10 @@ export class PaymentsService {
   async collectCash(technicianUserId: string, orderId: string): Promise<Payment> {
     const technicianProfile = await this.techniciansService.findByUserIdOrThrow(technicianUserId);
 
-    return this.dataSource.transaction(async (manager) => {
+    // نفس حماية `payWithWallet`: التسوية بتعمل أكتر من قيد مزدوج على محافظ متداخلة، فتعارض
+    // تزامن نادر مع تسوية تانية ممكن يقتل الـtransaction. Postgres بيعمل rollback كامل، فإعادة
+    // المحاولة آمنة — والبديل إن الفني يشوف خطأ بعد ما استلم الكاش فعلاً من العميل.
+    return withTransactionRetry('collectCash', () => this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -1029,7 +1060,7 @@ export class PaymentsService {
         new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.COMPLETED, order.customerId, order.technicianId),
       );
       return payment;
-    });
+    }));
   }
 
   /**
@@ -1120,19 +1151,33 @@ export class PaymentsService {
       return existing; // نفس الطلب بنفس المفتاح — عملية مكررة، رجّع نفس النتيجة من غير ما نعمل حاجة تانية
     }
     try {
-      return await this.payWithWalletUnchecked(userId, orderId, idempotencyKey);
+      // تعارض التزامن على مستوى Postgres (deadlock) بيتعاد تلقائيًا — الشرح الكامل والقياس
+      // في `common/db/transaction-retry.ts`. المحاولة المقتولة بترجع rollback كامل، فإعادة
+      // تشغيل الدالة من أولها آمنة بالتعريف.
+      return await withTransactionRetry(
+        'payWithWallet',
+        () => this.payWithWalletUnchecked(userId, orderId, idempotencyKey),
+      );
     } catch (err) {
       // §90.2 (طلب مالك مباشر — دفع مزدوج بضغطتين متزامنتين): الفحص فوق check-then-act خارج أي
       // قفل، فضغطتين حقيقيتين متزامنتين (أو retry شبكة بينما المحاولة الأولى لسه واصلة) ممكن
-      // يعدّوا الفحص الاتنين ويوصلوا هنا بنفس المفتاح بالظبط. القيد الفريد على idempotency_key
-      // في الداتابيز بيمنع صف مكرر فعليًا، لكن من غيره كان بيرجّع 500 خام للخاسر بدل ما يرجّعله
-      // نفس نتيجة اللي كسب — فرق واضح بين "الدفع فشل" و"الدفع نجح من محاولة تانية بنفس اللحظة".
-      if (this.isUniqueViolation(err)) {
-        const winner = await this.payments.findOne({ where: { idempotencyKey } });
-        if (winner) {
-          await this.assertPaymentOwnedByUser(winner, userId);
-          return winner;
-        }
+      // يعدّوا الفحص الاتنين ويوصلوا هنا بنفس المفتاح بالظبط.
+      //
+      // **اتوسّع بعد قياس حي (ج-٢)**: الفحص كان مقصورًا على `isUniqueViolation` — وده غطّى
+      // حالة واحدة بس من اتنين. القياس (١٠ نداءات متزامنة بنفس المفتاح) طلّع **٩ ردود 409**
+      // مش صف مكرر: الخاسر بيقف على قفل صف الطلب، وبعد ما الكسبان يعمل commit بيقرا الطلب
+      // وهو `completed`/`paid` فـ`assertPayable()` بترميه بـ«الطلب مدفوع بالفعل» **قبل** ما
+      // يوصل أصلاً لمحاولة الإدراج اللي كانت هتكسر القيد الفريد. النتيجة عمليًا: تطبيق عمل
+      // retry بعد انقطاع شبكة بيشوف رسالة خطأ رغم إن دفعته نجحت — بالظبط عكس العقد المكتوب
+      // فوق («نفس المفتاح = نفس النتيجة»).
+      //
+      // العلاج: بعد أي فشل، نسأل تاني عن صف بنفس المفتاح. وجوده معناه إن العملية بالمفتاح ده
+      // خلصت فعلاً (مفيش كاتب تاني للمفتاح ده غير نفس العملية دي)، فرجّعه. لو مفيش صف، الخطأ
+      // حقيقي وبيتصاعد زي ما هو.
+      const winner = await this.payments.findOne({ where: { idempotencyKey } });
+      if (winner && winner.orderId === orderId) {
+        await this.assertPaymentOwnedByUser(winner, userId);
+        return winner;
       }
       throw err;
     }
@@ -2700,9 +2745,7 @@ export class PaymentsService {
        RETURNING application_id, sequence_number, amount_cents`,
       [payment.installmentId, succeeded, failureReason],
     );
-    // نفس TypeORM quirk الموثقة في recurring-orders claim: UPDATE..RETURNING ممكن ترجع
-    // [rows, affectedCount] — بنفك الغلاف لو موجود.
-    const updated = Array.isArray(updatedRaw[0]) ? (updatedRaw[0] as Record<string, unknown>[]) : (updatedRaw as Record<string, unknown>[]);
+    const updated = returningRows<Record<string, unknown>>(updatedRaw);
     if (updated.length === 0) return;
 
     const inst = updated[0];

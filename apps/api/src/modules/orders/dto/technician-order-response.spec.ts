@@ -24,6 +24,7 @@ const fullOrder: OrderResponseDto = {
   customer_inputs: null,
   scheduled_at: null,
   scheduled_end_at: null,
+  customer_reschedule_count: 0,
   estimated_price_cents: 100_000,
   inspection_fee_cents: 5_000,
   surge_amount_cents: 3_000,

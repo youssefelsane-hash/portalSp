@@ -307,7 +307,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
   });
 
   // ADR-0018 §5 (طلب صريح من المالك 2026-08-19) — عرض طوارئ لازم يفضل قابل للقبول طالما محدش
-  // أخده، حتى لو مهلة الجولة (expires_at) فاتت من زمان. راجع matching-round-expiry.processor.ts:
+  // أخده، حتى لو مهلة الجولة (expires_at) فاتت من زمان. راجع matching-queue.processor.ts:
   // مهلة الجولة بقت تريجر لتوسيع البث لفنيين إضافيين بس، مش ميعاد صلاحية للعرض نفسه.
   it('عرض طوارئ فات معاده (expires_at) لسه قابل للقبول طالما محدش أخده — ADR-0018 §5', async () => {
     await dataSource.query(

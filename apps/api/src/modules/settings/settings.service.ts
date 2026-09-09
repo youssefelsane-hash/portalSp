@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -98,15 +98,41 @@ export class SettingsService {
    */
   private readonly localCache = new Map<string, { raw: { value: unknown; valueType: string } | null; expiresAt: number }>();
 
-  private localGet(key: string): { raw: { value: unknown; valueType: string } | null } | undefined {
+  private readonly logger = new Logger(SettingsService.name);
+
+  /** مفاتيح عليها تحديث خلفي شغّال دلوقتي — بيمنع تدافع (stampede) على نفس المفتاح. */
+  private readonly refreshing = new Set<string>();
+
+  /**
+   * بيرجّع القيمة المحفوظة ولو **منتهية الصلاحية** (`stale: true`) بدل ما يمسحها.
+   *
+   * ده أساس سياسة stale-while-revalidate تحت — والسبب مش أداء، ده **منع انقطاع خدمة**.
+   */
+  private localGet(key: string): { raw: { value: unknown; valueType: string } | null; stale: boolean } | undefined {
     if (LOCAL_CACHE_TTL_MS === 0) return undefined;
     const hit = this.localCache.get(key);
     if (!hit) return undefined;
-    if (hit.expiresAt <= Date.now()) {
-      this.localCache.delete(key);
-      return undefined;
-    }
-    return { raw: hit.raw };
+    return { raw: hit.raw, stale: hit.expiresAt <= Date.now() };
+  }
+
+  /**
+   * تحديث خلفي لمفتاح منتهي الصلاحية — **مايرميش أبدًا ومحدش بيستناه**.
+   *
+   * لو فشل (Redis واقع مثلاً) القيمة القديمة بتفضل مخدومة، وده بالظبط المطلوب: الإعدادات
+   * بتتغير نادرًا، وقيمة قديمة بثواني أهون بما لا يقاس من طلب حجز بيفشل.
+   */
+  private scheduleRefresh(key: string): void {
+    if (this.refreshing.has(key)) return;
+    this.refreshing.add(key);
+    void (async () => {
+      try {
+        await this.readFromSource(key);
+      } catch (err) {
+        this.logger.warn(`فشل تحديث إعداد ${key} في الخلفية: ${err instanceof Error ? err.message : err}`);
+      } finally {
+        this.refreshing.delete(key);
+      }
+    })();
   }
 
   private localSet(key: string, raw: { value: unknown; valueType: string } | null): void {
@@ -119,11 +145,55 @@ export class SettingsService {
     this.localCache.delete(key);
   }
 
-  /** قراءة القيمة الخام (value + valueType بس) — ذاكرة ← Redis ← القاعدة (مصدر الحقيقة). */
+  /**
+   * إبطال النسخة المحلية لمفتاح اتعدّل **من برّه الخدمة** (SQL مباشر، migration، أداة إدارية).
+   *
+   * مع سياسة stale-while-revalidate، القيمة القديمة بتتخدم فورًا ولو عمرها خلص — وده مقصود
+   * (شوف `readRaw`). لكنه معناه إن كتابة مباشرة في القاعدة مش هتبان في **نفس** القراءة اللي
+   * بعدها. الدالة دي هي المسار المدعوم لأي كاتب من برّه: نادِها بعد الكتابة ومسح Redis.
+   */
+  invalidateLocalCache(key: string): void {
+    this.localInvalidate(key);
+  }
+
+  /**
+   * قراءة القيمة الخام (value + valueType بس) — ذاكرة ← Redis ← القاعدة (مصدر الحقيقة).
+   *
+   * ### stale-while-revalidate — ده إصلاح انقطاع، مش تحسين أداء
+   *
+   * **المشكلة اللي اتقاست حيًا**: `OrdersService.create()` بتقرا إعدادات **جوّه ترانزاكشن
+   * الإنشاء**. القراءة دي كانت بتضرب Redis كل مرة الكاش المحلي يخلص عمره (ثانيتين)، يعني
+   * الترانزاكشن بتفضل مفتوحة والقاعدة مستنية التطبيق يبعت — وهو مستني Redis.
+   *
+   * تحت دفعة حجوزات، كل اللي فاتوا الكاش في نفس اللحظة بيتعلّقوا مع بعض. العيّنة من
+   * `pg_stat_activity` وقت الحادثة:
+   *
+   *     n=22  act=1  iit=18  waits=Client/ClientRead
+   *
+   * تمنتاشر ترانزاكشن مفتوحة وصامتة ⇒ الـpool بيخلص ⇒ **كل العملاء بياخدوا 503** لمدة مهلة
+   * الحصول على اتصال بالظبط (١٠ ثواني). الإثبات القاطع: تثبيت الكاش المحلي
+   * (`SETTINGS_LOCAL_CACHE_TTL_MS` كبير) خلّى ٦ من ٦ تشغيلات تعدّي نضيف، من غير أي تغيير تاني.
+   *
+   * **القاعدة الجديدة**: أول قراءة لأي مفتاح بس هي اللي بتنتظر مصدر خارجي. بعد كده القيمة
+   * بتتخدم من الذاكرة **حتى لو عمرها خلص**، والتحديث بيحصل في الخلفية. النتيجة: Redis بطيء أو
+   * واقع مابيقدرش يعلّق ولا ترانزاكشن واحدة — وده الفرق بين «خدمة ثانوية اتعطّلت» و«الحجز وقف».
+   *
+   * تكلفة القِدَم مقبولة: الإعدادات بتتغير نادرًا، والـinstance اللي عدّل بيبطّل كاشه فورًا
+   * (`update()`)، والباقيين بيشوفوا التغيير خلال `LOCAL_CACHE_TTL_MS` — نفس ضمان الأول بالظبط،
+   * الفرق إن الانتظار بقى على التحديث الخلفي مش على الطلب الحي.
+   */
   private async readRaw(key: string): Promise<{ value: unknown; valueType: string } | null> {
     const local = this.localGet(key);
-    if (local) return local.raw;
+    if (local) {
+      if (local.stale) this.scheduleRefresh(key);
+      return local.raw;
+    }
 
+    return this.readFromSource(key);
+  }
+
+  /** القراءة الحقيقية من المصادر الخارجية — Redis ثم القاعدة. المكان الوحيد اللي بينتظر. */
+  private async readFromSource(key: string): Promise<{ value: unknown; valueType: string } | null> {
     const cached = await this.cache.get(this.cacheKey(key));
     if (cached !== null) {
       try {
