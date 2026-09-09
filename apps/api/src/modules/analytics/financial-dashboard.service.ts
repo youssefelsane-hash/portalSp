@@ -459,7 +459,11 @@ export class FinancialDashboardService {
       })),
     ];
 
-    const operational = await this.findOperationalIssues();
+    // **المخالفات التشغيلية على مستوى النظام كله** (استرداد عالق، دفعة معلّقة، طلب مقفول بلا
+    // تسوية) ومالهاش علاقة بمحفظة بعينها. لما الأدمن (أو اختبار) يسأل عن **محفظة واحدة**،
+    // ضمّها في `total_issues` بيخلّي `is_balanced` تقول «مش متزنة» بسبب بيانات مالهاش أي علاقة
+    // بالفني ده — نفس السطر اللي بيوعد فوق إن الفلتر «بيخلّي الفحص بمعزل عن أي بيانات تانية».
+    const operational = walletId ? { total: 0, items: [] as FinancialOperationalIssue[] } : await this.findOperationalIssues();
     const totalIssues = ledgerIssuesTotal + operational.total;
 
     return {
