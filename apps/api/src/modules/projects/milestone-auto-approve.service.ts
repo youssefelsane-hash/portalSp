@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { returningRows } from '../../common/db/returning-rows';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProjectMilestone } from './entities/project-milestone.entity';
@@ -58,7 +59,7 @@ export class MilestoneAutoApproveService implements OnModuleInit, OnModuleDestro
        RETURNING c.id`,
       [Math.round(hours)],
     );
-    const rows = Array.isArray(result[0]) ? result[0] : result;
+    const rows = returningRows<{ id: string }>(result);
     if (rows.length > 0) this.logger.log(`موافقة تلقائية: ${rows.length} مرحلة`);
     return rows.length;
   }

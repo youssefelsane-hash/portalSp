@@ -45,6 +45,13 @@ export class MatchingDispatchQueueClient {
    * بيرفض التكرار بدل ما يوزّعه مرتين.
    */
   async enqueueDispatch(orderId: string): Promise<boolean> {
+    // **حارس ضد فشل صامت** (تدقيق ج-٤): `orderId` فاضي معناه إن الكولر قرا شكل نتيجة استعلام
+    // غلط. من غير الحارس ده الوظيفة بتتحجز بـ`jobId = 'dispatch-undefined'`، بتتنفّذ، وبترجّع
+    // «نجحت» — وده اللي خلّى بَقّة الـsweep تعيش شهور بلا أي أثر ظاهر.
+    if (!orderId) {
+      this.logger.error('محاولة حجز وظيفة توزيع بلا معرّف طلب — الكولر بيقرا نتيجة الاستعلام غلط');
+      return false;
+    }
     try {
       await Promise.race([
         this.queue.add(

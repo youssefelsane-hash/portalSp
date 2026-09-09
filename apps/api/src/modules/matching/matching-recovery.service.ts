@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { returningRows } from '../../common/db/returning-rows';
 import { Order } from '../orders/entities/order.entity';
 import { SettingsService } from '../settings/settings.service';
 import { MatchingDispatchQueueClient } from './matching-dispatch-queue.client';
@@ -96,7 +97,16 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
 
     // Claim + postpone happen in one transaction. Concurrent API instances cannot recover the
     // same order, and a permanently stalled old order leaves the front of the queue immediately.
-    const rows = await this.orders.manager.transaction((manager) => manager.query<Array<{ id: string }>>(
+    // **بَقّة حقيقية اتقاست في تدقيق ج-٤ (2026-09-09)**: النتيجة هنا كانت بتتقرا مباشرةً كأنها
+    // مصفوفة صفوف، وTypeORM بترجّع `UPDATE … RETURNING` كـ`[rows, affectedCount]`. النتيجة إن
+    // الحلقة تحت كانت بتلف على **عنصرين** (مصفوفة الصفوف، والرقم)، والاتنين `.id` بتاعهم
+    // `undefined` — يعني `enqueueDispatch(undefined)` مرتين، والـ`jobId` بقى `dispatch-undefined`
+    // فBullMQ بيدمجهم في وظيفة واحدة، والوظيفة دي بتنادي `dispatchOrAutoConfirm(undefined)` اللي
+    // بترجّع فورًا بلا أي أثر. **الـsweep فضلت شغّالة شكليًا وهي فعليًا ما أعادت توزيع ولا طلب
+    // واحد**: بتزوّد `matching_attempt_count` وبتأجّل `next_matching_attempt_at` (فالأدمن بيشوف
+    // «٤ محاولات» ويفتكرها بتحاول)، والطلب اللي فشل توزيعه أول مرة بيفضل `searching_technician`
+    // للأبد لحد ما أدمن يتدخّل بإيده. `returningRows()` هو المصدر الواحد لفك الشكل ده.
+    const raw = await this.orders.manager.transaction((manager) => manager.query(
       `WITH due_orders AS (
          SELECT orders.id
          FROM orders
@@ -129,6 +139,7 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
        RETURNING orders.id`,
       [batchSize, initialBackoffSeconds, maxBackoffSeconds],
     ));
+    const rows = returningRows<{ id: string }>(raw);
 
     // **الـsweep بتجدول، مش بتنفّذ.**
     //

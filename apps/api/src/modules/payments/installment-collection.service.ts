@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { returningRows } from '../../common/db/returning-rows';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Installment } from '../installments/entities/installment.entity';
@@ -118,6 +119,6 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
        RETURNING id`,
       [limit, maxAttempts, backoffDays, installmentIds ?? null],
     );
-    return Array.isArray(result[0]) ? (result[0] as { id: string }[]) : (result as { id: string }[]);
+    return returningRows<{ id: string }>(result);
   }
 }

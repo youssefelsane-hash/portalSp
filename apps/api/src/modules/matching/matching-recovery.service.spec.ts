@@ -40,6 +40,44 @@ describe('MatchingRecoveryService', () => {
     expect(enqueueDispatch).toHaveBeenCalledWith('order-2');
   });
 
+  /**
+   * **انحدار البَقّة اللي عاشت شهور** (تدقيق ج-٤، 2026-09-09): الاختبار فوق كان بيمرّر
+   * `[{id},{id}]` — وده شكل نتيجة `SELECT`. الدرايفر الحقيقي بيرجّع `UPDATE … RETURNING`
+   * كـ`[rows, affectedCount]`، فالكود الحقيقي كان بيلف على عنصرين (المصفوفة + الرقم) ويبعت
+   * `undefined` مرتين. النتيجة: الـsweep بتزوّد العدّاد وبتأجّل الموعد **من غير ما تعيد توزيع
+   * ولا طلب واحد**، والطلب اللي فشل توزيعه أول مرة بيعلق للأبد. الـmock الغلط هو اللي خلّى
+   * السويتة تعدّي وهي مش بتغطّي الحالة الحقيقية — فالشكل ده لازم يفضل مختبَر صراحةً.
+   */
+  it('بتفهم شكل [rows, affectedCount] الحقيقي بتاع UPDATE … RETURNING', async () => {
+    const query = jest.fn().mockResolvedValue([[{ id: 'order-1' }, { id: 'order-2' }], 2]);
+    const enqueueDispatch = jest.fn().mockResolvedValue(true);
+    const service = new MatchingRecoveryService(
+      repository(query) as never,
+      { enqueueDispatch } as never,
+      settings() as never,
+    );
+
+    await expect(service.sweep(100)).resolves.toBe(2);
+    expect(enqueueDispatch).toHaveBeenCalledTimes(2);
+    expect(enqueueDispatch).toHaveBeenCalledWith('order-1');
+    expect(enqueueDispatch).toHaveBeenCalledWith('order-2');
+    // الحارس الحاسم: ولا نداء واحد بمعرّف فاضي.
+    for (const [orderId] of enqueueDispatch.mock.calls) expect(orderId).toBeTruthy();
+  });
+
+  it('UPDATE ماأثّرش على أي طلب → مفيش أي حجز وظيفة', async () => {
+    const query = jest.fn().mockResolvedValue([[], 0]);
+    const enqueueDispatch = jest.fn().mockResolvedValue(true);
+    const service = new MatchingRecoveryService(
+      repository(query) as never,
+      { enqueueDispatch } as never,
+      settings() as never,
+    );
+
+    await expect(service.sweep(100)).resolves.toBe(0);
+    expect(enqueueDispatch).not.toHaveBeenCalled();
+  });
+
   it('reads batch size and backoff from settings instead of a deployment-time constant', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const configured = settings({

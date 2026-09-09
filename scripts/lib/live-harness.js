@@ -40,6 +40,7 @@ class LiveHarness {
     this.runId = Date.now().toString(36);
     this.runNum = String(Date.now() % 100000).padStart(5, '0');
     this.phoneSeq = 0;
+    this.tagSeq = 0;
     this.dayCursor = 5;
     this.created = { users: [], serviceIds: [], zoneIds: [], cityIds: [], categoryIds: [] };
     this.results = [];
@@ -110,6 +111,14 @@ class LiveHarness {
   }
 
   /**
+   * لاصقة فريدة **لكل نداء** داخل نفس التشغيلة. `runId` وحده مش كفاية: تدقيق زي ج-٤ بيبذر
+   * كتالوج معزول لكل حالة، والـslugs المشتقة من `runId` بس بتصطدم بـ`cities_slug_key`.
+   */
+  nextTag() {
+    return `${this.runId}${(this.tagSeq++).toString(36)}`;
+  }
+
+  /**
    * كل طلب اختبار بياخد يوم لوحده: السقف اليومي للفني (`matching.daily_capacity_minutes`)
    * مشترك، فطلبات سيناريوهات مختلفة على نفس اليوم بتتزاحم عليه — والرفض الصحيح من محرك
    * المطابقة بيبان كأنه عطل توزيع.
@@ -158,7 +167,8 @@ class LiveHarness {
 
   /** كتالوج معزول بالكامل (مدينة/نطاق/فئة/خدمة) — مايتلامسش مع بيانات أي تدقيق تاني. */
   async seedCatalog({ priceCents = 10_000, durationMinutes = 60 } = {}) {
-    const { prefix, runId } = this;
+    const { prefix } = this;
+    const runId = this.nextTag();
     const [country] = await this.q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     const [city] = await this.q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
@@ -187,7 +197,8 @@ class LiveHarness {
   }
 
   async makeTechnician(label = 't') {
-    const { prefix, runId } = this;
+    const { prefix } = this;
+    const runId = this.nextTag();
     const [user] = await this.q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`,
       [this.nextPhone(), `فني ${prefix} ${label} ${runId}`],
@@ -214,7 +225,8 @@ class LiveHarness {
   }
 
   async makeCustomer(label = 'c') {
-    const { prefix, runId } = this;
+    const { prefix } = this;
+    const runId = this.nextTag();
     const [user] = await this.q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
       [this.nextPhone(), `عميل ${prefix} ${label} ${runId}`],
@@ -230,7 +242,8 @@ class LiveHarness {
   }
 
   async makeAdmin() {
-    const { prefix, runId } = this;
+    const { prefix } = this;
+    const runId = this.nextTag();
     const [user] = await this.q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,
       [this.nextPhone(), `أدمن ${prefix} ${runId}`],

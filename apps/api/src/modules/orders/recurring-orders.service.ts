@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { returningRows } from '../../common/db/returning-rows';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -403,11 +404,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
         templateIds ?? null,
       ],
     );
-    // TypeORM قد يعيد UPDATE ... RETURNING كـ[rows, affectedCount] بحسب الـdriver؛ نفس فك
-    // الغلاف الموجود في claimOccurrences يمنع أن يصبح الصف الأول مصفوفة داخل الحلقة.
-    const claimed = Array.isArray(claimedRaw[0])
-      ? (claimedRaw[0] as ClaimedRecurringCardPayment[])
-      : (claimedRaw as ClaimedRecurringCardPayment[]);
+    const claimed = returningRows<ClaimedRecurringCardPayment>(claimedRaw);
 
     for (const order of claimed) {
       const result = await this.paymentsService.attemptRecurringOrderCardCharge(order.id, Number(order.attempt_number));
@@ -642,9 +639,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
                  candidates.previous_status`,
       [limit, MAX_CONSECUTIVE_FAILURES, CLAIM_LEASE_MS, templateIds ?? null],
     );
-    // TypeORM's PostgreSQL runner returns UPDATE ... RETURNING as
-    // [rows, affectedCount], unlike SELECT/INSERT which return rows directly.
-    const rows = Array.isArray(result[0]) ? result[0] : (result as ClaimedOccurrenceRow[]);
+    const rows = returningRows<ClaimedOccurrenceRow>(result);
 
     return rows.map((row) => {
       const scheduledFor = new Date(row.scheduled_for);

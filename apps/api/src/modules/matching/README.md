@@ -878,3 +878,34 @@ listing and acceptance. Historical work opportunities remain decidable.
 
 Verification: hourly/parallel/selected-provider requests, mobile signup parity, legacy opportunity
 compatibility, matching and admin explainability: 41 tests passed on isolated PostgreSQL.
+
+## ج-٤ (2026-09-09) — بَقّة حرجة: الـrecovery sweep ما أعادت توزيع ولا طلب واحد
+
+`MatchingRecoveryService.sweep()` كانت بتقرا نتيجة `UPDATE … RETURNING orders.id` كأنها مصفوفة
+صفوف. TypeORM بترجّع `UPDATE`/`DELETE … RETURNING` كـ**`[rows, affectedCount]`** — فالحلقة كانت
+بتلف على عنصرين (المصفوفة والرقم) وتبعت `enqueueDispatch(undefined)` مرتين، والـ`jobId` الثابت
+`dispatch-undefined` بيدمجهم في وظيفة واحدة بترجّع بلا أثر.
+
+**الأثر**: الـsweep كانت بتزوّد `matching_attempt_count` وبتأجّل `next_matching_attempt_at`
+بـbackoff — يعني الأدمن بيشوف «٤ محاولات» في Exception Center — وهي **ما نادت التوزيع ولا مرة**.
+أي طلب يفشل توزيعه من أول مرة كان بيعلق `searching_technician` للأبد لحد تدخّل يدوي.
+
+**ليه ما اتلقطش**: `matching-recovery.service.spec.ts` كان بيـmock الـquery بشكل `SELECT`
+(`[{id},{id}]`) مش بشكل `UPDATE`. السويتة خضراء وهي مش بتغطّي الحالة الحقيقية.
+
+**الإصلاح**: `returningRows()` من `src/common/db/returning-rows.ts` (المصدر الواحد لفك الشكل،
+وفيه جدول قياس لكل نوع استعلام)، + `enqueueDispatch()` بقى يرفض معرّف فاضي ويسجّل `error` بدل
+ما يرجّع نجاح، + اختبار انحدار بالشكل الحقيقي `[[…], 2]`.
+
+**تحقق حي**: `node scripts/matching-eligibility-audit.js` — ح-٩/ج بيثبت إن طلب عالق بيتلقط
+ويتعيّن أول ما فني مؤهّل يظهر. التقرير الكامل في `docs/29-e2e-production-readiness-audit-2026-09-08.md`.
+
+### ملاحظات أهلية اتأكدت في نفس التدقيق
+
+- **المساعد بياخد الطلب كقائد عادي** (ADR-0055) — شجرة الأهلية عمدًا مافيهاش شرط
+  `technician_kind`. تعليق `technicianKindCondition` كان لسه بيوصف قاعدة ADR-0050 الملغية،
+  واتصحّح.
+- **تفضيل ≠ قفل**: `requested_technician_id` لوحده = تفضيل والبديل مقصود؛ مع
+  `provider_lock_source` = قفل، والطلب بيروح `awaiting_technician_reselection` بدل أي استبدال.
+- **فجوة مفتوحة**: الـsweep دفعة ٢٥/دورة مرتّبة بالأقدم أولاً (~١٥٠٠ طلب/ساعة). تراكم أكبر من
+  كده = الطلبات الجديدة تستنى ورا القديمة. مااتقاسش تحت ضغط — محلّه ج-٦.

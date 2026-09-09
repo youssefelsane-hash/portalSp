@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { withTransactionRetry } from '../../common/db/transaction-retry';
+import { returningRows } from '../../common/db/returning-rows';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import {
@@ -2744,9 +2745,7 @@ export class PaymentsService {
        RETURNING application_id, sequence_number, amount_cents`,
       [payment.installmentId, succeeded, failureReason],
     );
-    // نفس TypeORM quirk الموثقة في recurring-orders claim: UPDATE..RETURNING ممكن ترجع
-    // [rows, affectedCount] — بنفك الغلاف لو موجود.
-    const updated = Array.isArray(updatedRaw[0]) ? (updatedRaw[0] as Record<string, unknown>[]) : (updatedRaw as Record<string, unknown>[]);
+    const updated = returningRows<Record<string, unknown>>(updatedRaw);
     if (updated.length === 0) return;
 
     const inst = updated[0];
