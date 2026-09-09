@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { fetchService, fetchPricingFields, estimatePrice } from '@/lib/catalog';
@@ -81,6 +81,21 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // بقى إجباري دايمًا لأي خدمة بتسمح بالجدولة.
   const [scheduleDayMode, setScheduleDayMode] = useState<'specific' | 'flexible'>('specific');
   const [scheduledDate, setScheduledDate] = useState('');
+  /**
+   * «بدأ الحجز» ≠ «شاف الخدمة» (بلاغ مالك 2026-09-09: أول خانتين في الفنل دايمًا نفس الرقم).
+   *
+   * الاتنين كانوا بيتبعتوا في نفس الـ`useEffect` بنفس اللحظة، فالتسرّب بينهم صفر بالتعريف
+   * والخانة التانية مالهاش أي معلومة زيادة. المرحلة دي بقت تتسجّل عند **أول التزام حقيقي**
+   * من العميل — اختيار ميعاد — وده اللي بيخلّي «فتح الصفحة وما كمّلش» رقم ليه معنى.
+   *
+   * الـref (مش state) عشان التسجيل مايعيدش رندر الصفحة، ومرة واحدة لكل فتحة صفحة.
+   */
+  const bookingStartedTracked = useRef(false);
+  function markBookingStarted() {
+    if (bookingStartedTracked.current) return;
+    bookingStartedTracked.current = true;
+    trackFunnelStage('booking_started', { service_id: id });
+  }
   const [scheduledDateRangeEnd, setScheduledDateRangeEnd] = useState('');
 
   // **وضع الحجز قيمة مشتقة، مش state (ADR-0048، docs/08 §85)** — العميل مابيسألش عنه خالص.
@@ -149,12 +164,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       .catch(() => setService(null));
   }, [id]);
 
-  // أول مرحلتين في الفنل (ADR-0081 §3): «شاف الخدمة» و«بدأ الحجز» بيحصلوا هنا **من غير أي
-  // نداء سيرفر**، فلو ما اتسجّلوش من المتصفح مفيش حد هيعرف كام واحد فتح الصفحة وما كمّلش.
-  // الصفحة دي هي الاتنين مع بعض: فتحها = عرض الخدمة + بداية الحجز.
+  // «شاف الخدمة» = فتح الصفحة. بيحصل **من غير أي نداء سيرفر**، فلو ما اتسجّلش من المتصفح
+  // مفيش حد هيعرف كام واحد فتح الصفحة وما كمّلش.
   useEffect(() => {
     trackFunnelStage('service_viewed', { service_id: id });
-    trackFunnelStage('booking_started', { service_id: id });
   }, [id]);
 
   useEffect(() => {
@@ -583,6 +596,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               value={scheduledDate}
               onChange={(e) => {
                 setScheduledDate(e.target.value);
+                markBookingStarted();
                 if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
               }}
               className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
@@ -594,6 +608,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 value={scheduledDate}
                 onChange={(e) => {
                   setScheduledDate(e.target.value);
+                  markBookingStarted();
                   if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
                 }}
                 className="rounded-lg border border-border bg-surface px-4 py-2"

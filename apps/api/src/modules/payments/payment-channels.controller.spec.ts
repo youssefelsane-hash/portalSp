@@ -56,6 +56,7 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     // اختبار في النص فشل قبل ما finally بتاعه يشتغل.
     await dataSource.query(`UPDATE settings SET value = 'true', updated_by_user_id = NULL WHERE key = 'payments.cash_enabled'`);
     await cache.del('settings:payments.cash_enabled');
+    settingsService.invalidateLocalCache('payments.cash_enabled');
     cache.onModuleDestroy();
     await dataSource.destroy();
   });
@@ -92,6 +93,10 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
       `UPDATE settings SET value = 'false' WHERE key = 'payments.cash_enabled'`,
     );
     await cache.del('settings:payments.cash_enabled');
+    // كتابة SQL مباشرة بتتخطى `SettingsService.update()`، والخدمة بتخدم القيمة المحلية ولو
+    // عمرها خلص (stale-while-revalidate) — فمسح Redis وحده مابيبانش. ده المسار المدعوم لأي
+    // كاتب من برّه الخدمة، ومن غيره الاختبار كان بيقيس قيمة قديمة ويفشل وهو سليم.
+    settingsService.invalidateLocalCache('payments.cash_enabled');
     try {
       const items = await controller.list(CUSTOMER);
       expect(items.find((i) => i.method === PaymentMethod.CASH)?.is_available).toBe(false);
@@ -99,6 +104,7 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     } finally {
       await dataSource.query(`UPDATE settings SET value = 'true' WHERE key = 'payments.cash_enabled'`);
       await cache.del('settings:payments.cash_enabled');
+      settingsService.invalidateLocalCache('payments.cash_enabled');
     }
   });
 });

@@ -1,12 +1,16 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../common/events/setting-updated.event';
+import {
+  SETTING_RELOAD_REQUIRED_EVENT,
+  SETTING_UPDATED_EVENT,
+  SettingUpdatedEvent,
+} from '../../common/events/setting-updated.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Setting } from './entities/setting.entity';
 
@@ -154,6 +158,24 @@ export class SettingsService {
    */
   invalidateLocalCache(key: string): void {
     this.localInvalidate(key);
+  }
+
+  /**
+   * **إعداد اتعدّل على نسخة تانية** (`SettingsCrossInstanceBridge`، ADR-0075).
+   *
+   * الجسر بيبطّل الكاش **المشترك** (Redis) على النسخة الكاتبة وبعدين يبلّغ باقي النسخ. لكن كل
+   * نسخة عندها كمان كاش **محلي** في الذاكرة بسياسة stale-while-revalidate — ومحدش كان بيبطّله
+   * هنا. النتيجة إن المستمعين على النسخة التانية (بوابات الدفع مثلاً) بيعيدوا القراءة فورًا
+   * فياخدوا **القيمة القديمة من ذاكرتهم**، ويفضلوا عليها لأن مفيش إعادة تحميل تانية بعد كده:
+   * عنوان InstaPay القديم يفضل شغّال على النسخة دي لحد إعادة تشغيل — وهو بالظبط اللي ADR-0075
+   * اتكتب عشان يمنعه.
+   *
+   * `prependListener` مقصود: لازم الإبطال يحصل **قبل** أي مستمع تاني للحدث ده يقرا القيمة.
+   */
+  @OnEvent(SETTING_RELOAD_REQUIRED_EVENT, { prependListener: true })
+  handleCrossInstanceReload(event: SettingUpdatedEvent): void {
+    if (!event?.key) return;
+    this.localInvalidate(event.key);
   }
 
   /**

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/funnel_tracker.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart' show BookingMode;
 import '../favorites/favorites_repository.dart';
@@ -127,6 +128,12 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
     final chosen = await _pickService(profile.services);
     if (chosen == null) return;
 
+    // مسار «احجز نفس الفني» مابيعديش على `navigateToServiceBooking` — لو ما اتسجّلش هنا،
+    // رحلات إعادة الحجز كلها كانت هتبان في الفنل من مرحلة السعر وبعدين، بلا بداية.
+    // المرحلتين مع بعض هنا **صح**: مفيش خطوة ميعاد بينهم في المسار ده.
+    FunnelTracker.instance.track('service_viewed', serviceId: chosen.id);
+    FunnelTracker.instance.track('booking_started', serviceId: chosen.id);
+
     setState(() => _rebooking = true);
     try {
       final service = await _catalogRepository.fetchService(chosen.id);
@@ -156,6 +163,10 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
     if (profile == null || profile.services.isEmpty) return;
     final chosen = await _pickService(profile.services);
     if (chosen == null) return;
+
+    // نفس سبب `_rebook` بالظبط — الحجز على سلوت محدد مسار مستقل عن شجرة الكتالوج.
+    FunnelTracker.instance.track('service_viewed', serviceId: chosen.id);
+    FunnelTracker.instance.track('booking_started', serviceId: chosen.id);
 
     setState(() => _bookingSlot = true);
     try {

@@ -7,7 +7,7 @@ import { ApiException, ErrorCode } from './common/exceptions/api.exception';
 export interface HttpLayerTarget {
   use(...handlers: unknown[]): unknown;
   set(key: string, value: unknown): unknown;
-  setGlobalPrefix(prefix: string): unknown;
+  setGlobalPrefix(prefix: string, options?: { exclude?: string[] }): unknown;
   enableCors(options: unknown): unknown;
   useStaticAssets(path: string, options?: { prefix?: string }): unknown;
   useGlobalPipes(...pipes: unknown[]): unknown;
@@ -121,7 +121,10 @@ export function configureHttpLayer(app: HttpLayerTarget, options: HttpLayerOptio
     }),
   );
 
-  app.setGlobalPrefix(options.apiPrefix);
+  // `‎/r/:code` **برّه البادئة عن قصد** (ADR-0082 §2): الرابط ده بيتطبع تحت QR على ورق،
+  // وبيتقرا بالعين ويتكتب بالإيد. `‎/r/AB12CD` قابل لده، و`‎/api/v1/marketing/links/AB12CD` لأ.
+  // ده نفس مبرر `‎/uploads/*` تحت — مسار عام موجّه لبني آدمين، مش جزء من عقد الـAPI.
+  app.setGlobalPrefix(options.apiPrefix, { exclude: ['r/:code'] });
 
   // 2) أصول الـCORS من env.validation.ts (CORS_ORIGIN) — فاضي = مفتوح للكل (`*`)، مقبول تطويريًا
   // بس، مرفوض صراحة وقت الإقلاع لو NODE_ENV=production (راجع env.validation.ts). الـJWT بيتبعت

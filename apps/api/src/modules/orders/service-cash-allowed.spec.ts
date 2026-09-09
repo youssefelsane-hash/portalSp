@@ -350,8 +350,17 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
   it('خدمة «وقت بداية فقط» من غير scheduled_at: تترفض', async () => {
     await dataSource.query(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.serviceCashEnabled]);
     try {
+      // **حارس التكرار بيسبق التحقق**: نفس (عميل + خدمة + عنوان) بلا حقول مميّزة بيرجّع الطلب
+      // اللي اتعمل في تست قبل كده بدل ما يتحقق من أي حاجة (`order-duplicate-guard`، سلوك صح).
+      // مفتاح idempotency صريح بيخلّي الطلب ده **طلب جديد فعلاً** فالتحقق يشتغل.
       await expect(
-        ordersService.create(ids.customerUser, { service_id: ids.serviceCashEnabled, address_id: ids.address } as never),
+        ordersService.create(
+          ids.customerUser,
+          { service_id: ids.serviceCashEnabled, address_id: ids.address } as never,
+          undefined,
+          undefined,
+          `start-time-only-${runId}`,
+        ),
       ).rejects.toMatchObject({ code: 'VAL_001' });
     } finally {
       await dataSource.query(`UPDATE services SET requires_start_time_only = false WHERE id = $1`, [ids.serviceCashEnabled]);

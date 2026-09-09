@@ -390,8 +390,12 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     ).rejects.toMatchObject({ code: 'VAL_001' });
   });
 
-  it('الأولوية: standard_data لما العميل يستخدمه بيتقدم على مخرجات المعادلة', async () => {
-    // نعمل صف standard_data بقيم طاقم مختلفة تمامًا
+  // **قلب السلوك ده مقصود (ADR-0060 / docs/08 §113)**: المعادلة بقت **المصدر الوحيد** للمدة
+  // والطاقم في خدمة `formula`. الاختبار كان بيتحقق من العكس («standard_data بيتقدّم على مخرجات
+  // المعادلة») — وده بالظبط الازدواج اللي الـADR شاله: مصدرين للرقم = رقم مختلف في المعاينة عن
+  // الطلب. النسخة الحالية بتوثّق القاعدة الجديدة: إرسال بيانات قياسية لخدمة معادلة **بيترفض
+  // برسالة بتقول للأدمن يعدّل المعادلة**، مش بيتقبل بصمت ويتجاهل المعادلة.
+  it('خدمة معادلة: إرسال standard_data بيترفض — المعادلة هي المصدر الوحيد للمدة والطاقم', async () => {
     const [std] = await q(
       `INSERT INTO service_standard_data
          (service_id, execution_type_ar, unit_ar, technician_daily_wage_cents, assistant_daily_wage_cents,
@@ -399,18 +403,24 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
        VALUES ($1,'تشطيب بالمساحة','م²',10000,5000,20,5,2) RETURNING id`,
       [ids.serviceFormula],
     );
-    // 100 وحدة ÷ 20/يوم = 5 أيام، والطاقم 5+2 — مختلفة تمامًا عن مخرجات المعادلة (3 فني/100 يوم)
+
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.serviceFormula,
+        address_id: ids.address,
+        field_values: { area: 100 },
+        standard_data_id: std.id,
+        requested_units: 100,
+      } as never),
+    ).rejects.toThrow(/محرك التسعير كمصدر وحيد/);
+
+    // ومن غير البيانات القياسية نفس الخدمة بتتحجز عادي، والطاقم/المدة من المعادلة.
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceFormula,
       address_id: ids.address,
       field_values: { area: 100 },
-      standard_data_id: std.id,
-      requested_units: 100,
     } as never);
-    expect(order.requiredTechnicians).toBe(5); // من standard_data مش ceil(100/40)=3
-    expect(order.requiredAssistants).toBe(2);
-    expect(order.estimatedDurationDays).toBe(5); // 100 وحدة ÷ 20/يوم — من standard_data مش المعادلة
-    // الطلب بيشاور على std (FK) — التنظيف النهائي في afterAll بعد حذف الطلبات
+    expect(order.requiredTechnicians).toBe(3); // ceil(100/40) من المعادلة
   });
 
   it('تكافؤ preview/create: نفس المدخلات = نفس السعر بالحرف', async () => {

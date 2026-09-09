@@ -62,8 +62,13 @@ export class FunnelService {
     const recorded = await this.dataSource.query<
       { stage: string; count: string; failed_count: string; sources: string[] }[]
     >(
+      // `order_id` أول واحد في `COALESCE` عن قصد: `order_placed` لازم تتعد **بالطلب** عشان
+      // نفس الرقم بالظبط يبقى نهاية النص الأول وبداية النص التاني المشتق من
+      // `order_status_history` (الجملة اللي فوق بتوعد بده). جلسة واحدة عملت طلبين كانت بتتعد
+      // «١» هنا و«٢» في المشتق، فالمراحل بعد الطلب تطلع أكبر من الطلب نفسه — فنل صاعد،
+      // مستحيل منطقيًا. باقي المراحل `order_id` فيها NULL فبتقع على الجلسة زي ما كانت.
       `SELECT stage,
-              COUNT(DISTINCT COALESCE(funnel_session_id::text, id::text))
+              COUNT(DISTINCT COALESCE(order_id::text, funnel_session_id::text, id::text))
                 FILTER (WHERE outcome = 'success') AS count,
               COUNT(*) FILTER (WHERE outcome = 'failed') AS failed_count,
               array_agg(DISTINCT source) AS sources

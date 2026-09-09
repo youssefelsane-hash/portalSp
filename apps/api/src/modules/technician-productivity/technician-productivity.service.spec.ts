@@ -82,6 +82,7 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
       [JSON.stringify(DEFAULT_PRODUCTIVITY_METRICS_CONFIG)],
     );
     await cache.del('settings:productivity.metrics_config');
+    settingsService.invalidateLocalCache('productivity.metrics_config');
     await dataSource.destroy();
     cache.onModuleDestroy();
   });
@@ -122,6 +123,7 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
     // تعديل مباشر بالـ SQL بيتخطى SettingsService.update() (اللي بيبطّل الكاش تلقائي) — لازم
     // نبطّل الكاش يدويًا هنا وإلا القراءة الجاية هترجّع القيمة القديمة المخزّنة (TTL دقيقة).
     await cache.del('settings:productivity.metrics_config');
+    settingsService.invalidateLocalCache('productivity.metrics_config');
 
     const report = await service.computeForTechnician(technicianId, 3);
     const revenueMetric = report.breakdown.find((b) => b.key === 'revenue_delivered');
@@ -136,6 +138,7 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
       [JSON.stringify(DEFAULT_PRODUCTIVITY_METRICS_CONFIG)],
     );
     await cache.del('settings:productivity.metrics_config');
+    settingsService.invalidateLocalCache('productivity.metrics_config');
   });
 
   it('حجم عينة أدنى أكبر من المتاح بيستبعد المقياس بسبب واضح (مش صفر صامت)', async () => {
@@ -148,6 +151,7 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
       [JSON.stringify(customConfig)],
     );
     await cache.del('settings:productivity.metrics_config');
+    settingsService.invalidateLocalCache('productivity.metrics_config');
 
     const report = await service.computeForTechnician(technicianId, 3);
     const ratingMetric = report.breakdown.find((b) => b.key === 'customer_rating');
@@ -159,6 +163,7 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
       [JSON.stringify(DEFAULT_PRODUCTIVITY_METRICS_CONFIG)],
     );
     await cache.del('settings:productivity.metrics_config');
+    settingsService.invalidateLocalCache('productivity.metrics_config');
   });
 
   it('فني بلا أي snapshots: صفر استثناء، درجة null مع تفسير واضح', async () => {

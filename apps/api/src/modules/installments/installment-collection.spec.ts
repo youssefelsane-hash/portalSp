@@ -36,6 +36,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
   let paymentsService: PaymentsService;
   let collectionService: InstallmentCollectionService;
   let secondCollectionService: InstallmentCollectionService;
+  let settingsServiceRef: SettingsService;
   let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
@@ -131,7 +132,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
     ids.installmentIds.push(inst.id);
 
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
-    const settingsService = new SettingsService(
+    settingsServiceRef = new SettingsService(
       dataSource.getRepository(Setting),
       { record: async () => undefined } as unknown as AuditLogService,
       cache,
@@ -152,7 +153,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       {} as never,
       {} as never,
       {} as never,
-      settingsService,
+      settingsServiceRef,
       { record: async () => undefined } as unknown as AuditLogService,
       events,
       {} as never, // providers registry — المسار هنا بينتهي قبل نداء البوابة (مفيش كارت محفوظ)
@@ -167,13 +168,13 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       dataSource.getRepository(Installment),
       dataSource,
       paymentsService,
-      settingsService,
+      settingsServiceRef,
     );
     secondCollectionService = new InstallmentCollectionService(
       dataSource.getRepository(Installment),
       dataSource,
       paymentsService,
-      settingsService,
+      settingsServiceRef,
     );
   });
 
@@ -207,11 +208,16 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
 
   async function flushSettingCache(value: string): Promise<void> {
     await q(`UPDATE settings SET value = $1 WHERE key = 'installments.auto_collection_enabled'`, [value]);
-    // تعديل SQL مباشر مايمرش على invalidation بتاع SettingsService (كاش 60s بمفتاح settings:{key})
+    // تعديل SQL مباشر مايمرش على invalidation بتاع SettingsService — **طبقتين** لازم يتبطّلوا:
+    // Redis (`settings:{key}`) **والكاش المحلي في الذاكرة** (stale-while-revalidate). مسح Redis
+    // لوحده كان بيسيب `false` من التست اللي قبله عايشة في الذاكرة، فالـsweep بيرجع 0 والاختبار
+    // يقرا كأن الـclaim مكسور. `invalidateLocalCache()` هو المسار المدعوم لأي كاتب من برّه
+    // (نفس القاعدة المكتوبة في CLAUDE.md).
     const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
     await redis.connect().catch(() => undefined);
     await redis.del('settings:installments.auto_collection_enabled').catch(() => undefined);
     redis.disconnect();
+    settingsServiceRef.invalidateLocalCache('installments.auto_collection_enabled');
   }
 
   it('مطفي افتراضيًا — مفيش أي دفعة بتنشأ من غير تشغيل صريح (BLOCKED by default)', async () => {

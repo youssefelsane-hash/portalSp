@@ -193,6 +193,17 @@ class LiveHarness {
    * القاعدة الصح مشتقّة من الـschema نفسه مش من قايمة استثناءات: عمود FK **بيقبل NULL** معناه
    * «علاقة اختيارية»، فقطعها هو التنظيف السليم. عمود **NOT NULL** معناه إن الابن ما ينفعش يعيش
    * من غير الأب، فالحذف هو السليم.
+   *
+   * ## و«بيقبل NULL» **مش دايمًا** معناه اختياري — الفشل بيقرّر، مش التخمين
+   *
+   * `booking_match_previews.technician_id` بيقبل NULL في تعريف العمود، لكن
+   * `chk_booking_match_preview_provider` بيفرض إن **واحد** من (فني، شركة) يبقى موجود. يعني
+   * العمود ملكية حقيقية، والـ`NULL` مسموح بس عشان البديل. الـ`UPDATE … SET NULL` كان بيترفض،
+   * والـ`.catch(() => {})` كان **بيبلع الرفض بصمت**، فالحذف بعده يقع على FK برسالة مالهاش
+   * علاقة بالسبب (بالظبط زي ما حصل في تدقيق الفنل).
+   *
+   * فالتصنيف بقى بالمحاولة مش بالتخمين: نجرّب نقطع العلاقة، ولو القاعدة رفضت يبقى الصف مملوك
+   * فعلاً ⇒ نحذفه بنفس مسار العمود الإجباري. مفيش أي فشل بيتبلع.
    */
   async cascadeDelete(table, ids, depth = 0) {
     if (!ids.length || depth > 4) return;
@@ -211,11 +222,14 @@ class LiveHarness {
       if (ref.table_name === 'audit_logs') continue;
       if (!ref.required) {
         // علاقة اختيارية = بصمة فاعل، مش ملكية. اقطعها وسيب الصف.
-        await this.q(
+        const detached = await this.q(
           `UPDATE ${ref.table_name} SET ${ref.column_name} = NULL WHERE ${ref.column_name} = ANY($1::uuid[])`,
           [ids],
-        ).catch(() => {});
-        continue;
+        ).then(
+          () => true,
+          () => false, // قيد CHECK بيمنع التفريغ ⇒ العمود ملكية، بنكمّل لمسار الحذف تحت
+        );
+        if (detached) continue;
       }
       const rows = await this.q(
         `SELECT id FROM ${ref.table_name} WHERE ${ref.column_name} = ANY($1::uuid[])`,

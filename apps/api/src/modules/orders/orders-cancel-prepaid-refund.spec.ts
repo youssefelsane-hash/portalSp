@@ -27,6 +27,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
   let service: OrdersService;
   let paymentEvents: { emit: jest.Mock };
   const runId = Date.now().toString(36);
+  let orderSeq = 0;
   const ids = {
     country: '',
     city: '',
@@ -88,7 +89,10 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, placed_at, assessment_type, price_status, remote_assessment_fee_cents)
        VALUES (20,$1,$2,$3,$4,$5,$6,$7,$8,0, now(), $9, COALESCE($10, 'confirmed'), $11) RETURNING id, order_number`,
       [
-        `TESTCPR-${opts.label}`.slice(0, 24),
+        // **رقم الطلب لازم يكون فريد بين التشغيلات**: `TESTCPR-${label}` ثابت، فأي تشغيلة
+        // اتقطعت قبل التنظيف بتخلّي اللي بعدها يقع على `orders_order_number_key`. الـlabel
+        // للتوثيق، والتفرّد من runId + عدّاد.
+        `CPR${runId}-${(orderSeq += 1)}`.slice(0, 24),
         ids.customerProfile,
         ids.service,
         ids.address,
@@ -228,6 +232,10 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+    // جداول بتتكتب أثناء الاسترداد وبتمنع حذف الطلب — لو فشل الحذف هنا، السويتة كلها بتقع.
+    await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+    await q(`DELETE FROM refund_settlement_reversals WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+    await q(`DELETE FROM order_earning_shares WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);

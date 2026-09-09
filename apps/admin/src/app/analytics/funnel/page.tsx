@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { FunnelReport, FunnelServiceRow, FunnelStageRow } from '@baytak/shared-types';
-import { FUNNEL_STAGE_LABELS_AR, FUNNEL_TRUST_LABELS_AR } from '@baytak/shared-types';
+import { FUNNEL_STAGE_LABELS_AR, FUNNEL_TRUST_LABELS_AR, funnelFailureLabelAr } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminQuery } from '@/lib/use-admin-query';
 import { AppShell } from '@/components/app-shell';
@@ -164,8 +164,14 @@ export default function FunnelPage() {
                   {report.top_failures.map((row, i) => (
                     <TableRow key={`${row.stage}-${row.failure_reason}-${i}`}>
                       <TableCell>{stageLabel(row.stage)}</TableCell>
-                      <TableCell dir="ltr" className="font-mono text-xs">
-                        {row.failure_reason}
+                      {/* بلاغ مالك: كان بيتعرض الكود الخام (`BAL_001`) وبس. الكود بيفضل ظاهر
+                          تحت الجملة لأنه اللي بيتبحث بيه في اللوج (`scripts/find-error.js`) —
+                          الترجمة زوّدت المعنى، ماشلتش وسيلة التشخيص. */}
+                      <TableCell>
+                        <span className="text-sm">{funnelFailureLabelAr(row.failure_reason)}</span>
+                        <span dir="ltr" className="text-muted-foreground block font-mono text-[11px]">
+                          {row.failure_reason}
+                        </span>
                       </TableCell>
                       <TableCell className="tabular-nums">{formatCount(row.count)}</TableCell>
                     </TableRow>

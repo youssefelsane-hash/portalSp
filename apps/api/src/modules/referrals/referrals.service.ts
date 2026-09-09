@@ -72,7 +72,7 @@ export class ReferralsService {
    * لو الاتنين صح، تقفل الترشيح وتزوّد عدّاد المُرشِّح، ولو العدّاد وصل لمضاعف جديد تصدر مكافأة.
    */
   async handleOrderCompleted(customerProfileId: string, orderId: string): Promise<void> {
-    const requiredPerReward = await this.settingsService.getNumber('referral.required_referrals_per_reward', 10);
+    const requiredPerReward = await this.settingsService.getNumber('referral.required_referrals_per_reward', 1);
     const rewardValueEgp = await this.settingsService.getNumber('referral.reward_value_egp', 150);
     const validityDays = await this.settingsService.getNumber('referral.reward_validity_days', 90);
     const result = await this.dataSource.transaction(async (manager) => {
@@ -234,7 +234,7 @@ export class ReferralsService {
     const [completedReferralsCount, pendingReferralsCount, requiredReferralsPerReward] = await Promise.all([
       this.referrals.count({ where: { referrerUserId: userId, status: ReferralStatus.COMPLETED } }),
       this.referrals.count({ where: { referrerUserId: userId, status: ReferralStatus.PENDING } }),
-      this.settingsService.getNumber('referral.required_referrals_per_reward', 10),
+      this.settingsService.getNumber('referral.required_referrals_per_reward', 1),
     ]);
 
     return {

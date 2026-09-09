@@ -35,4 +35,12 @@ export class RegisterDto {
   @IsString()
   @Length(3, 20)
   technician_referral_code?: string;
+
+  // اختياري — كود مصدر تسويق (ملصق/إنفلونسر/بواب/حملة، ADR-0082). بيوصل من رابط `‎/r/:code`
+  // أو بيتكتب بالإيد من الملصق. **خطأ فيه مايوقفش التسجيل** — نفس سياسة كود الفني فوق: خسارة
+  // إسناد أهون بما لا يقاس من عميل مقدرش يسجّل.
+  @IsOptional()
+  @IsString()
+  @Length(3, 24)
+  marketing_code?: string;
 }

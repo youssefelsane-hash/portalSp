@@ -52,16 +52,25 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
     );
   }
 
+  let technicianSeq = 0;
+
   async function makeTechnician(label: string, level: string = 'new'): Promise<string> {
+    // **runId الأول والعدّاد بعده**: `+2014${label}${runId}` كان بيتقص على ١٤ حرف، فأي label
+    // طوله ٩ حروف أو أكتر ('decliner-off'، 'truly-idle') كان بيبلع الـrunId بالكامل — يعني
+    // نفس رقم التليفون في كل تشغيلة، فأول تشغيلة اتقطعت قبل التنظيف بتفضل تكسر اللي بعدها
+    // بـ`users_phone_number_key`. التفرّد دلوقتي من مصدرين مضمونين: runId (بين التشغيلات)
+    // وعدّاد تسلسلي (جوّه التشغيلة)، والـlabel للتوثيق بس.
+    technicianSeq += 1;
+    const phoneNumber = `+20${runId.slice(0, 9)}${String(technicianSeq).padStart(2, '0')}`;
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
-      `+2014${label}${runId}`.slice(0, 14),
+      phoneNumber,
       `فني عدالة ${label} ${runId}`,
     ]);
     cleanupUserIds.push(user.id as string);
     const [profile] = await q(
       `INSERT INTO technician_profiles (user_id, technician_code, current_level, verification_status, current_location)
        VALUES ($1,$2,$3,'approved', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
-      [user.id, `FAIR${label}${runId}`.slice(0, 20), level],
+      [user.id, `FAIR${runId}${technicianSeq}`.slice(0, 20), level],
     );
     cleanupTechnicianIds.push(profile.id as string);
     await q(`INSERT INTO technician_services (technician_id, service_id, is_active) VALUES ($1,$2,true)`, [profile.id, ids.service]);

@@ -6,6 +6,7 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { loadRevisitPinState } from './revisit-pin';
+import { insertV2EarningShare } from '../payments/order-earning-share.testing';
 import { AdminExceptionCenterService } from '../operations/admin-exception-center.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { SettingsService } from '../settings/settings.service';
@@ -192,11 +193,13 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
     orderIds.push(original.id);
 
     if (opts.useEarningShare) {
-      await q(
-        `INSERT INTO order_earning_shares (order_id, technician_id, participant_role, technician_level, share_weight, pool_cents, share_cents)
-         VALUES ($1,$2,'leader','new',1,$3,$3)`,
-        [original.id, ids.technicianProfile, opts.technicianEarningCents],
-      );
+      await insertV2EarningShare(q, {
+        orderId: original.id,
+        technicianId: ids.technicianProfile,
+        participantRole: 'leader',
+        poolCents: opts.technicianEarningCents,
+        shareCents: opts.technicianEarningCents,
+      });
     }
 
     const [revisit] = await q(

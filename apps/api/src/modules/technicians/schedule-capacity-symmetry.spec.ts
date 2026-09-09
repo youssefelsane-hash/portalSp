@@ -286,7 +286,8 @@ describe('السقف اليومي وتماثل الجدولة (ADR-0059)', () =>
       expect(await tierFor(ids.techA, day, 60, 3)).toBe('LIGHT');
 
       // نفس الشغلانة بالظبط بعد التعيين — لازم تقفل التلات أيام كلها (يوم كامل لكل يوم).
-      await makeOrder(ids.techA, day, { days: 3, minutes: 60 });
+      // ADR-0077: المدة الدقيقة بتغلب تقدير الأيام، فشغلانة «٣ أيام» الحقيقية مالهاش دقايق.
+      await makeOrder(ids.techA, day, { days: 3, minutes: null });
       for (let offset = 0; offset < 3; offset += 1) {
         expect(await tierFor(ids.techA, dayAfter(210 + offset), 60, null)).toBe('HEAVY');
       }

@@ -105,7 +105,10 @@ describe('CatalogService.findMostRequestedCategories (docs/08 §77-E2)', () => {
   });
 
   it('الترتيب بعدد الطلبات — الفئة الأكتر طلبًا قبل الأقل', async () => {
-    const result = await service.findMostRequestedCategories(50);
+    // **الحد لازم يوسّع كل الفئات**: الاستعلام بيقصّ بـ`LIMIT` بعد الترتيب، وقاعدة التطوير فيها
+    // ١٠٠+ فئة عليها طلبات. فئة الاختبار (٣ طلبات) كانت بتقع بره أول ٥٠ فالاختبار يفشل حسب
+    // كمية البيانات المتراكمة مش حسب الكود. الترتيب النسبي هو اللي بنقيسه، مش وجودها في التوب.
+    const result = await service.findMostRequestedCategories(10_000);
     const order = result.map((c) => c.id);
     expect(order.indexOf(ids.hot)).toBeGreaterThanOrEqual(0);
     expect(order.indexOf(ids.cold)).toBeGreaterThanOrEqual(0);

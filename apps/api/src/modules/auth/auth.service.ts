@@ -17,6 +17,10 @@ import {
   TECHNICIAN_REFERRAL_CAPTURED_EVENT,
   TechnicianReferralCapturedEvent,
 } from '../../common/events/technician-referral-captured.event';
+import {
+  MARKETING_SOURCE_CAPTURED_EVENT,
+  MarketingSourceCapturedEvent,
+} from '../../common/events/marketing-source-captured.event';
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -344,6 +348,14 @@ export class AuthService {
       this.events.emit(
         TECHNICIAN_REFERRAL_CAPTURED_EVENT,
         new TechnicianReferralCapturedEvent(user.id, dto.technician_referral_code),
+      );
+    }
+    // إسناد تسويقي (ADR-0082) — «العميل ده جه من أنهي إعلان». نفس أسلوب السطور اللي فوق
+    // بالحرف: `auth` بيصدّر الحدث بس، والفحص والربط جوّه موديول `marketing`.
+    if (dto.marketing_code) {
+      this.events.emit(
+        MARKETING_SOURCE_CAPTURED_EVENT,
+        new MarketingSourceCapturedEvent(user.id, dto.marketing_code),
       );
     }
 

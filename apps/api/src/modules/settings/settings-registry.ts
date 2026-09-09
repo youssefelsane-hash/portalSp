@@ -135,6 +135,19 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'loyalty.earn_points_per_100_egp_spent': { type: 'number', default: 1, group: 'loyalty', description: 'نقاط الولاء المكتسبة لكل 100 جنيه إنفاق عند اكتمال الطلب' },
   'loyalty.points_expiry_months': { type: 'number', default: 12, group: 'loyalty', description: 'بعد كام شهر تنتهي نقاط الولاء المكتسبة (0 = ماتنتهيش أبدًا). التغيير بيسري على النقاط الجديدة بس — النقاط القديمة بتحتفظ بتاريخ انتهائها المتسجّل وقت اكتسابها.' },
 
+  // ── marketing ─────────────────────────────────────────────────────────
+  // الوجهات التلاتة دي هي اللي `GET /r/:code` بيوزّع عليها حسب جهاز الزائر. موجودة في
+  // الإعدادات مش في الـQR عمدًا: الملصق بيتطبع مرة ويعيش شهور (ADR-0082 §3).
+  'marketing.android_store_url': { type: 'string', default: '', group: 'marketing', description: 'رابط التطبيق على Google Play. لما يكون فاضي، زوّار الأندرويد بيروحوا لصفحة الويب بدل ما يوصلوا لصفحة مكسورة.' },
+  'marketing.ios_store_url': { type: 'string', default: '', group: 'marketing', description: 'رابط التطبيق على App Store. نفس السلوك لو فاضي.' },
+  'marketing.web_landing_url': { type: 'string', default: '', group: 'marketing', description: 'صفحة الهبوط على الويب — الوجهة الافتراضية لأي جهاز، والبديل لما رابط المتجر مايكونش متسجّل. فاضي = الرجوع لعنوان تطبيق الويب من متغيّرات البيئة.' },
+  'marketing.first_order_offer_enabled': { type: 'boolean', default: false, group: 'marketing', description: 'تفعيل عرض خصم أول طلب. مقفول افتراضيًا عن قصد: العرض بيصرف فلوس حقيقية، فتشغيله لازم يكون قرار صريح مش نتيجة migration.' },
+  'marketing.first_order_discount_cents': { type: 'number', default: 10000, group: 'marketing', description: 'قيمة خصم أول طلب بالقرش (١٠٠ ج.م افتراضيًا).' },
+  'marketing.first_order_min_order_cents': { type: 'number', default: 30000, group: 'marketing', description: 'أقل قيمة طلب يشتغل عليها الخصم بالقرش (٣٠٠ ج.م افتراضيًا) — بيمنع إن الخصم يبلع الطلب كله.' },
+  'marketing.first_order_validity_days': { type: 'number', default: 30, group: 'marketing', description: 'صلاحية كود أول طلب بالأيام من لحظة إصداره.' },
+  'marketing.first_order_message_ar': { type: 'string', default: 'معاك خصم {discount} ج.م على أول طلب — بحد أدنى {min_order} ج.م.', group: 'marketing', description: 'نص رسالة عرض أول طلب. {discount} و{min_order} بيتبدّلوا بالقيم الفعلية وقت الإرسال، فتغيير المبلغ مايسيبش نص قديم بيكذب.' },
+  'marketing.referral_invite_message_ar': { type: 'string', default: 'رشّح صاحبك واكسبوا الاتنين — هو ياخد خصم على أول طلب وإنت تاخد خصم لما طلبه يخلص.', group: 'marketing', description: 'نص دعوة الترشيح اللي بيظهر للعميل بعد أول طلب.' },
+
   // ── matching ──────────────────────────────────────────────────────────
   'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب' },
   'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
@@ -285,7 +298,9 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── referral ──────────────────────────────────────────────────────────
   'referral.recovery_batch_size': { type: 'number', default: 25, group: 'referral', description: 'أقصى عدد إحالات معلقة يفحصها مسار الاسترداد في الدورة الواحدة' },
-  'referral.required_referrals_per_reward': { type: 'number', default: 10, group: 'referral', description: 'عدد الترشيحات المكتملة (أول طلب فعلي للمُرشَّح) المطلوبة لاستحقاق مكافأة واحدة' },
+  // نموذج ١:١ (docs/08 §135-ح، migration 0312): مكافأة عن **كل** ترشيح ناجح. العشرة القديمة
+  // كانت قيمة تجريبية خلّت ٩ من كل ١٠ ترشيحات ناجحة بلا مقابل ظاهر.
+  'referral.required_referrals_per_reward': { type: 'number', default: 1, group: 'referral', description: 'عدد الترشيحات المكتملة (أول طلب فعلي للمُرشَّح) المطلوبة لاستحقاق مكافأة واحدة. ١ = مكافأة عن كل ترشيح ناجح.' },
   'referral.reward_validity_days': { type: 'number', default: 90, group: 'referral', description: 'عدد أيام صلاحية كود مكافأة الترشيح من تاريخ الإصدار' },
   'referral.reward_value_egp': { type: 'number', default: 150, group: 'referral', description: 'قيمة كود الخصم اللي بيتصدر تلقائياً كمكافأة ترشيح (بالجنيه) — تقريب لساعة خدمة قياسية' },
 
