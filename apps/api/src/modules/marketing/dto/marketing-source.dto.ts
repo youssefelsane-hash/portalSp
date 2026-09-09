@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsIn,
@@ -99,7 +100,10 @@ export class UpdateMarketingSourceDto {
 }
 
 export class MarkCommissionsPaidDto {
+  // قايمة فاضية كانت بتعدّي وترجّع «اتغيّر 0» بنجاح — نداء بيقول للأدمن إنه صرف وهو ما صرفش
+  // حاجة. الرفض الصريح أوضح من رد ناجح فاضي.
   @IsArray()
+  @ArrayNotEmpty()
   @IsUUID('4', { each: true })
   @Type(() => String)
   ids: string[];

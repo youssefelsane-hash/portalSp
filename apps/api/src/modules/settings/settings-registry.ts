@@ -298,7 +298,9 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── referral ──────────────────────────────────────────────────────────
   'referral.recovery_batch_size': { type: 'number', default: 25, group: 'referral', description: 'أقصى عدد إحالات معلقة يفحصها مسار الاسترداد في الدورة الواحدة' },
-  'referral.required_referrals_per_reward': { type: 'number', default: 10, group: 'referral', description: 'عدد الترشيحات المكتملة (أول طلب فعلي للمُرشَّح) المطلوبة لاستحقاق مكافأة واحدة' },
+  // نموذج ١:١ (docs/08 §135-ح، migration 0312): مكافأة عن **كل** ترشيح ناجح. العشرة القديمة
+  // كانت قيمة تجريبية خلّت ٩ من كل ١٠ ترشيحات ناجحة بلا مقابل ظاهر.
+  'referral.required_referrals_per_reward': { type: 'number', default: 1, group: 'referral', description: 'عدد الترشيحات المكتملة (أول طلب فعلي للمُرشَّح) المطلوبة لاستحقاق مكافأة واحدة. ١ = مكافأة عن كل ترشيح ناجح.' },
   'referral.reward_validity_days': { type: 'number', default: 90, group: 'referral', description: 'عدد أيام صلاحية كود مكافأة الترشيح من تاريخ الإصدار' },
   'referral.reward_value_egp': { type: 'number', default: 150, group: 'referral', description: 'قيمة كود الخصم اللي بيتصدر تلقائياً كمكافأة ترشيح (بالجنيه) — تقريب لساعة خدمة قياسية' },
 

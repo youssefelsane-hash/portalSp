@@ -4,10 +4,15 @@ import { useState } from 'react';
 import type {
   MarketingChannel,
   MarketingChannelPerformanceReport,
+  MarketingCommissionDto,
   MarketingSourceDto,
   MarketingSourcePerformanceReport,
 } from '@baytak/shared-types';
-import { MARKETING_CHANNELS, MARKETING_CHANNEL_LABELS_AR } from '@baytak/shared-types';
+import {
+  MARKETING_CHANNELS,
+  MARKETING_CHANNEL_LABELS_AR,
+  MARKETING_COMMISSION_STATUS_LABELS_AR,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminQuery } from '@/lib/use-admin-query';
 import { AppShell } from '@/components/app-shell';
@@ -35,6 +40,10 @@ export default function MarketingPage() {
   const [range, setRange] = useState({ from: daysAgoIso(DEFAULT_RANGE_DAYS), to: todayIso() });
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // الصف اللي عليه فعل دلوقتي — بيقفل زراره لوحده بدل ما يقفل الجدول كله.
+  const [busySourceId, setBusySourceId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [payingCommissions, setPayingCommissions] = useState(false);
   const [form, setForm] = useState({
     name_ar: '',
     channel: 'poster' as MarketingChannel,
@@ -62,6 +71,80 @@ export default function MarketingPage() {
     () => authedFetch<MarketingSourcePerformanceReport>(`/admin/marketing/performance/sources?${key}`),
     'حصل خطأ في تحميل أرقام المصادر',
   );
+
+  const commissions = useAdminQuery<MarketingCommissionDto[]>(
+    isLoading ? null : 'marketing-commissions:accrued',
+    () => authedFetch<MarketingCommissionDto[]>('/admin/marketing/commissions?status=accrued'),
+    'حصل خطأ في تحميل مستحقات الشركاء',
+  );
+
+  /**
+   * إيقاف/تشغيل مصدر. **الإيقاف مش حذف عن قصد**: الملصق المطبوع بيفضل موجود في الشارع،
+   * والزيارات اللي جت منه قبل الإيقاف تفضل محسوبة عليه — حذف المصدر كان هيمسح تاريخ إعلان
+   * صرفنا عليه فلوس. المصدر الموقوف بيوقف الإسناد الجديد بس.
+   */
+  async function toggleSource(source: MarketingSourceDto) {
+    setBusySourceId(source.id);
+    setActionError(null);
+    try {
+      await authedFetch(`/admin/marketing/sources/${source.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: !source.is_active }),
+      });
+      sources.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'مقدرناش نغيّر حالة المصدر');
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  /** تعديل مستحق الشريك لكل طلب مكتمل — بالجنيه في الشاشة، بالقرش في الـAPI. */
+  async function editPayout(source: MarketingSourceDto) {
+    const current = String(Math.round(source.payout_per_completed_order_cents / 100));
+    const answer = window.prompt(`مستحق الشريك لكل طلب مكتمل (بالجنيه) — ${source.name_ar}`, current);
+    if (answer === null) return;
+    const egp = Number(answer);
+    if (!Number.isFinite(egp) || egp < 0) {
+      setActionError('المبلغ لازم يكون رقم موجب');
+      return;
+    }
+    setBusySourceId(source.id);
+    setActionError(null);
+    try {
+      await authedFetch(`/admin/marketing/sources/${source.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ payout_per_completed_order_cents: Math.round(egp * 100) }),
+      });
+      sources.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'مقدرناش نعدّل المستحق');
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  /**
+   * تعليم كل المستحقات المتراكمة لمصدر كمدفوعة — بعد الصرف الفعلي بره النظام (ADR-0082 §5).
+   * الرد بيرجّع **العدد اللي اتغيّر فعلاً**، فلو حاجة كانت مدفوعة قبل كده الأدمن يشوف الحقيقة.
+   */
+  async function markSourcePaid(sourceId: string, ids: string[]) {
+    if (ids.length === 0) return;
+    setPayingCommissions(true);
+    setActionError(null);
+    try {
+      await authedFetch('/admin/marketing/commissions/mark-paid', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      });
+      commissions.reload();
+      sources.reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'مقدرناش نعلّم المستحقات كمدفوعة');
+    } finally {
+      setPayingCommissions(false);
+    }
+  }
 
   async function createSource(event: React.FormEvent) {
     event.preventDefault();
@@ -243,6 +326,7 @@ export default function MarketingPage() {
             <CardTitle className="text-base">الإعلانات والمصادر</CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto">
+            {actionError && <p className="text-destructive mb-2 text-sm">{actionError}</p>}
             {sources.error && <EmptyState title={sources.error} />}
             {!sources.error && (sources.data?.length ?? 0) === 0 && !sources.loading && (
               <EmptyState title="لسه مفيش أي مصدر" description="أضف أول إعلان من الفورم فوق." />
@@ -259,6 +343,7 @@ export default function MarketingPage() {
                     <TableHead>إيراد</TableHead>
                     <TableHead>مستحق للشريك</TableHead>
                     <TableHead>QR</TableHead>
+                    <TableHead>إجراءات</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -300,11 +385,101 @@ export default function MarketingPage() {
                               المتجر/الصفحة على طول بدل ما المستخدم يكتب الكود بإيده. */}
                           <PromoCodeQr code={source.share_url} />
                         </TableCell>
+                        <TableCell>
+                          <span className="flex flex-wrap gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={busySourceId === source.id}
+                              onClick={() => editPayout(source)}
+                            >
+                              تعديل المستحق
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={source.is_active ? 'destructive' : 'secondary'}
+                              disabled={busySourceId === source.id}
+                              onClick={() => toggleSource(source)}
+                            >
+                              {source.is_active ? 'إيقاف' : 'تشغيل'}
+                            </Button>
+                          </span>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
+            )}
+          </CardContent>
+        </Card>
+        {/* ═══ مستحقات الشركاء (بوابين/إنفلونسرز) ═══ */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">مستحقات الشركاء — لسه ما اتصرفتش</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            {commissions.error && <EmptyState title={commissions.error} />}
+            {!commissions.error && (commissions.data?.length ?? 0) === 0 && !commissions.loading && (
+              <EmptyState
+                title="مفيش مستحقات مفتوحة"
+                description="المستحق بيتسجّل تلقائيًا على أول طلب مكتمل لكل عميل جه من مصدر له مستحق."
+              />
+            )}
+            {(commissions.data?.length ?? 0) > 0 && (
+              <>
+                <p className="text-muted-foreground mb-3 text-xs">
+                  الصرف نفسه بيتم بره النظام (نقدًا/تحويل) — الزرار هنا بيعلّم المستحق مدفوع بس، ومفيش أي
+                  قيد محفظة تلقائي (ADR-0082 §5).
+                </p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>المصدر</TableHead>
+                      <TableHead>عدد المستحقات</TableHead>
+                      <TableHead>الإجمالي</TableHead>
+                      <TableHead>إجراء</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {Object.entries(
+                      (commissions.data ?? []).reduce<Record<string, MarketingCommissionDto[]>>((acc, row) => {
+                        (acc[row.sourceId] ??= []).push(row);
+                        return acc;
+                      }, {}),
+                    ).map(([sourceId, rows]) => {
+                      const source = (sources.data ?? []).find((s) => s.id === sourceId);
+                      const total = rows.reduce((sum, r) => sum + r.amountCents, 0);
+                      return (
+                        <TableRow key={sourceId}>
+                          <TableCell>
+                            <span className="font-medium">{source?.name_ar ?? sourceId}</span>
+                            <span className="mt-1 block">
+                              <Badge variant="outline" className="text-xs">
+                                {MARKETING_COMMISSION_STATUS_LABELS_AR.accrued}
+                              </Badge>
+                            </span>
+                          </TableCell>
+                          <TableCell className="tabular-nums">{formatCount(rows.length)}</TableCell>
+                          <TableCell className="tabular-nums">{money(total)}</TableCell>
+                          <TableCell>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={payingCommissions}
+                              onClick={() => markSourcePaid(sourceId, rows.map((r) => r.id))}
+                            >
+                              علّم كمدفوع
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </>
             )}
           </CardContent>
         </Card>
