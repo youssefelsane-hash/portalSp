@@ -39,8 +39,12 @@ class _FileComplaintScreenState extends State<FileComplaintScreen> {
 
   Future<void> _loadOrders() async {
     try {
-      final orders = await OrdersRepository(context.read<AuthRepository>()).list();
-      if (mounted) setState(() => _orders = orders);
+      // `list()` بقت ترجّع `OrdersPage` (عناصر + مؤشّر) بعد ما الصفحات بقت إجبارية على
+      // `GET /orders` (P1-4) — الشاشة دي فضلت بتستقبلها كـ`List<Order>` فالتطبيق **مابقاش
+      // يترجم أصلاً**. الشاشة محتاجة قايمة الطلبات عشان العميل يختار طلبًا يشتكي عليه،
+      // فالصفحة الأولى كافية هنا (بلا تحميل لانهائي).
+      final page = await OrdersRepository(context.read<AuthRepository>()).list();
+      if (mounted) setState(() => _orders = page.items);
     } on ApiException {
       // فشل تحميل القايمة مش لازم يمنع فتح شكوى عامة بلا طلب محدد.
       if (mounted) setState(() => _orders = []);

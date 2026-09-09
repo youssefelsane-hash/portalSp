@@ -194,3 +194,14 @@ jobs:
       - name: flutter build apk --debug (فحص تصدير حقيقي، مش static analysis بس)
         working-directory: apps/${{ matrix.app }}
         run: flutter build apk --debug
+
+      # ج-١٥ — `--debug` **مابيشغّلش R8 ولا tree-shaking**، فكل فئة أعطال الإصدار بتعدّي منه:
+      # كلاس بيتنادى بالـreflection (Firebase، فك JSON) بيتشال بصمت، وفروع `kDebugMode` بتتشال
+      # بالكامل، و`assert()` بتختفي. الانهيار الناتج بيحصل في يد المستخدم **بس**.
+      #
+      # `--dart-define=API_BASE_URL` مطلوب هنا فعلاً: `assertProductionApiConfig` بترمي وقت
+      # التشغيل لو الإصدار اتبنى بعنوان تطوير — والقيمة دي عنوان وهمي صالح الشكل، الغرض منه
+      # إثبات إن البناء نفسه بيعدّي، مش الاتصال بسيرفر.
+      - name: flutter build apk --release (R8/tree-shaking — الفئة اللي debug مابيشوفهاش)
+        working-directory: apps/${{ matrix.app }}
+        run: flutter build apk --release --dart-define=API_BASE_URL=https://api.ci.invalid/api/v1
