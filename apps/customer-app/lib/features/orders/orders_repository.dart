@@ -52,9 +52,12 @@ class OrdersRepository {
   }
 
   Future<OrdersPage> list({String? cursor}) async {
-    final suffix = cursor == null ? '' : '&cursor=${Uri.encodeComponent(cursor)}';
+    final suffix = cursor == null
+        ? ''
+        : '&cursor=${Uri.encodeComponent(cursor)}';
     final data = await auth.authedRequest('GET', '/orders?limit=20$suffix');
-    final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final items = (data?['items'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
     final meta = data?['meta'] as Map<String, dynamic>? ?? const {};
     return OrdersPage(
       items: items.map(Order.fromJson).toList(),
@@ -259,6 +262,7 @@ class OrdersRepository {
     String? promoCode,
     String? buildingCode,
     String? requestedTechnicianId,
+    String? requestedTechnicianCompanyId,
     String? scheduleSlotId,
     String? warrantyPlanId,
     DateTime? scheduledAt,
@@ -284,6 +288,7 @@ class OrdersRepository {
         if (buildingCode != null && buildingCode.isNotEmpty)
           'building_code': buildingCode,
         'requested_technician_id': ?requestedTechnicianId,
+        'requested_technician_company_id': ?requestedTechnicianCompanyId,
         'schedule_slot_id': ?scheduleSlotId,
         'warranty_plan_id': ?warrantyPlanId,
       },
@@ -327,7 +332,7 @@ class OrdersRepository {
       '/orders/$orderId/reschedule',
       body: {
         'new_scheduled_at': '${newDate}T00:00:00.000Z',
-        if (reasonCode != null) 'reason_code': reasonCode,
+        'reason_code': ?reasonCode,
         if (reasonDetails != null && reasonDetails.trim().isNotEmpty)
           'reason_details': reasonDetails.trim(),
       },
@@ -438,7 +443,10 @@ class OrdersRepository {
   }
 
   Future<InitialOrderQuote> getCurrentQuote(String orderId) async {
-    final data = await auth.authedRequest('GET', '/orders/$orderId/current-quote');
+    final data = await auth.authedRequest(
+      'GET',
+      '/orders/$orderId/current-quote',
+    );
     return InitialOrderQuote.fromJson(data!);
   }
 

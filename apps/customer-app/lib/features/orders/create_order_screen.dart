@@ -332,8 +332,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // أول مرحلتين في الفنل (ADR-0081 §3): «شاف الخدمة» و«بدأ الحجز» بيحصلوا هنا **من غير أي
     // نداء سيرفر**، فمن غير التسجيل ده مفيش حد هيعرف كام واحد فتح الشاشة وما كمّلش. باقي
     // المراحل ليها نداءات حقيقية والسيرفر بيسجّلها بنفسه.
-    FunnelTracker.instance.track('service_viewed', serviceId: widget.service.id);
-    FunnelTracker.instance.track('booking_started', serviceId: widget.service.id);
+    FunnelTracker.instance.track(
+      'service_viewed',
+      serviceId: widget.service.id,
+    );
+    FunnelTracker.instance.track(
+      'booking_started',
+      serviceId: widget.service.id,
+    );
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
     _requestedAt = widget.requestedAt;
@@ -573,6 +579,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestedTechnicianId: _effectiveRemoteQuote
             ? null
             : widget.requestedTechnicianId,
+        requestedTechnicianCompanyId: _effectiveRemoteQuote
+            ? null
+            : widget.requestedTechnicianCompanyId,
         scheduleSlotId: _effectiveRemoteQuote ? null : widget.scheduleSlotId,
         fieldValues: _showsDynamicForm ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
@@ -724,6 +733,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           addressId: _selectedAddress!.id,
           bookingMode: widget.bookingMode,
           requestedTechnicianId: widget.requestedTechnicianId,
+          requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
           scheduleSlotId: widget.scheduleSlotId,
           fieldValues: _showsDynamicForm ? _fieldValues : null,
           addonIds: _selectedAddonIds.toList(),
@@ -856,10 +866,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// كانت بتخلي الحجز يترفض بلا مخرج: العميل يرجع، يختار الفني تاني، يختار الإضافة تاني، ويترفض
   /// تاني للأبد.
   ///
-  /// الحل مش تجاهل البصمة (دي اللي بتمنع استبدال الفني/السعر في صمت — ADR-0065): بنعيد إصدار
-  /// التذكرة بـ`manual` على **نفس الفني** بالمدخلات الكاملة، فالسعر بيتحسب من جديد على نفس
-  /// المنفّذ والعميل بيتحاسب على اللي شافه. لو الفني بقى مش متاح فعلاً، الباك-إند بيرفض برسالة
-  /// صريحة — وده الصح، مش استبدال صامت.
+  /// الحل مش تجاهل البصمة (دي اللي بتمنع استبدال المنفّذ/السعر في صمت — ADR-0065): بنعيد إصدار
+  /// التذكرة بـ`manual` على **نفس الفني أو الشركة** بالمدخلات الكاملة، فالسعر بيتحسب من جديد على
+  /// نفس المنفّذ والعميل بيتحاسب على اللي شافه. لو المنفّذ بقى مش متاح فعلاً، الباك-إند بيرفض
+  /// برسالة صريحة — وده الصح، مش استبدال صامت.
   Future<String?> _refreshedMatchPreviewId() async {
     // التقييم بالصور مالوش فني وقت الحجز أصلاً: الإدارة بتحدد السعر الأول والتوزيع بيحصل
     // بعد ما العميل يوافق. الباك-إند بيرفض تذكرة فني مع `request_remote_quote` صراحة
@@ -869,7 +879,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_effectiveRemoteQuote) return null;
     final previewId = widget.matchPreviewId;
     final technicianId = widget.requestedTechnicianId;
-    if (previewId == null || technicianId == null || _selectedAddress == null) {
+    final companyId = widget.requestedTechnicianCompanyId;
+    if (previewId == null ||
+        (technicianId == null && companyId == null) ||
+        _selectedAddress == null) {
       return previewId;
     }
     try {
@@ -881,6 +894,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             addressId: _selectedAddress!.id,
             selectionMode: 'manual',
             technicianId: technicianId,
+            technicianCompanyId: companyId,
             bookingMode: widget.bookingMode,
             scheduledAt: widget.scheduleSlotId != null
                 ? null
