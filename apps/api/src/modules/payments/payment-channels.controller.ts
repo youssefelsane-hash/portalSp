@@ -8,6 +8,7 @@ import { PaymentChannelResponseDto } from './dto/payments-response.dto';
 import { PaymentMethod } from './entities/payment.entity';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
+import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
 
 /**
  * سبب عدم إتاحة طريقة دفع **بلغة العميل** (docs/08 §76-ز).
@@ -33,6 +34,7 @@ export class PaymentChannelsController {
     private readonly registry: PaymentProviderRegistry,
     private readonly settingsService: SettingsService,
     private readonly paymobProvider: PaymobProvider,
+    private readonly methodAvailability: PaymentMethodAvailabilityGuard,
   ) {}
 
   @Get()
@@ -42,22 +44,24 @@ export class PaymentChannelsController {
     // تتفحص)، لكن لازم تفضل قابلة للتعطيل من الأدمن برضه (`payments.cash_enabled`، بَقّة
     // تسليم كاش على طلب بلا فني، docs/08) — عكس باقي البوابات اللي isConfigured بتعكس وجود
     // بيانات اعتماد حقيقية بس.
-    const [cashEnabled, cardEnabled, walletEnabled, instaPayEnabled, fawryEnabled, installmentsEnabled] =
-      await Promise.all([
-        this.settingsService.getBoolean('payments.cash_enabled', true),
-        this.settingsService.getBoolean('payments.card_enabled', true),
-        this.settingsService.getBoolean('payments.wallet_enabled', true),
-        this.settingsService.getBoolean('payments.instapay_enabled', true),
-        this.settingsService.getBoolean('payments.fawry_enabled', false),
-        this.settingsService.getBoolean('payments.installments_enabled', true),
-      ]);
-    const enabledByMethod = new Map<PaymentMethod, boolean>([
-      [PaymentMethod.CASH, cashEnabled],
-      [PaymentMethod.CARD, cardEnabled],
-      [PaymentMethod.WALLET, walletEnabled],
-      [PaymentMethod.INSTAPAY, instaPayEnabled],
-      [PaymentMethod.FAWRY_REFERENCE, fawryEnabled],
+    // **نفس الحارس اللي مسار التنفيذ بيستخدمه** (`PaymentMethodAvailabilityGuard`) — مش قراءة
+    // موازية للمفاتيح. النسختين المنفصلتين هما اللي وّلدوا البَقّة الأصلية: الخريطة هنا كانت
+    // كاملة، ومسار التنفيذ ماكانش بيفحص أصلاً، فالمفتاح كان بيخفي الزرار والفلوس تتحرّك.
+    // مصدر واحد = وسيلة دفع جديدة مستحيل تتضاف لواحد وتُنسى في التاني.
+    const methods = [
+      PaymentMethod.CASH,
+      PaymentMethod.CARD,
+      PaymentMethod.WALLET,
+      PaymentMethod.INSTAPAY,
+      PaymentMethod.FAWRY_REFERENCE,
+    ];
+    const [installmentsEnabled, ...methodFlags] = await Promise.all([
+      this.settingsService.getBoolean('payments.installments_enabled', true),
+      ...methods.map((m) => this.methodAvailability.isEnabled(m)),
     ]);
+    const enabledByMethod = new Map<PaymentMethod, boolean>(
+      methods.map((m, i) => [m, methodFlags[i]]),
+    );
     const channels: PaymentChannelResponseDto[] = this.registry.listAll().map((entry) => {
       const isEnabled = enabledByMethod.get(entry.method) ?? false;
       const isAvailable = isEnabled && entry.isConfigured;

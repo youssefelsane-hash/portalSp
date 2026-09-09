@@ -20,6 +20,7 @@ import { TechnicianPaymentsController } from './technician-payments.controller';
 import { WalletController } from './wallet.controller';
 import { WebhooksController } from './webhooks.controller';
 import { PaymentsService } from './payments.service';
+import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
 import { PayoutsService } from './payouts.service';
 import { SavedPaymentMethodsService } from './saved-payment-methods.service';
 import { WalletsService } from './wallets.service';
@@ -98,6 +99,7 @@ import { AdminEarningsPolicyService } from './admin-earnings-policy.service';
     WebhooksController,
   ],
   providers: [
+    PaymentMethodAvailabilityGuard,
     AdminEarningsPolicyService,
     TechnicianDebtService,
     EarningsPolicyService,
