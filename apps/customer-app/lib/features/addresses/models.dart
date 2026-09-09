@@ -3,6 +3,7 @@ class Address {
   final String? label;
   final String? cityId;
   final String? areaId;
+  final String? serviceZoneId;
   final String streetName;
   final String? buildingNumber;
   final String? floorNumber;
@@ -19,6 +20,7 @@ class Address {
     required this.label,
     required this.cityId,
     required this.areaId,
+    required this.serviceZoneId,
     required this.streetName,
     required this.buildingNumber,
     required this.floorNumber,
@@ -31,20 +33,21 @@ class Address {
   });
 
   factory Address.fromJson(Map<String, dynamic> json) => Address(
-        id: json['id'] as String,
-        label: json['label'] as String?,
-        cityId: json['city_id'] as String?,
-        areaId: json['area_id'] as String?,
-        streetName: json['street_name'] as String,
-        buildingNumber: json['building_number'] as String?,
-        floorNumber: json['floor_number'] as String?,
-        apartmentNumber: json['apartment_number'] as String?,
-        landmark: json['landmark'] as String?,
-        latitude: (json['latitude'] as num).toDouble(),
-        longitude: (json['longitude'] as num).toDouble(),
-        isDefault: json['is_default'] as bool,
-        hasActiveOrder: json['has_active_order'] as bool? ?? false,
-      );
+    id: json['id'] as String,
+    label: json['label'] as String?,
+    cityId: json['city_id'] as String?,
+    areaId: json['area_id'] as String?,
+    serviceZoneId: json['service_zone_id'] as String?,
+    streetName: json['street_name'] as String,
+    buildingNumber: json['building_number'] as String?,
+    floorNumber: json['floor_number'] as String?,
+    apartmentNumber: json['apartment_number'] as String?,
+    landmark: json['landmark'] as String?,
+    latitude: (json['latitude'] as num).toDouble(),
+    longitude: (json['longitude'] as num).toDouble(),
+    isDefault: json['is_default'] as bool,
+    hasActiveOrder: json['has_active_order'] as bool? ?? false,
+  );
 
   String get displayTitle => label?.isNotEmpty == true ? label! : streetName;
 }

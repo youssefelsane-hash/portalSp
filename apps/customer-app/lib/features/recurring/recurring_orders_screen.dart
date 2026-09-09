@@ -29,6 +29,7 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
   List<RecurringTemplate>? _templates;
   List<Address> _addresses = [];
   List<CatalogService> _services = [];
+  Map<String, List<CatalogService>> _servicesByAddress = const {};
   String? _error;
   bool _acting = false;
 
@@ -43,12 +44,36 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait([_repository.list(), _addressesRepository.list(), _catalogRepository.fetchServices()]);
+      final results = await Future.wait([
+        _repository.list(),
+        _addressesRepository.list(),
+        _catalogRepository.fetchServices(),
+      ]);
+      final addresses = results[1] as List<Address>;
+      final zoneServices = <String, List<CatalogService>>{};
+      final uniqueZoneIds = addresses
+          .map((address) => address.serviceZoneId)
+          .whereType<String>()
+          .toSet();
+      await Future.wait(
+        uniqueZoneIds.map((zoneId) async {
+          zoneServices[zoneId] = await _catalogRepository.fetchServices(
+            zoneId: zoneId,
+          );
+        }),
+      );
       if (mounted) {
         setState(() {
           _templates = results[0] as List<RecurringTemplate>;
-          _addresses = results[1] as List<Address>;
+          _addresses = addresses;
           _services = results[2] as List<CatalogService>;
+          _servicesByAddress = {
+            for (final address in addresses)
+              address.id: address.serviceZoneId == null
+                  ? const []
+                  : zoneServices[address.serviceZoneId] ?? const [],
+          };
+          _error = null;
         });
       }
     } on ApiException catch (err) {
@@ -76,7 +101,11 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
       await _repository.setActive(template.id, !template.isActive);
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
@@ -88,7 +117,11 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
       await _repository.remove(template.id);
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
@@ -97,17 +130,31 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
   Future<void> _openCreateSheet() async {
     // الخدمات القابلة للتكرار بس (migration 0176) — الباقي مش بيتعرض أصلاً بدل ما العميل
     // يختاره ويترفض من الباك-إند.
-    final repeatable = _services.where((s) => s.allowsRecurringBooking && s.defaultAllowedBookingMode != null).toList();
-    if (repeatable.isEmpty || _addresses.isEmpty) {
+    final hasRepeatableService = _servicesByAddress.values.any(
+      (services) => services.any(
+        (service) =>
+            service.allowsRecurringBooking &&
+            service.defaultAllowedBookingMode != null,
+      ),
+    );
+    if (!hasRepeatableService || _addresses.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('مفيش خدمات متاحة للتكرار حاليًا — أو محتاج تضيف عنوان واحد على الأقل')),
+        const SnackBar(
+          content: Text(
+            'مفيش خدمات متاحة للتكرار حاليًا — أو محتاج تضيف عنوان واحد على الأقل',
+          ),
+        ),
       );
       return;
     }
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _CreateTemplateSheet(repository: _repository, services: repeatable, addresses: _addresses),
+      builder: (_) => _CreateTemplateSheet(
+        repository: _repository,
+        servicesByAddress: _servicesByAddress,
+        addresses: _addresses,
+      ),
     );
     if (result == true) await _load();
   }
@@ -118,55 +165,66 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: const Text('الحجوزات المتكررة')),
-        floatingActionButton: FloatingActionButton(onPressed: _openCreateSheet, child: const Icon(Icons.add)),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _openCreateSheet,
+          child: const Icon(Icons.add),
+        ),
         body: RefreshIndicator(
           onRefresh: _load,
           child: _error != null
               ? Center(child: Text(_error!))
               : _templates == null
-                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                  : _templates!.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 80),
-                            EmptyState(icon: Icons.repeat_outlined, title: 'مفيش حجوزات متكررة لسه'),
-                          ],
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            for (final template in _templates!)
-                              Card(
-                                child: ListTile(
-                                  title: Text(_serviceName(template.serviceId)),
-                                  subtitle: Text(
-                                    '${_addressLabel(template.addressId)}\n'
-                                    '${recurringFrequencyLabelsAr[template.frequency] ?? template.frequency} — '
-                                    'الحجز الجاي: ${template.nextRunAt.substring(0, 10)}'
-                                    '${template.paymentMethod != null ? '\nمقدّم (${template.paymentMethod == 'card' ? 'كارت' : 'InstaPay'})' : ''}',
-                                  ),
-                                  isThreeLine: true,
-                                  trailing: PopupMenuButton<String>(
-                                    enabled: !_acting,
-                                    onSelected: (value) {
-                                      if (value == 'toggle') {
-                                        _toggleActive(template);
-                                      } else if (value == 'remove') {
-                                        _remove(template);
-                                      }
-                                    },
-                                    itemBuilder: (context) => [
-                                      PopupMenuItem(
-                                        value: 'toggle',
-                                        child: Text(template.isActive ? 'إيقاف مؤقت' : 'استئناف'),
-                                      ),
-                                      const PopupMenuItem(value: 'remove', child: Text('حذف')),
-                                    ],
-                                  ),
+              ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+              : _templates!.isEmpty
+              ? ListView(
+                  children: const [
+                    SizedBox(height: 80),
+                    EmptyState(
+                      icon: Icons.repeat_outlined,
+                      title: 'مفيش حجوزات متكررة لسه',
+                    ),
+                  ],
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    for (final template in _templates!)
+                      Card(
+                        child: ListTile(
+                          title: Text(_serviceName(template.serviceId)),
+                          subtitle: Text(
+                            '${_addressLabel(template.addressId)}\n'
+                            '${recurringFrequencyLabelsAr[template.frequency] ?? template.frequency} — '
+                            'الحجز الجاي: ${template.nextRunAt.substring(0, 10)}'
+                            '${template.paymentMethod != null ? '\nمقدّم (${template.paymentMethod == 'card' ? 'كارت' : 'InstaPay'})' : ''}',
+                          ),
+                          isThreeLine: true,
+                          trailing: PopupMenuButton<String>(
+                            enabled: !_acting,
+                            onSelected: (value) {
+                              if (value == 'toggle') {
+                                _toggleActive(template);
+                              } else if (value == 'remove') {
+                                _remove(template);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: 'toggle',
+                                child: Text(
+                                  template.isActive ? 'إيقاف مؤقت' : 'استئناف',
                                 ),
                               ),
-                          ],
+                              const PopupMenuItem(
+                                value: 'remove',
+                                child: Text('حذف'),
+                              ),
+                            ],
+                          ),
                         ),
+                      ),
+                  ],
+                ),
         ),
       ),
     );
@@ -175,10 +233,14 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
 
 class _CreateTemplateSheet extends StatefulWidget {
   final RecurringOrdersRepository repository;
-  final List<CatalogService> services;
+  final Map<String, List<CatalogService>> servicesByAddress;
   final List<Address> addresses;
 
-  const _CreateTemplateSheet({required this.repository, required this.services, required this.addresses});
+  const _CreateTemplateSheet({
+    required this.repository,
+    required this.servicesByAddress,
+    required this.addresses,
+  });
 
   @override
   State<_CreateTemplateSheet> createState() => _CreateTemplateSheetState();
@@ -192,6 +254,15 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
   final _descriptionController = TextEditingController();
   String? _error;
   bool _submitting = false;
+
+  List<CatalogService> get _availableServices =>
+      (widget.servicesByAddress[_addressId] ?? const [])
+          .where(
+            (service) =>
+                service.allowsRecurringBooking &&
+                service.defaultAllowedBookingMode != null,
+          )
+          .toList(growable: false);
 
   Future<void> _pickStartDate() async {
     final picked = await showDatePicker(
@@ -208,7 +279,7 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
       setState(() => _error = 'اختار الخدمة والعنوان وأول موعد');
       return;
     }
-    final service = widget.services.firstWhere((s) => s.id == _serviceId);
+    final service = _availableServices.firstWhere((s) => s.id == _serviceId);
     final bookingMode = service.defaultAllowedBookingMode;
     if (bookingMode == null) {
       setState(() => _error = 'الخدمة دي مش متاحة لأي وضع حجز حاليًا');
@@ -256,60 +327,107 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('حجز متكرر جديد', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'حجز متكرر جديد',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                initialValue: _serviceId,
-                decoration: const InputDecoration(labelText: 'الخدمة', border: OutlineInputBorder()),
+                initialValue: _addressId,
+                decoration: const InputDecoration(
+                  labelText: 'العنوان',
+                  border: OutlineInputBorder(),
+                ),
                 items: [
-                  for (final service in widget.services)
-                    if (service.defaultAllowedBookingMode != null)
-                      DropdownMenuItem(value: service.id, child: Text(service.nameAr)),
+                  for (final address in widget.addresses)
+                    DropdownMenuItem(
+                      value: address.id,
+                      child: Text(address.label ?? address.streetName),
+                    ),
                 ],
-                onChanged: (value) => setState(() => _serviceId = value),
+                onChanged: (value) => setState(() {
+                  _addressId = value;
+                  _serviceId = null;
+                  _error = null;
+                }),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                initialValue: _addressId,
-                decoration: const InputDecoration(labelText: 'العنوان', border: OutlineInputBorder()),
+                key: ValueKey(_addressId),
+                initialValue: _serviceId,
+                decoration: InputDecoration(
+                  labelText: 'الخدمة',
+                  border: const OutlineInputBorder(),
+                  helperText: _addressId == null
+                      ? 'اختار العنوان الأول عشان نعرض الخدمات المتاحة فيه'
+                      : _availableServices.isEmpty
+                      ? 'مفيش خدمات متكررة متاحة في العنوان ده حاليًا'
+                      : null,
+                ),
                 items: [
-                  for (final address in widget.addresses)
-                    DropdownMenuItem(value: address.id, child: Text(address.label ?? address.streetName)),
+                  for (final service in _availableServices)
+                    DropdownMenuItem(
+                      value: service.id,
+                      child: Text(service.nameAr),
+                    ),
                 ],
-                onChanged: (value) => setState(() => _addressId = value),
+                onChanged: _addressId == null || _availableServices.isEmpty
+                    ? null
+                    : (value) => setState(() => _serviceId = value),
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 initialValue: _frequency,
-                decoration: const InputDecoration(labelText: 'التكرار', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'التكرار',
+                  border: OutlineInputBorder(),
+                ),
                 items: [
                   for (final entry in recurringFrequencyLabelsAr.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
                 ],
-                onChanged: (value) => setState(() => _frequency = value ?? 'monthly'),
+                onChanged: (value) =>
+                    setState(() => _frequency = value ?? 'monthly'),
               ),
               const SizedBox(height: 8),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(_startsAt != null ? _startsAt!.toIso8601String().substring(0, 10) : 'اختار أول موعد'),
+                title: Text(
+                  _startsAt != null
+                      ? _startsAt!.toIso8601String().substring(0, 10)
+                      : 'اختار أول موعد',
+                ),
                 trailing: const Icon(Icons.calendar_today_outlined),
                 onTap: _pickStartDate,
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(labelText: 'وصف المشكلة (اختياري)', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'وصف المشكلة (اختياري)',
+                  border: OutlineInputBorder(),
+                ),
                 maxLines: 2,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
               ],
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: _submitting ? null : _submit,
                 child: _submitting
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Text('إنشاء'),
               ),
             ],

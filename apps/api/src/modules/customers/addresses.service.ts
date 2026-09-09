@@ -53,6 +53,13 @@ export class AddressesService {
     return this.addresses.find({ where: { userId }, order: { isDefault: 'DESC', createdAt: 'DESC' } });
   }
 
+  async resolveServiceZoneId(address: Address): Promise<string | null> {
+    if (!address.cityId) return null;
+    const [longitude, latitude] = address.location.coordinates;
+    const zone = await this.geoService.findZoneForPoint(address.cityId, latitude, longitude);
+    return zone?.id ?? null;
+  }
+
   async findOwnedOrThrow(userId: string, addressId: string): Promise<Address> {
     const address = await this.addresses.findOne({ where: { id: addressId, userId } });
     if (!address) {

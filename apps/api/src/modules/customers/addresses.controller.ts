@@ -16,12 +16,21 @@ export class AddressesController {
       this.addressesService.findAllForUser(user.sub),
       this.addressesService.findAddressIdsWithActiveOrders(user.sub),
     ]);
-    return addresses.map((address) => toAddressResponseDto(address, activeAddressIds.has(address.id)));
+    return Promise.all(
+      addresses.map(async (address) =>
+        toAddressResponseDto(
+          address,
+          activeAddressIds.has(address.id),
+          await this.addressesService.resolveServiceZoneId(address),
+        ),
+      ),
+    );
   }
 
   @Post()
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateAddressDto) {
-    return toAddressResponseDto(await this.addressesService.create(user.sub, dto));
+    const address = await this.addressesService.create(user.sub, dto);
+    return toAddressResponseDto(address, false, await this.addressesService.resolveServiceZoneId(address));
   }
 
   @Patch(':id')
@@ -31,7 +40,11 @@ export class AddressesController {
     @Body() dto: UpdateAddressDto,
   ) {
     const updated = await this.addressesService.update(user.sub, id, dto);
-    return toAddressResponseDto(updated, await this.addressesService.hasActiveOrder(updated.id));
+    return toAddressResponseDto(
+      updated,
+      await this.addressesService.hasActiveOrder(updated.id),
+      await this.addressesService.resolveServiceZoneId(updated),
+    );
   }
 
   @Delete(':id')

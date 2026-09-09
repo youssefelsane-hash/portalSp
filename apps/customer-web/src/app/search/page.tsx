@@ -6,31 +6,45 @@ import Link from 'next/link';
 import { searchServices } from '@/lib/catalog';
 import { ServiceDto } from '@/lib/api-types';
 import { formatEgp } from '@/lib/orders';
+import { useCatalogZone } from '@/lib/catalog-zone';
 
 function SearchResults() {
+  const catalogZone = useCatalogZone();
   const params = useSearchParams();
   const initialQuery = params.get('q') ?? '';
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<ServiceDto[] | null>(null);
   const [searched, setSearched] = useState(initialQuery.trim().length >= 2);
+  const [resultContextKey, setResultContextKey] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!catalogZone.isReady) return;
+    if (!catalogZone.canLoadCatalog) return;
     if (initialQuery.trim().length >= 2) {
-      searchServices(initialQuery).then(setResults)
+      const contextKey = `${catalogZone.zoneId ?? 'public'}:${initialQuery.trim()}`;
+      searchServices(initialQuery, catalogZone.zoneId ?? undefined).then(setResults)
+        .then(() => setResultContextKey(contextKey))
         // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
         .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
     }
-    // مقصود مرة واحدة بس مع query الأولي من الرابط.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId, initialQuery]);
 
   function runSearch(e: React.FormEvent) {
     e.preventDefault();
     setSearched(true);
-    searchServices(query).then(setResults)
+    if (!catalogZone.canLoadCatalog) {
+      return;
+    }
+    const contextKey = `${catalogZone.zoneId ?? 'public'}:${query.trim()}`;
+    searchServices(query, catalogZone.zoneId ?? undefined).then(setResults)
+      .then(() => setResultContextKey(contextKey))
       // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
       .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
   }
+
+  const activeContextKey = `${catalogZone.zoneId ?? 'public'}:${query.trim()}`;
+  const visibleResults = catalogZone.canLoadCatalog && resultContextKey === activeContextKey ? results : null;
+  const catalogUnavailable = catalogZone.isReady && !catalogZone.canLoadCatalog;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
@@ -48,19 +62,21 @@ function SearchResults() {
       </form>
 
       <div className="mt-6">
-        {!searched ? (
+        {catalogUnavailable ? (
+          <p className="text-center text-danger">أضف عنوانًا داخل منطقة خدمة عشان نعرض لك الخدمات المتاحة</p>
+        ) : !searched ? (
           <p className="text-center text-muted">اكتب وصف مشكلتك (زي: &quot;المياه بتنزل من تحت الحوض&quot;)</p>
-        ) : results === null ? (
+        ) : visibleResults === null ? (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-16 animate-pulse rounded-xl bg-surface-variant" />
             ))}
           </div>
-        ) : results.length === 0 ? (
+        ) : visibleResults.length === 0 ? (
           <p className="text-center text-muted">مفيش خدمات مطابقة — جرّب توصيف مختلف أو تصفّح الفئات من الرئيسية</p>
         ) : (
           <div className="space-y-3">
-            {results.map((s) => (
+            {visibleResults.map((s) => (
               <Link
                 key={s.id}
                 href={`/services/${s.id}`}

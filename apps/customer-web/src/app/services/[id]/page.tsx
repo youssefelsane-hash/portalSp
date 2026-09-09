@@ -58,6 +58,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [addresses, setAddresses] = useState<AddressDto[] | null>(null);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
+  const [availabilityAddressId, setAvailabilityAddressId] = useState<string | null>(null);
+  const [serviceAvailabilityError, setServiceAvailabilityError] = useState<string | null>(null);
 
   // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي أسطى يختار" افتراضي/أساسي، "اختار بنفسك"
   // ثانوي، وبيظهر بس لو الخدمة فعلاً بتسمح بأكتر من فني (نفس منطق showBookingModeSelector في
@@ -184,6 +186,33 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!selectedAddressId || addresses === null) return;
+
+    const address = addresses.find((item) => item.id === selectedAddressId);
+    if (!address?.service_zone_id) return;
+
+    let active = true;
+    fetchService(id, address.service_zone_id)
+      .then((availableService) => {
+        if (!active) return;
+        setService(availableService);
+        setAvailabilityAddressId(selectedAddressId);
+        setServiceAvailabilityError(null);
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setAvailabilityAddressId(selectedAddressId);
+        setServiceAvailabilityError(
+          err instanceof ApiError ? err.message : 'الخدمة دي مش متاحة في العنوان المختار حاليًا',
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [addresses, id, selectedAddressId]);
 
   const debouncedFieldValues = useDebounced(fieldValues, 400);
 
@@ -453,10 +482,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     !needsSchedule ||
     (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd);
   const stepOneComplete = scheduleComplete && (!needsPreciseTime || !!preciseTime) && pricingFieldsValid;
-  const stepTwoComplete = stepOneComplete && !!selectedAddressId && allRequiredAccepted && remoteQuoteValid;
+  const serviceAvailableForAddress =
+    selectedAddressId !== null && availabilityAddressId === selectedAddressId && serviceAvailabilityError === null;
+  const selectedAddress = addresses?.find((item) => item.id === selectedAddressId);
+  const effectiveServiceAvailabilityError = selectedAddressId && !selectedAddress?.service_zone_id
+    ? 'العنوان ده خارج مناطق الخدمة المتاحة حاليًا'
+    : availabilityAddressId === selectedAddressId
+      ? serviceAvailabilityError
+      : null;
+  const stepTwoComplete =
+    stepOneComplete && serviceAvailableForAddress && allRequiredAccepted && remoteQuoteValid;
 
   const canSubmit =
     !!selectedAddressId &&
+    serviceAvailableForAddress &&
     (!needsSchedule ||
       (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
     (!needsPreciseTime || !!preciseTime) &&
@@ -639,6 +678,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                   checked={selectedAddressId === a.id}
                   onChange={() => {
                     setSelectedAddressId(a.id);
+                    setAvailabilityAddressId(null);
+                    setServiceAvailabilityError(null);
                     setShowNewAddressForm(false);
                   }}
                   className="mt-1"
@@ -660,6 +701,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 onClick={() => {
                   setShowNewAddressForm((v) => !v);
                   setSelectedAddressId(null);
+                  setAvailabilityAddressId(null);
+                  setServiceAvailabilityError(null);
                 }}
                 className="text-sm text-primary hover:underline"
               >
@@ -672,11 +715,24 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 onCreated={(addr) => {
                   setAddresses((prev) => [...(prev ?? []), addr]);
                   setSelectedAddressId(addr.id);
+                  setAvailabilityAddressId(null);
+                  setServiceAvailabilityError(null);
                   setShowNewAddressForm(false);
                 }}
               />
             )}
           </div>
+        )}
+        {selectedAddressId &&
+          selectedAddress?.service_zone_id &&
+          availabilityAddressId !== selectedAddressId &&
+          !effectiveServiceAvailabilityError && (
+          <p className="mt-2 text-sm text-muted">بنتأكد إن الخدمة متاحة في العنوان...</p>
+        )}
+        {effectiveServiceAvailabilityError && (
+          <p className="mt-2 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
+            {effectiveServiceAvailabilityError}
+          </p>
         )}
       </section>
       )}

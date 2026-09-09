@@ -3,8 +3,11 @@ import 'models.dart';
 
 // /service-categories و/services عامة (Public()) — مفيش داعي access_token، أي حد يقدر يتصفح الكتالوج.
 class CatalogRepository {
-  Future<List<ServiceCategory>> fetchCategories() async {
-    final items = await apiRequestList('/service-categories');
+  Future<List<ServiceCategory>> fetchCategories({String? zoneId}) async {
+    final query = zoneId == null
+        ? ''
+        : '?${Uri(queryParameters: {'zone_id': zoneId}).query}';
+    final items = await apiRequestList('/service-categories$query');
     return items.map(ServiceCategory.fromJson).toList();
   }
 
@@ -13,16 +16,28 @@ class CatalogRepository {
   /// كان التطبيق بيفلتر الفئات محليًا بـ`isFeatured` — يعني العنوان يقول «الأكثر طلبًا»
   /// والمصدر «اللي الأدمن اختاره». المسار ده بيخلّي الاسم يطابق القياس: السيرفر بيعدّ الطلبات
   /// الحقيقية في نافذة متحركة، وبيرجع لاختيار الأدمن بس لو مفيش أي طلبات لسه.
-  Future<List<CatalogService>> fetchMostRequestedServices() async {
-    final items = await apiRequestList('/services/most-requested');
+  Future<List<CatalogService>> fetchMostRequestedServices({
+    String? zoneId,
+  }) async {
+    final query = zoneId == null
+        ? ''
+        : '?${Uri(queryParameters: {'zone_id': zoneId}).query}';
+    final items = await apiRequestList('/services/most-requested$query');
     return items.map(CatalogService.fromJson).toList();
   }
 
-  Future<List<CatalogService>> fetchServices({String? categoryId, BookingMode? bookingMode}) async {
+  Future<List<CatalogService>> fetchServices({
+    String? categoryId,
+    BookingMode? bookingMode,
+    String? zoneId,
+  }) async {
     final params = <String, String>{};
     if (categoryId != null) params['category_id'] = categoryId;
     if (bookingMode != null) params['booking_mode'] = bookingMode.apiValue;
-    final query = params.isEmpty ? '' : '?${Uri(queryParameters: params).query}';
+    if (zoneId != null) params['zone_id'] = zoneId;
+    final query = params.isEmpty
+        ? ''
+        : '?${Uri(queryParameters: params).query}';
     final items = await apiRequestList('/services$query');
     return items.map(CatalogService.fromJson).toList();
   }
@@ -30,10 +45,15 @@ class CatalogRepository {
   // Script 3 §6/§7 — وصف طبيعي/بحث بديل عن تصفح الفئات ("المياه بتنزل من تحت الحوض" بدل
   // "سباكة"). GET /services/search?q=... (aliases/substring، مش AI — catalog.service.ts's
   // searchServices()). أقل من حرفين محليًا برضه (مطابق لفحص الباك-إند) عشان مانبعتش طلبات فاضية.
-  Future<List<CatalogService>> searchServices(String q) async {
+  Future<List<CatalogService>> searchServices(
+    String q, {
+    String? zoneId,
+  }) async {
     final trimmed = q.trim();
     if (trimmed.length < 2) return [];
-    final items = await apiRequestList('/services/search?${Uri(queryParameters: {'q': trimmed}).query}');
+    final items = await apiRequestList(
+      '/services/search?${Uri(queryParameters: {'q': trimmed, 'zone_id': ?zoneId}).query}',
+    );
     return items.map(CatalogService.fromJson).toList();
   }
 
@@ -59,16 +79,26 @@ class CatalogRepository {
   // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: مفيش UI بيعرض المدة المتوقعة
   // للعميل قبل الحجز لخدمات غير formula (اللي بتعتمد على service_standard_data). الاتنين تحت
   // مستقلين عن محرك التسعير الديناميكي بالكامل — نظام أقدم منفصل عمدًا (راجع catalog/README.md).
-  Future<List<ServiceStandardDataRow>> fetchStandardData(String serviceId) async {
+  Future<List<ServiceStandardDataRow>> fetchStandardData(
+    String serviceId,
+  ) async {
     final items = await apiRequestList('/services/$serviceId/standard-data');
     return items.map(ServiceStandardDataRow.fromJson).toList();
   }
 
-  Future<DurationEstimate> estimateDuration(String serviceId, String standardDataId, num requestedUnits) async {
-    final data = await apiRequest('POST', '/services/$serviceId/estimate-duration', body: {
-      'standard_data_id': standardDataId,
-      'requested_units': requestedUnits,
-    });
+  Future<DurationEstimate> estimateDuration(
+    String serviceId,
+    String standardDataId,
+    num requestedUnits,
+  ) async {
+    final data = await apiRequest(
+      'POST',
+      '/services/$serviceId/estimate-duration',
+      body: {
+        'standard_data_id': standardDataId,
+        'requested_units': requestedUnits,
+      },
+    );
     return DurationEstimate.fromJson(data!);
   }
 }

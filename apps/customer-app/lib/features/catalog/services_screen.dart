@@ -14,8 +14,9 @@ import 'models.dart';
 // أكتر من وضع.
 class ServicesScreen extends StatefulWidget {
   final ServiceCategory category;
+  final String? zoneId;
 
-  const ServicesScreen({super.key, required this.category});
+  const ServicesScreen({super.key, required this.category, this.zoneId});
 
   @override
   State<ServicesScreen> createState() => _ServicesScreenState();
@@ -34,7 +35,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
   Future<void> _load() async {
     try {
-      final services = await _repository.fetchServices(categoryId: widget.category.id);
+      final services = await _repository.fetchServices(
+        categoryId: widget.category.id,
+        zoneId: widget.zoneId,
+      );
       if (mounted) setState(() => _services = services);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -46,15 +50,15 @@ class _ServicesScreenState extends State<ServicesScreen> {
   // مساعدة حجز بسيطة (docs/08 §22 addendum) — العميل بيدوّر على مشكلته هنا؛ لو مش لاقيها في
   // القايمة، مفيش محرك تسعير تاني ولا فورم إضافي — مخرج بسيط ومباشر بس (اتصال/واتساب).
   Widget _problemNotListedFooter(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: OutlinedButton.icon(
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const SupportContactScreen()),
-          ),
-          icon: const Icon(Icons.help_outline),
-          label: const Text('مشكلتك مش من ضمن اللي فوق؟ كلّمنا'),
-        ),
-      );
+    padding: const EdgeInsets.all(16),
+    child: OutlinedButton.icon(
+      onPressed: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const SupportContactScreen())),
+      icon: const Icon(Icons.help_outline),
+      label: const Text('مشكلتك مش من ضمن اللي فوق؟ كلّمنا'),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -65,49 +69,51 @@ class _ServicesScreenState extends State<ServicesScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _services == null
-                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                : _services!.isEmpty
-                    ? Column(
-                        children: [
-                          Expanded(
-                            child: Center(
-                              child: EmptyState(
-                                icon: Icons.build_outlined,
-                                title: 'مفيش خدمات في "${widget.category.nameAr}" دلوقتي',
-                              ),
-                            ),
-                          ),
-                          _problemNotListedFooter(context),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          Expanded(
-                            child: ListView.separated(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: _services!.length,
-                              separatorBuilder: (_, _) => const SizedBox(height: 8),
-                              itemBuilder: (context, index) {
-                                final service = _services![index];
-                                // docs/08 §72 — الكارت بقى صورة عريضة فوق والكلام تحتها بعرض
-                                // الكارت كله (كان ListTile بصورة جانبية بتضغط العنوان والوصف).
-                                return ServiceCard(
-                                  service: service,
-                                  // بَقّة حقيقية اتلقطت: خدمات pricing_model=formula بيتعرض ليها
-                                  // basePriceCents (غالبًا صفر أو رقم داخلي مش مستخدم فعليًا —
-                                  // السعر الحقيقي بيتحسب بالكامل من محرك التسعير الديناميكي بعد
-                                  // ما العميل يملى تفاصيل الشغل) بدل ما توضّح إن السعر مش ثابت.
-                                  priceLabel: service.pricingModel == 'formula'
-                                      ? 'يُحسب حسب التفاصيل'
-                                      : _formatEgp(service.basePriceCents),
-                                  onTap: () => navigateToServiceBooking(context, service),
-                                );
-                              },
-                            ),
-                          ),
-                          _problemNotListedFooter(context),
-                        ],
+            ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+            : _services!.isEmpty
+            ? Column(
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: EmptyState(
+                        icon: Icons.build_outlined,
+                        title:
+                            'مفيش خدمات في "${widget.category.nameAr}" دلوقتي',
                       ),
+                    ),
+                  ),
+                  _problemNotListedFooter(context),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _services!.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final service = _services![index];
+                        // docs/08 §72 — الكارت بقى صورة عريضة فوق والكلام تحتها بعرض
+                        // الكارت كله (كان ListTile بصورة جانبية بتضغط العنوان والوصف).
+                        return ServiceCard(
+                          service: service,
+                          // بَقّة حقيقية اتلقطت: خدمات pricing_model=formula بيتعرض ليها
+                          // basePriceCents (غالبًا صفر أو رقم داخلي مش مستخدم فعليًا —
+                          // السعر الحقيقي بيتحسب بالكامل من محرك التسعير الديناميكي بعد
+                          // ما العميل يملى تفاصيل الشغل) بدل ما توضّح إن السعر مش ثابت.
+                          priceLabel: service.pricingModel == 'formula'
+                              ? 'يُحسب حسب التفاصيل'
+                              : _formatEgp(service.basePriceCents),
+                          onTap: () =>
+                              navigateToServiceBooking(context, service),
+                        );
+                      },
+                    ),
+                  ),
+                  _problemNotListedFooter(context),
+                ],
+              ),
       ),
     );
   }

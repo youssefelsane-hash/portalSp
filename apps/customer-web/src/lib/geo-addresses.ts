@@ -30,6 +30,7 @@ export interface AddressDto {
   longitude: number;
   is_default: boolean;
   has_active_order: boolean;
+  service_zone_id: string | null;
 }
 
 export const fetchCities = () => apiFetchList<CityDto>('/cities');

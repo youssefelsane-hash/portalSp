@@ -37,6 +37,7 @@ export interface AddressResponseDto {
   label: string | null;
   city_id: string | null;
   area_id: string | null;
+  service_zone_id: string | null;
   street_name: string;
   building_number: string | null;
   floor_number: string | null;

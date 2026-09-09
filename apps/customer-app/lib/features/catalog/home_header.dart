@@ -42,6 +42,7 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
     // دعوة بدل ما نستهلك شبكة ونسجّل خطأ متوقع.
     if (!context.read<AuthRepository>().isAuthenticated) {
       if (mounted) setState(() => _loaded = true);
+      widget.onAddressChanged?.call(null);
       return;
     }
     try {
@@ -51,12 +52,19 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
         // العنوان الافتراضي هو اللي بيتحجز عليه فعليًا؛ لو مفيش افتراضي، أول واحد.
         _address = addresses.isEmpty
             ? null
-            : addresses.firstWhere((a) => a.isDefault, orElse: () => addresses.first);
+            : addresses.firstWhere(
+                (a) => a.isDefault,
+                orElse: () => addresses.first,
+              );
         _loaded = true;
       });
+      widget.onAddressChanged?.call(_address);
     } catch (_) {
       // فشل تحميل العنوان ما ينفعش يمنع العميل من تصفح الخدمات — بيفضل النص المحايد.
-      if (mounted) setState(() => _loaded = true);
+      if (mounted) {
+        setState(() => _loaded = true);
+        widget.onAddressChanged?.call(null);
+      }
     }
   }
 
@@ -73,7 +81,9 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
     await _load();
     if (!mounted) return;
     final picked = await Navigator.of(context).push<Address>(
-      MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
+      MaterialPageRoute(
+        builder: (_) => const AddressesScreen(selectionMode: true),
+      ),
     );
     if (!mounted) return;
     if (picked != null) {
@@ -93,8 +103,8 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
     final label = !_loaded
         ? 'اختار عنوانك'
         : address == null
-            ? 'أضف عنوانك عشان نعرف نوصلك'
-            : address.displayTitle;
+        ? 'أضف عنوانك عشان نعرف نوصلك'
+        : address.displayTitle;
 
     return InkWell(
       onTap: _pickAddress,
@@ -103,7 +113,11 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
           children: [
-            Icon(Icons.location_on_outlined, size: 20, color: theme.colorScheme.primary),
+            Icon(
+              Icons.location_on_outlined,
+              size: 20,
+              color: theme.colorScheme.primary,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -120,12 +134,18 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.expand_more_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.expand_more_rounded,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ],
         ),
       ),
