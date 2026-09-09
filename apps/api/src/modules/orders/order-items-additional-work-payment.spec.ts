@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { randomUUID } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderItemsService } from './order-items.service';
@@ -228,6 +229,9 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
       savedPaymentMethods,
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
 
     orderItemsService = new OrderItemsService(

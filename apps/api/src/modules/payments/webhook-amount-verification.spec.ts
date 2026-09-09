@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { EarningsPolicyService } from './earnings-policy.service';
 import { DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order } from '../orders/entities/order.entity';
@@ -65,6 +66,9 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

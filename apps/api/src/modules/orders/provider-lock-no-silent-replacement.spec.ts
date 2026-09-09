@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
@@ -255,6 +256,9 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
       customerProfilesService, techniciansService, technicianLevelsService,
       { enqueueRecalculation: async () => undefined } as never, loyaltyService, settingsService, auditStub, events,
       {} as never, {} as never, {} as never, crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint), dataSource.getRepository(ComplaintMessage),

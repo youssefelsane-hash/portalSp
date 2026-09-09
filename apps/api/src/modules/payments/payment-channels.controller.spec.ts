@@ -4,6 +4,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { PaymentChannelsController } from './payment-channels.controller';
+import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymentMethod } from './entities/payment.entity';
 import { PaymobProvider } from './gateways/paymob-provider.service';
@@ -43,6 +44,9 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
       fakeRegistry,
       settingsService,
       { getConfigurationStatus: () => ({ configured: false, missingFields: ['API Key'] }) } as PaymobProvider,
+      // الحارس الحقيقي مش mock: هو مصدر الحقيقة الوحيد لخريطة «المفتاح ← وسيلة الدفع» بعد ج-١٨،
+      // فاستبداله بـmock كان هيخلّي الاختبار يقيس نسخة تانية من المنطق بدل اللي شغّالة فعلاً.
+      new PaymentMethodAvailabilityGuard(settingsService),
     );
   });
 

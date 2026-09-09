@@ -47,6 +47,9 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       {} as never,
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
+      // مسار التسوية مش متنادى في الاختبار ده (بيختبر حماية الدوسة المزدوجة / نتيجة البوابة
+      // بس)، والـDataSource هنا مزيّف — فخدمة حقيقية هتبقى كذب. `undefined` بيعكس الواقع.
+      undefined,
     );
     return { service, paymentRepository, provider, paymentProviders };
   };

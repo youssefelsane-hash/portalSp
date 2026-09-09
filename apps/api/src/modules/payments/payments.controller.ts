@@ -5,6 +5,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { PaymentsService } from './payments.service';
+import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
+import { PaymentMethod } from './entities/payment.entity';
 import {
   CardPaymentResponseDto,
   FawryReferenceResponseDto,
@@ -27,7 +29,12 @@ import {
 @Roles(UserType.CUSTOMER)
 @Throttle({ default: { limit: 20, ttl: 60_000 } })
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    // مفاتيح إيقاف وسائل الدفع (ج-١٨) — كانت مقروءة في قايمة العرض بس، فإقفال المفتاح كان
+    // بيخفي الزرار والفلوس تفضل تتحرّك من أي كلاينت بينادي الـendpoint مباشرةً.
+    private readonly methodAvailability: PaymentMethodAvailabilityGuard,
+  ) {}
 
   @Post(':id/pay-with-wallet')
   async payWithWallet(
@@ -40,6 +47,8 @@ export class PaymentsController {
     if (!idempotencyKey || idempotencyKey.trim().length === 0) {
       throw new BadRequestException('Idempotency-Key header مطلوب');
     }
+
+    await this.methodAvailability.assertEnabled(PaymentMethod.WALLET);
 
     const payment = await this.paymentsService.payWithWallet(user.sub, id, idempotencyKey.trim());
     return toPaymentResponseDto(payment);
@@ -55,6 +64,8 @@ export class PaymentsController {
       throw new BadRequestException('Idempotency-Key header مطلوب');
     }
 
+    await this.methodAvailability.assertEnabled(PaymentMethod.CARD);
+
     const { payment, redirectUrl } = await this.paymentsService.payWithCard(user.sub, id, idempotencyKey.trim());
     return { payment: toPaymentResponseDto(payment), redirect_url: redirectUrl };
   }
@@ -68,6 +79,8 @@ export class PaymentsController {
     if (!idempotencyKey || idempotencyKey.trim().length === 0) {
       throw new BadRequestException('Idempotency-Key header مطلوب');
     }
+
+    await this.methodAvailability.assertEnabled(PaymentMethod.FAWRY_REFERENCE);
 
     const { payment, referenceNumber, expiresAt } = await this.paymentsService.payWithFawryReference(
       user.sub,
@@ -95,6 +108,8 @@ export class PaymentsController {
     if (!idempotencyKey || idempotencyKey.trim().length === 0) {
       throw new BadRequestException('Idempotency-Key header مطلوب');
     }
+
+    await this.methodAvailability.assertEnabled(PaymentMethod.INSTAPAY);
 
     const { payment, referenceCode, instructionsAr, qrImageUrl } = await this.paymentsService.payWithInstaPay(
       user.sub,
