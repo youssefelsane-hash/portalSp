@@ -42,7 +42,7 @@ class LiveHarness {
     this.phoneSeq = 0;
     this.tagSeq = 0;
     this.dayCursor = 5;
-    this.created = { users: [], serviceIds: [], zoneIds: [], cityIds: [], categoryIds: [] };
+    this.created = { users: [], serviceIds: [], zoneIds: [], cityIds: [], categoryIds: [], roles: [] };
     this.results = [];
     this.db = null;
   }
@@ -294,7 +294,7 @@ class LiveHarness {
     let [role] = await this.q(`SELECT id FROM roles WHERE is_super_admin = true AND deleted_at IS NULL LIMIT 1`);
     if (!role) {
       [role] = await this.q(
-        `INSERT INTO roles (name, description_ar, is_super_admin, is_active) VALUES ($1,'تدقيق حي',true,true) RETURNING id`,
+        `INSERT INTO roles (name, display_name, is_super_admin, is_active) VALUES ($1,'تدقيق حي',true,true) RETURNING id`,
         [`super_admin_${runId}`],
       );
     }
@@ -305,6 +305,43 @@ class LiveHarness {
     // الدور بيتربط في `user_roles` مش في بروفايل الموظف — ده المصدر اللي `PermissionsGuard` بيقرا منه.
     await this.q(`INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [user.id, role.id]);
     return { userId: user.id, token: this.token(user.id, 'admin') };
+  }
+
+  /**
+   * موظف بصلاحيات **محدودة** بالاسم — مش super admin.
+   *
+   * ده المُمثّل اللي بيقيس الفرق بين «مسجّل دخول كموظف» و«مصرّح له بالفعل ده». `makeAdmin()`
+   * بيدّي دور `is_super_admin` اللي بيعدّي كل `@RequirePermission` بالتعريف، فأي فحص صلاحيات
+   * بيه بيبقى فحص فاضي. الموظف ده بياخد **بالظبط** الصلاحيات اللي اتسمّت وبس.
+   *
+   * @param {string[]} permissionNames أسماء الصلاحيات من جدول `permissions` (مثال: `orders.view`)
+   */
+  async makeEmployee(permissionNames = [], label = 'emp') {
+    const { prefix } = this;
+    const runId = this.nextTag();
+    const [user] = await this.q(
+      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,
+      [this.nextPhone(), `موظف ${prefix} ${label} ${runId}`],
+    );
+    this.created.users.push(user.id);
+    const [role] = await this.q(
+      `INSERT INTO roles (name, display_name, is_super_admin, is_active) VALUES ($1,'موظف محدود — تدقيق حي',false,true) RETURNING id`,
+      [`limited_${prefix}_${runId}`],
+    );
+    this.created.roles.push(role.id);
+    if (permissionNames.length) {
+      await this.q(
+        `INSERT INTO role_permissions (role_id, permission_id)
+         SELECT $1, id FROM permissions WHERE name = ANY($2::text[]) AND deleted_at IS NULL`,
+        [role.id, permissionNames],
+      );
+    }
+    await this.q(
+      `INSERT INTO employee_profiles (user_id, employee_code, department, is_active) VALUES ($1,$2,'ops',true)`,
+      [user.id, `${prefix.toUpperCase()}EMP${runId}`.slice(0, 20)],
+    );
+    await this.q(`INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [user.id, role.id]);
+    return { userId: user.id, roleId: role.id, token: this.token(user.id, 'admin') };
   }
 
   /**
@@ -466,6 +503,8 @@ class LiveHarness {
     await this.q(`DELETE FROM service_zones WHERE id = ANY($1::uuid[])`, [this.created.zoneIds]);
     await this.q(`DELETE FROM service_categories WHERE id = ANY($1::uuid[])`, [this.created.categoryIds]);
     await this.q(`DELETE FROM cities WHERE id = ANY($1::uuid[])`, [this.created.cityIds]);
+    // الأدوار آخر حاجة: `user_roles` بيتمسح مع المستخدم فوق، فالدور بيبقى بلا مراجع هنا.
+    await this.q(`DELETE FROM roles WHERE id = ANY($1::uuid[])`, [this.created.roles]);
   }
 }
 
