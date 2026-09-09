@@ -87,15 +87,51 @@ export default function PromotionsPage() {
     e.preventDefault();
     const form = new FormData(e.target as HTMLFormElement);
     const discountType = form.get('discount_type') as DiscountType;
+    const code = (form.get('code') as string).trim().toUpperCase();
+    const nameAr = (form.get('name_ar') as string).trim();
+    const validFromValue = form.get('valid_from') as string;
+    const validUntilValue = form.get('valid_until') as string;
+    const discountValue = Number(form.get('discount_value'));
+    const marketingChannel = form.get('marketing_channel') as MarketingChannel;
+    const payout = form.get('payout_per_completed_order_cents') as string;
+    const payoutCents = payout ? Math.round(Number(payout) * 100) : 0;
+    const payoutContact = (form.get('payout_contact_name') as string).trim();
+    const payoutPhone = (form.get('payout_contact_phone') as string).trim();
+
+    // Keep the form's feedback aligned with the API contract so the admin can fix
+    // every invalid value before a network request is made.
+    const validationErrors: string[] = [];
+    if (code.length < 3 || code.length > 24) validationErrors.push('الكود لازم يكون من 3 إلى 24 حرفًا أو رقمًا');
+    if (!nameAr) validationErrors.push('اسم الكود مطلوب');
+    if (discountEnabled && discountType !== 'free_inspection' && (!Number.isFinite(discountValue) || discountValue <= 0)) {
+      validationErrors.push('قيمة الخصم لازم تكون رقمًا أكبر من صفر');
+    }
+    const validFrom = new Date(`${validFromValue}T00:00:00`);
+    const validUntil = new Date(`${validUntilValue}T23:59:59.999`);
+    if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
+      validationErrors.push('اختار تاريخ بداية ونهاية صحيحين');
+    } else if (validUntil <= validFrom) {
+      validationErrors.push('تاريخ الانتهاء لازم يكون بعد تاريخ البداية');
+    }
+    if (payoutCents > 0 && !marketingChannel) validationErrors.push('اختار قناة التسويق قبل إضافة مستحق للشريك');
+    if (payoutContact && payoutContact.length < 2) validationErrors.push('اسم الشريك لازم يكون حرفين على الأقل');
+    if (payoutPhone && (payoutPhone.length < 6 || payoutPhone.length > 20)) {
+      validationErrors.push('رقم الشريك لازم يكون من 6 إلى 20 خانة');
+    }
+    if (validationErrors.length > 0) {
+      setError(validationErrors.join(' - '));
+      return;
+    }
+
     const body: CreatePromoCodeBody = {
-      code: (form.get('code') as string).trim().toUpperCase(),
-      name_ar: form.get('name_ar') as string,
+      code,
+      name_ar: nameAr,
       discount_type: discountType,
-      discount_value: !discountEnabled || discountType === 'free_inspection' ? 0 : Number(form.get('discount_value')),
+      discount_value: !discountEnabled || discountType === 'free_inspection' ? 0 : discountValue,
       discount_enabled: discountEnabled,
       // `type=date` بلا وقت؛ من تاريخ يبدأ من أوله، و"لحد تاريخ" لازم يظل صالحًا حتى آخره.
-      valid_from: new Date(`${form.get('valid_from') as string}T00:00:00`).toISOString(),
-      valid_until: new Date(`${form.get('valid_until') as string}T23:59:59.999`).toISOString(),
+      valid_from: validFrom.toISOString(),
+      valid_until: validUntil.toISOString(),
       new_customers_only: form.get('new_customers_only') === 'on',
     };
     const minOrder = form.get('min_order_amount_cents') as string;
@@ -108,17 +144,13 @@ export default function PromotionsPage() {
     if (budget) body.budget_cents = Math.round(Number(budget) * 100);
     if (selectedServiceIds.length > 0) body.applies_to_service_ids = selectedServiceIds;
     if (selectedZoneIds.length > 0) body.applies_to_zone_ids = selectedZoneIds;
-    const marketingChannel = form.get('marketing_channel') as MarketingChannel;
     if (marketingChannel) body.marketing_channel = marketingChannel;
     const marketingRegion = (form.get('marketing_region_label') as string).trim();
     if (marketingRegion) body.marketing_region_label = marketingRegion;
     const marketingNotes = (form.get('marketing_notes') as string).trim();
     if (marketingNotes) body.marketing_notes = marketingNotes;
-    const payout = form.get('payout_per_completed_order_cents') as string;
-    if (payout) body.payout_per_completed_order_cents = Math.round(Number(payout) * 100);
-    const payoutContact = (form.get('payout_contact_name') as string).trim();
+    if (payout) body.payout_per_completed_order_cents = payoutCents;
     if (payoutContact) body.payout_contact_name = payoutContact;
-    const payoutPhone = (form.get('payout_contact_phone') as string).trim();
     if (payoutPhone) body.payout_contact_phone = payoutPhone;
 
     setIsSaving(true);
@@ -270,7 +302,8 @@ export default function PromotionsPage() {
                   </div>
                   <div>
                     <Label htmlFor="payout_contact_phone">رقم الشريك (اختياري)</Label>
-                    <Input id="payout_contact_phone" name="payout_contact_phone" maxLength={20} dir="ltr" />
+                    <Input id="payout_contact_phone" name="payout_contact_phone" minLength={6} maxLength={20} inputMode="tel" dir="ltr" />
+                    <p className="mt-1 text-xs text-muted-foreground">من 6 إلى 20 خانة إذا تمت إضافته.</p>
                   </div>
                   <div>
                     <Label htmlFor="marketing_notes">ملاحظات داخلية (اختياري)</Label>
