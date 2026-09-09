@@ -119,14 +119,16 @@ export default function EarningsPolicyPage() {
     path: string,
     body: Record<string, unknown>,
     method: 'PATCH' | 'POST' | 'PUT' | 'DELETE' = 'PATCH',
-  ) {
+  ): Promise<boolean> {
     setSaving(key);
     setError(null);
     try {
       await authedFetch(path, { method, body: JSON.stringify(body) });
       load();
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'لم يتم حفظ التعديل');
+      return false;
     } finally {
       setSaving(null);
     }
@@ -199,11 +201,14 @@ export default function EarningsPolicyPage() {
 
   async function createAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    // React clears currentTarget once an awaited call resumes. Keep the actual form
+    // reference now, and reset it only after the API transaction succeeds.
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const technicianId = String(form.get('technician_id'));
     const serviceId = String(form.get('service_id') ?? '');
     const effectiveUntil = String(form.get('effective_until') ?? '');
-    await submit(
+    const saved = await submit(
       'technician-adjustment',
       `/admin/earnings-policy/technicians/${technicianId}/adjustments`,
       {
@@ -214,7 +219,7 @@ export default function EarningsPolicyPage() {
       },
       'POST',
     );
-    event.currentTarget.reset();
+    if (saved) formElement.reset();
   }
 
   async function runSimulation(event: FormEvent<HTMLFormElement>) {

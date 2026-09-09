@@ -217,6 +217,31 @@ export class AdminEarningsPolicyService {
     meta?: AuditActorMeta,
   ) {
     return this.dataSource.transaction(async (manager) => {
+      // One administrator may replace an adjustment at a time for this exact scope.
+      // Without this transaction-scoped lock, two near-simultaneous saves could each
+      // observe no active row and create competing earnings policies.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `earnings-adjustment:${technicianId}:${dto.service_id ?? 'all-services'}`,
+      ]);
+
+      const technician = await manager.query(
+        `SELECT id FROM technician_profiles WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [technicianId],
+      );
+      if (!technician[0]) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني أو المساعد غير موجود', HttpStatus.NOT_FOUND);
+      }
+
+      if (dto.service_id) {
+        const service = await manager.query(
+          `SELECT id FROM services WHERE id = $1 AND deleted_at IS NULL`,
+          [dto.service_id],
+        );
+        if (!service[0]) {
+          throw new ApiException(ErrorCode.VAL_001, 'الخدمة المحددة غير موجودة', HttpStatus.NOT_FOUND);
+        }
+      }
+
       const existing = await manager.query(
         `SELECT id FROM technician_earning_adjustments
           WHERE technician_id = $1 AND service_id IS NOT DISTINCT FROM $2 AND disabled_at IS NULL`,
