@@ -17,15 +17,17 @@ describe('MatchingRecoveryService', () => {
     },
   });
 
-  it('scans a bounded batch and safely continues after one dispatch failure', async () => {
+  // **الـsweep بتجدول، مش بتنفّذ.** كانت بتنادي `dispatchOrAutoConfirm()` لكل صف بالتتابع في
+  // نفس العملية، فدفعة ٢٥ طلب عالق كانت بتحتجز اتصالات القاعدة ~١٠ ثواني كل دورة والعملاء
+  // الحقيقيين بياخدوا 503. الاختبار ده بيقفل على إنها بقت **حجز وظايف بس** (التفاصيل والقياس
+  // في `matching-dispatch-queue.client.ts`).
+  it('بتحجز وظيفة لكل طلب عالق، ومابتنفّذش التوزيع بنفسها', async () => {
     const query = jest.fn().mockResolvedValue([{ id: 'order-1' }, { id: 'order-2' }]);
-    const dispatchOrAutoConfirm = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce({ dispatched: 1 });
+    // فشل حجز واحدة (Redis مش متاح) مابيوقفش الباقي — والطلب مش ضايع لأن الدورة الجاية بتعيد.
+    const enqueueDispatch = jest.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const service = new MatchingRecoveryService(
       repository(query) as never,
-      { dispatchOrAutoConfirm } as never,
+      { enqueueDispatch } as never,
       settings() as never,
     );
 
@@ -33,7 +35,9 @@ describe('MatchingRecoveryService', () => {
     expect(query.mock.calls[0][1]).toEqual([100, 60, 3600]);
     expect(query.mock.calls[0][0]).toContain('next_matching_attempt_at');
     expect(query.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
-    expect(dispatchOrAutoConfirm).toHaveBeenCalledTimes(2);
+    expect(enqueueDispatch).toHaveBeenCalledTimes(2);
+    expect(enqueueDispatch).toHaveBeenCalledWith('order-1');
+    expect(enqueueDispatch).toHaveBeenCalledWith('order-2');
   });
 
   it('reads batch size and backoff from settings instead of a deployment-time constant', async () => {
@@ -45,7 +49,7 @@ describe('MatchingRecoveryService', () => {
     });
     const service = new MatchingRecoveryService(
       repository(query) as never,
-      { dispatchOrAutoConfirm: jest.fn() } as never,
+      { enqueueDispatch: jest.fn().mockResolvedValue(true) } as never,
       configured as never,
     );
 
@@ -62,7 +66,7 @@ describe('MatchingRecoveryService', () => {
     const clear = jest.spyOn(global, 'clearTimeout').mockImplementation(() => undefined);
     const service = new MatchingRecoveryService(
       repository(jest.fn()) as never,
-      { dispatchOrAutoConfirm: jest.fn() } as never,
+      { enqueueDispatch: jest.fn().mockResolvedValue(true) } as never,
       settings({ 'matching.recovery_interval_seconds': 120 }) as never,
     );
 

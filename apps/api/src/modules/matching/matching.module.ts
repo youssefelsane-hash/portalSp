@@ -6,7 +6,8 @@ import { AuditModule } from '../audit/audit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
-import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor';
+import { MatchingQueueProcessor } from './matching-queue.processor';
+import { MatchingDispatchQueueClient } from './matching-dispatch-queue.client';
 import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
 import { MatchingService } from './matching.service';
 import { MatchingExplainabilityService } from './matching-explainability.service';
@@ -54,7 +55,8 @@ import { PaymentsModule } from '../payments/payments.module';
     MatchingRecoveryService,
     OrderDispatchListener,
     OrderRematchListener,
-    MatchingRoundExpiryProcessor,
+    MatchingQueueProcessor,
+    MatchingDispatchQueueClient,
   ],
   exports: [MatchingService, MatchingExplainabilityService],
 })

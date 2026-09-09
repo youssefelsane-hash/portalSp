@@ -679,7 +679,7 @@ export class MatchingService {
    * بيتصل بيها لحظة إنشاء الطلب (أول جولة)، وبعدها لما جولة تفشل بالكامل (كل الفنيين رفضوا/متأخرين).
    *
    * **إصلاح سباق حقيقي (مراجعة booking flow الشاملة 2026-08-12)**: قبل كده الدالة دي كانت بتقرأ
-   * الطلب من غير قفل، فلو `reject()` (آخر عرض معلّق بيترفض) و`MatchingRoundExpiryProcessor`
+   * الطلب من غير قفل، فلو `reject()` (آخر عرض معلّق بيترفض) و`MatchingQueueProcessor`
    * (مهلة الجولة خلصت) نادوا الدالة دي في نفس اللحظة تقريبًا لنفس الطلب، الاتنين كانوا يقدروا
    * يقروا نفس `MAX(assignment_round)` قبل ما أي واحد يكتب، ويحسبوا نفس `nextRound`، ويضيفوا
    * صفوف `order_assignments` مكررة لنفس الجولة (فنيين اتبعتلهم عرض مرتين) — موثّقة بالتفصيل في
@@ -1431,7 +1431,7 @@ export class MatchingService {
   /**
    * ADR-0018 §5 — العرض يفضل ظاهر هنا طالما `sent` (محدش قبله لسه)، **مهما كانت `expires_at`
    * فاتت أو لأ**. `expires_at` بقت معناها "امتى النظام بيوسّع البث لفنيين إضافيين" بس (راجع
-   * matching-round-expiry.processor.ts) — مش ميعاد صلاحية للعرض نفسه. لو الفني فتح التطبيق بعد
+   * matching-queue.processor.ts) — مش ميعاد صلاحية للعرض نفسه. لو الفني فتح التطبيق بعد
    * ما البث اتوسّع لفنيين تانيين، لازم لسه يشوف الطلب ده في قايمته ويقدر يقبله (أول واحد يقبل
    * ياخده، exclusivity ذرّية في accept() تحت).
    */
@@ -1502,7 +1502,7 @@ export class MatchingService {
 
       // ADR-0018 §5 — مفيش فحص expiresAt هنا عمدًا: العرض يفضل قابل للقبول طالما assignment_status
       // لسه sent/viewed (محدش قبله ولا هو رفضه صراحة)، بغض النظر عن مرور مهلة الجولة. راجع
-      // matching-round-expiry.processor.ts للتفصيل الكامل — expiresAt بقت بس تريجر لتوسيع البث،
+      // matching-queue.processor.ts للتفصيل الكامل — expiresAt بقت بس تريجر لتوسيع البث،
       // مش ميعاد صلاحية.
       const assignment = await manager.findOne(OrderAssignment, {
         where: { orderId, technicianId: profile.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },

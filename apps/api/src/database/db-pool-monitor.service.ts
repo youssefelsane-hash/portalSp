@@ -19,6 +19,9 @@ const PRESSURE_TICKS_BEFORE_WARNING = 3;
 
 const SAMPLE_INTERVAL_MS = 10_000;
 
+/** اتصالات بنفترض إنها محجوزة للصيانة/الـmigrations/الـpsql اليدوي — مش للتطبيق. */
+const MAINTENANCE_CONNECTIONS_RESERVE = 10;
+
 /**
  * **مراقب ضغط الـpool.**
  *
@@ -42,6 +45,43 @@ export class DbPoolMonitorService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.timer = setInterval(() => this.sample(), SAMPLE_INTERVAL_MS);
     this.timer.unref?.();
+    void this.reportCapacityAtBoot();
+  }
+
+  /**
+   * بيطبع وقت الإقلاع **الرقمين اللي بيحكموا سعة التزامن الحقيقية**: سقف الـpool بتاع النسخة
+   * دي، و`max_connections` بتاع Postgres نفسه.
+   *
+   * السبب: `DATABASE_POOL_MAX` كان ١٠ لشهور وهو سقف فعلي على عدد العملاء اللي يقدروا يحجزوا
+   * في نفس اللحظة (٧٠٪ من ٤٠ حجز متزامن كانوا بياخدوا 503 — راجع `config/configuration.ts`).
+   * محدش كان بيشوف الرقم ده في أي مكان، فمكانش فيه أي إشارة إن ده هو القيد. دلوقتي بيبان في
+   * أول عشر سطور من لوج الإقلاع، ومعاه القاعدة اللي بتحسب الرقم الصح.
+   *
+   * الفشل هنا **مايوقّفش الإقلاع أبدًا**: ده قياس مساعد، والتطبيق بيشتغل من غيره عادي.
+   */
+  private async reportCapacityAtBoot(): Promise<void> {
+    const snapshot = this.snapshot();
+    const poolMax = snapshot?.max ?? 0;
+    try {
+      const [row] = await this.dataSource.query<{ max_connections: string }[]>(`SHOW max_connections`);
+      const serverMax = parseInt(row?.max_connections ?? '0', 10);
+      if (!serverMax || !poolMax) return;
+
+      const instancesAffordable = Math.floor((serverMax - MAINTENANCE_CONNECTIONS_RESERVE) / poolMax);
+      this.logger.log(
+        `سعة الاتصالات: pool النسخة دي ${poolMax}، و max_connections بتاع Postgres ${serverMax} — ` +
+          `يعني القاعدة دي تستحمل ${instancesAffordable} نسخة من التطبيق بالسقف ده ` +
+          `(بعد حجز ${MAINTENANCE_CONNECTIONS_RESERVE} اتصال للصيانة والـmigrations).`,
+      );
+      if (instancesAffordable < 1) {
+        this.logger.error(
+          `DATABASE_POOL_MAX=${poolMax} أكبر من اللي القاعدة تستحمله (${serverMax} اتصال). ` +
+            `نسخة واحدة ممكن تستهلك كل الاتصالات وتمنع الصيانة والـmigrations. صغّر السقف أو كبّر القاعدة.`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`تعذّر قياس سعة اتصالات القاعدة وقت الإقلاع: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   onModuleDestroy(): void {

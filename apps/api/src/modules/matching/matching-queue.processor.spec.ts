@@ -1,4 +1,4 @@
-import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor';
+import { MatchingQueueProcessor } from './matching-queue.processor';
 import { AssignmentStatus } from './entities/order-assignment.entity';
 import { OrderStatus } from '../orders/entities/order.entity';
 import { ORDER_OFFER_RESOLVED_EVENT } from '../../common/events/order-offer-resolved.event';
@@ -7,7 +7,7 @@ import { ORDER_OFFER_RESOLVED_EVENT } from '../../common/events/order-offer-reso
 // مهلة الجولة لازم يوسّع البث لفنيين إضافيين بس، **بلا أي تعديل على order_assignments** — العروض
 // المعلّقة تفضل sent وقابلة للقبول. قبل التصحيح، الـprocessor ده كان بيحوّلها لـTIMEOUT (assignments
 // .save()) — أهم فحص هنا هو التأكيد الصريح إن assignments.save() ماعادش بيتنادى خالص.
-describe('MatchingRoundExpiryProcessor — توسيع البث بلا إبطال العروض القديمة (ADR-0018 §5)', () => {
+describe('MatchingQueueProcessor — توسيع البث بلا إبطال العروض القديمة (ADR-0018 §5)', () => {
   function buildProcessor(opts: {
     order: { orderStatus: OrderStatus } | null;
     pendingAssignments: { id: string; technicianId: string }[];
@@ -20,7 +20,7 @@ describe('MatchingRoundExpiryProcessor — توسيع البث بلا إبطال
     const matchingService = { dispatchNextRound } as never;
     const emit = jest.fn();
     const events = { emit } as never;
-    const processor = new MatchingRoundExpiryProcessor(assignments, orders, matchingService, events);
+    const processor = new MatchingQueueProcessor(assignments, orders, matchingService, events);
     return { processor, save, find, dispatchNextRound, emit };
   }
 

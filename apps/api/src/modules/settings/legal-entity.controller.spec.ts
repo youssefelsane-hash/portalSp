@@ -31,6 +31,7 @@ describe('LegalEntityController (docs/08 §100)', () => {
     'legal.tax_id',
   ];
   const originals = new Map<string, string>();
+  let settingsService: SettingsService;
 
   async function setSetting(key: string, value: string) {
     await dataSource.query(
@@ -39,6 +40,10 @@ describe('LegalEntityController (docs/08 §100)', () => {
       [key, JSON.stringify(value)],
     );
     await cache.del(`settings:${key}`);
+    // الكتابة فوق بتعدّي على `SettingsService.update()`، والخدمة بتخدم القيمة المحلية ولو
+    // عمرها خلص (stale-while-revalidate — شوف `settings.service.ts`). الإبطال الصريح ده هو
+    // المسار المدعوم لأي كاتب من برّه الخدمة.
+    settingsService.invalidateLocalCache(key);
   }
 
   beforeAll(async () => {
@@ -49,7 +54,7 @@ describe('LegalEntityController (docs/08 §100)', () => {
     });
     await dataSource.initialize();
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
-    const settingsService = new SettingsService(
+    settingsService = new SettingsService(
       dataSource.getRepository(Setting),
       {} as unknown as AuditLogService,
       cache,

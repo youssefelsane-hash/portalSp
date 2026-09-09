@@ -8,8 +8,22 @@ import { getRedisUrl } from '../../config/redis-url.util';
 import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../common/events/order-offer-resolved.event';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
-import { MATCHING_ROUNDS_QUEUE, RoundExpiredJobData } from './matching-rounds.queue';
+import {
+  MATCHING_ROUNDS_QUEUE,
+  ORDER_DISPATCH_JOB,
+  OrderDispatchJobData,
+  RoundExpiredJobData,
+} from './matching-rounds.queue';
 import { MatchingService } from './matching.service';
+
+/**
+ * **سقف الشغل الخلفي المتزامن** — ده هو الضغط الخلفي نفسه، مش رقم أداء.
+ *
+ * كل وظيفة توزيع بتاخد اتصال قاعدة بيانات واحد على الأقل. السقف ده بيضمن إن الشغل الخلفي
+ * مايقدرش ياخد كل الـpool ويسيب طلبات الـHTTP الحقيقية بتتخطّى مهلتها وترجع 503. القيمة
+ * المعقولة أقل بكتير من `DATABASE_POOL_MAX` عشان يفضل للطلبات الحية نصيب مضمون.
+ */
+const DISPATCH_CONCURRENCY = Math.max(1, parseInt(process.env.MATCHING_QUEUE_CONCURRENCY ?? '4', 10) || 4);
 
 /**
  * بيتنفّذ لحظة انتهاء "مهلة رد" جولة (30 ثانية للعادي، أقصر للطوارئ) — لو محدش رد صراحة
@@ -42,6 +56,7 @@ import { MatchingService } from './matching.service';
 @Processor(
   { name: MATCHING_ROUNDS_QUEUE },
   {
+    concurrency: DISPATCH_CONCURRENCY,
     connection: {
       url: getRedisUrl(),
       enableOfflineQueue: false,
@@ -50,8 +65,8 @@ import { MatchingService } from './matching.service';
     },
   },
 )
-export class MatchingRoundExpiryProcessor extends WorkerHost {
-  private readonly logger = new Logger(MatchingRoundExpiryProcessor.name);
+export class MatchingQueueProcessor extends WorkerHost {
+  private readonly logger = new Logger(MatchingQueueProcessor.name);
 
   constructor(
     @InjectRepository(OrderAssignment) private readonly assignments: Repository<OrderAssignment>,
@@ -69,9 +84,31 @@ export class MatchingRoundExpiryProcessor extends WorkerHost {
     this.logger.warn(`Worker error (matching-rounds): ${error.message}`);
   }
 
-  async process(job: Job<RoundExpiredJobData>): Promise<void> {
-    const { orderId, round } = job.data;
+  /**
+   * الـworker ده بياخد **نوعين وظايف** عمدًا في نفس الطابور: توزيع طلب جديد، وانتهاء مهلة جولة.
+   *
+   * التوحيد ده هو الغرض نفسه مش تجميع عشوائي: طابور واحد = **سقف تزامن واحد** على كل شغل
+   * المطابقة الخلفي، فمستحيل نوع وظيفة يستنزف اتصالات القاعدة على حساب التاني أو على حساب طلبات
+   * الـHTTP الحية. (كمان اتصال Redis واحد بدل اتنين — شوف الشرح تحت.)
+   */
+  async process(job: Job<RoundExpiredJobData | OrderDispatchJobData>): Promise<void> {
+    if (job.name === ORDER_DISPATCH_JOB) {
+      await this.processOrderDispatch(job.data as OrderDispatchJobData);
+      return;
+    }
+    await this.processRoundExpiry(job.data as RoundExpiredJobData);
+  }
 
+  /**
+   * توزيع طلب جديد. الرمي هنا **مقصود**: BullMQ بيعيد المحاولة، والطلب مايضيعش لو المطابقة
+   * فشلت لسبب عابر (انقطاع قاعدة، تزاحم). الشبكة الأخيرة بعد كده هي `MatchingRecoveryService`
+   * اللي بتمسح الطلبات العالقة في `searching_technician` كل دقيقة.
+   */
+  private async processOrderDispatch(data: OrderDispatchJobData): Promise<void> {
+    await this.matchingService.dispatchOrAutoConfirm(data.orderId);
+  }
+
+  private async processRoundExpiry({ orderId, round }: RoundExpiredJobData): Promise<void> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
       return; // الطلب اتحل (قبول/إلغاء) قبل ما المهلة تخلص — مفيش داعي نعمل حاجة
