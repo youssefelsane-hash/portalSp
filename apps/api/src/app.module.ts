@@ -10,6 +10,8 @@ import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { RequestMetricsInterceptor } from './common/observability/request-metrics.interceptor';
+import { ObservabilityModule } from './common/observability/observability.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -141,6 +143,9 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     HealthModule,
     AcademyModule,
     OpsModule,
+    // `@Global` بس متسجّل هنا صراحةً كمان: الـ`APP_INTERCEPTOR` بيتحقن في جذر التطبيق، فلازم
+    // الخدمة تكون متاحة في الجذر مش بس جوّه `OpsModule`.
+    ObservabilityModule,
     BrandingModule,
     TechnicianProductivityModule,
     SecurityModule,
@@ -149,6 +154,10 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
   ],
   providers: [
     AdminRouteRbacValidator,
+    // الترتيب مهم: `RequestMetricsInterceptor` **الأول** عشان يشوف مسار الخطأ كمان — الـ
+    // interceptor اللي بعده لو رمى، اللي قبله بيلقّطه. (الـ5xx هي أهم إشارة، ومقياس بيقول صفر
+    // غلط أسوأ من مفيش مقياس.)
+    { provide: APP_INTERCEPTOR, useClass: RequestMetricsInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_GUARD, useClass: IdentityThrottlerGuard },

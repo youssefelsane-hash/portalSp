@@ -93,3 +93,71 @@
 بـstack كامل). امتلاء القرص بيوقف Postgres والرفع والـAPI — فانقطاع الكاش كان بيتحوّل بسبب
 اللوج **وحده** لانقطاع خدمة. الإصلاح: خنق الرسائل المتكررة في
 `src/common/logging/throttled-log.ts` (نمو اللوج بقى ٠.٠MB في نفس السيناريو).
+
+---
+
+# ج-٧ (2026-09-09) — المراقبة والإنذارات: `OpsMetricsService` + `/admin/ops/health-metrics`
+
+الـwatchdog فوق بيحل مشكلة **واحدة** بعينها (طابور معلّق). البند ده أوسع: **لو أي حاجة وقعت،
+هل الإنذار بيرنّ؟**
+
+## `GET /admin/ops/health-metrics`
+
+نقطة القراءة الوحيدة للمراقبة الخارجية. `@Roles(ADMIN)` + `@RequirePermission('operations.view')`
+— **مش عامة زي `/health`** لأن الرد فيه أرقام تشغيلية (طلبات عالقة، دفعات فاشلة، أعماق طوابير).
+
+الرد فيه: `status`, `alerts[]`, `requests`, `queues[]`, `business`, `database.pool`, `process`,
+`thresholds`, `collectedAt`.
+
+**قاعدة الاستخدام في الإنتاج سطر واحد**: ندهها كل دقيقة بتوكن أدمن، ونبّه لو `status != "ok"`.
+كل عنصر في `alerts[]` فيه رسالة عربية فيها الرقم والعتبة، فالتنبيه قابل للتصرّف من غير ما حد
+يفتح شاشة.
+
+## `-1` مش `0` لما مانقدرش نقرا
+
+لو Redis واقع، الطابور بيرجع `waiting: -1` ومعاه إنذار `queue_unreachable:<الطابور>`. **صفر
+مطمئن كاذب أسوأ من مفيش رقم** — هو اللي بيخلّي حادثة تعدّي بلا ما حد يلاحظ. اتقاس حيًا: ٤/٤
+طوابير رجعت «مش معروفة» والنقطة نفسها فضلت بترد وRedis واقع.
+
+## العتبات (`group_name='ops'`, migration `0304`)
+
+| المفتاح | الافتراضي |
+|---|---|
+| `ops.alert_server_error_rate` | `0.05` |
+| `ops.alert_server_error_rate_critical` | `0.2` |
+| `ops.alert_latency_p95_ms` | `3000` |
+| `ops.alert_latency_p95_critical_ms` | `10000` |
+| `ops.alert_pool_waiting` | `1` |
+| `ops.alert_queue_stall_minutes` | `5` |
+| `ops.alert_queue_failed` | `20` |
+| `ops.alert_failed_payments_per_hour` | `10` |
+| `ops.alert_stuck_searching_minutes` | `30` |
+| `ops.alert_memory_rss_mb` | `1500` |
+
+**ليه الـmigration دي كانت لازمة**: `OpsMetricsService` بيقرا بـ`getNumber(key, fallback)`، فمن
+غير الصفوف دي الأرقام بتشتغل صح من الكود بس **الأدمن مايقدرش يشوفها ولا يعدّلها** —
+`PATCH /admin/settings/:key` بيرمي 404 لمفتاح مش موجود (اتقاس حيًا: `PATCH=404` قبل، `200` بعد).
+يعني «العتبات تتظبط بلا deploy» كان ادعاء غير صحيح عمليًا. القيم المبذورة **مطابقة للـfallback
+بالحرف** — البذر مش تغيير سياسة.
+
+**غيّرها من مسار الأدمن مش بـSQL**: الكتابة المباشرة بتعدّي على `SettingsService` فالقيمة القديمة
+بتفضل في الكاش المحلي (stale-while-revalidate) والتغيير مايبانش. المسار المدعوم بيبطّل الكاشين
+ويسري فورًا.
+
+## `RequestMetricsInterceptor` — ترتيب التسجيل مهم
+
+مسجَّل في `app.module.ts` **قبل** `ResponseInterceptor`. لو اتسجّل بعده مكنش هيشوف مسار الخطأ
+أصلاً، فعدّاد الـ5xx كان هيفضل صفر للأبد — أخطر شكل للطمأنينة الكاذبة.
+
+## حدود معروفة
+
+`RequestMetricsService` **في الذاكرة وper-process**: مع أكتر من نسخة كل نسخة بتقول عن نفسها. ده
+مقبول للإنذار (نسخة واحدة بتعاني = حادثة) ومش مقبول للتحليل التاريخي — الحل وقت التوسّع تصدير
+Prometheus/OTLP، مؤجّل عن قصد. وكمان **مفيش قناة إرسال** (بريد/Slack/PagerDuty): النقطة بتوفّر
+الإشارة والقاعدة، والربط قرار تشغيلي في خطة الإطلاق.
+
+## اتأكد إزاي
+
+`node scripts/monitoring-alerts-audit.js` — **١٧/١٧**. بيفتعل الحالات فعلاً: طلب عالق حقيقي
+(كتالوج بلا فني مؤهّل) ⇒ `stuck_orders` رنّ و`status` بقى `critical`؛ إسقاط Redis ⇒ `-1` +
+`queue_unreachable`؛ تغيير عتبة من مسار الأدمن ⇒ سرت فورًا.
