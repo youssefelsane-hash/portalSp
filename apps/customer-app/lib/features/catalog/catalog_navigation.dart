@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
+import '../../core/funnel_tracker.dart';
 import '../orders/assessment_route.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
@@ -29,6 +30,18 @@ Future<void> navigateToServiceBooking(
   }
   // ملاحظة: `availableBookingModes` بقت تُستخدم هنا كفحص "الخدمة قابلة للحجز أصلاً" بس — مش
   // كقايمة اختيارات تتعرض للعميل (ADR-0048).
+
+  // **«شاف الخدمة» بيتسجّل هنا بالظبط، قبل بوابة تسجيل الدخول** (بلاغ مالك 2026-09-09: أول
+  // خانتين في الفنل دايمًا صفر).
+  //
+  // كان بيتسجّل في `CreateOrderScreen.initState` — و`CreateOrderScreen` هي **آخر** شاشة في
+  // الرحلة، بعد الميعاد واختيار الفني ومعاينة السعر. النتيجة إن المرحلة اللي المفروض تقيس
+  // «كام حد فتح خدمة» ماكانتش بتتسجّل إلا للناس اللي وصلوا للآخر خالص — يعني اللي وقعوا في
+  // النص (وهم بالظبط اللي الفنل موجود عشانهم) ماكانوش بيتعدّوا خالص، والخانة تفضل صفر.
+  //
+  // والدالة دي هي **نقطة الالتقاء الوحيدة** لكل مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية)،
+  // فتسجيلها هنا معناه إنها مستحيل تتفوّت في مسار جديد يتضاف بعدين.
+  FunnelTracker.instance.track('service_viewed', serviceId: service.id);
 
   // **بوابة الزائر (docs/08 §77-B1، طلب مالك صريح)** — هنا بالظبط، ومكان تاني غلط.
   //
@@ -74,6 +87,11 @@ Future<void> navigateToServiceBooking(
   if (choice == null || !context.mounted) {
     return;
   }
+  // **«بدأ الحجز» = العميل اختار ميعاد فعلاً** — أول التزام حقيقي منه في الرحلة. المرحلتين
+  // كانوا بيتسجّلوا في نفس السطر بنفس اللحظة، فالخانتين كانوا بيطلعوا نفس الرقم دايمًا
+  // والتسرّب بينهم صفر بالتعريف — قياس مالوش أي معنى.
+  FunnelTracker.instance.track('booking_started', serviceId: service.id);
+
   final DateTime scheduledAt = choice.scheduledAt;
   final DateTime? scheduledAtRangeEnd = choice.rangeEnd;
   final TimeOfDay? preciseTime = choice.preciseTime;

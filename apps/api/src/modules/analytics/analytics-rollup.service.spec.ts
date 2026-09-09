@@ -65,6 +65,35 @@ describe('AnalyticsRollupService — تجميع الفنل والاحتفاظ (A
     return rows[0] ?? null;
   };
 
+  /**
+   * الأرقام اللي كانت موجودة **قبل** ما الاختبار يضيف أي حاجة.
+   *
+   * `booking_funnel_daily` جدول مجمّع لكل المنصة — مفيش فيه بُعد جلسة يتفلتر بيه. فلو
+   * الاختبار قاس القيمة المطلقة، أي حدث تاني في نفس اليوم (تدقيق حي، تشغيلة سابقة، تطوير
+   * عادي) بيكسره وهو سليم — وده حصل فعلاً. القياس بقى على **الفرق** اللي الاختبار نفسه
+   * أحدثه، فالنتيجة بقت مستقلة عن حالة القاعدة.
+   */
+  const baseline = new Map<string, { sessions: number; events: number; failed: number }>();
+
+  async function snapshotBaseline(stage: string): Promise<void> {
+    const row = await dailyRow(stage);
+    baseline.set(stage, {
+      sessions: Number(row?.sessions ?? 0),
+      events: Number(row?.events ?? 0),
+      failed: Number(row?.failed_events ?? 0),
+    });
+  }
+
+  const addedBy = async (stage: string) => {
+    const row = await dailyRow(stage);
+    const base = baseline.get(stage) ?? { sessions: 0, events: 0, failed: 0 };
+    return {
+      sessions: Number(row?.sessions ?? 0) - base.sessions,
+      events: Number(row?.events ?? 0) - base.events,
+      failed: Number(row?.failed_events ?? 0) - base.failed,
+    };
+  };
+
   beforeAll(async () => {
     dataSource = await new DataSource({
       type: 'postgres',
@@ -90,7 +119,9 @@ describe('AnalyticsRollupService — تجميع الفنل والاحتفاظ (A
 
   describe('التجميع', () => {
     it('بيجمّع الجلسات المميّزة والأحداث والفشل لكل مرحلة', async () => {
-      // تلات جلسات شافوا الخدمة، واحدة منهم شافتها مرتين ⇒ ٣ جلسات و٤ أحداث.
+      await snapshotBaseline('service_viewed');
+      await snapshotBaseline('booking_started');
+      // تلات جلسات شافوا الخدمة، واحدة منهم شافتها مرتين ⇒ ٣ جلسات و٤ أحداث **زيادة**.
       await addEvent({ stage: 'service_viewed', session: sessions[0], daysAgo: 0 });
       await addEvent({ stage: 'service_viewed', session: sessions[0], daysAgo: 0 });
       await addEvent({ stage: 'service_viewed', session: sessions[1], daysAgo: 0 });
@@ -100,14 +131,14 @@ describe('AnalyticsRollupService — تجميع الفنل والاحتفاظ (A
 
       await service.rollupRecentDays(3);
 
-      const viewed = await dailyRow('service_viewed');
-      expect(Number(viewed?.sessions)).toBe(3);
-      expect(Number(viewed?.events)).toBe(4);
-      expect(Number(viewed?.failed_events)).toBe(0);
+      const viewed = await addedBy('service_viewed');
+      expect(viewed.sessions).toBe(3);
+      expect(viewed.events).toBe(4);
+      expect(viewed.failed).toBe(0);
 
-      const started = await dailyRow('booking_started');
-      expect(Number(started?.sessions)).toBe(1);
-      expect(Number(started?.failed_events)).toBe(1);
+      const started = await addedBy('booking_started');
+      expect(started.sessions).toBe(1);
+      expect(started.failed).toBe(1);
     });
 
     it('**تشغيل الدورة تاني مابيضاعفش** — الرقم بيتعاد حسابه مش بيتزوّد', async () => {
@@ -122,9 +153,9 @@ describe('AnalyticsRollupService — تجميع الفنل والاحتفاظ (A
     it('حدث جديد على نفس اليوم بيظهر بعد إعادة التجميع من غير مسح يدوي', async () => {
       await addEvent({ stage: 'service_viewed', session: '00000000-0000-4000-8000-000000000004', daysAgo: 0 });
       await service.rollupRecentDays(3);
-      const viewed = await dailyRow('service_viewed');
-      expect(Number(viewed?.sessions)).toBe(4);
-      expect(Number(viewed?.events)).toBe(5);
+      const viewed = await addedBy('service_viewed');
+      expect(viewed.sessions).toBe(4);
+      expect(viewed.events).toBe(5);
     });
   });
 
