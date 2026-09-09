@@ -65,6 +65,13 @@ jobs:
       - name: فحص ترقيم الـmigrations
         run: node scripts/check-migrations.js
 
+      # فحص **محتوى** الـmigrations الجديدة (ج-١١): الـSQL بيعدّي على tsc وeslint وjest كلهم
+      # لأنه مش TypeScript — فمفيش أي بوابة بتقراه قبل ما يتطبّق على بيانات عملاء حقيقية.
+      # الحارس بيرصد الأنماط اللي بتقفل جداول أو بتفقد بيانات أو بتفشل على جدول مش فاضي،
+      # وبيقبل إقرارًا صريحًا (`-- migration-safety: ok <السبب>`) لما النمط يكون مقصود وآمن.
+      - name: فحص أمان الـmigrations الجديدة
+        run: node scripts/check-migration-safety.js
+
       - name: تطبيق الـmigrations
         run: node infra/migrations/migrate.js
         env:
