@@ -14,8 +14,9 @@ import 'models.dart';
 // تصنيف AI. نفس navigateToServiceBooking المستخدمة في ServicesScreen — مفيش محرك حجز تاني.
 class SearchResultsScreen extends StatefulWidget {
   final String initialQuery;
+  final String? zoneId;
 
-  const SearchResultsScreen({super.key, this.initialQuery = ''});
+  const SearchResultsScreen({super.key, this.initialQuery = '', this.zoneId});
 
   @override
   State<SearchResultsScreen> createState() => _SearchResultsScreenState();
@@ -56,7 +57,10 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
     }
     if (mounted) setState(() => _searched = true);
     try {
-      final results = await _repository.searchServices(trimmed);
+      final results = await _repository.searchServices(
+        trimmed,
+        zoneId: widget.zoneId,
+      );
       if (mounted) {
         setState(() {
           _results = results;
@@ -92,36 +96,39 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
         ),
         body: !_searched
             ? const Center(
-                child: EmptyState(icon: Icons.search, title: 'اكتب وصف مشكلتك (زي: "المياه بتنزل من تحت الحوض")'),
+                child: EmptyState(
+                  icon: Icons.search,
+                  title: 'اكتب وصف مشكلتك (زي: "المياه بتنزل من تحت الحوض")',
+                ),
               )
             : _error != null
-                ? Center(child: Text(_error!))
-                : _results == null
-                    ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                    : _results!.isEmpty
-                        ? const Center(
-                            child: EmptyState(
-                              icon: Icons.search_off,
-                              title: 'مفيش خدمات مطابقة — جرّب توصيف مختلف أو تصفّح الفئات',
-                            ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: _results!.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                              final service = _results![index];
-                              // نفس كارت قايمة الفئة بالحرف (docs/08 §72) — شكل واحد للخدمة في كل
-                              // مكان بيتعرض فيه، مش شكلين مختلفين حسب الشاشة.
-                              return ServiceCard(
-                                service: service,
-                                priceLabel: service.pricingModel == 'formula'
-                                    ? 'يُحسب حسب التفاصيل'
-                                    : _formatEgp(service.basePriceCents),
-                                onTap: () => navigateToServiceBooking(context, service),
-                              );
-                            },
-                          ),
+            ? Center(child: Text(_error!))
+            : _results == null
+            ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+            : _results!.isEmpty
+            ? const Center(
+                child: EmptyState(
+                  icon: Icons.search_off,
+                  title: 'مفيش خدمات مطابقة — جرّب توصيف مختلف أو تصفّح الفئات',
+                ),
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: _results!.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final service = _results![index];
+                  // نفس كارت قايمة الفئة بالحرف (docs/08 §72) — شكل واحد للخدمة في كل
+                  // مكان بيتعرض فيه، مش شكلين مختلفين حسب الشاشة.
+                  return ServiceCard(
+                    service: service,
+                    priceLabel: service.pricingModel == 'formula'
+                        ? 'يُحسب حسب التفاصيل'
+                        : _formatEgp(service.basePriceCents),
+                    onTap: () => navigateToServiceBooking(context, service),
+                  );
+                },
+              ),
       ),
     );
   }

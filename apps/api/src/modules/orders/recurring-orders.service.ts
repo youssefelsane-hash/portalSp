@@ -162,7 +162,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
 
   async create(userId: string, dto: CreateRecurringTemplateDto): Promise<RecurringOrderTemplate> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-    await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
+    const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     if (dto.requested_technician_id) {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
@@ -212,6 +212,18 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     if (!bookingModeAllowed) {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
+
+    const serviceZoneId = await this.addressesService.resolveServiceZoneId(address);
+    if (!serviceZoneId) {
+      throw new ApiException(
+        ErrorCode.ORDR_001,
+        'الخدمة غير متاحة في منطقتك لسه',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // القالب التلقائي التزام طويل الأجل، لذلك لا يكفي إخفاء الخدمة من شاشة الإنشاء. هذا
+    // الحارس يمنع عميلًا قديمًا أو طلبًا مصنوعًا يدويًا من إنشاء اشتراك لخدمة محجوبة.
+    await this.catalogService.assertServiceAvailableInZone(service.id, serviceZoneId);
 
     // ADR-0060 §3/§4 — الكمية والمدة والفترة اتشالوا من الـDTO خالص (مش مرفوضين بحارس): الـ
     // ValidationPipe العام (`forbidNonWhitelisted`) بيرفض أي واحد فيهم قبل ما يوصل هنا أصلاً.

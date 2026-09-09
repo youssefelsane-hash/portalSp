@@ -11,6 +11,7 @@ import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
+import '../addresses/models.dart';
 import '../support/support_contact_repository.dart';
 import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
@@ -74,6 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
+  Address? _selectedAddress;
+  bool _addressResolved = false;
+  int _catalogLoadGeneration = 0;
 
   /// خدمات نهائية مثل «تصليح حنفية»، مرتبة بعدد الطلبات الفعلي لا حسب القسم العام.
   List<CatalogService>? _mostRequested;
@@ -95,7 +99,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    // للزائر مفيش عنوان محفوظ، فنعرض الكتالوج العام فورًا. أما العميل المسجّل فنستنى عنوانه
+    // أولًا حتى لا تومض فئات محجوبة عن منطقته قبل وصول `/addresses`.
+    if (!context.read<AuthRepository>().isAuthenticated) {
+      _addressResolved = true;
+      _load();
+    }
     // رسالة الثقة/الضمان ونصايح مفيدة وبيانات الدعم ولوجو البراندنج — تحميل مستقل عمدًا (فشل أي
     // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
     _homepageContentRepository
@@ -136,20 +145,59 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
+    if (!_addressResolved) return;
+    final generation = ++_catalogLoadGeneration;
+    final zoneId = _selectedAddress?.serviceZoneId;
+    if (_selectedAddress != null && zoneId == null) {
+      if (mounted && generation == _catalogLoadGeneration) {
+        setState(() {
+          _categories = const [];
+          _mostRequested = const [];
+          _error = null;
+        });
+      }
+      return;
+    }
     try {
-      final categories = await _repository.fetchCategories();
-      if (mounted) setState(() => _categories = categories);
+      final categories = await _repository.fetchCategories(zoneId: zoneId);
+      if (mounted && generation == _catalogLoadGeneration) {
+        setState(() {
+          _categories = categories;
+          _error = null;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
+      if (mounted && generation == _catalogLoadGeneration) {
+        setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
+      }
     }
     // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
     // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
     try {
-      final mostRequested = await _repository.fetchMostRequestedServices();
-      if (mounted) setState(() => _mostRequested = mostRequested);
+      final mostRequested = await _repository.fetchMostRequestedServices(
+        zoneId: zoneId,
+      );
+      if (mounted && generation == _catalogLoadGeneration) {
+        setState(() => _mostRequested = mostRequested);
+      }
     } catch (_) {
       // بهدوء — القسم تسويقي، مش وظيفي.
     }
+  }
+
+  void _onAddressChanged(Address? address) {
+    if (_addressResolved &&
+        _selectedAddress?.id == address?.id &&
+        _selectedAddress?.serviceZoneId == address?.serviceZoneId) {
+      return;
+    }
+    setState(() {
+      _addressResolved = true;
+      _selectedAddress = address;
+      _categories = null;
+      _mostRequested = null;
+    });
+    _load();
   }
 
   void _applyHomepageContent(HomepageContent content) {
@@ -192,7 +240,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openSearch([String value = '']) => Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)),
+    MaterialPageRoute(
+      builder: (_) => SearchResultsScreen(
+        initialQuery: value,
+        zoneId: _selectedAddress?.serviceZoneId,
+      ),
+    ),
   );
 
   @override
@@ -240,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 )
               : null,
-          title: HomeLocationHeader(onAddressChanged: (_) => _load()),
+          title: HomeLocationHeader(onAddressChanged: _onAddressChanged),
           actions: [
             // الجرس بيتخفي للزائر (docs/08 §77-B1): `unreadCount()` بينادي endpoint محمي،
             // ومفيش حساب أصلاً يبقى ليه إشعارات. عرضه بصفر دايمًا كان هيبقى كذب صغير.
@@ -363,7 +416,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         TextButton(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => const CategoriesScreen(),
+                              builder: (_) => CategoriesScreen(
+                                zoneId: _selectedAddress?.serviceZoneId,
+                              ),
                             ),
                           ),
                           child: const Text('عرض الكل'),
@@ -422,8 +477,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 category: category,
                                 onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) =>
-                                        ServicesScreen(category: category),
+                                    builder: (_) => ServicesScreen(
+                                      category: category,
+                                      zoneId: _selectedAddress?.serviceZoneId,
+                                    ),
                                   ),
                                 ),
                               );

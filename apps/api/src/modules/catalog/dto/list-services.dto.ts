@@ -24,12 +24,22 @@ export class ListServicesDto {
   booking_mode?: BookingModeFilter;
 }
 
+export class CatalogZoneQueryDto {
+  @IsOptional()
+  @IsUUID()
+  zone_id?: string;
+}
+
 // Script 3 §7/§67 — بحث بلغة طبيعية، محدود الطول (مفيش استعلام نصي عملاق).
 export class SearchServicesDto {
   @IsString()
   @MinLength(2)
   @MaxLength(100)
   q: string;
+
+  @IsOptional()
+  @IsUUID()
+  zone_id?: string;
 }
 
 export class EstimateQueryDto {

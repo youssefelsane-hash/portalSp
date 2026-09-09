@@ -13,34 +13,40 @@ import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto'
 // allows_recurring_booking=false يعني مفيش قالب متكرر خالص، برفض واضح VAL_001 وقت الطلب بدل
 // قالب بيتنشأ وبعدين يفشل بصمت عند كل توليد.
 describe('RecurringOrdersService.create() — قدرة allows_recurring_booking + تكوين القالب', () => {
-  function buildService(serviceOverrides: Record<string, unknown>) {
+  function buildService(serviceOverrides: Record<string, unknown>, serviceZoneId: string | null = 'zone-1') {
     const templatesRepo = {
       manager: { query: jest.fn(async () => [{ exists: true }]) },
       create: jest.fn((data: Partial<RecurringOrderTemplate>) => ({ ...data })),
       save: jest.fn(async (data: Partial<RecurringOrderTemplate>) => data),
     };
+    const addressesService = {
+      findOwnedOrThrow: jest.fn(async () => ({ id: 'address-1' })),
+      resolveServiceZoneId: jest.fn(async () => serviceZoneId),
+    };
+    const catalogService = {
+      findServiceOrThrow: async () => ({
+        id: 'service-1',
+        allowsIndividual: true,
+        allowsTeam: false,
+        allowsEmergency: false,
+        requiresStartTimeOnly: false,
+        pricingModel: PricingModel.FORMULA,
+        ...serviceOverrides,
+      }),
+      assertServiceAvailableInZone: jest.fn(async () => undefined),
+    };
     const service = new RecurringOrdersService(
       templatesRepo as never,
       { findByUserIdOrThrow: async () => ({ id: 'profile-1', userId: 'user-1' }) } as never,
-      { findOwnedOrThrow: async () => ({ id: 'address-1' }) } as never,
-      {
-        findServiceOrThrow: async () => ({
-          id: 'service-1',
-          allowsIndividual: true,
-          allowsTeam: false,
-          allowsEmergency: false,
-          requiresStartTimeOnly: false,
-          pricingModel: PricingModel.FORMULA,
-          ...serviceOverrides,
-        }),
-      } as never,
+      addressesService as never,
+      catalogService as never,
       {} as never,
       {} as never,
       { emit: jest.fn(), emitAsync: jest.fn(async () => undefined) } as never,
       {} as never, // buildingsService — التستات دي مالهاش building_code,
       { createQueryRunner: () => ({ connect: async () => undefined, query: async () => [{ locked: true }], release: async () => undefined }) } as never,
     );
-    return { service, templatesRepo };
+    return { service, templatesRepo, addressesService, catalogService };
   }
 
   const futureIso = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -62,7 +68,7 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
   });
 
   it('allows_recurring_booking=true: القالب بيتحفظ بالمدخلات الجديدة (field_values/duration/شركة)', async () => {
-    const { service, templatesRepo } = buildService({ allowsRecurringBooking: true, allowsTeam: true });
+    const { service, templatesRepo, catalogService } = buildService({ allowsRecurringBooking: true, allowsTeam: true });
     const saved = await service.create('user-1', {
       service_id: 'service-1',
       address_id: 'address-1',
@@ -79,6 +85,7 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     expect(saved.fieldValues).toEqual({ area: 120 });
     expect(saved.paymentMethod).toBe('card');
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
+    expect(catalogService.assertServiceAvailableInZone).toHaveBeenCalledWith('service-1', 'zone-1');
   });
 
   it('قالب متكرر من غير كمية: بينجح عادي', async () => {
@@ -94,6 +101,26 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
     } as never);
     expect(saved.pricingQuantity).toBeNull();
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('عنوان خارج أي نطاق خدمة: يترفض قبل حفظ التزام متكرر', async () => {
+    const { service, templatesRepo, catalogService } = buildService(
+      { allowsRecurringBooking: true },
+      null,
+    );
+    await expect(
+      service.create('user-1', {
+        service_id: 'service-1',
+        address_id: 'address-1',
+        frequency: RecurringOrderFrequency.MONTHLY,
+        starts_at: futureIso(),
+      } as never),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ORDR_001,
+      status: HttpStatus.BAD_REQUEST,
+    });
+    expect(catalogService.assertServiceAvailableInZone).not.toHaveBeenCalled();
+    expect(templatesRepo.save).not.toHaveBeenCalled();
   });
 
   /**

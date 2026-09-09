@@ -9,7 +9,7 @@ import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { buildPricingContext } from '../pricing/pricing-context';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
-import { EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
+import { CatalogZoneQueryDto, EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 import { PricingModel } from './entities/service.entity';
@@ -25,8 +25,8 @@ export class CatalogController {
 
   @Public()
   @Get('service-categories')
-  async listCategories() {
-    const categories = await this.catalogService.findActiveCategories();
+  async listCategories(@Query() query: CatalogZoneQueryDto) {
+    const categories = await this.catalogService.findActiveCategories(query.zone_id);
     return categories.map(toServiceCategoryResponseDto);
   }
 
@@ -40,23 +40,23 @@ export class CatalogController {
    */
   @Public()
   @Get('service-categories/most-requested')
-  async listMostRequestedCategories() {
-    const categories = await this.catalogService.findMostRequestedCategories();
+  async listMostRequestedCategories(@Query() query: CatalogZoneQueryDto) {
+    const categories = await this.catalogService.findMostRequestedCategories(8, query.zone_id);
     return categories.map(toServiceCategoryResponseDto);
   }
 
   @Public()
   @Get('services')
   async listServices(@Query() query: ListServicesDto) {
-    const services = await this.catalogService.findServices(query.category_id, query.booking_mode);
+    const services = await this.catalogService.findServices(query.category_id, query.booking_mode, query.zone_id);
     return services.map(toServiceResponseDto);
   }
 
   /** الخدمات القابلة للحجز الأكثر طلبًا، بدل تجميع الطلبات تحت اسم القسم العام. */
   @Public()
   @Get('services/most-requested')
-  async listMostRequestedServices() {
-    const services = await this.catalogService.findMostRequestedServices();
+  async listMostRequestedServices(@Query() query: CatalogZoneQueryDto) {
+    const services = await this.catalogService.findMostRequestedServices(8, query.zone_id);
     return services.map(toServiceResponseDto);
   }
 
@@ -65,19 +65,21 @@ export class CatalogController {
   @Public()
   @Get('services/search')
   async searchServices(@Query() query: SearchServicesDto) {
-    const services = await this.catalogService.searchServices(query.q);
+    const services = await this.catalogService.searchServices(query.q, query.zone_id);
     return services.map(toServiceResponseDto);
   }
 
   @Public()
   @Get('services/:id')
-  async getService(@Param('id', ParseUUIDPipe) id: string) {
+  async getService(@Param('id', ParseUUIDPipe) id: string, @Query() query: CatalogZoneQueryDto) {
+    if (query.zone_id) await this.catalogService.assertServiceAvailableInZone(id, query.zone_id);
     return toServiceResponseDto(await this.catalogService.findServiceOrThrow(id));
   }
 
   @Public()
   @Post('services/:id/estimate')
   async estimate(@Param('id', ParseUUIDPipe) id: string, @Query() query: EstimateQueryDto) {
+    if (query.zone_id) await this.catalogService.assertServiceAvailableInZone(id, query.zone_id);
     const period = contractPeriodFromFieldValues(query.field_values);
     return this.catalogService.estimate(
       id,
@@ -163,6 +165,7 @@ export class CatalogController {
     // المنطقة لازم تتحدد الأول عشان التسعير المحايد يبقى بنفس منطقة الحجز الفعلي — نفس نداء
     // المنطقة اللي `listForServiceBooking()` بتعمله جوّاها (استخراج، مش استعلام تاني موازي).
     const zone = await this.techniciansService.resolveZoneForAddressOrThrow(query.address_id);
+    await this.catalogService.assertServiceAvailableInZone(id, zone.id);
     const neutralEstimate = canPrice
       ? await this.catalogService.estimate(id, zone.id, undefined, isEmergency, query.field_values)
       : null;

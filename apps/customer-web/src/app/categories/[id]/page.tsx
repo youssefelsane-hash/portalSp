@@ -6,32 +6,56 @@ import Link from 'next/link';
 import { fetchServices } from '@/lib/catalog';
 import { ServiceDto } from '@/lib/api-types';
 import { formatEgp } from '@/lib/orders';
+import { useCatalogZone } from '@/lib/catalog-zone';
 
 // نفس ServicesScreen في customer-app (Script 3 Phase 2) — بيعرض كل خدمات الفئة، وضع الحجز بيتقرر
 // بعدين في شاشة الخدمة نفسها لو الخدمة فعلاً بتدعم أكتر من وضع.
 export default function CategoryServicesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const catalogZone = useCatalogZone();
   const [services, setServices] = useState<ServiceDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadedZoneKey, setLoadedZoneKey] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchServices(id)
-      .then(setServices)
-      .catch(() => setError('تعذّر تحميل الخدمات'));
-  }, [id]);
+    if (!catalogZone.isReady) return;
+    if (!catalogZone.canLoadCatalog) return;
+    const loadKey = catalogZone.zoneId ?? 'public';
+    fetchServices(id, catalogZone.zoneId ?? undefined)
+      .then((items) => {
+        setServices(items);
+        setError(null);
+        setLoadedZoneKey(loadKey);
+      })
+      .catch(() => {
+        setError('تعذّر تحميل الخدمات');
+        setLoadedZoneKey(loadKey);
+      });
+  }, [catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId, id]);
+
+  const activeZoneKey = catalogZone.zoneId ?? 'public';
+  const catalogCurrent = catalogZone.canLoadCatalog && loadedZoneKey === activeZoneKey;
+  const visibleServices = catalogZone.canLoadCatalog ? (catalogCurrent ? services : null) : [];
+  const visibleError = catalogZone.canLoadCatalog
+    ? catalogCurrent
+      ? error
+      : null
+    : catalogZone.isReady
+      ? 'أضف عنوانًا داخل منطقة خدمة عشان نعرض لك الخدمات المتاحة'
+      : null;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="mb-6 text-2xl font-bold">الخدمات</h1>
-      {error ? (
-        <p className="text-danger">{error}</p>
-      ) : services === null ? (
+      {visibleError ? (
+        <p className="text-danger">{visibleError}</p>
+      ) : visibleServices === null ? (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-16 animate-pulse rounded-xl bg-surface-variant" />
           ))}
         </div>
-      ) : services.length === 0 ? (
+      ) : visibleServices.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface p-8 text-center">
           <p className="text-muted">مفيش خدمات في الفئة دي دلوقتي</p>
           <Link href="/support" className="mt-3 inline-block text-primary hover:underline">
@@ -40,7 +64,7 @@ export default function CategoryServicesPage({ params }: { params: Promise<{ id:
         </div>
       ) : (
         <div className="space-y-3">
-          {services.map((s) => (
+          {visibleServices.map((s) => (
             <Link
               key={s.id}
               href={`/services/${s.id}`}

@@ -5,6 +5,8 @@ export interface AddressResponseDto {
   label: string | null;
   city_id: string | null;
   area_id: string | null;
+  /** Resolved operational zone used by pricing, catalogue availability, and matching. */
+  service_zone_id: string | null;
   street_name: string;
   building_number: string | null;
   floor_number: string | null;
@@ -22,13 +24,18 @@ export interface AddressResponseDto {
   has_active_order: boolean;
 }
 
-export function toAddressResponseDto(address: Address, hasActiveOrder = false): AddressResponseDto {
+export function toAddressResponseDto(
+  address: Address,
+  hasActiveOrder = false,
+  serviceZoneId: string | null = null,
+): AddressResponseDto {
   const [lng, lat] = address.location.coordinates;
   return {
     id: address.id,
     label: address.label,
     city_id: address.cityId,
     area_id: address.areaId,
+    service_zone_id: serviceZoneId,
     street_name: address.streetName,
     building_number: address.buildingNumber,
     floor_number: address.floorNumber,

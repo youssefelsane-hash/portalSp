@@ -8,6 +8,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { AdminCatalogController } from './admin-catalog.controller';
+import { AdminZoneCatalogController } from './admin-zone-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
@@ -23,6 +24,7 @@ import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { TechnicianService } from './entities/technician-service.entity';
+import { ZoneCatalogAvailabilityService } from './zone-catalog-availability.service';
 
 @Module({
   imports: [
@@ -54,12 +56,13 @@ import { TechnicianService } from './entities/technician-service.entity';
     // القياسية في NestJS، بس التعليق كان بيقول العكس ويضلّل أي حد بيقرا.
     PricingModule,
   ],
-  controllers: [CatalogController, AdminCatalogController],
+  controllers: [CatalogController, AdminCatalogController, AdminZoneCatalogController],
   providers: [
     CatalogService,
     AdminCatalogService,
     ProductivityLearningService,
     OrderCompletedProductivityCaptureListener,
+    ZoneCatalogAvailabilityService,
     // ADR-0031 — CatalogController بقى محتاج STORAGE_SERVICE عشان يفكّ avatar_storage_key
     // الفنيين لرابط طازج قبل الرد على GET /services/:id/technicians.
     storageServiceProvider,

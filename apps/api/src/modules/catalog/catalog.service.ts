@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext, PricingContext } from '../pricing/pricing-context';
@@ -145,8 +145,15 @@ export class CatalogService {
     return found;
   }
 
-  findActiveCategories(): Promise<ServiceCategory[]> {
-    return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
+  async findActiveCategories(zoneId?: string): Promise<ServiceCategory[]> {
+    if (!zoneId) {
+      return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
+    }
+    const ids = await this.findVisibleCategoryIds(zoneId);
+    if (ids.length === 0) return [];
+    const categories = await this.categories.find({ where: { id: In(ids), isActive: true } });
+    const byId = new Map(categories.map((category) => [category.id, category]));
+    return ids.map((id) => byId.get(id)).filter((category): category is ServiceCategory => category !== undefined);
   }
 
   /**
@@ -164,7 +171,7 @@ export class CatalogService {
    * **الرجوع لـ`is_featured` مقصود كمان**: منصة جديدة عندها صفر طلبات مكتملة. عرض قسم فاضي
    * أسوأ بكتير من عرض اختيار الأدمن كبذرة أولية لحد ما بيانات حقيقية تتكوّن.
    */
-  async findMostRequestedCategories(limit = 8): Promise<ServiceCategory[]> {
+  async findMostRequestedCategories(limit = 8, zoneId?: string): Promise<ServiceCategory[]> {
     const windowDays = await this.settingsService.getNumber('catalog.most_requested_window_days', 90);
     const safeWindow = Math.max(7, Math.min(365, Math.floor(windowDays)));
 
@@ -184,19 +191,21 @@ export class CatalogService {
           AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician',
                                      'cancelled_by_system', 'expired', 'draft')
           AND sc.is_active = true AND sc.deleted_at IS NULL
+          AND ($3::uuid IS NULL OR catalog_service_enabled_in_zone(s.id, $3))
         GROUP BY s.category_id
         ORDER BY COUNT(*) DESC
         LIMIT $2`,
-      [safeWindow, limit],
+      [safeWindow, limit, zoneId ?? null],
     );
 
     if (rows.length === 0) {
       // صفر طلبات في النافذة — بذرة الأدمن هي كل اللي عندنا.
-      return this.categories.find({
+      const visible = zoneId ? new Set(await this.findVisibleCategoryIds(zoneId)) : null;
+      const featured = await this.categories.find({
         where: { isActive: true, isFeatured: true },
         order: { displayOrder: 'ASC' },
-        take: limit,
       });
+      return featured.filter((category) => !visible || visible.has(category.id)).slice(0, limit);
     }
 
     const ids = rows.map((r) => r.category_id);
@@ -210,7 +219,7 @@ export class CatalogService {
    * الخدمات النهائية الأكثر طلبًا، لا أقسامها العامة. الصفحة الرئيسية تستخدم هذه القائمة
    * لعرض «تصليح حنفية» مثلًا بدل «سباكة»، ثم تفتح مسار حجز الخدمة مباشرة.
    */
-  async findMostRequestedServices(limit = 8): Promise<Service[]> {
+  async findMostRequestedServices(limit = 8, zoneId?: string): Promise<Service[]> {
     const windowDays = await this.settingsService.getNumber('catalog.most_requested_window_days', 90);
     const safeWindow = Math.max(7, Math.min(365, Math.floor(windowDays)));
 
@@ -225,10 +234,11 @@ export class CatalogService {
                                      'cancelled_by_system', 'expired', 'draft')
           AND s.is_active = true AND s.deleted_at IS NULL
           AND sc.is_active = true AND sc.deleted_at IS NULL
+          AND ($3::uuid IS NULL OR catalog_service_enabled_in_zone(s.id, $3))
         GROUP BY s.id
         ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
         LIMIT $2`,
-      [safeWindow, limit],
+      [safeWindow, limit, zoneId ?? null],
     );
 
     const rankedIds = rows.map((row) => row.service_id);
@@ -241,9 +251,10 @@ export class CatalogService {
                JOIN service_categories sc ON sc.id = s.category_id
               WHERE s.is_active = true AND s.deleted_at IS NULL
                 AND sc.is_active = true AND sc.deleted_at IS NULL
+                AND ($2::uuid IS NULL OR catalog_service_enabled_in_zone(s.id, $2))
               ORDER BY sc.display_order ASC, s.display_order ASC, s.created_at ASC
               LIMIT $1`,
-            [limit],
+            [limit, zoneId ?? null],
           )
         ).map((row) => row.service_id);
 
@@ -253,7 +264,7 @@ export class CatalogService {
     return ids.map((id) => byId.get(id)).filter((service): service is Service => service !== undefined);
   }
 
-  findServices(categoryId?: string, bookingMode?: BookingModeFilter): Promise<Service[]> {
+  findServices(categoryId?: string, bookingMode?: BookingModeFilter, zoneId?: string): Promise<Service[]> {
     const bookingModeFilter =
       bookingMode === 'individual'
         ? { allowsIndividual: true }
@@ -262,10 +273,19 @@ export class CatalogService {
           : bookingMode === 'emergency'
             ? { allowsEmergency: true }
             : {};
-    return this.services.find({
-      where: { isActive: true, ...(categoryId ? { categoryId } : {}), ...bookingModeFilter },
-      order: { displayOrder: 'ASC' },
-    });
+    const qb = this.services
+      .createQueryBuilder('service')
+      .where('service.is_active = true');
+    if (categoryId) qb.andWhere('service.category_id = :categoryId', { categoryId });
+    for (const [column, value] of Object.entries(bookingModeFilter)) {
+      qb.andWhere(`service.${column} = :${column}`, { [column]: value });
+    }
+    if (zoneId) {
+      qb.andWhere('catalog_service_enabled_in_zone(service.id, :catalogZoneId)', {
+        catalogZoneId: zoneId,
+      });
+    }
+    return qb.orderBy('service.display_order', 'ASC').getMany();
   }
 
   // Script 3 §7/§12 — بحث بلغة طبيعية بسيطة (aliases/synonyms/substring، مش AI). العميل بيكتب
@@ -277,7 +297,7 @@ export class CatalogService {
   // حوض") كانت بترجع صفر نتائج فعليًا (بَقّة حقيقية اتلقطت وقت اختبار حي بمتصفح — راجع docs/16
   // للتفاصيل). الحل: نفصّل الجملة لكلمات ونطابق أي خدمة بتحتوي أي كلمة منها، ونرتّب حسب عدد
   // الكلمات المتطابقة تنازليًا (أكتر تطابق = أعلى) — مطابقة بسيطة صراحةً، مش فهم لغوي حقيقي.
-  async searchServices(query: string): Promise<Service[]> {
+  async searchServices(query: string, zoneId?: string): Promise<Service[]> {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
     // شيل "ال" التعريف من أول الكلمة لو موجودة — "الحوض" لازم يطابق كلمة مفتاحية "حوض" (نفس
@@ -299,6 +319,11 @@ export class CatalogService {
     });
 
     qb.andWhere(`(${matchConditions.join(' OR ')})`);
+    if (zoneId) {
+      qb.andWhere('catalog_service_enabled_in_zone(service.id, :catalogZoneId)', {
+        catalogZoneId: zoneId,
+      });
+    }
     qb.addSelect(`(${matchConditions.map((c) => `(CASE WHEN ${c} THEN 1 ELSE 0 END)`).join(' + ')})`, 'match_score');
     qb.setParameter('prefixPattern', `${trimmed}%`);
     qb.addSelect('(service.name_ar ILIKE :prefixPattern)', 'is_prefix_match');
@@ -309,6 +334,63 @@ export class CatalogService {
       .addOrderBy('service.display_order', 'ASC')
       .limit(20)
       .getMany();
+  }
+
+  /** Final server-side gate. UI filtering improves UX; this prevents old/tampered clients bypassing it. */
+  async assertServiceAvailableInZone(
+    serviceId: string,
+    zoneId: string,
+    manager: EntityManager = this.services.manager,
+    holdSharedZoneLock = false,
+  ): Promise<void> {
+    if (holdSharedZoneLock) {
+      // An admin category change can affect many services at once. Holding the shared lock until
+      // order commit makes the availability decision and the created order one atomic outcome.
+      await manager.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))', [
+        `zone-catalog:${zoneId}`,
+      ]);
+    }
+    const [row] = await manager.query<{ enabled: boolean }[]>(
+      'SELECT catalog_service_enabled_in_zone($1, $2) AS enabled',
+      [serviceId, zoneId],
+    );
+    if (!row?.enabled) {
+      throw new ApiException(
+        ErrorCode.ORDR_001,
+        'الخدمة دي مش متاحة في منطقتك حاليًا — اختار خدمة تانية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  private async findVisibleCategoryIds(zoneId: string): Promise<string[]> {
+    const rows = await this.categories.manager.query<{ id: string }[]>(
+      `WITH RECURSIVE category_tree AS (
+         SELECT category.id AS root_id, category.id, ARRAY[category.id] AS path
+           FROM service_categories category
+          WHERE category.is_active = true AND category.deleted_at IS NULL
+         UNION ALL
+         SELECT tree.root_id, child.id, tree.path || child.id
+           FROM category_tree tree
+           JOIN service_categories child ON child.parent_category_id = tree.id
+          WHERE child.is_active = true AND child.deleted_at IS NULL
+            AND NOT child.id = ANY(tree.path)
+       )
+       SELECT root.id
+         FROM service_categories root
+        WHERE root.is_active = true AND root.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1
+              FROM category_tree tree
+              JOIN services service ON service.category_id = tree.id
+             WHERE tree.root_id = root.id
+               AND service.is_active = true AND service.deleted_at IS NULL
+               AND catalog_service_enabled_in_zone(service.id, $1)
+          )
+        ORDER BY root.display_order ASC, root.name_ar ASC`,
+      [zoneId],
+    );
+    return rows.map((row) => row.id);
   }
 
   async findServiceOrThrow(id: string): Promise<Service> {

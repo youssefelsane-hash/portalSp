@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
 import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
 import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
+import { useCatalogZone } from '@/lib/catalog-zone';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
@@ -60,10 +61,12 @@ const TIP_FALLBACK_BACKGROUNDS = [
 
 export default function HomePage() {
   const router = useRouter();
+  const catalogZone = useCatalogZone();
   const heroMediaRef = useRef<HTMLDivElement>(null);
   const [categories, setCategories] = useState<ServiceCategoryDto[] | null>(null);
   const [mostRequested, setMostRequested] = useState<ServiceDto[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [catalogLoadKey, setCatalogLoadKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
   const [heroImages, setHeroImages] = useState<string[]>([]);
@@ -74,12 +77,6 @@ export default function HomePage() {
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
   useEffect(() => {
-    fetchCategories()
-      .then(setCategories)
-      .catch(() => setError('تعذّر تحميل الفئات — حاول تاني'));
-    fetchMostRequestedServices()
-      .then(setMostRequested)
-      .catch(() => {});
     // رسالة الثقة/الضمان ونصايح مفيدة ودعم العملاء — نص/بيانات إدارية بتتغيّر، صفر تأثير على باقي
     // الصفحة لو الجلب فشل (بيسيبوا فاضيين، الأقسام المعتمدة عليهم بتختفي بهدوء تحت).
     fetchHomepageContent()
@@ -99,6 +96,33 @@ export default function HomePage() {
       .then((asset) => setHeroBackgroundUrl(asset.is_default ? null : asset.url))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!catalogZone.isReady) return;
+    if (!catalogZone.canLoadCatalog) return;
+
+    let active = true;
+    const loadKey = catalogZone.zoneId ?? 'public';
+    Promise.all([
+      fetchCategories(catalogZone.zoneId ?? undefined),
+      fetchMostRequestedServices(catalogZone.zoneId ?? undefined),
+    ])
+      .then(([nextCategories, nextMostRequested]) => {
+        if (!active) return;
+        setCategories(nextCategories);
+        setMostRequested(nextMostRequested);
+        setError(null);
+        setCatalogLoadKey(loadKey);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError('تعذّر تحميل الفئات — حاول تاني');
+        setCatalogLoadKey(loadKey);
+      });
+    return () => {
+      active = false;
+    };
+  }, [catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId]);
 
   useEffect(() => {
     const slideCount = heroImages.length || (heroBackgroundUrl ? 1 : HERO_SLIDES.length);
@@ -129,7 +153,17 @@ export default function HomePage() {
     };
   }, []);
 
-  const featured = mostRequested;
+  const activeCatalogKey = catalogZone.zoneId ?? 'public';
+  const catalogCurrent = catalogZone.canLoadCatalog && catalogLoadKey === activeCatalogKey;
+  const visibleCategories = catalogZone.canLoadCatalog ? (catalogCurrent ? categories : null) : [];
+  const visibleError = catalogZone.canLoadCatalog
+    ? catalogCurrent
+      ? error
+      : null
+    : catalogZone.isReady
+      ? 'أضف عنوانًا داخل منطقة خدمة عشان نعرض لك الخدمات المتاحة'
+      : null;
+  const featured = catalogCurrent ? mostRequested : [];
   const effectiveHeroImages = heroImages.length > 0 ? heroImages : heroBackgroundUrl ? [heroBackgroundUrl] : [];
 
   function submitSearch(e: React.FormEvent) {
@@ -255,19 +289,19 @@ export default function HomePage() {
 
         <div className="mt-10">
           <h2 className="mb-3 text-lg font-semibold">كل الفئات</h2>
-          {error ? (
-            <p className="text-danger">{error}</p>
-          ) : categories === null ? (
+          {visibleError ? (
+            <p className="text-danger">{visibleError}</p>
+          ) : visibleCategories === null ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-24 animate-pulse rounded-xl bg-surface-variant" />
               ))}
             </div>
-          ) : categories.length === 0 ? (
+          ) : visibleCategories.length === 0 ? (
             <p className="text-muted">مفيش فئات خدمات متاحة دلوقتي</p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-              {categories.map((c) => (
+              {visibleCategories.map((c) => (
                 <Link
                   key={c.id}
                   href={`/categories/${c.id}`}

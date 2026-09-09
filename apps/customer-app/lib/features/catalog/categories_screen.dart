@@ -10,7 +10,9 @@ import 'services_screen.dart';
 // Script 3 §32/§35 — كانت الشاشة دي محتاجة bookingMode مُختار مسبقًا (BookingModeScreen، محذوفة
 // دلوقتي). العميل بيتصفح الفئات مباشرة من HomeScreen، ووضع الحجز بيتقرر بعد اختيار خدمة معيّنة.
 class CategoriesScreen extends StatefulWidget {
-  const CategoriesScreen({super.key});
+  const CategoriesScreen({super.key, this.zoneId});
+
+  final String? zoneId;
 
   @override
   State<CategoriesScreen> createState() => _CategoriesScreenState();
@@ -29,7 +31,9 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
 
   Future<void> _load() async {
     try {
-      final categories = await _repository.fetchCategories();
+      final categories = await _repository.fetchCategories(
+        zoneId: widget.zoneId,
+      );
       if (mounted) setState(() => _categories = categories);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -45,28 +49,38 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _categories == null
-                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                : _categories!.isEmpty
-                    ? const Center(child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي'))
-                    : GridView.builder(
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.95,
+            ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+            : _categories!.isEmpty
+            ? const Center(
+                child: EmptyState(
+                  icon: Icons.category_outlined,
+                  title: 'مفيش فئات خدمات متاحة دلوقتي',
+                ),
+              )
+            : GridView.builder(
+                padding: const EdgeInsets.all(16),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.95,
+                ),
+                itemCount: _categories!.length,
+                itemBuilder: (context, index) {
+                  final category = _categories![index];
+                  return CategoryCard(
+                    category: category,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ServicesScreen(
+                          category: category,
+                          zoneId: widget.zoneId,
                         ),
-                        itemCount: _categories!.length,
-                        itemBuilder: (context, index) {
-                          final category = _categories![index];
-                          return CategoryCard(
-                            category: category,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
-                            ),
-                          );
-                        },
                       ),
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }

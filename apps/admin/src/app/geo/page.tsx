@@ -10,7 +10,9 @@ import type {
   CreateCityBody,
   CreateServiceZoneBody,
   LngLatPoint,
+  SetZoneCatalogAvailabilityBody,
   ServiceZoneBoundaryResponseDto,
+  ZoneCatalogCategoryAvailabilityDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -28,7 +30,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { ZoneBoundaryMap } from '@/components/zone-boundary-map';
 
 export default function GeoPage() {
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, hasPermission } = useAuth();
   const [countries, setCountries] = useState<AdminCountryResponseDto[] | null>(null);
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [areas, setAreas] = useState<AdminAreaResponseDto[] | null>(null);
@@ -43,6 +45,8 @@ export default function GeoPage() {
   const [boundaryZone, setBoundaryZone] = useState<AdminServiceZoneResponseDto | null>(null);
   const [boundaryPoints, setBoundaryPoints] = useState<LngLatPoint[] | null>(null);
   const [boundaryLoading, setBoundaryLoading] = useState(false);
+  const [catalogZone, setCatalogZone] = useState<AdminServiceZoneResponseDto | null>(null);
+  const [catalogAvailability, setCatalogAvailability] = useState<ZoneCatalogCategoryAvailabilityDto[] | null>(null);
 
   function loadCountries() {
     authedFetch<AdminCountryResponseDto[]>('/admin/countries')
@@ -69,6 +73,12 @@ export default function GeoPage() {
     authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
       .then(setZones)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل نطاقات الخدمة'));
+  }
+
+  function selectCity(cityId: string) {
+    setSelectedCityId(cityId);
+    setCatalogZone(null);
+    setCatalogAvailability(null);
   }
 
   useEffect(() => {
@@ -104,7 +114,7 @@ export default function GeoPage() {
       const created = await authedFetch<AdminCityResponseDto>('/admin/cities', { method: 'POST', body: JSON.stringify(body) });
       setShowNewCity(false);
       loadCities();
-      setSelectedCityId(created.id);
+      selectCity(created.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -238,6 +248,38 @@ export default function GeoPage() {
     }
   }
 
+  async function openCatalogAvailability(zone: AdminServiceZoneResponseDto) {
+    setCatalogZone(zone);
+    setCatalogAvailability(null);
+    setError(null);
+    try {
+      const data = await authedFetch<ZoneCatalogCategoryAvailabilityDto[]>(
+        `/admin/service-zones/${zone.id}/catalog-availability`,
+      );
+      setCatalogAvailability(data);
+    } catch (err) {
+      setCatalogZone(null);
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الخدمات المتاحة للنطاق');
+    }
+  }
+
+  async function setCatalogRule(body: SetZoneCatalogAvailabilityBody) {
+    if (!catalogZone) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const data = await authedFetch<ZoneCatalogCategoryAvailabilityDto[]>(
+        `/admin/service-zones/${catalogZone.id}/catalog-availability`,
+        { method: 'PUT', body: JSON.stringify(body) },
+      );
+      setCatalogAvailability(data);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في حفظ إتاحة الخدمة');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const selectedCity = cities?.find((c) => c.id === selectedCityId) ?? null;
 
   return (
@@ -296,7 +338,7 @@ export default function GeoPage() {
                   <TableRow
                     key={city.id}
                     className={city.id === selectedCityId ? 'bg-accent/50 cursor-pointer' : 'cursor-pointer'}
-                    onClick={() => setSelectedCityId(city.id)}
+                    onClick={() => selectCity(city.id)}
                   >
                     <TableCell>{city.name_ar}</TableCell>
                     <TableCell dir="ltr">{city.slug}</TableCell>
@@ -444,9 +486,14 @@ export default function GeoPage() {
                           </button>
                         </TableCell>
                         <TableCell>
-                          <Button size="sm" variant="outline" disabled={isSaving} onClick={() => openBoundaryEditor(zone)}>
-                            {zone.has_boundary ? 'تعديل المضلّع' : 'رسم مضلّع'}
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" disabled={isSaving} onClick={() => openBoundaryEditor(zone)}>
+                              {zone.has_boundary ? 'تعديل المضلّع' : 'رسم مضلّع'}
+                            </Button>
+                            <Button size="sm" variant="outline" disabled={isSaving} onClick={() => openCatalogAvailability(zone)}>
+                              الخدمات المتاحة
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -460,6 +507,111 @@ export default function GeoPage() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {catalogZone && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-base">الخدمات المتاحة في نطاق: {catalogZone.name_ar}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              الافتراضي إن كل الخدمات متاحة. اقفل فئة كاملة أو خدمة بعينها قبل ما تظهر للعميل؛
+              ويمكن فتح خدمة كاستثناء داخل فئة مقفولة.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!catalogAvailability ? (
+              <TableSkeleton columns={2} />
+            ) : catalogAvailability.length === 0 ? (
+              <EmptyState title="مفيش فئات خدمات في الكتالوج" />
+            ) : (
+              catalogAvailability.map((category) => (
+                <div key={category.id} className="rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">{category.name_ar}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {category.effective_enabled ? 'الفئة متاحة' : 'الفئة محجوبة'}
+                        {category.override_enabled === null ? ' · الإعداد الافتراضي' : ' · قرار خاص بالنطاق'}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {category.override_enabled !== null && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={isSaving || !hasPermission('geo.manage')}
+                          onClick={() => setCatalogRule({ target_type: 'category', target_id: category.id, is_enabled: null })}
+                        >
+                          رجّع للافتراضي
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={category.effective_enabled ? 'destructive' : 'default'}
+                        disabled={isSaving || !hasPermission('geo.manage')}
+                        onClick={() => setCatalogRule({
+                          target_type: 'category',
+                          target_id: category.id,
+                          is_enabled: !category.effective_enabled,
+                        })}
+                      >
+                        {category.effective_enabled ? 'احجب الفئة' : 'افتح الفئة'}
+                      </Button>
+                    </div>
+                  </div>
+                  {category.services.length > 0 && (
+                    <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {category.services.map((service) => (
+                        <div key={service.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/50 p-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm">{service.name_ar}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {service.effective_enabled ? 'متاحة' : 'محجوبة'}
+                              {service.override_enabled !== null ? ' · استثناء' : ''}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            {service.override_enabled !== null && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={isSaving || !hasPermission('geo.manage')}
+                                onClick={() => setCatalogRule({ target_type: 'service', target_id: service.id, is_enabled: null })}
+                              >
+                                وراثة
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isSaving || !hasPermission('geo.manage')}
+                              onClick={() => setCatalogRule({
+                                target_type: 'service',
+                                target_id: service.id,
+                                is_enabled: !service.effective_enabled,
+                              })}
+                            >
+                              {service.effective_enabled ? 'حجب' : 'فتح'}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCatalogZone(null);
+                setCatalogAvailability(null);
+              }}
+            >
+              إغلاق
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {boundaryZone && (

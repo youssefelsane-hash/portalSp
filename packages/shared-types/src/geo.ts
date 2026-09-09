@@ -85,3 +85,28 @@ export interface ServiceZoneBoundaryResponseDto {
 export interface SetServiceZoneBoundaryBody {
   points: LngLatPoint[];
 }
+
+export interface ZoneCatalogServiceAvailabilityDto {
+  id: string;
+  name_ar: string;
+  is_active: boolean;
+  effective_enabled: boolean;
+  override_enabled: boolean | null;
+}
+
+export interface ZoneCatalogCategoryAvailabilityDto {
+  id: string;
+  parent_category_id: string | null;
+  name_ar: string;
+  is_active: boolean;
+  effective_enabled: boolean;
+  override_enabled: boolean | null;
+  services: ZoneCatalogServiceAvailabilityDto[];
+}
+
+export interface SetZoneCatalogAvailabilityBody {
+  target_type: 'category' | 'service';
+  target_id: string;
+  /** null removes the explicit override and returns to inherited/default-enabled behaviour. */
+  is_enabled: boolean | null;
+}

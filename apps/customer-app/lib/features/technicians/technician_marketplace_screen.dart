@@ -143,7 +143,22 @@ class _TechnicianMarketplaceScreenState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(err.message)));
+        ).showSnackBar(SnackBar(content: Text(err.displayMessage)));
+      }
+    } catch (err, stack) {
+      // Parsing/navigation failures are not ApiException instances. Previously they were swallowed
+      // by the button's finally block, so the customer only saw the button flash and stay put.
+      debugPrint(
+        'Unexpected provider selection failure ($id, company=$isCompany): $err\n$stack',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'تعذر تجهيز الحجز. حاول مرة أخرى، ولو استمرت المشكلة تواصل مع الدعم.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _selecting = false);

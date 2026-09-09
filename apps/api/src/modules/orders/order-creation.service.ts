@@ -1214,7 +1214,13 @@ export class OrderCreationService {
     let createdOrder: Order;
     try {
       createdOrder = await this.dataSource.transaction(async (manager) => {
-      const lockedMatchPreview = selectedMatchPreview
+        // The catalogue is only the first UX gate. Re-check while holding the zone's shared lock so
+        // an admin block cannot race the final insert. Existing recurring commitments and warranty
+        // revisits remain honourable; the switch controls new sales only.
+        if (!dto.original_order_id && !recurringIdentity) {
+          await this.catalogService.assertServiceAvailableInZone(service.id, zone.id, manager, true);
+        }
+        const lockedMatchPreview = selectedMatchPreview
         ? await manager
             .createQueryBuilder(BookingMatchPreview, 'preview')
             .setLock('pessimistic_write')
@@ -1798,6 +1804,7 @@ export class OrderCreationService {
     if (!zone) {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
+    await this.catalogService.assertServiceAvailableInZone(service.id, zone.id);
 
     // مضاعف سعر مستوى الفني (docs/08) — نفس منطق create() بالحرف، راجع تعليقها الكامل هناك.
     // سلوت الجدولة بيغلب requested_technician_id لو الاتنين موجودين (نفس أولوية create()).

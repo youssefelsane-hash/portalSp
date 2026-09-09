@@ -3,19 +3,35 @@ import { PriceEstimateDto, PricingFieldDto, ServiceCategoryDto, ServiceDto } fro
 
 // كتالوج عام — مفيش access_token مطلوب (Public() في الباك-إند)، نفس نمط
 // apps/customer-app/lib/features/catalog/catalog_repository.dart بالحرف.
-export const fetchCategories = () => apiFetchList<ServiceCategoryDto>('/service-categories');
+function withZone(path: string, zoneId?: string): string {
+  if (!zoneId) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}zone_id=${encodeURIComponent(zoneId)}`;
+}
 
-export const fetchServices = (categoryId?: string) =>
-  apiFetchList<ServiceDto>(`/services${categoryId ? `?category_id=${categoryId}` : ''}`);
+export const fetchCategories = (zoneId?: string) =>
+  apiFetchList<ServiceCategoryDto>(withZone('/service-categories', zoneId));
 
-export const fetchMostRequestedServices = () => apiFetchList<ServiceDto>('/services/most-requested');
+export const fetchServices = (categoryId?: string, zoneId?: string) => {
+  const query = new URLSearchParams();
+  if (categoryId) query.set('category_id', categoryId);
+  if (zoneId) query.set('zone_id', zoneId);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetchList<ServiceDto>(`/services${suffix}`);
+};
 
-export const fetchService = (id: string) => apiFetch<ServiceDto>(`/services/${id}`, null);
+export const fetchMostRequestedServices = (zoneId?: string) =>
+  apiFetchList<ServiceDto>(withZone('/services/most-requested', zoneId));
 
-export const searchServices = (q: string) => {
+export const fetchService = (id: string, zoneId?: string) =>
+  apiFetch<ServiceDto>(withZone(`/services/${id}`, zoneId), null);
+
+export const searchServices = (q: string, zoneId?: string) => {
   const trimmed = q.trim();
   if (trimmed.length < 2) return Promise.resolve<ServiceDto[]>([]);
-  return apiFetchList<ServiceDto>(`/services/search?q=${encodeURIComponent(trimmed)}`);
+  const query = new URLSearchParams({ q: trimmed });
+  if (zoneId) query.set('zone_id', zoneId);
+  return apiFetchList<ServiceDto>(`/services/search?${query.toString()}`);
 };
 
 export const fetchPricingFields = (serviceId: string) => apiFetchList<PricingFieldDto>(`/services/${serviceId}/pricing-fields`);
