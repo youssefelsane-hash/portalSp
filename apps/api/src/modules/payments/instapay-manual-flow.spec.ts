@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { EarningsPolicyService } from './earnings-policy.service';
 import { PaymentsService } from './payments.service';
 import { Order } from '../orders/entities/order.entity';
 import { Payment, PaymentGatewayStatus } from './entities/payment.entity';
@@ -169,6 +170,9 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       {} as never,
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
   });
 

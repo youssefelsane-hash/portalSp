@@ -1,4 +1,5 @@
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
 import { ServicePricingField } from '../pricing/entities/service-pricing-field.entity';
 import { realPricingEngineService } from '../pricing/pricing-engine.testing';
@@ -252,6 +253,9 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       savedPaymentMethods,
       {} as never,
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
 
     inspectionQuoteService = new InspectionQuoteService(

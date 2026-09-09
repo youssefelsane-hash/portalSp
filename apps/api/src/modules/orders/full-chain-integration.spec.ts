@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -238,6 +239,9 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       {} as never,
       dataSource.getRepository(Installment),
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

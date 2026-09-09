@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { EarningsPolicyService } from './earnings-policy.service';
 import { PaymentsService } from './payments.service';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
@@ -246,6 +247,9 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
   });
 

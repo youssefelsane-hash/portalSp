@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import Redis from 'ioredis';
 import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -158,6 +159,9 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       { findDefaultForCustomer: async () => null } as never, // مفيش بطاقة محفوظة = فشل مبكر آمن
       dataSource.getRepository(Installment),
       crewEarningsServiceStub(),
+      // ADR-0037/0288: بعد تحويل محرك الأرباح للنسخة الموحّدة بقى **إجباري** وقت
+      // التسوية — بناؤه هنا بيخلّي الاختبار يمشي على نفس مسار الإنتاج مش مسار تاني.
+      new EarningsPolicyService(dataSource),
     );
     collectionService = new InstallmentCollectionService(
       dataSource.getRepository(Installment),

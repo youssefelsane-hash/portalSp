@@ -77,6 +77,9 @@ describe('PaymentsService — حماية من دفع مزدوج (§90.2)', () =>
       {} as never, // savedPaymentMethods
       {} as never, // installments repo
       crewEarningsServiceStub(),
+      // مسار التسوية مش متنادى في الاختبار ده (بيختبر حماية الدوسة المزدوجة / نتيجة البوابة
+      // بس)، والـDataSource هنا مزيّف — فخدمة حقيقية هتبقى كذب. `undefined` بيعكس الواقع.
+      undefined,
     );
     return { service: service as unknown as PaymentsServiceInternals, paymentRepository, provider, dataSource };
   };
