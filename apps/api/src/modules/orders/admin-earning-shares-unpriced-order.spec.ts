@@ -28,15 +28,24 @@ describe('معاينة حصص المستحقات لطلب لسه سعره ما �
   const q = <T = { id: string }>(sql: string, params?: unknown[]): Promise<T[]> =>
     dataSource.query(sql, params) as Promise<T[]>;
 
-  const makeOrder = async (totalCents: number, commissionCents: number): Promise<string> => {
+  /**
+   * `priceStatus` هو علامة «السعر لسه ما اتحددش» في نموذج البيانات الحالي
+   * (`platform_commission_cents_snapshot` بقى بيتكتب null دايمًا من `order-creation.service`،
+   * فما بقاش يوصف الحالة دي). طلب في `waiting_assessment` إجماليه = رسم المعاينة بس.
+   */
+  const makeOrder = async (
+    totalCents: number,
+    commissionCents: number,
+    priceStatus: 'confirmed' | 'waiting_assessment' = 'confirmed',
+  ): Promise<string> => {
     const [o] = await q(
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, technician_id,
                            order_status, total_amount_cents, settlement_policy_version,
-                           platform_commission_cents_snapshot)
-       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',$7,2,$8) RETURNING id`,
+                           platform_commission_cents_snapshot, price_status)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'accepted',$7,2,$8,$9) RETURNING id`,
       [
         `AES-${runId}-${totalCents}`,
-        ids.customerProfile, ids.service, ids.address, ids.zone, ids.tech, totalCents, commissionCents,
+        ids.customerProfile, ids.service, ids.address, ids.zone, ids.tech, totalCents, commissionCents, priceStatus,
       ],
     );
     return o.id;
@@ -98,7 +107,7 @@ describe('معاينة حصص المستحقات لطلب لسه سعره ما �
     ids.tech = tp.id;
 
     // طلب تقييم: الإجمالي لسه رسم التقييم بس (٥٠ جنيه)، والعمولة الثابتة عمولة الشغلانة كاملة.
-    ids.unpricedOrder = await makeOrder(5_000, 12_000);
+    ids.unpricedOrder = await makeOrder(5_000, 12_000, 'waiting_assessment');
     // طلب متسعّر عادي — نفس المسار لازم يفضل شغّال.
     ids.pricedOrder = await makeOrder(50_000, 12_000);
 

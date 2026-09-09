@@ -36,6 +36,8 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     leaderProfile: '',
     memberAProfile: '',
     memberBProfile: '',
+    assistantAProfile: '',
+    assistantBProfile: '',
     unapprovedProfile: '',
     otherCompanyProfile: '',
     blockedProfile: '',
@@ -53,16 +55,37 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     return dataSource.query(sql, params);
   }
 
-  async function insertTechnician(label: string, opts: { companyId: string | null; verificationStatus: TechnicianVerificationStatus }) {
+  async function insertTechnician(
+    label: string,
+    opts: { companyId: string | null; verificationStatus: TechnicianVerificationStatus; kind?: 'technician' | 'assistant' },
+  ) {
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       nextPhone(),
       `فني ${label} ${runId}`,
     ]);
     users.push(user.id);
     const [profile] = await q(
-      `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, company_id, verification_status)
-       VALUES ($1,$2,'x',3,'new',$3,$4) RETURNING id`,
-      [user.id, `TCCRW${label}${runId}`.slice(0, 20), opts.companyId, opts.verificationStatus],
+      // `current_location` **شرط أهلية حقيقي** في `assertTechnicianJoinable()`: فني بلا موقع
+      // حالي = مش قابل للضم. الفكسچر كان بيسيبه NULL فكل تست في السويتة كان بيقع على
+      // «الشخص غير معتمد أو مفيش موقع حالي له» قبل ما يوصل للسلوك اللي هو موضوعه.
+      `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, company_id, verification_status, current_location, technician_kind)
+       VALUES ($1,$2,'x',3,'new',$3,$4, ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography, $5) RETURNING id`,
+      // **runId قبل الـlabel**: `TCCRW${label}${runId}` كان بيتقص على ٢٠ حرف، فأي label طويل
+      // ('othercompany'، 'unapproved') بيبلع الـrunId فيتكرر الكود بين التشغيلات.
+      [user.id, `TC${runId}${label}`.slice(0, 20), opts.companyId, opts.verificationStatus, opts.kind ?? 'technician'],
+    );
+    // اعتماد التخصص شرط تاني في نفس البوابة (`approved_specialty`) — فني بلا صف
+    // `technician_services` معتمد مايتضمّش لطلب الخدمة دي.
+    await q(
+      `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)
+       VALUES ($1,$2,true,'approved')`,
+      [profile.id, ids.service],
+    );
+    // تغطية المدينة شرط إضافي على المساعد بس (`same_city`) — بيتقاس من `technician_zones`.
+    await q(
+      `INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)
+       ON CONFLICT DO NOTHING`,
+      [profile.id, ids.zone],
     );
     return profile.id as string;
   }
@@ -180,6 +203,11 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     ids.leaderProfile = await insertTechnician('leader', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
     ids.memberAProfile = await insertTechnician('membera', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
     ids.memberBProfile = await insertTechnician('memberb', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
+    // **المساعد لازم يكون مسجّل كمساعد فعلاً**: `assertTechnicianJoinable()` بتقارن
+    // `technician_kind` بالدور المطلوب، فضم فني بدور «مساعد» مرفوض بحق. الاختبارات كانت
+    // بتستخدم نفس فني الطاقم في الدورين، وده مستحيل في الإنتاج.
+    ids.assistantAProfile = await insertTechnician('asista', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED, kind: 'assistant' });
+    ids.assistantBProfile = await insertTechnician('asistb', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED, kind: 'assistant' });
     ids.unapprovedProfile = await insertTechnician('unapproved', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.PENDING });
     ids.otherCompanyProfile = await insertTechnician('othercompany', { companyId: null, verificationStatus: TechnicianVerificationStatus.APPROVED });
     ids.blockedProfile = await insertTechnician('blocked', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
@@ -243,6 +271,8 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.blockedProfile]);
       // بما فيهم فنيي الحشو الـ15 اللي اتضافوا جوّه اختبار "أقصى عدد" (كلهم company_id=ids.company)
       // — مش بس الخمسة الأساسيين، وإلا FK هيمنع مسح الشركة تحتهم.
+      await q(`DELETE FROM technician_zones WHERE technician_id IN (SELECT id FROM technician_profiles WHERE id = $1 OR company_id = $2)`, [ids.otherCompanyProfile, ids.company]);
+      await q(`DELETE FROM technician_services WHERE technician_id IN (SELECT id FROM technician_profiles WHERE id = $1 OR company_id = $2)`, [ids.otherCompanyProfile, ids.company]);
       await q(`DELETE FROM technician_profiles WHERE id = $1 OR company_id = $2`, [ids.otherCompanyProfile, ids.company]);
       await q(`DELETE FROM technician_companies WHERE id = $1`, [ids.company]);
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
@@ -296,8 +326,11 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     const orderId = await insertOrder(`add-audit-tier-${runId}`, { bookingMode: BookingMode.TEAM, technicianId: ids.leaderProfile, requiredTechnicians: 3 });
     auditLogRecord.mockClear();
     await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberBProfile, 'دور');
+    // `AuditLogService.record()` بتتنده بوسيطين (الحمولة + الـmanager بتاع الترانزاكشن)،
+    // فمقارنة بوسيط واحد بتفشل مهما كانت الحمولة صح.
     expect(auditLogRecord).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'order.crew_member_added', newValues: expect.objectContaining({ capacity_tier: 'LIGHT' }) }),
+      expect.anything(),
     );
   });
 
@@ -321,9 +354,14 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       ]);
       users.push(tmpUser.id);
       const [tmpProfile] = await q(
-        `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, company_id, verification_status)
-         VALUES ($1,$2,'x',1,'new',$3,$4) RETURNING id`,
-        [tmpUser.id, `TCFILL${i}${runId}`.slice(0, 20), ids.company, TechnicianVerificationStatus.APPROVED],
+        `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, company_id, verification_status, current_location)
+         VALUES ($1,$2,'x',1,'new',$3,$4, ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+        [tmpUser.id, `TF${runId}${i}`.slice(0, 20), ids.company, TechnicianVerificationStatus.APPROVED],
+      );
+      await q(
+        `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)
+         VALUES ($1,$2,true,'approved')`,
+        [tmpProfile.id, ids.service],
       );
       await addMember(orderId, tmpProfile.id);
     }
@@ -431,7 +469,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       expect(before.missingAssistants).toBe(1);
       expect(before.crewComplete).toBe(false);
 
-      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'مساعد سباك', 'assistant');
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.assistantAProfile, 'مساعد سباك', 'assistant');
 
       const [row] = await q(`SELECT member_type FROM order_team_members WHERE order_id = $1`, [orderId]);
       expect(row.member_type).toBe('assistant');
@@ -468,7 +506,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
         requiredAssistants: 1,
       });
       await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'فني تاني', 'team_member');
-      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberBProfile, 'مساعد', 'assistant');
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.assistantBProfile, 'مساعد', 'assistant');
 
       const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 2, requiredAssistants: 1 });
       expect(composition.assignedTechnicians).toBe(2); // القائد + فني مضاف
@@ -483,13 +521,13 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
         requiredTechnicians: 1,
         requiredAssistants: 1,
       });
-      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'مساعد', 'assistant');
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.assistantAProfile, 'مساعد', 'assistant');
       const [existing] = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
 
-      await adminOrdersService.replaceCrewMember(ids.adminUserId, orderId, existing.id, ids.memberBProfile, 'المساعد اعتذر', undefined);
+      await adminOrdersService.replaceCrewMember(ids.adminUserId, orderId, existing.id, ids.assistantBProfile, 'المساعد اعتذر', undefined);
 
       const [row] = await q(`SELECT technician_id, member_type FROM order_team_members WHERE order_id = $1`, [orderId]);
-      expect(row.technician_id).toBe(ids.memberBProfile);
+      expect(row.technician_id).toBe(ids.assistantBProfile);
       expect(row.member_type).toBe('assistant');
       const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
       expect(composition.crewComplete).toBe(true);

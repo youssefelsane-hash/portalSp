@@ -38,7 +38,7 @@ import {
   MAX_TEAM_MEMBERS_PER_ORDER,
   computeCrewComposition,
 } from './order-team.service';
-import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderPriceStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { classifyPriceChange, FULL_PRICE_AUTHORITY, PriceChangeAuthority } from './price-change-authority';
 import { OrderTeamMember } from './entities/order-team-member.entity';
@@ -356,6 +356,17 @@ export class AdminOrdersService {
     // الطلب الذي لم يأخذ سعرًا فعليًا لا يملك وعاء مستحقات قابل للتوزيع بعد. النسبة نفسها لا
     // تجعل الإجمالي سالبًا، لكن إبقاء المعاينة فارغة هنا يمنع إيهام الإدارة بحصة مؤقتة.
     if (order.commissionRateApplied == null || order.totalAmountCents <= 0) {
+      return [];
+    }
+    // الطلب اللي سعره النهائي لسه ما اتحددش (معاينة/عرض سعر/موافقة عميل) إجماليه دلوقتي هو رسم
+    // المعاينة بس. حساب حصص عليه بيدّي الإدارة أرقامًا **هتتغيّر كلها** لما السعر يتحدد، وهي
+    // معروضة كأنها مستحقات — فالمعاينة تفضل فاضية لحد ما يبقى فيه سعر حقيقي.
+    const UNPRICED_STATUSES: OrderPriceStatus[] = [
+      OrderPriceStatus.WAITING_ASSESSMENT,
+      OrderPriceStatus.WAITING_QUOTE,
+      OrderPriceStatus.WAITING_CUSTOMER_APPROVAL,
+    ];
+    if (UNPRICED_STATUSES.includes(order.priceStatus)) {
       return [];
     }
     if (!this.earningsPolicyService) throw new Error('EarningsPolicyService is required for a V2 admin preview');
