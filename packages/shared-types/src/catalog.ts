@@ -1,5 +1,5 @@
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts وentities
-import type { TechnicianLevel, TechnicianPricingTier } from './technicians';
+import type { TechnicianPricingTier } from './technicians';
 
 // 'formula' — محرك التسعير الديناميكي (docs/08 §1، ADR-0001)، راجع pricing.ts لباقي أنواعه.
 // ADR-0060 §1 — قيمتين بس. اللي كان اسمه «سعر ثابت / بالساعة / بالوحدة / شهري» بقى **قوالب**
@@ -257,22 +257,7 @@ export interface AssignTechnicianServiceBody {
   skill_level?: SkillLevel;
 }
 
-export interface ServiceLevelPricingResponseDto {
-  id: string;
-  service_id: string;
-  technician_level: TechnicianLevel;
-  price_multiplier: number;
-  is_active: boolean;
-  created_at: string;
-}
-
-export interface UpsertLevelPricingBody {
-  technician_level: TechnicianLevel;
-  price_multiplier: number;
-}
-
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — مرآة كاملة لـServiceLevelPricingResponseDto/
-// UpsertLevelPricingBody فوق بالحرف، بس مربوطة بـTechnicianPricingTier (تجاري) مش TechnicianLevel.
+// مصدر تسعير الخدمة الوحيد حسب فئة مهارة الفني الموحدة.
 export interface ServicePricingTierPricingResponseDto {
   id: string;
   service_id: string;

@@ -22,15 +22,14 @@ export const LEVEL_LABELS: Record<TechnicianLevel, string> = {
 
 export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional', 'premium', 'team_leader'];
 
-// فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن LEVEL_LABELS/ALL_LEVELS فوق.
+// فئة مهارة التسعير الموحدة؛ المستوى أعلاه يظل للتشغيل والترقية فقط.
 export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
+  beginner: 'مبتدئ',
   standard: 'قياسي',
   expert: 'خبير',
-  senior: 'كبير',
-  premium: 'مميّز',
 };
 
-export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['standard', 'expert', 'senior', 'premium'];
+export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['beginner', 'standard', 'expert'];
 
 // لغة بصرية موحّدة لتصنيف القدرة الاستيعابية (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — نُقلت هنا من
 // operations/page.tsx (docs/08 §36.3) عشان تُستخدَم كمان في مفتّش المطابقة بصفحة تفاصيل الطلب

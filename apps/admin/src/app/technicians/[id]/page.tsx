@@ -331,7 +331,7 @@ export default function TechnicianDetailPage() {
     );
   }
 
-  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن handleChangeLevel فوق.
+  // فئة مهارة التسعير الموحدة؛ مستقلة عن مستوى الترقية التشغيلي.
   async function handleChangePricingTier(e: FormEvent) {
     e.preventDefault();
     if (!selectedPricingTier) return;
@@ -866,7 +866,7 @@ export default function TechnicianDetailPage() {
         <Card>
           <form onSubmit={handleChangePricingTier}>
             <CardHeader>
-              <CardTitle className="text-base">فئة التسعير</CardTitle>
+              <CardTitle className="text-base">فئة مهارة التسعير</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
@@ -885,7 +885,7 @@ export default function TechnicianDetailPage() {
             </CardContent>
             <CardFooter>
               <Button type="submit" size="sm" disabled={isSaving || selectedPricingTier === detail.pricing_tier}>
-                حفظ فئة التسعير
+                حفظ فئة المهارة
               </Button>
             </CardFooter>
           </form>

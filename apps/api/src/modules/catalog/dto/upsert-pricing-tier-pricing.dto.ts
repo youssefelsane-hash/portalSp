@@ -1,8 +1,7 @@
 import { IsEnum, IsNumber, IsPositive } from 'class-validator';
 import { TechnicianPricingTier } from '../../technicians/entities/technician-profile.entity';
 
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — نفس نمط UpsertLevelPricingDto بالحرف، بس مربوطة
-// بـTechnicianPricingTier (تجاري) مش TechnicianLevel (تشغيلي).
+// فئة مهارة التسعير الموحدة؛ هي المصدر التجاري الوحيد لمضاعف سعر الفني.
 export class UpsertPricingTierPricingDto {
   @IsEnum(TechnicianPricingTier)
   pricing_tier: TechnicianPricingTier;

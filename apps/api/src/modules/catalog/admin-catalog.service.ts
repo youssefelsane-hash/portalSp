@@ -14,7 +14,6 @@ import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
-import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
 import { UpsertPricingTierPricingDto } from './dto/upsert-pricing-tier-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -41,8 +40,8 @@ export class AdminCatalogService {
     @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(ServiceZonePricing)
     private readonly zonePricing: Repository<ServiceZonePricing>,
-    @InjectRepository(ServiceLevelPricing)
-    private readonly levelPricing: Repository<ServiceLevelPricing>,
+    // سجل تاريخي فقط بعد migration 0316؛ لا توجد واجهة أو عملية كتابة جديدة له.
+    @InjectRepository(ServiceLevelPricing) _legacyLevelPricing: Repository<ServiceLevelPricing>,
     @InjectRepository(ServicePricingTierPricing)
     private readonly pricingTierPricing: Repository<ServicePricingTierPricing>,
     @InjectRepository(ServiceAddon)
@@ -821,66 +820,7 @@ export class AdminCatalogService {
     });
   }
 
-  // ── تسعير حسب مستوى الفني ────────────────────────────────────────────
-
-  listLevelPricing(serviceId: string): Promise<ServiceLevelPricing[]> {
-    return this.levelPricing.find({
-      where: { serviceId },
-      order: { technicianLevel: 'ASC' },
-    });
-  }
-
-  async upsertLevelPricing(adminUserId: string, serviceId: string, dto: UpsertLevelPricingDto, meta?: AuditActorMeta): Promise<ServiceLevelPricing> {
-    await this.findServiceOrThrow(serviceId);
-
-    let pricing = await this.levelPricing.findOne({
-      where: { serviceId, technicianLevel: dto.technician_level },
-    });
-    const isNew = !pricing;
-    if (!pricing) {
-      pricing = this.levelPricing.create({
-        serviceId,
-        technicianLevel: dto.technician_level,
-      });
-    }
-    pricing.priceMultiplier = String(dto.price_multiplier);
-    pricing.isActive = true;
-    await this.levelPricing.save(pricing);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: isNew ? 'service_level_pricing.created' : 'service_level_pricing.updated',
-      entityType: 'service_level_pricing',
-      entityId: pricing.id,
-      newValues: {
-        technician_level: pricing.technicianLevel,
-        price_multiplier: pricing.priceMultiplier,
-      },
-      meta,
-    });
-    return pricing;
-  }
-
-  async deactivateLevelPricing(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
-    const pricing = await this.levelPricing.findOne({ where: { id } });
-    if (!pricing) {
-      throw new ApiException(ErrorCode.VAL_001, 'تسعير المستوى غير موجود', HttpStatus.NOT_FOUND);
-    }
-    pricing.isActive = false;
-    await this.levelPricing.save(pricing);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'service_level_pricing.deactivated',
-      entityType: 'service_level_pricing',
-      entityId: pricing.id,
-      meta,
-    });
-  }
-
-  // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
+  // ── تسعير فئة مهارة الفني الموحدة ─────────────────────────────────────
 
   listPricingTierPricing(serviceId: string): Promise<ServicePricingTierPricing[]> {
     return this.pricingTierPricing.find({

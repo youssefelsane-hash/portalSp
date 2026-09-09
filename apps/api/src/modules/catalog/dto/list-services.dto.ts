@@ -47,15 +47,13 @@ export class EstimateQueryDto {
   @IsUUID()
   zone_id?: string;
 
-  // اختياري — لمعاينة السعر لو الفني اللي هيتنفّذ الطلب من مستوى معيّن (بيتطبّق بس لو فيه
-  // service_level_pricing مفعّل للخدمة دي). التوصيل الفعلي في `POST /orders` لسه بيستخدم السعر
-  // الأساسي لأن الفني مش معروف وقت إنشاء الطلب (فجوة موثّقة في catalog/README.md).
+  // توافق مع العملاء الأقدم: المستوى التشغيلي يتحول داخليًا إلى فئة المهارة الموحدة عند معاينة
+  // السعر. المصدر الفعلي للمضاعف هو service_pricing_tier_pricing فقط.
   @IsOptional()
   @IsEnum(TechnicianLevel)
   technician_level?: TechnicianLevel;
 
-  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — إضافية زي technician_level فوق بالحرف،
-  // منفصلة تمامًا (تسعير تجاري مش مستوى تشغيلي).
+  // فئة المهارة الموحدة، وهي المدخل المباشر لمضاعف سعر الفني.
   @IsOptional()
   @IsEnum(TechnicianPricingTier)
   pricing_tier?: TechnicianPricingTier;

@@ -93,22 +93,22 @@ describe('AdminTechniciansService.changePricingTier() — منفصل تمامً�
 
   it('changePricingTier() بيغيّر pricing_tier بس، وcurrent_level التشغيلي يفضل زي ما هو بالحرف', async () => {
     const { profile } = await service.changePricingTier(ids.adminUser, ids.technicianProfile, {
-      pricing_tier: TechnicianPricingTier.PREMIUM,
+      pricing_tier: TechnicianPricingTier.EXPERT,
     } as never);
-    expect(profile.pricingTier).toBe(TechnicianPricingTier.PREMIUM);
+    expect(profile.pricingTier).toBe(TechnicianPricingTier.EXPERT);
     expect(profile.currentLevel).toBe(TechnicianLevel.PROFESSIONAL);
   });
 
   it('changeLevel() بيغيّر current_level بس، وpricing_tier التجاري يفضل زي ما هو بالحرف (استقلال في الاتجاه العكسي)', async () => {
     const { profile } = await service.changeLevel(ids.adminUser, ids.technicianProfile, { level: TechnicianLevel.PREMIUM } as never);
     expect(profile.currentLevel).toBe(TechnicianLevel.PREMIUM);
-    // التغيير السابق (premium) لسه ساري — changeLevel() ملوش أي أثر عليه.
-    expect(profile.pricingTier).toBe(TechnicianPricingTier.PREMIUM);
+    // التغيير السابق (expert) لسه ساري — changeLevel() ملوش أي أثر عليه.
+    expect(profile.pricingTier).toBe(TechnicianPricingTier.EXPERT);
   });
 
   it('changePricingTier() بترفض 409 لو الفني أصلاً على نفس الفئة', async () => {
     await expect(
-      service.changePricingTier(ids.adminUser, ids.technicianProfile, { pricing_tier: TechnicianPricingTier.PREMIUM } as never),
+      service.changePricingTier(ids.adminUser, ids.technicianProfile, { pricing_tier: TechnicianPricingTier.EXPERT } as never),
     ).rejects.toMatchObject({ status: 409 });
   });
 });

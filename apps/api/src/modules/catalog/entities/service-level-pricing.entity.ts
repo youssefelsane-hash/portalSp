@@ -2,6 +2,7 @@ import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } fro
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
 @Entity('service_level_pricing')
+// سجل تاريخي فقط. migration 0316 عطّل كل صفوفه ونقل قيمه إلى service_pricing_tier_pricing.
 export class ServiceLevelPricing {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
   id: string;

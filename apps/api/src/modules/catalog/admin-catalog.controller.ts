@@ -33,7 +33,6 @@ import {
   toAdminServiceResponseDto,
   toEligibleTechnicianResponseDto,
   toServiceAddonResponseDto,
-  toServiceLevelPricingResponseDto,
   toServicePricingTierPricingResponseDto,
   toServiceProductivityActualResponseDto,
   toServiceProductivitySuggestionResponseDto,
@@ -50,7 +49,6 @@ import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
-import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
 import { UpsertPricingTierPricingDto } from './dto/upsert-pricing-tier-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 
@@ -244,39 +242,7 @@ export class AdminCatalogController {
     return { technician_id: technicianId, removed: true };
   }
 
-  // ── تسعير حسب مستوى الفني ────────────────────────────────────────────
-
-  @Get('services/:id/level-pricing')
-  @RequirePermission('catalog.view')
-  async listLevelPricing(@Param('id', ParseUUIDPipe) id: string) {
-    const rows = await this.adminCatalogService.listLevelPricing(id);
-    return rows.map(toServiceLevelPricingResponseDto);
-  }
-
-  @Put('services/:id/level-pricing')
-  @RequirePermission('catalog.manage')
-  async upsertLevelPricing(
-    @CurrentUser() admin: JwtPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpsertLevelPricingDto,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    return toServiceLevelPricingResponseDto(await this.adminCatalogService.upsertLevelPricing(admin.sub, id, dto, audit));
-  }
-
-  @Delete('services/level-pricing/:pricingId')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermission('catalog.manage')
-  async deactivateLevelPricing(
-    @CurrentUser() admin: JwtPayload,
-    @Param('pricingId', ParseUUIDPipe) pricingId: string,
-    @AuditContext() audit: AuditMeta,
-  ) {
-    await this.adminCatalogService.deactivateLevelPricing(admin.sub, pricingId, audit);
-    return { id: pricingId, deactivated: true };
-  }
-
-  // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
+  // ── تسعير فئة مهارة الفني الموحدة ─────────────────────────────────────
 
   @Get('services/:id/pricing-tier-pricing')
   @RequirePermission('catalog.view')

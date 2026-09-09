@@ -83,7 +83,9 @@ export class CatalogService {
     @InjectRepository(ServiceCategory) private readonly categories: Repository<ServiceCategory>,
     @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(ServiceZonePricing) private readonly zonePricing: Repository<ServiceZonePricing>,
-    @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
+    // سجل تاريخي فقط بعد migration 0316. نحتفظ بالـDI/ترتيب البناء لتوافق الاختبارات القديمة،
+    // ولا يوجد أي مسار حساب يقرأه.
+    @InjectRepository(ServiceLevelPricing) _legacyLevelPricing: Repository<ServiceLevelPricing>,
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
     private readonly settingsService: SettingsService,
@@ -94,9 +96,8 @@ export class CatalogService {
   ) {}
 
   /**
-   * مضاعف السعر النهائي — فئة تسعير الفني (docs/08 §36.24، ADR-0025) لو موجودة وفيها صف نشط،
-   * وإلا fallback كامل لتسعير المستوى التشغيلي القديم (service_level_pricing)، وإلا 1 لو مفيش أي
-   * صف. **صفر كسر لأي مسار موجود** — technicianPricingTier باراميتر جديد اختياري بالكامل.
+   * مضاعف السعر النهائي له مصدر واحد: فئة التسعير الموحدة للخدمة. `technicianLevel` موجود
+   * لتوافق الاستدعاءات القديمة فقط، ويُحوّل إلى الفئة المناظرة بدل الرجوع إلى جدول تسعير آخر.
    */
   /** عام عمدًا (docs/08 §60.3): المطابقة محتاجاه بعد التعيين عشان تحسب فرق سعر الفني المميّز.
    * مصدر واحد للمضاعف — مفيش نسخة تانية من نفس البحث في موديول تاني. */
@@ -105,17 +106,29 @@ export class CatalogService {
     technicianLevel?: TechnicianLevel,
     technicianPricingTier?: TechnicianPricingTier,
   ): Promise<number> {
-    if (technicianPricingTier) {
+    const canonicalTier = technicianPricingTier ?? this.pricingTierForOperationalLevel(technicianLevel);
+    if (canonicalTier) {
       const tierRow = await this.pricingTierPricing.findOne({
-        where: { serviceId, pricingTier: technicianPricingTier, isActive: true },
+        where: { serviceId, pricingTier: canonicalTier, isActive: true },
       });
       if (tierRow) return Number(tierRow.priceMultiplier);
     }
-    if (technicianLevel) {
-      const levelRow = await this.levelPricing.findOne({ where: { serviceId, technicianLevel, isActive: true } });
-      if (levelRow) return Number(levelRow.priceMultiplier);
-    }
     return 1;
+  }
+
+  private pricingTierForOperationalLevel(level?: TechnicianLevel): TechnicianPricingTier | undefined {
+    switch (level) {
+      case TechnicianLevel.NEW:
+        return TechnicianPricingTier.BEGINNER;
+      case TechnicianLevel.VERIFIED:
+      case TechnicianLevel.PROFESSIONAL:
+        return TechnicianPricingTier.STANDARD;
+      case TechnicianLevel.PREMIUM:
+      case TechnicianLevel.TEAM_LEADER:
+        return TechnicianPricingTier.EXPERT;
+      default:
+        return undefined;
+    }
   }
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {

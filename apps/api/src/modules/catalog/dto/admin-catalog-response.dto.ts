@@ -1,6 +1,5 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
-import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from '../entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
 import { ServiceProductivitySuggestion } from '../entities/service-productivity-suggestion.entity';
@@ -233,27 +232,7 @@ export function toEligibleTechnicianResponseDto(row: TechnicianService): Eligibl
   };
 }
 
-export interface ServiceLevelPricingResponseDto {
-  id: string;
-  service_id: string;
-  technician_level: string;
-  price_multiplier: number;
-  is_active: boolean;
-  created_at: string;
-}
-
-export function toServiceLevelPricingResponseDto(pricing: ServiceLevelPricing): ServiceLevelPricingResponseDto {
-  return {
-    id: pricing.id,
-    service_id: pricing.serviceId,
-    technician_level: pricing.technicianLevel,
-    price_multiplier: Number(pricing.priceMultiplier),
-    is_active: pricing.isActive,
-    created_at: pricing.createdAt.toISOString(),
-  };
-}
-
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — نفس نمط ServiceLevelPricingResponseDto فوق بالحرف.
+// مصدر تسعير الخدمة الوحيد حسب فئة مهارة الفني الموحدة.
 export interface ServicePricingTierPricingResponseDto {
   id: string;
   service_id: string;

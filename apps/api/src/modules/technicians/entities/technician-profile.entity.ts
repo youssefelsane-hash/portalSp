@@ -11,14 +11,12 @@ export enum TechnicianLevel {
   TEAM_LEADER = 'team_leader',
 }
 
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TechnicianLevel فوق. TechnicianLevel
-// تشغيلي (حد قرار/أولوية مطابقة/أهلية قيادة فريق/تقدّم KPI)؛ pricing_tier مضاعف سعر تجاري بحت
-// (service_pricing_tier_pricing) يقرره الأدمن بشكل مستقل تمامًا — صفر ربط تلقائي بينهم.
+// فئة التسعير الموحدة: نفس مسميات سياسة المستحقات (مبتدئ/قياسي/خبير). TechnicianLevel
+// تشغيلي للترقية والمطابقة، أما الفئة هنا فهي مصدر مضاعف السعر الوحيد للخدمة.
 export enum TechnicianPricingTier {
+  BEGINNER = 'beginner',
   STANDARD = 'standard',
   EXPERT = 'expert',
-  SENIOR = 'senior',
-  PREMIUM = 'premium',
 }
 
 /**

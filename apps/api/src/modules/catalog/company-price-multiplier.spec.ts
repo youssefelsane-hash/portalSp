@@ -12,7 +12,7 @@ import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { SettingsService } from '../settings/settings.service';
-import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
+import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 
 /**
  * ADR-0042 / docs/08 §64.و — طلب المالك: «الشركات مالهاش معاملات زيادة، الشركة دايمًا بالسعر
@@ -60,10 +60,10 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
     );
     ids.service = service.id;
 
-    // مضاعف مستوى حقيقي للخدمة دي (1.5) — عشان نثبت إن معامل الشركة **بيحل محله** مش بيتضرب فيه.
+    // مضاعف فئة مهارة حقيقي للخدمة دي (1.5) — عشان نثبت إن معامل الشركة **بيحل محله** مش بيتضرب فيه.
     await q(
-      `INSERT INTO service_level_pricing (service_id, technician_level, price_multiplier, is_active)
-       VALUES ($1,'premium',1.50,true)`,
+      `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier, is_active)
+       VALUES ($1,'expert',1.50,true)`,
       [ids.service],
     );
 
@@ -82,7 +82,7 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
-    await q(`DELETE FROM service_level_pricing WHERE service_id = $1`, [ids.service]);
+    await q(`DELETE FROM service_pricing_tier_pricing WHERE service_id = $1`, [ids.service]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await dataSource.destroy();
@@ -110,9 +110,16 @@ describe('معامل سعر الشركة (ADR-0042، docs/08 §64.و)', () => {
     expect(estimate.level_price_multiplier).toBe(1.2);
   });
 
-  it('معامل الشركة بيحل **محل** مضاعف المستوى مش فوقه (مفيش تحصيل مزدوج)', async () => {
-    // نفس الخدمة عندها مضاعف مستوى 1.5 لـpremium. لو الاتنين اتركّبوا كان الناتج 180000.
-    const withLevelOnly = await catalogService.estimate(ids.service, undefined, TechnicianLevel.PREMIUM);
+  it('معامل الشركة بيحل **محل** مضاعف فئة المهارة مش فوقه (مفيش تحصيل مزدوج)', async () => {
+    // نفس الخدمة عندها مضاعف خبير 1.5. لو الاتنين اتركّبوا كان الناتج 180000.
+    const withLevelOnly = await catalogService.estimate(
+      ids.service,
+      undefined,
+      TechnicianLevel.PREMIUM,
+      false,
+      undefined,
+      TechnicianPricingTier.EXPERT,
+    );
     expect(withLevelOnly.estimated_total_cents).toBe(150000);
 
     const companyBooking = await catalogService.estimate(

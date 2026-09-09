@@ -14,10 +14,9 @@ import { Service } from './entities/service.entity';
 import { CatalogService } from './catalog.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — اختبار حي ضد Postgres حقيقي. تسعير-الفئة لازم
-// يغلب تسعير-المستوى القديم لو نشط، وخدمة من غير أي صف فئة لازم تفضل تستخدم تسعير المستوى
-// (رجريشن كامل)، وتغيير فئة الفني منفصل تمامًا عن مستواه التشغيلي.
-describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §36.24، ADR-0025)', () => {
+// مصدر التسعير الوحيد هو فئة المهارة الموحدة. المستوى التشغيلي يتحول للفئة المناظرة فقط
+// لحماية الاستدعاءات القديمة، ولا يعود لجدول تسعير مستقل.
+describe('CatalogService.estimate() — فئة مهارة الفني الموحدة', () => {
   let dataSource: DataSource;
   let service: CatalogService;
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
@@ -56,8 +55,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
     ]);
     ids.category = category.id;
 
-    // خدمة عندها الاتنين: تسعير مستوى قديم (professional=1.2) وتسعير فئة جديد (premium=1.5) — لازم
-    // الفئة الجديدة تغلب.
+    // خدمة عندها سجل مستوى قديم وسجلين موحدين. السجل القديم لا يدخل الحساب إطلاقًا.
     const [tierService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة فئة ${runId}`, `tier-service-${runId}`],
@@ -68,11 +66,11 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
       [ids.tierService],
     );
     await q(
-      `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier) VALUES ($1,'premium',1.5)`,
+      `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier) VALUES ($1,'expert',1.5), ($1,'standard',1.2)`,
       [ids.tierService],
     );
 
-    // خدمة من غير أي صف فئة خالص — لازم تفضل تستخدم تسعير المستوى القديم بالحرف (رجريشن).
+    // خدمة فيها السجل القديم فقط: إثبات أنه لا يعود مصدر سعر بعد التوحيد.
     const [levelOnlyService] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'formula',10000) RETURNING id`,
       [ids.category, `خدمة مستوى بس ${runId}`, `level-only-service-${runId}`],
@@ -107,47 +105,47 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
     await dataSource.destroy();
   });
 
-  it('تسعير الفئة (premium=1.5) بيغلب تسعير المستوى (professional=1.2) لما الاتنين موجودين', async () => {
+  it('تسعير الخبير (1.5) هو المصدر الوحيد حتى لو ظل سجل مستوى قديم موجودًا', async () => {
     const estimate = await service.estimate(
       ids.tierService,
       undefined,
       TechnicianLevel.PROFESSIONAL,
       false,
       undefined,
-      TechnicianPricingTier.PREMIUM,
+      TechnicianPricingTier.EXPERT,
     );
     expect(estimate.level_price_multiplier).toBe(1.5);
     expect(estimate.base_price_cents).toBe(10000);
     expect(estimate.estimated_total_cents).toBe(15000);
   });
 
-  it('من غير pricingTier خالص — نفس الخدمة بترجع لتسعير المستوى وحده (professional=1.2)', async () => {
+  it('الاستدعاء القديم بـprofessional يتحول إلى قياسي (1.2) من نفس جدول الفئات', async () => {
     const estimate = await service.estimate(ids.tierService, undefined, TechnicianLevel.PROFESSIONAL);
     expect(estimate.level_price_multiplier).toBe(1.2);
     expect(estimate.estimated_total_cents).toBe(12000);
   });
 
-  it('رجريشن — خدمة من غير أي صف تسعير-فئة تفضل تستخدم تسعير المستوى القديم بالحرف حتى لو pricingTier اتبعت', async () => {
+  it('خدمة بلا فئة موحدة لا تتأثر أبدًا بسجل المستوى القديم', async () => {
     const estimate = await service.estimate(
       ids.levelOnlyService,
       undefined,
       TechnicianLevel.PROFESSIONAL,
       false,
       undefined,
-      TechnicianPricingTier.PREMIUM,
+      TechnicianPricingTier.EXPERT,
     );
-    expect(estimate.level_price_multiplier).toBe(1.2);
-    expect(estimate.estimated_total_cents).toBe(12000);
+    expect(estimate.level_price_multiplier).toBe(1);
+    expect(estimate.estimated_total_cents).toBe(10000);
   });
 
-  it('فئة تسعير من غير صف نشط لها (standard) — مضاعف=1 بلا أي كسر', async () => {
+  it('فئة مهارة من غير صف نشط لها (beginner) — مضاعف=1 بلا أي كسر', async () => {
     const estimate = await service.estimate(
       ids.tierService,
       undefined,
       undefined,
       false,
       undefined,
-      TechnicianPricingTier.STANDARD,
+      TechnicianPricingTier.BEGINNER,
     );
     expect(estimate.level_price_multiplier).toBe(1);
     expect(estimate.estimated_total_cents).toBe(10000);

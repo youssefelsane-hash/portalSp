@@ -1,8 +1,9 @@
 // مطابق لـ apps/api/src/modules/technicians/dto/admin-technician-response.dto.ts وentities/technician-profile.entity.ts
 export type TechnicianLevel = 'new' | 'verified' | 'professional' | 'premium' | 'team_leader';
 
-// فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TechnicianLevel التشغيلي فوق.
-export type TechnicianPricingTier = 'standard' | 'expert' | 'senior' | 'premium';
+// فئة التسعير التجارية الموحدة. هي نفس لغة المهارة الظاهرة في سياسة المستحقات، بينما
+// TechnicianLevel فوق يظل مستوى تشغيليًا للترقية والمطابقة فقط.
+export type TechnicianPricingTier = 'beginner' | 'standard' | 'expert';
 /**
  * دور الشخص نفسه (ADR-0050) — مستقل تمامًا عن `TechnicianLevel` (جودة/أقدمية) و
  * `TechnicianPricingTier` (مضاعف سعر تجاري). `assistant` = ما يظهرش في أي قايمة فنيين، وما ياخدش

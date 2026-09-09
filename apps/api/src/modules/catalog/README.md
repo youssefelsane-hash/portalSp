@@ -201,30 +201,27 @@
 
 ## فئة تسعير الفني — `technician_profiles.pricing_tier` (docs/08 §36.24، ADR-0025)
 
-تدقيق حي أثبت إن `service_level_pricing.technician_level` مربوط مباشرة بـ`TechnicianLevel` التشغيلي
-(نفس العمود المستخدم لحد القرار المالي، أولوية المطابقة، أهلية "اعتماد"، والـKPI). طلب المالك فئة
-تسعير تجارية منفصلة تمامًا. التفاصيل الكاملة والبدائل المرفوضة في `docs/adr/0025-technician-pricing-tier.md`.
+`migration 0316` وحّد التسعير إلى مصدر واحد بعد تدقيق حي أثبت تعارض جدول المستوى التشغيلي مع
+جدول الفئة التجارية. التفاصيل والبدائل القديمة في `docs/adr/0025-technician-pricing-tier.md`.
 
-- **`TechnicianPricingTier` enum جديد بالكامل** (`standard`/`expert`/`senior`/`premium`) — أسماء
-  مختلفة عمدًا عن `TechnicianLevel` (صفر تشابه حتى في التسمية).
-- **`technician_profiles.pricing_tier` عمود جديد** (افتراضي `standard` لكل الصفوف — صفر اشتقاق
-  تلقائي من `current_level`، الأدمن لازم يصنّف صراحة عبر `PATCH /admin/technicians/:id/pricing-tier`).
-- **`service_pricing_tier_pricing` جدول جديد** (مرآة كاملة لـ`service_level_pricing`: service_id،
-  pricing_tier، price_multiplier، is_active) — صفر تعديل على الجدول القديم.
-- **`CatalogService.resolveLevelPriceMultiplier()`**: فرع أولوية جديد — فئة تسعير نشطة (لو الفني
-  عنده `pricingTier` وفيه صف نشط) → **غير كده fallback كامل** لتسعير المستوى القديم → مضاعف=1 لو
-  مفيش أي صف. `estimate()` بقى ياخد `technicianPricingTier?` كباراميتر إضافي اختياري (آخر باراميتر
-  عمدًا، صفر كسر لأي كولر موجود).
+- **`TechnicianPricingTier`**: ثلاث قيم فقط (`beginner`/`standard`/`expert`) باسم المستخدم
+  «مبتدئ/قياسي/خبير»؛ هي نفس تصنيف سياسة المستحقات.
+- **`technician_profiles.pricing_tier`**: يحدد فئة مهارة تسعير الفني صراحةً عبر
+  `PATCH /admin/technicians/:id/pricing-tier`، بينما `current_level` يظل تشغيليًا فقط.
+- **`service_pricing_tier_pricing`**: مصدر مضاعف السعر الوحيد؛ قاعدة unique تمنع صفين لنفس
+  الخدمة والفئة. جرى نقل الإعدادات القديمة إليه وتعطيل `service_level_pricing` كسجل تاريخي.
+- **`CatalogService.resolveLevelPriceMultiplier()`**: يقرأ الفئة الموحدة فقط. `technician_level`
+  في الطلبات القديمة يتحول إلى الفئة المناظرة للتوافق، ولا يوجد fallback لجدول آخر.
 - **`GET /services/:id/estimate`**: `pricing_tier` query param جديد اختياري جنب `technician_level`
   الموجود. **`orders.service.ts`/`catalog.controller.ts`'s `listTechniciansForService`**: تمرير
   `technician.pricingTier` جنب `technician.currentLevel` — بمجرد ما أدمن يضيف صف تسعير-فئة، بيتفعّل
   تلقائيًا في كل مسارات التسعير الحقيقية بلا كود إضافي.
 - **إدارة الفئة نفسها**: `GET/PUT /admin/services/:id/pricing-tier-pricing`،
-  `DELETE /admin/services/pricing-tier-pricing/:pricingId` (نفس نمط level-pricing بالحرف).
-- **`apps/admin`**: قسم "فئة التسعير" في بروفايل الفني (منفصل عن قسم "المستوى") + فورم "فئة تسعير
-  الفني" جديد في صفحة تفاصيل الخدمة.
-- **اختبارات حية جديدة**: `technician-pricing-tier.spec.ts` (4/4 — الفئة تغلب المستوى، fallback
-  للمستوى من غير فئة، رجريشن كامل لخدمة من غير أي صف فئة، فئة بلا صف نشط = مضاعف 1)،
+  `DELETE /admin/services/pricing-tier-pricing/:pricingId`.
+- **`apps/admin`**: قسم «فئة مهارة التسعير» في بروفايل الفني وفورم واحد في صفحة تفاصيل الخدمة؛
+  لا توجد شاشة أو endpoint موازية لتسعير المستوى القديم.
+- **اختبارات حية**: `technician-pricing-tier.spec.ts` (4/4 — الفئة الموحدة هي المصدر الوحيد،
+  توافق المستوى القديم يتحول للفئة، وسجل المستوى وحده لا يغير السعر، وفئة بلا صف نشط = 1)،
   `../technicians/technician-pricing-tier-assignment.spec.ts` (3/3 — استقلال `changePricingTier()`/
   `changeLevel()` في الاتجاهين + 409 لنفس الفئة).
 

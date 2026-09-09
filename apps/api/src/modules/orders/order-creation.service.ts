@@ -895,8 +895,8 @@ export class OrderCreationService {
       ? await this.techniciansService.findByProfileIdOrThrow(scheduleSlot.technicianId)
       : null;
     const knownTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
-    // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — نفس منطق knownTechnicianLevel فوق بالحرف،
-    // مصدر مستقل (technician_profiles.pricing_tier) عشان الفصل الكامل عن currentLevel التشغيلي.
+    // فئة مهارة التسعير الموحدة. level التشغيلي لا يملك مضاعف سعر مستقل؛ وجود الفئة الصريحة
+    // يضمن أن السعر النهائي المعروض للعميل يطابق فئة الفني المختار.
     const knownTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
     // ADR-0060 §2 — فترة التعاقد مصدرها **حقول الفورم** (اللي قالب «بالشهر» بيزرعها)، مش مدخل

@@ -1,8 +1,7 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 import { TechnicianPricingTier } from '../../technicians/entities/technician-profile.entity';
 
-// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — مرآة كاملة لـservice_level_pricing، بس مربوطة
-// بـTechnicianPricingTier (تجاري بحت) مش TechnicianLevel (تشغيلي). صفر تعديل على الجدول القديم.
+// مصدر تسعير الفني الوحيد: مبتدئ/قياسي/خبير. المستوى التشغيلي لا يملك جدول تسعير موازٍ.
 @Entity('service_pricing_tier_pricing')
 export class ServicePricingTierPricing {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
