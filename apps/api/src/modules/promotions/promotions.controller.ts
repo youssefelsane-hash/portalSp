@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { LoyaltySource } from './entities/loyalty-transaction.entity';
@@ -17,7 +18,17 @@ export class PromotionsController {
     private readonly loyaltyService: LoyaltyService,
   ) {}
 
+  /**
+   * **سقف أضيق من الافتراضي عمدًا (ج-٩)**: كود الخصم **سر قابل للتخمين** — كل محاولة فاشلة
+   * مجانية بتقرّب المهاجم من خصم حقيقي على حسابنا. الحد العام (٦٠/دقيقة) بيدّي ٨٦٬٤٠٠ تخمينة
+   * في اليوم من جهاز واحد، وده كفاية لفضاء أكواد قصير.
+   *
+   * ١٠/دقيقة أوسع بكتير من أي استخدام بشري حقيقي (العميل بيكتب كود أو اتنين قبل ما يحجز)
+   * وأضيق بكتير من تخمين مفيد. الـtracker بيعدّ بالـIP هنا (مفيش `phone_number` في الحمولة)،
+   * وده مقبول للمسار ده تحديدًا لأنه محتاج توكن صالح أصلاً — فتكلفة تدوير الهوية عالية.
+   */
   @Get('promo-codes/:code/validate')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async validate(@CurrentUser() user: JwtPayload, @Param('code') code: string, @Query() query: ValidatePromoCodeQueryDto) {
     const { promoCode, discountCents } = await this.promotionsService.previewForOrder(
       user.sub,
