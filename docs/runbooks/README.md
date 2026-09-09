@@ -12,7 +12,7 @@
 | `payment-gateway-down.md` | تعطل بوابة الدفع (Paymob/Fawry) | ⬜ لسه هيتكتب |
 | `ddos-attack.md` | هجوم DDoS | ⬜ لسه هيتكتب |
 | `data-breach.md` | تسرب بيانات | ⬜ لسه هيتكتب |
-| `deploy-failure.md` | فشل نشر / rollback | ⬜ لسه هيتكتب |
+| `go-live-and-rollback.md` | الإطلاق، فشل النشر، والرجوع (بيغطّي `deploy-failure.md`) | ✅ جاهز |
 | `earnings-v2-cutover.md` | تفعيل/إيقاف محرك المستحقات V2 ومطابقة الأموال | ✅ جاهز |
 | `flutter-desktop-local.md` | تشغيل تطبيقَي العميل والفني كبرامج macOS محلية | ✅ جاهز |
 | `local-run-macos.md` | تشغيل المنصّة كاملة محليًا على ماك (API + لوحتين + تطبيقات) وتشخيص «مفيش بيانات» | ✅ جاهز |
