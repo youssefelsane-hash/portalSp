@@ -139,6 +139,9 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/promotions', label: 'أكواد الخصم', icon: Tag, permission: 'promotions.view' },
       // ADR-0046 — الحملات التسويقية: إشعارات تلقائية بتفكّر العميل بالخدمات.
       { href: '/campaigns', label: 'الحملات التسويقية', icon: Send, permission: 'campaigns.manage' },
+      // ADR-0082 — «العميل ده جه من أنهي إعلان؟». مكانها هنا مش في التحليلات لأن فيها **أفعال**
+      // (إنشاء مصادر، تعليم مستحقات مدفوعة) مش قراءة أرقام بس.
+      { href: '/marketing', label: 'التسويق والإسناد', icon: Megaphone, permission: 'marketing.manage' },
     ],
   },
   {
