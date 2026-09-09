@@ -34,10 +34,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _load() async {
     try {
       final page = await _repository.list();
-      if (mounted) setState(() {
-        _orders = page.items;
-        _nextCursor = page.nextCursor;
-      });
+      if (mounted) {
+        setState(() {
+          _orders = page.items;
+          _nextCursor = page.nextCursor;
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
@@ -48,10 +50,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
     setState(() => _loadingMore = true);
     try {
       final page = await _repository.list(cursor: _nextCursor);
-      if (mounted) setState(() {
-        _orders = [...?_orders, ...page.items];
-        _nextCursor = page.nextCursor;
-      });
+      if (mounted) {
+        setState(() {
+          _orders = [...?_orders, ...page.items];
+          _nextCursor = page.nextCursor;
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     } finally {

@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { EarningsPolicyService } from './earnings-policy.service';
 import { DataSource } from 'typeorm';
@@ -61,7 +62,9 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       {} as never,
       { getNumber: async (_key: string, fallback: number) => fallback } as never,
       {} as never,
-      {} as never,
+      // الحدث ده بيتطلق فعلاً في مسار «فشل مؤكد لدفعة بطاقة متكررة» — `{}` هنا كان بيرمي
+      // `this.events.emit is not a function` فيتحوّل فشل متوقّع لعطل داخلي والاختبار يقع.
+      new EventEmitter2(),
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)

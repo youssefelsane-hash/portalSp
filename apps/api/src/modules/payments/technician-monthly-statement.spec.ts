@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { TechnicianEarningsService } from './technician-earnings.service';
+import { insertV2EarningShare } from './order-earning-share.testing';
 
 // اختبار حي ضد Postgres حقيقي — كشف مستحقات الفني الشهري (ADR-0038، docs/08 §61).
 //
@@ -30,8 +31,15 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
                            order_status, payment_status, payment_method, total_amount_cents, discount_amount_cents,
                            commissionable_base_cents, technician_earning_cents, platform_commission_cents,
-                           commission_rate_applied, level_premium_cents, warranty_price_cents, closed_at, paid_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid','cash',$7,$8,$9,$10,$11,15,$12,0,$13,$13) RETURNING id`,
+                           commission_rate_applied, level_premium_cents, warranty_price_cents, closed_at, paid_at,
+                           -- حقول تسوية v2 إجبارية على أي طلب مدفوع (migration 0282،
+                           -- chk_orders_percentage_earnings_settlement_balances): settlement_policy_version
+                           -- افتراضيه 2، والقيد بيفرض إن platform + worker_pool = total وإن
+                           -- technician_earning = worker_pool. الفكسچر كان بيدّعي في تعليقه إنه
+                           -- «بأرقام تسوية زي ما التسوية الحقيقية بتسيبها» وهو ناقص الحقول دي —
+                           -- فكان بيرمي على مستوى القاعدة من غير ما يقيس حاجة.
+                           worker_pool_cents, calculation_algorithm_version)
+       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid','cash',$7,$8,$9,$10,$11,15,$12,0,$13,$13,$10,1) RETURNING id`,
       [
         `STMT${runId}-${opts.label}`.slice(0, 24),
         ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone,
@@ -267,11 +275,14 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
   describe('§90.1 — تطابق مع المحفظة: طاقم + استرداد', () => {
     async function insertCrewShares(orderId: string, poolCents: number, memberShareCents: number) {
       const leaderShareCents = poolCents - memberShareCents;
-      await q(
-        `INSERT INTO order_earning_shares (order_id, technician_id, participant_role, technician_level, share_weight, pool_cents, share_cents)
-         VALUES ($1,$2,'leader','new',1.00,$3,$4), ($1,$5,'team_member','new',1.00,$3,$6)`,
-        [orderId, ids.techProfile, poolCents, leaderShareCents, ids.techProfile2, memberShareCents],
-      );
+      await insertV2EarningShare(q, {
+        orderId, technicianId: ids.techProfile, participantRole: 'leader',
+        poolCents, shareCents: leaderShareCents,
+      });
+      await insertV2EarningShare(q, {
+        orderId, technicianId: ids.techProfile2, participantRole: 'team_member',
+        poolCents, shareCents: memberShareCents,
+      });
     }
 
     it('عضو الطاقم بيشوف نصيبه هو بس — مش صفر ومش وعاء القائد', async () => {

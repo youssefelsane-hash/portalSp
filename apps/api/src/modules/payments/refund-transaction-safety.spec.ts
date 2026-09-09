@@ -1,3 +1,7 @@
+import { EARNINGS_V2_ALGORITHM_VERSION } from './earnings-calculator';
+import { WalletsService } from './wallets.service';
+import { Wallet } from './entities/wallet.entity';
+import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { DataSource } from 'typeorm';
 import { EarningsPolicyService } from './earnings-policy.service';
 import { PaymentsService } from './payments.service';
@@ -93,15 +97,22 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     totalAmountCents = amountCents,
   ) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    // **runId لازم يفضل جوّه رقم الطلب**: `TESTRF-${label}` كان بيتقص على ٢٤ حرف فيقطع آخر حرف
+    // من الـrunId، فالتنظيف اللي بيدوّر بـ`LIKE %runId%` ما كانش بيلاقي أي طلب — والسويتة كلها
+    // كانت بتقع في `afterAll` على مفتاح `orders_address_id_fkey`. الـrunId دلوقتي في الأول.
+    const orderNumber = `RF${runId}${label.split(runId).join('').replace(/^-+|-+$/g, '')}`.slice(0, 24);
     const [order] = await q(
-      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES (20,$1,$2,$3,$4,$5,'completed','paid',$6,0) RETURNING id`,
-      [`TESTRF-${label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, totalAmountCents],
+      // **لقطة تسوية متسقة**: الطلب ده مالوش فني، فوعاء العمال صفر وكل الإجمالي عمولة منصة.
+      // `reconcileRefund()` بيعكس التسوية من دلاء (منصة + حصص المشاركين) ولازم مجموعها = إجمالي
+      // الطلب، فطلب بعمولة صفر كان بيرمي «Settlement refund buckets must equal the original order total».
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, platform_commission_cents, worker_pool_cents, calculation_algorithm_version)
+       VALUES (20,$1,$2,$3,$4,$5,'completed','paid',$6,0,$6,0,$7) RETURNING id`,
+      [orderNumber, ids.customerProfile, ids.service, ids.address, ids.zone, totalAmountCents, EARNINGS_V2_ALGORITHM_VERSION],
     );
     const [payment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, gateway_transaction_id, completed_at)
        VALUES ($1,$2,$3,$4,'card','succeeded',$5,$6, now()) RETURNING id`,
-      [`PAYRF-${label}`.slice(0, 24), order.id, ids.customerProfile, amountCents, `idem-rf-${label}-${Math.random()}`, gatewayTxnId],
+      [`PY${runId}${label.split(runId).join('').replace(/^-+|-+$/g, '')}`.slice(0, 24), order.id, ids.customerProfile, amountCents, `idem-rf-${label}-${Math.random()}`, gatewayTxnId],
     );
     return { orderId: order.id as string, paymentId: payment.id as string };
   }
@@ -110,7 +121,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Order, Payment, Refund, User, WebhookEvent, OrderStatusHistory],
+      entities: [Order, Payment, Refund, User, WebhookEvent, OrderStatusHistory, Wallet, WalletTransaction],
     });
     await dataSource.initialize();
 
@@ -162,10 +173,14 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
 
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRF-%${runId}%`]);
-    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRF-%${runId}%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRF-%${runId}%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTRF-%${runId}%`]);
+    // `payment_notification_outbox` بيتكتب فيه صف مع كل استرداد (enqueueRefundNotification)،
+    // وبيمنع حذف الطلب بمفتاح أجنبي. التنظيف كان بيقع هنا فيبوّظ **السويتة كلها** مش تست واحد.
+    await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`RF${runId}%`]);
+    await q(`DELETE FROM refund_settlement_reversals WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`RF${runId}%`]);
+    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`RF${runId}%`]);
+    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`RF${runId}%`]);
+    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`RF${runId}%`]);
+    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`RF${runId}%`]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -185,7 +200,11 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,
-      {} as never, // walletsService — مش متنادى (مفيش فني على الطلب، refundMethod=ORIGINAL_METHOD مش WALLET_CREDIT)
+      // walletsService: **بيتنادى فعلاً**. `reconcileRefund()` على طلب مكتمل (مش ملغي) بمبلغ
+      // أكبر من صفر بيعكس التسوية، وأول خطوة فيها `findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID)`.
+      // التعليق القديم («مش متنادى») كان صح وقت كتابته وبقى غلط بعد ADR-0288 — فالخدمة الحقيقية
+      // هنا بدل `{}` عشان المسار يتقاس زي الإنتاج مش يرمي TypeError.
+      new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource),
       {} as never, // catalogService
       {} as never, // customerProfiles — نفس السبب
       {} as never, // techniciansService — نفس السبب (order.technicianId=null)
