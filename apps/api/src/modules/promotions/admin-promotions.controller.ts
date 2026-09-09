@@ -1,4 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { ArrayNotEmpty, IsArray, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { Type } from 'class-transformer';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -17,6 +19,19 @@ import { LoyaltySource } from './entities/loyalty-transaction.entity';
 import { LoyaltyService } from './loyalty.service';
 import { PromoCodesService } from './promo-codes.service';
 import { PromoCodeLinksService } from './promo-code-links.service';
+
+class MarkPromoMarketingCommissionsPaidDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
+  @Type(() => String)
+  ids: string[];
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 500)
+  note?: string;
+}
 
 @Controller('admin')
 @Roles(UserType.ADMIN)
@@ -49,6 +64,11 @@ export class AdminPromotionsController {
           shareUrl: this.promoCodeLinks.shareUrl(item.code),
           linkHitCount: link?.hits ?? 0,
           linkSignupCount: link?.signups ?? 0,
+          attributedOrderCount: link?.orders ?? 0,
+          attributedCompletedOrderCount: link?.completedOrders ?? 0,
+          attributedGrossRevenueCents: link?.grossRevenueCents ?? 0,
+          attributedPlatformRevenueCents: link?.platformRevenueCents ?? 0,
+          accruedPartnerCommissionCents: link?.accruedCommissionCents ?? 0,
         });
       }),
       meta,
@@ -65,6 +85,22 @@ export class AdminPromotionsController {
   ) {
     const promo = await this.promoCodesService.deactivate(id, admin.sub, audit);
     return toPromoCodeResponseDto(promo, { shareUrl: this.promoCodeLinks.shareUrl(promo.code) });
+  }
+
+  /** مستحقات شركاء أكواد الخصم/التسويق: تعليم يدوي فقط، ولا تحويل آلي للأموال. */
+  @Get('promo-codes/marketing-commissions')
+  @RequirePermission('promotions.view')
+  async listMarketingCommissions(@Query('status') status?: string) {
+    return this.promoCodeLinks.listCommissions(status);
+  }
+
+  @Post('promo-codes/marketing-commissions/mark-paid')
+  @RequirePermission('promotions.manage')
+  async markMarketingCommissionsPaid(
+    @CurrentUser() admin: JwtPayload,
+    @Body() dto: MarkPromoMarketingCommissionsPaidDto,
+  ) {
+    return { updated: await this.promoCodeLinks.markCommissionsPaid(dto.ids, admin.sub, dto.note) };
   }
 
   // نقاط ولاء يدوية (تعويض، هدية عيد ميلاد، ...) — مسار إداري بس، مفيش قاعدة تلقائية موصّلة لسه

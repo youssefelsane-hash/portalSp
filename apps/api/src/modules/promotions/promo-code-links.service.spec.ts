@@ -5,13 +5,13 @@ describe('PromoCodeLinksService smart links', () => {
   const settings = {
     getString: jest.fn(),
   } as unknown as SettingsService;
-  const service = new PromoCodeLinksService({} as never, {} as never, {} as never, settings);
+  const service = new PromoCodeLinksService({} as never, {} as never, {} as never, {} as never, {} as never, settings);
 
   beforeEach(() => jest.clearAllMocks());
 
   it('يحافظ على query موجودة وهو يمرر الكود إلى رحلة العميل', () => {
     expect(appendPromoLinkCode('https://customer.example/services?source=qr', 'SAVE_20')).toBe(
-      'https://customer.example/services?source=qr&p=SAVE_20',
+      'https://customer.example/services?source=qr&p=SAVE_20&pd=1',
     );
   });
 

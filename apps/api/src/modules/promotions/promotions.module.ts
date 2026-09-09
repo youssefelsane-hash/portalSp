@@ -13,6 +13,7 @@ import { LoyaltyTransaction } from './entities/loyalty-transaction.entity';
 import { PromoCode } from './entities/promo-code.entity';
 import { PromoCodeLinkAttribution } from './entities/promo-code-link-attribution.entity';
 import { PromoCodeLinkHit } from './entities/promo-code-link-hit.entity';
+import { PromoCodeMarketingCommission } from './entities/promo-code-marketing-commission.entity';
 import { PromoCodeUsage } from './entities/promo-code-usage.entity';
 import { LoyaltyExpiryService } from './loyalty-expiry.service';
 import { LoyaltyService } from './loyalty.service';
@@ -22,6 +23,7 @@ import { PromoCodeLinksService } from './promo-code-links.service';
 import { PromotionsController } from './promotions.controller';
 import { PromotionsService } from './promotions.service';
 import { PromoLinkCapturedListener } from './listeners/promo-link-captured.listener';
+import { PromoMarketingOrderStatusListener } from './listeners/promo-marketing-order-status.listener';
 
 @Module({
   imports: [
@@ -30,6 +32,7 @@ import { PromoLinkCapturedListener } from './listeners/promo-link-captured.liste
       PromoCodeUsage,
       PromoCodeLinkHit,
       PromoCodeLinkAttribution,
+      PromoCodeMarketingCommission,
       LoyaltyTransaction,
       CustomerProfile,
       User,
@@ -46,10 +49,11 @@ import { PromoLinkCapturedListener } from './listeners/promo-link-captured.liste
     PromoCodesService,
     PromoCodeLinksService,
     PromoLinkCapturedListener,
+    PromoMarketingOrderStatusListener,
     LoyaltyService,
     LoyaltyExpiryService,
     PromotionsService,
   ],
-  exports: [PromoCodesService, LoyaltyService, LoyaltyExpiryService],
+  exports: [PromoCodesService, PromoCodeLinksService, LoyaltyService, LoyaltyExpiryService],
 })
 export class PromotionsModule {}

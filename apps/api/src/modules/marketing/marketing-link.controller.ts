@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { MarketingService } from './marketing.service';
+import { PromoCodeLinksService } from '../promotions/promo-code-links.service';
 
 /**
  * رابط الاكتساب الذكي — نقطة الدخول اللي الـQR بيوصّل لها (ADR-0082 §2، docs/08 §135).
@@ -25,7 +26,10 @@ import { MarketingService } from './marketing.service';
  */
 @Controller('r')
 export class MarketingLinkController {
-  constructor(private readonly marketing: MarketingService) {}
+  constructor(
+    private readonly marketing: MarketingService,
+    private readonly promoLinks: PromoCodeLinksService,
+  ) {}
 
   /**
    * حد الطلبات عالي عن قصد (١٢٠/دقيقة للـIP): الملصق ممكن يتصوّر من مجموعة واقفة مع بعض على
@@ -51,6 +55,16 @@ export class MarketingLinkController {
     @Headers('user-agent') userAgent: string | undefined,
     @Res() res: Response,
   ): Promise<void> {
+    // كل مصدر قديم اتنقل لكود موحّد في migration 0314. نحوله لمسار /p كي تستمر الملصقات
+    // المطبوعة نفسها لكن تدخل في التقرير الموحد بدل ما تنشئ تاريخًا جديدًا في جدول قديم.
+    const promo = await this.promoLinks.findActiveByCode(code);
+    if (promo) {
+      const platform = this.promoLinks.detectPlatform(userAgent);
+      await this.promoLinks.recordHit(promo.id, platform);
+      res.redirect(HttpStatus.FOUND, await this.promoLinks.resolveDestination(platform, promo.code, promo.discountEnabled));
+      return;
+    }
+
     const platform = this.marketing.detectPlatform(userAgent);
     const source = await this.marketing.findActiveByCode(code);
     if (source) {

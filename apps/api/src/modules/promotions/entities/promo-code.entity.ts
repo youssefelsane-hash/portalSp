@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import type { MarketingChannel } from '../../marketing/entities/marketing-source.entity';
 
 export enum DiscountType {
   PERCENTAGE = 'percentage',
@@ -71,6 +72,29 @@ export class PromoCode {
 
   @Column({ name: 'spent_cents', type: 'integer', default: 0 })
   spentCents: number;
+
+  /** الكود قد يكون مصدر تسويق فقط (ملصق/بواب) بلا خصم عند الحجز. */
+  @Column({ name: 'discount_enabled', type: 'boolean', default: true })
+  discountEnabled: boolean;
+
+  /** الحقول التالية توصّف مصدر الإسناد؛ لا تدخل أبدًا في معادلة الخصم أو مستحق الفني. */
+  @Column({ name: 'marketing_channel', type: 'varchar', length: 30, nullable: true })
+  marketingChannel: MarketingChannel | null;
+
+  @Column({ name: 'marketing_region_label', type: 'varchar', length: 120, nullable: true })
+  marketingRegionLabel: string | null;
+
+  @Column({ name: 'marketing_notes', type: 'text', nullable: true })
+  marketingNotes: string | null;
+
+  @Column({ name: 'payout_per_completed_order_cents', type: 'integer', default: 0 })
+  payoutPerCompletedOrderCents: number;
+
+  @Column({ name: 'payout_contact_name', type: 'varchar', length: 120, nullable: true })
+  payoutContactName: string | null;
+
+  @Column({ name: 'payout_contact_phone', type: 'varchar', length: 20, nullable: true })
+  payoutContactPhone: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

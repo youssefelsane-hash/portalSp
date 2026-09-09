@@ -10,7 +10,7 @@ export function PromoLinkCapture() {
 
   useEffect(() => {
     const code = searchParams.get('p');
-    if (code) rememberPendingPromoLinkCode(code);
+    if (code) rememberPendingPromoLinkCode(code, searchParams.get('pd') !== '0');
   }, [searchParams]);
 
   return null;

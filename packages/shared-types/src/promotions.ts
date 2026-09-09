@@ -1,3 +1,5 @@
+import type { MarketingChannel } from './marketing';
+
 // مطابق لـ apps/api/src/modules/promotions/dto/*.ts وentities/promo-code.entity.ts
 export type DiscountType = 'percentage' | 'fixed_amount' | 'free_inspection';
 
@@ -20,12 +22,24 @@ export interface PromoCodeResponseDto {
   is_active: boolean;
   budget_cents: number | null;
   spent_cents: number;
+  discount_enabled: boolean;
+  marketing_channel: MarketingChannel | null;
+  marketing_region_label: string | null;
+  marketing_notes: string | null;
+  payout_per_completed_order_cents: number;
+  payout_contact_name: string | null;
+  payout_contact_phone: string | null;
   /** رابط عام قابل للمشاركة وQR؛ يفتح رحلة العميل مع الكود بعد تسجيل زيارة. */
   share_url: string;
   /** زيارات الرابط، وليست عدد مستخدمين فريدين. */
   link_hit_count: number;
   /** حسابات جديدة أُنشئت بعد فتح الرابط؛ لا تعني مرات استخدام الخصم. */
   link_signup_count: number;
+  attributed_order_count: number;
+  attributed_completed_order_count: number;
+  attributed_gross_revenue_cents: number;
+  attributed_platform_revenue_cents: number;
+  accrued_partner_commission_cents: number;
   created_at: string;
 }
 
@@ -44,4 +58,24 @@ export interface CreatePromoCodeBody {
   budget_cents?: number;
   applies_to_service_ids?: string[];
   applies_to_zone_ids?: string[];
+  discount_enabled?: boolean;
+  marketing_channel?: MarketingChannel;
+  marketing_region_label?: string;
+  marketing_notes?: string;
+  payout_per_completed_order_cents?: number;
+  payout_contact_name?: string;
+  payout_contact_phone?: string;
+}
+
+export interface PromoMarketingCommissionDto {
+  id: string;
+  promoCodeId: string;
+  orderId: string;
+  customerUserId: string;
+  amountCents: number;
+  status: 'accrued' | 'paid' | 'cancelled';
+  accruedAt: string;
+  paidAt: string | null;
+  paidByUserId: string | null;
+  paymentNote: string | null;
 }

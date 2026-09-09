@@ -22,7 +22,7 @@ export class PromoCodeLinkController {
     if (promo) await this.links.recordHit(promo.id, platform);
 
     // كود منتهي/موقوف لا يترك الزائر في صفحة خطأ؛ نفتح المنصة فقط بلا كود معروض.
-    const destination = await this.links.resolveDestination(platform, promo?.code ?? '');
+    const destination = await this.links.resolveDestination(platform, promo?.code ?? '', promo?.discountEnabled ?? false);
     res.redirect(HttpStatus.FOUND, destination);
   }
 }

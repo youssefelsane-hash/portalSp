@@ -6,8 +6,11 @@ import type {
   AdminServiceZoneResponseDto,
   CreatePromoCodeBody,
   DiscountType,
+  MarketingChannel,
+  PromoMarketingCommissionDto,
   PromoCodeResponseDto,
 } from '@baytak/shared-types';
+import { MARKETING_CHANNELS, MARKETING_CHANNEL_LABELS_AR } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -52,6 +55,8 @@ export default function PromotionsPage() {
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[]>([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
+  const [discountEnabled, setDiscountEnabled] = useState(true);
+  const [commissions, setCommissions] = useState<PromoMarketingCommissionDto[]>([]);
 
   function load() {
     authedFetchPaginated<PromoCodeResponseDto>(`/admin/promo-codes?page=${page}&per_page=${PER_PAGE}`)
@@ -60,6 +65,9 @@ export default function PromotionsPage() {
         setTotal(meta.total ?? items.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل أكواد الخصم'));
+    authedFetch<PromoMarketingCommissionDto[]>('/admin/promo-codes/marketing-commissions?status=accrued')
+      .then(setCommissions)
+      .catch(() => setCommissions([]));
   }
 
   useEffect(() => {
@@ -83,7 +91,8 @@ export default function PromotionsPage() {
       code: (form.get('code') as string).trim().toUpperCase(),
       name_ar: form.get('name_ar') as string,
       discount_type: discountType,
-      discount_value: discountType === 'free_inspection' ? 0 : Number(form.get('discount_value')),
+      discount_value: !discountEnabled || discountType === 'free_inspection' ? 0 : Number(form.get('discount_value')),
+      discount_enabled: discountEnabled,
       // `type=date` بلا وقت؛ من تاريخ يبدأ من أوله، و"لحد تاريخ" لازم يظل صالحًا حتى آخره.
       valid_from: new Date(`${form.get('valid_from') as string}T00:00:00`).toISOString(),
       valid_until: new Date(`${form.get('valid_until') as string}T23:59:59.999`).toISOString(),
@@ -99,6 +108,18 @@ export default function PromotionsPage() {
     if (budget) body.budget_cents = Math.round(Number(budget) * 100);
     if (selectedServiceIds.length > 0) body.applies_to_service_ids = selectedServiceIds;
     if (selectedZoneIds.length > 0) body.applies_to_zone_ids = selectedZoneIds;
+    const marketingChannel = form.get('marketing_channel') as MarketingChannel;
+    if (marketingChannel) body.marketing_channel = marketingChannel;
+    const marketingRegion = (form.get('marketing_region_label') as string).trim();
+    if (marketingRegion) body.marketing_region_label = marketingRegion;
+    const marketingNotes = (form.get('marketing_notes') as string).trim();
+    if (marketingNotes) body.marketing_notes = marketingNotes;
+    const payout = form.get('payout_per_completed_order_cents') as string;
+    if (payout) body.payout_per_completed_order_cents = Math.round(Number(payout) * 100);
+    const payoutContact = (form.get('payout_contact_name') as string).trim();
+    if (payoutContact) body.payout_contact_name = payoutContact;
+    const payoutPhone = (form.get('payout_contact_phone') as string).trim();
+    if (payoutPhone) body.payout_contact_phone = payoutPhone;
 
     setIsSaving(true);
     setError(null);
@@ -107,6 +128,7 @@ export default function PromotionsPage() {
       setShowNew(false);
       setSelectedServiceIds([]);
       setSelectedZoneIds([]);
+      setDiscountEnabled(true);
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -128,12 +150,29 @@ export default function PromotionsPage() {
     }
   }
 
+  async function markCommissionPaid(ids: string[]) {
+    if (ids.length === 0) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch('/admin/promo-codes/marketing-commissions/mark-paid', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تعليم المستحقات كمدفوعة');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
   return (
     <AppShell>
       <PageHeader
-        title="أكواد الخصم"
+        title="العروض والتسويق"
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + كود جديد
@@ -167,8 +206,17 @@ export default function PromotionsPage() {
               </div>
               <div>
                 <Label htmlFor="discount_value">قيمة الخصم (نسبة % أو جنيه)</Label>
-                <Input id="discount_value" name="discount_value" type="number" min={0} step="0.01" dir="ltr" />
+                <Input id="discount_value" name="discount_value" type="number" min={0} step="0.01" dir="ltr" disabled={!discountEnabled} />
               </div>
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <input type="checkbox" checked={discountEnabled} onChange={(e) => setDiscountEnabled(e.target.checked)} />
+                الكود يمنح خصمًا عند الحجز
+              </label>
+              {!discountEnabled && (
+                <p className="text-sm text-muted-foreground sm:col-span-2">
+                  كود تسويق وإسناد فقط: يقيس الزيارات والتسجيلات ويمكن أن ينشئ مستحق شريك، لكنه لا يغيّر سعر العميل.
+                </p>
+              )}
               <div>
                 <Label htmlFor="valid_from">من تاريخ</Label>
                 <Input id="valid_from" name="valid_from" type="date" required dir="ltr" />
@@ -197,6 +245,39 @@ export default function PromotionsPage() {
                 <input type="checkbox" name="new_customers_only" />
                 عملاء جداد بس
               </label>
+
+              <div className="border-t pt-3 sm:col-span-2">
+                <p className="mb-3 font-medium">التسويق والإسناد (اختياري)</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="marketing_channel">قناة المصدر</Label>
+                    <SelectNative id="marketing_channel" name="marketing_channel" defaultValue="">
+                      <option value="">بدون إسناد تسويقي</option>
+                      {MARKETING_CHANNELS.map((channel) => <option key={channel} value={channel}>{MARKETING_CHANNEL_LABELS_AR[channel]}</option>)}
+                    </SelectNative>
+                  </div>
+                  <div>
+                    <Label htmlFor="marketing_region_label">وصف منطقة الحملة (اختياري)</Label>
+                    <Input id="marketing_region_label" name="marketing_region_label" maxLength={120} placeholder="مثال: سموحة" />
+                  </div>
+                  <div>
+                    <Label htmlFor="payout_per_completed_order_cents">مستحق الشريك لكل أول طلب مكتمل (جنيه)</Label>
+                    <Input id="payout_per_completed_order_cents" name="payout_per_completed_order_cents" type="number" min={0} step="0.01" dir="ltr" />
+                  </div>
+                  <div>
+                    <Label htmlFor="payout_contact_name">اسم الشريك (اختياري)</Label>
+                    <Input id="payout_contact_name" name="payout_contact_name" maxLength={120} />
+                  </div>
+                  <div>
+                    <Label htmlFor="payout_contact_phone">رقم الشريك (اختياري)</Label>
+                    <Input id="payout_contact_phone" name="payout_contact_phone" maxLength={20} dir="ltr" />
+                  </div>
+                  <div>
+                    <Label htmlFor="marketing_notes">ملاحظات داخلية (اختياري)</Label>
+                    <Input id="marketing_notes" name="marketing_notes" maxLength={2000} />
+                  </div>
+                </div>
+              </div>
 
               <div className="sm:col-span-2">
                 <Label>مقصور على خدمات معيّنة (اختياري، فاضي = كل الخدمات)</Label>
@@ -259,8 +340,9 @@ export default function PromotionsPage() {
                 <TableHead>الكود</TableHead>
                 <TableHead>الاسم</TableHead>
                 <TableHead>الخصم</TableHead>
-                <TableHead>الاستخدام</TableHead>
-                <TableHead>زيارات / تسجيلات</TableHead>
+                <TableHead>القيود</TableHead>
+                <TableHead>الرحلة</TableHead>
+                <TableHead>النتيجة</TableHead>
                 <TableHead>الميزانية المتبقية</TableHead>
                 <TableHead>الحالة</TableHead>
                 <TableHead>QR</TableHead>
@@ -272,13 +354,17 @@ export default function PromotionsPage() {
                 <TableRow key={promo.id}>
                   <TableCell dir="ltr">{promo.code}</TableCell>
                   <TableCell>{promo.name_ar}</TableCell>
-                  <TableCell>{discountLabel(promo)}</TableCell>
+                  <TableCell>{promo.discount_enabled ? discountLabel(promo) : 'إسناد فقط'}</TableCell>
                   <TableCell>
                     {promo.used_count}
                     {promo.usage_limit_total ? ` / ${promo.usage_limit_total}` : ''}
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {promo.link_hit_count} / {promo.link_signup_count}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {promo.attributed_completed_order_count} مكتمل · {formatEgp(promo.attributed_gross_revenue_cents)}
+                    {promo.marketing_channel && <span className="mt-1 block text-xs text-muted-foreground">{MARKETING_CHANNEL_LABELS_AR[promo.marketing_channel]}</span>}
                   </TableCell>
                   <TableCell>
                     {promo.budget_cents !== null ? formatEgp(promo.budget_cents - promo.spent_cents) : '—'}
@@ -312,6 +398,29 @@ export default function PromotionsPage() {
 
           <Pagination page={page} totalPages={totalPages} total={total} itemLabel="كود" onPageChange={setPage} />
         </>
+      )}
+
+      {commissions.length > 0 && (
+        <Card className="mt-6">
+          <CardContent className="pt-6">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold">مستحقات شركاء العروض</h2>
+                <p className="text-sm text-muted-foreground">تُعلّم مدفوعة يدويًا فقط؛ لا يوجد سحب أو تحويل تلقائي للأموال.</p>
+              </div>
+              <Button size="sm" disabled={isSaving} onClick={() => markCommissionPaid(commissions.map((commission) => commission.id))}>
+                تعليم الكل مدفوعًا
+              </Button>
+            </div>
+            <Table>
+              <TableHeader><TableRow><TableHead>الكود</TableHead><TableHead>الطلب</TableHead><TableHead>المبلغ</TableHead></TableRow></TableHeader>
+              <TableBody>{commissions.map((commission) => {
+                const promo = promoCodes?.find((item) => item.id === commission.promoCodeId);
+                return <TableRow key={commission.id}><TableCell dir="ltr">{promo?.code ?? commission.promoCodeId}</TableCell><TableCell dir="ltr">{commission.orderId}</TableCell><TableCell>{formatEgp(commission.amountCents)}</TableCell></TableRow>;
+              })}</TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
     </AppShell>
   );

@@ -57,6 +57,9 @@ export class PromoCodesService {
     if (!promoCode.isActive || promoCode.deletedAt) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده مش شغال', HttpStatus.BAD_REQUEST);
     }
+    if (!promoCode.discountEnabled) {
+      throw new ApiException(ErrorCode.VAL_001, 'الكود ده للتسويق والإسناد فقط ومفيهوش خصم للحجز', HttpStatus.BAD_REQUEST);
+    }
     if (now < promoCode.validFrom || now > promoCode.validUntil) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده منتهي أو لسه مبدأش', HttpStatus.BAD_REQUEST);
     }
@@ -184,6 +187,13 @@ export class PromoCodesService {
     if (validUntil <= validFrom) {
       throw new ApiException(ErrorCode.VAL_001, 'تاريخ الانتهاء لازم يكون بعد تاريخ البداية', HttpStatus.BAD_REQUEST);
     }
+    if ((dto.payout_per_completed_order_cents ?? 0) > 0 && !dto.marketing_channel) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'اختار قناة التسويق قبل إضافة مستحق للشريك',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
     const promoCode = repository.create({
       code,
@@ -202,6 +212,13 @@ export class PromoCodesService {
       createdByUserId: adminUserId,
       budgetCents: dto.budget_cents ?? null,
       restrictedToUserId: dto.restricted_to_user_id ?? null,
+      discountEnabled: dto.discount_enabled ?? true,
+      marketingChannel: dto.marketing_channel ?? null,
+      marketingRegionLabel: dto.marketing_region_label?.trim() || null,
+      marketingNotes: dto.marketing_notes?.trim() || null,
+      payoutPerCompletedOrderCents: dto.payout_per_completed_order_cents ?? 0,
+      payoutContactName: dto.payout_contact_name?.trim() || null,
+      payoutContactPhone: dto.payout_contact_phone?.trim() || null,
     });
     await repository.save(promoCode);
     return promoCode;
