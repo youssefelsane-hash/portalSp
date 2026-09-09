@@ -31,12 +31,17 @@ export class OrderDispatchListener {
    */
   @OnEvent(ORDER_CREATED_EVENT)
   async handleOrderCreated(event: OrderCreatedEvent): Promise<void> {
-    if (await this.dispatchQueue.enqueueDispatch(event.orderId)) return;
-
-    this.logger.warn(`الطابور مش متاح للطلب ${event.orderId} — بننفّذ التوزيع مباشرة.`);
     try {
+      // `enqueueDispatch` مكتوبة إنها ترجع `false` مش ترمي — بس «مكتوبة إنها» مش «مضمون إنها».
+      // الحدث ده بيتبعت بـ`emitAsync` من `create()`، يعني أي رمي هنا بيرجع للعميل كـ`500`
+      // على طلب **اتسجّل بالفعل**. اللف ده بيحوّل أي عطل غير متوقّع في الطابور للمسار الاحتياطي
+      // (توزيع مباشر) بدل ما يكسر الحجز.
+      if (await this.dispatchQueue.enqueueDispatch(event.orderId)) return;
+      this.logger.warn(`الطابور مش متاح للطلب ${event.orderId} — بننفّذ التوزيع مباشرة.`);
       await this.matchingService.dispatchOrAutoConfirm(event.orderId);
     } catch (err) {
+      // آخر شبكة أمان: `MatchingRecoveryService` بتمسح الطلبات العالقة دوريًا، فالطلب مش بيضيع
+      // حتى لو المسارين فشلوا. الرمي هنا كان هيكسر الحجز بلا أي مكسب.
       this.logger.error(`فشل توزيع الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }

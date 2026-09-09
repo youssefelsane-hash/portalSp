@@ -1,0 +1,39 @@
+# baytak — نسخة احتياطية يومية متحقَّق منها (ج-١٠).
+#
+# الوحدة دي **oneshot** بتشغّل `scripts/backup-db.sh` وبس؛ الجدولة في
+# `baytak-backup.timer` جنبها. الفصل ده مقصود: تقدر تشغّل نسخة يدويًا وقت الحاجة
+# (`systemctl start baytak-backup`) من غير ما تلخبط الجدول.
+#
+# التركيب (على السيرفر):
+#   sudo cp infra/systemd/baytak-backup.{service,timer} /etc/systemd/system/
+#   # عدّل WorkingDirectory/User/EnvironmentFile تحت حسب مسار النشر الفعلي
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now baytak-backup.timer
+#   systemctl list-timers baytak-backup      # للتأكد إن الميعاد الجاي مضبوط
+#   journalctl -u baytak-backup -n 50        # نتيجة آخر نسخة
+#
+# **الإنذار عند الفشل**: السكريبت بيخرج بكود ≠ 0 لو الأرشيف تالف أو ناقص جداول جوهرية،
+# فالوحدة بتفشل و`journalctl` بيسجّلها. اربطها بمراقبتك عبر `OnFailure=` أو راقب
+# `systemctl is-failed baytak-backup`. **نسخة بتفشل بصمت أخطر من مفيش نسخة** — لأن
+# الاتنين بيدّوا نفس النتيجة وقت الكارثة، بس الأولى بتدّي طمأنينة كاذبة لحد ساعتها.
+
+[Unit]
+Description=baytak — نسخة احتياطية يومية للقاعدة (متحقَّق منها)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=baytak
+WorkingDirectory=/srv/baytak
+EnvironmentFile=/srv/baytak/apps/api/.env
+Environment=BACKUP_DIR=/var/backups/baytak
+Environment=BACKUP_RETENTION_DAYS=14
+ExecStart=/srv/baytak/scripts/backup-db.sh
+
+# النسخ الاحتياطي عملية I/O تقيلة — الأولوية المنخفضة بتخليها ماتزاحمش الطلبات الحقيقية.
+# القاعدة الحاكمة نفسها: النظام ممكن يبطأ، بس ما يقعش.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

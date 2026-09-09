@@ -84,6 +84,23 @@ async function main() {
 
       try {
         await client.query('BEGIN');
+        // **أخطر لحظة في أي نشر** (ج-١١): `ALTER TABLE` و`CREATE INDEX` العادي بياخدوا
+        // `ACCESS EXCLUSIVE` على الجدول. لو فيه معاملة شغّالة ماسكة الجدول (حتى `SELECT` طويل)،
+        // الـmigration بتقف في الطابور — **وكل استعلام جديد على الجدول بيقف وراها**. النتيجة إن
+        // `ALTER` بريء بيقفل جدول `orders` والمنصة كلها بتتجمّد لحد ما حد يلاحظ.
+        //
+        // `lock_timeout` بيحوّل الكارثة دي لفشل سريع ونظيف: لو مقدرناش ناخد القفل في ٥ ثواني،
+        // الـmigration بتفشل وتعمل rollback والخدمة **ما اتأثرتش**. تعيد المحاولة في وقت أهدى.
+        // `statement_timeout` بيحمي من الحالة التانية: القفل اتاخد بس العملية نفسها طويلة
+        // (إعادة كتابة جدول كبير) — الجدول بيفضل مقفول طول المدة دي.
+        //
+        // الاتنين قابلين للتعديل لـmigration معروف إنها طويلة (بناء فهرس ضخم في نافذة صيانة):
+        // `MIGRATION_LOCK_TIMEOUT=30s MIGRATION_STATEMENT_TIMEOUT=30min`. القيم الافتراضية
+        // مضبوطة للحالة الشائعة: نشر عادي والمنصة شغّالة.
+        await client.query(`SET LOCAL lock_timeout = '${process.env.MIGRATION_LOCK_TIMEOUT ?? '5s'}'`);
+        await client.query(
+          `SET LOCAL statement_timeout = '${process.env.MIGRATION_STATEMENT_TIMEOUT ?? '5min'}'`,
+        );
         await client.query(sql);
         await client.query('INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)', [
           file,
@@ -94,6 +111,17 @@ async function main() {
       } catch (err) {
         await client.query('ROLLBACK');
         console.error(`❌ فشل ${file}:`, err.message);
+        // `55P03 lock_not_available` و`57014 query_canceled` مش أخطاء في الـSQL — هما النتيجة
+        // **الصحيحة** للحماية فوق. الرسالة لازم تفرّق، وإلا حد هيقضي ساعة يدوّر على غلط في
+        // ملف سليم بدل ما يعيد المحاولة في وقت أهدى.
+        if (err.code === '55P03' || err.code === '57014') {
+          console.error(
+            `   ℹ️  ده مش غلط في الـSQL — الحماية اشتغلت: الجدول كان مقفول أو العملية طالت.\n` +
+              `      الخدمة **ما اتأثرتش** والتغيير اتلغى بالكامل. أعد المحاولة في وقت أهدى، أو\n` +
+              `      لو الـmigration دي طويلة بطبيعتها شغّلها في نافذة صيانة بـ:\n` +
+              `      MIGRATION_LOCK_TIMEOUT=30s MIGRATION_STATEMENT_TIMEOUT=30min node infra/migrations/migrate.js`,
+          );
+        }
         process.exit(1);
       }
     }

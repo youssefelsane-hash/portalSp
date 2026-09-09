@@ -65,6 +65,13 @@ jobs:
       - name: فحص ترقيم الـmigrations
         run: node scripts/check-migrations.js
 
+      # فحص **محتوى** الـmigrations الجديدة (ج-١١): الـSQL بيعدّي على tsc وeslint وjest كلهم
+      # لأنه مش TypeScript — فمفيش أي بوابة بتقراه قبل ما يتطبّق على بيانات عملاء حقيقية.
+      # الحارس بيرصد الأنماط اللي بتقفل جداول أو بتفقد بيانات أو بتفشل على جدول مش فاضي،
+      # وبيقبل إقرارًا صريحًا (`-- migration-safety: ok <السبب>`) لما النمط يكون مقصود وآمن.
+      - name: فحص أمان الـmigrations الجديدة
+        run: node scripts/check-migration-safety.js
+
       - name: تطبيق الـmigrations
         run: node infra/migrations/migrate.js
         env:
@@ -187,3 +194,14 @@ jobs:
       - name: flutter build apk --debug (فحص تصدير حقيقي، مش static analysis بس)
         working-directory: apps/${{ matrix.app }}
         run: flutter build apk --debug
+
+      # ج-١٥ — `--debug` **مابيشغّلش R8 ولا tree-shaking**، فكل فئة أعطال الإصدار بتعدّي منه:
+      # كلاس بيتنادى بالـreflection (Firebase، فك JSON) بيتشال بصمت، وفروع `kDebugMode` بتتشال
+      # بالكامل، و`assert()` بتختفي. الانهيار الناتج بيحصل في يد المستخدم **بس**.
+      #
+      # `--dart-define=API_BASE_URL` مطلوب هنا فعلاً: `assertProductionApiConfig` بترمي وقت
+      # التشغيل لو الإصدار اتبنى بعنوان تطوير — والقيمة دي عنوان وهمي صالح الشكل، الغرض منه
+      # إثبات إن البناء نفسه بيعدّي، مش الاتصال بسيرفر.
+      - name: flutter build apk --release (R8/tree-shaking — الفئة اللي debug مابيشوفهاش)
+        working-directory: apps/${{ matrix.app }}
+        run: flutter build apk --release --dart-define=API_BASE_URL=https://api.ci.invalid/api/v1

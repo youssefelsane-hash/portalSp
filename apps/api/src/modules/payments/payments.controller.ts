@@ -1,4 +1,5 @@
 import { BadRequestException, Controller, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
@@ -11,8 +12,20 @@ import {
   toPaymentResponseDto,
 } from './dto/payments-response.dto';
 
+/**
+ * **سقف بدء الدفع أضيق من الافتراضي عمدًا (ج-٩)**.
+ *
+ * `Idempotency-Key` بيمنع الدفع المزدوج بنفس المفتاح (P0-4) — بس مابيمنعش **سيل** محاولات
+ * بمفاتيح مختلفة. وكل محاولة بطاقة بتفتح جلسة عند البوابة الخارجية: بتكلّف فلوس، وبتعدّ في
+ * حصّتنا عندهم، وسيل منها بيرفع نسبة الفشل عندهم فيتعامل معانا كتاجر مشبوه.
+ *
+ * ٢٠/دقيقة أوسع من أي عميل حقيقي (بيدفع مرة، وممكن يعيد المحاولة كام مرة لو النت وحش) وأضيق
+ * من إساءة مفيدة. السقف على مستوى الكنترولر عشان يشمل **كل** طرق الدفع مع بعض — التقسيم كان
+ * هيسيب المهاجم يدوّر بين الطرق ويضاعف حصّته.
+ */
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
+@Throttle({ default: { limit: 20, ttl: 60_000 } })
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 

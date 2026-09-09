@@ -37,11 +37,21 @@ export class BookingPolicyController {
       'pricing.emergency_surcharge_percentage',
       EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK,
     );
+    // مفاتيح طوارئ الحجز (ج-١٧). الحارس في `create()` هو **السلطة** — ده مجرد إعلان مبكر
+    // للعميل. الفايدة: من غيره العميل بيملا الفورم كله (عنوان، صور، ميعاد، دفع) وبعدين ياكل
+    // رفض في الآخر — أسوأ لحظة ممكنة. لسه لازم الحارس موجود لأن الكلاينت ممكن يكون بيقرا قيمة
+    // قديمة، وممكن ميسألش أصلاً.
+    const [newBookingsEnabled, emergencyBookingsEnabled] = await Promise.all([
+      this.settingsService.getBoolean('orders.new_bookings_enabled', true),
+      this.settingsService.getBoolean('orders.emergency_bookings_enabled', true),
+    ]);
     return {
       near_term_request_hours: nearTermHours,
       // 0 = التعطيل (كل غير الطوارئ يتعيّن تلقائي) — وقتها مفيش تنبيه يتعرض أصلاً.
       near_term_confirmation_required: nearTermHours > 0,
       emergency_surcharge_percentage: emergencySurchargePercentage,
+      new_bookings_enabled: newBookingsEnabled,
+      emergency_bookings_enabled: emergencyBookingsEnabled,
     };
   }
 }

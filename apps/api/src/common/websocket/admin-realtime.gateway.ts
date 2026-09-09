@@ -266,9 +266,29 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   /** نقطة البث الوحيدة — كل الـhandlers بتستدعيها. الفشل هنا مابيكسرش العملية الأصلية. */
+  /**
+   * **مابترميش أبدًا — عمدًا** (ج-١٢).
+   *
+   * البث ده تحديث تجميلي لشاشة الأدمن. بس اتنين من المستمعين هنا (`ORDER_CREATED_EVENT`
+   * و`SETTING_UPDATED_EVENT`) بيتبعتوا بـ`emitAsync`، يعني **الكولر بيستنى ورمي المستمع
+   * بيرجع له**. النتيجة لو `this.server` لسه مش متهيّأ أو Socket.IO اتعثّر: **العميل بياخد
+   * `500` على طلب اتسجّل واتوزّع بالفعل** — وهو أسوأ شكل للفشل (الطلب موجود والعميل فاكر إنه
+   * فشل فبيعيد).
+   *
+   * فالبث بيتلقّط هنا في المصدر بدل ما كل مستمع يلفّ نفسه — نقطة واحدة تغطّي كل الـ٣٥ مستمع
+   * الحاليين وأي واحد جديد.
+   */
   private emitTopic(topic: AdminTopic, event: Omit<AdminLiveEvent, 'topic' | 'at'> & Partial<Pick<AdminLiveEvent, 'at'>>): void {
-    const payload: AdminLiveEvent = { ...event, topic, at: event.at ?? new Date().toISOString() };
-    this.server.to(room(topic)).emit('admin:live', payload);
+    try {
+      const payload: AdminLiveEvent = { ...event, topic, at: event.at ?? new Date().toISOString() };
+      this.server.to(room(topic)).emit('admin:live', payload);
+    } catch (err) {
+      this.logger.warn(
+        `فشل بث تحديث لوحة الأدمن (${topic}/${event.action}) — العملية الأساسية ماتأثرتش: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   // ── orders ──────────────────────────────────────────────────────────────
