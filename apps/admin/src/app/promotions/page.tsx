@@ -248,7 +248,7 @@ export default function PromotionsPage() {
         </Card>
       )}
 
-      {!promoCodes && <TableSkeleton columns={7} />}
+      {!promoCodes && <TableSkeleton columns={9} />}
       {promoCodes && promoCodes.length === 0 && <EmptyState title="مفيش أكواد خصم لسه" />}
 
       {promoCodes && promoCodes.length > 0 && (
@@ -260,6 +260,7 @@ export default function PromotionsPage() {
                 <TableHead>الاسم</TableHead>
                 <TableHead>الخصم</TableHead>
                 <TableHead>الاستخدام</TableHead>
+                <TableHead>زيارات / تسجيلات</TableHead>
                 <TableHead>الميزانية المتبقية</TableHead>
                 <TableHead>الحالة</TableHead>
                 <TableHead>QR</TableHead>
@@ -276,6 +277,9 @@ export default function PromotionsPage() {
                     {promo.used_count}
                     {promo.usage_limit_total ? ` / ${promo.usage_limit_total}` : ''}
                   </TableCell>
+                  <TableCell className="tabular-nums">
+                    {promo.link_hit_count} / {promo.link_signup_count}
+                  </TableCell>
                   <TableCell>
                     {promo.budget_cents !== null ? formatEgp(promo.budget_cents - promo.spent_cents) : '—'}
                   </TableCell>
@@ -284,7 +288,9 @@ export default function PromotionsPage() {
                       {promo.is_active ? 'مفعّل' : 'معطّل'}
                     </Badge>
                   </TableCell>
-                  <TableCell><PromoCodeQr code={promo.code} /></TableCell>
+                  <TableCell>
+                    <PromoCodeQr value={promo.share_url} label={`كود ${promo.code}`} caption={promo.share_url} />
+                  </TableCell>
                   <TableCell>
                     {promo.is_active && (
                       <ConfirmDialog

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { OtpResendButton } from '@/components/otp-resend-button';
+import { readPendingPromoLinkCode } from '@/lib/promo-link';
 
 type Step = 'phone' | 'code';
 
@@ -38,7 +39,7 @@ function RegisterForm() {
     setError(null);
     setBusy(true);
     try {
-      await register(phone, code, fullName);
+      await register(phone, code, fullName, readPendingPromoLinkCode() ?? undefined);
       router.push('/');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');

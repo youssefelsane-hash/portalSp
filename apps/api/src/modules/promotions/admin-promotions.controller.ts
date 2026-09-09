@@ -16,12 +16,14 @@ import { toPromoCodeResponseDto } from './dto/promo-code-response.dto';
 import { LoyaltySource } from './entities/loyalty-transaction.entity';
 import { LoyaltyService } from './loyalty.service';
 import { PromoCodesService } from './promo-codes.service';
+import { PromoCodeLinksService } from './promo-code-links.service';
 
 @Controller('admin')
 @Roles(UserType.ADMIN)
 export class AdminPromotionsController {
   constructor(
     private readonly promoCodesService: PromoCodesService,
+    private readonly promoCodeLinks: PromoCodeLinksService,
     private readonly loyaltyService: LoyaltyService,
     private readonly auditLog: AuditLogService,
     @InjectRepository(User) private readonly users: Repository<User>,
@@ -31,14 +33,26 @@ export class AdminPromotionsController {
   @Post('promo-codes')
   @RequirePermission('promotions.manage')
   async create(@CurrentUser() admin: JwtPayload, @Body() dto: CreatePromoCodeDto, @AuditContext() audit: AuditMeta) {
-    return toPromoCodeResponseDto(await this.promoCodesService.create(admin.sub, dto, audit));
+    const promo = await this.promoCodesService.create(admin.sub, dto, audit);
+    return toPromoCodeResponseDto(promo, { shareUrl: this.promoCodeLinks.shareUrl(promo.code) });
   }
 
   @Get('promo-codes')
   @RequirePermission('promotions.view')
   async list(@Query() query: ListPromoCodesQueryDto) {
     const { items, meta } = await this.promoCodesService.list(query);
-    return { items: items.map(toPromoCodeResponseDto), meta };
+    const stats = await this.promoCodeLinks.linkStatsForPromoCodes(items.map((item) => item.id));
+    return {
+      items: items.map((item) => {
+        const link = stats.get(item.id);
+        return toPromoCodeResponseDto(item, {
+          shareUrl: this.promoCodeLinks.shareUrl(item.code),
+          linkHitCount: link?.hits ?? 0,
+          linkSignupCount: link?.signups ?? 0,
+        });
+      }),
+      meta,
+    };
   }
 
   @Post('promo-codes/:id/deactivate')
@@ -49,7 +63,8 @@ export class AdminPromotionsController {
     @Param('id', ParseUUIDPipe) id: string,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toPromoCodeResponseDto(await this.promoCodesService.deactivate(id, admin.sub, audit));
+    const promo = await this.promoCodesService.deactivate(id, admin.sub, audit);
+    return toPromoCodeResponseDto(promo, { shareUrl: this.promoCodeLinks.shareUrl(promo.code) });
   }
 
   // نقاط ولاء يدوية (تعويض، هدية عيد ميلاد، ...) — مسار إداري بس، مفيش قاعدة تلقائية موصّلة لسه

@@ -43,4 +43,11 @@ export class RegisterDto {
   @IsString()
   @Length(3, 24)
   marketing_code?: string;
+
+  // كود وصَل من رابط QR لكود خصم عادي. ده **للإسناد التحليلي فقط**؛ الخصم لا يتطبق إلا
+  // لاحقًا من داخل رحلة الطلب وبعد كل شروط PromoCodesService المعتادة.
+  @IsOptional()
+  @IsString()
+  @Length(3, 24)
+  promo_link_code?: string;
 }

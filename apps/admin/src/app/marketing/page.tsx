@@ -383,7 +383,7 @@ export default function MarketingPage() {
                         <TableCell>
                           {/* الـQR بيحمل **الرابط** مش الكود: ده اللي بيخلّي المسح يودّي على
                               المتجر/الصفحة على طول بدل ما المستخدم يكتب الكود بإيده. */}
-                          <PromoCodeQr code={source.share_url} />
+                          <PromoCodeQr value={source.share_url} label={`رابط ${source.name_ar}`} caption={source.code} />
                         </TableCell>
                         <TableCell>
                           <span className="flex flex-wrap gap-1">

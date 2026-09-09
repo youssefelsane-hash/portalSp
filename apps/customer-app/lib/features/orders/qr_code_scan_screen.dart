@@ -3,6 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+/// روابط QR لأكواد الخصم (`/p/CODE`) تُرجع الكود للتدفق الحالي؛ الـAPI يراجع صلاحيته عند الحجز.
+String codeFromScannedQr(String rawValue) {
+  final value = rawValue.trim();
+  final uri = Uri.tryParse(value);
+  final segments = uri?.pathSegments ?? const <String>[];
+  if (segments.length >= 2 && segments[segments.length - 2] == 'p') {
+    final code = segments.last.trim();
+    if (RegExp(r'^[A-Za-z0-9_-]{3,24}$').hasMatch(code)) return code.toUpperCase();
+  }
+  return value;
+}
+
 /// ماسح محدود الغرض: يرجع النص المرمّز فقط، والتحقق من صلاحية الكود يظل مسؤولية الـAPI.
 class QrCodeScanScreen extends StatefulWidget {
   const QrCodeScanScreen({super.key});
@@ -25,7 +37,7 @@ class _QrCodeScanScreenState extends State<QrCodeScanScreen> {
 
     _completed = true;
     unawaited(_controller.stop());
-    Navigator.of(context).pop(value);
+    Navigator.of(context).pop(codeFromScannedQr(value));
   }
 
   @override

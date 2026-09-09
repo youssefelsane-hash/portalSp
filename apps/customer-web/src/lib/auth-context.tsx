@@ -11,7 +11,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   requestOtp: (phoneNumber: string, purpose: 'login' | 'register') => Promise<void>;
   verifyOtp: (phoneNumber: string, otpCode: string) => Promise<void>;
-  register: (phoneNumber: string, otpCode: string, fullName: string) => Promise<void>;
+  register: (phoneNumber: string, otpCode: string, fullName: string, promoLinkCode?: string) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
@@ -99,12 +99,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const register = useCallback(
-    async (phoneNumber: string, otpCode: string, fullName: string) => {
+    async (phoneNumber: string, otpCode: string, fullName: string, promoLinkCode?: string) => {
       const result = await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/register', {
         phone_number: phoneNumber,
         otp_code: otpCode,
         full_name: fullName,
         user_type: 'customer',
+        ...(promoLinkCode ? { promo_link_code: promoLinkCode } : {}),
       });
       setAccessTokenBoth(result.access_token);
       await fetchMe(result.access_token);

@@ -19,10 +19,19 @@ export interface PromoCodeResponseDto {
   is_active: boolean;
   budget_cents: number | null;
   spent_cents: number;
+  /** رابط قصير للـQR، ينقل العميل إلى رحلة الحجز ولا يمنح خصمًا بلا تحقق. */
+  share_url: string;
+  /** زيارات الرابط، وليست عدد أشخاص فريدين. */
+  link_hit_count: number;
+  /** حسابات جديدة وصلت من الرابط؛ أول رابط صالح فقط يسند التسجيل. */
+  link_signup_count: number;
   created_at: string;
 }
 
-export function toPromoCodeResponseDto(promoCode: PromoCode): PromoCodeResponseDto {
+export function toPromoCodeResponseDto(
+  promoCode: PromoCode,
+  options: { shareUrl?: string; linkHitCount?: number; linkSignupCount?: number } = {},
+): PromoCodeResponseDto {
   return {
     id: promoCode.id,
     code: promoCode.code,
@@ -42,6 +51,9 @@ export function toPromoCodeResponseDto(promoCode: PromoCode): PromoCodeResponseD
     is_active: promoCode.isActive,
     budget_cents: promoCode.budgetCents,
     spent_cents: promoCode.spentCents,
+    share_url: options.shareUrl ?? `/p/${encodeURIComponent(promoCode.code)}`,
+    link_hit_count: options.linkHitCount ?? 0,
+    link_signup_count: options.linkSignupCount ?? 0,
     created_at: promoCode.createdAt.toISOString(),
   };
 }

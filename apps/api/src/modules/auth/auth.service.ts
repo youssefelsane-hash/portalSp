@@ -21,6 +21,7 @@ import {
   MARKETING_SOURCE_CAPTURED_EVENT,
   MarketingSourceCapturedEvent,
 } from '../../common/events/marketing-source-captured.event';
+import { PROMO_LINK_CAPTURED_EVENT, PromoLinkCapturedEvent } from '../../common/events/promo-link-captured.event';
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -357,6 +358,9 @@ export class AuthService {
         MARKETING_SOURCE_CAPTURED_EVENT,
         new MarketingSourceCapturedEvent(user.id, dto.marketing_code),
       );
+    }
+    if (dto.promo_link_code) {
+      this.events.emit(PROMO_LINK_CAPTURED_EVENT, new PromoLinkCapturedEvent(user.id, dto.promo_link_code));
     }
 
     return tokens;

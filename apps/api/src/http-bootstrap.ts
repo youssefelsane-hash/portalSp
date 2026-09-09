@@ -121,10 +121,11 @@ export function configureHttpLayer(app: HttpLayerTarget, options: HttpLayerOptio
     }),
   );
 
-  // `‎/r/:code` **برّه البادئة عن قصد** (ADR-0082 §2): الرابط ده بيتطبع تحت QR على ورق،
+  // `‎/r/:code` و`‎/p/:code` **برّه البادئة عن قصد**: رابط تسويق أو كود خصم مطبوع تحت QR
+  // على ورق، فالمسار القصير قابل للكتابة والمسح؛ البادئة الطويلة مش جزء من تجربة العميل.
   // وبيتقرا بالعين ويتكتب بالإيد. `‎/r/AB12CD` قابل لده، و`‎/api/v1/marketing/links/AB12CD` لأ.
   // ده نفس مبرر `‎/uploads/*` تحت — مسار عام موجّه لبني آدمين، مش جزء من عقد الـAPI.
-  app.setGlobalPrefix(options.apiPrefix, { exclude: ['r/:code'] });
+  app.setGlobalPrefix(options.apiPrefix, { exclude: ['r/:code', 'p/:code'] });
 
   // 2) أصول الـCORS من env.validation.ts (CORS_ORIGIN) — فاضي = مفتوح للكل (`*`)، مقبول تطويريًا
   // بس، مرفوض صراحة وقت الإقلاع لو NODE_ENV=production (راجع env.validation.ts). الـJWT بيتبعت

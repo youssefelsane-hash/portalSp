@@ -20,6 +20,12 @@ export interface PromoCodeResponseDto {
   is_active: boolean;
   budget_cents: number | null;
   spent_cents: number;
+  /** رابط عام قابل للمشاركة وQR؛ يفتح رحلة العميل مع الكود بعد تسجيل زيارة. */
+  share_url: string;
+  /** زيارات الرابط، وليست عدد مستخدمين فريدين. */
+  link_hit_count: number;
+  /** حسابات جديدة أُنشئت بعد فتح الرابط؛ لا تعني مرات استخدام الخصم. */
+  link_signup_count: number;
   created_at: string;
 }
 

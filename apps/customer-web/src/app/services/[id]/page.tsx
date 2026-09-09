@@ -25,6 +25,7 @@ import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
+import { clearPendingPromoLinkCode, readPendingPromoLinkCode } from '@/lib/promo-link';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
 function availableBookingModes(service: ServiceDto): BookingMode[] {
@@ -121,6 +122,15 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [problemImageError, setProblemImageError] = useState<string | null>(null);
   const [requestRemoteQuote, setRequestRemoteQuote] = useState(false);
   const [promoCode, setPromoCode] = useState('');
+
+  // رابط QR يوصل أحيانًا قبل تسجيل الدخول، فبنقرأ الكود المحفوظ عند فتح الحجز لا عند التحويل فقط.
+  useEffect(() => {
+    const linkedCode = readPendingPromoLinkCode();
+    if (!linkedCode) return;
+    // التخزين الخارجي يُقرأ بعد أول رندر؛ تأجيل التحديث يمنع render متداخلًا أثناء hydration.
+    const timer = window.setTimeout(() => setPromoCode((current) => current || linkedCode), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[] | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'later' | 'card'>('later');
@@ -369,6 +379,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         },
         orderIdempotencyKey,
       );
+      clearPendingPromoLinkCode(promoCode);
       setSubmitted(true);
       if (remoteAssessmentFeeDueCents > 0 || (!effectiveRequestRemoteQuote && paymentMethod === 'card')) {
         const cardResult = await payWithCard(authedFetch, order.id);
@@ -1065,6 +1076,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             dir="ltr"
             className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
           />
+          {readPendingPromoLinkCode() === promoCode.trim().toUpperCase() && (
+            <p className="mt-2 text-sm text-muted">اتملى الكود من رابط المشاركة. هنتحقق من صلاحيته قبل تأكيد الطلب.</p>
+          )}
         </section>
       )}
 

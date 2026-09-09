@@ -5,18 +5,21 @@ import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
 
 interface PromoCodeQrProps {
-  code: string;
+  value: string;
+  label: string;
+  caption?: string;
 }
 
-/** QR محلي للنص فقط؛ تطبيق العميل يمسحه ثم يمرره لنفس تحقق الـAPI المعتاد. */
-export function PromoCodeQr({ code }: PromoCodeQrProps) {
+/** QR لرابط ذكي: يفتح الرحلة، بينما التحقق المالي يظل دائمًا داخل API عند الحجز. */
+export function PromoCodeQr({ value, label, caption }: PromoCodeQrProps) {
   const [visible, setVisible] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!visible || imageUrl) return;
     let active = true;
-    QRCode.toDataURL(code, {
+    QRCode.toDataURL(value, {
       errorCorrectionLevel: 'M',
       margin: 1,
       width: 180,
@@ -29,24 +32,40 @@ export function PromoCodeQr({ code }: PromoCodeQrProps) {
     return () => {
       active = false;
     };
-  }, [code, imageUrl, visible]);
+  }, [value, imageUrl, visible]);
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <div className="flex flex-col items-end gap-2">
-      <Button type="button" size="sm" variant="ghost" onClick={() => setVisible((value) => !value)}>
+      <div className="flex flex-wrap justify-end gap-1">
+        <Button type="button" size="sm" variant="ghost" onClick={() => setVisible((current) => !current)}>
         {visible ? 'إخفاء QR' : 'عرض QR'}
-      </Button>
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => void copyLink()}>
+          {copied ? 'تم النسخ' : 'نسخ الرابط'}
+        </Button>
+      </div>
       {visible && (
         <div className="rounded-md border bg-white p-2 text-center shadow-sm">
           {imageUrl ? (
             // الصورة `data:` مولّدة في المتصفح لحظتها — `next/image` بيحسّن ملفات جاية من
             // الشبكة، ومالوش أي فايدة هنا (مفيش طلب أصلاً يتحسّن)، فالتحذير مش منطبق.
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={`رمز QR لكود الخصم ${code}`} width={180} height={180} />
+            <img src={imageUrl} alt={`رمز QR لـ ${label}`} width={180} height={180} />
           ) : (
             <p className="w-[180px] py-8 text-xs text-muted-foreground">جاري إنشاء الرمز…</p>
           )}
-          <p dir="ltr" className="mt-1 text-xs font-medium text-slate-800">{code}</p>
+          <p className="mt-1 text-xs font-medium text-slate-800">{label}</p>
+          {caption && <p dir="ltr" className="mt-1 max-w-[180px] break-all text-[10px] text-slate-500">{caption}</p>}
         </div>
       )}
     </div>
