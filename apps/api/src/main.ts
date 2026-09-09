@@ -6,14 +6,21 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { configureHttpLayer } from './http-bootstrap';
 import { RedisIoAdapter } from './common/websocket/redis-io.adapter';
+import { reasonSignature, throttleMessage } from './common/logging/throttled-log';
 
 // شبكة أمان — بدون هيّ أي rejection ملوش .catch (زي اللي كانت بتحصل جوّه BullMQ Worker وقت
 // انقطاع Redis) كانت بتوقف الـ event loop المعني بصمت تام من غير أي أثر في اللوج، وده صعّب
 // تشخيص بَقّة "الـ Worker مابيرجعش يشتغل بعد رجوع Redis" جداً. دلوقتي أي rejection غير متوقعة
 // بتتسجّل صريح بدل ما تختفي.
+//
+// **الخنق مضاف بعد قياس حي (تدقيق ج-٦، 2026-09-09)**: أثناء انقطاع Redis، كل أمر فاشل بيولّد
+// rejection، والسطر ده كان بيطبع stack كامل لكل واحد — **٢.١ چيجابايت لوج في ١٨ دقيقة**.
+// امتلاء القرص بيوقف Postgres والرفع والـAPI نفسه، فانقطاع Redis (اللي النظام بيعيش من غيره
+// فعلاً، مقاس في نفس التدقيق) كان بيتحوّل بسبب اللوج **وحده** لانقطاع خدمة كامل. التفاصيل
+// والقاعدة في `common/logging/throttled-log.ts`.
 process.on('unhandledRejection', (reason) => {
-   
-  console.error('Unhandled Rejection:', reason);
+  const line = throttleMessage(`unhandledRejection:${reasonSignature(reason)}`, 'Unhandled Rejection');
+  if (line) console.error(`${line}:`, reason);
 });
 
 async function bootstrap() {

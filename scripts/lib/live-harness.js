@@ -78,16 +78,31 @@ class LiveHarness {
 
   // ===================== HTTP =====================
 
-  async api(pathname, { method = 'GET', token, body, headers = {} } = {}) {
-    const res = await fetch(`${API}${pathname}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...headers,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+  /**
+   * `timeoutMs` مهم في تدقيقات الانقطاع: من غيره، نداء بيعلّق بيرمي `fetch failed` ويوقّع
+   * التدقيق كله بدل ما يتسجّل كقياس. مع المهلة، التعليق بيرجع `{ status: 0, timedOut: true }`
+   * فالتقرير بيقول «عدّى س ثانية» بدل ما ينهار.
+   */
+  async api(pathname, { method = 'GET', token, body, headers = {}, timeoutMs } = {}) {
+    const controller = timeoutMs ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let res;
+    try {
+      res = await fetch(`${API}${pathname}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller?.signal,
+      });
+    } catch (err) {
+      return { status: 0, timedOut: true, body: { error: { message: String(err?.message ?? err) } } };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     const text = await res.text();
     let parsed;
     try {
@@ -390,6 +405,27 @@ class LiveHarness {
       await sleep(1000);
     }
     throw new Error('الـAPI مابقاش بيرد بعد إعادة التشغيل');
+  }
+
+  /**
+   * تعديل إعداد نظام لغرض التدقيق + **إبطال الكاشين**. الكتابة المباشرة على SQL بتعدّي على
+   * `SettingsService`، فبتفضل القيمة القديمة في كاش Redis (`settings:<key>`) وفي الكاش المحلي —
+   * وده بالظبط اللي خلّى تدقيق ج-٢ يقيس قيمة قديمة ويستنتج بَقّة مش موجودة. الكاش المحلي
+   * بيتمسح مع إعادة تشغيل الـAPI (اللي التدقيقات دي بتعملها بعد التعديل).
+   */
+  async setSetting(key, jsonValue) {
+    await this.q(`UPDATE settings SET value = $2::jsonb, updated_at = now() WHERE key = $1`, [
+      key,
+      JSON.stringify(jsonValue),
+    ]);
+    try {
+      const Redis = require('/home/user/portalSp/node_modules/ioredis');
+      const redis = new Redis(process.env.REDIS_URL ?? ENV.REDIS_URL ?? 'redis://localhost:6379');
+      await redis.del(`settings:${key}`);
+      redis.disconnect();
+    } catch {
+      /* Redis واقع = مفيش كاش يتمسح أصلاً */
+    }
   }
 
   async isApiUp() {
