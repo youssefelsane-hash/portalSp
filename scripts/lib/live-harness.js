@@ -99,6 +99,33 @@ class LiveHarness {
   }
 
   /**
+   * رفع صورة «بعد الشغل» — شرط إجباري قبل `complete`. المسار multipart بملف حقيقي، والباك-إند
+   * بيفحص **بصمة الملف** (magic bytes) مش الامتداد، فالبايتات دي لازم تكون PNG صحيحة فعلاً.
+   */
+  async uploadAfterPhoto(orderId, technicianToken) {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const form = new FormData();
+    form.append('media_type', 'after_photo');
+    form.append('file', new Blob([png], { type: 'image/png' }), 'after.png');
+    const res = await fetch(`${API}/technician/orders/${orderId}/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${technicianToken}` },
+      body: form,
+    });
+    const text = await res.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text.slice(0, 300) };
+    }
+    return { status: res.status, body: parsed };
+  }
+
+  /**
    * توقيع التوكن محليًا بدل دورة OTP كاملة لكل مستخدم — ده بيختصر الإعداد بس، الطلب نفسه
    * بيعدّي على كل الحُرّاس زي أي مستخدم حقيقي.
    */
