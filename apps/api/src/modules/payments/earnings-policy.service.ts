@@ -6,6 +6,7 @@ import {
   EarningsCalculationResult,
   EarningsParticipantInput,
 } from './earnings-calculator';
+import { splitOrderRevenue } from '../pricing/commission-base';
 
 interface ResolvedPolicyRow {
   technician_id: string;
@@ -35,8 +36,9 @@ export class EarningsPolicyService {
     const orderRows: Array<{
       settlement_policy_version: number | string;
       commission_rate_applied: number | string | null;
+      commissionable_base_cents: number | string | null;
     }> = await manager.query(
-      `SELECT settlement_policy_version, commission_rate_applied
+      `SELECT settlement_policy_version, commission_rate_applied, commissionable_base_cents
          FROM orders
         WHERE id = $1
         ${lockOrder ? 'FOR UPDATE' : ''}`,
@@ -56,11 +58,20 @@ export class EarningsPolicyService {
     if (!Number.isFinite(commissionRatePercentage) || commissionRatePercentage < 0 || commissionRatePercentage > 100) {
       throw new Error('Earnings order has an invalid platform commission percentage snapshot');
     }
-    return calculateEarningsV2(
-      finalOrderTotalCents,
-      Math.round((finalOrderTotalCents * commissionRatePercentage) / 100),
-      participants,
-    );
+    // **ADR-0037 / docs/08 §60.1**: النسبة بتتطبّق على **وعاء العمولة** مش على الإجمالي.
+    // الإجمالي بيضم مكوّنات الشركة وحدها بتتحمّل مخاطرها (الضمان الاختياري، رسوم الطوارئ،
+    // مضاعف التضخم). حساب `الإجمالي × النسبة` هنا كان بيرجّع الفني لنصيب من سعر الضمان —
+    // بالظبط البلاغ اللي الـADR اتكتب عشانه، وكان راجع بصمت مع تحويل التسوية للنسخة v2.
+    // `commissionable_base_cents` = null معناه طلب قبل migration 0192، فبنرجع للإجمالي عمدًا
+    // عشان إعادة تسوية طلب قديم ما تديش نتيجة مختلفة عن تسويته الأصلية.
+    const commissionableBaseCents =
+      order.commissionable_base_cents == null ? finalOrderTotalCents : Number(order.commissionable_base_cents);
+    const { platformCommissionCents } = splitOrderRevenue({
+      totalAmountCents: finalOrderTotalCents,
+      commissionableBaseCents,
+      commissionRatePercentage,
+    });
+    return calculateEarningsV2(finalOrderTotalCents, platformCommissionCents, participants);
   }
 
   async resolveParticipants(

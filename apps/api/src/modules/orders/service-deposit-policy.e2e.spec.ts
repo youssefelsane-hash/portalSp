@@ -78,6 +78,8 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     customerProfile: '',
     address: '',
     warrantyPlan: '',
+    techUser: '',
+    techProfile: '',
   };
 
   async function q(sql: string, params?: unknown[]) {
@@ -196,6 +198,21 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       [ids.customerUser, ids.city, `شارع إيداع ${runId}`],
     );
     ids.address = address.id;
+
+    // **فني حقيقي على الطلب قبل التسوية**: محرك المستحقات v2 بيرفض وعاء عمّال موجب بلا أي
+    // مشارك (`V2 paid worker pool requires at least one participant`) — وهو محق: طلب مقفول
+    // بلا منفّذ يعني فلوس متوزّعة على محدش. الفكسچر كان بيقفل الطلب من غير ما يعيّن حد.
+    const [technicianUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      `+2035${runId}`.slice(0, 15),
+      `فني إيداع ${runId}`,
+    ]);
+    ids.techUser = technicianUser.id;
+    const [technicianProfile] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, years_of_experience, current_level)
+       VALUES ($1,$2,3,'new') RETURNING id`,
+      [ids.techUser, `TCDEP${runId}`.slice(0, 20)],
+    );
+    ids.techProfile = technicianProfile.id;
 
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
@@ -316,7 +333,13 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [
         ids.customerProfile,
       ]);
+      await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_earning_shares WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
       await q(`DELETE FROM warranty_plans WHERE id = $1`, [ids.warrantyPlan]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
@@ -425,6 +448,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
 
     await q(`UPDATE warranty_plans SET coverage_months=24, price_value=50, version=version+1 WHERE id=$1`, [ids.warrantyPlan]);
     order.orderStatus = OrderStatus.WORK_COMPLETED;
+    order.technicianId = ids.techProfile;
     await dataSource.transaction(async (manager) => {
       await manager.save(order);
       await (paymentsService as unknown as {

@@ -1,3 +1,5 @@
+import { insertV2EarningShare } from './order-earning-share.testing';
+import { EARNINGS_V2_ALGORITHM_VERSION } from './earnings-calculator';
 import { DataSource } from 'typeorm';
 import { EarningsPolicyService } from './earnings-policy.service';
 import { ORDER_STATUS_CHANGED_EVENT } from '../../common/events/order-status-changed.event';
@@ -90,8 +92,11 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     orderSeq += 1;
     const orderNumber = `TESTCSD-${runId}-${orderSeq}`.slice(0, 24);
     const [order] = await q(
+      // **لقطة نسبة العمولة بتتقرا من الخدمة نفسها** مش رقم مكتوب بالإيد: التسوية v2 بتطبّق
+      // `orders.commission_rate_applied` مش `services.commission_percentage`، فرقم ثابت (20)
+      // كان بيخلّي اختبار «خدمة بعمولة صفر» يقيس ٢٠٪ ويفشل على حاجة مالهاش علاقة بموضوعه.
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES (20,$1,$2,$3,$4,$5,$6,'work_completed','unpaid',$7,0) RETURNING id`,
+       VALUES ((SELECT commission_percentage FROM services WHERE id = $4),$1,$2,$3,$4,$5,$6,'work_completed','unpaid',$7,0) RETURNING id`,
       [orderNumber, ids.customerProfile, ids.techProfile, serviceId, ids.address, ids.zone, totalAmountCents],
     );
     return order.id as string;
@@ -301,6 +306,11 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
          WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`,
         [`TESTCSD-%`],
       );
+      // مفاتيح أجنبية بتتكتب أثناء التسوية/الاسترداد وبتمنع حذف الطلب — لو فشل الحذف هنا
+      // السويتة كلها بتقع في afterAll مش تست واحد.
+      await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      await q(`DELETE FROM refund_settlement_reversals WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      await q(`DELETE FROM order_earning_shares WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCSD-%`]);
       await q(`DELETE FROM installment_plans WHERE name_ar LIKE $1`, [`TESTCSD-%`]);
       await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
@@ -848,8 +858,11 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   it('استرداد دفعة عمل إضافي أصغر يعكس حصتها من إجمالي أرباح الطلب فقط، ثم يقفل الطلب بعد استرداد الدفعة الأساسية أيضًا', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
-      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
-       VALUES (20,$1,$2,$3,$4,$5,$6,'completed','paid',120000,96000) RETURNING id`,
+      // لقطة تسوية v2 كاملة: `refundOrder()` بيتأكد إن مجموع دلاء التوزيع = إجمالي الطلب
+      // قبل ما يبعت للبوابة، فطلب مقفول بلا `worker_pool_cents` ولا صف حصص كان بيترفض
+      // بـ«توزيع مستحقات الطلب غير مكتمل».
+      `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, platform_commission_cents, worker_pool_cents, calculation_algorithm_version)
+       VALUES (20,$1,$2,$3,$4,$5,$6,'completed','paid',120000,96000,24000,96000,$7) RETURNING id`,
       [
         `TESTCSD-component-${runId}`.slice(0, 24),
         ids.customerProfile,
@@ -857,8 +870,16 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
         ids.service20,
         ids.address,
         ids.zone,
+        EARNINGS_V2_ALGORITHM_VERSION,
       ],
     );
+    await insertV2EarningShare(q, {
+      orderId: order.id,
+      technicianId: ids.techProfile,
+      participantRole: 'leader',
+      poolCents: 96000,
+      shareCents: 96000,
+    });
     const [basePayment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
        VALUES ($1,$2,$3,100000,'wallet','succeeded',$4,now()) RETURNING id`,
