@@ -113,7 +113,11 @@ describe('بوابة InstaPay — نسخة تانية بتعرف الإعداد 
     await dataSourceA.query(`UPDATE settings SET value = $1::jsonb WHERE key = $2`, [JSON.stringify('صُنّاع'), RECIPIENT_KEY]);
     await cacheB.del(`settings:${IPA_KEY}`);
     await cacheB.del(`settings:${RECIPIENT_KEY}`);
+    // مفتاحين اتغيّروا ⇒ **بلاغين**: `SettingsService.update()` بتتنده مرة لكل مفتاح وبتطلق
+    // حدث لكل واحد، والجسر بيبعت NOTIFY لكل واحد. بلاغ واحد بس كان بيسيب الاسم القديم في
+    // الكاش المحلي للنسخة B فالبوابة تفضل «مش مُعدّة» رغم إن العنوان وصل.
     await bridgeA.broadcast(new SettingUpdatedEvent(IPA_KEY, newAddress));
+    await bridgeA.broadcast(new SettingUpdatedEvent(RECIPIENT_KEY, 'صُنّاع'));
 
     const arrived = await waitFor(() => providerB.isConfigured && providerB['ipaAddress'] === newAddress);
     expect({

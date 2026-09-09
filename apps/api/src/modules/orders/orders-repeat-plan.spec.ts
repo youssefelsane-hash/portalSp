@@ -1,3 +1,5 @@
+import { nextOccurrence } from './recurring-schedule.util';
+import { RecurringOrderFrequency } from './entities/recurring-order-template.entity';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { EarningsPolicyService } from '../payments/earnings-policy.service';
 import { ServicePricingRule } from '../pricing/entities/service-pricing-rule.entity';
@@ -398,16 +400,33 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     expect(new Date(occurrence.scheduled_for).toISOString()).toBe(scheduledAt);
   });
 
-  it('شهري يوم 31: أول موعد للخطة يتـclamp لآخر يوم فعلي في الشهر الجاي (سنة كبيسة → 29)', async () => {
+  // **الحالة الكبيسة اتنقلت لاختبار الدالة نفسها**: `2028-01-31` بعيد أكتر من سقف الحجز المسبق
+  // (٩٠ يوم، P0-3)، فالحجز نفسه بيترفض قبل ما القالب يتعمل أصلاً — الاختبار كان بيقيس تاريخ
+  // ثابت في المستقبل ومستحيل يعدّي من بوابة الحجز. القصّ نفسه منطق خالص في `nextOccurrence()`،
+  // فبيتقاس هناك مباشرةً، والتكامل بيتقاس تحت بتاريخ جوّه النافذة.
+  it('شهري يوم 31: الموعد الجاي بيتـclamp لآخر يوم فعلي في الشهر الجاي (سنة كبيسة → 29)', () => {
+    expect(nextOccurrence(new Date('2028-01-31T14:30:00.000Z'), RecurringOrderFrequency.MONTHLY).toISOString())
+      .toBe('2028-02-29T14:30:00.000Z');
+    // وسنة عادية: 31 يناير ⇒ 28 فبراير.
+    expect(nextOccurrence(new Date('2027-01-31T14:30:00.000Z'), RecurringOrderFrequency.MONTHLY).toISOString())
+      .toBe('2027-02-28T14:30:00.000Z');
+  });
+
+  it('شهري جوّه نافذة الحجز: القالب بياخد الموعد الجاي المقصوص من الطلب الحقيقي', async () => {
+    // أقرب يوم 31 جوّه النافذة (لو مفيش، أقرب يوم فيه نفس السلوك) — محسوب من دلوقتي مش ثابت.
+    const base = new Date(Date.now() + 30 * 86_400_000);
+    base.setUTCHours(14, 30, 0, 0);
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceRepeatable,
       address_id: ids.address,
-      scheduled_at: '2028-01-31T14:30:00.000Z',
+      scheduled_at: base.toISOString(),
       repeat_frequency: 'monthly',
     } as never);
     ids.createdOrderIds.push(order.id);
     const templates = await loadTemplatesForCustomer();
-    expect(new Date(templates[0].next_run_at).toISOString()).toBe('2028-02-29T14:30:00.000Z');
+    expect(new Date(templates[0].next_run_at).toISOString()).toBe(
+      nextOccurrence(base, RecurringOrderFrequency.MONTHLY).toISOString(),
+    );
   });
 
   it('ذرّية العملية: فشل جوّه الـtransaction (كود خصم غلط) ميسيّبش أي أثر جزئي', async () => {
