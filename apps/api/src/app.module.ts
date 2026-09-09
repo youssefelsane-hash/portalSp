@@ -41,6 +41,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
+import { MarketingModule } from './modules/marketing/marketing.module';
 import { TechnicianReferralsModule } from './modules/technician-referrals/technician-referrals.module';
 import { TechnicianKpiModule } from './modules/technician-kpi/technician-kpi.module';
 import { TechnicianProgressionModule } from './modules/technician-progression/technician-progression.module';
@@ -135,6 +136,7 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     CampaignsModule,
     ReferralsModule,
     FavoritesModule,
+    MarketingModule,
     TechnicianReferralsModule,
     TechnicianKpiModule,
     TechnicianProgressionModule,
