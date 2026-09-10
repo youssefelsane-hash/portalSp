@@ -1441,7 +1441,7 @@ export class PaymentsService {
         currencyCode: 'EGP',
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
 
@@ -1587,7 +1587,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {
@@ -2611,7 +2611,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {
@@ -2727,7 +2727,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {

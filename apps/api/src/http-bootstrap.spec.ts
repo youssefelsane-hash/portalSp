@@ -58,9 +58,9 @@ describe('configureHttpLayer — ترتيب middleware', () => {
     });
 
     configureHttpLayer(make(), { uploadsDir: '/tmp/u', apiPrefix: 'api/v1', corsOrigins: [], trustedProxyHops: 1 });
-    configureHttpLayer(make(), { uploadsDir: '/tmp/u', apiPrefix: 'api/v1', corsOrigins: ['https://admin.baytak.app'], trustedProxyHops: 1 });
+    configureHttpLayer(make(), { uploadsDir: '/tmp/u', apiPrefix: 'api/v1', corsOrigins: ['https://admin.ostahome.com'], trustedProxyHops: 1 });
 
-    expect(seen).toEqual([{ origin: '*' }, { origin: ['https://admin.baytak.app'] }]);
+    expect(seen).toEqual([{ origin: '*' }, { origin: ['https://admin.ostahome.com'] }]);
   });
 });
 

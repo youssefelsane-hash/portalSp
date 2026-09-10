@@ -583,25 +583,43 @@ debug. الملفين `apps/customer-app/android/app/build.gradle.kts` و
 `google-services.json`: لو `android/key.properties` (كل تطبيق عنده نسخته الخاصة) موجود، بيتفعّل
 توقيع الإصدار الحقيقي تلقائيًا؛ من غيره البناء يفضل شغال بتوقيع debug زي الأول.
 
+### مفاتيح Osta الرسمية (2026-09-10)
+
+| التطبيق | معرّف الحزمة | الـalias | ملف الـkeystore |
+|---|---|---|---|
+| `apps/customer-app` | `com.ostahome.customer` | `osta-customer-upload` | `~/osta-customer-upload.jks` (بره المستودع) |
+| `apps/technician-app` | `com.ostahome.technician` | مقترح `osta-technician-upload` | **لسه ما اتولّدش** |
+
+**keystore مستقل لكل تطبيق** — تطبيقين مختلفين على Play بمعرّفين مختلفين؛ مشاركة نفس المفتاح
+بتربط مصيرهم ببعض بلا داعي: تسريب واحد = التنين.
+
 ### الخطوات (لكل تطبيق — customer-app وtechnician-app منفصلين، كل واحد له keystore خاص بيه)
 
 1. ولّد keystore حقيقي (مرة واحدة لكل تطبيق، واحفظه في مكان آمن برّه الـ repo — لو ضاع مينفعش
    تحدّث نفس التطبيق على Play Store تاني):
 
    ```bash
-   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
-     -validity 10000 -alias upload
+   keytool -genkey -v -keystore ~/osta-customer-upload.jks -keyalg RSA -keysize 2048 \
+     -validity 10000 -alias osta-customer-upload
    ```
 
-   هيسألك عن `storePassword` و`keyPassword` (ينفع يبقوا نفس القيمة) واسم/تنظيم — احفظهم.
+   هيسألك عن `storePassword` و`keyPassword` (ينفع يبقوا نفس القيمة) واسم/تنظيم — احفظهم في
+   مدير كلمات سر، **مش في أي ملف جوّه المستودع**.
 
 2. انسخ `apps/customer-app/android/key.properties.example` لـ
    `apps/customer-app/android/key.properties` (والمكافئ لـ `technician-app`)، واملأ القيم
-   الأربعة (`storePassword`, `keyPassword`, `keyAlias`, `storeFile` — مسار الـ `.jks` اللي
-   ولّدته فوق، نسبي لمجلد `android/` أو مطلق).
+   الأربعة (`storePassword`, `keyPassword`, `keyAlias`, `storeFile`). **`storeFile` بيتحل نسبةً
+   لمجلد `android/app/`** — استخدم مسار مطلق كامل وخلاص.
 
 3. الملف `key.properties` نفسه في `.gitignore` بالفعل (`apps/*/android/.gitignore`) — أبدًا
-   متعملوش commit، ده سر إصدار حقيقي زي كلمة سر قاعدة بيانات.
+   متعملوش commit، ده سر إصدار حقيقي زي كلمة سر قاعدة بيانات. في CI: مايتحطش في المستودع خالص —
+   يتولّد وقت البناء من secrets الـCI (base64 للـkeystore + الباسووردات كمتغيرات محمية) ويتمسح بعده.
+
+> **تصليب 2026-09-10 — "الملف موجود" مش دليل توقيع**: الحارس كان بيعتبر مجرد وجود
+> `key.properties` = توقيع إصدار حقيقي. حد ينسخ الـ`.example` من غير ما يملاه (وده حصل فعلاً في
+> السيشن دي) كان بيعدّي البوابة وبعدين يقع برسالة Gradle غامضة عن `file("")`. دلوقتي القيم
+> الأربعة لازم تكون **غير فاضية** وملف الـ`.jks` نفسه لازم يكون **موجود على القرص** — غير كده
+> بيتعامل كأنه مفيش توقيع، و`bundleRelease` بيفشل بالرسالة الواضحة زي ما المفروض.
 
 ### التأكد إنها اشتغلت
 

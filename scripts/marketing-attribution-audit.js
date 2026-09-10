@@ -131,7 +131,7 @@ async function run() {
   }
 
   // دلوقتي نحط رابط أندرويد ونتأكد إن التوزيع بقى فعلي.
-  const play = 'https://play.google.com/store/apps/details?id=com.baytak.customer';
+  const play = 'https://play.google.com/store/apps/details?id=com.ostahome.customer';
   await h.setSetting('marketing.android_store_url', play);
   // الكاش المحلي للإعدادات عمره ثانيتين (stale-while-revalidate) — الانتظار هنا بيخلّي الفحص
   // يقيس القيمة الجديدة فعلاً بدل ما يتهم كود سليم.

@@ -8,7 +8,8 @@
 # المفتاح ده لسه ما اتولّدش؛ يتولّد وقت تجهيز الرفع بنفس خطوات مفتاح العميل بالظبط،
 # بـalias خاص بيه (مقترح: `osta-technician-upload`).
 #
-# `storeFile` بيتقري نسبةً لـ`apps/technician-app/android/`، فالأأمن مسار مطلق.
+# `storeFile` بيتحل نسبةً لـ`apps/technician-app/android/app/` (مجلد الموديول، مش `android/`) —
+# فالأأمن دايمًا مسار مطلق كامل.
 #
 # خطوات توليد الـkeystore وتعبئة القيم: docs/03-external-integrations.md § توقيع Android.
 

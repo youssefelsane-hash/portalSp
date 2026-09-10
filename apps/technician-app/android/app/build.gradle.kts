@@ -12,9 +12,23 @@ plugins {
 // git) موجود، بيتفعّل توقيع حقيقي؛ من غيره، fallback لتوقيع debug زي الأول.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
-val hasReleaseSigning = keystorePropertiesFile.exists()
-if (hasReleaseSigning) {
+if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+// **وجود الملف مش كفاية** (تصليب 2026-09-10): حد ينسخ `key.properties.example` لـ`key.properties`
+// من غير ما يملاه — فالحارس تحت بيشوف "توقيع موجود" ويعدّي، والبناء بيقع بعدين برسالة Gradle
+// غامضة عن `file("")`. الأسوأ إن ناتج المتجر بيعدّي بوابة كانت موضوعة مخصوص عشان توقفه.
+// القيم الأربعة لازم تكون موجودة وغير فاضية، **وملف الـkeystore نفسه لازم يكون على القرص فعلاً**.
+val hasReleaseSigning = run {
+    val required = listOf("keyAlias", "keyPassword", "storeFile", "storePassword")
+    if (required.any { (keystoreProperties[it] as String?).isNullOrBlank() }) {
+        false
+    } else {
+        // `file(...)` هنا = نفس الأساس اللي `signingConfigs` تحت بيحل بيه المسار
+        // (مجلد `android/app/`) — أي أساس تاني معناه فحص بيقول "موجود" وتوقيع بيقول "مش لاقيه".
+        file(keystoreProperties["storeFile"] as String).exists()
+    }
 }
 
 // بوابة P0-3 في docs/23 — «إصدار المتجر يجب أن **يفشل** بدل أن ينتج نسخة Debug بصمت».
@@ -30,7 +44,7 @@ gradle.taskGraph.whenReady {
     if (buildingStoreBundle && !hasReleaseSigning) {
         throw GradleException(
             "مينفعش تبني App Bundle للمتجر بلا توقيع إصدار حقيقي. " +
-                "لازم android/key.properties يكون موجود (keyAlias/keyPassword/storeFile/storePassword). " +
+                "لازم android/key.properties يكون موجود **وقيمه الأربعة مليانة** (keyAlias/keyPassword/storeFile/storePassword) وملف الـkeystore نفسه موجود على القرص. " +
                 "التفاصيل في docs/03-external-integrations.md § توقيع Android.",
         )
     }

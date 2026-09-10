@@ -7,7 +7,8 @@
 #   الـalias:  osta-customer-upload
 #   الملف:     ~/osta-customer-upload.jks  (بره المستودع، على جهاز الإصدار بس)
 #
-# `storeFile` بيتقري نسبةً لـ`apps/customer-app/android/`، فالأأمن مسار مطلق.
+# `storeFile` بيتحل نسبةً لـ`apps/customer-app/android/app/` (مجلد الموديول، مش `android/`) —
+# فالأأمن دايمًا مسار مطلق كامل.
 # الباسووردات بتتكتب بالإيد هنا — مفيش قيمة افتراضية ولا مولّدة، وده مقصود.
 #
 # في CI: مايتحطش الملف ده في المستودع خالص — يتولّد وقت البناء من secrets الـCI
