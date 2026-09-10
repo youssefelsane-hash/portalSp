@@ -104,6 +104,14 @@ describe('AnalyticsRollupService — تجميع الفنل والاحتفاظ (A
 
     const [today] = await q<{ d: string }[]>(`SELECT (now() AT TIME ZONE 'Africa/Cairo')::date::text AS d`);
     touchedDays.add(today.d);
+
+    // **تجميع قبل أي baseline** — من غيره الاختبار بيفشل على قاعدة تطوير فيها أحداث النهاردة
+    // لسه ماتجمّعتش. السبب إن `snapshotBaseline` بتقرا الجدول **المجمّع**، فأحداث موجودة في
+    // `booking_funnel_events` وماعداش عليها rollup مش بتبان فيه — وأول `rollupRecentDays()`
+    // جوّه الاختبار بتضيفها كلها فتتحسب كأن الاختبار هو اللي عملها. حصل فعلاً: مسح صفحات
+    // الويب الحي (`scripts/customer-web-screens-audit.js`) بيولّد `service_viewed` حقيقي،
+    // فالفرق طلع 16 بدل 4. التجميع هنا بيخلّي الـbaseline يعكس كل اللي قبل الاختبار فعلاً.
+    await service.rollupRecentDays(3);
   });
 
   afterAll(async () => {

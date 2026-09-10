@@ -35,6 +35,7 @@ const STATIC_ROUTES = [
   '/account/projects', '/account/recurring', '/account/referrals',
   '/account/wallet', '/account/warranties',
   '/legal/terms', '/legal/privacy', '/legal/account-deletion',
+  '/support', '/about', '/join',
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -106,11 +107,54 @@ async function login(page, phone) {
   await page.fill('input[type="tel"], input[name="phone"], input', phone);
   await page.getByRole('button', { name: /كود|إرسال|ابعت/ }).first().click();
   await sleep(900);
+  // لو الصفحة ما انتقلتش لخطوة الكود، الرسالة اللي عليها هي التشخيص الحقيقي — من غيرها الفحص
+  // بيفشل بـ«زرار مش موجود» وهو عرض لسبب تاني خالص.
+  const onCodeStep = await page.getByRole('button', { name: /^دخول$/ }).count();
+  if (!onCodeStep) {
+    const text = (await page.innerText('body')).replace(/\n+/g, ' | ').slice(0, 300);
+    throw new Error(`تسجيل الدخول وقف على خطوة الرقم: ${text}`);
+  }
   const otp = latestOtp(phone);
   const otpInput = page.locator('input').last();
   await otpInput.fill(otp);
   await page.getByRole('button', { name: /دخول|تأكيد|تمام|سجّل/ }).first().click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 }).catch(() => {});
+}
+
+/**
+ * كل لينك داخلي في الفوتر لازم يوصل لوجهة موجودة (docs/08 §136).
+ *
+ * الفحص ده منفصل عن مسح الصفحات عن قصد: الفوتر بيتعرض على **كل** صفحة، فلينك مكسور فيه بيتضرب
+ * من كل مكان — وقايمة `STATIC_ROUTES` مكتوبة بالإيد، فهي مش هتلقط لينك جديد اتضاف في الفوتر
+ * ومحدش فكّر يضيفه هنا. ده بالظبط اللي حصل مع `/support` (٤٠٤ على كل صفحة لأسابيع).
+ *
+ * بيتحقق من حاجتين: الصفحة نفسها بترد بحالة أقل من ٤٠٠، ولو اللينك فيه `#anchor` فالعنصر
+ * صاحب الـid ده موجود فعلاً في الصفحة (مرساة ميتة = المستخدم بيوصل لأعلى صفحة عشوائية).
+ */
+async function auditFooterLinks(page) {
+  const problems = [];
+  await page.goto(`${WEB}/`, { waitUntil: 'domcontentloaded', timeout: 25000 });
+  const hrefs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('footer a[href^="/"]')).map((a) => a.getAttribute('href')),
+  );
+  const unique = [...new Set(hrefs)];
+  if (!unique.length) problems.push('مفيش أي لينك داخلي في الفوتر — يا إما الفوتر مش بيترسم يا إما الفحص باظ');
+
+  for (const href of unique) {
+    const [pathname, anchor] = href.split('#');
+    const res = await page.goto(`${WEB}${pathname}`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null);
+    if (!res || res.status() >= 400) {
+      problems.push(`لينك فوتر مكسور: ${href} → ${res ? res.status() : 'مفيش رد'}`);
+      continue;
+    }
+    if (anchor) {
+      const found = await page.evaluate((id) => Boolean(document.getElementById(id)), anchor);
+      if (!found) problems.push(`مرساة ميتة في الفوتر: ${href} — مفيش عنصر بـid="${anchor}"`);
+    }
+  }
+
+  console.log(`${problems.length ? '❌' : '✅'} لينكات الفوتر (${unique.length} لينك)${problems.length ? '\n     ' + problems.join('\n     ') : ''}`);
+  return problems;
 }
 
 (async () => {
@@ -192,6 +236,13 @@ async function login(page, phone) {
     }
     await context.close();
   }
+
+  // مرة واحدة بس — الفوتر واحد لكل الصفحات، فتكراره على كل viewport مايضيفش معلومة.
+  const footerContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'ar-EG' });
+  const footerPage = await footerContext.newPage();
+  const footerProblems = await auditFooterLinks(footerPage);
+  results.push({ route: 'footer-links', viewport: 'desktop', problems: footerProblems });
+  await footerContext.close();
 
   await browser.close();
   const failed = results.filter((r) => r.problems.length);
