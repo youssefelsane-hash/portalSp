@@ -40,3 +40,28 @@
 Migration 0275 registers it and the admin matching settings expose it. ADR-0078 retires the
 assignment-only opportunity exclusivity/heavy-offer settings (migration 0276); normal round
 settings control additional requests. Existing crew recruitment is unchanged.
+
+## روابط السوشيال ميديا الرسمية (docs/08 §136، طلب مالك 2026-09-10)
+
+**الفجوة اللي المالك لقطها بنفسه**: «بحثت في المشروع عن Facebook وInstagram وما لقيتش
+Settings/URLs خاصة بيهم». صحيح — مجموعة `social` مكانش فيها غير
+`social.facebook_graph_access_token` (مفتاح Graph API لمعاينات الروابط، حاجة تانية خالص).
+
+`migration 0313` بتزرع خمس مفاتيح: `social.facebook_url`، `social.instagram_url`،
+`social.tiktok_url`، `social.linkedin_url`، `social.youtube_url` — كلهم `string`،
+`group_name='social'`، `is_public=true`، وقيمتهم الابتدائية **فاضية عمدًا**. التعديل عبر
+`PATCH /admin/settings/:key` الموجود (`settings.manage` + Passkey حديث + audit)، وبيظهروا
+تلقائيًا في `/settings` بلوحة الأدمن تحت قسم «social» — صفر UI مخصّص.
+
+`SocialLinksController` (`@Public() GET /social-links`، نفس فلسفة `SupportContactController`
+و`LegalEntityController`) بيرجّع `{ links: [{ network, url }] }` بترتيب عرض ثابت. تلات التزامات
+مثبّتة باختبار حي في `social-links.controller.spec.ts` (٥ حالات على Postgres حقيقي):
+
+1. **الفاضي بيختفي** — الشبكة اللي مالهاش رابط **مش بترجع في القايمة أصلاً**، فمستحيل الواجهة
+   تعرض أيقونة بتودّي لحتة فاضية. الواجهة مالهاش أي قرار تاخده.
+2. **`https://` فقط** — القيمة دي بتتحوّل لـ`href` بيتنفّذ على متصفح المستخدم، فأي
+   `javascript:`/`http:`/نص عادي بيترفض. الحارس في **مسار القراءة** مش مسار الأدمن عمدًا: القراءة
+   هي اللي بتبني الرابط، فهي المكان الصح للتحقق (نفس درس `SupportContactController.help_url`).
+3. **ترتيب العرض من السيرفر** — مصدر واحد بدل ما كل سطح يرتّبهم بنفسه ويختلفوا بعدين.
+
+المستهلك الأول: فوتر `apps/customer-web` (بيتعرض على كل صفحة، `revalidate: 300`).

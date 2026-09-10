@@ -320,6 +320,15 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── social ────────────────────────────────────────────────────────────
   'social.facebook_graph_access_token': { type: 'string', default: '', group: 'social', description: 'مفتاح Facebook Graph API لجلب معاينات لينكات انستجرام/فيسبوك (oEmbed)' },
+  // حسابات المنصة الرسمية (docs/08 §136). القيمة الفاضية معناها **الأيقونة ما تظهرش خالص** —
+  // مفيش لينك ميت في فوتر بيتشاف من كل صفحة. الحارس الأمني (https فقط) في
+  // `SocialLinksController` عمدًا مش هنا: القراءة العامة هي اللي بتبني `href` بيتنفّذ على
+  // متصفح المستخدم، فمكان التحقق هو مسار القراءة (نفس درس `SupportContactController`).
+  'social.facebook_url': { type: 'string', default: '', group: 'social', description: 'رابط صفحة فيسبوك الرسمية. لازم يبدأ https:// وإلا بيتجاهَل والأيقونة ما تظهرش.' },
+  'social.instagram_url': { type: 'string', default: '', group: 'social', description: 'رابط حساب إنستجرام الرسمي. نفس شرط https://.' },
+  'social.tiktok_url': { type: 'string', default: '', group: 'social', description: 'رابط حساب تيك توك الرسمي. نفس شرط https://.' },
+  'social.linkedin_url': { type: 'string', default: '', group: 'social', description: 'رابط صفحة لينكدإن الرسمية. نفس شرط https://.' },
+  'social.youtube_url': { type: 'string', default: '', group: 'social', description: 'رابط قناة يوتيوب الرسمية. نفس شرط https://.' },
 
   // ── support ───────────────────────────────────────────────────────────
   'support.email': { type: 'string', default: '', group: 'support', description: 'إيميل الدعم (اختياري)' },
