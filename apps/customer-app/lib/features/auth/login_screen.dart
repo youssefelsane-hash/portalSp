@@ -472,16 +472,24 @@ class _BrandMarkState extends State<_BrandMark> {
     final logoUrl = _logoUrl;
     return Column(
       children: [
-        if (logoUrl != null)
-          Image.network(
-            logoUrl,
-            height: 92,
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-            errorBuilder: (_, _, _) => const _GradientBrandCircle(),
-          )
-        else
-          const _GradientBrandCircle(),
+        // ارتفاع ثابت + تلاشي: قبل كده اللوجو كان بيحل محل الدايرة البديلة **بقفزة**،
+        // فالمستخدم يشوف شكلين مختلفين في نص ثانية ويحس إن فيه حاجة غلط (بلاغ 2026-09-10).
+        SizedBox(
+          height: 92,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: logoUrl != null
+                ? Image.network(
+                    logoUrl,
+                    key: ValueKey(logoUrl),
+                    height: 92,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => const _GradientBrandCircle(),
+                  )
+                : const _GradientBrandCircle(),
+          ),
+        ),
         const SizedBox(height: 14),
         Text(
           'أسطى',

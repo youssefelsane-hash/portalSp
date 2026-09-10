@@ -7,6 +7,7 @@ import 'core/compromised_device_screen.dart';
 import 'core/deep_link_router.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
+import 'design/branded_loading_screen.dart';
 import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
@@ -74,9 +75,7 @@ class _DeviceSecurityGate extends StatelessWidget {
       future: DeviceSecurityService().check(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const BrandedLoadingScreen(message: 'بنتأكد من أمان الجهاز…');
         }
         final result = snapshot.data!;
         if (result.isCompromised) {
@@ -182,7 +181,7 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthRepository>();
     if (auth.isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const BrandedLoadingScreen(message: 'بنجهّز حسابك…');
     }
     // docs/08 §17.22 — لازم يتفحص *قبل* isAuthenticated: جلسة محفوظة مش كافية لوحدها لو
     // البصمة مفعّلة على الجهاز ده.
@@ -237,7 +236,7 @@ class _VerificationGateState extends State<_VerificationGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const BrandedLoadingScreen(message: 'بنجيب شغلك…');
     }
     return _needsOnboarding
         ? const OnboardingScreen()
