@@ -27,6 +27,7 @@ import 'catalog_navigation.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
 import '../projects/create_project_screen.dart';
+import '../shell/app_footer.dart';
 
 // Script 3 §2/§3/§5/§32 — أول شاشة بعد تسجيل الدخول، محل BookingModeScreen القديمة اللي كانت
 // بتسأل "فرد ولا فريق؟" فورًا (anti-pattern صريح — العميل ما بيشوفش وصف مشكلته أصلاً قبل سؤال
@@ -493,6 +494,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+              // فوتر التطبيق — نظير فوتر الموقع بالحرف (بلاغ مالك 2026-09-11: «الفوتر مش
+              // ظاهر في الـcustomer application»). بره الـPadding عمدًا: الفوتر له خلفيته
+              // الخاصة وبيمتد لحواف الشاشة، والحشو الجانبي جوّاه.
+              AppFooter(zoneId: _selectedAddress?.serviceZoneId),
             ],
           ),
         ),
