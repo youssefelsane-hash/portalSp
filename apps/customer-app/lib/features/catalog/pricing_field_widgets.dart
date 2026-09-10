@@ -271,6 +271,9 @@ Widget buildPricingFieldWidget(
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: DropdownButtonFormField<String>(
+          // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+          // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+          isExpanded: true,
           decoration: InputDecoration(
             labelText: label,
             border: const OutlineInputBorder(),

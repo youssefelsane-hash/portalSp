@@ -95,11 +95,15 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> {
                                 children: [
                                   Icon(Icons.tag, size: 18, color: Theme.of(context).colorScheme.onPrimaryContainer),
                                   const SizedBox(width: 6),
-                                  Text(
-                                    'اكتب الكود ده في ملاحظة التحويل',
-                                    style: TextStyle(
-                                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w600,
+                                  // النص العربي ده أعرض من شاشة ٣٢٠ بكسل جوّه كارت بحشو ٢٠×٢،
+                                  // فبدون Flexible الصف بيتجاوز بـ٢٢٦ بكسل (بَقّة بيكسل حقيقية).
+                                  Flexible(
+                                    child: Text(
+                                      'اكتب الكود ده في ملاحظة التحويل',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
                                 ],

@@ -1353,6 +1353,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DropdownButtonFormField<ServiceStandardDataRow>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     initialValue: _selectedStandardData,
                     decoration: const InputDecoration(
                       labelText: 'نوع التنفيذ',

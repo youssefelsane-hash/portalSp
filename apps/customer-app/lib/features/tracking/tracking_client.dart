@@ -32,6 +32,7 @@ class OrderTrackingClient {
     // (order-tracking.gateway.ts's handleJoin بيتحقق من الملكية بس، مش order_status).
     void Function(String previousStatus, String newStatus)? onOrderStatusChanged,
   }) {
+    if (!kRealtimeEnabled) return;
     final socket = socket_io.io(
       '$_socketBaseUrl/tracking',
       socket_io.OptionBuilder()

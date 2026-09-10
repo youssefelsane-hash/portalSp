@@ -78,6 +78,9 @@ class _FileComplaintScreenState extends State<FileComplaintScreen> {
                   ),
                 ),
               DropdownButtonFormField<ComplaintCategory>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _category,
                 decoration: const InputDecoration(labelText: 'نوع المشكلة'),
                 items: ComplaintCategory.values

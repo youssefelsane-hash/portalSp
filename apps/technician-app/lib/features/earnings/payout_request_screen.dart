@@ -90,6 +90,9 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _method,
                 decoration: const InputDecoration(labelText: 'طريقة الصرف'),
                 items: payoutMethodLabelsAr.entries

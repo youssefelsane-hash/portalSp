@@ -1253,6 +1253,9 @@ class _RescheduleRequestDialogState extends State<_RescheduleRequestDialog> {
               const Text('الموعد الحالي لن يتغيّر إلا بعد موافقة العميل.'),
               const SizedBox(height: 16),
               DropdownButtonFormField<ScheduleSlot>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _slot,
                 decoration: const InputDecoration(labelText: 'الموعد المقترح'),
                 items: widget.slots
@@ -2246,6 +2249,9 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
+                                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                                isExpanded: true,
                                 initialValue: _drafts[i].itemType,
                                 decoration: const InputDecoration(
                                   labelText: 'النوع',

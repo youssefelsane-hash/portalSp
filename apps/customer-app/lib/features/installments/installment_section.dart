@@ -175,6 +175,9 @@ class _InstallmentSectionState extends State<InstallmentSection> {
                   )
                 else
                   DropdownButtonFormField<String>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     key: ValueKey(_selectedPlan!.id),
                     initialValue: _paymentMethods.any((method) =>
                             method.id == _selectedPaymentMethodId &&

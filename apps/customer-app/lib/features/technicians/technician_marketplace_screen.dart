@@ -223,6 +223,9 @@ class _TechnicianMarketplaceScreenState
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   DropdownButton<TechnicianSortOption>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     value: _sort,
                     underline: const SizedBox.shrink(),
                     items: TechnicianSortOption.values

@@ -66,7 +66,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   crossAxisCount: 2,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
-                  childAspectRatio: 0.95,
+                  // صورة ٤:٣ + سطرين اسم — النسبة دي بتدي الاسم مساحته من غير قصّ على ٣٢٠ بكسل.
+                  childAspectRatio: 0.82,
                 ),
                 itemCount: _categories!.length,
                 itemBuilder: (context, index) {

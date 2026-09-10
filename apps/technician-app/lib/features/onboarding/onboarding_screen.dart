@@ -263,6 +263,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             DropdownButtonFormField<String>(
+                              // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                              // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                              isExpanded: true,
                               initialValue: _selectedDocumentType,
                               decoration: const InputDecoration(labelText: 'نوع المستند'),
                               items: documentTypeLabelsAr.entries

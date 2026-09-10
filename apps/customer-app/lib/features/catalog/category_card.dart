@@ -27,14 +27,20 @@ class CategoryCard extends StatelessWidget {
               placeholderIcon: Icons.category_outlined,
               borderRadius: BorderRadius.zero,
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              child: Text(
-                category.nameAr,
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall,
+            // **Flexible مقصود**: خلية الشبكة ارتفاعها ثابت (مشتق من `childAspectRatio`)،
+            // والصورة بتاخد ٣/٤ العرض منه. الباقي مش دايمًا بيكفي تلات سطور اسم على شاشة
+            // ٣٢٠ بكسل — من غير الحد ده العمود بيتجاوز بـ٢٠–٤٠ بكسل (بَقّة بيكسل حقيقية
+            // اتلقطت في مسح الشاشات). Flexible بيقصّ النص بدل ما يكسر التخطيط.
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                child: Text(
+                  category.nameAr,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
               ),
             ),
           ],

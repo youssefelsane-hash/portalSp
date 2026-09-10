@@ -657,6 +657,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+            // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+            isExpanded: true,
             initialValue: _staffRole,
             decoration: const InputDecoration(border: OutlineInputBorder()),
             items: [

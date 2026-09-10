@@ -201,6 +201,9 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                      // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                      isExpanded: true,
                       initialValue: _cityId,
                       decoration: const InputDecoration(labelText: 'المدينة'),
                       items: (_cities ?? [])
@@ -214,6 +217,9 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                      // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                      isExpanded: true,
                       initialValue: _areaId,
                       decoration: const InputDecoration(labelText: 'المنطقة'),
                       items: (_areas ?? [])

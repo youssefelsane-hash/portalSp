@@ -345,6 +345,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _addressId,
                 decoration: const InputDecoration(
                   labelText: 'العنوان',
@@ -365,6 +368,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 key: ValueKey(_addressId),
                 initialValue: _serviceId,
                 decoration: InputDecoration(
@@ -389,6 +395,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _frequency,
                 decoration: const InputDecoration(
                   labelText: 'التكرار',
