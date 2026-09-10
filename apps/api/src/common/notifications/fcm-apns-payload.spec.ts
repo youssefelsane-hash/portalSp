@@ -98,3 +98,29 @@ describe('FcmPushDispatcher.buildMessage() — صحة حمولة APNs مقابل
     expect(message.data?.actionable).toBe('false');
   });
 });
+
+/**
+ * §15 (تدقيق أمان الأسرار) — بَقّة تسريب حقيقية اتقفلت: الكود كان بيسجّل `err.stack` لما
+ * `FIREBASE_SERVICE_ACCOUNT_JSON` يكون مكسور. رسالة `JSON.parse` في V8 بتضمّ **أول ~10 حروف من
+ * المدخل نفسه** (`Unexpected token 'x', "xSECRET..."... is not valid JSON`)، والمدخل هنا مفتاح
+ * خدمة Firebase — يعني جزء من سر حقيقي كان بيروح للوج الإنتاج على أول قيمة غلط.
+ */
+describe('FcmPushDispatcher — قيمة مفتاح الخدمة المكسورة مابتوصلش للوج', () => {
+  it('بيسجّل اسم الخطأ بس، من غير أي جزء من قيمة FIREBASE_SERVICE_ACCOUNT_JSON', async () => {
+    const { Logger } = await import('@nestjs/common');
+    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    // قيمة **وهمية** بالكامل بشكل سر حقيقي — عشان نتأكد إن ولا حرف منها بيتسجّل.
+    const brokenSecret = 'zFAKEPRIVATEKEYzzzzzzzzzzzzzzzzzzzzzzzz';
+    const config = { get: () => brokenSecret } as unknown as ConfigService;
+
+    const dispatcher = new FcmPushDispatcher(config);
+    expect(dispatcher.isConfigured).toBe(false);
+
+    const written = errorSpy.mock.calls.flat().join(' ');
+    expect(written).toContain('FIREBASE_SERVICE_ACCOUNT_JSON');
+    expect(written).toContain('SyntaxError');
+    expect(written).not.toContain('FAKEPRIVATEKEY');
+    expect(written).not.toContain(brokenSecret.slice(0, 8));
+    errorSpy.mockRestore();
+  });
+});

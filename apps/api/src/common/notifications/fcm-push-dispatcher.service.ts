@@ -57,7 +57,12 @@ export class FcmPushDispatcher {
       this.messaging = getMessaging(app);
       this.isConfigured = true;
     } catch (err) {
-      this.logger.error('فشل تحميل FIREBASE_SERVICE_ACCOUNT_JSON — لازم يكون JSON صحيح', err instanceof Error ? err.stack : err);
+      // **متعمّد إننا مانسجّلش رسالة الخطأ ولا الـstack**: `JSON.parse` في V8 بيحط أول ~10 حروف من
+      // المدخل جوه رسالة الخطأ نفسها ("Unexpected token 'x', \"xSECRETKEY\"... is not valid JSON").
+      // المدخل هنا هو مفتاح خدمة Firebase، فتسجيل الرسالة = تسريب جزء من سر حقيقي للوج الإنتاج.
+      // اسم الصنف لوحده كفاية للتشخيص (SyntaxError = JSON مكسور، غيره = مشكلة في الشهادة نفسها).
+      const errorName = err instanceof Error ? err.name : 'UnknownError';
+      this.logger.error(`فشل تحميل FIREBASE_SERVICE_ACCOUNT_JSON (${errorName}) — لازم يكون محتوى ملف مفتاح الخدمة كامل كـJSON صالح في سطر واحد`);
       this.isConfigured = false;
       this.messaging = null;
     }

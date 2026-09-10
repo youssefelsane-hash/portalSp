@@ -12,6 +12,10 @@ const MINIMAL_VALID_PRODUCTION_ENV = {
   WEBAUTHN_RP_ID: 'example.com',
   WEBAUTHN_ORIGIN: 'https://app.example.com',
   STORAGE_PROVIDER: 's3',
+  // إنتاج Osta على Cloudflare R2 — القيم دي **وهمية**.
+  S3_BUCKET: 'osta-production',
+  S3_ACCESS_KEY_ID: 'fake-access-key-id',
+  S3_SECRET_ACCESS_KEY: 'fake-secret-access-key',
   // المزوّد الافتراضي بعد هجرة 2026-09-10 — القيم دي **وهمية** ومالهاش أي علاقة بأي حساب حقيقي.
   SMS_PROVIDER: 'cequens',
   CEQUENS_API_KEY: 'fake-api-key-for-tests',
@@ -49,6 +53,24 @@ describe('envValidationSchema — docs/08 §19 بند 16 (fail-fast للإعدا
     delete (env as Record<string, unknown>).STORAGE_PROVIDER;
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
     expect(error).toBeDefined();
+  });
+
+  it('STORAGE_PROVIDER=s3 بلا bucket/مفاتيح في الإنتاج يترفض — كان بيقلع healthy وكل رفع ملف بيفشل وقت التشغيل', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV } as Record<string, unknown>;
+    delete env.S3_BUCKET;
+    delete env.S3_ACCESS_KEY_ID;
+    delete env.S3_SECRET_ACCESS_KEY;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('S3_BUCKET');
+  });
+
+  it('STORAGE_PROVIDER=s3 بـbucket بس (بلا مفاتيح) يترفض برضه — التلاتة لازم مع بعض', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV } as Record<string, unknown>;
+    delete env.S3_ACCESS_KEY_ID;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('S3_ACCESS_KEY_ID');
   });
 
   it('مفيش أي بيانات اعتماد CEQUENS في الإنتاج يترفض — القناة الوحيدة لتسليم كود OTP', () => {

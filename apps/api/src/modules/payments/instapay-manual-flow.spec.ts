@@ -35,6 +35,10 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     order2: '',
     instapayPayment: '',
     instapayPayment2: '',
+    order3: '',
+    instapayPayment3: '',
+    order4: '',
+    instapayPayment4: '',
     cardPayment: '',
   };
 
@@ -141,6 +145,28 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     );
     ids.instapayPayment2 = instapayPayment2.id;
 
+    // طلبين إضافيين مستقلين تمامًا لبند §11 (ضمان إن التحويلة ماتتأكّدش مرتين): واحد لتأكيدين
+    // **متزامنين** فعليًا، وواحد لتأكيد بعد رفض. لازم يكونوا منفصلين عن اللي فوق عشان كل اختبار
+    // يبدأ من حالة "معلّقة" نضيفة مهما كان ترتيب التشغيل.
+    for (const [orderKey, paymentKey, tag] of [
+      ['order3', 'instapayPayment3', '3'],
+      ['order4', 'instapayPayment4', '4'],
+    ] as const) {
+      const [row] = await q(
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+           payment_status, total_amount_cents, placed_at)
+         VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+        [`TESTIP${tag}-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      );
+      ids[orderKey] = row.id;
+      const [pay] = await q(
+        `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, initiated_at)
+         VALUES ($1,$2,$3,$4,'instapay','pending',$5, now()) RETURNING id`,
+        [`PAYIP${tag}-${runId}`.slice(0, 24), row.id, ids.customerProfile, 100000, `idem-ip${tag}-${runId}`],
+      );
+      ids[paymentKey] = pay.id;
+    }
+
     service = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
@@ -188,6 +214,11 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order2]);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order2]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order2]);
+    // طلبات §11 (تأكيد متزامن / تأكيد بعد رفض) — نفس ترتيب المسح بالظبط.
+    await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
+    await q(`DELETE FROM order_status_history WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
+    await q(`DELETE FROM payments WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
+    await q(`DELETE FROM orders WHERE id = ANY($1)`, [[ids.order3, ids.order4]]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.otherCustomerProfile]);
@@ -272,6 +303,59 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       );
       expect(row.payment_status).toBe(PaymentGatewayStatus.SUCCEEDED);
       expect(row.order_status).toBe('searching_technician');
+    });
+  });
+
+  // §11 من مواصفة إعداد الإنتاج: "تحويلة/مرجع مايتأكّدش مرتين". النقر المزدوج **المتسلسل** مغطّى
+  // فوق؛ الاتنين هنا بيغطّوا الحالتين اللي كانت ناقصة فعليًا.
+  describe('confirmInstaPayPayment() — §11: استحالة تأكيد نفس التحويلة مرتين', () => {
+    it('تأكيدين **متزامنين** على نفس الدفعة = أثر مالي واحد وحدث واحد وانتقال حالة واحد', async () => {
+      eventsEmit.mockClear();
+      const adminUserId = ids.customerUser;
+
+      // مش تسلسل — الاتنين بيتبعتوا مع بعض على اتصالين مختلفين من الـpool، وده بالظبط اللي
+      // القفل التشاؤمي (`pessimistic_write`) موجود عشانه.
+      const [first, second] = await Promise.all([
+        service.confirmInstaPayPayment(adminUserId, ids.instapayPayment3),
+        service.confirmInstaPayPayment(adminUserId, ids.instapayPayment3),
+      ]);
+      expect(first.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
+      expect(second.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
+      // نفس لحظة الإتمام في الردّين = الفائز واحد بس، والتاني رجع نفس الصف مش نفّذ تأكيد تاني.
+      expect(second.completedAt!.getTime()).toBe(first.completedAt!.getTime());
+
+      const confirmedEmits = eventsEmit.mock.calls.filter((call) => call[0] === 'payment.instapay_confirmed');
+      expect(confirmedEmits).toHaveLength(1);
+
+      const [payRow] = await dataSource.query(
+        `SELECT payment_status, collected_by_user_id FROM payments WHERE id = $1`,
+        [ids.instapayPayment3],
+      );
+      expect(payRow.payment_status).toBe(PaymentGatewayStatus.SUCCEEDED);
+      expect(payRow.collected_by_user_id).toBe(adminUserId);
+
+      const [orderRow] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [ids.order3]);
+      expect(orderRow.order_status).toBe('searching_technician');
+
+      // أخطر جزء: انتقال الحالة نفسه لازم يكون **مرة واحدة** — صفّين هنا معناهم إن التوزيع اتبدأ
+      // مرتين لنفس الطلب.
+      const [{ count }] = await dataSource.query(
+        `SELECT COUNT(*)::int AS count FROM order_status_history WHERE order_id = $1 AND new_status = 'searching_technician'`,
+        [ids.order3],
+      );
+      expect(count).toBe(1);
+    });
+
+    it('تأكيد تحويلة **اترفضت** بيترفض بوضوح — مش رجوع صامت يوهم الموظف إن التأكيد نجح', async () => {
+      const adminUserId = ids.customerUser;
+      await service.rejectInstaPayPayment(adminUserId, ids.instapayPayment4, 'التحويل مش ظاهر في الحساب');
+
+      await expect(service.confirmInstaPayPayment(adminUserId, ids.instapayPayment4)).rejects.toThrow(/معلّقة/);
+
+      const [payRow] = await dataSource.query(`SELECT payment_status FROM payments WHERE id = $1`, [
+        ids.instapayPayment4,
+      ]);
+      expect(payRow.payment_status).toBe(PaymentGatewayStatus.FAILED);
     });
   });
 

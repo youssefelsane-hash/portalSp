@@ -212,7 +212,36 @@ FAWRY_REFERENCE_EXPIRY_HOURS=72
    `https://nyc3.digitaloceanspaces.com`، R2: `https://<account_id>.r2.cloudflarestorage.com`) —
    ده `S3_ENDPOINT`.
 
-### مكان القيم
+### ⭐ إنتاج Osta — Cloudflare R2 (`osta-production`)
+
+اختيار الإطلاق هو **Cloudflare R2**: صفر تكلفة egress، وده أهم بند تكلفة في منتج بيعرض صور طلبات
+ومستندات فنيين طول الوقت.
+
+1. لوحة Cloudflare → **R2 → Create bucket** باسم **`osta-production`**.
+2. **R2 → Manage R2 API Tokens → Create API token**: الصلاحية **Object Read & Write**، ومحصورة على
+   الـbucket ده **بس** (مش Account-wide — مبدأ أقل صلاحية ممكنة). التوكن بيديك **Access Key ID**
+   و**Secret Access Key**؛ **السر بيتعرض مرة واحدة بس** عند الإنشاء.
+3. الـendpoint من نفس الصفحة: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+
+```
+STORAGE_PROVIDER=s3
+S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+S3_REGION=auto            # R2 مالوش أقاليم فعلية — "auto" هي القيمة اللي R2 بيوقّع بيها
+S3_BUCKET=osta-production
+S3_ACCESS_KEY_ID=<من الخطوة 2>
+S3_SECRET_ACCESS_KEY=<من الخطوة 2>
+S3_FORCE_PATH_STYLE=true  # R2 بيخدم path-style: /<bucket>/<key>
+STORAGE_S3_URL_EXPIRY_SECONDS=604800   # 7 أيام — الحد الأقصى لـSigV4، وR2 بيحترمه
+```
+
+> 🔒 القيم دي **سيرفر بس**. ممنوع تمامًا وجود أي منها في كود Flutter، أو أي واجهة أمامية، أو ملف
+> في الريبو، أو مثال في التوثيق بقيمة حقيقية. التطبيقات بتاخد روابط presigned من الـAPI، مش مفاتيح.
+
+> **حارس إقلاع (2026-09-10)**: `STORAGE_PROVIDER=s3` في staging/production من غير
+> `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` **بيمنع السيرفر من الإقلاع** بدل ما يقلع
+> "healthy" وكل رفع ملف حقيقي يفشل وقت التشغيل.
+
+### مكان القيم (أي مزوّد تاني)
 
 في `apps/api/.env`:
 ```
@@ -287,20 +316,43 @@ FIREBASE_SERVICE_ACCOUNT_JSON=<محتوى الملف كامل كسطر واحد>
 - الملفين الاتنين (`android/app/google-services.json`, `ios/Runner/GoogleService-Info.plist`)
   مُضافين لـ `.gitignore` في التطبيقين — نفس منطق `.env`: قيم بيئة حقيقية متتحطش في git.
 
-> **تحديث 2026-08-26 (docs/08 §69)**: مشروع Firebase الحقيقي بقى موجود (`sonaa3-66360`)،
-> و**`apps/customer-app/android/app/google-services.json` اتحط فعلاً** — يعني تطبيق العميل على
-> أندرويد جاهز يسجّل توكن ويستقبل push بمجرد ما يتبني ويتسجّل فيه دخول. الباقي:
-> `technician-app` محتاج تطبيق Android تاني في نفس المشروع بحزمة `com.baytak.technician_app`
-> وملفه الخاص، وiOS (التطبيقين) محتاج `GoogleService-Info.plist` + **مفتاح APNs مرفوع** في
-> Project Settings → Cloud Messaging (مؤجّل بطلب المالك). الملفات دي في `.gitignore` فكل بيئة
-> بناء لازم تحط نسختها.
+> ### ⚠️ تحديث 2026-09-10 — مشروع الإنتاج `osta-production` ومعرّفات الحزم الجديدة
+>
+> معرّفات حزم أندرويد اتغيّرت في نفس اليوم كجزء من الإطلاق تحت اسم **Osta**:
+>
+> | التطبيق | المعرّف القديم | **معرّف الإنتاج** |
+> |---|---|---|
+> | `apps/customer-app` | `com.baytak.customer_app` | **`com.ostahome.customer`** |
+> | `apps/technician-app` | `com.baytak.technician_app` | **`com.ostahome.technician`** |
+>
+> **ده معناه إن أي `google-services.json` قديم بقى غير صالح**: الملف بيربط الحزمة بتطبيق مسجّل
+> بعينه، فملف متولّد لـ`com.baytak.customer_app` مش هيشتغل مع `com.ostahome.customer` — البناء
+> بيعدّي والتسجيل بيفشل وقت التشغيل. لازم تطبيقين **جداد** في مشروع `osta-production` وملفين
+> جداد. مشروع `sonaa3-66360` القديم بقى تاريخي، مايستخدمش للإطلاق.
 
-**الخطوات المتبقية عليك (محتاجة مشروع Firebase حقيقي)**: اعمل مشروع على
-[console.firebase.google.com](https://console.firebase.google.com) (لو لسه معملتوش في §الأول)،
-ضيف تطبيق Android بـ `applicationId` من `android/app/build.gradle.kts` (`com.baytak.customer_app`
-أو `com.baytak.technician_app`) ونزّل `google-services.json` وحطه في `android/app/`، وضيف تطبيق
-iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) ونزّل
-`GoogleService-Info.plist` وضيفه لـ `ios/Runner/` عبر Xcode (Add Files to "Runner").
+**الخطوات عليك في وحدة تحكم Firebase (مشروع `osta-production`)**:
+
+1. اعمل/افتح مشروع **`osta-production`** على
+   [console.firebase.google.com](https://console.firebase.google.com).
+2. **Add app → Android** مرتين، بالمعرّفين بالظبط زي ما هما في الجدول فوق (اللي في
+   `android/app/build.gradle.kts` — لو اختلف حرف واحد، الملف مش هيشتغل).
+3. نزّل `google-services.json` لكل تطبيق وحطه في `apps/<app>/android/app/google-services.json`.
+   الملفين **في `.gitignore`** — كل بيئة بناء بتحط نسختها، وممنوع رفعهم على git.
+4. **Project Settings → Service Accounts → Generate new private key** → المحتوى كله كسطر واحد في
+   `FIREBASE_SERVICE_ACCOUNT_JSON` على سيرفر الإنتاج **بس**.
+5. iOS (مؤجّل بطلب المالك): `GoogleService-Info.plist` لكل تطبيق + **مفتاح APNs مرفوع** في
+   Project Settings → Cloud Messaging. الإضافة لازم تكون من Xcode (Add Files to "Runner")، مش
+   نسخ ملف — قيد موثّق: مفيش macOS/Xcode في بيئة التطوير دي.
+
+> 🔒 **قاعدة قاطعة**: مفتاح خدمة Firebase Admin (`FIREBASE_SERVICE_ACCOUNT_JSON`) **سيرفر بس**.
+> ممنوع تمامًا يدخل أي كود Flutter أو أي واجهة أمامية — التطبيقات بتستخدم `google-services.json`
+> وهو ملف إعداد عميل، مش بيانات اعتماد إدارية. الكود متحقّق: مفيش أي `firebase_options.dart` ولا
+> أي مفتاح خدمة في `apps/customer-app/lib` أو `apps/technician-app/lib` (بيندهوا
+> `Firebase.initializeApp()` بلا أي options، فبيقروا ملف الإعداد وقت البناء).
+>
+> الباك-إند بيقرا القيمة من البيئة بس (`configuration.ts → notifications.fcm.serviceAccountJson`)،
+> ولو القيمة مكسورة بيسجّل **اسم الخطأ بس** — تسجيل `err.stack` كان بيسرّب أول ~10 حروف من المفتاح
+> في رسالة `JSON.parse` (بَقّة حقيقية اتقفلت 2026-09-10، ومغطّاة باختبار انحدار).
 
 ### 4.2 SMS — CEQUENS (المزوّد المعتمد لمصر)
 

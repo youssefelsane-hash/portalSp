@@ -162,6 +162,21 @@ export const envValidationSchema = Joi.object({
   // الحارس **بيتبع المزوّد المختار** (هجرة 2026-09-10 لـCEQUENS): قبل كده كان بيفرض بيانات
   // Twilio دايمًا، فإطلاق بـCEQUENS كان هيتقفل على مزوّد إحنا مابنستخدمهوش. فحص عابر للحقول
   // (مش `.when()` عادي) لأن كل مزوّد بياخد **مجموعة** حقول لازم تيجي مع بعض.
+  // نفس فلسفة حارس الـSMS تحت، لكن للتخزين: `STORAGE_PROVIDER=s3` كان مفروض في الإنتاج من غير ما
+  // حد يفرض **بيانات الـbucket نفسها**. النتيجة كانت سيرفر بيقلع "healthy" وS3Client متبني بـ
+  // `bucket=undefined` وبيانات اعتماد فاضية — كل رفع ملف حقيقي (صور طلب، مستندات فني) بيفشل وقت
+  // التشغيل بدل ما يتمنع وقت الإقلاع. إنتاج Osta على Cloudflare R2 (bucket: osta-production).
+  .custom((value: Record<string, unknown>, helpers) => {
+    if (isProductionLikeEnv(value.NODE_ENV as string | undefined) && value.STORAGE_PROVIDER === 's3') {
+      const missing = ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'].filter((key) => !value[key]);
+      if (missing.length > 0) {
+        return helpers.message({
+          custom: `STORAGE_PROVIDER=s3 يستلزم ${missing.join('/')} في staging/production — من غيرهم كل رفع ملف حقيقي بيفشل وقت التشغيل بدل ما يتمنع وقت الإقلاع`,
+        });
+      }
+    }
+    return value;
+  })
   .custom((value: Record<string, unknown>, helpers) => {
     if (isProductionLikeEnv(value.NODE_ENV as string | undefined)) {
       const provider = (value.SMS_PROVIDER as string | undefined) ?? 'cequens';
