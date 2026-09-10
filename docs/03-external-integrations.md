@@ -233,14 +233,20 @@ S3_FORCE_PATH_STYLE=true
 
 ---
 
-## 4. الإشعارات — FCM / Twilio / SMTP
+## 4. الإشعارات — FCM / CEQUENS / Twilio / SMTP
 
-الثلاثة مستقلين تماماً عن بعض — فعّل أي واحد فيهم لوحده، الباقي بيفضل log-only من غير أي تأثير.
+كل قناة مستقلة تماماً عن الباقي — فعّل أي واحدة لوحدها، الباقي بيفضل log-only من غير أي تأثير.
 
 **الكود**: `apps/api/src/common/notifications/` (`fcm-push-dispatcher.service.ts`,
-`twilio-sms-dispatcher.service.ts`, `twilio-whatsapp-dispatcher.service.ts`,
-`smtp-email-dispatcher.service.ts`) — تفاصيل معمارية كاملة في
-`apps/api/src/modules/notifications/README.md`.
+`cequens-sms-dispatcher.service.ts`, `twilio-sms-dispatcher.service.ts`,
+`twilio-whatsapp-dispatcher.service.ts`, `smtp-email-dispatcher.service.ts`) — تفاصيل معمارية
+كاملة في `apps/api/src/modules/notifications/README.md`.
+
+> **الـSMS محايد المزوّد منذ 2026-09-10.** المستهلك (`AuthService` للـOTP،
+> `CompositeNotificationDispatcher` لباقي الإشعارات) بيحقن الـtoken `SMS_DISPATCHER` مش كلاس
+> بعينه، والاختيار بيحصل مرة واحدة وقت التركيب في `sms-dispatcher.provider.ts` حسب `SMS_PROVIDER`.
+> إضافة مزوّد تالت = ملف واحد جديد بيحقق `SmsDispatcher` + سطر في `SMS_PROVIDERS`، بلا أي لمس
+> للمستهلكين.
 
 ### 4.1 Push — Firebase Cloud Messaging
 
@@ -296,7 +302,57 @@ FIREBASE_SERVICE_ACCOUNT_JSON=<محتوى الملف كامل كسطر واحد>
 iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) ونزّل
 `GoogleService-Info.plist` وضيفه لـ `ios/Runner/` عبر Xcode (Add Files to "Runner").
 
-### 4.2 SMS / WhatsApp — Twilio
+### 4.2 SMS — CEQUENS (المزوّد المعتمد لمصر)
+
+`SMS_PROVIDER=cequens` هو الافتراضي. CEQUENS مزوّد إقليمي بتغطية وأسعار أفضل بكتير لمصر من
+Twilio، واللي خلاه اختيار الإطلاق.
+
+**دورة حياة كود التحقق (OTP) بتفضل ملك Osta بالكامل** — التوليد (`randomInt`)، الهاش بـbcrypt،
+مدة الصلاحية، عدد المحاولات، إبطال أي كود أقدم عند إعادة الإرسال، والتحقق نفسه: كله في
+`auth.service.ts` وقاعدة بياناتنا. CEQUENS **قناة تسليم نص وبس**؛ مابنستخدمش أي "Verify API"
+خارجي، وأي انتقال لكده قرار منفصل صريح مش أثر جانبي لتبديل مزوّد.
+
+#### الخطوات
+
+1. اعمل حساب على [cequens.com](https://www.cequens.com) وفعّله للإرسال في مصر.
+2. **اسم المُرسِل (Sender ID)**: اطلب اعتماد Sender ID من CEQUENS (اسم أبجدي زي `OSTA`). ده
+   `CEQUENS_SENDER_NAME` — **إجباري**، المزوّد بيرفض أي رسالة من غير Sender ID معتمد للدولة.
+3. **المصادقة** — املا **واحد** من المسارين:
+   - **(أ) مفتاح API جاهز (المفضّل للسيرفر)**: من لوحة CEQUENS → **Developers → Create API Key**
+     (اسم + تاريخ انتهاء) → القيمة دي هي `CEQUENS_API_KEY`، وبتتبعت كـ`Authorization: Bearer`.
+   - **(ب) تبادل OAuth2**: `CEQUENS_CLIENT_ID` / `CEQUENS_CLIENT_SECRET` / `CEQUENS_USERNAME` /
+     `CEQUENS_PASSWORD` — الكود بيعمل `grant_type=password` ويخزّن الـ`access_token` في الذاكرة
+     ويجدّده قبل انتهائه بـ60 ثانية.
+4. الأرقام لازم تكون **E.164** (`+2010…`) — وده اللي `normalizePhoneNumber` بيطلّعه أصلاً.
+
+في `apps/api/.env`:
+```
+SMS_PROVIDER=cequens
+CEQUENS_SENDER_NAME=<Sender ID المعتمد>
+CEQUENS_API_KEY=<لو اخترت المسار (أ)>
+# أو المسار (ب):
+CEQUENS_CLIENT_ID=
+CEQUENS_CLIENT_SECRET=
+CEQUENS_USERNAME=
+CEQUENS_PASSWORD=
+```
+
+`CEQUENS_BASE_URL` و`CEQUENS_AUTH_URL` اختياريين — الافتراضي
+`https://apis.cequens.com/sms/v1` و`https://apis.cequens.com/auth/v1/tokens`. موجودين كمتغيرات
+عشان لو حسابك على عقد/مسار مختلف يتظبط من البيئة بلا تعديل كود.
+
+> ⚠️ **نقطة تحقّق مفتوحة بصراحة**: توثيق CEQUENS العام بيوصف المسارين (مفتاح API + OAuth2)،
+> وأنهي واحد مفعّل بيتحدد من الحساب نفسه. عشان كده الاتنين مدعومين في الكود بدل مراهنة على
+> واحد. **قبل الإطلاق**: اعمل إرسال تجريبي حقيقي واحد وأكّد أي مسار بيشتغل مع حسابنا.
+
+> 🔒 **ممنوع** تسجيل أي كود OTP أو أي بيانات اعتماد CEQUENS في لوج الإنتاج. الكود بيسجّل سبب
+> الفشل ورقم **مقصوص** بس (`+2010***34`)، وطباعة الـOTP الخام متوقفة في staging/production.
+
+### 4.2.1 SMS (بديل احتياطي) / WhatsApp — Twilio
+
+Twilio بقى بديل احتياطي للـSMS (`SMS_PROVIDER=twilio`)، ولسه المزوّد **الوحيد** لقناة WhatsApp.
+لو المزوّد المختار مش مُعدّ والتاني مُعدّ، الكود بيرجع للتاني بتحذير في اللوج بدل ما كود التحقق
+مايوصلش لحد.
 
 1. اعمل حساب على [twilio.com](https://www.twilio.com).
 2. من الـ Console الرئيسية: **Account SID** (`TWILIO_ACCOUNT_SID`) و**Auth Token**
@@ -310,6 +366,7 @@ iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) و�
 
 في `apps/api/.env`:
 ```
+SMS_PROVIDER=twilio   # بس لو عايز Twilio يبقى مزوّد الـSMS بدل CEQUENS
 TWILIO_ACCOUNT_SID=<من الخطوة 2>
 TWILIO_AUTH_TOKEN=<من الخطوة 2>
 TWILIO_SMS_FROM_NUMBER=<من الخطوة 3>
@@ -657,6 +714,13 @@ S3_SECRET_ACCESS_KEY=
 
 # Notifications (§4)
 FIREBASE_SERVICE_ACCOUNT_JSON=
+SMS_PROVIDER=cequens      # أو twilio
+CEQUENS_SENDER_NAME=      # إجباري لو cequens
+CEQUENS_API_KEY=          # المسار (أ)
+CEQUENS_CLIENT_ID=        # المسار (ب) — الأربعة مع بعض
+CEQUENS_CLIENT_SECRET=
+CEQUENS_USERNAME=
+CEQUENS_PASSWORD=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_SMS_FROM_NUMBER=

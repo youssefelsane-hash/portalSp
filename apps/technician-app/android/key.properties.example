@@ -1,8 +1,18 @@
-# انسخ الملف ده لـ key.properties (نفس المجلد) وحط فيه القيم الحقيقية بتاعة الـ release keystore.
-# key.properties نفسه في .gitignore عمدًا — أبدًا متعملوش commit، ده سر إصدار حقيقي.
-# خطوات توليد الـ keystore وتعبئة القيم دي: docs/03-external-integrations.md § توقيع Android.
+# انسخ الملف ده لـ`key.properties` (نفس المجلد) وحط فيه القيم الحقيقية بتاعة الـrelease keystore.
+#
+# `key.properties` نفسه في `.gitignore` عمدًا — **أبدًا** متعملوش commit، ده سر إصدار حقيقي.
+#
+# ── مفتاح الرفع لتطبيق الفني (Osta) ─────────────────────────────────────────
+# **keystore مستقل تمامًا عن تطبيق العميل** — تطبيقين مختلفين على Play بـapplication id
+# مختلف، فمشاركة نفس المفتاح بينهم بتربط مصيرهم ببعض بلا أي داعي: تسريب واحد = التنين.
+# المفتاح ده لسه ما اتولّدش؛ يتولّد وقت تجهيز الرفع بنفس خطوات مفتاح العميل بالظبط،
+# بـalias خاص بيه (مقترح: `osta-technician-upload`).
+#
+# `storeFile` بيتقري نسبةً لـ`apps/technician-app/android/`، فالأأمن مسار مطلق.
+#
+# خطوات توليد الـkeystore وتعبئة القيم: docs/03-external-integrations.md § توقيع Android.
 
-storePassword=CHANGE_ME
-keyPassword=CHANGE_ME
-keyAlias=CHANGE_ME
-storeFile=/absolute/or/relative/path/to/upload-keystore.jks
+storePassword=
+keyPassword=
+keyAlias=
+storeFile=

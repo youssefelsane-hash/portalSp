@@ -2,14 +2,19 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Twilio } from 'twilio';
 import { DispatchNotificationInput, DispatchResult } from './notification-dispatcher';
+import { SmsDispatcher } from './sms-dispatcher';
 
 /**
  * SMS حقيقي عبر Twilio — تفعيلها = ملء TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER
  * في .env (تفاصيل الحصول عليهم: docs/03-external-integrations.md) من غير أي تعديل كود.
+ *
+ * بقى **بديل احتياطي** بعد هجرة 2026-09-10 لـCEQUENS كمزوّد أساسي لمصر؛ الاختيار بينهم في
+ * `sms-dispatcher.provider.ts` عبر `SMS_PROVIDER`، والمستهلك بيحقن `SMS_DISPATCHER` مش الكلاس ده.
  */
 @Injectable()
-export class TwilioSmsDispatcher {
+export class TwilioSmsDispatcher implements SmsDispatcher {
   readonly isConfigured: boolean;
+  readonly providerName = 'twilio';
   private readonly logger = new Logger('NotificationDispatch(sms)');
   private readonly client: Twilio | null;
   private readonly fromNumber: string | undefined;

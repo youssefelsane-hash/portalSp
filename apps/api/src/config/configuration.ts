@@ -45,7 +45,7 @@ export default () => ({
 
   security: {
     settingsEncryptionKey: process.env.SETTINGS_ENCRYPTION_KEY,
-    // مفصولة بفاصلة (زي "https://admin.baytak.com,https://baytak.com") — فاضي = مفتوح للكل،
+    // مفصولة بفاصلة (زي "https://admin.ostahome.com,https://ostahome.com") — فاضي = مفتوح للكل،
     // مرفوض في الإنتاج عبر env.validation.ts (CORS_ORIGIN مطلوبة هناك لو NODE_ENV=production).
     corsOrigins: (process.env.CORS_ORIGIN ?? '')
       .split(',')
@@ -102,6 +102,23 @@ export default () => ({
     fcm: {
       // محتوى ملف مفتاح خدمة Firebase الكامل كـJSON (سطر واحد) — مش مسار ملف
       serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    },
+    // مزوّد الـSMS الفعّال. الافتراضي CEQUENS (المزوّد المعتمد لمصر منذ 2026-09-10)؛ Twilio
+    // بقى بديل احتياطي. الاختيار نفسه في common/notifications/sms-dispatcher.provider.ts.
+    smsProvider: process.env.SMS_PROVIDER ?? 'cequens',
+    cequens: {
+      // مفتاح API جاهز من لوحة CEQUENS (Developers → Create API Key) — بيتبعت كـBearer مباشرةً.
+      // لو مش موجود، بنستخدم تبادل OAuth2 بالقيم اللي تحته. الاتنين مدعومين لأن الحساب هو اللي
+      // بيحدد أنهي مسار مفعّل (docs/03-external-integrations.md §4.2).
+      apiKey: process.env.CEQUENS_API_KEY,
+      clientId: process.env.CEQUENS_CLIENT_ID,
+      clientSecret: process.env.CEQUENS_CLIENT_SECRET,
+      username: process.env.CEQUENS_USERNAME,
+      password: process.env.CEQUENS_PASSWORD,
+      // اسم المُرسِل المعتمد من CEQUENS للدولة — إجباري، الرسالة بترفض من غيره.
+      senderName: process.env.CEQUENS_SENDER_NAME,
+      baseUrl: process.env.CEQUENS_BASE_URL ?? 'https://apis.cequens.com/sms/v1',
+      authUrl: process.env.CEQUENS_AUTH_URL ?? 'https://apis.cequens.com/auth/v1/tokens',
     },
     twilio: {
       accountSid: process.env.TWILIO_ACCOUNT_SID,

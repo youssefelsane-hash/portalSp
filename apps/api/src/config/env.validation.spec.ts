@@ -12,6 +12,18 @@ const MINIMAL_VALID_PRODUCTION_ENV = {
   WEBAUTHN_RP_ID: 'example.com',
   WEBAUTHN_ORIGIN: 'https://app.example.com',
   STORAGE_PROVIDER: 's3',
+  // المزوّد الافتراضي بعد هجرة 2026-09-10 — القيم دي **وهمية** ومالهاش أي علاقة بأي حساب حقيقي.
+  SMS_PROVIDER: 'cequens',
+  CEQUENS_API_KEY: 'fake-api-key-for-tests',
+  CEQUENS_SENDER_NAME: 'OSTA',
+};
+
+/** نفس الـenv بس بمزوّد Twilio — البديل الاحتياطي، لسه لازم يتفحص بنفس الصرامة. */
+const MINIMAL_VALID_PRODUCTION_ENV_TWILIO = {
+  ...MINIMAL_VALID_PRODUCTION_ENV,
+  SMS_PROVIDER: 'twilio',
+  CEQUENS_API_KEY: undefined,
+  CEQUENS_SENDER_NAME: undefined,
   TWILIO_ACCOUNT_SID: 'AC-real',
   TWILIO_AUTH_TOKEN: 'real-token',
   TWILIO_SMS_FROM_NUMBER: '+201000000000',
@@ -39,21 +51,78 @@ describe('envValidationSchema — docs/08 §19 بند 16 (fail-fast للإعدا
     expect(error).toBeDefined();
   });
 
-  it('مفيش أي بيانات اعتماد Twilio SMS في الإنتاج يترفض — القناة الوحيدة لتسليم كود OTP', () => {
+  it('مفيش أي بيانات اعتماد CEQUENS في الإنتاج يترفض — القناة الوحيدة لتسليم كود OTP', () => {
     const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
-    delete (env as Record<string, unknown>).TWILIO_ACCOUNT_SID;
-    delete (env as Record<string, unknown>).TWILIO_AUTH_TOKEN;
+    delete (env as Record<string, unknown>).CEQUENS_API_KEY;
+    delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('CEQUENS');
+  });
+
+  it('CEQUENS بمفتاح API بلا اسم مُرسِل يترفض — الرسالة نفسها بترفض من المزوّد من غير Sender ID معتمد', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
+    delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('CEQUENS');
+  });
+
+  it('CEQUENS بمسار OAuth كامل (بلا مفتاح API) يعدّي — الحساب هو اللي بيحدد المسار المفعّل', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV } as Record<string, unknown>;
+    delete env.CEQUENS_API_KEY;
+    const { error } = envValidationSchema.validate(
+      {
+        ...env,
+        CEQUENS_CLIENT_ID: 'fake-client',
+        CEQUENS_CLIENT_SECRET: 'fake-secret',
+        CEQUENS_USERNAME: 'fake-user',
+        CEQUENS_PASSWORD: 'fake-pass',
+      },
+      { allowUnknown: true },
+    );
+    expect(error).toBeUndefined();
+  });
+
+  it('CEQUENS بمسار OAuth ناقص قيمة واحدة يترفض — الأربعة لازم مع بعض', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV } as Record<string, unknown>;
+    delete env.CEQUENS_API_KEY;
+    const { error } = envValidationSchema.validate(
+      { ...env, CEQUENS_CLIENT_ID: 'fake-client', CEQUENS_CLIENT_SECRET: 'fake-secret', CEQUENS_USERNAME: 'fake-user' },
+      { allowUnknown: true },
+    );
+    expect(error).toBeDefined();
+  });
+
+  it('SMS_PROVIDER=twilio بإعداد Twilio كامل يعدّي — البديل الاحتياطي لسه مدعوم بالكامل', () => {
+    const { error } = envValidationSchema.validate(MINIMAL_VALID_PRODUCTION_ENV_TWILIO, { allowUnknown: true });
+    expect(error).toBeUndefined();
+  });
+
+  it('SMS_PROVIDER=twilio مُعدّ جزئيًا (SID/TOKEN بلا رقم المرسل) يترفض — التلاتة لازم مع بعض', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV_TWILIO };
     delete (env as Record<string, unknown>).TWILIO_SMS_FROM_NUMBER;
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
     expect(error).toBeDefined();
     expect(error!.message).toContain('TWILIO');
   });
 
-  it('Twilio مُعدّة جزئيًا بس (SID/TOKEN بلا رقم المرسل) في الإنتاج يترفض برضه — التلاتة لازم مع بعض', () => {
-    const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
-    delete (env as Record<string, unknown>).TWILIO_SMS_FROM_NUMBER;
-    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+  it('SMS_PROVIDER=twilio بلا أي بيانات Twilio **مايعدّيش** حتى لو CEQUENS مُعدّ — الحارس بيتبع المزوّد المختار', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_PRODUCTION_ENV, SMS_PROVIDER: 'twilio' },
+      { allowUnknown: true },
+    );
     expect(error).toBeDefined();
+    expect(error!.message).toContain('TWILIO');
+  });
+
+  it('SMS_PROVIDER بقيمة مش معروفة يترفض — بدل ما يقع بصمت على الافتراضي', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_PRODUCTION_ENV, SMS_PROVIDER: 'nexmo' },
+      { allowUnknown: true },
+    );
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('SMS_PROVIDER');
   });
 
   it('WEBAUTHN_RP_ID مش مُعدّة خالص في الإنتاج يترفض — بَقّة مطابقة اتلقطت أثناء بناء بند 16 (defaults كانت بتتخطى فحص .when())', () => {
@@ -109,14 +178,13 @@ describe('envValidationSchema — staging لازم يتفحص بنفس صرام�
     expect(error!.message).toContain('STORAGE_PROVIDER');
   });
 
-  it('مفيش بيانات اعتماد Twilio SMS في staging يترفض — نفس فحص production بالحرف', () => {
+  it('مفيش بيانات اعتماد بوابة SMS في staging يترفض — نفس فحص production بالحرف', () => {
     const env = { ...MINIMAL_VALID_STAGING_ENV };
-    delete (env as Record<string, unknown>).TWILIO_ACCOUNT_SID;
-    delete (env as Record<string, unknown>).TWILIO_AUTH_TOKEN;
-    delete (env as Record<string, unknown>).TWILIO_SMS_FROM_NUMBER;
+    delete (env as Record<string, unknown>).CEQUENS_API_KEY;
+    delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
     expect(error).toBeDefined();
-    expect(error!.message).toContain('TWILIO');
+    expect(error!.message).toContain('CEQUENS');
   });
 
   it('JWT secrets قصيرة/افتراضية في staging يترفضوا — نفس فحص production بالحرف', () => {

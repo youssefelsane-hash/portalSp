@@ -37,7 +37,7 @@ gradle.taskGraph.whenReady {
 }
 
 android {
-    namespace = "com.baytak.technician_app"
+    namespace = "com.ostahome.technician"
     // بَقّة CI حقيقية اتلقطت واتصلحت (2026-08-15): flutter.compileSdkVersion (36 حاليًا مع Flutter
     // 3.44.9) أقل من اللي flutter_secure_storage محتاجه (37) — build فاشل بـ"CheckAarMetadata".
     // 37 صريح هنا بدل الاعتماد على قيمة Flutter الافتراضية لحد ما SDK نفسه يترقّى.
@@ -52,8 +52,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.baytak.technician_app"
+        // معرّف تطبيق Osta الرسمي على Google Play (هجرة 2026-09-10 من `com.baytak.technician_app`).
+        // **مايتغيّرش بعد أول رفع للمتجر** — Google Play بيعامل أي تغيير فيه كتطبيق جديد تمامًا.
+        applicationId = "com.ostahome.technician"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

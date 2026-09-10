@@ -1,14 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { NotificationChannel } from '../../modules/notifications/entities/notification.entity';
 import { FcmPushDispatcher } from './fcm-push-dispatcher.service';
 import { LogOnlyNotificationDispatcher } from './log-only-notification-dispatcher';
 import { DispatchNotificationInput, DispatchResult, NotificationDispatcher } from './notification-dispatcher';
+import { SMS_DISPATCHER, SmsDispatcher } from './sms-dispatcher';
 import { SmtpEmailDispatcher } from './smtp-email-dispatcher.service';
-import { TwilioSmsDispatcher } from './twilio-sms-dispatcher.service';
 import { TwilioWhatsAppDispatcher } from './twilio-whatsapp-dispatcher.service';
 
 /**
- * بيوجّه كل قناة لبوابتها الحقيقية (FCM/Twilio SMS/Twilio WhatsApp/SMTP) — قناة مش مُعدّة
+ * بيوجّه كل قناة لبوابتها الحقيقية (FCM/بوابة SMS المختارة/Twilio WhatsApp/SMTP) — قناة مش مُعدّة
  * (`isConfigured=false`) بترجع لـ LogOnlyNotificationDispatcher بدل ما ترفض بصمت أو تنهار، نفس
  * فلسفة PaymentGateway/StorageService بالظبط: كل قناة مستقلة، تفعيل قناة واحدة (زي push بس)
  * مايأثرش على الباقي (لسه log-only لحد ما تتظبط هي كمان). in_app دايماً "delivered" فوراً —
@@ -18,7 +18,7 @@ import { TwilioWhatsAppDispatcher } from './twilio-whatsapp-dispatcher.service';
 export class CompositeNotificationDispatcher implements NotificationDispatcher {
   constructor(
     private readonly push: FcmPushDispatcher,
-    private readonly sms: TwilioSmsDispatcher,
+    @Inject(SMS_DISPATCHER) private readonly sms: SmsDispatcher,
     private readonly whatsapp: TwilioWhatsAppDispatcher,
     private readonly email: SmtpEmailDispatcher,
     private readonly logOnly: LogOnlyNotificationDispatcher,
