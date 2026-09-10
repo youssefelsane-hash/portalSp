@@ -1,4 +1,4 @@
-package com.baytak.customer_app
+package com.ostahome.technician
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

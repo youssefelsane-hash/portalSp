@@ -1441,7 +1441,7 @@ export class PaymentsService {
         currencyCode: 'EGP',
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
 
@@ -1587,7 +1587,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {
@@ -1892,10 +1892,19 @@ export class PaymentsService {
           },
           manager,
         );
-      if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+      if (lockedPayment.paymentStatus === PaymentGatewayStatus.SUCCEEDED) {
         // Idempotency — نقر مزدوج/إعادة إرسال بيرجع نفس الدفعة من غير أي أثر مالي إضافي.
         await recordAudit();
         return { payment: lockedPayment, dispatchInfo: null };
+      }
+      if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+        // مش نقر مزدوج — دي دفعة **اتبتّ فيها بحالة تانية** (اترفضت/اتلغت/تحت المراجعة). الرجوع
+        // الصامت هنا كان بيدّي الموظف إحساس إن التأكيد نجح وهو ماحصلش أي حاجة. رفض معلن أوضح.
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          `مينفعش تأكيد التحويلة — حالتها الحالية "${lockedPayment.paymentStatus}" مش "معلّقة"`,
+          HttpStatus.CONFLICT,
+        );
       }
 
       lockedPayment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
@@ -2602,7 +2611,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {
@@ -2718,7 +2727,7 @@ export class PaymentsService {
         providerToken: savedMethod.providerToken,
         customerFirstName: firstName || 'NA',
         customerLastName: rest.join(' ') || 'NA',
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerEmail: user.email ?? `customer-${user.id}@ostahome.com`,
         customerPhone: user.phoneNumber,
       });
       if (result.succeeded) {

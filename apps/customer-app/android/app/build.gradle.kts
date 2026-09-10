@@ -15,9 +15,23 @@ plugins {
 // وتعبئة القيم: docs/03-external-integrations.md § توقيع Android.
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
-val hasReleaseSigning = keystorePropertiesFile.exists()
-if (hasReleaseSigning) {
+if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+// **وجود الملف مش كفاية** (تصليب 2026-09-10): حد ينسخ `key.properties.example` لـ`key.properties`
+// من غير ما يملاه — فالحارس تحت بيشوف "توقيع موجود" ويعدّي، والبناء بيقع بعدين برسالة Gradle
+// غامضة عن `file("")`. الأسوأ إن ناتج المتجر بيعدّي بوابة كانت موضوعة مخصوص عشان توقفه.
+// القيم الأربعة لازم تكون موجودة وغير فاضية، **وملف الـkeystore نفسه لازم يكون على القرص فعلاً**.
+val hasReleaseSigning = run {
+    val required = listOf("keyAlias", "keyPassword", "storeFile", "storePassword")
+    if (required.any { (keystoreProperties[it] as String?).isNullOrBlank() }) {
+        false
+    } else {
+        // `file(...)` هنا = نفس الأساس اللي `signingConfigs` تحت بيحل بيه المسار
+        // (مجلد `android/app/`) — أي أساس تاني معناه فحص بيقول "موجود" وتوقيع بيقول "مش لاقيه".
+        file(keystoreProperties["storeFile"] as String).exists()
+    }
 }
 
 // بوابة P0-3 في docs/23 — «إصدار المتجر يجب أن **يفشل** بدل أن ينتج نسخة Debug بصمت».
@@ -33,7 +47,7 @@ gradle.taskGraph.whenReady {
     if (buildingStoreBundle && !hasReleaseSigning) {
         throw GradleException(
             "مينفعش تبني App Bundle للمتجر بلا توقيع إصدار حقيقي. " +
-                "لازم android/key.properties يكون موجود (keyAlias/keyPassword/storeFile/storePassword). " +
+                "لازم android/key.properties يكون موجود **وقيمه الأربعة مليانة** (keyAlias/keyPassword/storeFile/storePassword) وملف الـkeystore نفسه موجود على القرص. " +
                 "التفاصيل في docs/03-external-integrations.md § توقيع Android.",
         )
     }
@@ -54,7 +68,7 @@ if (mapsPropertiesFile.exists()) {
 val googleMapsApiKey = (mapsProperties["googleMapsApiKey"] as String?) ?: ""
 
 android {
-    namespace = "com.baytak.customer_app"
+    namespace = "com.ostahome.customer"
     // بَقّة CI حقيقية اتلقطت واتصلحت (2026-08-15): flutter.compileSdkVersion (36 حاليًا مع Flutter
     // 3.44.9) أقل من اللي flutter_secure_storage محتاجه (37) — build فاشل بـ"CheckAarMetadata".
     // 37 صريح هنا بدل الاعتماد على قيمة Flutter الافتراضية لحد ما SDK نفسه يترقّى.
@@ -69,8 +83,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.baytak.customer_app"
+        // معرّف تطبيق Osta الرسمي على Google Play (هجرة 2026-09-10 من `com.baytak.customer_app`).
+        // **مايتغيّرش بعد أول رفع للمتجر** — Google Play بيعامل أي تغيير فيه كتطبيق جديد تمامًا.
+        applicationId = "com.ostahome.customer"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

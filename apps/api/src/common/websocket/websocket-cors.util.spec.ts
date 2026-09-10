@@ -20,8 +20,8 @@ describe('websocketCorsOriginHandler (docs/08 §19 بند 21)', () => {
   });
 
   it('CORS_ORIGIN مضبوطة — أصل مطابق يتقبل', (done) => {
-    process.env.CORS_ORIGIN = 'https://admin.baytak.com,https://baytak.com';
-    websocketCorsOriginHandler('https://admin.baytak.com', (err, allow) => {
+    process.env.CORS_ORIGIN = 'https://admin.ostahome.com,https://ostahome.com';
+    websocketCorsOriginHandler('https://admin.ostahome.com', (err, allow) => {
       expect(err).toBeNull();
       expect(allow).toBe(true);
       done();
@@ -29,7 +29,7 @@ describe('websocketCorsOriginHandler (docs/08 §19 بند 21)', () => {
   });
 
   it('CORS_ORIGIN مضبوطة — أصل غير مطابق يترفض', (done) => {
-    process.env.CORS_ORIGIN = 'https://admin.baytak.com,https://baytak.com';
+    process.env.CORS_ORIGIN = 'https://admin.ostahome.com,https://ostahome.com';
     websocketCorsOriginHandler('https://evil.example.com', (err, allow) => {
       expect(err).toBeNull();
       expect(allow).toBe(false);
@@ -38,7 +38,7 @@ describe('websocketCorsOriginHandler (docs/08 §19 بند 21)', () => {
   });
 
   it('CORS_ORIGIN مضبوطة — اتصال بلا Origin header (زي عميل Flutter/native) بيتقبل', (done) => {
-    process.env.CORS_ORIGIN = 'https://admin.baytak.com';
+    process.env.CORS_ORIGIN = 'https://admin.ostahome.com';
     websocketCorsOriginHandler(undefined, (err, allow) => {
       expect(err).toBeNull();
       expect(allow).toBe(true);

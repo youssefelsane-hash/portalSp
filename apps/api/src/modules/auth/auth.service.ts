@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -9,7 +9,7 @@ import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { isProductionLikeEnv } from '../../config/env.validation';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
-import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
+import { SMS_DISPATCHER, SmsDispatcher } from '../../common/notifications/sms-dispatcher';
 import { parseDurationToMs } from '../../common/utils/duration';
 import { USER_REGISTERED_EVENT, UserRegisteredEvent } from '../../common/events/user-registered.event';
 import { REFERRAL_REGISTERED_EVENT, ReferralRegisteredEvent } from '../../common/events/referral-registered.event';
@@ -80,7 +80,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
-    private readonly smsDispatcher: TwilioSmsDispatcher,
+    @Inject(SMS_DISPATCHER) private readonly smsDispatcher: SmsDispatcher,
     private readonly mfaPolicy: MfaPolicyService,
     private readonly webAuthn: WebAuthnService,
     private readonly notificationRouting: NotificationRoutingService,
@@ -144,14 +144,14 @@ export class AuthService {
       this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
     }
 
-    // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة Twilio SMS حقيقية اتبنت
+    // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة SMS حقيقية اتبنت
     // معمارياً في common/notifications/ بـ isConfigured (تفعيلها = env vars، تفاصيل في
     // docs/03-external-integrations.md)، هنا أول استهلاك حقيقي ليها. فشل الإرسال (بوابة مش
     // مظبوطة أو خطأ شبكة) ميرمّيش الطلب — نفس فلسفة "فشل تقني مايكسرش تجربة المستخدم الحقيقي"
     // المتّبعة في كل مكان تاني، وخصوصاً هنا: العميل المحلي بيقدر يكمل التسجيل من اللوج فوق.
     const result = await this.smsDispatcher.send({
       notificationId: null, // مفيش صف `notifications` لكود التحقق — مفيش استلام يتأكّد (تدقيق L-7)
-      userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — TwilioSmsDispatcher.send() مبيقراش الحقل ده أصلاً
+      userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — بوابات الـSMS مبتقراش الحقل ده أصلاً
       channel: NotificationChannel.SMS,
       titleAr: 'كود التحقق — OSTA',
       bodyAr: `كودك: ${code} — صالح لمدة ${expiryMinutes} دقيقة. متشاركوش الكود ده مع حد.`,

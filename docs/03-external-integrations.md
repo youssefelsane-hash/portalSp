@@ -212,7 +212,36 @@ FAWRY_REFERENCE_EXPIRY_HOURS=72
    `https://nyc3.digitaloceanspaces.com`، R2: `https://<account_id>.r2.cloudflarestorage.com`) —
    ده `S3_ENDPOINT`.
 
-### مكان القيم
+### ⭐ إنتاج Osta — Cloudflare R2 (`osta-production`)
+
+اختيار الإطلاق هو **Cloudflare R2**: صفر تكلفة egress، وده أهم بند تكلفة في منتج بيعرض صور طلبات
+ومستندات فنيين طول الوقت.
+
+1. لوحة Cloudflare → **R2 → Create bucket** باسم **`osta-production`**.
+2. **R2 → Manage R2 API Tokens → Create API token**: الصلاحية **Object Read & Write**، ومحصورة على
+   الـbucket ده **بس** (مش Account-wide — مبدأ أقل صلاحية ممكنة). التوكن بيديك **Access Key ID**
+   و**Secret Access Key**؛ **السر بيتعرض مرة واحدة بس** عند الإنشاء.
+3. الـendpoint من نفس الصفحة: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+
+```
+STORAGE_PROVIDER=s3
+S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+S3_REGION=auto            # R2 مالوش أقاليم فعلية — "auto" هي القيمة اللي R2 بيوقّع بيها
+S3_BUCKET=osta-production
+S3_ACCESS_KEY_ID=<من الخطوة 2>
+S3_SECRET_ACCESS_KEY=<من الخطوة 2>
+S3_FORCE_PATH_STYLE=true  # R2 بيخدم path-style: /<bucket>/<key>
+STORAGE_S3_URL_EXPIRY_SECONDS=604800   # 7 أيام — الحد الأقصى لـSigV4، وR2 بيحترمه
+```
+
+> 🔒 القيم دي **سيرفر بس**. ممنوع تمامًا وجود أي منها في كود Flutter، أو أي واجهة أمامية، أو ملف
+> في الريبو، أو مثال في التوثيق بقيمة حقيقية. التطبيقات بتاخد روابط presigned من الـAPI، مش مفاتيح.
+
+> **حارس إقلاع (2026-09-10)**: `STORAGE_PROVIDER=s3` في staging/production من غير
+> `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` **بيمنع السيرفر من الإقلاع** بدل ما يقلع
+> "healthy" وكل رفع ملف حقيقي يفشل وقت التشغيل.
+
+### مكان القيم (أي مزوّد تاني)
 
 في `apps/api/.env`:
 ```
@@ -233,14 +262,20 @@ S3_FORCE_PATH_STYLE=true
 
 ---
 
-## 4. الإشعارات — FCM / Twilio / SMTP
+## 4. الإشعارات — FCM / CEQUENS / Twilio / SMTP
 
-الثلاثة مستقلين تماماً عن بعض — فعّل أي واحد فيهم لوحده، الباقي بيفضل log-only من غير أي تأثير.
+كل قناة مستقلة تماماً عن الباقي — فعّل أي واحدة لوحدها، الباقي بيفضل log-only من غير أي تأثير.
 
 **الكود**: `apps/api/src/common/notifications/` (`fcm-push-dispatcher.service.ts`,
-`twilio-sms-dispatcher.service.ts`, `twilio-whatsapp-dispatcher.service.ts`,
-`smtp-email-dispatcher.service.ts`) — تفاصيل معمارية كاملة في
-`apps/api/src/modules/notifications/README.md`.
+`cequens-sms-dispatcher.service.ts`, `twilio-sms-dispatcher.service.ts`,
+`twilio-whatsapp-dispatcher.service.ts`, `smtp-email-dispatcher.service.ts`) — تفاصيل معمارية
+كاملة في `apps/api/src/modules/notifications/README.md`.
+
+> **الـSMS محايد المزوّد منذ 2026-09-10.** المستهلك (`AuthService` للـOTP،
+> `CompositeNotificationDispatcher` لباقي الإشعارات) بيحقن الـtoken `SMS_DISPATCHER` مش كلاس
+> بعينه، والاختيار بيحصل مرة واحدة وقت التركيب في `sms-dispatcher.provider.ts` حسب `SMS_PROVIDER`.
+> إضافة مزوّد تالت = ملف واحد جديد بيحقق `SmsDispatcher` + سطر في `SMS_PROVIDERS`، بلا أي لمس
+> للمستهلكين.
 
 ### 4.1 Push — Firebase Cloud Messaging
 
@@ -281,22 +316,95 @@ FIREBASE_SERVICE_ACCOUNT_JSON=<محتوى الملف كامل كسطر واحد>
 - الملفين الاتنين (`android/app/google-services.json`, `ios/Runner/GoogleService-Info.plist`)
   مُضافين لـ `.gitignore` في التطبيقين — نفس منطق `.env`: قيم بيئة حقيقية متتحطش في git.
 
-> **تحديث 2026-08-26 (docs/08 §69)**: مشروع Firebase الحقيقي بقى موجود (`sonaa3-66360`)،
-> و**`apps/customer-app/android/app/google-services.json` اتحط فعلاً** — يعني تطبيق العميل على
-> أندرويد جاهز يسجّل توكن ويستقبل push بمجرد ما يتبني ويتسجّل فيه دخول. الباقي:
-> `technician-app` محتاج تطبيق Android تاني في نفس المشروع بحزمة `com.baytak.technician_app`
-> وملفه الخاص، وiOS (التطبيقين) محتاج `GoogleService-Info.plist` + **مفتاح APNs مرفوع** في
-> Project Settings → Cloud Messaging (مؤجّل بطلب المالك). الملفات دي في `.gitignore` فكل بيئة
-> بناء لازم تحط نسختها.
+> ### ⚠️ تحديث 2026-09-10 — مشروع الإنتاج `osta-production` ومعرّفات الحزم الجديدة
+>
+> معرّفات حزم أندرويد اتغيّرت في نفس اليوم كجزء من الإطلاق تحت اسم **Osta**:
+>
+> | التطبيق | المعرّف القديم | **معرّف الإنتاج** |
+> |---|---|---|
+> | `apps/customer-app` | `com.baytak.customer_app` | **`com.ostahome.customer`** |
+> | `apps/technician-app` | `com.baytak.technician_app` | **`com.ostahome.technician`** |
+>
+> **ده معناه إن أي `google-services.json` قديم بقى غير صالح**: الملف بيربط الحزمة بتطبيق مسجّل
+> بعينه، فملف متولّد لـ`com.baytak.customer_app` مش هيشتغل مع `com.ostahome.customer` — البناء
+> بيعدّي والتسجيل بيفشل وقت التشغيل. لازم تطبيقين **جداد** في مشروع `osta-production` وملفين
+> جداد. مشروع `sonaa3-66360` القديم بقى تاريخي، مايستخدمش للإطلاق.
 
-**الخطوات المتبقية عليك (محتاجة مشروع Firebase حقيقي)**: اعمل مشروع على
-[console.firebase.google.com](https://console.firebase.google.com) (لو لسه معملتوش في §الأول)،
-ضيف تطبيق Android بـ `applicationId` من `android/app/build.gradle.kts` (`com.baytak.customer_app`
-أو `com.baytak.technician_app`) ونزّل `google-services.json` وحطه في `android/app/`، وضيف تطبيق
-iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) ونزّل
-`GoogleService-Info.plist` وضيفه لـ `ios/Runner/` عبر Xcode (Add Files to "Runner").
+**الخطوات عليك في وحدة تحكم Firebase (مشروع `osta-production`)**:
 
-### 4.2 SMS / WhatsApp — Twilio
+1. اعمل/افتح مشروع **`osta-production`** على
+   [console.firebase.google.com](https://console.firebase.google.com).
+2. **Add app → Android** مرتين، بالمعرّفين بالظبط زي ما هما في الجدول فوق (اللي في
+   `android/app/build.gradle.kts` — لو اختلف حرف واحد، الملف مش هيشتغل).
+3. نزّل `google-services.json` لكل تطبيق وحطه في `apps/<app>/android/app/google-services.json`.
+   الملفين **في `.gitignore`** — كل بيئة بناء بتحط نسختها، وممنوع رفعهم على git.
+4. **Project Settings → Service Accounts → Generate new private key** → المحتوى كله كسطر واحد في
+   `FIREBASE_SERVICE_ACCOUNT_JSON` على سيرفر الإنتاج **بس**.
+5. iOS (مؤجّل بطلب المالك): `GoogleService-Info.plist` لكل تطبيق + **مفتاح APNs مرفوع** في
+   Project Settings → Cloud Messaging. الإضافة لازم تكون من Xcode (Add Files to "Runner")، مش
+   نسخ ملف — قيد موثّق: مفيش macOS/Xcode في بيئة التطوير دي.
+
+> 🔒 **قاعدة قاطعة**: مفتاح خدمة Firebase Admin (`FIREBASE_SERVICE_ACCOUNT_JSON`) **سيرفر بس**.
+> ممنوع تمامًا يدخل أي كود Flutter أو أي واجهة أمامية — التطبيقات بتستخدم `google-services.json`
+> وهو ملف إعداد عميل، مش بيانات اعتماد إدارية. الكود متحقّق: مفيش أي `firebase_options.dart` ولا
+> أي مفتاح خدمة في `apps/customer-app/lib` أو `apps/technician-app/lib` (بيندهوا
+> `Firebase.initializeApp()` بلا أي options، فبيقروا ملف الإعداد وقت البناء).
+>
+> الباك-إند بيقرا القيمة من البيئة بس (`configuration.ts → notifications.fcm.serviceAccountJson`)،
+> ولو القيمة مكسورة بيسجّل **اسم الخطأ بس** — تسجيل `err.stack` كان بيسرّب أول ~10 حروف من المفتاح
+> في رسالة `JSON.parse` (بَقّة حقيقية اتقفلت 2026-09-10، ومغطّاة باختبار انحدار).
+
+### 4.2 SMS — CEQUENS (المزوّد المعتمد لمصر)
+
+`SMS_PROVIDER=cequens` هو الافتراضي. CEQUENS مزوّد إقليمي بتغطية وأسعار أفضل بكتير لمصر من
+Twilio، واللي خلاه اختيار الإطلاق.
+
+**دورة حياة كود التحقق (OTP) بتفضل ملك Osta بالكامل** — التوليد (`randomInt`)، الهاش بـbcrypt،
+مدة الصلاحية، عدد المحاولات، إبطال أي كود أقدم عند إعادة الإرسال، والتحقق نفسه: كله في
+`auth.service.ts` وقاعدة بياناتنا. CEQUENS **قناة تسليم نص وبس**؛ مابنستخدمش أي "Verify API"
+خارجي، وأي انتقال لكده قرار منفصل صريح مش أثر جانبي لتبديل مزوّد.
+
+#### الخطوات
+
+1. اعمل حساب على [cequens.com](https://www.cequens.com) وفعّله للإرسال في مصر.
+2. **اسم المُرسِل (Sender ID)**: اطلب اعتماد Sender ID من CEQUENS (اسم أبجدي زي `OSTA`). ده
+   `CEQUENS_SENDER_NAME` — **إجباري**، المزوّد بيرفض أي رسالة من غير Sender ID معتمد للدولة.
+3. **المصادقة** — املا **واحد** من المسارين:
+   - **(أ) مفتاح API جاهز (المفضّل للسيرفر)**: من لوحة CEQUENS → **Developers → Create API Key**
+     (اسم + تاريخ انتهاء) → القيمة دي هي `CEQUENS_API_KEY`، وبتتبعت كـ`Authorization: Bearer`.
+   - **(ب) تبادل OAuth2**: `CEQUENS_CLIENT_ID` / `CEQUENS_CLIENT_SECRET` / `CEQUENS_USERNAME` /
+     `CEQUENS_PASSWORD` — الكود بيعمل `grant_type=password` ويخزّن الـ`access_token` في الذاكرة
+     ويجدّده قبل انتهائه بـ60 ثانية.
+4. الأرقام لازم تكون **E.164** (`+2010…`) — وده اللي `normalizePhoneNumber` بيطلّعه أصلاً.
+
+في `apps/api/.env`:
+```
+SMS_PROVIDER=cequens
+CEQUENS_SENDER_NAME=<Sender ID المعتمد>
+CEQUENS_API_KEY=<لو اخترت المسار (أ)>
+# أو المسار (ب):
+CEQUENS_CLIENT_ID=
+CEQUENS_CLIENT_SECRET=
+CEQUENS_USERNAME=
+CEQUENS_PASSWORD=
+```
+
+`CEQUENS_BASE_URL` و`CEQUENS_AUTH_URL` اختياريين — الافتراضي
+`https://apis.cequens.com/sms/v1` و`https://apis.cequens.com/auth/v1/tokens`. موجودين كمتغيرات
+عشان لو حسابك على عقد/مسار مختلف يتظبط من البيئة بلا تعديل كود.
+
+> ⚠️ **نقطة تحقّق مفتوحة بصراحة**: توثيق CEQUENS العام بيوصف المسارين (مفتاح API + OAuth2)،
+> وأنهي واحد مفعّل بيتحدد من الحساب نفسه. عشان كده الاتنين مدعومين في الكود بدل مراهنة على
+> واحد. **قبل الإطلاق**: اعمل إرسال تجريبي حقيقي واحد وأكّد أي مسار بيشتغل مع حسابنا.
+
+> 🔒 **ممنوع** تسجيل أي كود OTP أو أي بيانات اعتماد CEQUENS في لوج الإنتاج. الكود بيسجّل سبب
+> الفشل ورقم **مقصوص** بس (`+2010***34`)، وطباعة الـOTP الخام متوقفة في staging/production.
+
+### 4.2.1 SMS (بديل احتياطي) / WhatsApp — Twilio
+
+Twilio بقى بديل احتياطي للـSMS (`SMS_PROVIDER=twilio`)، ولسه المزوّد **الوحيد** لقناة WhatsApp.
+لو المزوّد المختار مش مُعدّ والتاني مُعدّ، الكود بيرجع للتاني بتحذير في اللوج بدل ما كود التحقق
+مايوصلش لحد.
 
 1. اعمل حساب على [twilio.com](https://www.twilio.com).
 2. من الـ Console الرئيسية: **Account SID** (`TWILIO_ACCOUNT_SID`) و**Auth Token**
@@ -310,6 +418,7 @@ iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) و�
 
 في `apps/api/.env`:
 ```
+SMS_PROVIDER=twilio   # بس لو عايز Twilio يبقى مزوّد الـSMS بدل CEQUENS
 TWILIO_ACCOUNT_SID=<من الخطوة 2>
 TWILIO_AUTH_TOKEN=<من الخطوة 2>
 TWILIO_SMS_FROM_NUMBER=<من الخطوة 3>
@@ -474,25 +583,43 @@ debug. الملفين `apps/customer-app/android/app/build.gradle.kts` و
 `google-services.json`: لو `android/key.properties` (كل تطبيق عنده نسخته الخاصة) موجود، بيتفعّل
 توقيع الإصدار الحقيقي تلقائيًا؛ من غيره البناء يفضل شغال بتوقيع debug زي الأول.
 
+### مفاتيح Osta الرسمية (2026-09-10)
+
+| التطبيق | معرّف الحزمة | الـalias | ملف الـkeystore |
+|---|---|---|---|
+| `apps/customer-app` | `com.ostahome.customer` | `osta-customer-upload` | `~/osta-customer-upload.jks` (بره المستودع) |
+| `apps/technician-app` | `com.ostahome.technician` | مقترح `osta-technician-upload` | **لسه ما اتولّدش** |
+
+**keystore مستقل لكل تطبيق** — تطبيقين مختلفين على Play بمعرّفين مختلفين؛ مشاركة نفس المفتاح
+بتربط مصيرهم ببعض بلا داعي: تسريب واحد = التنين.
+
 ### الخطوات (لكل تطبيق — customer-app وtechnician-app منفصلين، كل واحد له keystore خاص بيه)
 
 1. ولّد keystore حقيقي (مرة واحدة لكل تطبيق، واحفظه في مكان آمن برّه الـ repo — لو ضاع مينفعش
    تحدّث نفس التطبيق على Play Store تاني):
 
    ```bash
-   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
-     -validity 10000 -alias upload
+   keytool -genkey -v -keystore ~/osta-customer-upload.jks -keyalg RSA -keysize 2048 \
+     -validity 10000 -alias osta-customer-upload
    ```
 
-   هيسألك عن `storePassword` و`keyPassword` (ينفع يبقوا نفس القيمة) واسم/تنظيم — احفظهم.
+   هيسألك عن `storePassword` و`keyPassword` (ينفع يبقوا نفس القيمة) واسم/تنظيم — احفظهم في
+   مدير كلمات سر، **مش في أي ملف جوّه المستودع**.
 
 2. انسخ `apps/customer-app/android/key.properties.example` لـ
    `apps/customer-app/android/key.properties` (والمكافئ لـ `technician-app`)، واملأ القيم
-   الأربعة (`storePassword`, `keyPassword`, `keyAlias`, `storeFile` — مسار الـ `.jks` اللي
-   ولّدته فوق، نسبي لمجلد `android/` أو مطلق).
+   الأربعة (`storePassword`, `keyPassword`, `keyAlias`, `storeFile`). **`storeFile` بيتحل نسبةً
+   لمجلد `android/app/`** — استخدم مسار مطلق كامل وخلاص.
 
 3. الملف `key.properties` نفسه في `.gitignore` بالفعل (`apps/*/android/.gitignore`) — أبدًا
-   متعملوش commit، ده سر إصدار حقيقي زي كلمة سر قاعدة بيانات.
+   متعملوش commit، ده سر إصدار حقيقي زي كلمة سر قاعدة بيانات. في CI: مايتحطش في المستودع خالص —
+   يتولّد وقت البناء من secrets الـCI (base64 للـkeystore + الباسووردات كمتغيرات محمية) ويتمسح بعده.
+
+> **تصليب 2026-09-10 — "الملف موجود" مش دليل توقيع**: الحارس كان بيعتبر مجرد وجود
+> `key.properties` = توقيع إصدار حقيقي. حد ينسخ الـ`.example` من غير ما يملاه (وده حصل فعلاً في
+> السيشن دي) كان بيعدّي البوابة وبعدين يقع برسالة Gradle غامضة عن `file("")`. دلوقتي القيم
+> الأربعة لازم تكون **غير فاضية** وملف الـ`.jks` نفسه لازم يكون **موجود على القرص** — غير كده
+> بيتعامل كأنه مفيش توقيع، و`bundleRelease` بيفشل بالرسالة الواضحة زي ما المفروض.
 
 ### التأكد إنها اشتغلت
 
@@ -657,6 +784,13 @@ S3_SECRET_ACCESS_KEY=
 
 # Notifications (§4)
 FIREBASE_SERVICE_ACCOUNT_JSON=
+SMS_PROVIDER=cequens      # أو twilio
+CEQUENS_SENDER_NAME=      # إجباري لو cequens
+CEQUENS_API_KEY=          # المسار (أ)
+CEQUENS_CLIENT_ID=        # المسار (ب) — الأربعة مع بعض
+CEQUENS_CLIENT_SECRET=
+CEQUENS_USERNAME=
+CEQUENS_PASSWORD=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_SMS_FROM_NUMBER=

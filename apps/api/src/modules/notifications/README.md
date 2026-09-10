@@ -10,9 +10,11 @@
   | القناة | البوابة الحقيقية | env vars |
   |---|---|---|
   | `push` | `FcmPushDispatcher` (Firebase Cloud Messaging، `firebase-admin`) | `FIREBASE_SERVICE_ACCOUNT_JSON` |
-  | `sms` | `TwilioSmsDispatcher` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM_NUMBER` |
+  | `sms` | **`SMS_DISPATCHER`** — token محايد المزوّد، بيتحدد وقت التركيب من `SMS_PROVIDER` (`cequens` افتراضيًا، أو `twilio`) في `common/notifications/sms-dispatcher.provider.ts` | `SMS_PROVIDER` + (`CEQUENS_SENDER_NAME` مع `CEQUENS_API_KEY` أو الأربعة `CEQUENS_CLIENT_ID/SECRET/USERNAME/PASSWORD`) أو (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM_NUMBER`) |
   | `whatsapp` | `TwilioWhatsAppDispatcher` (نفس حساب Twilio، رقم WhatsApp منفصل) | + `TWILIO_WHATSAPP_FROM_NUMBER` |
   | `email` | `SmtpEmailDispatcher` (`nodemailer`، أي بوابة SMTP — SendGrid/Mailgun/SES/Gmail) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` |
+
+  - **الـSMS محايد المزوّد (هجرة 2026-09-10 لـCEQUENS)**: المستهلكين (`AuthService` لكود التحقق، و`CompositeNotificationDispatcher` لباقي الإشعارات) بيحقنوا الـtoken `SMS_DISPATCHER` مش كلاس بعينه. لو المزوّد المختار مش مُعدّ والتاني مُعدّ، الاختيار بيرجع للتاني **بتحذير صريح في اللوج** — بوابة الـSMS هي القناة الوحيدة لتسليم الـOTP، فسقوطها بصمت = صفر تسجيل دخول لأي مستخدم حقيقي. **دورة حياة الـOTP بتفضل ملك Osta بالكامل** (توليد/bcrypt/صلاحية/محاولات/إبطال/تحقق من قاعدتنا) — المزوّد قناة تسليم نص وبس، مفيش أي Verify API خارجي.
 
   كل قناة `isConfigured` مستقلة عن الباقي — لو ناقص أي env var لقناة معيّنة، `CompositeNotificationDispatcher` بيرجّعها تلقائياً لـ`LogOnlyNotificationDispatcher` (نفس السلوك القديم بالظبط: تسجيل في اللوج، "delivered" لو فيه target فعلاً، فشل واضح لو مفيش) — تفعيل قناة واحدة (push مثلاً) من غير الباقي شغال عادي، مفيش تبعية بين القنوات. تفاصيل الحصول على كل قيمة ومكانها بالظبط: `docs/03-external-integrations.md`.
   - **اتأكد حياً**: `in_app` لسه شغال زي ما هو (صفر رجعة، اتأكد بطلب حقيقي ولّد 3 إشعارات in_app متتالية بنجاح). مسار `complaint.filed → ops_manager` (بقناتين `in_app`+`email` عبر `notification_routing_rules`) اتأكد إنه لسه بيعدّي صح عبر `CompositeNotificationDispatcher` الجديد من غير أي كسر — شكوى حقيقية اتفتحت وولّدت الإشعارين المتوقعين بالضبط.

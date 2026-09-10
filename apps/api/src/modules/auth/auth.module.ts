@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
+import { SmsModule } from '../../common/notifications/sms.module';
 import { AdminModule } from '../admin/admin.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -41,9 +41,10 @@ import { WebAuthnService } from './webauthn.service';
     AdminModule, // PermissionsService — لازم لـMfaPolicyService (فحص High-Privilege حي، ADR-0011)
     NotificationsModule, // NotificationRoutingService — تنبيه super_admin عند استخدام استرجاع MFA
     AuditModule, // AuditLogService — تسجيل عملية admin_mfa.reset (ADR-0011 §6)
+    SmsModule, // SMS_DISPATCHER — بوابة تسليم كود التحقق (المزوّد بيتحدد من SMS_PROVIDER)
   ],
   controllers: [AuthController, WebAuthnController, SessionsController, AdminMfaController],
-  providers: [AuthService, JwtStrategy, TwilioSmsDispatcher, MfaPolicyService, WebAuthnService, StepUpService],
+  providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService],
   // StepUpService لازم يتصدّر — StepUpGuard مسجّل كـAPP_GUARD عالمي في AppModule نفسه (زي
   // PermissionsGuard/PermissionsService)، فمحتاج يلاقي الـprovider ده في سياق موديول متصدّر.
   exports: [AuthService, StepUpService],

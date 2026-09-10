@@ -6,7 +6,7 @@
 
 نفس أساس `apps/customer-app` بالظبط (كود auth منسوخ حرفياً منه، مش معاد اختراعه) — تسجيل دخول OTP كامل ضد `apps/api` الحقيقي، بنفس معمارية الأمان (`access_token` في الذاكرة، `refresh_token` في `flutter_secure_storage`، وحماية single-flight من بَقّة تدوير الـ refresh token — التفاصيل الكاملة في `apps/admin/README.md` و`apps/customer-app/README.md`).
 
-**براند صُنّاع (`docs/06-vision-brief-sanaa.md` §0)**: اسم التطبيق الظاهر (`main.dart` title، شاشة تسجيل الدخول) اتحدّث لـ"صُنّاع" — نصوص ظاهرة للمستخدم بس، **مش** package/bundle id (`com.baytak.technician_app` لسه زي ما هو عمدًا، تغييره قرار كبير محتاج اللوجو النهائي وقرار إعادة نشر على المتاجر، تفاصيل في `docs/07-multi-agent-task-split.md`).
+**براند صُنّاع (`docs/06-vision-brief-sanaa.md` §0)**: اسم التطبيق الظاهر (`main.dart` title، شاشة تسجيل الدخول) اتحدّث لـ"صُنّاع" — نصوص ظاهرة للمستخدم بس، **مش** package/bundle id. **تحديث 2026-09-10**: معرّف أندرويد اتغيّر لـ`com.ostahome.technician` كجزء من إطلاق Osta (معرّف iOS لسه `com.baytak.technicianApp` — محتاج قرار المالك، راجع `docs/30-osta-legacy-identifiers-classification.md`).
 
 ### رندر حقيقي عبر Linux desktop (بناء 2026-08-12) — تفاصيل المنهجية في `apps/customer-app/README.md`
 
@@ -159,11 +159,11 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 نفس التطبيقين بيشتغلوا بنفس المنطق بالظبط — دليل كامل خطوة بخطوة (ربط الموبايل بالواي فاي أو USB،
 تثبيت APK بدون ما تسيب التيرمنال شغال، وليه الكتالوج/البيانات بتختفي بعد كل جلسة تطوير سحابية
 جديدة) موجود في `apps/customer-app/README.md` تحت نفس العنوان — بس بدّل `API_BASE_URL` بعنوان نفس
-السيرفر ومنفذ نفس التطبيق (`com.baytak.technician_app`) في أوامر `flutter build apk`/`adb install`.
+السيرفر ومنفذ نفس التطبيق (`com.ostahome.technician`) في أوامر `flutter build apk`/`adb install`.
 
 مسح بيانات هذا التطبيق تحديدًا (توكن الدخول، الكاش المحلي — من غير ما يمسح حاجة من السيرفر):
 ```bash
-adb shell pm clear com.baytak.technician_app
+adb shell pm clear com.ostahome.technician
 ```
 
 ## بَقّة حقيقية — شاشات بتعلّق للأبد على loading spinner (نفس بَقّة apps/customer-app، اتصلحت هنا كمان، 2026-08-19)

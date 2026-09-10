@@ -1,4 +1,6 @@
 import * as Joi from 'joi';
+// مصدر واحد لأسماء المزوّدات — الـJoi هنا واللي بيختار وقت التركيب بيقروا نفس القايمة.
+import { SMS_PROVIDERS } from '../common/notifications/sms-dispatcher';
 
 // Script 2 Part M (finding #63، اتكشفت أثناء مراجعة Part G) — بَقّة أمنية حقيقية وخطيرة: كل
 // فحوصات fail-fast تحت دي كانت بتتفحص ضد 'production' بس. النشر الفعلي الحقيقي (Railway) شغال
@@ -131,6 +133,16 @@ export const envValidationSchema = Joi.object({
   // قنوات الإشعارات الخارجية — كل واحدة اختيارية بالكامل ومستقلة عن الباقي (قناة مش مُعدّة
   // بترجع log-only، مش بتفشّل). تفاصيل كل قيمة: docs/03-external-integrations.md
   FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().allow('').optional(),
+  // مزوّد الـSMS الفعّال — CEQUENS هو الافتراضي (المزوّد المعتمد لمصر)، وTwilio بديل احتياطي.
+  SMS_PROVIDER: Joi.string().valid(...SMS_PROVIDERS).default('cequens'),
+  CEQUENS_API_KEY: Joi.string().allow('').optional(),
+  CEQUENS_CLIENT_ID: Joi.string().allow('').optional(),
+  CEQUENS_CLIENT_SECRET: Joi.string().allow('').optional(),
+  CEQUENS_USERNAME: Joi.string().allow('').optional(),
+  CEQUENS_PASSWORD: Joi.string().allow('').optional(),
+  CEQUENS_SENDER_NAME: Joi.string().allow('').optional(),
+  CEQUENS_BASE_URL: Joi.string().uri().allow('').optional(),
+  CEQUENS_AUTH_URL: Joi.string().uri().allow('').optional(),
   TWILIO_ACCOUNT_SID: Joi.string().allow('').optional(),
   TWILIO_AUTH_TOKEN: Joi.string().allow('').optional(),
   TWILIO_SMS_FROM_NUMBER: Joi.string().allow('').optional(),
@@ -142,19 +154,52 @@ export const envValidationSchema = Joi.object({
   SMTP_PASSWORD: Joi.string().allow('').optional(),
   SMTP_FROM_EMAIL: Joi.string().allow('').optional(),
 })
-  // docs/08 §19 بند 16 — بوابة SMS (Twilio) هي القناة الوحيدة لتسليم كود OTP في الكود الحالي
+  // docs/08 §19 بند 16 — بوابة SMS هي القناة الوحيدة لتسليم كود OTP في الكود الحالي
   // (auth.service.ts، صفر بديل — لا WhatsApp ولا إيميل للـOTP). لو مش مُعدّة، السيرفر كان بيقلع
   // "healthy" في الإنتاج والـOTP endpoints بترجع 200 بلا ما أي رقم حقيقي يستلم كود خالص — مفيش
-  // طريقة تانية لأي مستخدم حقيقي يسجّل دخول أو يعمل حساب. فحص عابر للحقول (مش .when() عادي لأن
-  // TWILIO_ACCOUNT_SID/AUTH_TOKEN/SMS_FROM_NUMBER التلاتة لازم يكونوا موجودين مع بعض).
+  // طريقة تانية لأي مستخدم حقيقي يسجّل دخول أو يعمل حساب.
+  //
+  // الحارس **بيتبع المزوّد المختار** (هجرة 2026-09-10 لـCEQUENS): قبل كده كان بيفرض بيانات
+  // Twilio دايمًا، فإطلاق بـCEQUENS كان هيتقفل على مزوّد إحنا مابنستخدمهوش. فحص عابر للحقول
+  // (مش `.when()` عادي) لأن كل مزوّد بياخد **مجموعة** حقول لازم تيجي مع بعض.
+  // نفس فلسفة حارس الـSMS تحت، لكن للتخزين: `STORAGE_PROVIDER=s3` كان مفروض في الإنتاج من غير ما
+  // حد يفرض **بيانات الـbucket نفسها**. النتيجة كانت سيرفر بيقلع "healthy" وS3Client متبني بـ
+  // `bucket=undefined` وبيانات اعتماد فاضية — كل رفع ملف حقيقي (صور طلب، مستندات فني) بيفشل وقت
+  // التشغيل بدل ما يتمنع وقت الإقلاع. إنتاج Osta على Cloudflare R2 (bucket: osta-production).
+  .custom((value: Record<string, unknown>, helpers) => {
+    if (isProductionLikeEnv(value.NODE_ENV as string | undefined) && value.STORAGE_PROVIDER === 's3') {
+      const missing = ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'].filter((key) => !value[key]);
+      if (missing.length > 0) {
+        return helpers.message({
+          custom: `STORAGE_PROVIDER=s3 يستلزم ${missing.join('/')} في staging/production — من غيرهم كل رفع ملف حقيقي بيفشل وقت التشغيل بدل ما يتمنع وقت الإقلاع`,
+        });
+      }
+    }
+    return value;
+  })
   .custom((value: Record<string, unknown>, helpers) => {
     if (isProductionLikeEnv(value.NODE_ENV as string | undefined)) {
-      const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
-      if (!hasTwilioSms) {
-        return helpers.message({
-          custom:
-            'TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER الثلاثة لازم يكونوا موجودين في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
-        });
+      const provider = (value.SMS_PROVIDER as string | undefined) ?? 'cequens';
+      if (provider === 'twilio') {
+        const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
+        if (!hasTwilioSms) {
+          return helpers.message({
+            custom:
+              'SMS_PROVIDER=twilio يستلزم TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER التلاتة في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
+          });
+        }
+      } else {
+        // CEQUENS بيقبل مسارين للمصادقة: مفتاح API جاهز، أو تبادل OAuth2 بالأربع قيم.
+        const hasApiKey = Boolean(value.CEQUENS_API_KEY);
+        const hasOauth = Boolean(
+          value.CEQUENS_CLIENT_ID && value.CEQUENS_CLIENT_SECRET && value.CEQUENS_USERNAME && value.CEQUENS_PASSWORD,
+        );
+        if (!(hasApiKey || hasOauth) || !value.CEQUENS_SENDER_NAME) {
+          return helpers.message({
+            custom:
+              'SMS_PROVIDER=cequens يستلزم CEQUENS_SENDER_NAME + إمّا CEQUENS_API_KEY أو (CEQUENS_CLIENT_ID/CEQUENS_CLIENT_SECRET/CEQUENS_USERNAME/CEQUENS_PASSWORD) في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
+          });
+        }
       }
     }
     return value;

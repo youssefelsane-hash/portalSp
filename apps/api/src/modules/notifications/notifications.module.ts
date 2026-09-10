@@ -4,8 +4,8 @@ import { CompositeNotificationDispatcher } from '../../common/notifications/comp
 import { FcmPushDispatcher } from '../../common/notifications/fcm-push-dispatcher.service';
 import { LogOnlyNotificationDispatcher } from '../../common/notifications/log-only-notification-dispatcher';
 import { NOTIFICATION_DISPATCHER } from '../../common/notifications/notification-dispatcher';
+import { SmsModule } from '../../common/notifications/sms.module';
 import { SmtpEmailDispatcher } from '../../common/notifications/smtp-email-dispatcher.service';
-import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
 import { TwilioWhatsAppDispatcher } from '../../common/notifications/twilio-whatsapp-dispatcher.service';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
@@ -98,6 +98,7 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
     TechniciansModule,
     SettingsModule,
     AuditModule,
+    SmsModule, // SMS_DISPATCHER — نسخة واحدة مشتركة مع AuthModule
   ],
   controllers: [NotificationsController, AdminNotificationRoutingController, AdminNotificationTypeConfigsController],
   providers: [
@@ -108,7 +109,6 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
     NotificationWorkflowReminderService,
     LogOnlyNotificationDispatcher,
     FcmPushDispatcher,
-    TwilioSmsDispatcher,
     TwilioWhatsAppDispatcher,
     SmtpEmailDispatcher,
     { provide: NOTIFICATION_DISPATCHER, useClass: CompositeNotificationDispatcher },
