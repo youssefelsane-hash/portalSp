@@ -183,6 +183,10 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`RF${runId}%`]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+    // نفس فئة تنظيف `payment_notification_outbox` فوق: الاسترداد بيولّد إشعار للعميل، والإشعار
+    // بمفتاح أجنبي على `users` — فحذف المستخدم كان بيفشل و**السويتة كلها** تسقط في `afterAll`
+    // رغم إن كل الاختبارات عدّت. (اتلقطت في تشغيلة كاملة: 2066 تست نجحوا وسويتة واحدة حمرا.)
+    await q(`DELETE FROM notifications WHERE user_id = $1`, [ids.customerUser]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
