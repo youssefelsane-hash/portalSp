@@ -538,7 +538,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     <div className="mx-auto max-w-2xl px-4 py-8">
       {service.icon_url && (
         // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-        <img src={service.icon_url} alt="" className="mb-4 aspect-[3/1] w-full rounded-xl object-cover" />
+        <img
+          src={service.icon_url}
+          alt=""
+          loading="eager"
+          fetchPriority="high"
+          decoding="async"
+          className="mb-4 aspect-[3/1] w-full rounded-xl bg-surface-variant object-cover"
+        />
       )}
       <h1 className="text-2xl font-bold">{service.name_ar}</h1>
       {service.short_description_ar && <p className="mt-1 text-muted">{service.short_description_ar}</p>}
@@ -1563,7 +1570,15 @@ function IndividualCard({
       <input type="radio" name="technician" checked={selected} onChange={onSelect} className="mt-1.5" />
       {t.avatar_url ? (
         // eslint-disable-next-line @next/next/no-img-element -- صور فنيين خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-        <img src={t.avatar_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+        <img
+          src={t.avatar_url}
+          alt=""
+          width={48}
+          height={48}
+          loading="lazy"
+          decoding="async"
+          className="h-12 w-12 shrink-0 rounded-full bg-surface-variant object-cover"
+        />
       ) : (
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant text-lg">👤</div>
       )}

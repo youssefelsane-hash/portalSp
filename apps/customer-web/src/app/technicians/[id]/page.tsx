@@ -44,7 +44,15 @@ export default function TechnicianProfilePage({ params }: { params: Promise<{ id
       <div className="flex items-center gap-4">
         {profile.avatar_url ? (
           // eslint-disable-next-line @next/next/no-img-element -- صور فنيين خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-          <img src={profile.avatar_url} alt={profile.full_name} className="h-16 w-16 rounded-full object-cover" />
+          <img
+            src={profile.avatar_url}
+            alt={profile.full_name}
+            width={64}
+            height={64}
+            loading="eager"
+            decoding="async"
+            className="h-16 w-16 rounded-full bg-surface-variant object-cover"
+          />
         ) : (
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-variant text-2xl">👤</div>
         )}

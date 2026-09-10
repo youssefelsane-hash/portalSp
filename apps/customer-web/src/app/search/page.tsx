@@ -85,7 +85,15 @@ function SearchResults() {
                 <div className="flex items-center gap-4">
                   {s.icon_url ? (
                     // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-                    <img src={s.icon_url} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                    <img
+                      src={s.icon_url}
+                      alt=""
+                      width={56}
+                      height={56}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-14 w-14 shrink-0 rounded-lg bg-surface-variant object-cover"
+                    />
                   ) : (
                     <div className="h-14 w-14 shrink-0 rounded-lg bg-surface-variant" />
                   )}

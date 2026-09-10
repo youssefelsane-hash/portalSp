@@ -39,11 +39,20 @@ export function SiteHeader() {
 
   return (
     <header className="border-b border-border bg-surface sticky top-0 z-40">
-      <div className="mx-auto max-w-5xl flex items-center justify-between px-4 py-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <Link href="/" className="flex items-center text-xl font-bold text-primary">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- لوجو مُدار من الأدمن، مش أصل ثابت معروف وقت الـbuild
-            <img src={logoUrl} alt="أسطى" className="h-9 w-auto" onError={() => setLogoUrl(null)} />
+            <img
+              src={logoUrl}
+              alt="أسطى"
+              // اللوجو أول حاجة العين بتروح لها — تحميل كسول هنا معناه هيدر فاضي أول لحظة.
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
+              className="h-9 w-auto"
+              onError={() => setLogoUrl(null)}
+            />
           ) : (
             'أسطى'
           )}
