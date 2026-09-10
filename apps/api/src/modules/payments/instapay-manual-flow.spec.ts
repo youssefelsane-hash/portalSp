@@ -178,6 +178,9 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
 
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    // الاسترداد بيتعلّق بالدفعة والطلب الاتنين — لازم يتمسح قبلهم وإلا التنظيف بيفشل على FK
+    // ويسيب صفوف ورا كل تشغيلة (نفس فئة البَقّة الموثّقة فوق بتاعت صف الدولة).
+    await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order, ids.order2]]);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
     // order2/instapayPayment2 (§28 — confirmInstaPayPayment() تست) — بيولّد order_status_history
@@ -313,6 +316,73 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       await expect(service.confirmInstaPayTransferByCustomer(ids.customerUser, ids.order)).rejects.toThrow(
         'مفيش دفعة InstaPay معلّقة للطلب ده',
       );
+    });
+  });
+
+  /**
+   * **بلاغ مالك (2026-09-10)**: «بعد ما تتأكد التحويلة دي بتختفي من السيستم. لأ عايزها عادي
+   * تظهر، ولكن تظهر إن هي معمول لها Accepted فعلاً وتظهر بتاريخ إيه وتفاصيل زيادة… معلومات
+   * الفلوس دي لازم تكون دقيقة جدًا جدًا جدًا.»
+   *
+   * الاختبارات دي بتشتغل **بعد** اختبارات التأكيد والرفض فوق عمدًا: الحالة في القاعدة وقتها
+   * فيها تحويلة مؤكَّدة وتحويلة مرفوضة فعليًا — يعني السجل بيتقري من نتيجة أفعال حقيقية، مش
+   * من صفوف مصنوعة للاختبار.
+   */
+  describe('listInstaPayPayments() — السجل بيفضل ظاهر بعد القرار', () => {
+    const ours = (rows: Awaited<ReturnType<PaymentsService['listInstaPayPayments']>>) =>
+      rows.filter((row) => [ids.instapayPayment, ids.instapayPayment2].includes(row.id));
+
+    it('التحويلة المؤكَّدة والمرفوضة الاتنين بيفضلوا ظاهرين بحالتهم وتاريخ القرار', async () => {
+      const rows = ours(await service.listInstaPayPayments('all'));
+      expect(rows).toHaveLength(2);
+
+      const confirmed = rows.find((row) => row.id === ids.instapayPayment2)!;
+      expect(confirmed.payment_status).toBe('succeeded');
+      expect(confirmed.decided_at).not.toBeNull();
+      // اللي أكّد اتسجّل بالاسم — «تفاصيل زيادة» مش مجرد علامة صح.
+      expect(confirmed.decided_by_name).not.toBeNull();
+      expect(confirmed.failure_message).toBeNull();
+
+      const rejected = rows.find((row) => row.id === ids.instapayPayment)!;
+      expect(rejected.payment_status).toBe('failed');
+      expect(rejected.decided_at).not.toBeNull();
+      expect(rejected.failure_message).toBe('الكود المرجعي مش مطابق');
+    });
+
+    it('أرقام الفلوس دقيقة: مبلغ التحويلة، إجمالي الطلب، والمُسترَد', async () => {
+      const [confirmed] = ours(await service.listInstaPayPayments('all')).filter((row) => row.id === ids.instapayPayment2);
+      const [dbRow] = await dataSource.query<{ amount_cents: number; total_amount_cents: number }[]>(
+        `SELECT p.amount_cents, o.total_amount_cents FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = $1`,
+        [ids.instapayPayment2],
+      );
+      expect(confirmed.amount_cents).toBe(Number(dbRow.amount_cents));
+      expect(confirmed.order_total_amount_cents).toBe(Number(dbRow.total_amount_cents));
+      expect(confirmed.currency_code).toBe('EGP');
+      // مفيش استرداد لسه — الصافي = المبلغ نفسه. الرقم ده هو اللي الشاشة بتطرح منه.
+      expect(confirmed.refunded_cents).toBe(0);
+    });
+
+    it('استرداد مكتمل بيتخصم من الصافي، والمعلّق لأ', async () => {
+      const insertRefund = (status: string, cents: number, suffix: string) =>
+        dataSource.query(
+          `INSERT INTO refunds (refund_number, payment_id, order_id, amount_cents, refund_type, refund_reason_code,
+                                refund_method, refund_status, requested_by_user_id)
+           VALUES ($1,$2,$3,$4,'partial','other','original_method',$5,$6)`,
+          [`RF-${runId}-${suffix}`, ids.instapayPayment2, ids.order2, cents, status, ids.customerUser],
+        );
+      await insertRefund('pending', 700, 'p');
+      const pendingOnly = ours(await service.listInstaPayPayments('all')).find((r) => r.id === ids.instapayPayment2)!;
+      // طلب استرداد لسه معلّق **مش** فلوس رجعت — لو اتحسب، الشاشة بتقول للموظف رقم أقل من الحقيقة.
+      expect(pendingOnly.refunded_cents).toBe(0);
+
+      await insertRefund('completed', 500, 'c');
+      const withRefund = ours(await service.listInstaPayPayments('all')).find((r) => r.id === ids.instapayPayment2)!;
+      expect(withRefund.refunded_cents).toBe(500);
+    });
+
+    it('الفلتر بيفصل «محتاج قرار» عن «تم البتّ فيها»', async () => {
+      expect(ours(await service.listInstaPayPayments('pending'))).toHaveLength(0);
+      expect(ours(await service.listInstaPayPayments('decided'))).toHaveLength(2);
     });
   });
 });

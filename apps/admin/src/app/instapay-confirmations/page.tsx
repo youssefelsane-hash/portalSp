@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import type { InstaPayPendingPaymentResponseDto } from '@baytak/shared-types';
+import type { InstaPayPaymentResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
@@ -24,21 +24,24 @@ import Link from 'next/link';
 // كان لازم يدوّر طلب-طلب. نفس أسلوب /payouts بالحرف (طابور + موافقة/رفض).
 export default function InstaPayConfirmationsPage() {
   const { isLoading, authedFetch, hasPermission } = useAuth();
-  const [payments, setPayments] = useState<InstaPayPendingPaymentResponseDto[] | null>(null);
+  const [payments, setPayments] = useState<InstaPayPaymentResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // طلب مالك (2026-09-10): التحويلة المؤكَّدة **تفضل ظاهرة** بحالتها وتاريخها، مش تختفي.
+  // الفلتر بيبدأ على «الكل» عشان ده هو السلوك المطلوب، والمعلّق بيتصدّر من الباك-إند نفسه.
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'decided'>('all');
 
-  function load() {
-    authedFetch<{ items: InstaPayPendingPaymentResponseDto[] }>('/admin/payments/instapay-pending')
+  function load(status: 'all' | 'pending' | 'decided' = statusFilter) {
+    authedFetch<{ items: InstaPayPaymentResponseDto[] }>(`/admin/payments/instapay?status=${status}`)
       .then((res) => setPayments(res.items))
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الدفعات المعلّقة'));
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل تحويلات InstaPay'));
   }
 
   useEffect(() => {
     if (isLoading) return;
-    load();
+    load(statusFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
+  }, [isLoading, statusFilter]);
   // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
   // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
   useAdminLiveRefresh(["payments"], () => load());
@@ -69,7 +72,8 @@ export default function InstaPayConfirmationsPage() {
       <PageHeader
         title="تأكيدات InstaPay"
         description={
-          'الدفعات المعلّقة اللي محتاجة مراجعة يدوية — اللي العميل بلّغ التحويل فيها ظاهرة الأول. ' +
+          'سجل تحويلات InstaPay كامل: المعلّق محتاج القرار ظاهر الأول (واللي العميل بلّغ التحويل ' +
+          'فيه قبل غيره)، والمؤكَّد والمرفوض بيفضلوا في نفس الشاشة بتاريخ القرار ومين اتخذه. ' +
           'رقم الطلب في العمود الأول هو نفس الكود اللي العميل مكتوب له صراحةً إنه يحطّه في ملاحظة ' +
           'تحويل InstaPay — قارنه مباشرة بملاحظة التحويل الفعلية في كشف الحساب قبل ما تأكّد.'
         }
@@ -81,9 +85,39 @@ export default function InstaPayConfirmationsPage() {
           في الباك-إند برضه، مش بالإخفاء ده بس. */}
       {hasPermission('settings.manage') && <InstaPayQrCard authedFetch={authedFetch} />}
 
+      {/* الفلتر مش تزويق: موظف الـFinance محتاج يشوف «اللي محتاج قرار» لوحده لما الطابور
+          يكبر، من غير ما يفقد السجل اللي المالك طلب إنه يفضل ظاهر. */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {([
+          ['all', 'الكل'],
+          ['pending', 'محتاج قرار'],
+          ['decided', 'تم البتّ فيها'],
+        ] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={statusFilter === value ? 'default' : 'outline'}
+            onClick={() => {
+              setPayments(null);
+              setStatusFilter(value);
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!error && !payments && <TableSkeleton columns={6} />}
-      {payments && payments.length === 0 && <EmptyState title="مفيش دفعات InstaPay معلّقة دلوقتي" />}
+      {!error && !payments && <TableSkeleton columns={7} />}
+      {payments && payments.length === 0 && (
+        <EmptyState
+          title={
+            statusFilter === 'pending'
+              ? 'مفيش دفعات InstaPay محتاجة قرار دلوقتي'
+              : 'مفيش تحويلات InstaPay مسجّلة'
+          }
+        />
+      )}
 
       {payments && payments.length > 0 && (
         <Table>
@@ -93,7 +127,8 @@ export default function InstaPayConfirmationsPage() {
               <TableHead>العميل</TableHead>
               <TableHead>المبلغ</TableHead>
               <TableHead>الحالة</TableHead>
-              <TableHead>الوقت</TableHead>
+              <TableHead>الخط الزمني</TableHead>
+              <TableHead>القرار</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -104,6 +139,9 @@ export default function InstaPayConfirmationsPage() {
                   <Link href={`/orders/${payment.order_id}`} className="underline" dir="ltr">
                     {payment.order_number}
                   </Link>
+                  <span className="block text-xs text-muted-foreground" dir="ltr">
+                    {payment.payment_number}
+                  </span>
                 </TableCell>
                 <TableCell>
                   {payment.customer_name}
@@ -111,36 +149,88 @@ export default function InstaPayConfirmationsPage() {
                     {payment.customer_phone}
                   </span>
                 </TableCell>
-                <TableCell>{formatEgp(payment.amount_cents)}</TableCell>
                 <TableCell>
-                  {payment.customer_confirmed_transfer_at ? (
+                  <span className="font-medium">{formatEgp(payment.amount_cents)}</span>
+                  {/* «معلومات الفلوس لازم تكون دقيقة جدًا» — التحويلة ممكن تكون عربون أو قسط،
+                      فعرض إجمالي الطلب جنبها بيمنع قراءة غلط، والمُسترَد بيتشال صراحةً. */}
+                  <span className="block text-xs text-muted-foreground">
+                    من إجمالي {formatEgp(payment.order_total_amount_cents)}
+                    {payment.installment_id ? ' · قسط' : ''}
+                  </span>
+                  {payment.refunded_cents > 0 && (
+                    <span className="block text-xs text-destructive">
+                      اتردّ منها {formatEgp(payment.refunded_cents)} · الصافي{' '}
+                      {formatEgp(payment.amount_cents - payment.refunded_cents)}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {payment.payment_status === 'succeeded' ? (
+                    <StatusChip tone="success">مؤكَّدة — الفلوس وصلت</StatusChip>
+                  ) : payment.payment_status === 'failed' ? (
+                    <StatusChip tone="danger">مرفوضة</StatusChip>
+                  ) : payment.customer_confirmed_transfer_at ? (
                     <StatusChip tone="warning">العميل بلّغ التحويل</StatusChip>
                   ) : (
                     <StatusChip tone="neutral">مستنّي العميل يبلّغ</StatusChip>
                   )}
+                  {payment.gateway_reference && (
+                    <span className="block text-xs text-muted-foreground" dir="ltr">
+                      {payment.gateway_reference}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs leading-6">
+                  <span className="block">
+                    بدأت: {new Date(payment.initiated_at).toLocaleString('ar-EG-u-nu-latn')}
+                  </span>
+                  <span className="block">
+                    بلاغ العميل:{' '}
+                    {payment.customer_confirmed_transfer_at
+                      ? new Date(payment.customer_confirmed_transfer_at).toLocaleString('ar-EG-u-nu-latn')
+                      : '—'}
+                  </span>
+                </TableCell>
+                <TableCell className="text-xs leading-6">
+                  {payment.decided_at ? (
+                    <>
+                      <span className="block">{new Date(payment.decided_at).toLocaleString('ar-EG-u-nu-latn')}</span>
+                      <span className="block text-muted-foreground">
+                        بواسطة {payment.decided_by_name ?? '—'}
+                      </span>
+                      {payment.failure_message && (
+                        <span className="block text-destructive">السبب: {payment.failure_message}</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">لسه محتاجة قرار</span>
+                  )}
                 </TableCell>
                 <TableCell>
-                  {new Date(payment.customer_confirmed_transfer_at ?? payment.initiated_at).toLocaleString('ar-EG-u-nu-latn')}
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" disabled={isSaving} onClick={() => handleConfirm(payment.id)}>
-                      تأكيد الاستلام
-                    </Button>
-                    <PromptDialog
-                      trigger={
-                        <Button size="sm" variant="destructive" disabled={isSaving}>
-                          رفض
-                        </Button>
-                      }
-                      title="رفض دفعة InstaPay"
-                      label="سبب الرفض"
-                      minLength={2}
-                      confirmLabel="رفض"
-                      destructive
-                      onConfirm={(reason) => handleReject(payment.id, reason)}
-                    />
-                  </div>
+                  {/* الأزرار بتظهر للمعلّق بس — التحويلة اللي اتبتّ فيها بقت سجل، والتغيير
+                      عليها بيتم من صفحة الطلب نفسها (استرداد)، مش بإعادة تأكيد. */}
+                  {payment.payment_status === 'pending' ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" disabled={isSaving} onClick={() => handleConfirm(payment.id)}>
+                        تأكيد الاستلام
+                      </Button>
+                      <PromptDialog
+                        trigger={
+                          <Button size="sm" variant="destructive" disabled={isSaving}>
+                            رفض
+                          </Button>
+                        }
+                        title="رفض دفعة InstaPay"
+                        label="سبب الرفض"
+                        minLength={2}
+                        confirmLabel="رفض"
+                        destructive
+                        onConfirm={(reason) => handleReject(payment.id, reason)}
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

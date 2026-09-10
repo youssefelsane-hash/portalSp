@@ -6,6 +6,8 @@ import { CatalogService } from '../catalog/catalog.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { ServiceZonePricing } from '../catalog/entities/service-zone-pricing.entity';
 import { ServiceLevelPricing } from '../catalog/entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from '../catalog/entities/service-pricing-tier-pricing.entity';
+import { TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from '../catalog/entities/service-addon.entity';
 import { ServiceStandardData } from '../catalog/entities/service-standard-data.entity';
 import { PriceCertaintyMode, Service } from '../catalog/entities/service.entity';
@@ -234,7 +236,7 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
       entities: [
-        Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServiceAddon,
+        Service, ServiceCategory, ServiceZonePricing, ServiceLevelPricing, ServicePricingTierPricing, ServiceAddon,
         ServiceStandardData, ServicePricingField, ServicePricingRule, ServicePricingEvaluation,
       ],
     });
@@ -257,7 +259,7 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
         await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1::uuid[])`, [ids]);
         await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1::uuid[])`, [ids]);
         await q(`DELETE FROM service_zone_pricing WHERE service_id = ANY($1::uuid[])`, [ids]);
-        await q(`DELETE FROM service_level_pricing WHERE service_id = ANY($1::uuid[])`, [ids]);
+        await q(`DELETE FROM service_pricing_tier_pricing WHERE service_id = ANY($1::uuid[])`, [ids]);
         await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [ids]);
       }
       await q(`DELETE FROM service_categories WHERE id = ANY($1::uuid[])`, [staleIds]);
@@ -298,7 +300,11 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
         },
       } as never,
       realPricingEngineService(dataSource),
-      {} as never,
+      // migration 0316 وحّد تسعير المستوى في `service_pricing_tier_pricing`، فـ`CatalogService`
+      // بقت تقرا منه فعلاً. الـplaceholder `{}` القديم كان بيرمي
+      // `this.pricingTierPricing.findOne is not a function` جوّه `estimate()` — المصفوفة كلها
+      // بتسقط على استثناء مالوش أي علاقة بالسيناريو المختبَر. مستودع حقيقي زي باقي المستودعات هنا.
+      dataSource.getRepository(ServicePricingTierPricing),
     );
 
     // خدمة لكل تركيبة (قالب × يقين) مستخدمة فعلاً في السيناريوهات.
@@ -316,10 +322,14 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
           [serviceId, zoneId],
         );
       }
+      // migration 0316 وحّد تسعير المستوى في `service_pricing_tier_pricing`، وبقى هو **المصدر
+      // الوحيد** اللي `CatalogService.resolveLevelPriceMultiplier()` بتقرا منه. البذرة القديمة
+      // كانت لسه بتكتب في `service_level_pricing` (سجل تاريخي مالوش أي قارئ)، فمضاعف المستوى
+      // كان بيتجاهَل بالكامل و٣٠ سيناريو بيفشلوا برقم أقل من المتوقّع.
       await q(
-        `INSERT INTO service_level_pricing (service_id, technician_level, price_multiplier)
-         VALUES ($1,$2,1.20)`,
-        [serviceId, TechnicianLevel.PREMIUM],
+        `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier, is_active)
+         VALUES ($1,$2,1.20,true)`,
+        [serviceId, TechnicianPricingTier.EXPERT],  // مستوى premium بيتحوّل لفئة expert (pricingTierForOperationalLevel)
       );
     }
   });
@@ -329,7 +339,7 @@ describe('§130 — مصفوفة سيناريوهات التسعير (تغطية
     try {
       if (createdServiceIds.length > 0) {
         await q(`DELETE FROM service_zone_pricing WHERE service_id = ANY($1::uuid[])`, [createdServiceIds]);
-        await q(`DELETE FROM service_level_pricing WHERE service_id = ANY($1::uuid[])`, [createdServiceIds]);
+        await q(`DELETE FROM service_pricing_tier_pricing WHERE service_id = ANY($1::uuid[])`, [createdServiceIds]);
         await q(`DELETE FROM service_pricing_rules WHERE service_id = ANY($1::uuid[])`, [createdServiceIds]);
         await q(`DELETE FROM service_pricing_fields WHERE service_id = ANY($1::uuid[])`, [createdServiceIds]);
         await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [createdServiceIds]);

@@ -18,7 +18,7 @@ import {
 } from '../../common/events/recurring-order-payment.event';
 import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
 import type { RefundResolvedEvent } from '../../common/events/refund-resolved.event';
-import { InstaPayPendingPaymentResponseDto } from './dto/payments-response.dto';
+import { InstaPayPaymentResponseDto } from './dto/payments-response.dto';
 import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
 import {
   PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT,
@@ -1631,46 +1631,102 @@ export class PaymentsService {
   }
 
   /**
-   * طابور تأكيد InstaPay الإداري (§28) — كل الدفعات المعلّقة، اللي العميل بلّغ التحويل فيها الأول
-   * (محتاجة قرار فوري) — نفس نمط طابور الصرف (listPayouts) بس مخصوص لـInstaPay. مفيش pagination
-   * لأن الطابور ده المفروض يفضل صغير عمليًا (لو كبر، مشكلة تشغيلية أهم من الـUI).
+   * **سجل تحويلات InstaPay** (طلب مالك 2026-09-10) — مش طابور المعلّق بس.
+   *
+   * > «بعد ما تتأكد التحويلة دي بتختفي من السيستم. لأ عايزها عادي تظهر، ولكن تظهر إن هي معمول
+   * >  لها Accepted فعلاً وتظهر بتاريخ إيه وتفاصيل زيادة… معلومات الفلوس دي لازم تكون دقيقة
+   * >  جدًا جدًا جدًا.»
+   *
+   * الاستعلام كان بيفلتر `payment_status = 'pending'` فقط، فالتحويلة بتختفي **لحظة** التأكيد:
+   * صفر أثر مرئي للمراجعة أو التدقيق، وموظف الـFinance مالوش أي طريقة يتأكد إنه أكّد فعلاً غير
+   * إنه يفتح الطلب. دلوقتي الطابور والسجل حاجة واحدة، والمعلّق بيفضل فوق دايمًا.
+   *
+   * `status`: `'pending'` (المحتاج قرار) · `'decided'` (اتأكد أو اترفض) · `'all'` (الافتراضي).
+   * الاسترداد بيتجمّع من `refunds` المكتملة بس — الطلب المعلّق مش فلوس رجعت.
    */
-  async listInstaPayPending(): Promise<InstaPayPendingPaymentResponseDto[]> {
+  async listInstaPayPayments(
+    status: 'pending' | 'decided' | 'all' = 'all',
+    limit = 200,
+  ): Promise<InstaPayPaymentResponseDto[]> {
+    const statusCondition =
+      status === 'pending'
+        ? `AND p.payment_status = 'pending'`
+        : status === 'decided'
+          ? `AND p.payment_status <> 'pending'`
+          : '';
     const rows = await this.dataSource.query<
       {
         id: string;
+        payment_number: string;
         order_id: string;
         order_number: string;
         customer_name: string;
         customer_phone: string;
         amount_cents: number;
+        currency_code: string;
+        order_total_amount_cents: number;
+        order_payment_status: string;
+        payment_status: string;
         gateway_reference: string | null;
         initiated_at: Date;
         customer_confirmed_transfer_at: Date | null;
+        decided_at: Date | null;
+        decided_by_name: string | null;
+        failure_message: string | null;
+        refunded_cents: string | number | null;
+        installment_id: string | null;
       }[]
     >(
-      `SELECT p.id, p.order_id, o.order_number, u.full_name AS customer_name, u.phone_number AS customer_phone,
-              p.amount_cents, p.gateway_reference, p.initiated_at, p.customer_confirmed_transfer_at
+      `SELECT p.id, p.payment_number, p.order_id, o.order_number,
+              u.full_name AS customer_name, u.phone_number AS customer_phone,
+              p.amount_cents, p.currency_code,
+              o.total_amount_cents AS order_total_amount_cents,
+              o.payment_status::text AS order_payment_status,
+              p.payment_status::text AS payment_status,
+              p.gateway_reference, p.initiated_at, p.customer_confirmed_transfer_at,
+              COALESCE(p.completed_at, p.failed_at) AS decided_at,
+              decider.full_name AS decided_by_name,
+              p.failure_message,
+              (SELECT COALESCE(SUM(r.amount_cents), 0) FROM refunds r
+                WHERE r.payment_id = p.id AND r.refund_status = 'completed') AS refunded_cents,
+              p.installment_id
        FROM payments p
        JOIN orders o ON o.id = p.order_id
        JOIN customer_profiles cp ON cp.id = o.customer_id
        JOIN users u ON u.id = cp.user_id
-       WHERE p.payment_method = 'instapay' AND p.payment_status = 'pending'
-       ORDER BY (p.customer_confirmed_transfer_at IS NOT NULL) DESC,
-                COALESCE(p.customer_confirmed_transfer_at, p.initiated_at) ASC`,
+       LEFT JOIN users decider ON decider.id = p.collected_by_user_id
+       WHERE p.payment_method = 'instapay' ${statusCondition}
+       -- المعلّق أولاً (محتاج قرار)، وجوّه كل مجموعة الأحدث حركةً أولاً.
+       ORDER BY (p.payment_status = 'pending') DESC,
+                (p.payment_status = 'pending' AND p.customer_confirmed_transfer_at IS NOT NULL) DESC,
+                CASE WHEN p.payment_status = 'pending'
+                     THEN COALESCE(p.customer_confirmed_transfer_at, p.initiated_at) END ASC,
+                COALESCE(p.completed_at, p.failed_at, p.initiated_at) DESC
+       LIMIT $1`,
+      [Math.max(1, Math.min(500, limit))],
     );
     return rows.map((row) => ({
       id: row.id,
+      payment_number: row.payment_number,
       order_id: row.order_id,
       order_number: row.order_number,
       customer_name: row.customer_name,
       customer_phone: row.customer_phone,
       amount_cents: row.amount_cents,
+      currency_code: row.currency_code,
+      order_total_amount_cents: row.order_total_amount_cents,
+      order_payment_status: row.order_payment_status,
+      payment_status: row.payment_status,
       gateway_reference: row.gateway_reference,
       initiated_at: row.initiated_at.toISOString(),
       customer_confirmed_transfer_at: row.customer_confirmed_transfer_at
         ? row.customer_confirmed_transfer_at.toISOString()
         : null,
+      decided_at: row.decided_at ? row.decided_at.toISOString() : null,
+      decided_by_name: row.decided_by_name,
+      failure_message: row.failure_message,
+      refunded_cents: Number(row.refunded_cents ?? 0),
+      installment_id: row.installment_id,
     }));
   }
 

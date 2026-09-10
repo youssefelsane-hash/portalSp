@@ -30,6 +30,7 @@ import { ListRefundsQueryDto } from './dto/list-refunds-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
 import { RejectInstaPayPaymentDto } from './dto/reject-instapay-payment.dto';
+import { ListInstaPayPaymentsDto } from './dto/list-instapay-payments.dto';
 import { ReconcileRefundDto } from './dto/reconcile-refund.dto';
 import { SetInstaPayQrLinkDto } from './dto/set-instapay-qr-link.dto';
 import {
@@ -115,15 +116,19 @@ export class AdminPaymentsController {
   }
 
   /**
-   * طابور تأكيد InstaPay الإداري (§28) — كانت فجوة حقيقية: confirm/reject موجودين من زمان
-   * بصلاحية `payments.confirm_manual`، بس مفيش GET بيجمّعهم في مكان واحد — موظف Finance كان
-   * مضطر يدوّر طلب-طلب. نفس الصلاحية بالظبط، من غير @RequireStepUp() (ده فرض بس على الأفعال
-   * المالية الفعلية confirm/reject تحت، مش على القراءة — نفس فرق payouts.view/payouts.approve).
+   * **سجل تحويلات InstaPay** (§28، موسّع بطلب مالك 2026-09-10) — الطابور والسجل حاجة واحدة.
+   *
+   * كان `instapay-pending` بيرجّع المعلّق بس، فالتحويلة كانت **تختفي لحظة التأكيد**: مفيش أي
+   * أثر مرئي لمراجعة أو تدقيق. دلوقتي نفس المسار بيرجّع المعلّق والمقرَّر مع الخط الزمني كامل،
+   * والمعلّق بيفضل فوق دايمًا فمفيش تراجع في سرعة القرار.
+   *
+   * نفس الصلاحية بالظبط، من غير @RequireStepUp() (ده فرض بس على الأفعال المالية الفعلية
+   * confirm/reject تحت، مش على القراءة — نفس فرق payouts.view/payouts.approve).
    */
-  @Get('payments/instapay-pending')
+  @Get('payments/instapay')
   @RequirePermission('payments.confirm_manual')
-  async listInstaPayPending() {
-    return { items: await this.paymentsService.listInstaPayPending() };
+  async listInstaPayPayments(@Query() query: ListInstaPayPaymentsDto) {
+    return { items: await this.paymentsService.listInstaPayPayments(query.status ?? 'all', query.limit ?? 200) };
   }
 
   /**

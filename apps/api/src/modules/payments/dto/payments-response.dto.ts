@@ -89,16 +89,46 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
 // §28 — طابور تأكيد InstaPay الإداري (كانت فجوة حقيقية: مفيش أي شاشة/endpoint بيجمّع الدفعات
 // المعلّقة، الأدمن كان مضطر يدور عليها طلب-طلب من جوّه تفاصيل كل طلب لوحده). فيه اسم/رقم العميل
 // (مش UUID خام — نفس درس §28.1) عشان الطابور يبقى قابل للاستخدام فعليًا من غير نداء تاني.
-export interface InstaPayPendingPaymentResponseDto {
+/**
+ * **سجل تحويلات InstaPay** (طلب مالك 2026-09-10) — مش طابور المعلّق بس.
+ *
+ * > «موجود إنستا باي لما بتيجي تعمل تأكيد إن الدفع وصل، خلاص كده بعد ما تتأكد التحويلة دي
+ * >  بتختفي من السيستم. لأ عايزها عادي تظهر، ولكن تظهر إن هي معمول لها Accepted فعلاً وتظهر
+ * >  بتاريخ إيه وتفاصيل زيادة كمان. معلومات الفلوس دي لازم تكون دقيقة جدًا.»
+ *
+ * الاستعلام القديم كان بيفلتر `payment_status = 'pending'` فقط، فالتحويلة كانت **تختفي** لحظة
+ * التأكيد ومفيش أي أثر مرئي — لا للمراجعة ولا للتدقيق. الشكل ده بيحمل الخط الزمني كامل
+ * (بدأت → العميل بلّغ → القرار)، مين قرّر، وسبب الرفض، مع أرقام الفلوس الدقيقة.
+ */
+export interface InstaPayPaymentResponseDto {
   id: string;
+  payment_number: string;
   order_id: string;
   order_number: string;
   customer_name: string;
   customer_phone: string;
+  /** مبلغ التحويلة نفسها بالقرش. */
   amount_cents: number;
+  currency_code: string;
+  /** إجمالي الطلب وقت القراءة — التحويلة ممكن تكون عربون أو قسط، فالمقارنة لازمة للمراجعة. */
+  order_total_amount_cents: number;
+  /** حالة دفع الطلب ككل (`unpaid`/`paid`/…) — بتوضّح هل التحويلة دي غطّت الطلب ولا لأ. */
+  order_payment_status: string;
+  /** `pending` \| `succeeded` \| `failed` — الحالة الفعلية للدفعة. */
+  payment_status: string;
   gateway_reference: string | null;
   initiated_at: string;
   customer_confirmed_transfer_at: string | null;
+  /** لحظة القرار: `completed_at` للمقبولة، `failed_at` للمرفوضة، `null` للمعلّقة. */
+  decided_at: string | null;
+  /** اسم الموظف اللي أكّد/رفض — من `collected_by_user_id`. */
+  decided_by_name: string | null;
+  /** سبب الرفض كما سجّله الموظف. `null` لأي حالة تانية. */
+  failure_message: string | null;
+  /** إجمالي ما اتردّ من التحويلة دي (استرداد مكتمل بس) — عشان الرقم المعروض يبقى صافي فعلاً. */
+  refunded_cents: number;
+  /** أقساط/دفعات جزئية: معرّف القسط لو التحويلة دي بتخصّه. */
+  installment_id: string | null;
 }
 
 export interface SavedPaymentMethodResponseDto {
