@@ -28,7 +28,10 @@ class _PayoutsScreenState extends State<PayoutsScreen> {
     try {
       final payouts = await widget.repository.fetchPayouts();
       if (mounted) setState(() => _payouts = payouts);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }

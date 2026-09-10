@@ -109,7 +109,10 @@ class _LoginScreenState extends State<LoginScreen> {
           content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي'),
         ),
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -137,7 +140,10 @@ class _LoginScreenState extends State<LoginScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _otpFocusNode.requestFocus();
       });
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       setState(() => _error = err.message);
     } finally {
       setState(() => _isSubmitting = false);
@@ -168,7 +174,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       // في الوضع المشروط لازم نرجّع للرحلة اللي فتحتنا. في الوضع الجذري `_AuthGate` بيتكفّل.
       if (widget.isModal && mounted) Navigator.of(context).pop(true);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
       final suggestRegister = !_isRegisterMode && err.statusCode == 404;
       // الخانة بتتفضّى وتاخد التركيز تاني — الكود اللي اترفض مش هينفع تاني مهما اتبعت، وسيبانه

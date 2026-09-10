@@ -133,7 +133,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               _initialQuoteError = null;
             });
           }
-        } on ApiException catch (err) {
+        } catch (errRaw) {
+          // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+          // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+          final err = ApiException.from(errRaw);
           if (mounted) setState(() => _initialQuoteError = err.message);
         }
       } else if (mounted) {
@@ -148,7 +151,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       }
       if (order.technicianId != null) await _loadRescheduleRequests();
       await _loadMedia();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -175,7 +181,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           );
         }
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _decidingRescheduleRequest = false);
@@ -257,7 +266,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       final all = await _repository.listRescheduleOptions(order.id);
       options = all.where((option) => option.available).toList();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       return;
     }
@@ -309,7 +321,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         setState(() => _order = updated);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }
@@ -397,7 +412,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             : 'تمت الموافقة — الفني هيكمل الشغل';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _decidingQuote = false);
@@ -446,7 +464,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('تم الرفض — الشغل هيكمل بالنطاق الأساسي بس')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _decidingQuote = false);
@@ -476,7 +497,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // العرض قد يتغير بينما العميل فاتح الشاشة. نحمّل النسخة الجديدة فورًا بعد رد التعارض.
       if (err.statusCode == 409) await _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
@@ -504,7 +528,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('اتلغى الطلب$feeMessage')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       }
@@ -634,7 +661,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           await showGoogleReviewPromptDialog(context, reviewUrl);
         }
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // 409 لو اتقيّم قبل كده (مفيش endpoint تحقق مسبق، راجع ratings_repository.dart) —
       // بنعتبرها نفس نتيجة "اتقيّم" من ناحية الواجهة، مش خطأ حقيقي محتاج المستخدم يعيد المحاولة.
       if (mounted) {
@@ -688,7 +718,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة — الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _requestingRevisit = false);
@@ -706,7 +739,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             .showSnackBar(const SnackBar(content: Text('بندوّرلك على فني بديل دلوقتي')));
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _requestingRematch = false);
@@ -734,7 +770,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       .showSnackBar(const SnackBar(content: Text('اتبعت طلبك للفني اللي اخترته ✅')));
                 }
                 await _load();
-              } on ApiException catch (err) {
+              } catch (errRaw) {
+                // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+                // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+                final err = ApiException.from(errRaw);
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
               } finally {
                 if (mounted) setState(() => _requestingRematch = false);
@@ -743,7 +782,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ),
         ),
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }
@@ -757,7 +799,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع من المحفظة بنجاح ✅')));
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _paying = false);
@@ -777,7 +822,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع بالبطاقة بنجاح ✅')));
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _paying = false);
@@ -797,7 +845,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع بنجاح ✅')));
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _paying = false);
@@ -820,7 +871,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع بنجاح ✅')));
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _paying = false);
@@ -838,7 +892,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('تمام، سجّلنا إنك سلّمت الفلوس ✅')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _confirmingCashHandover = false);

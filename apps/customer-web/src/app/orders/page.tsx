@@ -8,10 +8,11 @@ import { listMyOrders, orderStatusLabelsAr, formatEgp, OrderResponseDto } from '
 
 export default function OrdersPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading, authedFetch } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, authedFetchPage } = useAuth();
   const [orders, setOrders] = useState<OrderResponseDto[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -19,13 +20,18 @@ export default function OrdersPage() {
       return;
     }
     if (isAuthenticated) {
-      listMyOrders(authedFetch).then((page) => {
+      listMyOrders(authedFetchPage).then((page) => {
         setOrders(page.items);
         setNextCursor(page.meta.next_cursor);
       },
       )
         // نفس القاعدة: الرفض يتسجّل بدل ما يضيع في صمت (docs/08 §133).
-        .catch((err: unknown) => console.error('فشل تحميل بيانات', err));
+        // الفشل لازم يوصل للمستخدم كرسالة — `console.error` لوحده معناه شاشة تحميل للأبد.
+        .catch((err: unknown) => {
+          console.error('فشل تحميل بيانات', err);
+          setOrders([]);
+          setLoadError(err instanceof Error ? err.message : 'تعذر تحميل طلباتك — حاول تاني');
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, authLoading]);
@@ -34,7 +40,7 @@ export default function OrdersPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await listMyOrders(authedFetch, nextCursor);
+      const page = await listMyOrders(authedFetchPage, nextCursor);
       setOrders((current) => [...(current ?? []), ...page.items]);
       setNextCursor(page.meta.next_cursor);
     } finally {
@@ -57,6 +63,11 @@ export default function OrdersPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="mb-6 text-2xl font-bold">طلباتي</h1>
+      {loadError && (
+        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm text-danger" role="alert">
+          {loadError}
+        </div>
+      )}
       {!orders || orders.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface p-8 text-center">
           <p className="text-muted">لسه معملتش أي طلب</p>

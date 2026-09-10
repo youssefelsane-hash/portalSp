@@ -39,7 +39,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     try {
       final methods = await _repository.list();
       if (mounted) setState(() => _methods = methods);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -49,7 +52,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     try {
       await _repository.setDefault(method.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _acting.remove(method.id));
@@ -69,7 +75,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     try {
       await _repository.revoke(method.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _acting.remove(method.id));

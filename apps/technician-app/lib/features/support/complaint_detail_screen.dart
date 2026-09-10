@@ -51,7 +51,10 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
           _loading = false;
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         setState(() {
           _error = err.message;
@@ -71,7 +74,10 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
         setState(() => _messages = [..._messages, message]);
         _messageController.clear();
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -88,7 +94,10 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
       final bytes = await picked.readAsBytes();
       final attachment = await _repository.uploadAttachment(widget.complaintId, bytes, picked.name);
       if (mounted) setState(() => _attachments = [..._attachments, attachment]);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _uploadingImage = false);

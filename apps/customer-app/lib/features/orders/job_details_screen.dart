@@ -85,7 +85,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           }
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _pricingFieldsError = err.message);
     } finally {
       if (mounted) setState(() => _loadingPricingFields = false);

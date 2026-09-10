@@ -51,17 +51,19 @@ class OrdersRepository {
     return items.map(CancellationReason.fromJson).toList();
   }
 
+  // بَقّة حقيقية (بلاغ مالك 2026-09-10: «صفحة طلباتي ما بتفتحش، بتفضل تحمّل»): الكود كان
+  // بيقرا `data['items']`، لكن `ResponseInterceptor` بيرفع `items` لـ`data` نفسها ويحط `meta`
+  // جنبها في الـenvelope — فـ`data` قايمة مش Map، والكاست كان بيرمي `TypeError` جوّه
+  // `authedRequest`. الشاشة بتمسك `ApiException` بس، فالاستثناء ضاع و`_orders` فضلت `null`
+  // للأبد = عجلة تحميل دايمة. `authedRequestPage()` هو العقد الصح لأي endpoint `{items, meta}`.
   Future<OrdersPage> list({String? cursor}) async {
     final suffix = cursor == null
         ? ''
         : '&cursor=${Uri.encodeComponent(cursor)}';
-    final data = await auth.authedRequest('GET', '/orders?limit=20$suffix');
-    final items = (data?['items'] as List<dynamic>? ?? [])
-        .cast<Map<String, dynamic>>();
-    final meta = data?['meta'] as Map<String, dynamic>? ?? const {};
+    final page = await auth.authedRequestPage('/orders?limit=20$suffix');
     return OrdersPage(
-      items: items.map(Order.fromJson).toList(),
-      nextCursor: meta['next_cursor'] as String?,
+      items: page.items.map(Order.fromJson).toList(),
+      nextCursor: page.nextCursor,
     );
   }
 

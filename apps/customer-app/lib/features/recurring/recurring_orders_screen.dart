@@ -76,7 +76,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
           _error = null;
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -100,7 +103,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
     try {
       await _repository.setActive(template.id, !template.isActive);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -116,7 +122,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
     try {
       await _repository.remove(template.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -304,7 +313,10 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
         FocusScope.of(context).unfocus();
         Navigator.of(context).pop(true);
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);

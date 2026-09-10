@@ -58,7 +58,10 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
       if (mounted) setState(() => _cities = cities);
       // وضع تعديل — المنطقة المحفوظة قبل كده لازم تتحمّل عشان تظهر مختارة في القايمة المنسدلة.
       if (_cityId != null) await _loadAreasKeepingSelection(_cityId!);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -67,7 +70,10 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
     try {
       final areas = await _geoRepository.fetchAreas(cityId);
       if (mounted) setState(() => _areas = areas);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -80,7 +86,10 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
     try {
       final areas = await _geoRepository.fetchAreas(cityId);
       if (mounted) setState(() => _areas = areas);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -136,7 +145,10 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
               landmark: _landmarkController.text.trim(),
             );
       if (mounted) Navigator.of(context).pop(address);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _saving = false);

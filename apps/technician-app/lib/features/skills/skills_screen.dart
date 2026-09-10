@@ -37,7 +37,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
     try {
       final categories = await _repository.listMyCategories();
       if (mounted) setState(() => _categories = categories);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -72,7 +75,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
     try {
       await _repository.withdraw(category.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -234,7 +240,10 @@ class _AddSkillScreenState extends State<_AddSkillScreen> {
     try {
       final categories = await widget.repository.listCategories();
       if (mounted) setState(() => _categories = categories);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -253,7 +262,10 @@ class _AddSkillScreenState extends State<_AddSkillScreen> {
         );
         Navigator.of(context).pop(true);
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,

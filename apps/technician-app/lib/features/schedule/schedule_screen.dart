@@ -50,7 +50,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       final to = from.add(const Duration(days: 180));
       final slots = await _repository.list(from: _fmt(from), to: _fmt(to));
       if (mounted) setState(() => _slots = slots);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -122,7 +125,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       await _repository.bulkSetAvailability(dates: _selectedDates.toList(), action: action);
       _selectedDates.clear();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _submitting = false);

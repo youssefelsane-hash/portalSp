@@ -319,8 +319,24 @@ export interface MyOrdersPageDto {
   meta: { next_cursor: string | null; has_more: boolean };
 }
 
-export const listMyOrders = (authedFetch: AuthedFetch, cursor?: string) =>
-  authedFetch<MyOrdersPageDto>(`/orders?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+type AuthedFetchPage = <T>(path: string, options?: RequestInit) => Promise<{ items: T[]; meta: Record<string, unknown> }>;
+
+/**
+ * **بَقّة حقيقية (بلاغ مالك 2026-09-10)** — نفس بَقّة «طلباتي ما بتفتحش» في تطبيق الأندرويد
+ * بالحرف: `/orders` بيرجّع `{items, meta}` من الكونترولر، لكن `ResponseInterceptor` بيرفع
+ * `items` لـ`data` ويحط `meta` جنبها. `authedFetch` بيرجّع `data` بس، فـ`page.items` كانت
+ * `undefined` و`page.meta.next_cursor` بترمي TypeError → الصفحة تفضل على «جاري التحميل» للأبد.
+ */
+export const listMyOrders = async (
+  authedFetchPage: AuthedFetchPage,
+  cursor?: string,
+): Promise<MyOrdersPageDto> => {
+  const page = await authedFetchPage<OrderResponseDto>(
+    `/orders?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  );
+  const nextCursor = (page.meta.next_cursor as string | null | undefined) ?? null;
+  return { items: page.items, meta: { next_cursor: nextCursor, has_more: nextCursor !== null } };
+};
 
 export const getMyOrder = (authedFetch: AuthedFetch, id: string) => authedFetch<OrderResponseDto>(`/orders/${id}`);
 

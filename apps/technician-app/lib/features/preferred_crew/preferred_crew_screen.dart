@@ -53,7 +53,10 @@ class _PreferredCrewScreenState extends State<PreferredCrewScreen> {
           _memberships = results[2];
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -69,7 +72,10 @@ class _PreferredCrewScreenState extends State<PreferredCrewScreen> {
       await _repository.invite(code);
       _codeController.clear();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -84,7 +90,10 @@ class _PreferredCrewScreenState extends State<PreferredCrewScreen> {
     try {
       await action();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);

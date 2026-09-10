@@ -68,7 +68,10 @@ class _ChatScreenState extends State<ChatScreen> {
           if (mounted) setState(() => _error = message);
         },
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         setState(() {
           _error = err.message;
@@ -102,7 +105,10 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = await picked.readAsBytes();
       final message = await _repository.sendImageMessage(_threadId!, bytes, picked.name);
       _appendMessage(message);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _uploadingImage = false);

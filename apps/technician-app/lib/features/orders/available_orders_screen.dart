@@ -233,19 +233,28 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
     try {
       orders = await _repository.fetchAvailable();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // `displayMessage` بيضيف `request_id` لأخطاء الـ500 — من غيره الرسالة عامة ومفيش أي
       // طريقة تربطها بسطر في لوج الباك-إند (بلاغ مالك: «التيرمنال مش ظاهر فيها الـerror»).
       firstError ??= err.displayMessage;
     }
     try {
       upcoming = await _repository.fetchUpcomingConfirmed();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       firstError ??= err.displayMessage;
     }
     try {
       overdue = await _repository.fetchOverdue();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       firstError ??= err.displayMessage;
     }
 
@@ -302,7 +311,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         await _refreshActiveOrders();
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -321,7 +333,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -346,7 +361,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.acceptCrewOpportunity(invite.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -364,7 +382,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.declineCrewOpportunity(invite.id);
       await _loadCrewOpportunities();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -389,7 +410,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         await _refreshActiveOrders();
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -424,7 +448,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.reject(order.orderId);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,

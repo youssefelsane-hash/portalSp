@@ -71,7 +71,10 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
           ? await _favoritesRepository.removeFavorite(widget.technicianId)
           : await _favoritesRepository.addFavorite(widget.technicianId);
       if (mounted) setState(() => _isFavorited = newState);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _togglingFavorite = false);
@@ -82,7 +85,10 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
     try {
       final profile = await _repository.fetchPublicProfile(widget.technicianId);
       if (mounted) setState(() => _profile = profile);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -149,7 +155,10 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _rebooking = false);
@@ -185,7 +194,10 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
         // الحالة الحقيقية (السلوت بقى محجوز لو كمل، أو لسه فاضي لو رجع).
         await _loadSchedule();
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _bookingSlot = false);

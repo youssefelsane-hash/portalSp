@@ -779,3 +779,35 @@ PR #236 اللي فيه اختبار Dart واحد فات بالظبط بسبب 
 الـawait مباشرة = `A TextEditingController was used after being disposed` = شاشة حمرا بعد ما
 التقييم يكون اتبعت. `_DisposeOnRouteExit` بيربط التخلص بـ`State.dispose()`. اختبار الانحدار:
 `test/rating_dialog_dispose_test.dart` — اتأكد إنه بيقع قبل الإصلاح.
+
+## بَقّة «صفحة طلباتي ما بتفتحش» (بلاغ مالك 2026-09-10) — السبب البنيوي والحارس
+
+**العرَض**: العميل يفتح «طلباتي»، الشاشة تفضل على عجلة التحميل للأبد، من غير أي رسالة خطأ.
+
+**السبب**: `GET /orders` بقى مُقسّم صفحات (`{items, meta}` من الكونترولر). لكن
+`ResponseInterceptor` في `apps/api` بيكتشف الشكل ده ويفكّه: `items` بتروح `data`، و`meta`
+بتتحط **جنب** `data` في الـenvelope. يعني الرد الفعلي:
+
+```json
+{ "success": true, "data": [ ...الطلبات... ], "meta": { "next_cursor": null, "has_more": false } }
+```
+
+`OrdersRepository.list()` كان بينده `authedRequest()` (اللي بيعمل `data as Map`) ويقرا
+`data['items']` — فالكاست بيرمي `TypeError`. والشاشة (زي **كل** شاشة في التطبيق وقتها) بتمسك
+`on ApiException catch` بس، فالاستثناء هرب، و`setState` اللي بيوقّف التحميل مانفّذش أبدًا.
+
+**نفس البَقّة كانت في `apps/customer-web`** بالحرف (`page.items` = `undefined`)، واتصلحت هناك
+كمان. `apps/admin` كان عنده `apiFetchPage()` صح من زمان — هو اللي النمط اتنسخ منه.
+
+### التلات حُرّاس اللي اتحطّوا عشان الفئة دي ماترجعش
+
+1. **`apiRequestPage()` / `ApiPage`** في `lib/core/api_client.dart` (ونظيرهم `apiFetchPage` في
+   `apps/customer-web`) — العقد الصح لأي endpoint مُقسّم صفحات مكتوب في مكان **واحد**، بدل ما
+   كل repository يخمّنه. `apiRequest()` بقى يرمي `BAD_RESPONSE` صريح لو `data` مش Map.
+2. **`ApiException.from()` + مسك عام في كل شاشة** — 161 موقع كان بيمسك `ApiException` بس
+   بقوا يمسكوا أي استثناء ويحوّلوه لرسالة. مافيش شاشة تقدر تعلّق على التحميل بسبب استثناء
+   غير متوقّع بعد كده، مهما كان مصدره (كاست، تحليل JSON، بَقّة برمجية).
+3. **مهلة 30 ثانية على كل نداء** (`apiRequestTimeout`) — `package:http` مالوش مهلة افتراضية
+   خالص، فسوكيت اتعلّق في شبكة موبايل كان بيدّي **نفس** العرَض بالظبط بلا أي بَقّة في الكود.
+
+اختبار الانحدار الحي: `test_live/orders_list_page_live_test.dart`.

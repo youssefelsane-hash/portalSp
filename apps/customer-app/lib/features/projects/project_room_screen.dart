@@ -188,7 +188,10 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
           _error = null;
         });
       }
-    } on ApiException catch (error) {
+    } catch (errorRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final error = ApiException.from(errorRaw);
       if (mounted) {
         setState(() {
           _loading = false;
@@ -646,7 +649,10 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
           ),
         );
       }
-    } on ApiException catch (error) {
+    } catch (errorRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final error = ApiException.from(errorRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -914,7 +920,10 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
           context,
         ).showSnackBar(const SnackBar(content: Text('وصلت رسالتك للإدارة')));
       }
-    } on ApiException catch (error) {
+    } catch (errorRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final error = ApiException.from(errorRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
