@@ -93,7 +93,10 @@ class _InstallmentSectionState extends State<InstallmentSection> {
         const SnackBar(content: Text('تم تقديم طلب التقسيط — تحت المراجعة')),
       );
       Navigator.of(context).pop(true);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -172,6 +175,9 @@ class _InstallmentSectionState extends State<InstallmentSection> {
                   )
                 else
                   DropdownButtonFormField<String>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     key: ValueKey(_selectedPlan!.id),
                     initialValue: _paymentMethods.any((method) =>
                             method.id == _selectedPaymentMethodId &&

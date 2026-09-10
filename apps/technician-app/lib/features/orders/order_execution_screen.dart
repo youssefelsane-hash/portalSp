@@ -299,7 +299,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -339,7 +342,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -494,7 +500,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       );
       if (mounted) setState(() => _photoMessage = 'صورة $labelAr اترفعت ✅');
       await _loadMedia();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
@@ -534,7 +543,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           const SnackBar(content: Text('اتبعت السعر — مستني موافقة العميل')),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -570,7 +582,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -607,7 +622,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           const SnackBar(content: Text('اتبعت عرض السعر للعميل — مستني رده')),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -642,7 +660,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         );
         Navigator.of(context).pop();
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -676,7 +697,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         );
         setState(() {});
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -710,7 +734,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         );
         setState(() {});
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -747,7 +774,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         await _refreshFromServer();
         await _loadTeamMembersIfApplicable();
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -771,7 +801,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           context,
         ).showSnackBar(const SnackBar(content: Text('شكراً على تقييمك 🙏')));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // 409 لو العميل قيّم الأول — نفس تعامل customer-app بالحرف (اعتبرها "اتقيّم" مش خطأ).
       if (mounted) {
         if (err.statusCode == 409) {
@@ -1220,6 +1253,9 @@ class _RescheduleRequestDialogState extends State<_RescheduleRequestDialog> {
               const Text('الموعد الحالي لن يتغيّر إلا بعد موافقة العميل.'),
               const SizedBox(height: 16),
               DropdownButtonFormField<ScheduleSlot>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _slot,
                 decoration: const InputDecoration(labelText: 'الموعد المقترح'),
                 items: widget.slots
@@ -2213,6 +2249,9 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
+                                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                                isExpanded: true,
                                 initialValue: _drafts[i].itemType,
                                 decoration: const InputDecoration(
                                   labelText: 'النوع',

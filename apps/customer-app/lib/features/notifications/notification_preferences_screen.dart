@@ -39,7 +39,10 @@ class _NotificationPreferencesScreenState extends State<NotificationPreferencesS
     try {
       final preferences = await _repository.fetchPreferences();
       if (mounted) setState(() => _preferences = preferences);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
 
@@ -61,7 +64,10 @@ class _NotificationPreferencesScreenState extends State<NotificationPreferencesS
         '/customer/marketing-preference',
         body: {'marketing_opt_out': !receiveOffers},
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // رجّع الحالة القديمة عشان الشاشة ما تكدبش على العميل لو الحفظ فشل.
       if (mounted) {
         setState(() => _marketingOptOut = previous);
@@ -81,7 +87,10 @@ class _NotificationPreferencesScreenState extends State<NotificationPreferencesS
               .toList();
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _saving.remove(pref.channel));

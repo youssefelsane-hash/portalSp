@@ -71,7 +71,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final me = await _repository.fetchMe();
       if (mounted) setState(() => _me = me);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -87,7 +90,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _repository.requestAssistant(code);
       _codeController.clear();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -117,7 +123,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         filename: picked.name,
       );
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
@@ -132,7 +141,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       await _repository.removeAssistant();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -156,7 +168,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _deletingAccount = true);
     try {
       await context.read<AuthRepository>().deleteAccount();
-    } on ApiException catch (error) {
+    } catch (errorRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final error = ApiException.from(errorRaw);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,

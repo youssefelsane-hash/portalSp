@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- نسخة الوضع الداكن — نفس سطح ثيم Material 3 الداكن المشتق من نفس اللون البذري. -->
+<resources>
+    <color name="splash_background">#FF111318</color>
+</resources>

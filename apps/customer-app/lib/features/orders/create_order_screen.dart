@@ -265,7 +265,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         );
         if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -475,7 +478,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         units,
       );
       if (mounted) setState(() => _durationEstimate = result);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _durationError = err.message);
     } finally {
       if (mounted) setState(() => _estimatingDuration = false);
@@ -505,7 +511,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           }
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _pricingFieldsError = err.message);
     } finally {
       if (mounted) setState(() => _loadingPricingFields = false);
@@ -587,7 +596,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           _reconcilePaymentMethodSelection();
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted && generation == _previewRequestGeneration) {
         setState(() => _previewError = err.message);
       }
@@ -740,7 +752,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       try {
         result = await attempt(asBuilding: false);
         kind = 'promo';
-      } on ApiException catch (error) {
+      } catch (errorRaw) {
+        // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+        // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+        final error = ApiException.from(errorRaw);
         // نجرّب كود عمارة فقط لو كود الخصم غير موجود. أي خطأ آخر (منتهي، غير صالح للخدمة،
         // تجاوز الحد...) يخص كود الخصم نفسه ويجب أن يراه العميل بدل رسالة عمارة مضللة.
         if (error.statusCode != 404) rethrow;
@@ -756,7 +771,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           _reconcilePaymentMethodSelection();
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _codeError = err.message);
     } finally {
       if (mounted) setState(() => _validatingCode = false);
@@ -821,7 +839,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // مش هيمنع الانتقال لـOrderDetailScreen — العميل يقدر يعيد المحاولة من هناك لو الأزرار
       // موجودة، أو الطلب هيتلغى تلقائيًا لو ماكملش خلال المهلة (راجع تعليق _submit فوق).
       if (mounted) {
@@ -1047,7 +1068,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         );
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -1329,6 +1353,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: DropdownButtonFormField<ServiceStandardDataRow>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     initialValue: _selectedStandardData,
                     decoration: const InputDecoration(
                       labelText: 'نوع التنفيذ',

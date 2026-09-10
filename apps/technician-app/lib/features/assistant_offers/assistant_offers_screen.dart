@@ -35,7 +35,10 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
     try {
       final offers = await _repository.fetchAvailable();
       if (mounted) setState(() => _offers = offers);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -50,7 +53,10 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
         );
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // فرصة ضاعت لحد تاني (409) — رسالة واضحة، مش خطأ عام. نفس رسالة الباك-إند بالظبط.
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       await _load();
@@ -64,7 +70,10 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
     try {
       await _repository.reject(offer.offerId);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _isActing = false);

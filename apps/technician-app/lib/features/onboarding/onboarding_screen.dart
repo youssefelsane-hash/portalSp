@@ -49,7 +49,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           _documents = results[1] as List<TechnicianDocument>;
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -97,7 +100,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         filename: picked.name,
       );
       if (mounted) setState(() => _documents = [document, ..._documents]);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -257,6 +263,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             DropdownButtonFormField<String>(
+                              // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                              // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                              isExpanded: true,
                               initialValue: _selectedDocumentType,
                               decoration: const InputDecoration(labelText: 'نوع المستند'),
                               items: documentTypeLabelsAr.entries

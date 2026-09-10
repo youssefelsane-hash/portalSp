@@ -261,7 +261,10 @@ class AuthRepository extends ChangeNotifier {
   }) async {
     try {
       return await apiRequest(method, path, body: body, accessToken: _accessToken, extraHeaders: extraHeaders);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (err.statusCode == 401) {
         final newToken = await _refresh();
         return apiRequest(method, path, body: body, accessToken: newToken, extraHeaders: extraHeaders);
@@ -274,10 +277,32 @@ class AuthRepository extends ChangeNotifier {
   Future<List<Map<String, dynamic>>> authedRequestList(String path) async {
     try {
       return await apiRequestList(path, accessToken: _accessToken);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (err.statusCode == 401) {
         final newToken = await _refresh();
         return apiRequestList(path, accessToken: newToken);
+      }
+      rethrow;
+    }
+  }
+
+  /// زي `authedRequestList` بس لـendpoint مُقسّم صفحات (`{items, meta}` عند الكونترولر).
+  ///
+  /// لازم يتستخدم مع `/orders` وأي endpoint شبهه — `authedRequest()` بيرمي `BAD_RESPONSE`
+  /// معاهم لأن الـ`ResponseInterceptor` بيحط القايمة في `data` و`meta` جنبها.
+  Future<ApiPage> authedRequestPage(String path) async {
+    try {
+      return await apiRequestPage(path, accessToken: _accessToken);
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
+      if (err.statusCode == 401) {
+        final newToken = await _refresh();
+        return apiRequestPage(path, accessToken: newToken);
       }
       rethrow;
     }
@@ -292,7 +317,10 @@ class AuthRepository extends ChangeNotifier {
   }) async {
     try {
       return await apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: _accessToken);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (err.statusCode == 401) {
         final newToken = await _refresh();
         return apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: newToken);

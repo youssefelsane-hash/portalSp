@@ -123,7 +123,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                         children: [
                           SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                           SizedBox(width: 12),
-                          Text('بيتصل بخدمة التتبع اللحظي...'),
+                          // من غير Flexible الصف بيتجاوز عرض الشاشة الضيّقة (١٢٤ بكسل على ٣٢٠).
+                          Flexible(child: Text('بيتصل بخدمة التتبع اللحظي...')),
                         ],
                       ),
                     )

@@ -35,7 +35,10 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         zoneId: widget.zoneId,
       );
       if (mounted) setState(() => _categories = categories);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -63,7 +66,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   crossAxisCount: 2,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
-                  childAspectRatio: 0.95,
+                  // صورة ٤:٣ + سطرين اسم — النسبة دي بتدي الاسم مساحته من غير قصّ على ٣٢٠ بكسل.
+                  childAspectRatio: 0.82,
                 ),
                 itemCount: _categories!.length,
                 itemBuilder: (context, index) {

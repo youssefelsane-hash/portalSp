@@ -66,7 +66,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
           .catchError((_) {
             if (mounted) setState(() => _orders = []);
           });
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (err.statusCode == 404) {
         if (mounted) setState(() => _notMember = true);
       } else if (mounted) {
@@ -107,7 +110,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
       );
       setState(() => _notMember = false);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -129,7 +135,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
       _branchNameController.clear();
       _branchAddressController.clear();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -212,7 +221,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
         isActive: isActive,
       );
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -230,7 +242,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
       await _repository.addStaff(technicianCode: code, teamRole: _staffRole);
       _staffCodeController.clear();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -245,7 +260,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
     try {
       await _repository.removeStaff(member.userId);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -260,7 +278,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
     try {
       await _repository.updateStaffRole(member.userId, newRole);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -286,7 +307,10 @@ class _CompanyScreenState extends State<CompanyScreen> {
     try {
       await _repository.transferOwnership(newOwner.userId);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -633,6 +657,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
+            // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+            // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+            isExpanded: true,
             initialValue: _staffRole,
             decoration: const InputDecoration(border: OutlineInputBorder()),
             items: [

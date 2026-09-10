@@ -37,3 +37,11 @@ String resolveApiAssetUrl(String value) {
   final origin = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
   return '$origin$value';
 }
+
+/// مفتاح إيقاف التتبع اللحظي (`--dart-define=REALTIME_ENABLED=false`).
+///
+/// **ليه موجود**: `socket_io_client` بيفضل يجدول مؤقتات إعادة اتصال طول ما مفيش سيرفر
+/// سوكيت — ومؤقت شغّال بعد تفكيك الشجرة بيوقّع اختبارات الواجهات كلها على `!timersPending`،
+/// فيخبّي الأعطال الحقيقية وسطها. الافتراضي `true` (الإنتاج والتطوير)، والاختبارات بس هي
+/// اللي بتقفله. مفيد كمان كمفتاح طوارئ لو بوابة السوكيت نفسها وقعت.
+const bool kRealtimeEnabled = bool.fromEnvironment('REALTIME_ENABLED', defaultValue: true);

@@ -512,3 +512,30 @@ screenshot المالك (2026-09-03): «BOTTOM OVERFLOWED BY 81 PIXELS» في ح
 `showTechnicianRatingDialog` كانت بتعمل `controller.dispose()` بعد `await showDialog` مباشرة،
 والحوار لسه مرسوم طول أنيميشن الخروج → شاشة حمرا بعد ما التقييم يتبعت. `_DisposeOnRouteExit`
 بيربط التخلص بـ`State.dispose()`. اختبار الانحدار: `test/rating_dialog_dispose_test.dart`.
+
+## مسح كل شاشات الفني — `test_live/all_screens_smoke_live_test.dart`
+
+نفس فلسفة `apps/customer-app` بالحرف: **٢٨ شاشة × ٣ مقاسات = ٨٤ حالة** ضد API حقيقي، وكل
+حالة بتفشل على استثناء، أو شاشة عالقة على مؤشر تحميل بحجم كامل، أو `RenderFlex overflowed`.
+
+```
+node scripts/seed-technician-screens.js /tmp/tech-seed.json
+cd apps/technician-app && flutter test test_live/all_screens_smoke_live_test.dart \
+  --dart-define=API_BASE_URL=http://localhost:3000/api/v1 \
+  --dart-define=REALTIME_ENABLED=false \
+  --dart-define=TECH_SEED_PATH=/tmp/tech-seed.json
+```
+
+البذرة سكريبت node مستقل عمدًا: إنشاء فني معتمد محتاج صفوف في `technician_profiles`
+و`technician_services` و`technician_zones` وكتالوج كامل — وده كله موجود ومختبَر في
+`scripts/lib/live-harness.js`، فتكراره بـDart كان هيبقى نسخة تانية من نفس المنطق تتعتّق لوحدها.
+
+### اللي الجولة الأولى لقطته (٦ حالات فاشلة من ٨٤)
+
+**بَقّة بيكسل حقيقية في «شريط تفعيل الموقع»** — الشريط ده بيظهر **لأول فني بيفتح التطبيق**،
+قبل ما موقعه يتسجّل، فهو أول منظر يشوفه. على شاشة ٣٢٠ بكسل، الصف الواحد كان بيدي الزرار
+عرضه الطبيعي ويسيب للنص شريط ضيّق جدًا، فالجملة تتلف لعشرات السطور والشريط يطلع **أطول من
+الشاشة كلها** (تجاوز ١٠١ بكسل). الحل: `LayoutBuilder` بيكدّس النص فوق الزرار تحت ٣٨٠ بكسل.
+
+باقي الحالات كانت مؤقتات `socket_io_client` لإعادة الاتصال — اتقفلت في الاختبارات بـ
+`REALTIME_ENABLED=false` (مفتاح حقيقي، افتراضيه `true`)، مش بَقّة منتج.

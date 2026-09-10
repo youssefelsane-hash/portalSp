@@ -36,7 +36,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       final items = await _repository.list();
       if (mounted) setState(() => _notifications = items);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -46,7 +49,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       try {
         await _repository.markRead(notification.id);
         await _load();
-      } on ApiException catch (err) {
+      } catch (errRaw) {
+        // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+        // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+        final err = ApiException.from(errRaw);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       }
     }
@@ -57,7 +63,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       await _repository.markAllRead();
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }

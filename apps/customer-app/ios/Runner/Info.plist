@@ -4,8 +4,18 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- التطبيق عربي بالكامل وRTL (`locale: Locale('ar','EG')` في `lib/main.dart`). من غير
+	     الإعلان ده، iOS بيعتبره تطبيق إنجليزي: حوارات أذونات النظام (الموقع، الكاميرا،
+	     الإشعارات، Face ID) بتظهر بالإنجليزي جنب واجهة عربية، وصفحة المتجر بتتصنّف إنجليزي.
+	     الأندرويد مالوش نظير للمشكلة دي (النصوص بتيجي من الـAPK نفسه)، فالفجوة عاشت غير
+	     ملحوظة لأن الـiOS ما اتفتحش قبل كده. -->
 	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<string>ar</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>ar</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>أسطى</string>
 	<key>CFBundleExecutable</key>

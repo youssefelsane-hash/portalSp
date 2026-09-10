@@ -137,7 +137,10 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         requestedTechnicianId: preview.provider.id,
         matchPreviewId: preview.matchPreviewId,
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // رسالة صريحة — ممنوع نكمّل في صمت على مرشّح مش موجود (بند 10).
       if (mounted) {
         ScaffoldMessenger.of(

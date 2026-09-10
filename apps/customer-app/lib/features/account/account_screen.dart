@@ -105,7 +105,10 @@ class _AccountScreenState extends State<AccountScreen> {
 
     try {
       await context.read<AuthRepository>().deleteAccount();
-    } on ApiException catch (e) {
+    } catch (eRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final e = ApiException.from(eRaw);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }

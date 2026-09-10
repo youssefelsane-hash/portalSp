@@ -27,6 +27,7 @@ class TechnicianTrackingClient {
     void Function(String message)? onError,
     void Function(String previousStatus, String newStatus)? onOrderStatusChanged,
   }) {
+    if (!kRealtimeEnabled) return;
     final socket = socket_io.io(
       '$_socketBaseUrl/tracking',
       socket_io.OptionBuilder()

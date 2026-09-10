@@ -65,7 +65,10 @@ class _FileComplaintScreenState extends State<FileComplaintScreen> {
         description: _descriptionController.text.trim(),
       );
       if (mounted) Navigator.of(context).pop(complaint);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -92,6 +95,9 @@ class _FileComplaintScreenState extends State<FileComplaintScreen> {
             children: [
               if (widget.orderId == null && _orders != null && _orders!.isNotEmpty)
                 DropdownButtonFormField<String?>(
+                  // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                  // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                  isExpanded: true,
                   initialValue: _selectedOrderId,
                   decoration: const InputDecoration(labelText: 'الطلب (اختياري)'),
                   items: [
@@ -104,6 +110,9 @@ class _FileComplaintScreenState extends State<FileComplaintScreen> {
                 ),
               const SizedBox(height: 16),
               DropdownButtonFormField<ComplaintCategory>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _category,
                 decoration: const InputDecoration(labelText: 'نوع المشكلة'),
                 items: ComplaintCategory.values

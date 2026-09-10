@@ -76,7 +76,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
           _error = null;
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -100,7 +103,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
     try {
       await _repository.setActive(template.id, !template.isActive);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -116,7 +122,10 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
     try {
       await _repository.remove(template.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -304,7 +313,10 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
         FocusScope.of(context).unfocus();
         Navigator.of(context).pop(true);
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -333,6 +345,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _addressId,
                 decoration: const InputDecoration(
                   labelText: 'العنوان',
@@ -353,6 +368,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 key: ValueKey(_addressId),
                 initialValue: _serviceId,
                 decoration: InputDecoration(
@@ -377,6 +395,9 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _frequency,
                 decoration: const InputDecoration(
                   labelText: 'التكرار',

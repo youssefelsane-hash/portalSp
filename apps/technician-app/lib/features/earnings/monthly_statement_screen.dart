@@ -133,6 +133,9 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
 
   Widget _monthPicker() {
     return DropdownButtonFormField<String>(
+      // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+      // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+      isExpanded: true,
       initialValue: _selectedMonth,
       decoration: const InputDecoration(
         labelText: 'الشهر',

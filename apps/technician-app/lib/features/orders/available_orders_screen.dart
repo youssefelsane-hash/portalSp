@@ -233,19 +233,28 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
     try {
       orders = await _repository.fetchAvailable();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // `displayMessage` بيضيف `request_id` لأخطاء الـ500 — من غيره الرسالة عامة ومفيش أي
       // طريقة تربطها بسطر في لوج الباك-إند (بلاغ مالك: «التيرمنال مش ظاهر فيها الـerror»).
       firstError ??= err.displayMessage;
     }
     try {
       upcoming = await _repository.fetchUpcomingConfirmed();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       firstError ??= err.displayMessage;
     }
     try {
       overdue = await _repository.fetchOverdue();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       firstError ??= err.displayMessage;
     }
 
@@ -302,7 +311,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         await _refreshActiveOrders();
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -321,7 +333,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -346,7 +361,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.acceptCrewOpportunity(invite.id);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -364,7 +382,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.declineCrewOpportunity(invite.id);
       await _loadCrewOpportunities();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -389,7 +410,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         await _refreshActiveOrders();
       }
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -424,7 +448,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.reject(order.orderId);
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -791,42 +818,68 @@ class _LocationCaptureBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final message = Text(
+      'موقعك لسه مسجّلش — الطلبات مش هتوصلك من غيره',
+      style: TextStyle(
+        color: scheme.onErrorContainer,
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+      ),
+    );
+    final action = isCapturing
+        ? SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: scheme.onErrorContainer,
+            ),
+          )
+        : TextButton(
+            onPressed: onRetry,
+            child: Text(
+              'فعّل الموقع الآن',
+              style: TextStyle(color: scheme.onErrorContainer),
+            ),
+          );
+
+    // **بَقّة بيكسل حقيقية (مسح الشاشات، ٣٢٠ بكسل)**: الصف الواحد كان بيدي الزرار عرضه
+    // الطبيعي ويسيب للنص شريط ضيّق، فالجملة كانت بتتلف لعشرات السطور والشريط يطلع أطول من
+    // الشاشة كلها (تجاوز ١٠١ بكسل). والشريط ده بالذات بيظهر **لأول فني بيفتح التطبيق** —
+    // قبل ما موقعه يتسجّل — فده كان أول منظر يشوفه. على العرض الضيّق بنكدّس بدل ما نزاحم.
     return Material(
       color: scheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            Icon(Icons.location_off_outlined, color: scheme.onErrorContainer),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'موقعك لسه مسجّلش — الطلبات مش هتوصلك من غيره',
-                style: TextStyle(
-                  color: scheme.onErrorContainer,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            isCapturing
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: scheme.onErrorContainer,
-                    ),
-                  )
-                : TextButton(
-                    onPressed: onRetry,
-                    child: Text(
-                      'فعّل الموقع الآن',
-                      style: TextStyle(color: scheme.onErrorContainer),
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final icon = Icon(Icons.location_off_outlined, color: scheme.onErrorContainer);
+            if (constraints.maxWidth < 380) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      icon,
+                      const SizedBox(width: 10),
+                      Expanded(child: message),
+                    ],
                   ),
-          ],
+                  Align(alignment: AlignmentDirectional.centerStart, child: action),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                icon,
+                const SizedBox(width: 10),
+                Expanded(child: message),
+                const SizedBox(width: 8),
+                action,
+              ],
+            );
+          },
         ),
       ),
     );

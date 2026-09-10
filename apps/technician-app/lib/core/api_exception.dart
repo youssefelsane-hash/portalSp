@@ -18,6 +18,23 @@ class ApiException implements Exception {
     this.requestId,
   });
 
+  /// أي استثناء بيتحوّل لـ`ApiException` مفهومة — نقطة واحدة بدل ما كل شاشة تخمّن.
+  ///
+  /// **بَقّة حقيقية (بلاغ مالك 2026-09-10: «طلباتي ما بتفتحش، بتفضل بتحمّل»)**: الشاشات كانت
+  /// بتمسك `on ApiException catch` بس. الرد رجع سليم من السيرفر، لكن شكل الـenvelope اتغيّر
+  /// (`ResponseInterceptor` بيرفع `items` لـ`data` ويحط `meta` جنبها)، فالكاست في الـrepository
+  /// رمى `TypeError` — مش `ApiException` — فمحدش مسكه، والـ`setState` اللي بيوقّف التحميل
+  /// مانفّذش أبدًا. النتيجة: عجلة تحميل للأبد بلا أي رسالة. الفاكتوري ده بيخلّي أي استثناء
+  /// (كاست، تحليل JSON، بَقّة برمجية) ينتهي كرسالة للمستخدم بدل شاشة معلّقة.
+  factory ApiException.from(Object error) {
+    if (error is ApiException) return error;
+    return ApiException(
+      code: 'CLIENT_UNEXPECTED',
+      message: 'حصل خطأ غير متوقع في التطبيق — حاول تاني',
+      statusCode: 0,
+    );
+  }
+
   /// نص العرض: الرسالة، ومعاها المعرّف **لو** العطل من عندنا (5xx) — أخطاء التحقق العادية
   /// (4xx) رسالتها مفهومة ومفيش داعي نلوّثها بكود.
   String get displayMessage =>

@@ -101,6 +101,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               const SizedBox(height: 8),
               if (_addresses != null && _addresses!.isNotEmpty)
                 DropdownButtonFormField<String>(
+                  // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                  // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                  isExpanded: true,
                   initialValue: _selectedAddress?.id,
                   items: _addresses!
                       .map(

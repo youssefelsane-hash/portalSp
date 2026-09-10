@@ -272,7 +272,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           <WarrantyRevisitSection authedFetch={authedFetch} order={order} />
         )}
 
-      <ChatSection authedFetch={authedFetch} orderId={order.id} accessToken={accessToken} />
+      <ChatSection
+        authedFetch={authedFetch}
+        orderId={order.id}
+        accessToken={accessToken}
+        hasTechnician={Boolean(order.technician_id)}
+      />
     </div>
   );
 }
@@ -561,10 +566,13 @@ function ChatSection({
   authedFetch,
   orderId,
   accessToken,
+  hasTechnician,
 }: {
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
   orderId: string;
   accessToken: string | null;
+  /** الشات بيتفتح مع الفني — قبل ما يتعيّن واحد مفيش محادثة أصلاً. */
+  hasTechnician: boolean;
 }) {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageDto[]>([]);
@@ -574,14 +582,16 @@ function ChatSection({
   const clientRef = useRef<ChatSocketClient | null>(null);
 
   useEffect(() => {
-    // بَقّة حقيقية اتلقطت باختبار حي: مفيش thread للطلب لسه (قبل تعيين فني، أو طلب اتلغى قبل ما
-    // يتعيّنله فني خالص) بيرجع 404 متوقّع من الباك-إند — ده مش خطأ يستاهل console noise، ببساطة
-    // مفيش شات نعرضه (الشرط `if (!threadId) return null` تحت بيتعامل معاه بصمت).
+    // مفيش thread قبل ما يتعيّن فني — والباك-إند بيرد 404 متوقّع. الشرط ده بيمنع النداء
+    // من أصله بدل ما نعمل طلب شبكة نعرف مقدمًا إنه هيفشل ويسيب `console.error` في كونسول
+    // كل عميل بيفتح طلب لسه بيدوّر على فني (اتلقط بمسح صفحات الويب 2026-09-10).
+    // الـ`catch` سايب على حاله لأن الـthread ممكن يكون اتمسح مع إلغاء الطلب بعد التعيين.
+    if (!hasTechnician) return;
     getThreadForOrder(authedFetch, orderId)
       .then((t) => setThreadId(t.id))
       .catch(() => setThreadId(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
+  }, [orderId, hasTechnician]);
 
   // شات حي عبر WebSocket (نفس القناة اللي الموبايل بيستخدمها بالضبط، chat.gateway.ts) — تاريخ
   // الرسايل بـREST مرة واحدة، الرسايل الجديدة بتوصل فورًا عبر السوكيت بدل بولينج (كان فجوة موثّقة).

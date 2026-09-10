@@ -131,7 +131,10 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
           const SnackBar(content: Text('تم فتح المطالبة ومراجعتها بدأت')),
         );
       }
-    } on ApiException catch (error) {
+    } catch (errorRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final error = ApiException.from(errorRaw);
       if (mounted) {
         ScaffoldMessenger.of(
           context,

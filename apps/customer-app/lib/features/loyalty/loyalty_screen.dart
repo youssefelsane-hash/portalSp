@@ -47,7 +47,10 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
           _transactions = results[1] as List<LoyaltyTransaction>;
         });
       }
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }

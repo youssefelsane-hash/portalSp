@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiEnvelope, TokenPair, UserResponseDto } from './api-types';
-import { apiFetch, ApiError } from './api-client';
+import { apiFetch, ApiError, apiFetchPage } from './api-client';
 
 interface AuthContextValue {
   accessToken: string | null;
@@ -14,6 +14,8 @@ interface AuthContextValue {
   register: (phoneNumber: string, otpCode: string, fullName: string, promoLinkCode?: string) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
+  /** لـendpoints مُقسّمة صفحات (`{items, meta}`) — راجع `apiFetchPage` للسبب. */
+  authedFetchPage: <T>(path: string, options?: RequestInit) => Promise<{ items: T[]; meta: Record<string, unknown> }>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -135,6 +137,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [doRefresh],
   );
 
+  const authedFetchPage = useCallback(
+    async <T,>(path: string, options: RequestInit = {}) => {
+      try {
+        return await apiFetchPage<T>(path, accessTokenRef.current, options);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          const newToken = await doRefresh();
+          return apiFetchPage<T>(path, newToken, options);
+        }
+        throw err;
+      }
+    },
+    [doRefresh],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       accessToken,
@@ -146,8 +163,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       register,
       logout,
       authedFetch,
+      authedFetchPage,
     }),
-    [accessToken, user, isLoading, requestOtp, verifyOtp, register, logout, authedFetch],
+    [accessToken, user, isLoading, requestOtp, verifyOtp, register, logout, authedFetch, authedFetchPage],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

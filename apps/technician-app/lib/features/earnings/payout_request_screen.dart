@@ -36,7 +36,10 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
         destinationMasked: _destinationController.text.trim(),
       );
       if (mounted) Navigator.of(context).pop(payout);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -87,6 +90,9 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                isExpanded: true,
                 initialValue: _method,
                 decoration: const InputDecoration(labelText: 'طريقة الصرف'),
                 items: payoutMethodLabelsAr.entries

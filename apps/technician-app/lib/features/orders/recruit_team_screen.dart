@@ -41,7 +41,10 @@ class _RecruitTeamScreenState extends State<RecruitTeamScreen> {
     try {
       final candidates = await _repository.fetchRecruitCandidates(widget.orderId, widget.role);
       if (mounted) setState(() => _candidates = candidates);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
   }
@@ -63,7 +66,10 @@ class _RecruitTeamScreenState extends State<RecruitTeamScreen> {
       // بعد التجنيد/الفرصة، المرشّح ده بقى عضو فريق أو عنده عرض حي بالفعل — بنعيد التحميل عشان
       // يختفي من القايمة (استعلام listRecruitCandidates بيستبعد الأعضاء المضافين تلقائيًا).
       await _load();
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _recruiting = false);

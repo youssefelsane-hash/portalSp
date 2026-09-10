@@ -109,7 +109,10 @@ class _LoginScreenState extends State<LoginScreen> {
           content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي'),
         ),
       );
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -137,7 +140,10 @@ class _LoginScreenState extends State<LoginScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _otpFocusNode.requestFocus();
       });
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       setState(() => _error = err.message);
     } finally {
       setState(() => _isSubmitting = false);
@@ -168,7 +174,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       // في الوضع المشروط لازم نرجّع للرحلة اللي فتحتنا. في الوضع الجذري `_AuthGate` بيتكفّل.
       if (widget.isModal && mounted) Navigator.of(context).pop(true);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
       final suggestRegister = !_isRegisterMode && err.statusCode == 404;
       // الخانة بتتفضّى وتاخد التركيز تاني — الكود اللي اترفض مش هينفع تاني مهما اتبعت، وسيبانه
@@ -463,16 +472,24 @@ class _BrandMarkState extends State<_BrandMark> {
     final logoUrl = _logoUrl;
     return Column(
       children: [
-        if (logoUrl != null)
-          Image.network(
-            logoUrl,
-            height: 92,
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-            errorBuilder: (_, _, _) => const _GradientBrandCircle(),
-          )
-        else
-          const _GradientBrandCircle(),
+        // ارتفاع ثابت + تلاشي: قبل كده اللوجو كان بيحل محل الدايرة البديلة **بقفزة**،
+        // فالمستخدم يشوف شكلين مختلفين في نص ثانية ويحس إن فيه حاجة غلط (بلاغ 2026-09-10).
+        SizedBox(
+          height: 92,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: logoUrl != null
+                ? Image.network(
+                    logoUrl,
+                    key: ValueKey(logoUrl),
+                    height: 92,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => const _GradientBrandCircle(),
+                  )
+                : const _GradientBrandCircle(),
+          ),
+        ),
         const SizedBox(height: 14),
         Text(
           'أسطى',

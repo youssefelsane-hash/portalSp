@@ -108,7 +108,10 @@ class _TechnicianMarketplaceScreenState
         bookingMode: widget.bookingMode,
       );
       if (mounted) setState(() => _technicians = items);
-    } on ApiException catch (err) {
+    } catch (errRaw) {
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
+      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -220,6 +223,9 @@ class _TechnicianMarketplaceScreenState
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   DropdownButton<TechnicianSortOption>(
+                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
+                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
+                    isExpanded: true,
                     value: _sort,
                     underline: const SizedBox.shrink(),
                     items: TechnicianSortOption.values

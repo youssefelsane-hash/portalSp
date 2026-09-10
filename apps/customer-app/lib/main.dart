@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/api_config.dart';
 import 'core/auth_repository.dart';
 import 'core/deep_link_router.dart';
+import 'features/catalog/branding_repository.dart';
 import 'design/app_theme.dart';
+import 'design/branded_loading_screen.dart';
 import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/shell/customer_shell.dart';
@@ -11,6 +15,10 @@ import 'features/notifications/floating_notification_alert.dart';
 
 void main() {
   assertProductionApiConfig();
+  // تسخين كاش البراند من أول لحظة: اللوجو بيتجاب مرة واحدة بالتوازي مع إقلاع الواجهة، فأي
+  // شاشة بتعرضه (الدخول، شاشة التحميل، الرئيسية) بتلاقيه جاهز بدل ما تعرض بديل وتبدّله
+  // قدام عين المستخدم. فشله متجاهَل عمدًا — البديل المرسوم بالكود شغّال بلا شبكة أصلاً.
+  unawaited(BrandingRepository().fetchPrimaryLogo().catchError((_) => null));
   runApp(const BaytakApp());
 }
 
@@ -61,7 +69,9 @@ class _AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthRepository>();
     if (auth.isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      // مش `Scaffold` عريان: الإطار ده بيقع بين شاشة الدخول المُبرندة والقشرة المُبرندة،
+      // وأي شاشة بلا هوية هنا بتتقري كـ«وميض بيكسلات غلط» (بلاغ مالك 2026-09-10).
+      return const BrandedLoadingScreen(message: 'بنجهّز حسابك…');
     }
     // docs/08 §17.22 — لازم يتفحص *قبل* isAuthenticated: جلسة محفوظة مش كافية لوحدها لو
     // البصمة مفعّلة على الجهاز ده.
