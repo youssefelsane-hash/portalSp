@@ -16,6 +16,7 @@ class ChatClient {
     void Function()? onJoined,
     void Function(String message)? onError,
   }) {
+    if (!kRealtimeEnabled) return;
     final socket = socket_io.io(
       '$_socketBaseUrl/chat',
       socket_io.OptionBuilder()

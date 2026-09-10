@@ -165,6 +165,13 @@ Future<void> _pumpScreen(WidgetTester tester, Widget screen, Size size) async {
 Future<void> _disposeTree(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+  // شاشات ليها إعادة محاولة مؤجّلة مشروعة (مثال: التقاط موقع الفني بعد ٣ و٨ ثواني) —
+  // بنصرّف الزمن الوهمي عشان مؤقتاتها تنطلق وتلاقي `mounted == false` وتخرج. من غير كده
+  // الـbinding بيرمي `!timersPending` وهو عطل بنية اختبار مش عطل منتج.
+  for (var i = 0; i < 6; i++) {
+    await tester.pump(const Duration(seconds: 3));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }
   await tester.pump();
   tester.takeException();
 }
