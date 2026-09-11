@@ -24,17 +24,16 @@
 | `scripts/marketing-attribution-audit.js` | رابط Play بـ`com.baytak.customer` | `com.ostahome.customer` | رابط متجر حقيقي؛ القديم بيروح لصفحة مش موجودة |
 | `apps/api/.env.example`، `configuration.ts`، `websocket-cors.util.spec.ts`، `http-bootstrap.spec.ts` | أمثلة `baytak.com` / `admin.baytak.app` | `ostahome.com` / `admin.ostahome.com` | §13 — أمثلة الإطلاق لازم تكون على النطاق الحقيقي |
 
-## الفئة A — **محجوزة، محتاجة قرار من المالك** (اتوثّقت ومااتغيّرتش)
+## الفئة A — iOS وmacOS (اتغيّرت بعد اعتماد Firebase)
 
-| المكان | القيمة الحالية | المطلوب |
+| المكان | القيمة القديمة | القيمة المعتمدة |
 |---|---|---|
-| `apps/customer-app/ios/Runner.xcodeproj/project.pbxproj` | `com.baytak.customerApp` (+ `.RunnerTests`) | معرّف حزمة iOS رسمي لـOsta |
-| `apps/technician-app/ios/Runner.xcodeproj/project.pbxproj` | `com.baytak.technicianApp` (+ `.RunnerTests`) | نفسه |
+| تطبيق العميل على iOS وmacOS | `com.baytak.customerApp` (+ `.RunnerTests`) | `com.ostahome.customer` (+ `.RunnerTests`) |
+| تطبيق الفني على iOS وmacOS | `com.baytak.technicianApp` (+ `.RunnerTests`) | `com.ostahome.technician` (+ `.RunnerTests`) |
 
-**ليه مااتغيّرتش**: المواصفة إدّت معرّفات **أندرويد** بس، وiOS مؤجّل صراحةً بطلب المالك.
-اختراع `com.ostahome.customer` لـiOS من عندي معناه معرّف مالوش أي وجود في App Store Connect،
-وده أسوأ من القديم لأنه بيبان صح وهو غلط. **المطلوب من المالك**: يحدّد معرّفي iOS (الأرجح نفس
-معرّفَي أندرويد)، وساعتها يتغيّروا من Xcode مع تسجيل التطبيقين في Firebase وApple Developer.
+**دليل الاعتماد**: مشروع Firebase الإنتاجي `osta-production` يحتوي تطبيقات iOS بالمعرّفين نفسهما.
+ملفا `GoogleService-Info.plist` المحليان يُضافان إلى Target كل تطبيق ولا يدخلان Git لأنهما إعدادات
+بيئة إنتاج. يبقى على Apple Developer/App Store Connect فقط تسجيل المعرفين وربطهما بفريق التوقيع.
 
 ---
 
@@ -44,7 +43,7 @@
 |---|---|---|
 | `packages/shared-types` وكل مستهلكيها | اسم الحزمة `@baytak/shared-types` | حزمة **داخلية للمونوريبو**، مش منشورة على أي registry ومحدش براّنا بيشوفها. تغييرها = لمس ~١٠٠ سطر `import` + `package.json` + مسارات `tsconfig` مقابل صفر مكسب |
 | `apps/customer-app/lib/core/auth_repository.dart`, `main.dart` (ونظيرهم في تطبيق الفني) | `BaytakUser`, `BaytakApp`, `BaytakTechnicianApp` | أسماء أصناف Dart داخلية — المستخدم مابيشوفش أي واحد منهم (الاسم المعروض بييجي من `applicationLabel`/`CFBundleDisplayName`) |
-| `apps/*/linux/CMakeLists.txt`, `apps/*/macos/...`, `apps/*/windows/runner/Runner.rc` | `com.baytak.*` | سقالة Flutter لسطح المكتب — **مش أهداف إطلاق أصلاً**، ومابتتبنيش ولا بتترفع لأي متجر |
+| `apps/*/linux/CMakeLists.txt`, `apps/*/windows/runner/Runner.rc` | `com.baytak.*` | سقالة Flutter لسطح المكتب — **مش أهداف إطلاق أصلاً**، ومابتتبنيش ولا بتترفع لأي متجر |
 | `docs/**`, `README.md`, `CLAUDE.md`, `docs/system-audit/**` | ذكر تاريخي للاسم القديم | التوثيق سجل تاريخي؛ إعادة كتابته بتمسح ليه القرارات اتاخدت. الوثائق **الموجّهة للإطلاق** (`docs/03`) اتحدّثت بالفعل حيث لزم |
 | `apps/api/src/http-bootstrap.spec.ts` | `/srv/baytak/uploads` | مسار **وهمي** جوه اختبار، مالوش أي وجود على أي قرص |
 | `package-lock.json` | اسم حزمة الجذر | داخلي، والتغيير بيعيد توليد الملف كله بلا داعي |
@@ -68,7 +67,7 @@
 ## خلاصة
 
 - **A منفّذة**: ٧ مواضع (معرّفات أندرويد، بريد بوابة الدفع، رابط المتجر، أمثلة النطاق).
-- **A محجوزة**: معرّفَي حزمة iOS — محتاجين قرار المالك، وممنوع اختراعهم.
+- **A منفّذة**: معرّفات حزم iOS وmacOS اعتمدت على تطبيقات Firebase الإنتاجية الموجودة.
 - **B**: اتسابت — أسماء داخلية وتوثيق تاريخي وسقالة منصات مش أهداف إطلاق.
 - **C**: اتسابت بسبب صريح — مفاتيح تخزين لمستخدمين حاليين، حمولة مخزّنة، بنية نشر شغالة،
   وmigration اتعمله commit.
