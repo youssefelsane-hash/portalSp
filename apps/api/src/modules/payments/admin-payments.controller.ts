@@ -26,7 +26,7 @@ import { InstaPayQrService } from './gateways/instapay-qr.service';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
-import { ListRefundsQueryDto } from './dto/list-refunds-query.dto';
+import { asBool, ListRefundsQueryDto } from './dto/list-refunds-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
 import { RejectInstaPayPaymentDto } from './dto/reject-instapay-payment.dto';
@@ -79,8 +79,12 @@ export class AdminPaymentsController {
   @Get('refunds')
   @RequirePermission('refunds.view')
   async listRefunds(@Query() query: ListRefundsQueryDto) {
-    const rows = await this.paymentsService.listRefunds(query.status);
-    return rows.map(toRefundResponseDto);
+    const rows = await this.paymentsService.listRefunds({
+      status: query.status,
+      automatic: asBool(query.automatic),
+      needsReconciliation: asBool(query.needs_reconciliation),
+    });
+    return rows.map((row) => toRefundResponseDto(row.refund, row.orderNumber));
   }
 
   @Post('orders/:id/refund')

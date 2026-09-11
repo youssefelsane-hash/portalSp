@@ -342,6 +342,16 @@ export interface TechnicianOrderResponseDto
   is_crew_share: boolean;
   /** لا توجد حصة تاريخية مسجلة لطلب مقفل؛ لا يعرض التطبيق رقمًا مُعاد حسابه. */
   earning_snapshot_missing: boolean;
+  /**
+   * **فيه استرداد اتعمل للعميل على الطلب ده** — طلب مالك صريح 2026-09-11: «الفني يشوف تلميح
+   * بسيط **جوّه** الطلب، لازم يفتحه عشان يشوفه، مش بره».
+   *
+   * **واقعة بلا أي رقم، عمدًا.** docs/08 §60.2 بيمنع أرقام فلوس العميل عن الفني
+   * (`refunded_amount_cents` نفسه محذوف من العقد ده فوق)، والتلميح ده مايكسرش القاعدة:
+   * بيقول «حصل استرداد» عشان الفني يفهم ليه مستحقه اتغيّر، من غير ما يعرف العميل دفع كام
+   * ولا رجعله كام. الرقم اللي يخصّه — نصيبه هو — موجود بالفعل في `my_earning_cents`.
+   */
+  has_customer_refund: boolean;
 }
 
 export function toTechnicianOrderResponseDto(
@@ -355,6 +365,7 @@ export function toTechnicianOrderResponseDto(
     earningPending?: boolean;
     isCrewShare?: boolean;
     earningSnapshotMissing?: boolean;
+    hasCustomerRefund?: boolean;
   },
 ): TechnicianOrderResponseDto {
   const {
@@ -388,6 +399,10 @@ export function toTechnicianOrderResponseDto(
     earning_pending: money.earningPending ?? false,
     is_crew_share: money.isCrewShare ?? false,
     earning_snapshot_missing: money.earningSnapshotMissing ?? false,
+    // مصدره `getTechnicianMoneyView` (نفس الاستعلام اللي بيحسب الكاش والمستحق أصلاً)، مش
+    // `base.refunded_amount_cents` — الحقل ده اختياري ومابيتعبّاش في مسار الفني خالص، فكان
+    // بيدّي `false` دايمًا. التدقيق الحي هو اللي مسك ده.
+    has_customer_refund: money.hasCustomerRefund ?? false,
     has_online_payment: money.hasOnlinePayment,
     fully_paid_online: money.fullyPaidOnline,
     // docs/08 §108-B — total_amount_cents بقى مخفي دايمًا لنسخة الفني، بلا استثناء الكاش الكامل

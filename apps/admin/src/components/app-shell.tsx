@@ -50,6 +50,7 @@ import {
   Star,
   Tag,
   ToggleLeft,
+  Undo2,
   UserCog,
   Users,
   Wrench,
@@ -135,6 +136,9 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/warranty-claims', label: 'مطالبات الضمان', icon: ShieldCheck, permission: 'warranty.view' },
       { href: '/installments', label: 'التقسيط', icon: Landmark, permission: 'installments.view' },
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote, permission: 'payouts.view' },
+      // طلب مالك 2026-09-11 — `GET /admin/refunds` كان موجود بلا أي صفحة بتناديه، فاسترداد
+      // النظام التلقائي كان عمليًا غير مرئي إلا لو فتحت الطلب اللي بتشك فيه أصلاً.
+      { href: '/refunds', label: 'الاستردادات', icon: Undo2, permission: 'refunds.view' },
       { href: '/instapay-confirmations', label: 'تأكيدات InstaPay', icon: Landmark, permission: 'payments.confirm_manual' },
       { href: '/promotions', label: 'العروض والتسويق', icon: Tag, permission: 'promotions.view' },
       // ADR-0046 — الحملات التسويقية: إشعارات تلقائية بتفكّر العميل بالخدمات.

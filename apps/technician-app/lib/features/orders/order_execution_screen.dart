@@ -1543,6 +1543,31 @@ class _MoneySummaryCard extends StatelessWidget {
                 ],
               ),
             ],
+            // طلب مالك 2026-09-11: «الفني يشوف تلميح بسيط **جوّه** الطلب، لازم يفتحه عشان
+            // يشوفه، مش بره». التلميح **بلا أي رقم** (docs/08 §60.2 بيمنع أرقام فلوس العميل
+            // عن الفني) — غرضه بس إن الفني يفهم ليه مستحقه فوق اتغيّر بدل ما يفتكرها غلط.
+            if (order.hasCustomerRefund) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.undo_outlined,
+                    size: 16,
+                    color: Colors.blueGrey.shade700,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'اتعمل استرداد للعميل على الطلب ده، فمستحقك اتعدّل. لو محتاج تفاصيل كلّم الإدارة.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blueGrey.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

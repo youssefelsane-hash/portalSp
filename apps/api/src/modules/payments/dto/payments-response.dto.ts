@@ -1,9 +1,9 @@
-import { Wallet } from '../entities/wallet.entity';
+import { PLATFORM_SYSTEM_USER_ID, Wallet } from '../entities/wallet.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { Payment } from '../entities/payment.entity';
 import { Payout } from '../entities/payout.entity';
 import { PayoutOrderItem } from '../entities/payout-order-item.entity';
-import { Refund } from '../entities/refund.entity';
+import { Refund, RefundMethod, RefundStatus } from '../entities/refund.entity';
 import { SavedPaymentMethod } from '../entities/saved-payment-method.entity';
 
 export interface WalletResponseDto {
@@ -232,6 +232,8 @@ export interface RefundResponseDto {
   refund_number: string;
   payment_id: string;
   order_id: string | null;
+  /** رقم الطلب المقروء — من غيره القايمة أرقام استرداد بلا أي سياق يتصرّف عليه. */
+  order_number: string | null;
   amount_cents: number;
   refund_type: string;
   refund_method: string;
@@ -240,14 +242,30 @@ export interface RefundResponseDto {
   requested_at: string;
   completed_at: string | null;
   provider_refund_id: string | null;
+  /**
+   * **الاسترداد ده النظام عمله لوحده** (إلغاء طلب مدفوع مقدّمًا قبل أي شغل) — مش قرار أدمن.
+   *
+   * طلب مالك صريح 2026-09-11: «لما الاسترداد بيتقبل تلقائيًا من النظام — وده المسار الصح —
+   * لازم يبان للأدمن عشان يتابع». من غير العلم ده، صف النظام وصف الأدمن بيبانوا نفس الحاجة
+   * في القايمة، والأدمن مش عارف أنهي واحد محتاج متابعة منه.
+   */
+  is_automatic: boolean;
+  /**
+   * محتاج تدخّل بشري دلوقتي: الاسترداد لسه `processing` يعني فلوس معلّقة في النص — البوابة
+   * اتنادت وردها ما وصلش، والنظام **عمدًا** مابيخمّنش النتيجة (AUD-012). لازم موظف يثبّت
+   * النتيجة من المزود عبر `POST /admin/refunds/:id/reconcile`.
+   */
+  needs_reconciliation: boolean;
+  reconciled_at: string | null;
 }
 
-export function toRefundResponseDto(refund: Refund): RefundResponseDto {
+export function toRefundResponseDto(refund: Refund, orderNumber?: string | null): RefundResponseDto {
   return {
     id: refund.id,
     refund_number: refund.refundNumber,
     payment_id: refund.paymentId,
     order_id: refund.orderId,
+    order_number: orderNumber ?? null,
     amount_cents: refund.amountCents,
     refund_type: refund.refundType,
     refund_method: refund.refundMethod,
@@ -256,6 +274,10 @@ export function toRefundResponseDto(refund: Refund): RefundResponseDto {
     requested_at: refund.requestedAt.toISOString(),
     completed_at: refund.completedAt ? refund.completedAt.toISOString() : null,
     provider_refund_id: refund.providerRefundId,
+    is_automatic: refund.requestedByUserId === PLATFORM_SYSTEM_USER_ID,
+    needs_reconciliation:
+      refund.refundStatus === RefundStatus.PROCESSING && refund.refundMethod === RefundMethod.ORIGINAL_METHOD,
+    reconciled_at: refund.reconciledAt ? refund.reconciledAt.toISOString() : null,
   };
 }
 

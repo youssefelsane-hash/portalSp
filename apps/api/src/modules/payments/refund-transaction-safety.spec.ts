@@ -305,8 +305,13 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     // Script 7 Phase 17 — كانت فجوة موثّقة صراحة: الاسترداد العالق ده كان مفيش أي طريقة للأدمن
     // يشوفه بيها خالص (مفيش GET /admin/refunds). listRefunds() الجديدة لازم ترجّعه صراحة —
     // إثبات إن الرؤية بقت موجودة فعليًا لنفس السيناريو اللي الاختبار ده بيثبته فوق.
-    const stuckRefunds = await service.listRefunds(RefundStatus.PROCESSING);
-    expect(stuckRefunds.some((r) => r.id === refund!.id)).toBe(true);
+    const stuckRefunds = await service.listRefunds({ status: RefundStatus.PROCESSING });
+    expect(stuckRefunds.some((row) => row.refund.id === refund!.id)).toBe(true);
+
+    // طلب مالك 2026-09-11 — الفلوس المعلّقة لازم يكون ليها فلتر بالاسم، مش تتلغبط وسط
+    // الاستردادات المكتملة في قايمة طولها ٢٠٠ صف.
+    const needingWork = await service.listRefunds({ needsReconciliation: true });
+    expect(needingWork.some((row) => row.refund.id === refund!.id)).toBe(true);
   });
 
   it('النتيجة غير المعروفة لا تتحول لرفض: الأدمن يقفل نفس صف الاسترداد بدليل ومرجع مزود مرة واحدة', async () => {
