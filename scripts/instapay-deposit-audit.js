@@ -146,7 +146,78 @@ async function main() {
       }
     }
 
-    console.log('\n═══ ٣ — العربون: افتراضي مقابل الدفع الكامل ═══');
+    // ═══ تسلسل صفحة الويب بالظبط ═══
+    //
+    // `apps/customer-web/src/app/orders/[id]/instapay/page.tsx` مابتعتمدش على كائن متمرَّر من
+    // صفحة الحجز: بتعمل GET الأول، ولو ٤٠٤ بتبدأ التحويل، ولو الإنشاء رجع ٤٠٩ (تبويب تاني
+    // سبقها) بترجع تقرا اللي كسب. الثلاث خطوات دي مالهاش اختبار في أي مكان تاني، وهي بالظبط
+    // اللي بتخلّي `F5` أو تبويبين مفتوحين مايعملوش تحويلين على طلب واحد.
+    console.log('\n═══ ٣ — تسلسل صفحة الويب: قراءة → إنشاء → تعارض → قراءة ═══');
+    {
+      const [order] = await h.q(
+        `INSERT INTO orders (commission_rate_applied, order_number, customer_id, service_id, address_id,
+           service_zone_id, order_status, payment_status, total_amount_cents, commissionable_base_cents,
+           technician_earning_cents, booking_mode, settlement_policy_version)
+         VALUES (20,$1,$2,$3,$4,$5,'pending_payment','unpaid',$6,$6,0,'individual',2)
+         RETURNING id, order_number`,
+        [`IPW-${h.runId}`.slice(0, 24), customer.profileId, catalog.service.id, customer.addressId,
+         catalog.zone.id, PRICE_CENTS],
+      );
+      orderIds.push(order.id);
+
+      // ① أول زيارة للصفحة: مفيش تحويل مفتوح → لازم ٤٠٤ بالظبط، مش ٥٠٠ ولا ٢٠٠ بجسم فاضي.
+      // الصفحة بتفرّق بالكود ده تحديدًا بين «ابدأ تحويل» و«فيه غلط».
+      const beforeStart = await h.api(`/orders/${order.id}/instapay-transfer`, { token: customer.token });
+      check('ويب', 'القراءة قبل أي تحويل بترجّع ٤٠٤', beforeStart.status, 404,
+        beforeStart.status !== 404 ? JSON.stringify(beforeStart.body?.error ?? '').slice(0, 200) : undefined);
+
+      // ② الصفحة بتبدأ التحويل بمفتاح جديد.
+      const created = await h.api(`/orders/${order.id}/pay-with-instapay`, {
+        method: 'POST', token: customer.token,
+        headers: { 'Idempotency-Key': `ipw-a-${h.runId}` },
+      });
+      check('ويب', 'الإنشاء من الصفحة عدّى', created.status, 201,
+        created.status !== 201 ? JSON.stringify(created.body?.error ?? '').slice(0, 200) : undefined);
+
+      // ③ تبويب تاني عمل نفس الحاجة بمفتاح **مختلف** — لازم يترفض، وإلا بقى فيه تحويلين على
+      //    طلب واحد والعميل ممكن يحوّل مرتين.
+      const secondTab = await h.api(`/orders/${order.id}/pay-with-instapay`, {
+        method: 'POST', token: customer.token,
+        headers: { 'Idempotency-Key': `ipw-b-${h.runId}` },
+      });
+      check('ويب', 'تبويب تاني مابيعملش تحويل تاني', secondTab.status, 409,
+        secondTab.status !== 409 ? JSON.stringify(secondTab.body?.error ?? '').slice(0, 200) : undefined);
+
+      const [count] = await h.q(
+        `SELECT COUNT(*)::int AS n FROM payments WHERE order_id = $1 AND payment_method = 'instapay'`,
+        [order.id]);
+      check('ويب', 'دفعة InstaPay واحدة بس على الطلب', count.n, 1);
+
+      // ④ التبويب الخاسر بيرجع يقرا — ولازم يلاقي نفس أرقام اللي كسب بالحرف.
+      const afterConflict = await h.api(`/orders/${order.id}/instapay-transfer`, { token: customer.token });
+      check('ويب', 'القراءة بعد التعارض بترد', afterConflict.status, 200,
+        afterConflict.status !== 200 ? JSON.stringify(afterConflict.body?.error ?? '').slice(0, 200) : undefined);
+      if (afterConflict.status === 200 && created.status === 201) {
+        check('ويب', 'نفس الحساب في التبويبين',
+          afterConflict.body.data.recipient_address, created.body.data.recipient_address);
+        check('ويب', 'نفس رقم الطلب في التبويبين',
+          afterConflict.body.data.reference_code, created.body.data.reference_code);
+        check('ويب', 'نفس المبلغ في التبويبين',
+          afterConflict.body.data.amount_cents, created.body.data.amount_cents);
+      }
+
+      // ⑤ «حوّلت الفلوس» — بيتسجّل في الباك-إند، ومابيأكّدش الدفع من نفسه.
+      const claimed = await h.api(`/orders/${order.id}/confirm-instapay-transfer`, {
+        method: 'POST', token: customer.token,
+      });
+      check('ويب', 'تسجيل «حوّلت» عدّى', claimed.status, 201,
+        claimed.status !== 201 ? JSON.stringify(claimed.body?.error ?? '').slice(0, 200) : undefined);
+      const [afterClaim] = await h.q(`SELECT payment_status FROM orders WHERE id = $1`, [order.id]);
+      check('ويب', 'ادّعاء العميل مابيخلّيش الطلب مدفوع', afterClaim.payment_status, 'unpaid',
+        'التأكيد النهائي من Finance بس');
+    }
+
+    console.log('\n═══ ٤ — العربون: افتراضي مقابل الدفع الكامل ═══');
     {
       await h.q(
         `UPDATE services SET deposit_required = true, deposit_percentage = $2, cash_allowed = true WHERE id = $1`,

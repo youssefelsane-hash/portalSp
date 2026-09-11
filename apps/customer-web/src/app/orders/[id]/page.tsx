@@ -32,6 +32,13 @@ import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
 import { WarrantyRevisitSection } from './warranty-revisit-section';
 
+/**
+ * الحالات اللي لسه فيها مبلغ ممكن يتدفع — **نسخة طبق الأصل من `_payableOrderStatuses`** في
+ * `apps/customer-app/lib/features/orders/order_detail_screen.dart`. أي تغيير هنا لازم يتغيّر
+ * هناك، وإلا الويب والتطبيق يعرضوا مدخلين دفع مختلفين على نفس الطلب.
+ */
+const PAYABLE_ORDER_STATUSES = new Set(['work_completed', 'awaiting_payment', 'pending_payment']);
+
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
 const TIMELINE_STATUSES = [
   'searching_technician',
@@ -245,6 +252,29 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {!['awaiting_admin_quote', 'awaiting_initial_quote_approval'].includes(order.order_status) && (
         <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
       )}
+
+      {/* **مدخل InstaPay على الطلب نفسه** — نظير زرار «ادفع عبر InstaPay» في تطبيق العميل.
+          من غيره، العميل اللي قفل التبويب في نص التحويل، أو حجز بالكاش وغيّر رأيه، مكانش قدامه
+          أي طريق من الويب لوسيلة الدفع الأساسية للمنصة.
+
+          الشرط مطابق لشرط التطبيق بالحرف (`_payableOrderStatuses` + المستحق دلوقتي): الطلب
+          المدفوع بالكامل مابيعرضش الزرار، والمدفوع جزئيًا بيعرضه على الباقي. */}
+      {PAYABLE_ORDER_STATUSES.has(order.order_status) &&
+        (order.payment_status !== 'paid' || (order.amount_due_now_cents ?? 0) > 0) && (
+          <section className="mt-4 rounded-xl border border-border bg-surface p-4">
+            {order.payment_status === 'paid' && (order.amount_due_now_cents ?? 0) > 0 && (
+              <p className="mb-2 font-semibold">
+                باقي للسداد: {formatEgp(order.amount_due_now_cents ?? 0)}
+              </p>
+            )}
+            <Link
+              href={`/orders/${order.id}/instapay`}
+              className="inline-block rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
+            >
+              ادفع عبر InstaPay
+            </Link>
+          </section>
+        )}
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">

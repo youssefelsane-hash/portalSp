@@ -74,6 +74,24 @@ export class EarningsPolicyService {
     return calculateEarningsV2(finalOrderTotalCents, platformCommissionCents, participants);
   }
 
+  /**
+   * بيحلّ كل سياسة قابلة للتعديل من الأدمن لمدخلات ثابتة تتحسب عليها الفلوس.
+   *
+   * ## أسبقية استثناء الشخص: ليه `IS NOT NULL` مش `= o.service_id`
+   *
+   * **تصليح بَقّة مالية حقيقية (تدقيق 2026-09-11).** الاستثناء العام على شخص بيتسجّل بـ
+   * `service_id = NULL`، فـ`(NULL = o.service_id)` بتطلع **NULL** مش `false`. وPostgres في
+   * `ORDER BY … DESC` بيحط الـNULLs **الأول** افتراضيًا — يعني الصف العام كان بيسبق الصف
+   * المخصوص للخدمة ويغلبه.
+   *
+   * النتيجة المتقاسة حيًا: أدمن بيحط لفني استثناء **على خدمة بعينها** وهو عنده استثناء عام،
+   * والنظام بيدفع بالعام في صمت (٥٪ بدل ٢٥٪ في القياس). مفيش أي رسالة خطأ — الفلوس بتتحسب
+   * وتتوزّع وتتقفل على الرقم الغلط، وده أسوأ شكل للبَقّة المالية.
+   *
+   * `tea.service_id IS NOT NULL` **مستحيل تطلع NULL**، فالترتيب بقى قاطع. وهي مكافئة لـ«مطابق
+   * للخدمة دي» بالظبط، لأن `WHERE` أصلاً بيحصر الصفوف على (خدمة الطلب أو NULL) — مفيش خدمة
+   * تالتة تقدر تعدّي.
+   */
   async resolveParticipants(
     orderId: string,
     manager: EntityManager = this.dataSource.manager,
@@ -130,7 +148,9 @@ export class EarningsPolicyService {
               AND tea.disabled_at IS NULL
               AND tea.effective_from <= now()
               AND (tea.effective_until IS NULL OR tea.effective_until > now())
-            ORDER BY (tea.service_id = o.service_id) DESC, tea.effective_from DESC, tea.id DESC
+            -- ترتيب الأسبقية: المخصوص للخدمة قبل العام. شوف تعليق الدالة فوق — الصيغة دي
+            -- تصليح بَقّة مالية، مش أسلوب كتابة.
+            ORDER BY (tea.service_id IS NOT NULL) DESC, tea.effective_from DESC, tea.id DESC
             LIMIT 1
          ) ia ON true
          LEFT JOIN order_earning_adjustments oa
