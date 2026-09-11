@@ -54,10 +54,45 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   // الإلغاء هنا إداري موثق فقط لحالة تنفيذ متوقفة؛ ليس زر إلغاء عاديًا للعميل أو للفني، ولا
   // يطلق استردادًا تلقائيًا.
   'in_progress',
+  // ADR-0083 §4 — التلاتة دول كانوا مقفولين، فالأدمن كان بيفقد الإلغاء بالظبط في النافذة اللي
+  // بيحتاجه فيها (الفني قبل وفي الطريق ووصل). كلهم قبل أي حركة مالية، ومطابقين حرفيًا
+  // لـORDER_TRANSITIONS في apps/api/src/modules/orders/order-state-machine.ts.
+  'accepted',
+  'technician_on_way',
+  'technician_arrived',
 ];
 
 export function isOrderCancellable(status: OrderStatus): boolean {
   return CANCELLABLE_STATUSES.includes(status);
+}
+
+/**
+ * ليه الإلغاء مقفول في الحالة دي — **بيتعرض بدل ما الزرار يختفي** (ADR-0083 §5).
+ *
+ * طلب المالك الحرفي: «إلغاء الطلب دايمًا ظاهرة للأدمن». إخفاء الزرار بيخلي الأدمن يفتكر إن
+ * الميزة مش موجودة أصلاً (وده اللي حصل فعلاً)، فالزرار بيفضل ظاهر ومعطّل ومعاه المسار البديل.
+ */
+export function orderCancelBlockedReason(status: OrderStatus): string | null {
+  if (isOrderCancellable(status)) return null;
+  switch (status) {
+    case 'work_completed':
+    case 'awaiting_payment':
+      return 'الشغل خلص والتسوية المالية على وشك — المسار الصح هنا الاسترداد من صفحة المدفوعات، مش إلغاء بيمسح شغل اتعمل.';
+    case 'completed':
+      return 'الطلب اتقفل وتمّت تسويته ماليًا — أي تصحيح بعد كده بيعدّي من الاسترداد أو تسوية مستحقات.';
+    case 'disputed':
+      return 'الطلب في نزاع/زيارة فاشلة — قرار الإلغاء بيتاخد من «حل الزيارة الفاشلة» تحت عشان رسوم الزيارة والاسترداد يتحسبوا صح.';
+    case 'cancelled_by_customer':
+    case 'cancelled_by_technician':
+    case 'cancelled_by_system':
+      return 'الطلب ملغي بالفعل.';
+    case 'expired':
+      return 'الطلب انتهت صلاحيته.';
+    case 'refunded':
+      return 'الطلب اتردّت فلوسه بالفعل.';
+    default:
+      return 'الإلغاء الإداري مش متاح في الحالة دي.';
+  }
 }
 
 // مطابق حرفياً لـ REASSIGNABLE_STATUSES في apps/api/src/modules/orders/admin-orders.service.ts.
@@ -69,12 +104,53 @@ export function isOrderReassignable(status: OrderStatus): boolean {
   return REASSIGNABLE_STATUSES.includes(status);
 }
 
-// مطابق حرفياً لـ RESCHEDULABLE_STATUSES في apps/api/src/modules/orders/orders.service.ts —
-// إعادة الجدولة (عميل أو أدمن، Script 4 Part K §42) متاحة بس قبل ما الفني يتحرّك فعليًا.
-const RESCHEDULABLE_STATUSES: OrderStatus[] = ['accepted', 'technician_assigned'];
+// مطابق حرفياً لـ ADMIN_RESCHEDULABLE_STATUSES في
+// apps/api/src/modules/orders/order-reschedule.service.ts (ADR-0083 §3).
+//
+// القايمة دي **أوسع من قايمة العميل** عن قصد: إعادة الجدولة الإدارية قرار بشري موثّق (سبب
+// إلزامي + تدقيق + إشعار الطرفين)، مش زرار بيدوسه العميل والفني في الطريق. الحالة اللي بتحصل
+// فعلاً — الفني وصل ولقى المكان مقفول — كانت بتتحوّل غصبًا لمسار «زيارة فاشلة» حتى لو مش دي
+// القصة (طلب مالك صريح: «خلي إعادة الجدولة دايمًا ظاهرة»).
+const RESCHEDULABLE_STATUSES: OrderStatus[] = [
+  'technician_assigned',
+  'accepted',
+  'technician_on_way',
+  'technician_arrived',
+  'in_progress',
+  'awaiting_quote_approval',
+  'awaiting_admin_quote',
+  'awaiting_initial_quote_approval',
+];
 
 export function isOrderReschedulable(status: OrderStatus): boolean {
   return RESCHEDULABLE_STATUSES.includes(status);
+}
+
+/** ليه إعادة الجدولة مقفولة — بيتعرض بدل ما الزرار يختفي (ADR-0083 §5). */
+export function orderRescheduleBlockedReason(status: OrderStatus, hasTechnician: boolean): string | null {
+  if (status === 'searching_technician') {
+    return hasTechnician ? null : null; // مسموح: إعادة جدولة طلب لسه بيدوّر على منفّذ
+  }
+  if (!isOrderReschedulable(status)) {
+    switch (status) {
+      case 'work_completed':
+      case 'awaiting_payment':
+      case 'completed':
+        return 'الشغل خلص — مفيش موعد جاي يتغيّر. لو محتاج زيارة تانية، افتح إعادة زيارة أو طلب جديد.';
+      case 'disputed':
+        return 'الطلب في نزاع/زيارة فاشلة — الموعد الجديد بيتحدد من «حل الزيارة الفاشلة» تحت.';
+      case 'draft':
+      case 'pending_payment':
+        return 'الطلب لسه ما اتأكدش — مفيش موعد مثبّت يتغيّر.';
+      case 'awaiting_technician_selection':
+      case 'awaiting_technician_reselection':
+        return 'العميل لسه بيختار المنفّذ — الموعد بيتثبّت بعد الاختيار.';
+      default:
+        return 'إعادة الجدولة مش متاحة في الحالة دي.';
+    }
+  }
+  if (!hasTechnician) return 'مفيش منفّذ معيّن على الطلب لسه — عيّن منفّذ الأول.';
+  return null;
 }
 
 // Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32) — 4 مصادر أحداث كانت كل واحدة في كارت

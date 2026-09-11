@@ -41,6 +41,10 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
 
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
+  // رقم الطلب بيتقص على ٢٤ حرف، فأي label طويل بيتصادم مع اللي قبله — عداد قصير بدل تركيب نص.
+  let orderSeq = 0;
+  const nextLabel = () => `a83${runId.slice(-4)}${(orderSeq++).toString().padStart(2, '0')}`;
+
   const dayFromNow = (offset: number) => {
     const day = new Date();
     day.setUTCHours(0, 0, 0, 0);
@@ -356,5 +360,55 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
         'الاتنين',
       ),
     ).rejects.toThrow(/واحد بس/);
+  });
+
+  /**
+   * ADR-0083 §3 — إعادة الجدولة الإدارية بقت أوسع من مسار العميل.
+   *
+   * طلب المالك: «خلي إعادة الجدولة بتاعت الطلب دايمًا ظاهرة للأدمن». الحالة اللي بتحصل فعلاً —
+   * الفني وصل ولقى المكان مقفول، أو الشغل وقف نص اليوم — كانت بتتحوّل غصبًا لمسار «زيارة فاشلة».
+   * مسار **العميل** ما اتغيرش عن قصد: إعادة جدولة ذاتية والفني في الطريق = تصادم مع رحلة شغالة.
+   */
+  describe('صلاحية الأدمن أوسع من العميل (ADR-0083 §3)', () => {
+    const EXECUTION_STATUSES = [
+      OrderStatus.TECHNICIAN_ON_WAY,
+      OrderStatus.TECHNICIAN_ARRIVED,
+      OrderStatus.IN_PROGRESS,
+      OrderStatus.AWAITING_QUOTE_APPROVAL,
+    ];
+
+    it('الأدمن بيعيد الجدولة في كل حالات التنفيذ', async () => {
+      // يوم مختلف لكل حالة: نفس الفني، فالنقل ليوم واحد كان هيخلي التانية تتعارض مع الأولى
+      // بحق (السلوك ده صح، بس مش اللي التست بيقيسه).
+      let day = 4;
+      for (const status of EXECUTION_STATUSES) {
+        const orderId = await insertOrder(nextLabel(), dayFromNow(1), status);
+        const updated = await ordersService.rescheduleByAdmin(
+          ids.adminUser,
+          orderId,
+          { newScheduledAt: dayFromNow(day++).toISOString() },
+          `تأجيل إداري من حالة ${status}`,
+        );
+        expect(updated.scheduledAt).not.toBeNull();
+      }
+    });
+
+    it('العميل لسه مرفوض في نفس الحالات — البوابة الأضيق ما اتفتحتش بالغلط', async () => {
+      for (const status of EXECUTION_STATUSES) {
+        const orderId = await insertOrder(nextLabel(), dayFromNow(1), status);
+        await expect(
+          ordersService.reschedule(ids.customerUser, orderId, { new_scheduled_at: dayFromNow(4).toISOString() } as never),
+        ).rejects.toThrow();
+      }
+    });
+
+    it('بعد اكتمال الشغل الاتنين مرفوضين — مفيش موعد جاي يتغيّر', async () => {
+      for (const status of [OrderStatus.WORK_COMPLETED, OrderStatus.COMPLETED]) {
+        const orderId = await insertOrder(nextLabel(), dayFromNow(1), status);
+        await expect(
+          ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newScheduledAt: dayFromNow(4).toISOString() }, 'محاولة بعد الاكتمال'),
+        ).rejects.toThrow();
+      }
+    });
   });
 });

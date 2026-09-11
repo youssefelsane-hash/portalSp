@@ -33,20 +33,42 @@ export const OPTIONAL_ASSISTANT_MAX_FALLBACK = 1;
 
 export type CrewRole = 'technician' | 'assistant';
 
+/**
+ * الحالات اللي الطاقم قابل للتعديل فيها — **الحد هو الإغلاق المالي، مش «بدء الشغل»** (ADR-0083 §1).
+ *
+ * القايمة دي كانت بتقف عند `technician_arrived`، فطلب فريق **شغّال فعلاً** (`in_progress`) —
+ * وهو بالظبط الوقت اللي بتكتشف فيه إنك محتاج راجل زيادة — ماكانش ينفع يتضافله حد (بلاغ مالك،
+ * docs/08 §138). الحد ده كان بيحمي من خطر مش موجود في النص اللي حجبه: `order_earning_shares`
+ * (السجل اللي بيثبّت نصيب كل مشارك) مابيتكتبش غير في `PaymentsService.settleAndComplete()` عند
+ * الانتقال لـ`completed`، فالطاقم ساكن ماليًا قبل كده تمامًا.
+ *
+ * `work_completed`/`awaiting_payment` ممنوعين عن قصد: التسوية وشيكة وأي عضو يتضاف هيبقى له
+ * نصيب من شغل ما عملهوش. `disputed` ممنوع لأن ليه مسار حل خاص بحسابات رسوم/استرداد
+ * (`resolve-failed-visit`) — تعديل الطاقم من برّه بيتخطّاه.
+ */
 const CREW_MUTABLE_STATUSES = new Set<OrderStatus>([
   OrderStatus.SEARCHING_TECHNICIAN,
   OrderStatus.TECHNICIAN_ASSIGNED,
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
   OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
+  OrderStatus.AWAITING_ADMIN_QUOTE,
+  OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
 ]);
 
-/** لا نعيد كتابة سجل المشاركين بعد بدء العمل أو تثبيت الحقوق المالية. */
+/** `true` لو الطاقم لسه قابل للتعديل — نفس المصدر اللي الواجهة بتقرا منه عشان ما تعرضش زرار ميت. */
+export function isCrewMembershipMutable(status: OrderStatus): boolean {
+  return CREW_MUTABLE_STATUSES.has(status);
+}
+
+/** لا نعيد كتابة سجل المشاركين بعد تثبيت الحقوق المالية (ADR-0083 §1). */
 export function assertCrewMembershipMutable(order: Pick<Order, 'orderStatus'>): void {
   if (!CREW_MUTABLE_STATUSES.has(order.orderStatus)) {
     throw new ApiException(
       ErrorCode.ORDR_003,
-      'لا يمكن تعديل طاقم الطلب بعد بدء الشغل أو إغلاقه ماليًا',
+      'لا يمكن تعديل طاقم الطلب بعد اكتمال الشغل أو إغلاقه ماليًا',
       HttpStatus.CONFLICT,
     );
   }

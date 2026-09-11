@@ -43,10 +43,15 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_SYSTEM,
   ],
+  // ADR-0083 §4 — `CANCELLED_BY_SYSTEM` (الإلغاء الإداري الموثّق) مضاف للتلات حالات دي. الحالة
+  // الأبعد منهم (`IN_PROGRESS`) كانت مسموحة أصلاً، فمفيش فئة خطر جديدة بتتفتح: كلهم **قبل** أي
+  // حركة مالية (`order_earning_shares` مابتتكتبش غير في `settleAndComplete`). من غير ده الأدمن
+  // كان بيفقد الإلغاء بالظبط في النافذة اللي بيحتاجه فيها (الفني قبل وفي الطريق) — طلب مالك صريح.
   [OrderStatus.ACCEPTED]: [
     OrderStatus.TECHNICIAN_ON_WAY,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.SEARCHING_TECHNICIAN, // سياسة إلغاء الفني — إعادة مطابقة تلقائية (طوارئ/auto-match)
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION, // سياسة إلغاء الفني — العميل يختار بديل بنفسه
   ],
@@ -54,12 +59,14 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.TECHNICIAN_ARRIVED,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
   ],
   [OrderStatus.TECHNICIAN_ARRIVED]: [
     OrderStatus.IN_PROGRESS,
     OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
     // زيارة فاشلة — الفني وصل والعميل مش موجود/رافض يفتح (docs/08 §22 بند 3). مختلف عن

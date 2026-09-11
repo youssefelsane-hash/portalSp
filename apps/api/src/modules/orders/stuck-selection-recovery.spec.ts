@@ -20,7 +20,7 @@ describe('إنقاذ الطلبات العالقة في اختيار الفني 
   let emitter: EventEmitter2;
   const emitted: { event: string; payload: unknown }[] = [];
   const orderIds: string[] = [];
-  let seed: { customerProfile: string; address: string; service: string } | null = null;
+  let seed: { customerProfile: string; address: string; service: string; city: string; category: string; user: string } | null = null;
 
   const q = <T = unknown>(sql: string, params: unknown[] = []): Promise<T> => ds.query(sql, params) as Promise<T>;
 
@@ -42,20 +42,31 @@ describe('إنقاذ الطلبات العالقة في اختيار الفني 
       `INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`,
       [user.id],
     );
-    const [sample] = await q<{ city_id: string; lat: number; lng: number }[]>(
-      `SELECT city_id, ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lng
-         FROM addresses WHERE deleted_at IS NULL AND location IS NOT NULL AND city_id IS NOT NULL LIMIT 1`,
+    // **كتالوج خاص بالملف ده** — الاختبار كان بياخد أي عنوان/خدمة موجودين
+    // (`SELECT ... LIMIT 1`)، يعني بيعتمد على بقايا ملف تاني: على قاعدة نضيفة (كونتينر جديد،
+    // CI) الاستعلام بيرجّع صفر صفوف والسويتة بتقع على `Cannot read properties of undefined`
+    // قبل ما توصل للسلوك اللي بتقيسه أصلاً. اتلقطت حيًا على قاعدة اتعملها migrate من الصفر.
+    const [country] = await q<{ id: string }[]>(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
+    const [city] = await q<{ id: string }[]>(
+      `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
+      [country.id, `مدينة إنقاذ ${suffix}`, `Recovery City ${suffix}`, `recovery-city-${suffix}`],
+    );
+    const [category] = await q<{ id: string }[]>(
+      `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
+      [`فئة إنقاذ ${suffix}`, `Recovery Category ${suffix}`, `recovery-category-${suffix}`],
+    );
+    const [svc] = await q<{ id: string }[]>(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
+       VALUES ($1,$2,$3,'formula',70000,20,0) RETURNING id`,
+      [category.id, `خدمة إنقاذ ${suffix}`, `recovery-service-${suffix}`],
     );
     const [address] = await q<{ id: string }[]>(
       `INSERT INTO addresses (user_id, city_id, street_name, building_number, location, is_default)
-       VALUES ($1, $2, 'شارع الإنقاذ', '1', ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, true)
+       VALUES ($1, $2, 'شارع الإنقاذ', '1', ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography, true)
        RETURNING id`,
-      [user.id, sample.city_id, sample.lng, sample.lat],
+      [user.id, city.id],
     );
-    const [svc] = await q<{ id: string }[]>(
-      `SELECT id FROM services WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1`,
-    );
-    seed = { customerProfile: profile.id, address: address.id, service: svc.id };
+    seed = { customerProfile: profile.id, address: address.id, service: svc.id, city: city.id, category: category.id, user: user.id };
   });
 
   afterAll(async () => {
@@ -67,7 +78,12 @@ describe('إنقاذ الطلبات العالقة في اختيار الفني 
     if (seed) {
       await q(`DELETE FROM addresses WHERE id = $1`, [seed.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [seed.customerProfile]);
-      await q(`DELETE FROM users WHERE full_name = 'عميل إنقاذ'`);
+      // **المستخدم بتاع التشغيلة دي بس** — الحذف بالاسم كان بيحاول يشيل مستخدمي تشغيلات
+      // قديمة لسه ليهم `customer_profiles`، فبيقع على مفتاح أجنبي ويكسر تنظيف السويتة كلها.
+      await q(`DELETE FROM users WHERE id = $1`, [seed.user]);
+      await q(`DELETE FROM services WHERE id = $1`, [seed.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [seed.category]);
+      await q(`DELETE FROM cities WHERE id = $1`, [seed.city]);
     }
     await q(`DELETE FROM sweep_leases WHERE lock_name = 'stuck-selection-recovery'`);
     await ds.destroy();

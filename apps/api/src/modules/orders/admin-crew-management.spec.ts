@@ -51,6 +51,13 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     return `+2039${runId.slice(-6)}${counter}`.slice(0, 15);
   }
 
+  // `insertOrder` بتقص رقم الطلب على ٢٤ حرف، فأي label طويل بيتقص وبيتصادم مع اللي قبله
+  // (بَقّة حقيقية اتلقطت هنا: تلات حالات انتظار بنفس الـprefix بقوا نفس رقم الطلب).
+  let orderSeq = 0;
+  function nextOrderSeq(): string {
+    return `${runId.slice(-4)}${(orderSeq++).toString().padStart(2, '0')}`;
+  }
+
   async function q(sql: string, params?: unknown[]) {
     return dataSource.query(sql, params);
   }
@@ -263,12 +270,22 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
 
   afterAll(async () => {
     try {
+      // الفني المشغول بياخد **عرض** بدل إضافة فورية (ADR-0057)، فبينزل صف في
+      // `technician_work_opportunities` بيمنع حذف الطلب بمفتاح أجنبي لو ما اتشالش الأول.
+      await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTCRW-%`]);
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCRW-%`]);
+      await q(`DELETE FROM technician_work_opportunities WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCRW-%`]);
       await q(`DELETE FROM order_team_members WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCRW-%`]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCRW-%`]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCRW-%`]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-      await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.blockedProfile]);
+      // كل سلوتات فنيي الملف — مش `blockedProfile` وحده: تستات ADR-0083 بتحجز إجازات على فنيين
+      // مؤقتين، وسيبها كان بيكسر حذف البروفايلات بمفتاح أجنبي.
+      await q(
+        `DELETE FROM technician_schedule_slots WHERE technician_id IN (SELECT id FROM technician_profiles WHERE id = $1 OR company_id = $2)`,
+        [ids.otherCompanyProfile, ids.company],
+      );
       // بما فيهم فنيي الحشو الـ15 اللي اتضافوا جوّه اختبار "أقصى عدد" (كلهم company_id=ids.company)
       // — مش بس الخمسة الأساسيين، وإلا FK هيمنع مسح الشركة تحتهم.
       await q(`DELETE FROM technician_zones WHERE technician_id IN (SELECT id FROM technician_profiles WHERE id = $1 OR company_id = $2)`, [ids.otherCompanyProfile, ids.company]);
@@ -531,6 +548,157 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       expect(row.member_type).toBe('assistant');
       const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
       expect(composition.crewComplete).toBe(true);
+    });
+  });
+
+  /**
+   * ADR-0083 §1 — حد تعديل الطاقم هو **الإغلاق المالي** مش «بدء الشغل».
+   *
+   * البلاغ الأصلي (docs/08 §138): «لما يكون فيه شغل معاه حد وعايزين نضيف لنكمل الفريق…
+   * السيستم مش بيرضى يضيف حد للطلب رغم إن الطلب محتاج ناس وفيه ناس فاضية». شغلانة فريق
+   * ممتدة أيام بتكتشف نقص العمالة **وهي شغالة** — و`in_progress` كانت مرفوضة.
+   */
+  describe('حد تعديل الطاقم = التسوية مش بدء الشغل (ADR-0083 §1)', () => {
+    // فنيين مخصّصين للسويتة دي. الإضافة الناجحة بتخلي الفني **ملتزم فعلاً**، فإعادة استخدام
+    // فني السويتات اللي فوق بتقيس التلوث مش السلوك (اتلقطت حيًا: تست الماضي فشل مجمّعًا ونجح
+    // منفردًا).
+    let freshSeq = 0;
+    /** فني جديد لكل استخدام — الإضافة الناجحة بتخلي الفني ملتزم فعلاً، فمشاركته بين تستين
+     *  بتقيس التلوث مش السلوك (اتلقطت حيًا: التست نجح منفردًا وفشل مجمّعًا). */
+    const freshTech = () =>
+      insertTechnician(`a83x${freshSeq++}`, { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
+
+    async function setStatus(orderId: string, status: string) {
+      await q(`UPDATE orders SET order_status = $2::order_status WHERE id = $1`, [orderId, status]);
+    }
+
+    it('الطلب الشغّال (in_progress) بيقبل عضو طاقم جديد — ده بالظبط البلاغ', async () => {
+      const orderId = await insertOrder(`a83a${nextOrderSeq()}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 3,
+      });
+      await setStatus(orderId, 'in_progress');
+
+      const tech = await freshTech();
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, tech, 'فني إضافي', 'team_member');
+
+      const [row] = await q(`SELECT technician_id FROM order_team_members WHERE order_id = $1`, [orderId]);
+      expect(row.technician_id).toBe(tech);
+    });
+
+    it('حالات انتظار عرض السعر بتقبل كمان — الطلب لسه مفتوح ماليًا', async () => {
+      for (const status of ['awaiting_quote_approval', 'awaiting_admin_quote', 'awaiting_initial_quote_approval']) {
+        const orderId = await insertOrder(`a83b${nextOrderSeq()}`, {
+          bookingMode: BookingMode.TEAM,
+          technicianId: ids.leaderProfile,
+          requiredTechnicians: 3,
+        });
+        await setStatus(orderId, status);
+        await expect(
+          adminOrdersService.addCrewMember(ids.adminUserId, orderId, await freshTech(), 'فني إضافي', 'team_member'),
+        ).resolves.toBeDefined();
+      }
+    });
+
+    it('بعد اكتمال الشغل بيترفض — التسوية بتكتب order_earning_shares وأي عضو جديد هياخد نصيب من شغل ما عملهوش', async () => {
+      for (const status of ['work_completed', 'awaiting_payment', 'completed']) {
+        const orderId = await insertOrder(`a83c${nextOrderSeq()}`, {
+          bookingMode: BookingMode.TEAM,
+          technicianId: ids.leaderProfile,
+          requiredTechnicians: 3,
+        });
+        await setStatus(orderId, status);
+        await expect(
+          adminOrdersService.addCrewMember(ids.adminUserId, orderId, await freshTech(), 'فني إضافي', 'team_member'),
+        ).rejects.toThrow(/بعد اكتمال الشغل أو إغلاقه ماليًا/);
+      }
+    });
+
+    it('الإزالة بتتبع نفس الحد بالظبط — مفيش باب خلفي في الاتجاه التاني', async () => {
+      const orderId = await insertOrder(`a83d${nextOrderSeq()}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 3,
+      });
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, await freshTech(), 'فني إضافي', 'team_member');
+      const [member] = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
+
+      await setStatus(orderId, 'in_progress');
+      await expect(
+        adminOrdersService.removeCrewMember(ids.adminUserId, orderId, member.id, 'الفني اعتذر وسط الشغل', undefined),
+      ).resolves.toBeDefined();
+
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, await freshTech(), 'بديل', 'team_member');
+      const [member2] = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
+      await setStatus(orderId, 'completed');
+      await expect(
+        adminOrdersService.removeCrewMember(ids.adminUserId, orderId, member2.id, 'محاولة بعد التسوية', undefined),
+      ).rejects.toThrow(/بعد اكتمال الشغل أو إغلاقه ماليًا/);
+    });
+
+    /**
+     * ADR-0083 §2 — الأيام اللي عدّت مابتتحسبش على المرشّح.
+     *
+     * ده الشق التاني من البلاغ: «الناس كلها بتبان إن هي مشغولة… حتى لو التاريخ بيكون خلاص
+     * معدي». طلب ممتد بدأ في الماضي كان بيتقاس على نافذته الكاملة من يوم البداية الأصلي.
+     */
+    it('طلب ممتد بدأ في الماضي: فني فاضي دلوقتي بيتقبل — الأيام اللي فاتت مش قابلة للحجز أصلاً', async () => {
+      const orderId = await insertOrder(`a83e${nextOrderSeq()}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 3,
+      });
+      await q(
+        `UPDATE orders SET scheduled_at = now() - interval '10 days', estimated_duration_days = 20 WHERE id = $1`,
+        [orderId],
+      );
+
+      await expect(
+        adminOrdersService.addCrewMember(ids.adminUserId, orderId, await freshTech(), 'فني إضافي', 'team_member'),
+      ).resolves.toBeDefined();
+    });
+
+    it('الإجازة اللي عدّت مابتحجبش الانضمام، والإجازة الجاية بتفضل حاجبة', async () => {
+      const orderId = await insertOrder(`a83f${nextOrderSeq()}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 3,
+      });
+      await q(
+        `UPDATE orders SET scheduled_at = now() - interval '10 days', estimated_duration_days = 20 WHERE id = $1`,
+        [orderId],
+      );
+      const vacPast = await freshTech();
+      // إجازة في يوم عدّى جوّه نافذة الطلب الأصلية — مالهاش أي أثر على الانضمام النهاردة.
+      await q(
+        `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+         VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date - 5, '00:00', '23:59', 'blocked')`,
+        [vacPast],
+      );
+      await expect(
+        adminOrdersService.addCrewMember(ids.adminUserId, orderId, vacPast, 'فني إضافي', 'team_member'),
+      ).resolves.toBeDefined();
+
+      // فني تاني، إجازة في يوم **جاي** جوّه نفس النافذة → بيتحجب زي ما هو المفروض.
+      const vacFuture = await freshTech();
+      const orderId2 = await insertOrder(`a83g${nextOrderSeq()}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 3,
+      });
+      await q(
+        `UPDATE orders SET scheduled_at = now() - interval '10 days', estimated_duration_days = 20 WHERE id = $1`,
+        [orderId2],
+      );
+      await q(
+        `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+         VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date + 2, '00:00', '23:59', 'blocked')`,
+        [vacFuture],
+      );
+      await expect(
+        adminOrdersService.addCrewMember(ids.adminUserId, orderId2, vacFuture, 'فني إضافي', 'team_member'),
+      ).rejects.toThrow();
     });
   });
 });

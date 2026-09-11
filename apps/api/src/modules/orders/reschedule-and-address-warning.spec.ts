@@ -729,12 +729,24 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
     ).rejects.toThrow();
   });
 
-  it('يرفض إعادة جدولة بعد ما الفني يبقى في الطريق فعلاً (technician_on_way) — نفس قيد العميل بالظبط', async () => {
+  /**
+   * **السلوك ده اتغيّر عمدًا في ADR-0083 §3** (طلب مالك: «خلي إعادة الجدولة دايمًا ظاهرة
+   * للأدمن»). الاختبار كان بيثبّت «نفس قيد العميل بالظبط» — والقيد ده هو اللي كان بيجبر أبسط
+   * حالة تشغيلية (الفني وصل ولقى المكان مقفول) تتحوّل لمسار «زيارة فاشلة».
+   *
+   * اللي بيتقاس دلوقتي هو **الفرق نفسه**: الأدمن بيعدي (قرار بشري بسبب إلزامي وتدقيق)،
+   * والعميل بيفضل مرفوض بالحرف على نفس الطلب — فاتساع صلاحية الأدمن ما فتحش الباب الذاتي.
+   */
+  it('الأدمن بيعيد الجدولة والفني في الطريق، والعميل بيفضل مرفوض على نفس الطلب (ADR-0083 §3)', async () => {
     const orderId = await insertOrder(`toolate-${runId}`, OrderStatus.TECHNICIAN_ON_WAY);
     await insertSlot('toolate-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
-    const newSlotId = await insertSlot('toolate-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '16:00');
+    const customerSlotId = await insertSlot('toolate-cust', TechnicianScheduleSlotStatus.AVAILABLE, null, '15:00');
 
-    await expect(ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newSlotId }, 'سبب تجريبي')).rejects.toThrow();
-    expect(auditLogRecord).not.toHaveBeenCalled();
+    await expect(ordersService.reschedule(ids.customerUser, orderId, { new_slot_id: customerSlotId })).rejects.toThrow();
+
+    const newSlotId = await insertSlot('toolate-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '16:00');
+    const updated = await ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newSlotId }, 'المكان كان مقفول والعميل طلب يوم تاني');
+    expect(updated.scheduledAt).not.toBeNull();
+    expect(auditLogRecord).toHaveBeenCalled();
   });
 });
