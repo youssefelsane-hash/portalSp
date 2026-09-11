@@ -384,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       // كانت 24 — بلاغ مالك: «فيه مسافة كبيرة بين آخر كلمة موجودة وكل الفئات».
                       const SizedBox(height: 16),
                     ],
-                    _ProjectCta(
+                    ProjectCtaCard(
                       // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
                       // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
                       onTap: () async {
@@ -685,59 +685,83 @@ class _HomeScreenState extends State<HomeScreen> {
 /// النص حرفيًا زي ما المالك كتبه. والمكان مقصود: العميل اللي عدّى على كل الفئات وما لقاش
 /// اللي بيدور عليه هو بالظبط اللي محتاج يعرف إن فيه مسار مشروع كامل — عرضه فوق قبل الخدمات
 /// كان بيزاحم أول حاجة العميل جاي عشانها.
-class _ProjectCta extends StatelessWidget {
-  const _ProjectCta({required this.onTap});
+/// كارت «ابدأ مشروع» — **صف واحد**، مش بلوك. (عام عشان `test/project_cta_test.dart` يقيس ارتفاعه.)
+///
+/// بلاغ المالك (2026-09-11): «الكارت ده طويل وعريض أوي… قلّل ارتفاعه عشان ما ياكلش الشاشة…
+/// وشيل لوجو البيت لو شكله مش احترافي، خليه بريميوم».
+///
+/// اللي اتغيّر ولـيه:
+///  1. **من عمود لصف**: العنوان والوصف والزرار كانوا تلات بلوكات فوق بعض. الأرقام متقاسة
+///     فعليًا على 390×844 بنفس تركيب الشاشة (Column جوّه scroll view):
+///     **182px ← 62px** (توفير 66%). ومع تكبير خط النظام ×1.5: **272px ← 80px** (71%) —
+///     يعني الكارت كان بياكل تلت الشاشة لعنصر واحد مش هو الغرض الأساسي.
+///  2. **اتشال الإيموچي 🏠**: إيموچي في كارت المفروض «بريميوم» بيقرا هاوي، وشكله بيختلف من
+///     جهاز لجهاز (كل نظام له خط إيموچي مختلف) — فمفيش تحكّم في النتيجة أصلاً.
+///     البديل أيقونة Material في مربع ملوّن خفيف: نفس اللغة البصرية بتاعة باقي الشاشة.
+///  3. **`maxLines: 1` + ellipsis على السطرين**: من غيرها الكارت بيرجع يطول تاني أول ما
+///     المستخدم يكبّر خط النظام — وده اللي كان بيحصل فعلاً.
+class ProjectCtaCard extends StatelessWidget {
+  const ProjectCtaCard({super.key, required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final onContainer = theme.colorScheme.onPrimaryContainer;
+
     return Material(
       color: theme.colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
             children: [
-              Text(
-                'بتجهز أو بتشطب بيتك؟ 🏠',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onPrimaryContainer,
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: onContainer.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  Icons.design_services_rounded,
+                  size: 20,
+                  color: onContainer,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'من المعاينة لحد التسليم، خلّي مشروعك كله في مكان واحد.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onPrimaryContainer,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'ابدأ مشروع',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.onPrimaryContainer,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'بتجهّز أو بتشطّب بيتك؟',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: onContainer,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.arrow_back_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onPrimaryContainer,
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      'من المعاينة للتسليم في مكان واحد',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: onContainer.withValues(alpha: 0.78),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_back_rounded, size: 18, color: onContainer),
             ],
           ),
         ),
