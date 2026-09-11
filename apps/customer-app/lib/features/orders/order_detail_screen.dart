@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/external_links.dart';
 import '../../core/api_exception.dart';
 import '../../core/work_scope_label.dart';
 import '../../core/auth_repository.dart';
@@ -219,10 +219,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   // docs/08 §22 بند 1 — رقم تليفون الفني بيوصلنا بس بعد ما الباك-إند يتأكد إن الحجز اتأكد فعليًا،
   // فمفيش داعي لأي فحص إضافي هنا غير فتح تطبيق الاتصال.
   Future<void> _callTechnician(String phone) async {
-    final uri = Uri(scheme: 'tel', path: phone);
-    if (!await launchUrl(uri)) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر فتح تطبيق الاتصال')));
-    }
+    await openPhoneDialer(context, phone);
   }
 
   String _formatRescheduleOptionDate(String value) {

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/external_links.dart';
 import '../chat/chat_screen.dart';
 import 'support_contact_repository.dart';
 
@@ -10,9 +10,10 @@ import 'support_contact_repository.dart';
 class SupportContactScreen extends StatelessWidget {
   const SupportContactScreen({super.key});
 
-  Future<void> _call(String phone) => launchUrl(Uri(scheme: 'tel', path: phone));
+  Future<void> _call(BuildContext context, String phone) => openPhoneDialer(context, phone);
 
-  Future<void> _openWhatsapp(String url) => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  Future<void> _openWhatsapp(BuildContext context, String url) =>
+      openExternalUrl(context, Uri.parse(url), failureMessage: 'تعذّر فتح واتساب');
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +43,7 @@ class SupportContactScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   if (contact.phoneNumber != null)
                     FilledButton.icon(
-                      onPressed: () => _call(contact.phoneNumber!),
+                      onPressed: () => _call(context, contact.phoneNumber!),
                       icon: const Icon(Icons.call),
                       label: const Text('اتصل بينا', style: TextStyle(fontSize: 16)),
                       style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18)),
@@ -50,7 +51,7 @@ class SupportContactScreen extends StatelessWidget {
                   if (contact.phoneNumber != null && contact.whatsappUrl != null) const SizedBox(height: 12),
                   if (contact.whatsappUrl != null)
                     FilledButton.icon(
-                      onPressed: () => _openWhatsapp(contact.whatsappUrl!),
+                      onPressed: () => _openWhatsapp(context, contact.whatsappUrl!),
                       icon: const Icon(Icons.chat),
                       label: const Text('واتساب', style: TextStyle(fontSize: 16)),
                       style: FilledButton.styleFrom(

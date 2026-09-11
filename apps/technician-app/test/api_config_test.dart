@@ -25,4 +25,53 @@ void main() {
       expect(() => assertProductionApiConfig(isRelease: true, url: 'https://api.baytak.app/api/v1'), returnsNormally);
     });
   });
+
+  // عنوان الموقع — بَقّة حقيقية (بلاغ المالك 2026-09-11: الروابط الخارجية مابتفتحش حاجة).
+  // الاشتقاق القديم كان بيشيل `/api/v1` وخلاص، فبيرجّع **عنوان الباك-إند**:
+  // `https://api.ostahome.com/legal/terms` = 404 من NestJS. الموقع الحقيقي `ostahome.com`.
+  group('deriveSiteBaseUrl', () {
+    test('بيشيل بادئة api. في الإنتاج', () {
+      expect(deriveSiteBaseUrl('https://api.ostahome.com/api/v1'), 'https://ostahome.com');
+    });
+
+    test('بيحوّل منفذ الباك-إند المحلي (3000) لمنفذ الموقع (3002)', () {
+      expect(deriveSiteBaseUrl('http://10.0.2.2:3000/api/v1'), 'http://10.0.2.2:3002');
+      expect(deriveSiteBaseUrl('http://localhost:3000/api/v1'), 'http://localhost:3002');
+    });
+
+    test('مابيلمسش دومين مالوش بادئة api. ولا منفذ 3000', () {
+      expect(deriveSiteBaseUrl('https://ostahome.com/api/v1'), 'https://ostahome.com');
+      expect(deriveSiteBaseUrl('https://backend.example.com:8443/api/v1'), 'https://backend.example.com:8443');
+    });
+
+    test('بيشيل الشرطة المايلة الأخيرة وبيتعامل مع نسخة API تانية', () {
+      expect(deriveSiteBaseUrl('https://api.ostahome.com/api/v2/'), 'https://ostahome.com');
+    });
+
+    test('مدخل باظ بيرجع زي ما هو بدل ما يرمي', () {
+      expect(deriveSiteBaseUrl('مش-رابط'), 'مش-رابط');
+    });
+  });
+
+  // إصدار Release بعنوان API حقيقي بس عنوان موقع محلي = كل الروابط القانونية مكسورة،
+  // وGoogle Play بيطلب نفس الروابط دي في Store Listing.
+  group('assertProductionApiConfig — عنوان الموقع', () {
+    test('بيرمي لو الموقع لسه محلي رغم إن الـAPI حقيقي', () {
+      expect(
+        () => assertProductionApiConfig(
+          isRelease: true,
+          url: 'https://api.ostahome.com/api/v1',
+          site: 'http://localhost:3002',
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('بيعدّي لما الاتنين حقيقيين', () {
+      expect(
+        () => assertProductionApiConfig(isRelease: true, url: 'https://api.ostahome.com/api/v1'),
+        returnsNormally,
+      );
+    });
+  });
 }

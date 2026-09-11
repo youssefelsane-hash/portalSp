@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_config.dart';
+import '../../core/external_links.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
@@ -655,7 +655,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (contact.phoneNumber != null)
                 OutlinedButton.icon(
                   onPressed: () =>
-                      launchUrl(Uri(scheme: 'tel', path: contact.phoneNumber!)),
+                      openPhoneDialer(context, contact.phoneNumber!),
                   icon: const Icon(Icons.call_outlined),
                   label: Text(
                     contact.phoneNumber!,
@@ -664,9 +664,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               if (contact.whatsappUrl != null)
                 OutlinedButton.icon(
-                  onPressed: () => launchUrl(
+                  onPressed: () => openExternalUrl(
+                    context,
                     Uri.parse(contact.whatsappUrl!),
-                    mode: LaunchMode.externalApplication,
+                    failureMessage: 'تعذّر فتح واتساب',
                   ),
                   icon: const Icon(Icons.chat_outlined),
                   label: const Text('واتساب'),

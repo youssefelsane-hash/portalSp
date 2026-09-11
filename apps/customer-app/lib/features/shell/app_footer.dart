@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../../core/api_config.dart';
+import '../../core/external_links.dart';
 import '../../core/auth_gate.dart';
 import '../catalog/categories_screen.dart';
 import '../projects/my_projects_screen.dart';
@@ -38,10 +37,11 @@ class _AppFooterState extends State<AppFooter> {
   LegalEntityInfo _entity = LegalEntityInfo.fallback;
   List<SocialLink> _social = const [];
 
-  /// الموقع مشتق من عنوان الـAPI — نفس مبدأ `LegalLinksScreen`، فمفيش دومين تاني مكتوب في
-  /// الكود لازم يتحدّث لوحده لما البيئة تتغيّر.
-  static String get _siteOrigin =>
-      apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+  /// عنوان الموقع من `api_config.dart` — **مش** اشتقاق محلي من `apiBaseUrl`.
+  ///
+  /// الاشتقاق المحلي القديم كان بيدّي عنوان الباك-إند (`api.ostahome.com`)، فكل رابط خارجي
+  /// هنا كان بيفتح 404 من NestJS. تفاصيل السبب الكامل في `siteBaseUrl`.
+  static String get _siteOrigin => siteBaseUrl;
 
   @override
   void initState() {
@@ -60,13 +60,7 @@ class _AppFooterState extends State<AppFooter> {
   }
 
   Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('مقدرناش نفتح $uri')));
-    }
+    await openExternalUrl(context, Uri.parse(url));
   }
 
   Future<void> _push(Widget screen) async {
@@ -141,13 +135,13 @@ class _AppFooterState extends State<AppFooter> {
               _FooterLink(
                 label: _entity.supportPhone!,
                 ltr: true,
-                onTap: () => _openUrl('tel:${_entity.supportPhone}'),
+                onTap: () => openPhoneDialer(context, _entity.supportPhone!),
               ),
             if (_entity.supportEmail != null)
               _FooterLink(
                 label: _entity.supportEmail!,
                 ltr: true,
-                onTap: () => _openUrl('mailto:${_entity.supportEmail}'),
+                onTap: () => openEmailApp(context, _entity.supportEmail!),
               ),
           ],
 

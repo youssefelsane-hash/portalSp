@@ -3,7 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:safe_device/safe_device.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/external_links.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
@@ -463,12 +463,11 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     final uri = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&destination=${address.latitude},${address.longitude}',
     );
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('مقدرناش نفتح تطبيق الخرائط')),
-      );
-    }
+    await openExternalUrl(
+      context,
+      uri,
+      failureMessage: 'مقدرناش نفتح تطبيق الخرائط',
+    );
   }
 
   @override
@@ -1700,9 +1699,8 @@ class _JobBriefCard extends StatelessWidget {
                       ),
                     ),
                     TextButton.icon(
-                      onPressed: () => launchUrl(
-                        Uri(scheme: 'tel', path: order.customerPhone!),
-                      ),
+                      onPressed: () =>
+                          openPhoneDialer(context, order.customerPhone!),
                       icon: const Icon(Icons.call, size: 18),
                       label: const Text('اتصل'),
                     ),

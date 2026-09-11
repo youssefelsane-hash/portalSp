@@ -847,3 +847,101 @@ flutter test test_live/all_screens_smoke_live_test.dart \
 4. **«بيتصل بخدمة التتبع اللحظي...»** في شاشة التتبع — نفس الفئة، ١٢٤ بكسل.
 
 بعد الإصلاحات: **٩٩/٩٩ عدّوا**.
+
+## بَقّة «الفوتر في الأندرويد ما بيفتحش أي حاجة» (بلاغ مالك 2026-09-11) — سببين، والتخمين الشائع غلط
+
+بلاغ المالك بالحرف: «الفوتر في الأندرويد ما بيفتحش أي حاجة، يعني تدوس على أي حاجة ما بيفتحهاش،
+ما يعرفش ليه بصراحة».
+
+### التخمين اللي بدأت بيه وطلع **غلط** — وثّقته عشان محدش يعيده
+
+الشك الأول راح على **رؤية الحِزم في Android 11+** (`<queries>` في `AndroidManifest.xml`).
+الـmanifest فعلاً مافيهوش غير `PROCESS_TEXT`، والتطبيقين على `targetSdk = 36`. المنطقي إن
+`url_launcher` يفشل.
+
+**بس قراية كود الحزمة نفسها بتقول العكس.** في
+`url_launcher_android-6.3.32/android/.../UrlLauncher.java`:
+
+```java
+@Override
+public boolean launchUrl(@NonNull String url, ...) {
+  Intent launchIntent = new Intent(Intent.ACTION_VIEW).setData(Uri.parse(url));
+  try {
+    activity.startActivity(launchIntent);   // ← مفيش resolveActivity خالص
+  } catch (ActivityNotFoundException e) {
+    return false;
+  }
+  return true;
+}
+```
+
+`startActivity` بـintent ضمني **مش متأثر** بفلترة رؤية الحِزم — اللي متأثر هو
+`resolveActivity`/`queryIntentActivities`، واللي بيستخدمهم هو `canLaunchUrl` بس. ومفيش أي مكان
+في التطبيقين بينده `canLaunchUrl`. **فإضافة `<queries>` مكانتش هتصلّح حاجة**، وعشان كده
+مِتضافتش — إضافة إعداد بيحلّ مشكلة مش موجودة هي تشويش على اللي بعدنا، مش احتراز.
+(لو حد ضاف `canLaunchUrl` بعدين، ساعتها `<queries>` بتبقى مطلوبة فعلاً — نفس الكلام على
+`LSApplicationQueriesSchemes` في iOS.)
+
+### السبب الأول الحقيقي — `launchUrl` على أندرويد **بيرمي**، مابيرجّعش `false`
+
+في `url_launcher_android-6.3.32/lib/url_launcher_android.dart`:
+
+```dart
+if (!succeeded) {
+  throw PlatformException(code: 'ACTIVITY_NOT_FOUND', message: '...');
+}
+```
+
+وكل الكود عندنا — **١١ موضع** في التطبيقين — كان مكتوب بالشكل ده:
+
+```dart
+if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مقدرناش نفتح')));
+}
+```
+
+الـ`if` دي **فرع ميت على أندرويد**. والاستثناء بيتحصل جوّه `Future` محدش بيستناه
+(`onTap: () => _openUrl(...)`) فبيروح لـ`FlutterError.onError`، يتطبع في اللوج، وخلاص —
+**المستخدم بيدوس ومايحصلش ولا حاجة ولا أي رسالة**. ده بالحرف وصف المالك.
+
+**الإصلاح**: مكان واحد مسمّى — `lib/core/external_links.dart`
+(`openExternalUrl` / `openPhoneDialer` / `openEmailApp`) بيمسك `Object` مش `PlatformException`
+بس (عشان `MissingPluginException` و`ArgumentError` كمان)، وبيعرض رسالة حقيقية. **مفيش
+`launchUrl` مباشر في أي شاشة من دلوقتي** — الفني عنده نفس الملف بالظبط.
+
+الاختبار (`test/external_links_test.dart`) اتتأكد إنه بيمسك الرجوع فعلاً: بتشغيله على نسخة
+الكود القديمة رسب بـ`PlatformException(ACTIVITY_NOT_FOUND)` — نفس الاستثناء اللي كان بيتبلع.
+
+### السبب التاني — عنوان الموقع كان **عنوان الباك-إند**
+
+الفوتر و`LegalLinksScreen` كانوا بيشتقّوا عنوان الموقع كده:
+
+```dart
+apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '')   // ❌
+```
+
+ده بيدّي `http://10.0.2.2:3000` في التطوير و`https://api.ostahome.com` في الإنتاج — **الباك-إند
+مش الموقع**. يعني «شروط الاستخدام» كانت بتفتح `api.ostahome.com/legal/terms` وترجّع 404 من
+NestJS. الموقع الحقيقي `ostahome.com` (docs/31 §النطاقات) وفي التطوير على المنفذ 3002.
+
+**الإصلاح**: `siteBaseUrl` في `lib/core/api_config.dart` — `--dart-define=SITE_BASE_URL` صريح،
+وإلا اشتقاق محسوب (`api.` بتتشال، و3000 بتبقى 3002) مع اختبارات على المدخلات الحقيقية.
+و`assertProductionApiConfig` بقى **بيرفض** أي إصدار Release عنوان موقعه لسه محلي — نفس حماية
+عنوان الـAPI، لأن Google Play بيطلب نفس الروابط دي في Store Listing.
+
+### بناء Release لازم يبقى كده من دلوقتي
+
+```bash
+flutter build appbundle --release \
+  --dart-define=API_BASE_URL=https://api.ostahome.com/api/v1 \
+  --dart-define=SITE_BASE_URL=https://ostahome.com
+```
+
+(`SITE_BASE_URL` اختياري طول ما الـAPI على `api.<الموقع>` — الاشتقاق بيمسكها. لو النطاقات
+اتغيّرت لأي شكل تاني، بقى إجباري وإلا البناء بيرسب فورًا بدل ما يشحن روابط مكسورة.)
+
+### الروابط جوّه التطبيق مكانتش مكسورة
+
+`كل الفئات`/`مشاريعي`/`تواصل معنا`/`الشكاوى` بتعمل `Navigator.push` عادي. اتأكدت بـ
+`NavigatorObserver` حقيقي في `test/app_footer_test.dart` — الدوسة بتوصل وبتعمل push. فالبلاغ
+كله سببه الروابط الخارجية (٧ من ١١ عنصر في الفوتر).
