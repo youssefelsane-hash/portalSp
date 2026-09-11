@@ -56,6 +56,9 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38) — الشاشة دي بقت بتُستخدم للوضعين. team بيخلي
   // الباك-إند يفلتر مستوى الفني (محترف فأعلى) ويدمج الشركات في نفس القايمة.
   final BookingMode bookingMode;
+  // نقطة حقن صغيرة للاختبارات: تسمح باختبار أول فريم وحالات التحميل/الفراغ من غير شبكة.
+  // الإنتاج لا يمررها، فيظل يستخدم نفس المستودع الحقيقي ونفس الـAPI بلا أي تغيير.
+  final TechniciansRepository? repository;
 
   const TechnicianMarketplaceScreen({
     super.key,
@@ -66,6 +69,7 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
     this.fieldValues,
     this.requestedAt,
     this.bookingMode = BookingMode.individual,
+    this.repository,
   });
 
   @override
@@ -91,7 +95,9 @@ class _TechnicianMarketplaceScreenState
   void initState() {
     super.initState();
     _effectiveRequestedAt = widget.requestedAt;
-    _repository = TechniciansRepository(context.read<AuthRepository>());
+    _repository =
+        widget.repository ??
+        TechniciansRepository(context.read<AuthRepository>());
     _load();
   }
 
@@ -216,27 +222,39 @@ class _TechnicianMarketplaceScreenState
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    _technicians != null ? _countLabel(_technicians!) : ' ',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      _technicians != null ? _countLabel(_technicians!) : ' ',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   ),
-                  DropdownButton<TechnicianSortOption>(
-                    // نصوص عربية طويلة على شاشة ٣٢٠ بكسل بتخلّي القايمة تتجاوز عرضها (RenderFlex
-                    // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
-                    isExpanded: true,
-                    value: _sort,
-                    underline: const SizedBox.shrink(),
-                    items: TechnicianSortOption.values
-                        .map(
-                          (o) => DropdownMenuItem(
-                            value: o,
-                            child: Text(o.labelAr),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: _onSortChanged,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButton<TechnicianSortOption>(
+                      // isExpanded يحتاج عرضًا محدودًا. وجوده مباشرة داخل Row كان يعطيه عرضًا
+                      // لا نهائيًا ويوقع أول فريم للشاشة على Android/iOS؛ Expanded هنا هو القيد.
+                      isExpanded: true,
+                      value: _sort,
+                      underline: const SizedBox.shrink(),
+                      items: TechnicianSortOption.values
+                          .map(
+                            (o) => DropdownMenuItem(
+                              value: o,
+                              child: Text(
+                                o.labelAr,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _onSortChanged,
+                    ),
                   ),
                 ],
               ),
