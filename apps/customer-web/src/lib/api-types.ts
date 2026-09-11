@@ -36,6 +36,12 @@ export interface ServiceCategoryDto {
   name_en: string;
   slug: string;
   icon_url: string | null;
+  // **فجوة حقيقية اتقفلت 2026-09-11**: العمود ده موجود في `service_categories` من زمان،
+  // والباك-إند بيرجّعه في `service-response.dto.ts`، و`apps/customer-app` بيقراه من زمان
+  // (`ServiceCategory.coverImageUrl`) — بس النوع ده هنا نسخة محلية من `@baytak/shared-types`
+  // واتزحزحت عنه. النتيجة: الأدمن يرفع صورة غلاف للفئة، تبان في الأندرويد، **ومتبانش في
+  // الويب خالص** لأن الحقل مش موجود في النوع أصلاً. ده بلاغ المالك «الفئات مفيهاش صور».
+  cover_image_url: string | null;
   is_featured: boolean;
 }
 
