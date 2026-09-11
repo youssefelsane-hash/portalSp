@@ -140,7 +140,26 @@ export const envValidationSchema = Joi.object({
   CEQUENS_CLIENT_SECRET: Joi.string().allow('').optional(),
   CEQUENS_USERNAME: Joi.string().allow('').optional(),
   CEQUENS_PASSWORD: Joi.string().allow('').optional(),
-  CEQUENS_SENDER_NAME: Joi.string().allow('').optional(),
+  // **حد طول Sender ID مش تفصيلة شكلية**: المعيار (GSM 03.38 / TP-OA) بيحدّ اسم المُرسِل
+  // الأبجدي بـ**١١ محرف**، والرقمي بـ**١٥ رقم**. قيمة أطول من كده المزوّد بيرفضها **وقت
+  // الإرسال** — يعني السيرفر بيقلع "سليم" وكل كود تحقق بيفشل بهدوء، وبوابة الـSMS هي القناة
+  // الوحيدة لتسليم الـOTP. الفحص هنا بيحوّل العطل ده من وقت التشغيل لوقت الإقلاع.
+  CEQUENS_SENDER_NAME: Joi.string()
+    .allow('')
+    .optional()
+    .custom((value: string, helpers) => {
+      if (!value) return value;
+      const isNumeric = /^\d+$/.test(value);
+      const limit = isNumeric ? 15 : 11;
+      if (value.length > limit) {
+        return helpers.message({
+          custom: `CEQUENS_SENDER_NAME طوله ${value.length} محرف — الحد ${limit} لاسم ${isNumeric ? 'رقمي' : 'أبجدي'} (معيار GSM). المزوّد هيرفض كل رسالة، وده معناه صفر تسجيل دخول.`,
+        });
+      }
+      return value;
+    }),
+  // شكل رقم المستلم اللي بيتبعت لـCEQUENS — راجع الشرح الكامل في `cequens-sms-dispatcher.service.ts`.
+  CEQUENS_RECIPIENT_FORMAT: Joi.string().valid('msisdn', 'e164').default('msisdn'),
   CEQUENS_BASE_URL: Joi.string().uri().allow('').optional(),
   CEQUENS_AUTH_URL: Joi.string().uri().allow('').optional(),
   TWILIO_ACCOUNT_SID: Joi.string().allow('').optional(),

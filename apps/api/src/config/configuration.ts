@@ -119,6 +119,10 @@ export default () => ({
       senderName: process.env.CEQUENS_SENDER_NAME,
       baseUrl: process.env.CEQUENS_BASE_URL ?? 'https://apis.cequens.com/sms/v1',
       authUrl: process.env.CEQUENS_AUTH_URL ?? 'https://apis.cequens.com/auth/v1/tokens',
+      // 'msisdn' = رقم دولي من غير '+' (زي 201000000000) — الشكل اللي أمثلة CEQUENS بتستخدمه.
+      // 'e164' = بالـ'+' زي ما هو مخزّن عندنا. نفس فلسفة `baseUrl`/`authUrl` فوق: الحساب هو
+      // اللي بيحدد، فالقيمة قابلة للتهيئة بدل ما نراهن ونكتشف غلط وقت الإطلاق.
+      recipientFormat: (process.env.CEQUENS_RECIPIENT_FORMAT ?? 'msisdn') as 'msisdn' | 'e164',
     },
     twilio: {
       accountSid: process.env.TWILIO_ACCOUNT_SID,
