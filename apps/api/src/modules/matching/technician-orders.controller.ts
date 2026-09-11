@@ -7,7 +7,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto, toTechnicianOrderResponseDto } from '../orders/dto/order-response.dto';
 import { Order } from '../orders/entities/order.entity';
-import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from '../orders/order-state-machine';
+import { TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES } from '../orders/order-state-machine';
 import { PaymentsService } from '../payments/payments.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { MatchingService } from './matching.service';
@@ -29,7 +29,7 @@ export class TechnicianOrdersController {
    * `my_earning_cents`، وكان تطبيق الفني يعوّض الحقل الغائب بصفر حتى أول إعادة تحميل للتفاصيل.
    */
   private async toTechnicianDto(order: Order) {
-    const contactVisible = TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
+    const contactVisible = TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
     const [address, money, customerContact, serviceNameAr] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
       this.paymentsService.getTechnicianMoneyView(order),

@@ -35,7 +35,7 @@ export class CustomerProfilesService {
   /**
    * بيانات تواصل العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـ
    * `TechniciansService.findContactInfoOrThrow()` اللي العميل بيشوف بيها الفني. الكولر هو
-   * المسؤول عن فحص شرط الظهور (`TECHNICIAN_CONTACT_VISIBLE_STATUSES`) قبل ما ينادي، نفس النمط
+   * المسؤول عن فحص شرط الظهور (`TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES`) قبل ما ينادي، نفس النمط
    * المتّبع في `orders.controller.ts` بالحرف — مفيش استعلام أصلاً لو الطلب لسه في حالة مش مسموحة.
    */
   async findContactInfoOrThrow(

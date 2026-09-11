@@ -4,7 +4,7 @@
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { Order } from './entities/order.entity';
 import { OrderStatus } from './entities/order.entity';
-import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
+import { TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 
 function fakeOrder(orderStatus: OrderStatus): Order {
   return {
@@ -86,11 +86,9 @@ describe('toOrderResponseDto — بيانات العميل/الخدمة للفن
     expect(dto.service_name_ar).toBeUndefined();
   });
 
-  it('سياسة الظهور مرآة حرفية لبيانات الفني عند العميل — نفس المجموعة بالظبط', () => {
-    // الحالات اللي الفني بيشوف فيها العميل = الحالات اللي العميل بيشوف فيها الفني. لو حد غيّر
-    // المجموعة دي في ناحية واحدة بس، الاختبار ده بيقع.
-    expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(OrderStatus.ACCEPTED)).toBe(true);
-    expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(OrderStatus.SEARCHING_TECHNICIAN)).toBe(false);
-    expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(OrderStatus.PENDING_PAYMENT)).toBe(false);
+  it('بيانات العميل للفني تظل في التحصيل بعد العمل، وهي سياسة مستقلة عن رقم الفني عند العميل', () => {
+    expect(TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(OrderStatus.ACCEPTED)).toBe(true);
+    expect(TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(OrderStatus.SEARCHING_TECHNICIAN)).toBe(false);
+    expect(TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(OrderStatus.AWAITING_PAYMENT)).toBe(true);
   });
 });

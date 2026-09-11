@@ -136,7 +136,7 @@ export class TechniciansService {
   }
 
   // اسم/تليفون الفني للعرض للعميل بعد تأكيد حجيز حقيقي (docs/08 §22 بند 1) — الكولر (orders.controller.ts)
-  // هو المسؤول عن فحص شرط الظهور (TECHNICIAN_CONTACT_VISIBLE_STATUSES) قبل ما ينادي الدالة دي أصلاً.
+  // هو المسؤول عن فحص شرط الظهور (CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES) قبل ما ينادي الدالة دي أصلاً.
   async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
     const profile = await this.findByProfileIdOrThrow(profileId);
     const user = await this.users.findOne({ where: { id: profile.userId } });

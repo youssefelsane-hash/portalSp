@@ -120,13 +120,13 @@ export interface OrderResponseDto {
   pricing_quantity: number | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
-  /** رقم تليفون الفني (docs/08 §22 بند 1) — موجود بس بعد تأكيد حجيز حقيقي (TECHNICIAN_CONTACT_VISIBLE_STATUSES)،
+  /** اسم/رقم الفني للعميل: موجودان أثناء التنفيذ فقط (CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES).
    * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
   technician_name?: string;
   technician_phone?: string;
   /** بيانات العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـtechnician_name/phone فوق:
    * موجودة بس في مسارات `technician/orders/*` وبس بعد تأكيد حجز حقيقي (نفس
-   * TECHNICIAN_CONTACT_VISIBLE_STATUSES بالظبط). الفني كان بيشوف شاشة تنفيذ بلا اسم العميل ولا
+   * TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES بالظبط). الفني كان بيشوف شاشة تنفيذ بلا اسم العميل ولا
    * تليفونه خالص — بلاغ مالك مباشر بسكرين شوت. الكولر بيحسب الشرط، مش الدالة دي. */
   customer_name?: string;
   customer_phone?: string;
@@ -163,7 +163,7 @@ export interface OrderResponseDto {
 
 // address اختياري — القوائم (GET /orders، GET /admin/orders) بتفضل من غير join إضافي، مسارات
 // تفاصيل الطلب الفردي بس (GET /orders/:id، GET /technician/orders/:id|active) بتمرره.
-// technicianContact اختياري كمان — الكولر بيحسب شرط الظهور (TECHNICIAN_CONTACT_VISIBLE_STATUSES)
+// technicianContact اختياري كمان — الكولر بيحسب شرط الظهور (CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES)
 // قبل ما يجيب البيانات أصلاً، فمفيش استعلام إضافي لو الطلب لسه مش وصل لحالة مسموحة.
 /** رسالة إدارة واحدة زي ما العميل بيقراها — بلا هوية كاتبها (خصوصية الموظفين، docs/08 §60.2). */
 export interface OrderCustomerNoticeDto {

@@ -1,7 +1,8 @@
 import {
   ACTIVE_TECHNICIAN_ORDER_STATUSES,
   CUSTOMER_CANCELLABLE_STATUSES,
-  TECHNICIAN_CONTACT_VISIBLE_STATUSES,
+  CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES,
+  TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES,
   canTransition,
   ORDER_TRANSITIONS,
 } from './order-state-machine';
@@ -31,10 +32,9 @@ describe('order-state-machine — اتساق CUSTOMER_CANCELLABLE_STATUSES مع 
   });
 });
 
-// docs/08 §22 بند 1 — تليفون الفني لازم يظهر للعميل بس بعد "تأكيد حجيز حقيقي" (الفني وافق فعليًا،
-// مش بس اتعيّن وينتظر قبوله). اختبار وحدة نقي بيثبت إن مجموعة الحالات دي بالظبط، صفر حالة سابقة
-// لـACCEPTED مسموحة (تسريب رقم فني لعميل قبل ما الفني يوافق أصلاً)، وصفر حالة إلغاء/نزاع نهائية.
-describe('order-state-machine — TECHNICIAN_CONTACT_VISIBLE_STATUSES (docs/08 §22 بند 1)', () => {
+// رقم الفني يظهر للعميل بعد القبول وأثناء التنفيذ فقط، ثم يُحجب فور انتهاء العمل. اختبار وحدة
+// نقي يمنع تسريب الرقم قبل القبول أو بعد الإقفال، حتى لو عدّلت واجهة العميل وحدها.
+describe('order-state-machine — CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES', () => {
   const preConfirmationStatuses = [
     OrderStatus.DRAFT,
     OrderStatus.PENDING_PAYMENT,
@@ -44,12 +44,15 @@ describe('order-state-machine — TECHNICIAN_CONTACT_VISIBLE_STATUSES (docs/08 �
 
   it('صفر حالة "قبل التأكيد" موجودة في مجموعة الظهور — الفني المُعيّن (مش المُوافِق) لازم يترفض', () => {
     for (const status of preConfirmationStatuses) {
-      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
+      expect(CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
     }
   });
 
-  it('صفر حالة إلغاء/نزاع/انتظار-إعادة-اختيار موجودة — الفني القديم متسربش بعد إلغاء/تنازع', () => {
-    const terminalOrDisputedStatuses = [
+  it('يحجب رقم الفني بعد نهاية التنفيذ، وفي الإلغاء أو النزاع أو إعادة الاختيار', () => {
+    const closedOrDisputedStatuses = [
+      OrderStatus.WORK_COMPLETED,
+      OrderStatus.AWAITING_PAYMENT,
+      OrderStatus.COMPLETED,
       OrderStatus.CANCELLED_BY_CUSTOMER,
       OrderStatus.CANCELLED_BY_TECHNICIAN,
       OrderStatus.CANCELLED_BY_SYSTEM,
@@ -58,24 +61,27 @@ describe('order-state-machine — TECHNICIAN_CONTACT_VISIBLE_STATUSES (docs/08 �
       OrderStatus.REFUNDED,
       OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
     ];
-    for (const status of terminalOrDisputedStatuses) {
-      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
+    for (const status of closedOrDisputedStatuses) {
+      expect(CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
     }
   });
 
-  it('ACCEPTED فصاعدًا (لحد الاكتمال) — الحالات اللي الفني ملتزم فيها فعليًا، لازم تظهر', () => {
+  it('يعرض الرقم في حالات التنفيذ الفعلية فقط', () => {
     for (const status of [
       OrderStatus.ACCEPTED,
       OrderStatus.TECHNICIAN_ON_WAY,
       OrderStatus.TECHNICIAN_ARRIVED,
       OrderStatus.IN_PROGRESS,
       OrderStatus.AWAITING_QUOTE_APPROVAL,
-      OrderStatus.WORK_COMPLETED,
-      OrderStatus.AWAITING_PAYMENT,
-      OrderStatus.COMPLETED,
+      OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
     ]) {
-      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(true);
+      expect(CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(true);
     }
+  });
+
+  it('يبقي بيانات العميل عند الفني في التحصيل أو النزاع بعد العمل', () => {
+    expect(TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(OrderStatus.AWAITING_PAYMENT)).toBe(true);
+    expect(TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(OrderStatus.COMPLETED)).toBe(true);
   });
 });
 

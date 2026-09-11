@@ -34,7 +34,7 @@ import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
+import { TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -64,11 +64,10 @@ export class TechnicianOrderExecutionController {
   // فالعنوان بتاعه مضمون الوصول ليه. بيتنادى بعد كل فعل تنفيذي عشان زرار "افتح الملاحة" في
   // apps/technician-app يفضل شغال طول دورة التنفيذ، مش بس أول تحميل للشاشة.
   private async toDto(order: Order, viewerProfileId?: string | null) {
-    // بيانات العميل/الخدمة (docs/08 §56 بند 3) — بلاغ مالك: شاشة الفني كانت بتعرض أزرار التنفيذ
-    // بلا اسم العميل ولا تليفونه ولا اسم الخدمة، فالفني مش عارف رايح لمين ولا يعمل إيه. بيانات
-    // التواصل بتظهر بس بعد تأكيد حجز حقيقي — نفس TECHNICIAN_CONTACT_VISIBLE_STATUSES بالظبط
-    // اللي العميل بيشوف بيها الفني، مرآة كاملة. مفيش استعلام أصلاً قبل الحالة دي.
-    const contactVisible = TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
+    // بيانات العميل/الخدمة (docs/08 §56 بند 3) — بعد القبول تظهر للفني، وتظل متاحة له في
+    // تحصيل الكاش أو النزاع بعد العمل. هذه ليست مرآة لرقم الفني عند العميل: العميل يُخفى عنه
+    // رقم الفني فور انتهاء التنفيذ، بينما الفني قد يحتاج رقم العميل لمسار مالي مفتوح.
+    const contactVisible = TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
     const [address, money, customerContact, serviceNameAr] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
       // docs/08 §60.2 (طلب مالك صريح) — الصورة المالية المفلترة بدل التفصيل الكامل. الفلترة في

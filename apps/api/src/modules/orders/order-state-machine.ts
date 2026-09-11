@@ -244,16 +244,23 @@ export const TECHNICIAN_POST_WORK_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.DISPUTED,
 ];
 
-// الحالات اللي رقم تليفون الفني يظهر فيها للعميل (docs/08 §22 بند 1) — "تأكيد حجيز حقيقي" معناه
-// الفني وافق فعليًا (accepted)، مش بس اتعيّن وقاعد ينتظر قبوله (technician_assigned لسه قبلها).
-// نفس ACTIVE_TECHNICIAN_ORDER_STATUSES فوق + الحالات اللي بعد بدء الشغل (الفني لسه مرتبط بالطلب).
-export const TECHNICIAN_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+// بيانات الفني للعميل تظهر أثناء التنفيذ فقط: من القبول حتى نهاية الشغل الفعلية. بمجرد أن ينتهي
+// العمل، لا يخرج الاسم أو الرقم من API العميل، حتى لو ظل الطلب ظاهرًا في "طلباتي" للفاتورة أو
+// التقييم أو الضمان. التواصل اللاحق يمر عبر المنصة، وليس مباشرة مع الفني.
+export const CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
   OrderStatus.TECHNICIAN_ARRIVED,
   OrderStatus.IN_PROGRESS,
   OrderStatus.AWAITING_QUOTE_APPROVAL,
   OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+]);
+
+// سياسة الفني مختلفة عن العميل عمدًا: بعد انتهاء العمل قد يظل لديه تحصيل كاش أو نزاع مفتوح،
+// ولذلك لا نخفي بيانات العميل منه لمجرد إخفاء رقم الفني عن العميل. فصل المجموعتين يمنع كسر
+// التحصيل بعد العمل مع الحفاظ على خصوصية رقم الفني في الطلبات المغلقة.
+export const TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  ...CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES,
   OrderStatus.WORK_COMPLETED,
   OrderStatus.AWAITING_PAYMENT,
   OrderStatus.COMPLETED,

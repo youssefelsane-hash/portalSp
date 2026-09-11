@@ -38,7 +38,7 @@ import { OrderResponseDto, toOrderResponseDto } from './dto/order-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { UploadPricingFieldImageDto } from './dto/upload-pricing-field-image.dto';
 import { UploadProblemImageDto } from './dto/upload-problem-image.dto';
-import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
+import { CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
@@ -121,7 +121,7 @@ export class OrdersController {
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     // الملكية اتفحصت هنا (findOneOwnedOrThrow) — أي بيانات بعد السطر ده مضمون إنها لعميل صاحب
-    // الطلب فعلاً، بما فيها تليفون الفني (docs/08 §22 بند 1، حماية IDOR).
+    // الطلب فعلاً، بما فيها تليفون الفني أثناء التنفيذ فقط (docs/08 §22 بند 1، حماية IDOR).
     const order = await this.ordersService.findOneOwnedOrThrow(user.sub, id);
     return this.enrichedResponse(user.sub, order);
   }
@@ -136,7 +136,7 @@ export class OrdersController {
   private async enrichedResponse(userId: string, order: Order): Promise<OrderResponseDto> {
     const address = await this.addressesService.findOwnedOrThrow(userId, order.addressId);
     const technicianContact =
-      order.technicianId && TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
+      order.technicianId && CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
         ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
         : null;
     // ADR-0071 — رسايل الإدارة بتتقرا هنا مرة واحدة، فـ`getOne()` وكل الـmutations اللي

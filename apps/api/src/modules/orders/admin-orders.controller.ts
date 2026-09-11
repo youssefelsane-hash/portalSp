@@ -170,7 +170,7 @@ export class AdminOrdersController {
     const { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent } =
       await this.adminOrdersService.getDetail(id);
     // اسم/تليفون الفني بيبانوا للأدمن دايمًا طالما فيه فني معيّن (بخلاف عقد العميل
-    // TECHNICIAN_CONTACT_VISIBLE_STATUSES اللي حماية IDOR ضد العميل قبل تأكيد حجز حقيقي — مبدأ
+    // CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES اللي حماية IDOR ضد العميل قبل تأكيد حجز حقيقي — مبدأ
     // مختلف تمامًا، مش ينطبق على موظف عمليات عنده صلاحية RBAC كاملة على الطلب أصلاً). كانت فجوة
     // عرض حقيقية: شاشة تفاصيل الطلب كانت بتعرض technician_id كـUUID خام بلا اسم/رقم، وموظف
     // العمليات مضطر ينسخ الـUUID يدويًا عشان يعرف مين الفني المُعيَّن.
@@ -180,7 +180,7 @@ export class AdminOrdersController {
     // بيانات العميل + العنوان + اسم الخدمة (docs/08 §73 بند 3) — كانت غايبة تمامًا عن تفاصيل
     // الطلب للأدمن (toOrderResponseDto كانت بتتنادى بـaddress=undefined, viewerExtras=undefined)،
     // رغم إنها متوفرة أصلاً لمسارات العميل/الفني بنفس الشكل بالظبط. الأدمن عنده صلاحية RBAC
-    // كاملة على الطلب أصلاً — صفر شرط ظهور هنا (بخلاف TECHNICIAN_CONTACT_VISIBLE_STATUSES
+    // كاملة على الطلب أصلاً — صفر شرط ظهور هنا (بخلاف CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES
     // المستخدم في مسارات العميل/الفني للحماية من IDOR قبل تأكيد حجز حقيقي).
     const [address, customerContact, serviceNameAr] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
