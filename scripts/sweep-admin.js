@@ -26,7 +26,10 @@ const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2';
 
 // اسم قاعدة البيانات كان مكتوب بالإيد (`baytak_main`) — الأداة كانت بتفشل من أول استعلام على
 // أي جهاز اسم قاعدته مختلف (الجهاز ده اسمها `baytak`). بيتقرا من البيئة دلوقتي.
-const DB = process.env.PGDATABASE || (process.env.DATABASE_URL || '').split('/').pop() || 'baytak';
+// اسم القاعدة بيتقرا من نفس المصدر اللي الـAPI بيقلع بيه — التخمين هنا كان بيخلّي
+// تسجيل الدخول يفشل بصمت والزحف يكمّل كزائر، والمعرّفات ترجّع 404 مالهاش وجود.
+const { resolveApiDatabase } = require('./lib/resolve-api-db');
+const DB = resolveApiDatabase();
 const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,'-Atc',q],
   { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' }).trim();
 

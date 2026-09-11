@@ -27,7 +27,10 @@ const PHONE = process.env.CUSTOMER_PHONE || '+201000000777';
 const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2';
 // اسم قاعدة البيانات بيتقرا من البيئة — كان مكتوب بالإيد في sweep-admin.js وبيفشل على أي جهاز
 // اسم قاعدته مختلف.
-const DB = process.env.PGDATABASE || (process.env.DATABASE_URL || '').split('/').pop() || 'baytak';
+// اسم القاعدة بيتقرا من نفس المصدر اللي الـAPI بيقلع بيه — التخمين هنا كان بيخلّي
+// تسجيل الدخول يفشل بصمت والزحف يكمّل كزائر، والمعرّفات ترجّع 404 مالهاش وجود.
+const { resolveApiDatabase } = require('./lib/resolve-api-db');
+const DB = resolveApiDatabase();
 
 const sql = (q) =>
   execFileSync('psql', ['-h', 'localhost', '-U', 'baytak', '-d', DB, '-Atc', q], {
@@ -104,7 +107,55 @@ async function visit(page, path, label) {
   return { status, errors: [...new Set(errors)], failed: [...new Set(failed)] };
 }
 
+/**
+ * بيتأكد إن حساب العميل الاختباري **موجود فعلاً** قبل ما نحاول ندخل بيه.
+ *
+ * كان ده سبب «دخول العميل: ❌ فشل — الزحف هيكمل كزائر» على كل تشغيلة: شاشة `/login` بتشتغل
+ * لحساب قايم بس، والحساب ده مكانش موجود في قاعدة الـAPI أصلاً. النتيجة إن **كل الصفحات
+ * المحمية (طلباتي، حسابي، المحفظة، الشكاوى…) مكانتش بتتفحص خالص** والتقرير بيقول ٤٦/٤٦ نضيفة
+ * — وهو فعليًا بيفحص نسخة الزائر منها.
+ *
+ * التسجيل بيتم بمسار الـOTP الحقيقي (نفس اللي العميل بيعدّي عليه)، مش بحقن صف في القاعدة.
+ */
+async function ensureCustomerExists() {
+  const exists = sql(`SELECT count(*) FROM users WHERE phone_number='${PHONE}'`) !== '0';
+  if (exists) return true;
+
+  const post = async (path, body) => {
+    const res = await fetch(`${API}/api/v1${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { ok: res.ok, body: await res.json().catch(() => null) };
+  };
+
+  const requested = await post('/auth/otp/request', { phone_number: PHONE, purpose: 'register' });
+  if (!requested.ok) {
+    console.log(`⚠️  مقدرناش نطلب OTP لتسجيل حساب الاختبار — الزحف هيكمل كزائر`);
+    return false;
+  }
+  sql(
+    `UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false
+     WHERE id=(SELECT id FROM otp_codes WHERE phone_number='${PHONE}' ORDER BY created_at DESC LIMIT 1)`,
+  );
+  const registered = await post('/auth/register', {
+    phone_number: PHONE,
+    otp_code: '123456',
+    full_name: 'عميل زحف الويب',
+    user_type: 'customer',
+  });
+  if (!registered.ok) {
+    console.log('⚠️  فشل تسجيل حساب الاختبار — الزحف هيكمل كزائر');
+    return false;
+  }
+  console.log('ℹ️  حساب العميل الاختباري اتسجّل لأول مرة');
+  return true;
+}
+
 (async () => {
+  await ensureCustomerExists();
+
   const browser = await chromium.launch({
     executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
     args: ['--no-sandbox'],

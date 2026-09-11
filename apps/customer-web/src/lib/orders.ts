@@ -314,6 +314,39 @@ export const createMatchPreview = (authedFetch: AuthedFetch, body: CreateMatchPr
     body: JSON.stringify(body),
   });
 
+export interface PreviewOrderBody {
+  service_id: string;
+  address_id: string;
+  booking_mode?: 'individual' | 'team' | 'emergency';
+  scheduled_at?: string;
+  field_values?: Record<string, string | number | boolean>;
+  addon_ids?: string[];
+  promo_code?: string;
+  building_code?: string;
+  requested_technician_id?: string;
+  requested_technician_company_id?: string;
+  schedule_slot_id?: string;
+  warranty_plan_id?: string;
+}
+
+/**
+ * **تفكيك السعر الكامل قبل التأكيد** — نفس المصدر اللي `apps/customer-app` بيستخدمه بالحرف
+ * (`orders_repository.dart → previewPrice`).
+ *
+ * ليه ده مهم: الويب كان بيعتمد على `POST /services/:id/estimate` — تقدير خدمة **مجرّد** مالوش
+ * علم بالعنوان ولا المنفّذ ولا الخصم ولا الإيداع، فبيرجّع رقم واحد اسمه «السعر المتوقع». وده
+ * سبب «فلو التسعير مختلف» في بلاغ المالك: التطبيق بيعرض بنود حقيقية وإيداع، والويب بيعرض رقم
+ * تقريبي وجملة بتحذّر إنه ممكن يزيد.
+ *
+ * `POST /orders/preview` بيرجّع **نفس القيم بالحرف** اللي `POST /orders` هيحسبها لو اتبعتت نفس
+ * المدخلات — فاللي العميل شافه هو اللي هيتسجّل.
+ */
+export const previewOrder = (authedFetch: AuthedFetch, body: PreviewOrderBody) =>
+  authedFetch<PreviewOrderResponseDto>('/orders/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
 export interface MyOrdersPageDto {
   items: OrderResponseDto[];
   meta: { next_cursor: string | null; has_more: boolean };
