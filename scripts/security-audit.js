@@ -344,6 +344,11 @@ async function run() {
     'modules/common/health/health.controller.ts', // liveness
     'modules/analytics/funnel-tracking.controller.ts', // حدث قبل الدخول — throttle مش مصادقة
     'modules/feature-flags/feature-flags.controller.ts', // تعليق «مفيش @Public هنا عمداً»
+    // ── مراجعة 2026-09-11 ────────────────────────────────────────────────────────────────
+    // التلاتة دول اتراجعوا سطر-بسطر: صفر بيانات شخصية في الرد، وصفر كتابة على أي كيان حقيقي.
+    'modules/settings/social-links.controller.ts', // روابط سوشيال معلنة للفوتر — نفس فلسفة legal-entity
+    'modules/promotions/promo-code-link.controller.ts', // /p/:code — تحويل QR، بيسجّل زيارة مجهولة وبيـ302، throttle 120/د
+    'modules/marketing/marketing-link.controller.ts', // /r/:code — نفس الشيء لمصادر الحملات، throttle 120/د
   ]);
   const unexpected = publicList.filter((f) => !EXPECTED_PUBLIC.has(f));
   h.record(

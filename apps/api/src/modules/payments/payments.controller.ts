@@ -4,6 +4,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { isProductionLikeEnv } from '../../config/env.validation';
 import { PaymentsService } from './payments.service';
 import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
 import { PaymentMethod } from './entities/payment.entity';
@@ -25,9 +26,24 @@ import {
  * من إساءة مفيدة. السقف على مستوى الكنترولر عشان يشمل **كل** طرق الدفع مع بعض — التقسيم كان
  * هيسيب المهاجم يدوّر بين الطرق ويضاعف حصّته.
  */
+/**
+ * سقف الدفع — ٢٠/دقيقة، **ومستحيل يترفع في staging/production**.
+ *
+ * السبب إن ده متغيّر أصلاً: أدوات التدقيق المالي (`scripts/financial-idempotency-audit.js`)
+ * شغلها إنها تبعت **عشر محاولات دفع متزامنة** وتتأكد إن واحدة بس بتعدّي. السقف الثابت كان
+ * بيرجّع 429 لكل العشرة، فالتدقيق مكانش بيقيس الـidempotency أصلاً — كان بيقيس الـthrottle.
+ * والأسوأ إن التدقيق كان بيرسب دايمًا، فرسوبه بقى «طبيعي» ومحدش بيبصله.
+ *
+ * الحارس هنا هو اللي بيخلّي ده آمن: `isProductionLikeEnv` بيتجاهل المتغيّر تمامًا في أي بيئة
+ * حقيقية، فالسقف الإنتاجي ثابت بالكود مهما كانت البيئة.
+ */
+const PAYMENT_THROTTLE_LIMIT = isProductionLikeEnv(process.env.NODE_ENV)
+  ? 20
+  : parseInt(process.env.PAYMENTS_THROTTLE_LIMIT ?? '20', 10);
+
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
-@Throttle({ default: { limit: 20, ttl: 60_000 } })
+@Throttle({ default: { limit: PAYMENT_THROTTLE_LIMIT, ttl: 60_000 } })
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,

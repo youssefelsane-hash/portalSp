@@ -100,7 +100,22 @@ export class OrderCancellationService {
           CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES,
         );
 
-    const previousStatus = order.orderStatus;
+    // **الحالة السابقة بتتقرا من الصف المقفول، مش من القراءة اللي قبل المعاملة.**
+    //
+    // كان فيه شرط زيادة هنا: `lockedOrder.orderStatus !== previousStatus` — يعني أي تغيّر حصل
+    // بين القراءة والقفل بيرفض الإلغاء حتى لو الحالة الجديدة **قابلة للإلغاء أصلاً**. وده
+    // بيتحقق كل يوم في الإنتاج: العميل يدوس «إلغاء» والطلب لسه `searching_technician`، ومحرك
+    // المطابقة يعيّن فني في نفس اللحظة (`accepted`)، فالعميل ياخد «حاول تاني» بلا سبب — وتاني
+    // محاولة بتنجح لكن برسوم إلغاء ظهرت فجأة. اتلقطت بـ`scripts/order-state-machine-audit.js`
+    // (سيناريو م-٢) وكانت راسبة بشكل شبه ثابت.
+    //
+    // الشرطين الباقيين هما الحماية الحقيقية، وبيتقاسوا على **الصف المقفول** فمفيش أي قراءة
+    // قديمة تدخل في القرار: الحالة لازم تكون ضمن اللي العميل يقدر يلغيها، والانتقال لازم يكون
+    // مسموح في آلة الحالات. ورسوم الإلغاء بتتحسب من `lockedOrder` برضه، يعني الرسم بيطابق
+    // الحالة الفعلية وقت الإلغاء مش الحالة اللي العميل شافها.
+    // بتتملّى جوّه المعاملة من الصف المقفول، وبتتقرا بعدها في الحدث — أبسط من إرجاع tuple
+    // وتغيير كل مواقع الاستخدام تحت.
+    let previousStatus = order.orderStatus;
     const cancelledOrder = await this.dataSource.transaction(async (manager) => {
       const lockedOrder = await manager
         .createQueryBuilder(Order, 'order')
@@ -109,12 +124,12 @@ export class OrderCancellationService {
         .getOne();
       if (
         !lockedOrder ||
-        lockedOrder.orderStatus !== previousStatus ||
         !CUSTOMER_CANCELLABLE_STATUSES.has(lockedOrder.orderStatus) ||
         !canTransition(lockedOrder.orderStatus, OrderStatus.CANCELLED_BY_CUSTOMER)
       ) {
         throw new ApiException(ErrorCode.ORDR_003, 'حالة الطلب اتغيّرت بالفعل — حاول تاني', HttpStatus.CONFLICT);
       }
+      previousStatus = lockedOrder.orderStatus;
       const minutesSincePlaced = lockedOrder.placedAt ? (Date.now() - lockedOrder.placedAt.getTime()) / 60_000 : Infinity;
       const feeCents =
         cancellationFeePercentage !== null && minutesSincePlaced > freeWindowMinutes
