@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { Order, OrderPaymentStatus } from '../orders/entities/order.entity';
+import { Order, OrderPaymentStatus, OrderType } from '../orders/entities/order.entity';
 
 export type OrderPriceIncreaseSource =
   | 'level_premium'
@@ -75,6 +75,7 @@ export class OrderFinancialFinalizationService {
     if (order.commissionableBaseCents !== null) {
       order.commissionableBaseCents += commissionableIncreaseCents;
     }
+    await this.applyRevisitCommissionRate(manager, order, commissionableIncreaseCents);
     await manager.save(order);
 
     return {
@@ -141,5 +142,56 @@ export class OrderFinancialFinalizationService {
       previousCommissionableBaseCents,
       newCommissionableBaseCents: order.commissionableBaseCents,
     };
+  }
+
+  /**
+   * **بَقّة مالية حقيقية (بلاغ المالك 2026-09-11): «المنصة بتاخد صفر من كل شغل مدفوع بيتضاف
+   * على إعادة الزيارة».**
+   *
+   * طلب إعادة الزيارة تحت الضمان بيتعمل بنسبة عمولة **صفر** مثبّتة على الصف
+   * (`order-creation.service.ts`: `originalOrder ? 0 : service.commissionPercentage`). وده
+   * **صح تمامًا للشغل المجاني نفسه**: المنصة بتتنازل عن عمولتها على إعادة شغلانة خدت عمولتها
+   * مرة.
+   *
+   * بس النسبة دي **snapshot على الطلب**، فأول ما الفني يكتشف إنه محتاج قطعة غيار أو أجرة
+   * إضافية والعميل يوافق، الشغل الجديد المدفوع ده بيدخل بنفس الصفر. الأرقام المتقاسة فعليًا
+   * (`scripts/revisit-commission-audit.js`) على قطعة بـ300 ج.م وخدمة عمولتها 20%:
+   *
+   * | | قبل الإصلاح | المفروض |
+   * |---|---|---|
+   * | نصيب الفني | 300.00 ج.م | 240.00 ج.م |
+   * | نصيب المنصة | **0.00 ج.م** | 60.00 ج.م |
+   *
+   * **ليه التصحيح آمن على الوعاء كله؟** لأن وعاء العمولة على طلب إعادة الزيارة بيبدأ من **صفر**
+   * (كل مكوّناته صفر وقت الإنشاء، `order-creation.service.ts` §1527+) — يعني الوعاء مافيهوش غير
+   * الشغل الجديد المدفوع. فتطبيق نسبة الخدمة على الوعاء كله = تطبيقها على الشغل الجديد بالظبط،
+   * بلا أي مساس بالجزء المجاني.
+   *
+   * **ليه القراءة هنا مش من المستدعي؟** لأن ده مسار الكتابة الوحيد لأي زيادة سعر، فقراءة النسبة
+   * جوّاه بتخلّي الإصلاح شامل لكل المسارات (بنود إضافية، عرض بعد المعاينة، مراجعة تشخيص،
+   * زيادة مستوى) — ومش ممكن مسار جديد ينساها. SQL خام عمدًا: قراءة عمود واحد مش سبب كافٍ إن
+   * طبقة مالية خالصة تعتمد على مستودع الكتالوج.
+   *
+   * الشرط مقيّد بـ**إعادة الزيارة تحديدًا** (مش أي طلب نسبته صفر): خدمة عمولتها صفر أصلاً، أو
+   * طلب الأدمن صفّر عمولته بقرار، مالهمش أي علاقة بالاستثناء ده ومايتلمسوش.
+   */
+  private async applyRevisitCommissionRate(
+    manager: EntityManager,
+    order: Order,
+    commissionableIncreaseCents: number,
+  ): Promise<void> {
+    if (commissionableIncreaseCents <= 0) return;
+    if (order.orderType !== OrderType.REVISIT) return;
+    if (order.commissionRateApplied === null) return;
+    if (Number(order.commissionRateApplied) !== 0) return;
+
+    const [row] = await manager.query<{ commission_percentage: string }[]>(
+      `SELECT commission_percentage FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const rate = Number(row?.commission_percentage);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) return;
+
+    order.commissionRateApplied = String(rate);
   }
 }

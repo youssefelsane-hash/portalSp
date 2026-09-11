@@ -1,0 +1,105 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+/// أيقونات السوشيال بعلامات البراند الحقيقية وألوانها (طلب مالك 2026-09-11).
+///
+/// > «الروابط شغالة، بس بتظهر كنص جوّه إطار. أنا عايز الأيقونة الحقيقية بتاعت المنصة بلونها —
+/// >  فيسبوك أزرق، إنستجرام بالتدرّج — أيقونة صغيرة يدوس عليها تروح للرابط.»
+///
+/// **ده بيلغي قرار سابق صراحةً.** الفوتر كان بيكتب اسم الشبكة كنص، والتعليق وقتها كان:
+/// «Material مافيهاش أيقونات براندات، وأي أيقونة بديلة بتبقى تخمين بصري غلط». الحل مش أيقونة
+/// بديلة ولا تخمين — دي **نفس مسارات الـSVG** المستخدمة في `apps/customer-web` بالحرف
+/// (`src/components/social-icons.tsx`)، فالشكل واحد في الويب والتطبيق ومفيش نسختين بيفرقوا.
+///
+/// الألوان هي ألوان البراند الرسمية. استخدام علامات المنصات محكوم بإرشادات كل منصة (شكل
+/// ثابت، بلا تشويه، على خلفية فيها تباين كافٍ) — اللي تحت ملتزم بيها، وأي تعديل عليها لازم
+/// يفضل ملتزم بيها كمان.
+class SocialBrandMark extends StatelessWidget {
+  const SocialBrandMark({super.key, required this.network, this.size = 20});
+
+  final String network;
+  final double size;
+
+  /// نفس `PATHS` في `apps/customer-web/src/components/social-icons.tsx`.
+  static const _paths = <String, String>{
+    'facebook':
+        'M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06C2 17.08 5.66 21.24 10.44 22v-7.03H7.9v-2.91h2.54V9.85c0-2.52 1.49-3.91 3.77-3.91 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.78-1.63 1.57v1.89h2.78l-.44 2.91h-2.34V22C18.34 21.24 22 17.08 22 12.06z',
+    'instagram':
+        'M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.42.36 1.06.41 2.23.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.42.16-1.06.36-2.23.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.8-.25-2.23-.41-.56-.22-.96-.48-1.38-.9-.42-.42-.68-.82-.9-1.38-.16-.42-.36-1.06-.41-2.23-.06-1.27-.07-1.65-.07-4.85s.01-3.58.07-4.85c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.42-.16 1.06-.36 2.23-.41 1.27-.06 1.65-.07 4.85-.07zm0 3.18a6.66 6.66 0 100 13.32 6.66 6.66 0 000-13.32zm0 10.99a4.33 4.33 0 110-8.66 4.33 4.33 0 010 8.66zm8.47-11.25a1.56 1.56 0 11-3.11 0 1.56 1.56 0 013.11 0z',
+    'tiktok':
+        'M16.6 5.82A4.28 4.28 0 0115.54 3h-3.09v12.4a2.59 2.59 0 01-2.59 2.5 2.59 2.59 0 112.59-2.59v-3.1a5.68 5.68 0 105.68 5.68V9.4a7.34 7.34 0 004.28 1.37V7.68a4.28 4.28 0 01-1.81-.38 4.29 4.29 0 01-2-1.48z',
+    'linkedin':
+        'M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05a3.74 3.74 0 013.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.07 2.07 0 110-4.14 2.07 2.07 0 010 4.14zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0z',
+    'youtube':
+        'M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.5A3.02 3.02 0 00.5 6.19C0 8.08 0 12 0 12s0 3.92.5 5.81a3.02 3.02 0 002.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 002.12-2.14C24 15.92 24 12 24 12s0-3.92-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z',
+  };
+
+  /// ألوان البراند الرسمية. إنستجرام وتيك توك مالهمش لون واحد — بيتعاملوا بالتدرّج تحت.
+  static const _solidColors = <String, Color>{
+    'facebook': Color(0xFF1877F2),
+    'linkedin': Color(0xFF0A66C2),
+    'youtube': Color(0xFFFF0000),
+  };
+
+  static const _instagramGradient = LinearGradient(
+    begin: Alignment.bottomLeft,
+    end: Alignment.topRight,
+    colors: [
+      Color(0xFFFEDA75),
+      Color(0xFFFA7E1E),
+      Color(0xFFD62976),
+      Color(0xFF962FBF),
+      Color(0xFF4F5BD5),
+    ],
+  );
+
+  static const _tiktokGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF25F4EE), Color(0xFF010101), Color(0xFFFE2C55)],
+    stops: [0.0, 0.5, 1.0],
+  );
+
+  /// هل الشبكة دي ليها علامة معروفة عندنا؟ الفوتر بيرجع للنص لو لأ — أحسن من أيقونة مخمّنة.
+  static bool supports(String network) => _paths.containsKey(network);
+
+  @override
+  Widget build(BuildContext context) {
+    final path = _paths[network];
+    if (path == null) return const SizedBox.shrink();
+
+    final svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        '<path fill="white" d="$path"/></svg>';
+    final mark = SvgPicture.string(
+      svg,
+      width: size,
+      height: size,
+      // الرسم أبيض ثم بيتلوّن بالتدرّج/اللون فوقه عبر ShaderMask — كده اللون واحد لكل الحالات
+      // (لون صلب = تدرّج من لون واحد)، ومفيش فرعين للرسم.
+      fit: BoxFit.contain,
+    );
+
+    final gradient = network == 'instagram'
+        ? _instagramGradient
+        : network == 'tiktok'
+        ? _tiktokGradient
+        : null;
+    final solid = _solidColors[network];
+
+    if (gradient != null) {
+      return ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (bounds) => gradient.createShader(bounds),
+        child: mark,
+      );
+    }
+
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (bounds) =>
+          LinearGradient(colors: [solid!, solid]).createShader(bounds),
+      child: mark,
+    );
+  }
+}

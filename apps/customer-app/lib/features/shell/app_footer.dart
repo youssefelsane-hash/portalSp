@@ -7,6 +7,7 @@ import '../projects/my_projects_screen.dart';
 import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'site_info_repository.dart';
+import 'social_brand_mark.dart';
 
 /// فوتر التطبيق — **النظير الحرفي لفوتر الموقع** (`apps/customer-web/src/components/site-footer.tsx`).
 ///
@@ -104,27 +105,56 @@ class _AppFooterState extends State<AppFooter> {
 
           if (_social.isNotEmpty) ...[
             const SizedBox(height: 16),
+            // طلب مالك 2026-09-11: «بتظهر كنص جوّه إطار… عايز الأيقونة الحقيقية بلونها،
+            // أيقونة صغيرة يدوس عليها تروح للرابط». العلامة الحقيقية بقت متاحة عبر
+            // `SocialBrandMark` (نفس مسارات SVG المستخدمة في الويب بالحرف)، فالسبب القديم
+            // اللي كان مكتوب هنا («مفيش أيقونات براندات») مابقاش قايم.
+            //
+            // شبكة ملهاش علامة عندنا بترجع للشكل القديم — نص واضح أحسن من أيقونة مخمّنة.
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 12,
+              runSpacing: 12,
               children: [
                 for (final link in _social)
-                  OutlinedButton(
-                    onPressed: () => _openUrl(link.url),
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
+                  if (SocialBrandMark.supports(link.network))
+                    Tooltip(
+                      message: socialLabelsAr[link.network] ?? link.network,
+                      child: InkWell(
+                        onTap: () => _openUrl(link.url),
+                        borderRadius: BorderRadius.circular(999),
+                        // مساحة لمس ٤٤×٤٤ حوالين أيقونة ٢٢ — أقل من كده بيبقى صعب يتداس
+                        // على موبايل (نفس الحد الأدنى في إرشادات الاتنين).
+                        child: Semantics(
+                          button: true,
+                          label: socialLabelsAr[link.network] ?? link.network,
+                          child: SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: Center(
+                              child: SocialBrandMark(
+                                network: link.network,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    OutlinedButton(
+                      onPressed: () => _openUrl(link.url),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                      ),
+                      child: Text(
+                        socialLabelsAr[link.network] ?? link.network,
+                        style: theme.textTheme.labelMedium,
                       ),
                     ),
-                    // اسم الشبكة كنص مش أيقونة براند: Material مافيهاش أيقونات براندات، وأي
-                    // أيقونة بديلة بتبقى تخمين بصري غلط. النص أوضح وأصدق.
-                    child: Text(
-                      socialLabelsAr[link.network] ?? link.network,
-                      style: theme.textTheme.labelMedium,
-                    ),
-                  ),
               ],
             ),
           ],

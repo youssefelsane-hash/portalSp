@@ -71,6 +71,35 @@ export interface OrderPaymentSummaryDto {
   customer_confirmed_transfer_at: string | null;
 }
 
+/**
+ * صف الاسترداد في **قايمة متابعة الأدمن** (`GET /admin/refunds`) — أوسع من
+ * `OrderRefundSummaryDto` اللي جوّه صفحة الطلب، لأن القايمة دي بتتقري بلا سياق طلب.
+ *
+ * طلب مالك صريح 2026-09-11: «لما الاسترداد بيتقبل تلقائيًا من النظام — وده المسار الصح —
+ * لازم يبان للأدمن عشان يتابع». عشان كده `is_automatic` و`needs_reconciliation` جزء من
+ * العقد نفسه مش استنتاج في الواجهة.
+ */
+export interface AdminRefundResponseDto {
+  id: string;
+  refund_number: string;
+  payment_id: string;
+  order_id: string | null;
+  order_number: string | null;
+  amount_cents: number;
+  refund_type: RefundType;
+  refund_method: RefundMethod;
+  refund_status: RefundStatus;
+  reason_notes: string | null;
+  requested_at: string;
+  completed_at: string | null;
+  provider_refund_id: string | null;
+  /** النظام عمله لوحده (إلغاء طلب مدفوع مقدّمًا قبل أي شغل) — مش قرار أدمن. */
+  is_automatic: boolean;
+  /** فلوس معلّقة: البوابة اتنادت وردها ما وصلش، ومحتاج موظف يثبّت النتيجة (AUD-012). */
+  needs_reconciliation: boolean;
+  reconciled_at: string | null;
+}
+
 export interface OrderRefundSummaryDto {
   id: string;
   amount_cents: number;

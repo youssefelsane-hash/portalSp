@@ -6,7 +6,12 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { TechniciansService } from '../technicians/technicians.service';
 import { OrderCustomerNotice } from './entities/order-customer-notice.entity';
 import { Order, OrderStatus } from './entities/order.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
+import {
+  ACTIVE_TECHNICIAN_ORDER_STATUSES,
+  ENGAGED_TECHNICIAN_ORDER_STATUSES,
+  TECHNICIAN_ATTENTION_ORDER_STATUSES,
+  TECHNICIAN_POST_WORK_ORDER_STATUSES,
+} from './order-state-machine';
 
 export interface CustomerOrdersPage {
   items: Order[];
@@ -170,8 +175,18 @@ export class OrderQueriesService {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     return this.orders.find({
       where: [
-        { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
+        // شغل مستحق دلوقتي (غير مجدول) — المجدول مكانه `findUpcomingConfirmedForTechnician`.
+        {
+          technicianId: profile.id,
+          orderStatus: In([...ACTIVE_TECHNICIAN_ORDER_STATUSES, ...TECHNICIAN_ATTENTION_ORDER_STATUSES]),
+          scheduledAt: IsNull(),
+        },
+        // بمجرد ما يتحرّك، الطلب بقى «الشغل الحالي» مهما كانت جدولته.
         { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
+        // **بعد ما الشغل خلص** (تحصيل كاش، نزاع) — الجدولة مالهاش معنى، الموعد عدّى خلاص.
+        // من غير الفرع ده الطلب كان بيختفي من تطبيق الفني وهو لسه عليه كاش يحصّله أو نزاع
+        // مرفوع ضده (بلاغ المالك 2026-09-11).
+        { technicianId: profile.id, orderStatus: In(TECHNICIAN_POST_WORK_ORDER_STATUSES) },
       ],
       order: { updatedAt: 'DESC' },
     });
@@ -255,7 +270,11 @@ export class OrderQueriesService {
     return this.orders
       .createQueryBuilder('o')
       .where('o.technician_id = :technicianId', { technicianId: profile.id })
-      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
+      // `technician_assigned` معاه عمدًا: شغل متأخر متعيّن ولسه ما اتقبلش هو **بالظبط** اللي
+      // لازم يطفو للفني، مش يختفي لأنه ما وصلش لـ`accepted` (بلاغ المالك 2026-09-11).
+      .andWhere('o.order_status IN (:...statuses)', {
+        statuses: [OrderStatus.ACCEPTED, ...TECHNICIAN_ATTENTION_ORDER_STATUSES],
+      })
       .andWhere('o.scheduled_at IS NOT NULL')
       .andWhere(`${OrderQueriesService.CAIRO_DAY_EXPR} < ${OrderQueriesService.CAIRO_TODAY_EXPR}`)
       .orderBy('o.scheduled_at', 'ASC')
@@ -276,7 +295,13 @@ export class OrderQueriesService {
       .where('o.technician_id = :technicianId', { technicianId: profile.id })
       // بمجرد ما الفني يبدأ التحرك، الطلب ينتقل لقسم "الشغل الحالي" حتى لو كان مجدولًا؛ إبقاؤه
       // هنا كان يعرض نفس الطلب مرتين. القادم المؤكد هو المقبول الذي لم يبدأ تنفيذه فقط.
-      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
+      // `technician_assigned` معاه عمدًا: الطلب **المجدول** المتعيّن ولسه ما اتقبلش كان مالوش
+      // مكان خالص — لا هنا (الشرط كان `accepted` بس) ولا في «الشغل الحالي» (بيستبعد المجدول
+      // في الفرع الأول). فالفني بيتعيّن له شغل مجدول ومايشوفهوش في أي شاشة
+      // (بلاغ المالك 2026-09-11، متقاس في `technician-order-visibility-audit.js`).
+      .andWhere('o.order_status IN (:...statuses)', {
+        statuses: [OrderStatus.ACCEPTED, ...TECHNICIAN_ATTENTION_ORDER_STATUSES],
+      })
       .andWhere('o.scheduled_at IS NOT NULL')
       .andWhere(`${OrderQueriesService.CAIRO_DAY_EXPR} >= ${OrderQueriesService.CAIRO_TODAY_EXPR}`)
       .orderBy('o.scheduled_at', 'ASC')

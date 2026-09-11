@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import { withTransactionRetry } from '../../common/db/transaction-retry';
 import { returningRows } from '../../common/db/returning-rows';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -87,6 +87,13 @@ export interface TechnicianMoneyView {
   earningPending: boolean;
   /** حصّة الفني ده هو من وعاء الطاقم (ADR-0040) — بتساوي الوعاء كله لو مفيش طاقم. */
   isCrewShare: boolean;
+  /**
+   * فيه استرداد مكتمل للعميل على الطلب ده (طلب مالك 2026-09-11).
+   *
+   * **واقعة بلا رقم، عمدًا** — docs/08 §60.2 بيمنع أرقام فلوس العميل عن الفني. الغرض إن
+   * الفني يفهم ليه مستحقه اتغيّر لما يفتح الطلب، مش إنه يعرف رجع للعميل كام.
+   */
+  hasCustomerRefund: boolean;
   /** طلب مقفل بلا snapshot حصص تاريخي؛ الرقم لا يجوز تخمينه بقواعد اليوم. */
   earningSnapshotMissing: boolean;
 }
@@ -515,6 +522,7 @@ export class PaymentsService {
       fullyPaidOnline: paidOnlineCents > 0 && paidOnlineCents >= breakdown.totalAmountCents,
       earningPending,
       isCrewShare,
+      hasCustomerRefund: breakdown.refundedAmountCents > 0,
       earningSnapshotMissing,
     };
   }
@@ -2929,12 +2937,50 @@ export class PaymentsService {
   // رسالة الرفض في refundOrder() بتحول الأدمن لمراجعة يدوية، لكن مفيش أي endpoint كان بيرجّع
   // قايمة استردادات خالص — الأدمن معندوش طريقة يعرف إن فيه استرداد عالق من الأساس غير استعلام
   // DB مباشر. migration 0140 (`refunds.view`) بتحمي الـendpoint ده.
-  async listRefunds(status?: RefundStatus): Promise<Refund[]> {
-    return this.refunds.find({
-      where: status ? { refundStatus: status } : {},
-      order: { requestedAt: 'DESC' },
-      take: 200,
-    });
+  /**
+   * قايمة الاستردادات للأدمن — **سطح المتابعة الوحيد** للفلوس اللي خرجت أو معلّقة.
+   *
+   * بترجّع رقم الطلب مع كل صف: القايمة من غيره أرقام استرداد بلا سياق، والأدمن مضطر يفتح
+   * كل واحد لوحده عشان يعرف هو بتاع إيه.
+   *
+   * الفلاتر مقصودة بالاسم:
+   * - `automatic` — اللي النظام عمله لوحده (طلب مالك 2026-09-11: لازم يبان للمتابعة).
+   * - `needsReconciliation` — صف `processing` عبر البوابة، يعني **فلوس معلّقة في النص**
+   *   مستنية موظف يثبّت نتيجة المزود (AUD-012 — النظام عمدًا مابيخمّنش النتيجة).
+   */
+  async listRefunds(filters: {
+    status?: RefundStatus;
+    automatic?: boolean;
+    needsReconciliation?: boolean;
+  } = {}): Promise<{ refund: Refund; orderNumber: string | null }[]> {
+    const where: FindOptionsWhere<Refund> = {};
+    if (filters.status) where.refundStatus = filters.status;
+    if (filters.needsReconciliation) {
+      where.refundStatus = RefundStatus.PROCESSING;
+      where.refundMethod = RefundMethod.ORIGINAL_METHOD;
+    }
+    if (filters.automatic !== undefined) {
+      where.requestedByUserId = filters.automatic
+        ? PLATFORM_SYSTEM_USER_ID
+        : Not(PLATFORM_SYSTEM_USER_ID);
+    }
+
+    const refunds = await this.refunds.find({ where, order: { requestedAt: 'DESC' }, take: 200 });
+    if (refunds.length === 0) return [];
+
+    // استعلام تاني مقصود بدل JOIN في نفس الـquery builder: `getRawAndEntities` مع `take`
+    // وjoin على كيان مش مربوط بعلاقة بيكسر في TypeORM (`createOrderByCombinedWithSelectExpression`
+    // بيدوّر على metadata عمود مش موجودة). ده أوضح وبيعدّي استعلامين بس مهما كان طول القايمة.
+    const orderIds = [...new Set(refunds.map((refund) => refund.orderId).filter((id): id is string => !!id))];
+    const orderRows = orderIds.length
+      ? await this.orders.find({ where: { id: In(orderIds) }, select: { id: true, orderNumber: true } })
+      : [];
+    const numberById = new Map(orderRows.map((order) => [order.id, order.orderNumber]));
+
+    return refunds.map((refund) => ({
+      refund,
+      orderNumber: refund.orderId ? (numberById.get(refund.orderId) ?? null) : null,
+    }));
   }
 
   /**

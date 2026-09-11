@@ -13,6 +13,10 @@
  *   node scripts/clean-test-data.js --order-number-like 'P7-%'
  */
 const { Client } = require('pg');
+// نفس مصدر بيانات الاتصال اللي بتستخدمه كل التدقيقات الحية. من غير ده كان لازم `DATABASE_URL`
+// تكون مُصدَّرة في الشِل، وغير كده الأداة بتقع بـ`FATAL 28000` (فشل مصادقة) اللي مابيقولش
+// إن السبب إعداد ناقص — وده حصل فعلاً وقت مناداتها من سكربت تاني.
+const { DATABASE_URL } = require('./lib/live-harness');
 
 const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -27,7 +31,7 @@ const where = serviceId ? `service_id = $1` : orderId ? `id = $1` : `order_numbe
 const param = serviceId ?? orderId ?? numberLike;
 
 (async () => {
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const db = new Client({ connectionString: DATABASE_URL });
   await db.connect();
   try {
     await db.query('BEGIN');

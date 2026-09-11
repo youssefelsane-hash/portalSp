@@ -125,6 +125,13 @@ class Order {
 
   /// الطلب اتقفل تاريخيًا من غير snapshot للحصة؛ التطبيق لا يعرض رقمًا مخمّنًا.
   final bool earningSnapshotMissing;
+
+  /// فيه استرداد اتعمل للعميل على الطلب ده (طلب مالك 2026-09-11).
+  ///
+  /// **واقعة بلا أي رقم، عمدًا**: docs/08 §60.2 بيمنع أرقام فلوس العميل عن الفني، فالعقد
+  /// بيبعت عَلَم بس. الغرض إن الفني يفهم ليه مستحقه اتغيّر — ويشوفه **جوّه الطلب** لما
+  /// يفتحه، مش كإشعار بره.
+  final bool hasCustomerRefund;
   // بَقّة مالية حقيقية (بلاغ مالك 2026-09-03): مش كل رد من الباك-إند بيحمل العقد المالي للفني —
   // `OrderResponseDto` العام (مسارات مشتركة مع العميل) مافيهوش `my_earning_cents` ولا
   // `cash_to_collect_cents` خالص. `?? 0` لوحده كان بيحوّل «الحقل مش موجود» لـ«مستحقك أنت صفر»،
@@ -178,6 +185,7 @@ class Order {
     this.earningPending = false,
     this.isCrewShare = false,
     this.earningSnapshotMissing = false,
+    this.hasCustomerRefund = false,
     this.hasMoneyView = true,
     required this.paymentStatus,
     // قيمة افتراضية مش `required`: حقل جديد، و'confirmed' معناها «سعره مستقر» — وده السلوك
@@ -211,6 +219,7 @@ class Order {
     earningPending: json['earning_pending'] as bool? ?? false,
     isCrewShare: json['is_crew_share'] as bool? ?? false,
     earningSnapshotMissing: json['earning_snapshot_missing'] as bool? ?? false,
+    hasCustomerRefund: json['has_customer_refund'] as bool? ?? false,
     hasMoneyView: json.containsKey('my_earning_cents'),
     paymentStatus: json['payment_status'] as String,
     // الطلبات القديمة قبل ADR-0063 مالهاش الحقل ده — 'confirmed' يعني «سعره مستقر»،

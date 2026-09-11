@@ -108,9 +108,10 @@ export async function SiteFooter() {
                       rel="noopener noreferrer"
                       aria-label={SOCIAL_LABELS_AR[link.network]}
                       title={SOCIAL_LABELS_AR[link.network]}
-                      className="motion-press flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-variant/60 text-muted transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary"
+                      className="motion-press flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface-variant/60 transition-colors hover:border-primary hover:bg-primary/10"
                     >
-                      <SocialIcon network={link.network} className="h-[18px] w-[18px]" />
+                      {/* طلب مالك 2026-09-11: الأيقونة بلون البراند، مش رمادية ولا نص. */}
+                      <SocialIcon network={link.network} brand className="h-[18px] w-[18px]" />
                     </a>
                   </li>
                 ))}

@@ -48,4 +48,40 @@ describe('EarningsPolicyService', () => {
       'missing its platform commission percentage snapshot',
     );
   });
+
+  // ADR-0055 §3 — «القسمة بتشتغل على participant_role مش على technician_kind». المطابقة هنا
+  // كانت بتقرا الاتنين، فالمساعد القائد كان بيوصل للحاسبة بتركيبة مرفوضة والتسوية كلها بتفشل.
+  it('بيدّي المساعد القائد دور فني في القسمة — مش دور مساعد', async () => {
+    const rows = (technicianKind: 'technician' | 'assistant') => [
+      {
+        technician_id: 'leader', participant_role: 'leader', technician_kind: technicianKind,
+        technician_level: 'professional', level_weight_bps: 12_500, assistant_ratio_bps: 6_500,
+        service_skill: 'standard', service_skill_factor_bps: 10_000,
+        individual_adjustment_bps: null, order_adjustment_bps: null, used_neutral_skill_fallback: false,
+      },
+      {
+        technician_id: 'helper', participant_role: 'assistant', technician_kind: 'assistant',
+        technician_level: 'professional', level_weight_bps: 12_500, assistant_ratio_bps: 6_500,
+        service_skill: 'standard', service_skill_factor_bps: 10_000,
+        individual_adjustment_bps: null, order_adjustment_bps: null, used_neutral_skill_fallback: false,
+      },
+    ];
+    const run = async (technicianKind: 'technician' | 'assistant') => {
+      const manager = {
+        query: jest.fn()
+          .mockResolvedValueOnce([{ settlement_policy_version: 2, commission_rate_applied: 0 }])
+          .mockResolvedValueOnce(rows(technicianKind)),
+      };
+      return new EarningsPolicyService({ manager } as never).calculateOrder('order', 165_000, manager as never);
+    };
+
+    const asAssistant = await run('assistant');
+    expect(asAssistant.participantShares[0]).toMatchObject({
+      technicianId: 'leader', technicianKindSnapshot: 'assistant', earningRole: 'technician', isLeader: true,
+    });
+    // نفس أرقام القائد الفني بالظبط — نوع الحساب مابيخصمش من اللي عمل الشغلانة.
+    expect(asAssistant.participantShares.map((share) => share.shareCents)).toEqual(
+      (await run('technician')).participantShares.map((share) => share.shareCents),
+    );
+  });
 });

@@ -142,8 +142,23 @@ export class EarningsPolicyService {
     );
 
     return rows.map((row) => {
-      const earningRole: EarningRole =
-        row.technician_kind === 'assistant' || row.participant_role === 'assistant' ? 'assistant' : 'technician';
+      // **ADR-0055 §3 بالحرف**: «القسمة بتشتغل على `participant_role` مش على `technician_kind`»
+      // — مساعد شايل الطلب لوحده بياخد **نصيب القائد الكامل**، لأنه عمل الشغلانة كلها وسعر
+      // الخدمة هو سعرها. تسعيرة المساعد المخفّضة معناها «نصيبك كمساعِد لفني تاني»، مش سقف
+      // دائم على أي فلوس ياخدها.
+      //
+      // السطر ده كان بيقرا `technician_kind` كمان، فالمساعد القائد كان بيطلع `earningRole`
+      // = assistant مع `isLeader` = true — التركيبة اللي `calculateEarningsV2` بترفضها. النتيجة
+      // المتقاسة حيًا: التسوية بترمي `PAY_003` والطلب بيتعلّق على `work_completed/unpaid`
+      // **للأبد** — لا العميل يقدر يدفع، ولا المساعد بياخد حاجة، ولا المنصة بتاخد عمولتها.
+      // ADR-0055 كان بيقول «مفيش سطر كود مالي اتغيّر» على أساس إن القسمة على الدور — والسطر
+      // ده كان بالظبط هو الاستثناء اللي مالحقش يتشال وقتها.
+      //
+      // حماية المساعد **المنضم لطاقم حد تاني** مافقدتش: `resolveEffectiveMemberType` بيفرض
+      // `member_type = 'assistant'` عليه وقت الضم، فبيوصل هنا بـ`participant_role = 'assistant'`
+      // وياخد تسعيرة المساعد زي ما هي. والحارس في `calculateEarningsV2` لسه بيقفل على أي صف
+      // بيانات مخالف (مساعد مسجّل `team_member` من غير ما يكون القائد).
+      const earningRole: EarningRole = row.participant_role === 'assistant' ? 'assistant' : 'technician';
       return {
         technicianId: row.technician_id,
         earningRole,

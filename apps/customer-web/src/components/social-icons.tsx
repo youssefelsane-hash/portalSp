@@ -7,8 +7,16 @@ import { SocialNetwork } from '@/lib/social-links';
  * (الفوتر بيتعرض في كل مكان). وكمان `currentColor` بيخلّيهم يمشوا مع الثيم الفاتح والداكن
  * تلقائيًا من غير نسختين لكل أيقونة.
  *
- * المسارات مبسّطة من العلامات الرسمية للاستخدام كأيقونة رابط — بلا شعار كامل ولا ألوان
- * البراند بتاعة المنصات (استخدامها له شروط استخدام خاصة بكل منصة).
+ * المسارات مبسّطة من العلامات الرسمية للاستخدام كأيقونة رابط — بلا شعار كامل.
+ *
+ * **تحديث 2026-09-11 (طلب مالك صريح)**: «عايز الأيقونة بلون البراند — فيسبوك أزرق، إنستجرام
+ * بالتدرّج». التعليق هنا كان بيقول إننا بنتجنّب ألوان البراند؛ ده اتغيّر بقرار المالك.
+ * الألوان تحت هي الرسمية، والاستخدام ملتزم بإرشادات المنصات (شكل ثابت، بلا تشويه، تباين كافٍ)
+ * — أي تعديل لازم يفضل ملتزم بيها.
+ *
+ * نفس المسارات دي بالحرف مستخدمة في تطبيق العميل
+ * (`apps/customer-app/lib/features/shell/social_brand_mark.dart`) — أي تعديل هنا يتنقل هناك،
+ * وإلا الشكل يفرق بين الموقع والتطبيق.
  */
 const PATHS: Record<SocialNetwork, string> = {
   facebook:
@@ -23,9 +31,64 @@ const PATHS: Record<SocialNetwork, string> = {
     'M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.5 3.55 12 3.55 12 3.55s-7.5 0-9.38.5A3.02 3.02 0 00.5 6.19C0 8.08 0 12 0 12s0 3.92.5 5.81a3.02 3.02 0 002.12 2.14c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3.02 3.02 0 002.12-2.14C24 15.92 24 12 24 12s0-3.92-.5-5.81zM9.55 15.57V8.43L15.82 12l-6.27 3.57z',
 };
 
-export function SocialIcon({ network, className }: { network: SocialNetwork; className?: string }) {
+/** ألوان البراند الرسمية. إنستجرام وتيك توك مالهمش لون واحد فبيتعاملوا بتدرّج تحت. */
+const BRAND_COLORS: Partial<Record<SocialNetwork, string>> = {
+  facebook: '#1877F2',
+  linkedin: '#0A66C2',
+  youtube: '#FF0000',
+};
+
+const GRADIENTS: Partial<Record<SocialNetwork, { id: string; stops: [string, string][] }>> = {
+  instagram: {
+    id: 'osta-ig-gradient',
+    stops: [
+      ['0%', '#FEDA75'],
+      ['25%', '#FA7E1E'],
+      ['50%', '#D62976'],
+      ['75%', '#962FBF'],
+      ['100%', '#4F5BD5'],
+    ],
+  },
+  tiktok: {
+    id: 'osta-tt-gradient',
+    stops: [
+      ['0%', '#25F4EE'],
+      ['50%', '#010101'],
+      ['100%', '#FE2C55'],
+    ],
+  },
+};
+
+/**
+ * `brand` بيرسم بلون المنصة؛ من غيره بيرجع لـ`currentColor` (بيمشي مع الثيم الفاتح والداكن).
+ *
+ * التدرّجات معرّفة **جوّه نفس الـsvg** مش في `<defs>` عامة: الأيقونة ممكن تتعرض أكتر من مرة
+ * في نفس الصفحة، ومعرّف عام واحد كان هيخلّي نسخة تسرق تعريف التانية لو اتشالت من الـDOM.
+ */
+export function SocialIcon({
+  network,
+  className,
+  brand = false,
+}: {
+  network: SocialNetwork;
+  className?: string;
+  brand?: boolean;
+}) {
+  const gradient = brand ? GRADIENTS[network] : undefined;
+  const gradientId = gradient ? `${gradient.id}-${network}` : undefined;
+  const fill = gradientId ? `url(#${gradientId})` : brand ? (BRAND_COLORS[network] ?? 'currentColor') : 'currentColor';
+
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" className={className}>
+    <svg viewBox="0 0 24 24" fill={fill} aria-hidden="true" focusable="false" className={className}>
+      {gradient && gradientId && (
+        <defs>
+          <linearGradient id={gradientId} x1="0%" y1="100%" x2="100%" y2="0%">
+            {gradient.stops.map(([offset, color]) => (
+              <stop key={offset} offset={offset} stopColor={color} />
+            ))}
+          </linearGradient>
+        </defs>
+      )}
       <path d={PATHS[network]} />
     </svg>
   );

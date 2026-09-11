@@ -31,6 +31,20 @@ import 'order_date_labels.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
 
+/// الحالات اللي فتح شاشة التنفيذ تلقائيًا عليها له معنى — الفني فعلاً في نص الشغلانة.
+///
+/// عمدًا **مش** بتشمل `work_completed`/`awaiting_payment`/`disputed`: الشغل خلص، والطلب بيفضل
+/// ظاهر في القايمة عشان الفني يتابعه (تحصيل/نزاع) من غير ما يتفتح في وشه كل مرة.
+/// ولا `technician_assigned`: لسه ما قبلش الطلب أصلاً.
+const _kAutoOpenStatuses = {
+  'accepted',
+  'technician_on_way',
+  'technician_arrived',
+  'in_progress',
+  'awaiting_quote_approval',
+  'awaiting_initial_quote_approval',
+};
+
 class AvailableOrdersScreen extends StatefulWidget {
   const AvailableOrdersScreen({super.key});
 
@@ -178,11 +192,18 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       final activeOrders = await _repository.fetchActiveOrders();
       if (mounted) setState(() => _activeOrders = activeOrders);
-      if (activeOrders.length == 1 && mounted) {
+      // **الفتح التلقائي لشاشة التنفيذ بس للشغل اللي فعلاً تحت التنفيذ.**
+      //
+      // الباك-إند بقى بيرجّع كمان الطلبات اللي **خلصت وبتستنى** (تحصيل كاش، نزاع، متعيّن ولسه
+      // ما اتقبلش) — وده مقصود وصح: كانت مختفية تمامًا من التطبيق رغم إن الفني له فيها مصلحة
+      // قايمة (بلاغ المالك 2026-09-11). بس فتح شاشة التنفيذ تلقائيًا على طلب **خلص** أول ما
+      // التطبيق يفتح مالهوش معنى — بتفضل ظاهرة في القايمة والفني يدوس عليها لو عايز.
+      final autoOpenable = activeOrders.where((o) => _kAutoOpenStatuses.contains(o.orderStatus)).toList();
+      if (autoOpenable.length == 1 && mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) =>
-                OrderExecutionScreen(initialOrder: activeOrders.single),
+                OrderExecutionScreen(initialOrder: autoOpenable.single),
           ),
         );
         await _refreshActiveOrders();
