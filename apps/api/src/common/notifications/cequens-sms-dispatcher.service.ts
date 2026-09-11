@@ -48,6 +48,7 @@ export class CequensSmsDispatcher implements SmsDispatcher {
   private readonly username?: string;
   private readonly password?: string;
   private readonly senderName?: string;
+  private readonly recipientFormat: 'msisdn' | 'e164';
 
   /** توكن OAuth المخزّن في الذاكرة — مابيتكتبش في أي لوج ولا قاعدة. */
   private cachedToken: { value: string; expiresAtMs: number } | null = null;
@@ -61,6 +62,7 @@ export class CequensSmsDispatcher implements SmsDispatcher {
     this.username = config.get<string>('notifications.cequens.username');
     this.password = config.get<string>('notifications.cequens.password');
     this.senderName = config.get<string>('notifications.cequens.senderName');
+    this.recipientFormat = config.get<'msisdn' | 'e164'>('notifications.cequens.recipientFormat') ?? 'msisdn';
 
     const hasCredentials = Boolean(this.apiKey) || Boolean(this.clientId && this.clientSecret && this.username && this.password);
     // اسم المُرسِل (Sender ID) إجباري: CEQUENS بيرفض الرسالة من غيره، ولازم يكون معتمد للدولة.
@@ -88,8 +90,17 @@ export class CequensSmsDispatcher implements SmsDispatcher {
           senderName: this.senderName,
           messageType: 'text',
           messageText: `${input.titleAr}\n${input.bodyAr}`,
-          // E.164 إجباري — نفس الشكل اللي `normalizePhoneNumber` بيطلّعه في التسجيل.
-          recipients: to,
+          // **شكل رقم المستلم — أول حاجة تتأكد منها في أول إرسال حقيقي.**
+          //
+          // إحنا بنخزّن E.164 بالـ'+' (`normalizePhoneNumber` بيطلّع `+201000000777`)، وأمثلة
+          // CEQUENS في التوثيق بتستخدم الرقم الدولي **من غير '+'** (`201000000777`). الفرق ده
+          // مش تجميلي: لو المزوّد رفض الشكل، **كل كود تحقق بيفشل** وبوابة الـSMS هي القناة
+          // الوحيدة لتسليمه — يعني صفر تسجيل دخول لأي مستخدم حقيقي.
+          //
+          // مابنراهنش على واحد: الافتراضي هو شكل التوثيق (`msisdn`)، و`CEQUENS_RECIPIENT_FORMAT=e164`
+          // بيرجّع الـ'+' من غير أي تعديل كود لو الحساب طلب كده. نفس المبدأ المتّبع أصلاً في
+          // `CEQUENS_BASE_URL`/`CEQUENS_AUTH_URL`.
+          recipients: this.formatRecipient(to),
         }),
       });
 
@@ -104,6 +115,11 @@ export class CequensSmsDispatcher implements SmsDispatcher {
       this.logger.error(`فشل إرسال SMS لـ${maskPhone(to)}`, err instanceof Error ? err.stack : undefined);
       return { delivered: false, failureReason: err instanceof Error ? err.message : 'خطأ غير معروف في إرسال SMS' };
     }
+  }
+
+  /** بيحوّل E.164 المخزّن للشكل اللي الحساب بيقبله — راجع الشرح عند `recipients` فوق. */
+  private formatRecipient(phone: string): string {
+    return this.recipientFormat === 'e164' ? phone : phone.replace(/^\+/, '');
   }
 
   /** المفتاح الجاهز لو موجود، وإلا توكن OAuth محفوظ في الذاكرة ومتجدّد قبل انتهائه. */

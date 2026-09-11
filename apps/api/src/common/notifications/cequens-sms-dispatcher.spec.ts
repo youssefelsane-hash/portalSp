@@ -79,7 +79,9 @@ describe('CequensSmsDispatcher', () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.senderName).toBe(FAKE_SENDER);
     expect(body.messageType).toBe('text');
-    expect(body.recipients).toBe('+201000000000');
+    // **من غير '+'** — الشكل اللي أمثلة CEQUENS بتستخدمه، وهو الافتراضي
+    // (`CEQUENS_RECIPIENT_FORMAT=msisdn`). التحويل نفسه مغطّى في `cequens-contract.spec.ts`.
+    expect(body.recipients).toBe('201000000000');
     expect(String(body.messageText)).toContain(OTP_CODE);
   });
 

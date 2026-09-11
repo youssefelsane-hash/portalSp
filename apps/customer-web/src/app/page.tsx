@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
 import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
 import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
+import { CategoryTile } from '@/components/catalog/category-tile';
 import { useCatalogZone } from '@/lib/catalog-zone';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
@@ -301,9 +302,9 @@ export default function HomePage() {
           {visibleError ? (
             <p className="rounded-2xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger">{visibleError}</p>
           ) : visibleCategories === null ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-[104px] animate-pulse rounded-2xl bg-surface-variant" />
+                <div key={i} className="aspect-square animate-pulse rounded-xl bg-surface-variant" />
               ))}
             </div>
           ) : visibleCategories.length === 0 ? (
@@ -311,33 +312,9 @@ export default function HomePage() {
               مفيش فئات خدمات متاحة دلوقتي
             </p>
           ) : (
-            <div className="motion-list grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="motion-list grid grid-cols-3 gap-3 sm:grid-cols-4">
               {(shownCategories ?? []).map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/categories/${c.id}`}
-                  className="motion-rise motion-press group flex h-[104px] flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-3 text-center transition-colors hover:border-primary"
-                >
-                  {c.icon_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- رابط يحدده الأدمن، مش أصل معروف وقت البناء
-                    <img
-                      src={c.icon_url}
-                      alt=""
-                      width={32}
-                      height={32}
-                      loading="lazy"
-                      decoding="async"
-                      className="h-8 w-8 shrink-0 object-contain"
-                    />
-                  ) : (
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                      {c.name_ar.charAt(0)}
-                    </span>
-                  )}
-                  <span className="line-clamp-2 text-sm font-medium leading-tight text-foreground group-hover:text-primary">
-                    {c.name_ar}
-                  </span>
-                </Link>
+                <CategoryTile key={c.id} category={c} />
               ))}
             </div>
           )}
@@ -379,20 +356,27 @@ export default function HomePage() {
                 href={`/services/${service.id}`}
                 className="motion-rise motion-press group flex flex-col items-center gap-2 text-center"
               >
-                <span className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface transition-[transform,border-color] duration-200 group-hover:-translate-y-0.5 group-hover:border-primary">
+                {/* **بلا إطار وبلا خلفية** — بلاغ المالك 2026-09-11: «ما يبقاش باين إطار
+                    الصورة، والـPNG اللي خلفيته شفافة تبان عليها خلفية الموقع». الأندرويد
+                    (`FeaturedServiceItem`) بيرسم الصورة على طول من غير صندوق، والويب كان
+                    لافّها في `border border-border bg-surface`. دايرة القص هنا شكل مش صندوق:
+                    مفيش لون خلفه، فالشفافية بتوصل لخلفية الصفحة زي ما هي. */}
+                <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full transition-transform duration-200 group-hover:-translate-y-0.5">
                   {service.featured_icon_url || service.icon_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={service.featured_icon_url || service.icon_url || ''}
                       alt=""
-                      width={40}
-                      height={40}
+                      width={56}
+                      height={56}
                       loading="lazy"
                       decoding="async"
-                      className="h-10 w-10 object-contain"
+                      className="h-full w-full object-contain"
                     />
                   ) : (
-                    <span className="text-lg font-semibold text-primary">
+                    // نفس `_FeaturedInitial` في الأندرويد بالحرف — دايرة بلون أساسي خفيف
+                    // وأول حرف. ده الاحتياطي الوحيد اللي الأندرويد بيعرضه هنا.
+                    <span className="flex h-full w-full items-center justify-center rounded-full bg-primary/10 text-lg font-bold text-primary">
                       {(service.featured_name_ar || service.name_ar).charAt(0)}
                     </span>
                   )}

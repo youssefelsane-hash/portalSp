@@ -13,6 +13,18 @@ import 'package:customer_app/features/shell/app_footer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// بيسجّل كل push عشان نتأكد إن الدوسة **وصلت** فعلاً — بلاغ المالك كان «تدوس على أي حاجة
+/// ما بيفتحهاش»، و`findsOneWidget` على النص مابيقولش إن الدوسة بتعمل حاجة.
+class _RouteSpy extends NavigatorObserver {
+  final pushed = <Route<dynamic>>[];
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    pushed.add(route);
+    super.didPush(route, previousRoute);
+  }
+}
+
 Future<void> _pumpFooter(WidgetTester tester, Size size) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -98,5 +110,59 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 1));
     expect(tester.takeException(), isNull);
+  });
+
+  // ── الدوسة نفسها بتوصل؟ ─────────────────────────────────────────────────
+  // بلاغ المالك 2026-09-11: «الفوتر في الأندرويد ما بيفتحش أي حاجة». الروابط الخارجية
+  // سببها كان في `openExternalUrl` (اتصلح واتغطّى في `external_links_test.dart`)، وده
+  // بيغطّي النص التاني: روابط جوّه التطبيق.
+  testWidgets('«كل الفئات» بيفتح شاشة فعلاً', (tester) async {
+    final spy = _RouteSpy();
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ar', 'EG'),
+        navigatorObservers: [spy],
+        home: const Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(body: SingleChildScrollView(child: AppFooter())),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 1));
+
+    final before = spy.pushed.length;
+    await tester.tap(find.text('كل الفئات'));
+    await tester.pump();
+
+    expect(spy.pushed.length, greaterThan(before), reason: 'الدوسة لازم تعمل push لشاشة');
+  });
+
+  testWidgets('«تواصل معنا» بيفتح شاشة فعلاً', (tester) async {
+    final spy = _RouteSpy();
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ar', 'EG'),
+        navigatorObservers: [spy],
+        home: const Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(body: SingleChildScrollView(child: AppFooter())),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 1));
+
+    final before = spy.pushed.length;
+    await tester.tap(find.text('تواصل معنا'));
+    await tester.pump();
+
+    expect(spy.pushed.length, greaterThan(before));
   });
 }

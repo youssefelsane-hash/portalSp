@@ -61,6 +61,13 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # لازمين لاختبار `core/external_links.dart` بس: الاختبار بيستبدل نسخة منصة
+  # `url_launcher` بواحدة مزيّفة **بترمي** زي أندرويد بالظبط (مش بترجّع false) — وده الشكل
+  # الوحيد اللي بيمسك البَقّة اللي خلّت الفوتر يفشل بصمت. الاتنين جايين أصلاً كـtransitive
+  # من `url_launcher`، فالإعلان هنا مابيضيفش أي حزمة جديدة على `pubspec.lock`.
+  plugin_platform_interface: ^2.1.8
+  url_launcher_platform_interface: ^2.3.2
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

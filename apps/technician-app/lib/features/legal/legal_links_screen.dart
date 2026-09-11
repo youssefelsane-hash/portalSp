@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_config.dart';
+import '../../core/external_links.dart';
 
 /// الشروط والسياسات (بوابة P0-1 في docs/23).
 ///
@@ -11,19 +11,14 @@ import '../../core/api_config.dart';
 class LegalLinksScreen extends StatelessWidget {
   const LegalLinksScreen({super.key});
 
-  /// الموقع مشتق من عنوان الـAPI — نفس المبدأ المتّبع في `resolveApiAssetUrl`، فمفيش دومين
-  /// تاني مكتوب في الكود لازم يتحدّث لوحده لما البيئة تتغيّر.
-  static String get _siteOrigin => apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+  /// عنوان الموقع من `api_config.dart` — **مش** اشتقاق محلي من `apiBaseUrl`.
+  ///
+  /// الاشتقاق المحلي القديم كان بيدّي عنوان الباك-إند نفسه، فـ«شروط الاستخدام» كانت بتفتح
+  /// `api.ostahome.com/legal/terms` وترجّع 404. تفاصيل السبب الكامل في `siteBaseUrl`.
+  static String get _siteOrigin => siteBaseUrl;
 
   Future<void> _open(BuildContext context, String path) async {
-    final uri = Uri.parse('$_siteOrigin$path');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('مقدرناش نفتح $uri')),
-        );
-      }
-    }
+    await openExternalUrl(context, Uri.parse('$_siteOrigin$path'));
   }
 
   @override

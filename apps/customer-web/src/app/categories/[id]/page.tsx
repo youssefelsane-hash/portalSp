@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { use } from 'react';
 import Link from 'next/link';
-import { fetchServices } from '@/lib/catalog';
-import { ServiceDto } from '@/lib/api-types';
-import { formatEgp } from '@/lib/orders';
+import { fetchCategories, fetchServices } from '@/lib/catalog';
+import { ServiceCategoryDto, ServiceDto } from '@/lib/api-types';
 import { useCatalogZone } from '@/lib/catalog-zone';
+import { ServiceCard } from '@/components/catalog/service-card';
 
 // نفس ServicesScreen في customer-app (Script 3 Phase 2) — بيعرض كل خدمات الفئة، وضع الحجز بيتقرر
 // بعدين في شاشة الخدمة نفسها لو الخدمة فعلاً بتدعم أكتر من وضع.
@@ -14,6 +14,10 @@ export default function CategoryServicesPage({ params }: { params: Promise<{ id:
   const { id } = use(params);
   const catalogZone = useCatalogZone();
   const [services, setServices] = useState<ServiceDto[] | null>(null);
+  // الأندرويد بيعرض اسم الفئة في شريط العنوان (`ServicesScreen`) لأنه بيستقبل الكائن كامل.
+  // الويب بيوصله `id` بس من الرابط، فبنجيب الفئة بالاسم — من غيرها العنوان بيفضل «الخدمات»
+  // في كل فئة، والمستخدم اللي فتح لينك مباشر مش عارف هو فين.
+  const [category, setCategory] = useState<ServiceCategoryDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadedZoneKey, setLoadedZoneKey] = useState<string | null>(null);
 
@@ -31,6 +35,10 @@ export default function CategoryServicesPage({ params }: { params: Promise<{ id:
         setError('تعذّر تحميل الخدمات');
         setLoadedZoneKey(loadKey);
       });
+    // فشل ده مش بيأثر على الصفحة — العنوان بيرجع للنص العام وخلاص.
+    fetchCategories(catalogZone.zoneId ?? undefined)
+      .then((items) => setCategory(items.find((c) => c.id === id) ?? null))
+      .catch(() => setCategory(null));
   }, [catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId, id]);
 
   const activeZoneKey = catalogZone.zoneId ?? 'public';
@@ -45,14 +53,21 @@ export default function CategoryServicesPage({ params }: { params: Promise<{ id:
       : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold">الخدمات</h1>
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      <h1 className="mb-6 text-2xl font-bold">{category?.name_ar ?? 'الخدمات'}</h1>
       {visibleError ? (
         <p className="text-danger">{visibleError}</p>
       ) : visibleServices === null ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-surface-variant" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="overflow-hidden rounded-2xl border border-border bg-surface">
+              <div className="aspect-[3/1] animate-pulse bg-surface-variant" />
+              <div className="space-y-2 p-4">
+                <div className="h-4 w-2/3 animate-pulse rounded bg-surface-variant" />
+                <div className="h-3 w-full animate-pulse rounded bg-surface-variant" />
+                <div className="h-4 w-24 animate-pulse rounded bg-surface-variant" />
+              </div>
+            </div>
           ))}
         </div>
       ) : visibleServices.length === 0 ? (
@@ -63,37 +78,11 @@ export default function CategoryServicesPage({ params }: { params: Promise<{ id:
           </Link>
         </div>
       ) : (
-        <div className="space-y-3">
+        // شبكة مش قايمة عمودية: الكارت دلوقتي بصورة عريضة، وعمود واحد على الديسكتوب
+        // بيخلّي الكارت الواحد عرضه 768px وصورته شريط ضخم بلا داعي.
+        <div className="motion-list grid gap-4 sm:grid-cols-2">
           {visibleServices.map((s) => (
-            <Link
-              key={s.id}
-              href={`/services/${s.id}`}
-              className="flex items-center justify-between gap-4 rounded-xl border border-border bg-surface p-4 hover:border-primary"
-            >
-              <div className="flex items-center gap-4">
-                {s.icon_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-                  <img
-                    src={s.icon_url}
-                    alt=""
-                    width={56}
-                    height={56}
-                    loading="lazy"
-                    decoding="async"
-                    className="h-14 w-14 shrink-0 rounded-lg bg-surface-variant object-cover"
-                  />
-                ) : (
-                  <div className="h-14 w-14 shrink-0 rounded-lg bg-surface-variant" />
-                )}
-                <div>
-                  <p className="font-medium">{s.name_ar}</p>
-                  {s.short_description_ar && <p className="text-sm text-muted">{s.short_description_ar}</p>}
-                </div>
-              </div>
-              <span className="shrink-0 font-semibold text-primary">
-                {s.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(s.base_price_cents)}
-              </span>
-            </Link>
+            <ServiceCard key={s.id} service={s} />
           ))}
         </div>
       )}

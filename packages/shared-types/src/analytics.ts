@@ -34,6 +34,12 @@ export interface FunnelStageRow {
   count: number;
   /** محاولات فشلت — المنتج منع العميل يكمّل، مش إنه غيّر رأيه. الفرق ده هو أهم حاجة في الفنل. */
   failed_count: number;
+  /**
+   * أحداث ناجحة مالهاش هوية محاولة (لا طلب ولا جلسة) — كلاينت قديم، تخزين متصفح مقفول، أو
+   * سكربت بينده الـAPI مباشرة. **مش داخلة في `count`**: حدث مجهول ماينفعش يتحسب «محاولة»
+   * وإلا المرحلة بتتضخّم بعدد النداءات مش بعدد الناس (بَقّة حقيقية اتصلحت 2026-09-11).
+   */
+  untracked_count: number;
   pct_of_entry: number | null;
   dropped_from_previous: number | null;
   drop_rate_from_previous: number | null;

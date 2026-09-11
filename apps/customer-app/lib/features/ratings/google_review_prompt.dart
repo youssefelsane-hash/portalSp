@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../core/external_links.dart';
 
 // طلب مراجعة Google (docs/10 بند 40) — كان مؤجّل عمدًا كـbacklog. بيظهر بس بعد تقييم عميل
 // عالي فعلاً (الباك-إند هو اللي بيقرر should_prompt، مش الواجهة — راجع
@@ -25,7 +25,7 @@ Future<void> showGoogleReviewPromptDialog(BuildContext context, String reviewUrl
   // جوّه WebView مضمّن (نفس المشكلة اللي PortfolioLinkViewerScreen بيتفاداها بالعكس بالظبط:
   // هنا المطلوب الخروج للتطبيق/المتصفح الحقيقي، مش التضمين).
   final uri = Uri.tryParse(reviewUrl);
-  if (uri != null) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (uri != null && context.mounted) {
+    await openExternalUrl(context, uri);
   }
 }
