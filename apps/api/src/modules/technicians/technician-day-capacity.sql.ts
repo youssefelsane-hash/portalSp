@@ -270,10 +270,16 @@ export function dailyCapacityExceededExpr(opts: CapacityConflictOpts): string {
   const candidateMinutesExpr = `COALESCE(${candidateLoad.durationMinutesExpr}, ${candidateLoad.serviceDefaultMinutesExpr}, ${DEFAULT_JOB_MINUTES})`;
   const candidateSpanDaysExpr = candidateSpanDaysFromSource(candidateLoad, dailyCapacityParam);
   const candidateStartDay = `(COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date`;
+  // **بداية النافذة الفعلية** (ADR-0083 §2) — المرشّح بيُضم للشغل من دلوقتي، فالأيام اللي عدّت
+  // مش قابلة للحجز ومايصحّش تتحمّل عليه. طلب فريق بدأ من ١٠ أيام وممتد ٢٠ كان بيتقاس على
+  // العشرين يوم كلهم، فأي مرشّح عنده أي شغل في أي يوم منهم يبان «مشغول» وهو فاضي (بلاغ مالك،
+  // docs/08 §138). لطلب بيبدأ النهاردة أو بعدها `GREATEST` بترجّع نفس القيمة بالحرف، فالتغيير
+  // مقصور بالبناء على الحالة المكسورة وحدها.
+  const windowStartDay = `GREATEST(${candidateStartDay}, (now() AT TIME ZONE 'Africa/Cairo')::date)`;
   return `EXISTS (
     SELECT 1
     FROM generate_series(
-      ${candidateStartDay}::timestamp,
+      ${windowStartDay}::timestamp,
       (${candidateStartDay} + (GREATEST(${candidateSpanDaysExpr}, 1) - 1))::timestamp,
       interval '1 day'
     ) AS cd(candidate_day)

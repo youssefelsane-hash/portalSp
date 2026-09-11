@@ -110,7 +110,8 @@ import {
   paymentStatusTone,
   isOrderCancellable,
   isOrderReassignable,
-  isOrderReschedulable,
+  orderCancelBlockedReason,
+  orderRescheduleBlockedReason,
   TIMELINE_SOURCE_LABELS,
   timelineEventSourceTone,
   DISPATCH_ROUTE_LABELS,
@@ -1114,6 +1115,12 @@ export default function OrderDetailPage() {
   const assistantMembers = teamMembers.filter((m) => m.member_type === 'assistant');
   const crewMembers = teamMembers;
 
+  // ADR-0083 §5 — السبب بيتحسب مرة واحدة: الزرار وحالة التعطيل ونص الشرح كلهم بيقروا منه، فمفيش
+  // احتمال إن الزرار يبان مفتوح والفورم يقول مقفول.
+  const adminRescheduleBlockedReason = order
+    ? orderRescheduleBlockedReason(order.order_status, Boolean(order.technician_id))
+    : null;
+
   // إعادة جدولة عامة من الأدمن (Script 4 Part K §42، ADR-0034) — الأيام المتاحة بتتحسب في
   // الباك-إند بنفس محرك التوافر الموحّد اللي المطابقة بتستخدمه (technicianAvailabilityCondition)،
   // مش من صفوف سلوت. اليوم غير المتاح بيتعرض معطّل بسببه، مش بيختفي بلا تفسير.
@@ -1756,14 +1763,19 @@ export default function OrderDetailPage() {
               </p>
             )}
           </CardContent>
-          {(isOrderCancellable(order.order_status) || isOrderReassignable(order.order_status)) && (
-            <CardFooter className="flex-col items-stretch gap-3">
+          {/* ADR-0083 §5 — الزرار بيفضل **ظاهر دايمًا**. طلب المالك الحرفي: «إلغاء الطلب دايمًا
+              ظاهرة للأدمن، يكون دايمًا عنده أكسس». إخفاؤه كان بيخلي الأدمن يفتكر إن الميزة مش
+              موجودة؛ دلوقتي في الحالة الممنوعة بيبقى معطّل ومعاه السبب والمسار البديل. */}
+          <CardFooter className="flex-col items-stretch gap-3">
               <div className="flex gap-2">
-                {isOrderCancellable(order.order_status) && (
-                  <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
-                    إلغاء الطلب
-                  </Button>
-                )}
+                <Button
+                  variant="destructive"
+                  disabled={isSaving || !isOrderCancellable(order.order_status)}
+                  title={orderCancelBlockedReason(order.order_status) ?? undefined}
+                  onClick={() => setShowCancelForm((s) => !s)}
+                >
+                  إلغاء الطلب
+                </Button>
                 {isOrderReassignable(order.order_status) && hasPermission('orders.reassign') && (
                   <Button
                     variant="outline"
@@ -1777,7 +1789,13 @@ export default function OrderDetailPage() {
                   </Button>
                 )}
               </div>
-              {showCancelForm && (
+              {orderCancelBlockedReason(order.order_status) && (
+                <p className="rounded-md border border-border bg-muted/40 p-2 text-sm text-muted-foreground">
+                  <span className="font-medium">الإلغاء الإداري مقفول دلوقتي:</span>{' '}
+                  {orderCancelBlockedReason(order.order_status)}
+                </p>
+              )}
+              {showCancelForm && isOrderCancellable(order.order_status) && (
                 <form onSubmit={handleCancel} className="flex flex-col gap-2">
                   {['awaiting_initial_quote_approval', 'awaiting_quote_approval', 'in_progress'].includes(order.order_status) && (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
@@ -1846,16 +1864,26 @@ export default function OrderDetailPage() {
                 </form>
               )}
             </CardFooter>
-          )}
-          {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — مستقلة عن isOrderCancellable
-              فوق (accepted مش cancellable لكنها reschedulable). استخدام تشغيلي: العميل يتصل
-              يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه. */}
-          {(isOrderReschedulable(order.order_status) || (order.order_status === 'searching_technician' && !order.technician_id)) && hasPermission('orders.reschedule') && (
+          {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42، ADR-0083 §3/§5). استخدام تشغيلي:
+              العميل يتصل يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه — أو الفني وصل ولقى
+              المكان مقفول. الزرار **ظاهر دايمًا** بطلب المالك، ومعطّل بسبب مكتوب لما يتقفل. */}
+          {hasPermission('orders.reschedule') && (
             <CardFooter className="flex-col items-stretch gap-3">
-              <Button type="button" variant="outline" disabled={isSaving} onClick={handleOpenAdminRescheduleForm}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSaving || adminRescheduleBlockedReason !== null}
+                title={adminRescheduleBlockedReason ?? undefined}
+                onClick={handleOpenAdminRescheduleForm}
+              >
                 إعادة جدولة الموعد
               </Button>
-              {showAdminRescheduleForm && (
+              {adminRescheduleBlockedReason && (
+                <p className="rounded-md border border-border bg-muted/40 p-2 text-sm text-muted-foreground">
+                  <span className="font-medium">إعادة الجدولة مقفولة دلوقتي:</span> {adminRescheduleBlockedReason}
+                </p>
+              )}
+              {showAdminRescheduleForm && adminRescheduleBlockedReason === null && (
                 <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
                   <Label htmlFor="admin_reschedule_date">اليوم الجديد</Label>
                   {!order.technician_id && (

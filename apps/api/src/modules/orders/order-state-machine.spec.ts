@@ -131,4 +131,29 @@ describe('order-state-machine — تسعير الإدارة من الصور', ()
     expect(canTransition(OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
     expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.IN_PROGRESS)).toBe(false);
   });
+
+  /**
+   * ADR-0083 §4 — الإلغاء الإداري متاح طول ما الطلب قبل التسوية.
+   *
+   * طلب المالك: «إلغاء الطلب دايمًا ظاهرة للأدمن». التلات حالات دي كانت مقفولة، فالأدمن كان
+   * بيفقد الإلغاء بالظبط في النافذة اللي بيحتاجه فيها: الفني قبل، وفي الطريق، ووصل.
+   */
+  it('الأدمن يقدر يلغي بعد قبول الفني وأثناء تحركه ووصوله — كلهم قبل أي حركة مالية', () => {
+    expect(canTransition(OrderStatus.ACCEPTED, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+    expect(canTransition(OrderStatus.TECHNICIAN_ON_WAY, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+    expect(canTransition(OrderStatus.TECHNICIAN_ARRIVED, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(true);
+  });
+
+  it('بعد اكتمال الشغل الإلغاء الإداري بيفضل مقفول — هناك المسار الصح هو الاسترداد مش مسح شغل اتعمل', () => {
+    expect(canTransition(OrderStatus.WORK_COMPLETED, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(false);
+    expect(canTransition(OrderStatus.AWAITING_PAYMENT, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(false);
+    expect(canTransition(OrderStatus.COMPLETED, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(false);
+    // النزاع ليه مسار حل خاص بحسابات رسوم/استرداد — إلغاء عادي من برّه بيتخطّاه.
+    expect(canTransition(OrderStatus.DISPUTED, OrderStatus.CANCELLED_BY_SYSTEM)).toBe(false);
+  });
+
+  it('توسيع الإلغاء الإداري ما فتحش إلغاء العميل الذاتي في حالات التنفيذ', () => {
+    expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.TECHNICIAN_ARRIVED)).toBe(false);
+    expect(CUSTOMER_CANCELLABLE_STATUSES.has(OrderStatus.IN_PROGRESS)).toBe(false);
+  });
 });

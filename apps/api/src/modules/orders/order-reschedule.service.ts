@@ -38,10 +38,36 @@ export interface OrderRescheduleRequestResponse {
   created_at: Date;
 }
 
-// إعادة الجدولة (docs/08 §22 بند 9-12) متاحة بس قبل ما الفني يبدأ يتحرّك فعليًا — بعد
-// technician_on_way الموعد بقى واقعي (الفني في الطريق)، تغييره في اللحظة دي مش "إعادة جدولة" لطلب
-// مستقبلي، ده تصادم مع رحلة شغالة فعلاً.
+// إعادة الجدولة **الذاتية للعميل** (docs/08 §22 بند 9-12) متاحة بس قبل ما الفني يبدأ يتحرّك
+// فعليًا — بعد technician_on_way الموعد بقى واقعي (الفني في الطريق)، وتغييره من العميل في
+// اللحظة دي مش "إعادة جدولة" لطلب مستقبلي، ده تصادم مع رحلة شغالة فعلاً.
 const RESCHEDULABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ASSIGNED, OrderStatus.ACCEPTED]);
+
+/**
+ * إعادة الجدولة **الإدارية** أوسع (ADR-0083 §3، طلب مالك: «خلي إعادة الجدولة دايمًا ظاهرة
+ * للأدمن»).
+ *
+ * الفرق عن قايمة العميل فوق مقصود: ده قرار بشري موثّق (سبب إلزامي + تدقيق + إشعار الطرفين)،
+ * مش زرار بيدوسه العميل والفني في الطريق. والحالة اللي بتحصل فعلاً — الفني وصل ولقى المكان
+ * مقفول، أو الشغل وقف نص اليوم والعميل طلب يوم تاني — كانت بتتحوّل غصبًا لمسار «زيارة فاشلة»
+ * حتى لو مش دي القصة.
+ *
+ * الحد فوق هو نفسه حد الطاقم: قبل التسوية. بعد `work_completed` مفيش «موعد» يتغيّر أصلاً.
+ */
+const ADMIN_RESCHEDULABLE_STATUSES = new Set<OrderStatus>([
+  ...RESCHEDULABLE_STATUSES,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
+  OrderStatus.AWAITING_ADMIN_QUOTE,
+  OrderStatus.AWAITING_INITIAL_QUOTE_APPROVAL,
+]);
+
+/** `true` لو الأدمن يقدر يعيد جدولة الطلب دلوقتي — مصدر واحد تقرا منه الواجهة كمان. */
+export function isAdminReschedulable(status: OrderStatus): boolean {
+  return ADMIN_RESCHEDULABLE_STATUSES.has(status) || status === ADMIN_RESCHEDULABLE_UNASSIGNED_STATUS;
+}
 
 // حالة إضافية للأدمن فقط: الطلب المجدول قد يمر موعده وهو ما زال يبحث عن منفّذ. لا يوجد
 // فني نتحقق من جدوله بعد، لكن لا بد من موعد مستقبلي جديد قبل التعيين اليدوي.
@@ -589,7 +615,7 @@ export class OrderRescheduleService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    this.assertReschedulable(order, actor.transitionDisputedToAccepted === true);
+    this.assertReschedulable(order, actor.transitionDisputedToAccepted === true, actor.role === 'admin');
 
     let newSlot: TechnicianScheduleSlot | null = null;
     let newScheduledAt: Date;
@@ -626,7 +652,7 @@ export class OrderRescheduleService {
         .where('o.id = :orderId', { orderId })
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-      this.assertReschedulable(fresh, actor.transitionDisputedToAccepted === true);
+      this.assertReschedulable(fresh, actor.transitionDisputedToAccepted === true, actor.role === 'admin');
       if (
         actor.role === 'customer' &&
         actor.customerRescheduleLimit !== undefined &&
@@ -749,8 +775,13 @@ export class OrderRescheduleService {
     return updatedOrder;
   }
 
-  private assertReschedulable(order: Order, allowDisputedFailedVisit = false): void {
-    if (!RESCHEDULABLE_STATUSES.has(order.orderStatus) && !(allowDisputedFailedVisit && order.orderStatus === OrderStatus.DISPUTED)) {
+  /**
+   * @param isAdmin مسار إداري (سبب إلزامي + تدقيق) — بياخد القايمة الأوسع (ADR-0083 §3).
+   *   الافتراضي `false` عشان أي كولر جديد ينزل على القايمة الأضيق بلا قصد، مش العكس.
+   */
+  private assertReschedulable(order: Order, allowDisputedFailedVisit = false, isAdmin = false): void {
+    const allowed = isAdmin ? ADMIN_RESCHEDULABLE_STATUSES : RESCHEDULABLE_STATUSES;
+    if (!allowed.has(order.orderStatus) && !(allowDisputedFailedVisit && order.orderStatus === OrderStatus.DISPUTED)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
         `مينفعش تعيد جدولة الطلب والفني في حالة ${order.orderStatus}`,
@@ -827,7 +858,7 @@ export class OrderRescheduleService {
     actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
     approvedRequestId?: string,
   ): Promise<{ previousScheduledAt: Date | null; newScheduledAt: Date }> {
-    this.assertReschedulable(order);
+    this.assertReschedulable(order, false, actor.role === 'admin');
 
     const currentSlot = await manager.findOne(TechnicianScheduleSlot, {
       where: { orderId: order.id, status: TechnicianScheduleSlotStatus.BOOKED },

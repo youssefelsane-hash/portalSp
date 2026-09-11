@@ -287,10 +287,14 @@ function blockedExistsExpr(opts: {
 }): string {
   const { technicianIdExpr, scheduledAtParam, serviceDurationExpr, dailyCapacityMinutesParam, candidateLoad } = opts;
   const spanDaysExpr = candidateLoad ? candidateSpanDaysFromSource(candidateLoad, dailyCapacityMinutesParam) : '1';
-  const candidateStart = `COALESCE(${scheduledAtParam}::timestamptz, now())`;
-  // نهاية النافذة = البداية + (أيام الشغل - 1) + مدة اليوم. لشغل يوم واحد بترجع للسلوك الصح
-  // القديم بالظبط (بداية + المدة)، فمفيش إفراط في التقييد لإجازة مش متقاطعة.
-  const candidateEnd = `(${candidateStart}
+  // نفس قاعدة نافذة القدرة (ADR-0083 §2): الإجازة اللي عدّت مش بتمنع انضمام النهاردة. بداية
+  // النافذة بتتقصّ على `now()` لو الطلب بدأ خلاص — وبترجع نفس القيمة بالحرف لأي طلب لسه ماجاش.
+  const rawStart = `COALESCE(${scheduledAtParam}::timestamptz, now())`;
+  const candidateStart = `GREATEST(${rawStart}, now())`;
+  // نهاية النافذة = البداية **الأصلية** + (أيام الشغل - 1) + مدة اليوم. مربوطة بـ`rawStart`
+  // مش بالبداية المقصوصة عن قصد: لو اتحسبت من `now()` كانت هتمدّ النافذة لقدّام بعدد الأيام
+  // اللي عدّت، فتحجب إجازة برّه مدة الشغل الحقيقية. لشغل يوم واحد بترجع للسلوك القديم بالحرف.
+  const candidateEnd = `(${rawStart}
         + ((GREATEST(${spanDaysExpr}, 1) - 1) || ' days')::interval
         + (${serviceDurationExpr} || ' minutes')::interval)`;
   return `
@@ -387,11 +391,19 @@ export async function classifyTechnicianCapacity(
   const rows = await dataSource.query<{ tier: TechnicianCapacityTier }>(
     `
     WITH target AS (
-      SELECT (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date AS target_date
+      SELECT (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date AS target_date,
+             -- ADR-0083 §2 — بداية النافذة الفعلية: المرشّح بيُضم من دلوقتي، فالأيام اللي عدّت
+             -- من شغلانة ممتدة بدأت في الماضي مش قابلة للحجز ومايصحّش تتحمّل عليه. لطلب بيبدأ
+             -- النهاردة أو بعدها GREATEST بترجّع نفس القيمة بالحرف.
+             GREATEST(
+               (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date,
+               (now() AT TIME ZONE 'Africa/Cairo')::date
+             ) AS window_start_date
     ),
     -- نفس تقاطع الـtimestamps الحقيقي بتاع blockedExistsExpr بالحرف — بيغطي أيام الشغل
     -- الممتد كلها وبيعدّي نص الليل صح. (كان هنا نفس بَقّة الـ::time الملفوفة، فالتصنيف كان
-    -- ممكن يقول LIGHT لفني في إجازة صريحة.)
+    -- ممكن يقول LIGHT لفني في إجازة صريحة.) النهاية مربوطة بالبداية **الأصلية** والبداية
+    -- مقصوصة على now() — نفس قاعدة blockedExistsExpr بالحرف (ADR-0083 §2).
     blocked AS (
       SELECT 1 FROM technician_schedule_slots tss
       WHERE tss.technician_id = $1 AND tss.status = 'blocked' AND tss.deleted_at IS NULL
@@ -400,7 +412,7 @@ export async function classifyTechnicianCapacity(
                 + ((GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1) || ' days')::interval
                 + (COALESCE($9::int, $5::int) || ' minutes')::interval)
         AND (tss.slot_date + tss.end_time) AT TIME ZONE 'Africa/Cairo'
-            > COALESCE($2::timestamptz, now())
+            > GREATEST(COALESCE($2::timestamptz, now()), now())
       LIMIT 1
     ),
     -- ADR-0059 — نفس حسبة السقف اليومي بالحرف اللي technicianAvailabilityCondition() بتستخدمها.
@@ -414,7 +426,7 @@ export async function classifyTechnicianCapacity(
         activeStatusesParam: '$6',
         excludeOrderIdParam: '$3',
         dailyCapacityParam: '$4',
-      })} dl ON dl.busy_day BETWEEN target.target_date
+      })} dl ON dl.busy_day BETWEEN target.window_start_date
           AND target.target_date + (GREATEST(COALESCE(CEIL($8::numeric)::int, 1), 1) - 1)
     ),
     heavy AS (
