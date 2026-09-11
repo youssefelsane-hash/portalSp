@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -12,6 +12,7 @@ import {
   CardPaymentResponseDto,
   FawryReferenceResponseDto,
   InstaPayReferenceResponseDto,
+  toInstaPayReferenceResponseDto,
   toPaymentResponseDto,
 } from './dto/payments-response.dto';
 
@@ -127,17 +128,27 @@ export class PaymentsController {
 
     await this.methodAvailability.assertEnabled(PaymentMethod.INSTAPAY);
 
-    const { payment, referenceCode, instructionsAr, qrImageUrl } = await this.paymentsService.payWithInstaPay(
-      user.sub,
-      id,
-      idempotencyKey.trim(),
-    );
-    return {
-      payment: toPaymentResponseDto(payment),
-      reference_code: referenceCode,
-      instructions_ar: instructionsAr,
-      qr_image_url: qrImageUrl,
-    };
+    const details = await this.paymentsService.payWithInstaPay(user.sub, id, idempotencyKey.trim());
+    return toInstaPayReferenceResponseDto(details);
+  }
+
+  /**
+   * **استئناف شاشة التحويل** (طلب مالك 2026-09-11: «لو شخص طلع من صفحة الدفع وعايز يدخل تاني،
+   * أو طلع من التطبيق خالص وراح على InstaPay وبعدين رجع عشان ياخد الرقم copy»).
+   *
+   * ده سلوك InstaPay **الطبيعي** مش حالة شاذة: العميل لازم يسيب تطبيقنا ويفتح تطبيق البنك.
+   * من غير المسار ده، الرجوع كان معناه إعادة نداء `pay-with-instapay` (كتابة، وبتطلب
+   * `Idempotency-Key`) — فالتطبيق كان مضطر يخزّن الرد أو يخاطر بدفعة تانية.
+   *
+   * **قراءة بحتة**: بترجّع تفاصيل الدفعة المعلّقة القايمة بالفعل، مابتنشئش دفعة جديدة
+   * ومابتغيّرش أي حالة، فالعميل يقدر يفتح ويقفل الشاشة قد ما يحب بأمان.
+   */
+  @Get(':id/instapay-transfer')
+  async getInstaPayTransfer(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<InstaPayReferenceResponseDto> {
+    return toInstaPayReferenceResponseDto(await this.paymentsService.getInstaPayTransfer(user.sub, id));
   }
 
   /**

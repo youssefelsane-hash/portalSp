@@ -11,6 +11,13 @@ class PaymentChannelAvailability {
   final bool available;
   final String? unavailableReason;
 
+  /// الوسيلة المرشّحة من المنصة — الباك-إند بيحدّدها من إعداد، مش التطبيق.
+  ///
+  /// نص الوسم بييجي جاهز كمان (`recommendedLabelAr`) عشان التطبيق والويب ما يخترعوش
+  /// صيغتين مختلفتين لنفس الحاجة.
+  final bool isRecommended;
+  final String? recommendedLabelAr;
+
   PaymentChannelAvailability.fromJson(Map<String, dynamic> json)
     : method = json['method'] as String,
       enabled = json['is_enabled'] as bool? ?? true,
@@ -18,7 +25,9 @@ class PaymentChannelAvailability {
           json['is_configured'] as bool? ??
           (json['is_available'] as bool? ?? false),
       available = json['is_available'] as bool? ?? false,
-      unavailableReason = json['unavailable_reason'] as String?;
+      unavailableReason = json['unavailable_reason'] as String?,
+      isRecommended = json['is_recommended'] as bool? ?? false,
+      recommendedLabelAr = json['recommended_label_ar'] as String?;
 }
 
 class OptionalWarrantyPlan {
@@ -200,6 +209,11 @@ class OrdersRepository {
     /// لما تتبعت، الباك-إند بيعيد التحقق من نفس الفني ونفس السعر ونفس المدخلات قبل الإنشاء،
     /// وبيرفض لو حاجة اتغيّرت بدل ما يستبدل الفني في صمت.
     String? matchPreviewId,
+
+    /// العميل اختار يدفع الطلب كامل بدل العربون (طلب مالك 2026-09-11).
+    ///
+    /// مالوش أي أثر لو الخدمة مافيهاش عربون أصلاً — الباك-إند بيتجاهله وقتها.
+    bool payFullAmount = false,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -217,6 +231,7 @@ class OrdersRepository {
         'standard_data_id': ?standardDataId,
         'requested_units': ?requestedUnits,
         'prepayment_method': ?paymentMethod,
+        if (payFullAmount) 'pay_full_amount': true,
         'warranty_plan_id': ?warrantyPlanId,
         // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
         'booking_mode': bookingMode.apiValue,

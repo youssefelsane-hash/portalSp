@@ -13,6 +13,7 @@ import { TechnicianReferralsService } from './technician-referrals.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 describe('Technician referral Phase 4 financial integrity', () => {
   let dataSource: DataSource;
@@ -180,15 +181,11 @@ describe('Technician referral Phase 4 financial integrity', () => {
          WHERE technician_id = $1`,
         [ids.techProfile],
       );
-      await q(
-        `DELETE FROM wallet_transactions
-         WHERE reference_type = 'technician_referral_bonus'
+      await deleteWalletTransactions(q, `reference_type = 'technician_referral_bonus'
            AND (
              reference_id IN (SELECT id FROM technician_referral_bonuses WHERE technician_id = $1)
              OR reference_id = ANY($2::uuid[])
-           )`,
-        [ids.techProfile, ids.orders],
-      );
+           )`, [ids.techProfile, ids.orders]);
       await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [
         platformBalanceBefore,
         PLATFORM_SYSTEM_USER_ID,

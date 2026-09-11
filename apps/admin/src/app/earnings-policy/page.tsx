@@ -249,6 +249,7 @@ export default function EarningsPolicyPage() {
               assistant_ratio_bps: leaderLevel.assistant_ratio_bps,
               service_skill: leaderSkill.skill_level,
               service_skill_factor_bps: leaderSkill.factor_bps,
+              individual_adjustment_bps: Math.round(Number(form.get('leader_adjustment')) * 100),
             },
             {
               technician_id: 'simulated-assistant',
@@ -515,8 +516,60 @@ export default function EarningsPolicyPage() {
                     <div><Label>إجمالي الطلب</Label><Input name="total_egp" type="number" min="0" step="0.01" defaultValue="5000" dir="ltr" required /></div>
                     <div><Label>عمولة المنصة %</Label><Input name="commission_percentage" type="number" min="0" max="100" step="0.01" defaultValue="15" dir="ltr" required /></div>
                   </div>
-                  <div className="rounded-xl border p-3"><strong className="text-sm">الفني القائد</strong><div className="mt-2 grid grid-cols-2 gap-2"><select name="leader_level" className="h-10 rounded-md border px-2" defaultValue="professional">{overview.levels.map((level) => <option key={level.level} value={level.level}>{level.display_name_ar}</option>)}</select><select name="leader_skill" className="h-10 rounded-md border px-2" defaultValue="expert">{overview.skills.map((skill) => <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>)}</select></div></div>
-                  <div className="rounded-xl border p-3"><strong className="text-sm">المساعد</strong><div className="mt-2 grid grid-cols-3 gap-2"><select name="assistant_level" className="h-10 rounded-md border px-2" defaultValue="verified">{overview.levels.map((level) => <option key={level.level} value={level.level}>{level.display_name_ar}</option>)}</select><select name="assistant_skill" className="h-10 rounded-md border px-2" defaultValue="standard">{overview.skills.map((skill) => <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>)}</select><Input name="assistant_adjustment" type="number" step="0.01" defaultValue="5" aria-label="تعديل المساعد بالمئة" dir="ltr" /></div></div>
+                  {/* **كل خانة ليها عنوان مكتوب، والطرفين ليهم نفس الخانات.**
+                      قبل كده كان المساعد عنده خانة تالتة بلا أي عنوان مرئي (عنوان للقارئ
+                      الصوتي بس) وقيمتها الافتراضية ٥٪ — الأدمن بيشوف مربع رقم مكتوب فيه ٥
+                      ومش عارف هو إيه، وكل محاكاة بتطلع بنتيجة مش مطابقة لطلب حقيقي بلا
+                      استثناءات. والقائد مكانش عنده الخانة دي أصلاً رغم إن محرك التسوية
+                      بيطبّق استثناء الشخص على الفنيين والمساعدين بنفس الطريقة — فالمحاكي
+                      مكانش يقدر يحاكي طلب القائد فيه استثناء. */}
+                  {([
+                    { key: 'leader', title: 'الفني القائد', level: 'professional', skill: 'expert' },
+                    { key: 'assistant', title: 'المساعد', level: 'verified', skill: 'standard' },
+                  ] as const).map((participant) => (
+                    <div key={participant.key} className="rounded-xl border p-3">
+                      <strong className="text-sm">{participant.title}</strong>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">الدرجة</Label>
+                          <select
+                            name={`${participant.key}_level`}
+                            className="mt-1 h-10 w-full rounded-md border px-2"
+                            defaultValue={participant.level}
+                          >
+                            {overview.levels.map((level) => (
+                              <option key={level.level} value={level.level}>{level.display_name_ar}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">مهارة الخدمة</Label>
+                          <select
+                            name={`${participant.key}_skill`}
+                            className="mt-1 h-10 w-full rounded-md border px-2"
+                            defaultValue={participant.skill}
+                          >
+                            {overview.skills.map((skill) => (
+                              <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">استثناء شخصي %</Label>
+                          {/* صفر = بلا استثناء. الافتراضي لازم يساوي طلبًا عاديًا، وإلا المحاكي
+                              بيجاوب على سؤال محدش سأله. */}
+                          <Input
+                            name={`${participant.key}_adjustment`}
+                            type="number"
+                            step="0.01"
+                            defaultValue="0"
+                            className="mt-1"
+                            dir="ltr"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                   <Button className="w-full" disabled={saving === 'simulation'}>احسب بنفس محرك التسوية</Button>
                 </form>
                 <div className="rounded-2xl bg-slate-950 p-5 text-white">

@@ -14,6 +14,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { WalletsService } from '../payments/wallets.service';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 /**
  * ADR-0051 (docs/08 §96) — إعادة الزيارة مربوطة بالفني الأصلي.
@@ -152,7 +153,7 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
             WHERE w.id = net.wallet_id`,
           [orderIds],
         );
-        await q(`DELETE FROM wallet_transactions WHERE reference_type = 'order' AND reference_id = ANY($1::uuid[])`, [orderIds]);
+        await deleteWalletTransactions(q, `reference_type = 'order' AND reference_id = ANY($1::uuid[])`, [orderIds]);
         await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
         await q(`DELETE FROM order_earning_shares WHERE order_id = ANY($1::uuid[])`, [orderIds]);
         await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);

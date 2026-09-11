@@ -28,7 +28,17 @@ import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
-import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';
+import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';/**
+ * أسماء وسائل الدفع المقدّم المعروضة للعميل. **الترتيب مش هنا** — السيرفر بيرجّع القايمة
+ * مرتّبة (`payment-channels.controller.ts`)، فالواجهة بتعرضها زي ما جت. لو الترتيب اتكرر هنا،
+ * أول تغيير في `payments.recommended_method` هيخلّي الويب والتطبيق يقولوا حاجتين مختلفتين.
+ */
+const PREPAYMENT_LABELS_AR: Record<string, string> = {
+  instapay: 'InstaPay',
+  card: 'بطاقة الآن',
+};
+
+
 
 type BookingMode = 'individual' | 'team' | 'emergency';
 /**
@@ -156,7 +166,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }, []);
 
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[] | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'later' | 'card'>('later');
+  // اختيار العميل **الصريح** بس. `null` = لسه ماختارش، والافتراضي بيتشتق تحت
+  // (`effectivePaymentMethod`) بدل ما يتخزّن — تخزينه كان بيحتاج `useEffect` يكتب حالة، وده
+  // ممنوع بقاعدة `react-hooks/set-state-in-effect` عندنا، وبيعمل رندر متسلسل بلا داعي.
+  // `later` = كاش/محفظة بعد الشغل (غياب دفع مقدّم). الباقي وسائل دفع مسبق حقيقية.
+  const [paymentChoice, setPaymentChoice] = useState<'later' | 'card' | 'instapay' | null>(null);
+  // العميل اختار يدفع الطلب كامل بدل العربون (طلب مالك 2026-09-11) — نفس اختيار التطبيق.
+  const [payFullInsteadOfDeposit, setPayFullInsteadOfDeposit] = useState(false);
 
   // بند 2-7 — الحجز بقى **تلات خطوات بالظبط**، مفيش صفحة مراجعة رابعة:
   //   1. تفاصيل الشغل والموعد + السعر الحالي (قبل اختيار الفني)
@@ -438,11 +454,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           promo_code: effectiveRequestRemoteQuote ? undefined : promoCode || undefined,
           field_values: showsDynamicForm ? fieldValues : undefined,
           prepayment_method:
+            // رسم التقييم بيتحصّل بالبطاقة بس — مسار تحويلة فورية، مش تحويل بنكي بمراجعة يدوية.
             remoteAssessmentFeeDueCents > 0
               ? 'card'
-              : !effectiveRequestRemoteQuote && paymentMethod === 'card'
-                ? 'card'
+              : !effectiveRequestRemoteQuote && effectivePaymentMethod !== 'later'
+                ? effectivePaymentMethod
                 : undefined,
+          // بيتبعت بس لما يكون فيه عربون فعلاً والعميل اختار يتخطاه — غير كده `undefined`
+          // عشان ما نغيّرش سلوك أي طلب تاني.
+          pay_full_amount:
+            depositChoiceVisible && payFullInsteadOfDeposit ? true : undefined,
           // بند 12 — قفل السعر: التذكرة اللي العميل شاف عليها الفني والسعر هي نفسها اللي
           // الباك-إند بيعيد التحقق منها. لو المدخلات اتغيّرت أو الفني بقى مش متاح، الإنشاء
           // بيترفض بوضوح بدل ما يستبدل حد في صمت.
@@ -455,7 +476,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       );
       clearPendingPromoLinkCode(promoCode);
       setSubmitted(true);
-      if (remoteAssessmentFeeDueCents > 0 || (!effectiveRequestRemoteQuote && paymentMethod === 'card')) {
+      // InstaPay بيروح لصفحة تحويل جوّه الموقع — مفيش redirect لبوابة خارجية. الصفحة نفسها
+      // بتجيب بياناتها من `GET /orders/:id/instapay-transfer`، فبنوصّله بـ`replace` من غير ما
+      // نمرّر أي حالة: refresh أو رجوع أو فتح الرابط من تاني بيشتغلوا كلهم زي بعض.
+      if (!effectiveRequestRemoteQuote && remoteAssessmentFeeDueCents === 0 && effectivePaymentMethod === 'instapay') {
+        router.replace(`/orders/${order.id}/instapay`);
+        return;
+      }
+      if (remoteAssessmentFeeDueCents > 0 || (!effectiveRequestRemoteQuote && effectivePaymentMethod === 'card')) {
         const cardResult = await payWithCard(authedFetch, order.id);
         // `assign()` مش `location.href = ...`: قاعدة react-hooks/immutability بتعتبر الإسناد
         // على كائن برّه المكوّن تعديلًا ممنوعًا (خطأ lint حقيقي كان واقف في المشروع). الاتنين
@@ -628,6 +656,64 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // وإلا تقدير `POST /orders/preview`. الاتنين نفس الشكل (`PreviewOrderResponseDto`)، فالجدول
   // تحت مابيفرّقش بينهم — وده اللي بيمنع «رقمين مختلفين على نفس الشاشة».
   const priceBreakdown: PreviewOrderResponseDto | null = activePreview?.pricing ?? orderPreview;
+
+  /**
+   * فيه عربون مثبّت على السعر المعروض، يعني العميل قدّامه **اختيار حقيقي**: يدفع العربون
+   * دلوقتي والباقي كاش للصنايعي بعد الشغل، ولا يخلّص الطلب كله مرة واحدة.
+   *
+   * مسار «التقييم بالصور» مستثنى: الطلب بيتعمل بإجمالي صفر والسعر بيتحدد بعدين، فمفيش عربون
+   * أصلاً يتقرر عليه.
+   */
+  const depositChoiceVisible =
+    !effectiveRequestRemoteQuote &&
+    priceBreakdown?.deposit_amount_cents != null &&
+    priceBreakdown.deposit_amount_cents > 0;
+
+  /**
+   * وسائل الدفع المقدّم المتاحة، **بترتيب السيرفر زي ما جه** (InstaPay فوق ثم الكاش ثم الباقي).
+   *
+   * بنفلتر على اللي الويب بيعرف يكمّلها فعلاً: البطاقة (تحويلة لبوابة) وInstaPay (صفحة تحويل
+   * جوّه الموقع). فوري والتقسيط ليهم مسارات مالهاش واجهة هنا لسه — عرضهم كان هيوصّل العميل
+   * لطريق مسدود، وده أسوأ من عدم عرضهم.
+   */
+  const prepaymentOptions = (paymentChannels ?? []).filter(
+    (channel) => channel.is_available && (channel.method === 'instapay' || channel.method === 'card'),
+  );
+
+  /**
+   * «كاش/محفظة بعد الشغل» = **غياب** دفع مقدّم، ونفس شرط الباك-إند بالحرف
+   * (`order-creation.service.ts`): بيترفض لو الخدمة مش بتقبل كاش أو عليها عربون مفروض.
+   *
+   * ولو العميل اختار يدفع الطلب كامل بدل العربون، هو كده اختار دفع مقدّم — فالخيار ده
+   * بيتشال عشان ما يبقاش فيه اختيارين متناقضين ظاهرين مع بعض.
+   */
+  const cashAfterWorkAllowed =
+    service.cash_allowed !== false &&
+    !service.deposit_required &&
+    !(depositChoiceVisible && payFullInsteadOfDeposit);
+
+  /**
+   * الوسيلة اللي الطلب هيتبعت بيها فعلاً — **مشتقّة، مش مخزّنة**.
+   *
+   * قاعدة الافتراضي هي نفس قاعدة التطبيق بالحرف (`_reconcilePaymentMethodSelection`):
+   * **«بعد الشغل» يفضل الافتراضي طول ما هو مسموح**، والترشيح بيغيّر الافتراضي بس لما الدفع
+   * المقدّم يبقى **إجباري** أصلاً. فرض InstaPay كافتراضي على كل الطلبات كان هيحوّل الترشيح
+   * لإجبار ويكسر العميل اللي عايز يدفع كاش على خدمة بتسمح بيه.
+   *
+   * ولإن دي اشتقاق مش حالة، أي تغيّر في الخدمة أو في اختيار العربون بيصحّح الوسيلة لوحده:
+   * مستحيل يفضل مخزّن عندنا اختيار بقى غير صالح.
+   */
+  const selectableMethods = new Set<string>([
+    ...prepaymentOptions.map((channel) => channel.method),
+    ...(cashAfterWorkAllowed ? ['later'] : []),
+  ]);
+  const effectivePaymentMethod: 'later' | 'card' | 'instapay' =
+    paymentChoice && selectableMethods.has(paymentChoice)
+      ? paymentChoice
+      : cashAfterWorkAllowed
+        ? 'later'
+        : ((prepaymentOptions.find((channel) => channel.is_recommended) ?? prepaymentOptions[0])
+            ?.method as 'card' | 'instapay' | undefined) ?? 'later';
 
   const canSubmit =
     !!selectedAddressId &&
@@ -1229,22 +1315,79 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {step === 3 && !effectiveRequestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
+      {/* **اختيار العربون ولا الطلب كامل** (طلب مالك 2026-09-11) — نفس اختيار التطبيق بالحرف.
+          فيه ناس بتفضّل تخلص الدفع مرة واحدة، وفيه ناس بتفضّل تدفع الأقل دلوقتي والباقي كاش
+          للصنايعي؛ الاتنين مسارين مشروعين فالقرار قرار العميل مش جملة خبرية مفروضة عليه. */}
+      {step === 3 && depositChoiceVisible && priceBreakdown && (
+        <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-3 font-semibold">تحب تدفع كام دلوقتي؟</h2>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="radio"
+              checked={!payFullInsteadOfDeposit}
+              onChange={() => setPayFullInsteadOfDeposit(false)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium">
+                العربون دلوقتي — {formatEgp(priceBreakdown.deposit_amount_cents ?? 0)}
+              </span>
+              <span className="mt-0.5 block text-muted">
+                والباقي ({formatEgp(priceBreakdown.remaining_amount_cents ?? 0)}) تدفعه كاش للصنايعي بعد الشغل
+              </span>
+            </span>
+          </label>
+          <label className="mt-3 flex items-start gap-3 text-sm">
+            <input
+              type="radio"
+              checked={payFullInsteadOfDeposit}
+              onChange={() => setPayFullInsteadOfDeposit(true)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium">
+                الطلب كامل دلوقتي — {formatEgp(priceBreakdown.total_amount_cents)}
+              </span>
+              <span className="mt-0.5 block text-muted">
+                تخلّص الدفع مرة واحدة ومش هيتبقى عليك حاجة بعد الشغل
+              </span>
+            </span>
+          </label>
+        </section>
+      )}
+
+      {/* الوسائل بتتعرض **بالترتيب اللي السيرفر رجّعه** (InstaPay فوق، الكاش تحتها) مع وسم
+          الترشيح جاي من السيرفر كمان — عشان تغيير `payments.recommended_method` من لوحة الأدمن
+          يوصل للويب والتطبيق من غير نشر جديد لأي واحد فيهم. */}
+      {step === 3 && !effectiveRequestRemoteQuote && prepaymentOptions.length > 0 && (
         <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPaymentMethod('later')}
-              className={`rounded-lg border px-4 py-2 text-sm ${paymentMethod === 'later' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              كاش / محفظة بعد الشغل
-            </button>
-            <button
-              onClick={() => setPaymentMethod('card')}
-              className={`rounded-lg border px-4 py-2 text-sm ${paymentMethod === 'card' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              بطاقة الآن
-            </button>
+          <div className="flex flex-wrap gap-2">
+            {prepaymentOptions.map((channel) => (
+              <button
+                key={channel.method}
+                onClick={() => setPaymentChoice(channel.method as 'card' | 'instapay')}
+                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm ${effectivePaymentMethod === channel.method ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+              >
+                {PREPAYMENT_LABELS_AR[channel.method] ?? channel.method}
+                {channel.is_recommended && channel.recommended_label_ar && (
+                  <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                    {channel.recommended_label_ar}
+                  </span>
+                )}
+              </button>
+            ))}
+            {/* «بعد الشغل» مش وسيلة في السجل — هو غياب دفع مسبق، فبيتعرض آخر واحد ومش بيترشّح.
+                بيتحجب لو الخدمة أصلاً بتفرض دفع مقدّم (عربون أو كاش ممنوع)، لأن الباك-إند
+                بيرفضه ساعتها وعرضه كان بيوصّل العميل لرسالة خطأ عند التأكيد. */}
+            {cashAfterWorkAllowed && (
+              <button
+                onClick={() => setPaymentChoice('later')}
+                className={`rounded-lg border px-4 py-2 text-sm ${effectivePaymentMethod === 'later' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+              >
+                كاش / محفظة بعد الشغل
+              </button>
+            )}
           </div>
         </section>
       )}

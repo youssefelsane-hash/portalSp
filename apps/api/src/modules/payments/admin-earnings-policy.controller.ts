@@ -8,7 +8,9 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminEarningsPolicyService } from './admin-earnings-policy.service';
 import {
+  CreateOrderEarningAdjustmentDto,
   CreateTechnicianEarningAdjustmentDto,
+  DisableOrderEarningAdjustmentDto,
   SimulateEarningsDto,
   UpdateEarningsLevelPolicyDto,
   UpdateEarningsSkillPolicyDto,
@@ -81,6 +83,44 @@ export class AdminEarningsPolicyController {
     @AuditContext() audit: AuditMeta,
   ) {
     return this.policy.createTechnicianAdjustment(user.sub, id, dto, audit);
+  }
+
+  /**
+   * استثناء مستحقات على **طلب واحد بعينه** (docs/08 §136).
+   *
+   * نفس صلاحية استثناء الشخص (`technician_earning_adjustment.manage`) عن قصد: ده نفس فئة
+   * القرار بالظبط — تعديل نصيب شخص من فلوس — والفرق بس في نطاقه. صلاحية جديدة كانت هتحتاج
+   * ترحيل وتوزيع على الأدوار من غير ما تضيف أي حماية حقيقية.
+   */
+  @Post('orders/:id/adjustments')
+  @RequirePermission('technician_earning_adjustment.manage')
+  @RequireStepUp()
+  createOrderAdjustment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateOrderEarningAdjustmentDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.policy.createOrderAdjustment(user.sub, id, dto, audit);
+  }
+
+  @Delete('orders/:id/adjustments/:technicianId')
+  @RequirePermission('technician_earning_adjustment.manage')
+  @RequireStepUp()
+  disableOrderAdjustment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('technicianId', ParseUUIDPipe) technicianId: string,
+    @Body() dto: DisableOrderEarningAdjustmentDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.policy.disableOrderAdjustment(user.sub, id, technicianId, dto.reason, audit);
+  }
+
+  @Get('orders/:id/adjustments')
+  @RequirePermission('technician_earning_adjustment.view')
+  listOrderAdjustments(@Param('id', ParseUUIDPipe) id: string) {
+    return this.policy.listOrderAdjustments(id);
   }
 
   @Put('services/:id/levels/:level')

@@ -5,6 +5,7 @@ import { returningFirst } from '../../common/db/returning-rows';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { calculateEarningsV2 } from './earnings-calculator';
 import {
+  CreateOrderEarningAdjustmentDto,
   CreateTechnicianEarningAdjustmentDto,
   SimulateEarningsDto,
   UpdateEarningsLevelPolicyDto,
@@ -208,6 +209,231 @@ export class AdminEarningsPolicyService {
         orderAdjustmentBps: participant.order_adjustment_bps ?? 0,
       })),
     );
+  }
+
+  /**
+   * استثناء مستحقات **على طلب واحد بعينه** — «الشغلانة دي كانت أصعب من المعتاد».
+   *
+   * ## ليه الدالة دي موجودة أصلاً
+   *
+   * `order_earning_adjustments` كان **بيتقرا في محرك التسوية من يوم migration 0227** وبيتضرب
+   * في وزن المشارك صح — بس مفيش أي endpoint ولا خدمة ولا شاشة بتكتب فيه في المستودع كله.
+   * يعني «استثناء على طلب بعينه» كان مستحيل الأدمن يعمله رغم إن النظام جاهز يحسبه
+   * (تدقيق 2026-09-11، docs/08 §136).
+   *
+   * ## الحارسان اللي مش موجودين في استثناء الشخص
+   *
+   * **١. التسوية لازم تكون لسه ماتقفلتش.** `recordV2Shares()` **idempotent وغير قابل
+   * للتعديل**: أول ما يكتب صفوف `order_earning_shares` بيرجّعها زي ما هي للأبد ومابيعيدش
+   * الحساب. فاستثناء بيتكتب بعد التسوية = صف في الداتابيز مالوش أي أثر على أي قرش. الأخطر إن
+   * الأدمن هيشوف «اتحفظ ✅» ويفتكر إنه عدّل مستحق الفني، والفني هياخد الرقم القديم. رفض صريح
+   * بـ409 أفضل مليون مرة من نجاح كداب.
+   *
+   * **٢. الشخص لازم يكون مشارك في الطلب فعلاً.** الاستعلام في `resolveParticipants()` بيعمل
+   * `LEFT JOIN` على `order_earning_adjustments` بالطلب **والفني** — فصف لشخص مش في الطاقم
+   * مابيتقراش خالص. من غير الحارس ده، الأدمن يقدر يحفظ استثناء لفني غلط (اختيار من قايمة
+   * طويلة، أو نسخ لصق معرّف) ومايعرفش إنه ضاع إلا لما يسأل ليه الفلوس ماتغيرتش.
+   *
+   * وكمان بنرفض طلب V1 (`settlement_policy_version <> 2`) لنفس السبب بالظبط: تسوية V1
+   * (`CrewEarningsService`) مابتقراش الجدول ده أصلاً.
+   *
+   * الاستبدال بدل التعديل: أي استثناء قايم على نفس (الطلب، الشخص) بيتعطّل وبيتكتب صف جديد —
+   * فالسجل بيفضل شايل كل قرار اتاخد ومين اخده، مش آخر قيمة بس.
+   */
+  async createOrderAdjustment(
+    adminUserId: string,
+    orderId: string,
+    dto: CreateOrderEarningAdjustmentDto,
+    meta?: AuditActorMeta,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      // نفس قفل استثناء الشخص: حفظين متزامنين على نفس النطاق كانوا يقدروا الاتنين يشوفوا
+      // «مفيش صف نشط» وينشئوا سياستين متنافستين.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `order-earnings-adjustment:${orderId}:${dto.technician_id}`,
+      ]);
+
+      const [order] = await manager.query<
+        { id: string; settlement_policy_version: number; technician_id: string | null }[]
+      >(
+        `SELECT id, settlement_policy_version, technician_id
+           FROM orders WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [orderId],
+      );
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (Number(order.settlement_policy_version) !== 2) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الطلب ده على نسخة تسوية قديمة مابتقراش استثناءات الطلب — التعديل عليه لازم يتم كتسوية يدوية',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const [settled] = await manager.query<{ shares: string }[]>(
+        `SELECT COUNT(*) AS shares FROM order_earning_shares WHERE order_id = $1`,
+        [orderId],
+      );
+      if (Number(settled?.shares ?? 0) > 0) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'التسوية اتقفلت على الطلب ده والحصص اتسجّلت — الاستثناء دلوقتي مش هيغيّر أي مبلغ. ' +
+            'استخدم تسوية يدوية على محفظة الفني بدل كده',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const [participant] = await manager.query<{ id: string }[]>(
+        `SELECT tp.id
+           FROM technician_profiles tp
+          WHERE tp.id = $1
+            AND tp.deleted_at IS NULL
+            AND (
+              tp.id = $2::uuid
+              OR EXISTS (SELECT 1 FROM order_team_members otm
+                          WHERE otm.order_id = $3 AND otm.technician_id = tp.id)
+            )`,
+        [dto.technician_id, order.technician_id, orderId],
+      );
+      if (!participant) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الشخص ده مش مشارك في الطلب — الاستثناء عليه مش هيتقرا وقت التسوية',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      const existing = await manager.query<{ id: string }[]>(
+        `SELECT id FROM order_earning_adjustments
+          WHERE order_id = $1 AND technician_id = $2 AND disabled_at IS NULL`,
+        [orderId, dto.technician_id],
+      );
+      for (const row of existing) {
+        await manager.query(`UPDATE order_earning_adjustments SET disabled_at = now() WHERE id = $1`, [row.id]);
+      }
+
+      const [created] = await manager.query(
+        `INSERT INTO order_earning_adjustments
+           (order_id, technician_id, adjustment_bps, reason, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING *`,
+        [orderId, dto.technician_id, dto.adjustment_bps, dto.reason, adminUserId],
+      );
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'earnings_policy.order_adjustment_created',
+          entityType: 'order_earning_adjustment',
+          entityId: created.id,
+          newValues: created,
+          meta,
+        },
+        manager,
+      );
+      return created;
+    });
+  }
+
+  /**
+   * إلغاء استثناء طلب قائم.
+   *
+   * **تعطيل مش حذف**: الصف بيفضل في الجدول بـ`disabled_at`، فالسجل بيفضل يقول إن الاستثناء
+   * ده اتعمل واتلغى ومين عمل إيه. حذفه كان هيخلّي القرار يختفي من التاريخ.
+   *
+   * نفس حارس التسوية: بعد ما الحصص تتسجّل، الإلغاء كمان مالوش أي أثر على الفلوس، فالنجاح
+   * الكاذب هنا مضلّل بنفس القدر.
+   */
+  async disableOrderAdjustment(
+    adminUserId: string,
+    orderId: string,
+    technicianId: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `order-earnings-adjustment:${orderId}:${technicianId}`,
+      ]);
+
+      const [settled] = await manager.query<{ shares: string }[]>(
+        `SELECT COUNT(*) AS shares FROM order_earning_shares WHERE order_id = $1`,
+        [orderId],
+      );
+      if (Number(settled?.shares ?? 0) > 0) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'التسوية اتقفلت على الطلب ده — إلغاء الاستثناء دلوقتي مش هيرجّع أي مبلغ',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // `returningFirst` مش `const [disabled] =`: TypeORM بترجّع `UPDATE … RETURNING` بشكل
+      // `[صفوف, عدد]` مش مصفوفة صفوف، والفرق مايظهرش في الـtypes (شوف `returning-rows.ts`).
+      const disabled = returningFirst<Record<string, unknown> & { id: string }>(
+        await manager.query(
+          `UPDATE order_earning_adjustments
+              SET disabled_at = now()
+            WHERE order_id = $1 AND technician_id = $2 AND disabled_at IS NULL
+           RETURNING *`,
+          [orderId, technicianId],
+        ),
+      );
+      if (!disabled) {
+        throw new ApiException(ErrorCode.VAL_001, 'مفيش استثناء نشط على الطلب ده للشخص ده', HttpStatus.NOT_FOUND);
+      }
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'earnings_policy.order_adjustment_disabled',
+          entityType: 'order_earning_adjustment',
+          entityId: disabled.id,
+          newValues: { ...disabled, disable_reason: reason },
+          meta,
+        },
+        manager,
+      );
+      return disabled;
+    });
+  }
+
+  /**
+   * استثناءات الطلب **النشطة** مع أسماء أصحابها، ومعاها حالة التسوية.
+   *
+   * `is_settled` بيتبعت مع القايمة عمدًا: الواجهة محتاجة تعرف تقفل الفورم **قبل** ما الأدمن
+   * يكتب ويضغط حفظ وياخد ٤٠٩ — الرفض في الباك-إند حارس، مش تجربة استخدام.
+   */
+  async listOrderAdjustments(orderId: string) {
+    const [settlement] = await this.dataSource.query<{ shares: string; version: number }[]>(
+      `SELECT (SELECT COUNT(*) FROM order_earning_shares WHERE order_id = o.id) AS shares,
+              o.settlement_policy_version AS version
+         FROM orders o WHERE o.id = $1`,
+      [orderId],
+    );
+    if (!settlement) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const items = await this.dataSource.query(
+      `SELECT oea.id, oea.technician_id, oea.adjustment_bps, oea.reason, oea.created_at,
+              u.full_name AS technician_name,
+              CASE WHEN oea.technician_id = o.technician_id THEN 'leader' ELSE otm.member_type END AS participant_role
+         FROM order_earning_adjustments oea
+         JOIN orders o ON o.id = oea.order_id
+         JOIN technician_profiles tp ON tp.id = oea.technician_id
+         JOIN users u ON u.id = tp.user_id
+         LEFT JOIN order_team_members otm
+           ON otm.order_id = oea.order_id AND otm.technician_id = oea.technician_id
+        WHERE oea.order_id = $1 AND oea.disabled_at IS NULL
+        ORDER BY oea.created_at DESC`,
+      [orderId],
+    );
+    return {
+      is_settled: Number(settlement.shares) > 0,
+      supports_order_adjustments: Number(settlement.version) === 2,
+      items,
+    };
   }
 
   async createTechnicianAdjustment(

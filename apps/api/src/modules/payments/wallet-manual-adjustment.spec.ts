@@ -35,6 +35,7 @@ import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
 import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت تصحيح المحفظة اليدوي الجديد (docs/08 §20 بند 5): كانت
 // فجوة حقيقية — AdminWalletController كان قراءة بس، صفر مسار لأدمن/مالية يصحّح رصيد فني (مثلاً
@@ -177,8 +178,8 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
       // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
       await q(`DELETE FROM wallet_adjustments WHERE actor_user_id = $1`, [ids.adminUser]);
-      await q(`DELETE FROM wallet_transactions WHERE performed_by_user_id = $1`, [ids.adminUser]);
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await deleteWalletTransactions(q, `performed_by_user_id = $1`, [ids.adminUser]);
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
       await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [
         platformBalanceBefore,
         PLATFORM_SYSTEM_USER_ID,

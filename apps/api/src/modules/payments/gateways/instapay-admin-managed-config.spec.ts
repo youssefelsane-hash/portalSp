@@ -118,8 +118,13 @@ describe('InstaPayProvider — إعدادات أدمن ديناميكية بدل
       customerPhone: '+201000000000',
     });
     if (result.kind !== 'reference') throw new Error('InstaPay لازم يرجّع reference');
-    expect(result.instructionsAr).toContain(`test-${runId}@instapay`);
-    expect(result.instructionsAr).toContain(`فني اختبار ${runId}`);
+    // نية الاختبار زي ما هي (القيمة اللي الأدمن حطها بتوصل للعميل لحظيًا بلا restart)، بس
+    // بتتقرا من الحقول المستقلة: الحساب والاسم اتشالوا من `instructionsAr` عمدًا
+    // (طلب مالك 2026-09-11) لأن رقم لاتيني جوّه جملة عربية بيتعرض بترتيب خانات مقلوب.
+    expect(result.recipientAddress).toBe(`test-${runId}@instapay`);
+    expect(result.recipientName).toBe(`فني اختبار ${runId}`);
+    // والنص نفسه لازم يفضل **من غير** أي رقم — ده الثابت اللي البَقّة اتصلحت عشانه.
+    expect(result.instructionsAr).not.toContain(`test-${runId}@instapay`);
   });
 
   it('مسح قيمة واحدة بعد التفعيل بيرجّع isConfigured=false تاني (دورة كاملة اتأكدت)', async () => {

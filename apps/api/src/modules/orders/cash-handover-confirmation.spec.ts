@@ -39,6 +39,7 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14). بيغطي: تأكيد
 // العميل وحده مايسوّيش الطلب؛ "لم أستلم" الفني يوديه DISPUTED + شكوى؛ التعارض (عميل أكّد + فني
@@ -276,7 +277,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
     await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TCASH-%`]);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TCASH-%`]);
     await q(`DELETE FROM loyalty_transactions WHERE user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [ids.techUser, ids.customerUser]);
+    await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [ids.techUser, ids.customerUser]);
     await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TCASH-%`]);
     await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TCASH-%`]);

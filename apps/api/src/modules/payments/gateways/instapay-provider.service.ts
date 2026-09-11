@@ -28,6 +28,15 @@ const IPA_ADDRESS_SETTING_KEY = 'payments.instapay.ipa_address';
 const RECIPIENT_NAME_SETTING_KEY = 'payments.instapay.recipient_name';
 
 /**
+ * خطوات التحويل — **كلام بس، صفر أرقام**. الأرقام (الحساب، المبلغ، رقم الطلب) بترجع حقول
+ * مستقلة عشان الواجهة تعرضها LTR في سطور منفصلة. لما كانوا مدفونين في الجملة دي، الـbidi
+ * كان بيقلب خانات الأرقام اللاتينية وسط العربي والعميل ينسخ رقم حساب غلط.
+ */
+const INSTAPAY_INSTRUCTIONS_AR =
+  'افتح تطبيق البنك أو محفظتك، اختار «تحويل InstaPay»، وحوّل المبلغ للحساب اللي فوق. ' +
+  'مهم: اكتب رقم الطلب في خانة ملاحظة التحويل عشان نلاقي تحويلك بسرعة.';
+
+/**
  * InstaPay — مسبق الدفع، **تأكيد يدوي بس** (ADR-0013 §7 من توجيه المالك 2026-08-14). مفيش
  * تكامل webhook تلقائي موثوق متاح لـInstaPay في مصر لأي منصة تجارية عادية دلوقتي — العميل بيحوّل
  * يدويًا لرقم/IPA معلن، وموظف Finance مُصرَّح له بس هو اللي بيأكّد الاستلام
@@ -91,6 +100,12 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
     // نفس الرقم اللي notifications.action_required (§13) هيستخدمه لإيقاف التذكيرات بعد انتهاء الصلاحية.
     const windowHours = await this.settingsService.getNumber('payments.instapay_confirmation_window_hours', 24);
     const expiresAt = new Date(Date.now() + windowHours * 60 * 60 * 1000);
+    // وعد وقت التأكيد (migration 0319، طلب مالك 2026-09-11). بييجي من الإعدادات مش ثابت في
+    // الكود عشان لو أداء فريق المراجعة اتغيّر، الوعد يتعدّل من لوحة الأدمن بلا deploy.
+    const [confirmTypicalMinutes, confirmMaxMinutes] = await Promise.all([
+      this.settingsService.getNumber('payments.instapay_confirm_typical_minutes', 20),
+      this.settingsService.getNumber('payments.instapay_confirm_max_minutes', 60),
+    ]);
     return {
       kind: 'reference',
       // بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الشاشة كانت بتعرض `input.paymentId`
@@ -103,16 +118,68 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
       // ويحطّه في التحويل، وموظف الـFinance في `/instapay-confirmations` (عمود "الطلب") يقدر
       // يتحقق منه مباشرة بمقارنته بنفس القيمة دي.
       referenceCode: input.orderNumber,
-      instructionsAr:
-        `حوّل ${(input.amountCents / 100).toFixed(2)} ج.م عبر InstaPay لـ ${this.ipaAddress} ` +
-        `(${this.recipientName}) — واكتب رقم طلبك ${input.orderNumber} في ملاحظة التحويل. ` +
-        `هيتم تأكيد الدفع خلال وقت قصير من فريق الدعم.`,
+      // النص ده بقى **شرح للخطوات بس** — الأرقام نفسها (الحساب، المبلغ، رقم الطلب) بترجع
+      // حقول مستقلة تحت، والواجهة بتعرضها كسطور منفصلة قابلة للنسخ. قبل كده كان الحساب
+      // والمبلغ مدفونين جوّه الجملة دي، فالـbidi بيقلب خانات الرقم اللاتيني وسط العربي
+      // والعميل بينسخه غلط — على تحويل بنكي حقيقي.
+      instructionsAr: INSTAPAY_INSTRUCTIONS_AR,
+      ...this.transferDisplayFields(input.amountCents, confirmTypicalMinutes, confirmMaxMinutes),
       providerReference: input.paymentId,
       expiresAt,
       // QR مُدار من الأدمن (migration 0211) — بيتقرا **وقت كل عملية دفع** مش وقت الإقلاع، لأن
       // رابط S3 موقّع وبينتهي. `null` لو الأدمن ما حطش حاجة أو التخزين وقع: التعليمات النصية
       // فوق فيها كل اللي العميل محتاجه فعليًا، فالـQR راحة إضافية مش شرط للدفع.
       qrImageUrl: await this.qrService.getCustomerUrl(),
+    };
+  }
+
+  /**
+   * الحقول اللي الشاشة بتعرضها — **مصدر واحد** لمسار بدء الدفع ومسار الاستئناف.
+   *
+   * العميل بيخرج من التطبيق عشان يفتح تطبيق البنك ويرجع (ده الاستخدام الطبيعي لـInstaPay مش
+   * حالة شاذة)، فلازم يلاقي **نفس** الأرقام بالحرف. لو كل مسار بنى الحقول بنفسه، أول تعديل
+   * في واحد بيخلّي العميل الراجع يشوف بيانات غير اللي حوّل عليها.
+   */
+  private transferDisplayFields(
+    amountCents: number,
+    confirmTypicalMinutes: number,
+    confirmMaxMinutes: number,
+  ) {
+    return {
+      recipientAddress: this.ipaAddress ?? null,
+      recipientName: this.recipientName ?? null,
+      amountCents,
+      confirmTypicalMinutes,
+      confirmMaxMinutes,
+    };
+  }
+
+  /**
+   * تفاصيل تحويل قايم بالفعل — **قراءة بحتة، صفر آثار جانبية**.
+   *
+   * ده مسار «رجعت للتطبيق عشان أنسخ الرقم»: مابيعملش دفعة جديدة ولا بيلمس أي حالة، فالعميل
+   * يقدر يفتح الشاشة ويقفلها ألف مرة بأمان. مسار `createPayment` بيلزمه `Idempotency-Key`
+   * لأنه بيكتب؛ ده لأ.
+   */
+  async describeExistingTransfer(orderNumber: string, amountCents: number): Promise<{
+    referenceCode: string;
+    instructionsAr: string;
+    qrImageUrl: string | null;
+    recipientAddress: string | null;
+    recipientName: string | null;
+    amountCents: number;
+    confirmTypicalMinutes: number;
+    confirmMaxMinutes: number;
+  }> {
+    const [confirmTypicalMinutes, confirmMaxMinutes] = await Promise.all([
+      this.settingsService.getNumber('payments.instapay_confirm_typical_minutes', 20),
+      this.settingsService.getNumber('payments.instapay_confirm_max_minutes', 60),
+    ]);
+    return {
+      referenceCode: orderNumber,
+      instructionsAr: INSTAPAY_INSTRUCTIONS_AR,
+      qrImageUrl: await this.qrService.getCustomerUrl(),
+      ...this.transferDisplayFields(amountCents, confirmTypicalMinutes, confirmMaxMinutes),
     };
   }
 

@@ -53,6 +53,7 @@ import { RatingsService } from '../ratings/ratings.service';
 import { Rating, RatingType } from '../ratings/entities/rating.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 /**
  * Script 7 Phase 34 — Full Golden-Path Live Test. رحلة العميل الكاملة أولوية #1 (docs/08 المقدمة
@@ -310,7 +311,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     try {
       await q(`DELETE FROM ratings WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM order_media WHERE order_id = $1`, [ids.order]);
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = ANY($1))`, [
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = ANY($1))`, [
         [ids.customerUser, ids.technicianUser],
       ]);
       await q(`DELETE FROM wallets WHERE owner_user_id = ANY($1)`, [[ids.customerUser, ids.technicianUser]]);

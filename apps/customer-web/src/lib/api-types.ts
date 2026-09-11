@@ -140,6 +140,16 @@ export interface ServiceDto {
   // الأربع بوليانات القدام اتشالوا من الـAPI بالكامل.
   allows_date_range_booking: boolean;
   schedule_precision: 'full_day' | 'start_time';
+  /**
+   * بوابتا الدفع المقدّم، **موجودتين في `ServiceResponseDto` من زمان ومستعملتين في
+   * `apps/customer-app`** وكانتا غايبتين هنا بس.
+   *
+   * الباك-إند بيرفض أي طلب بلا `prepayment_method` لو `cash_allowed = false` أو
+   * `deposit_required = true` (`order-creation.service.ts`) — فمن غيرهم الويب كان بيعرض
+   * «كاش/محفظة بعد الشغل» على خدمات بترفضه، والعميل ياخد خطأ عند التأكيد.
+   */
+  cash_allowed: boolean;
+  deposit_required: boolean;
 }
 
 export interface PricingFieldOptionDto {
@@ -189,6 +199,14 @@ export interface PriceEstimateDto {
 // OrderDto الكامل موجود في orders.ts (مطابق لـ OrderResponseDto بالحرف).
 
 export interface PaymentChannelDto {
-  method: 'cash' | 'wallet' | 'card' | 'instapay' | 'fawry_reference';
+  method: 'cash' | 'wallet' | 'card' | 'instapay' | 'fawry_reference' | 'installment';
   is_available: boolean;
+  /** سبب معروض للعميل لو الوسيلة مش متاحة — نص عام بلا أي تشخيص تشغيلي. */
+  unavailable_reason?: string | null;
+  /**
+   * الوسيلة اللي المنصة بترشّحها (`payments.recommended_method`). السيرفر كمان بيرجّع القايمة
+   * **مرتّبة** بترتيب العرض المطلوب، فالواجهة بتعرضها زي ما جت من غير ما تعيد ترتيبها.
+   */
+  is_recommended?: boolean;
+  recommended_label_ar?: string | null;
 }

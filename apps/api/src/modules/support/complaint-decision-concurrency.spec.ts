@@ -16,6 +16,7 @@ import { SupportService } from './support.service';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 describe('SupportService complaint terminal decision concurrency', () => {
   let dataSource: DataSource;
@@ -107,7 +108,7 @@ describe('SupportService complaint terminal decision concurrency', () => {
       await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [
         ids.complaints,
       ]);
-      await q(`DELETE FROM wallet_transactions WHERE reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [
+      await deleteWalletTransactions(q, `reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [
         ids.complaints,
       ]);
       await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [

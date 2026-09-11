@@ -205,8 +205,66 @@ class LiveHarness {
    * فالتصنيف بقى بالمحاولة مش بالتخمين: نجرّب نقطع العلاقة، ولو القاعدة رفضت يبقى الصف مملوك
    * فعلاً ⇒ نحذفه بنفس مسار العمود الإجباري. مفيش أي فشل بيتبلع.
    */
+  /**
+   * حذف حركات محفظة **مع إرجاع أثرها على أرصدة المحافظ المتأثرة**.
+   *
+   * نفس بَقّة تنظيف السبيكات بالحرف (`apps/api/src/modules/payments/wallet-cleanup.testing.ts`):
+   * كل تسوية بتكتب قيد مزدوج، طرف على محفظة الفني وطرف على **محفظة المنصة المشتركة**. الحذف
+   * التعاقبي بيشيل الصفوف، بس `wallets.balance_cents` بيفضل شايل أثرها — ومحفظة المنصة
+   * مابتتمسحش أبدًا، فكل تشغيلة تدقيق كانت بتزوّد الانحراف.
+   *
+   * اتقاس فعلاً: تشغيلة تدقيقات واحدة بعد إصلاح السبيكات رجّعت العدّاد من ٠ لـ١ بفرق
+   * ١٤٦٠ ج.م. يعني الإصلاح في السبيكات وحده ماكانش هيكفي طول ما التدقيقات الحية بتنضّف بالطريقة
+   * القديمة.
+   */
+  async deleteWalletTransactions(whereSql, params) {
+    const affected = await this.q(
+      `WITH deleted AS (
+         DELETE FROM wallet_transactions WHERE ${whereSql}
+         RETURNING wallet_id, balance_after_cents - balance_before_cents AS effect_cents
+       ), per_wallet AS (
+         SELECT wallet_id, SUM(effect_cents)::bigint AS effect_cents FROM deleted GROUP BY wallet_id
+       ), restored AS (
+         UPDATE wallets w SET balance_cents = w.balance_cents - p.effect_cents
+           FROM per_wallet p WHERE w.id = p.wallet_id
+         RETURNING w.id AS wallet_id
+       )
+       SELECT wallet_id FROM restored`,
+      params,
+    );
+    if (!affected.length) return;
+
+    // عبارة تانية عمدًا: تعديلات CTE مش مرئية لباقي أجزاء نفس العبارة في Postgres، فالحياكة
+    // جوّه العبارة فوق كانت هتحسب المجاميع وهي لسه شايفة الصفوف المحذوفة.
+    await this.q(
+      `UPDATE wallet_transactions t
+          SET balance_before_cents = c.before_cents, balance_after_cents = c.after_cents
+         FROM (
+           SELECT x.id,
+                  COALESCE(SUM(x.effect) OVER (
+                    PARTITION BY x.wallet_id ORDER BY x.created_at, x.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0)::int AS before_cents,
+                  SUM(x.effect) OVER (PARTITION BY x.wallet_id ORDER BY x.created_at, x.id)::int AS after_cents
+             FROM (
+               SELECT id, wallet_id, created_at,
+                      CASE WHEN direction = 'credit' THEN amount_cents ELSE -amount_cents END AS effect
+                 FROM wallet_transactions WHERE wallet_id = ANY($1::uuid[])
+             ) x
+         ) c
+        WHERE t.id = c.id
+          AND (t.balance_before_cents <> c.before_cents OR t.balance_after_cents <> c.after_cents)`,
+      [affected.map((row) => row.wallet_id)],
+    );
+  }
+
   async cascadeDelete(table, ids, depth = 0) {
     if (!ids.length || depth > 4) return;
+    // حركات المحافظ ليها مسار حذف خاص بيرجّع الأرصدة — لو اتمسحت كصفوف عادية هنا، الطرف
+    // المقابل على محفظة المنصة بيفضل محسوب في رصيدها وهي مابتتمسحش أبدًا.
+    if (table === 'wallet_transactions') {
+      await this.deleteWalletTransactions(`id = ANY($1::uuid[])`, [ids]);
+      return;
+    }
     const refs = await this.q(
       `SELECT c.conrelid::regclass::text AS table_name, a.attname AS column_name, a.attnotnull AS required
          FROM pg_constraint c

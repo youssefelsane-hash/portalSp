@@ -22,6 +22,13 @@ export interface CreateOrderBody {
   field_values?: Record<string, string | number | boolean>;
   /** الدفع قبل التوزيع فقط. `payment_method` القديم ما زال مقبولاً من الـAPI مؤقتًا. */
   prepayment_method?: 'card' | 'instapay';
+  /**
+   * العميل اختار يدفع الطلب **كامل** بدل العربون (طلب مالك 2026-09-11).
+   *
+   * الباك-إند وقتها مابياخدش snapshot لـ`deposit_amount_cents` أصلاً، فالطلب بيمشي كطلب بلا
+   * عربون بالظبط — **مفيش أي فرع جديد في المسار المالي**. سايبه `undefined` = العربون زي ما هو.
+   */
+  pay_full_amount?: boolean;
   // "كرّر الحجز ده" (migration 0176) — الطلب بيتعمل بالمسار العادي + قالب متكرر بيتإنشاء بنفس
   // العملية أول موعد له بعد الموعد المحجوز. الباك-إند بيرفضه للطوارئ/الخدمات غير مفعّل فيها التكرار.
   repeat_frequency?: 'weekly' | 'monthly' | 'yearly';

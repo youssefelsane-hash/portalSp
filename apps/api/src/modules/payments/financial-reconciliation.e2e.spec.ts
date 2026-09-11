@@ -39,6 +39,7 @@ import { Address } from '../customers/entities/address.entity';
 import { EarningsPolicyService } from './earnings-policy.service';
 import { CrewEarningsService } from './crew-earnings.service';
 import { OrderEarningShare } from './entities/order-earning-share.entity';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 /**
  * Script 7 Phase 35 — Financial Reconciliation Test. الأسئلة الحاكمة من تعليمات الـaudit الأصلية
@@ -281,7 +282,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       await q(`DELETE FROM payment_notification_outbox WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM refunds WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM order_earning_shares WHERE order_id = $1`, [ids.order]);
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = ANY($1))`, [
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = ANY($1))`, [
         [ids.customerUser, ids.technicianUser],
       ]);
       await q(`DELETE FROM wallets WHERE owner_user_id = ANY($1)`, [[ids.customerUser, ids.technicianUser]]);
