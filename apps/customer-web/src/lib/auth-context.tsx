@@ -44,14 +44,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAccessToken(token);
   }, []);
 
-  const inFlightRefresh = useRef<Promise<string> | null>(null);
+  const inFlightRefresh = useRef<Promise<string | null> | null>(null);
 
-  const doRefresh = useCallback((): Promise<string> => {
+  const doRefresh = useCallback((): Promise<string | null> => {
     if (!inFlightRefresh.current) {
-      const run = async (): Promise<string> => {
-        const result = await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/refresh', {});
-        setAccessTokenBoth(result.access_token);
-        return result.access_token;
+      const run = async (): Promise<string | null> => {
+        const result = await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'> | null>(
+          '/api/auth/refresh',
+          {},
+        );
+        setAccessTokenBoth(result?.access_token ?? null);
+        return result?.access_token ?? null;
       };
       inFlightRefresh.current = run().finally(() => {
         inFlightRefresh.current = null;
@@ -70,6 +73,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const token = await doRefresh();
+        // `null` = زائر مالوش جلسة (رد ٢٠٠ بـ`data: null` من مسار الـrefresh). مش خطأ،
+        // فمفيش داعي نرمي استثناء عشان نمسكه في `catch` بعد سطرين.
+        if (!token) throw new Error('no session');
         await fetchMe(token);
       } catch {
         setAccessTokenBoth(null);

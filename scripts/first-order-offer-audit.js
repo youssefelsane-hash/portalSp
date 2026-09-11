@@ -23,7 +23,9 @@
 const fs = require('node:fs');
 const { LiveHarness, sleep } = require('./lib/live-harness');
 
-const API_LOG = process.env.API_LOG_PATH ?? '/tmp/claude-0/api.log';
+// مسار اللوج بيتحل وقت التشغيل — كان مكتوب بالإيد لـscratchpad سيشن قديمة، فالتدقيق
+// كان بيرسب على «مالقيناش كود OTP» في أي تشغيلة تانية.
+const { resolveApiLog } = require('./lib/resolve-api-log');
 const KEEP = process.argv.includes('--keep');
 const h = new LiveHarness('fo');
 
@@ -42,9 +44,11 @@ async function registerCustomer() {
     return { error: `طلب OTP فشل: HTTP=${otpRes.status} ${messageOf(otpRes.body)}` };
   }
   await sleep(400);
-  const log = fs.readFileSync(API_LOG, 'utf8');
+  const apiLog = resolveApiLog();
+  if (!apiLog) return { error: 'مالقيناش لوج الباك-إند — مرّر API_LOG_PATH' };
+  const log = fs.readFileSync(apiLog, 'utf8');
   const match = [...log.matchAll(new RegExp(`\\[OTP\\] \\${phone} .*→ (\\d{6})`, 'g'))].pop();
-  if (!match) return { error: `مالقيناش كود OTP في لوج التطوير (${API_LOG})` };
+  if (!match) return { error: `مالقيناش كود OTP في لوج التطوير (${apiLog})` };
 
   const res = await h.api('/auth/register', {
     method: 'POST',

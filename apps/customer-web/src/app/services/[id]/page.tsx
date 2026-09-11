@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { fetchService, fetchPricingFields, estimatePrice } from '@/lib/catalog';
@@ -11,10 +12,12 @@ import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel 
 import {
   createOrder,
   createMatchPreview,
+  previewOrder,
   formatEgp,
   uploadPricingFieldImage,
   uploadProblemImage,
   type BookingMatchPreviewDto,
+  type PreviewOrderResponseDto,
 } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import { LiveAmount } from '@/components/live-amount';
@@ -28,6 +31,26 @@ import { MapPicker } from '@/components/map-picker';
 import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
+/**
+ * هل الطلب ده **لازم** يتبعت كطلب تقييم بالصور؟
+ *
+ * نفس الحارس بالحرف في `apps/customer-app` و`apps/api`: لو مسار الصور هو الوحيد المتاح
+ * لسياسة الخدمة (ومش طوارئ)، الطلب لازم يتبعت كده وإلا الباك-إند بيرفضه.
+ *
+ * موجودة على مستوى الموديول عشان `useEffect` — اللي لازم يتنادى قبل أي `return` مبكّر —
+ * والرندر اللي بعده يستخدموا **نفس** القاعدة، بدل نسختين ممكن يفرقوا.
+ */
+function resolveEffectiveRemoteQuote(
+  service: ServiceDto | null,
+  bookingMode: BookingMode,
+  requested: boolean,
+): boolean {
+  if (!service) return requested;
+  const routes = assessmentRoutesForService(service);
+  const remoteForced = routes.remote && bookingMode !== 'emergency' && !routes.onsite;
+  return remoteForced ? true : requested;
+}
+
 function availableBookingModes(service: ServiceDto): BookingMode[] {
   return [
     ...(service.allows_individual ? (['individual'] as const) : []),
@@ -140,6 +163,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   //   2. العنوان وإكمال الطلب (وصف/صور/تكرار/خصم/دفع/سياسات)
   //   3. اختيار الفني أو الترشيح التلقائي + التأكيد
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  // تفكيك السعر الكامل من `POST /orders/preview` — نفس مصدر التطبيق بالحرف. `estimate`
+  // (`/services/:id/estimate`) بيفضل للتقدير المبكّر في الخطوة الأولى بس.
+  const [orderPreview, setOrderPreview] = useState<PreviewOrderResponseDto | null>(null);
+  const [orderPreviewLoading, setOrderPreviewLoading] = useState(false);
   // بند 9-12 — تذكرة المطابقة: الفني وسعره اللي العميل شافه واللي هيتأكد عليه، من الباك-إند.
   const [matchPreview, setMatchPreview] = useState<BookingMatchPreviewDto | null>(null);
   // بصمة المدخلات وقت ما التذكرة اتعملت — بيتقارن بالبصمة الحالية عشان نعرف إنها بايتة.
@@ -283,12 +310,59 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [technicianChoiceMode, selectedAddressId, id, bookingMode, debouncedFieldValues]);
 
-  const totalCents =
-    (technicianChoiceMode === 'manual' &&
-      technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
-    estimate?.estimated_total_cents ||
-    service?.base_price_cents ||
-    null;
+  // **معاينة الطلب الكاملة** — بتتنادى في الخطوة التالتة بس، وبنفس مدخلات `POST /orders`
+  // بالظبط (العنوان، الميعاد، المنفّذ المطلوب، كود الخصم، حقول التسعير). ده اللي بيضمن إن
+  // الرقم اللي العميل بيشوفه قبل التأكيد هو نفس الرقم اللي هيتسجّل — نفس ضمان التطبيق بالحرف.
+  //
+  // مسار الصور مستثنى: مفيش سعر خدمة أصلاً وقت الحجز، وطلب معاينة له بيرجّع رقم مالوش معنى.
+  useEffect(() => {
+    if (step !== 3 || !selectedAddressId || resolveEffectiveRemoteQuote(service, bookingMode, requestRemoteQuote)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOrderPreview(null);
+      return;
+    }
+    let active = true;
+    setOrderPreviewLoading(true);
+    previewOrder(authedFetch, {
+      service_id: id,
+      address_id: selectedAddressId,
+      booking_mode: bookingMode,
+      ...(scheduledDate ? { scheduled_at: computeScheduledAt(scheduledDate) } : {}),
+      ...(Object.keys(debouncedFieldValues).length > 0 ? { field_values: debouncedFieldValues } : {}),
+      ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
+      ...(selectedTechnicianId && technicianChoiceMode === 'manual'
+        ? { requested_technician_id: selectedTechnicianId }
+        : {}),
+    })
+      .then((preview) => {
+        if (active) setOrderPreview(preview);
+      })
+      // فشل المعاينة **مايكسرش الصفحة**: الملخص بيرجع لتقدير `estimate`، والتأكيد نفسه لسه
+      // بيتحقق في الباك-إند. رمي الخطأ هنا كان هيقفل الحجز على مشكلة عرض.
+      .catch(() => {
+        if (active) setOrderPreview(null);
+      })
+      .finally(() => {
+        if (active) setOrderPreviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    step,
+    selectedAddressId,
+    service,
+    requestRemoteQuote,
+    id,
+    bookingMode,
+    scheduledDate,
+    preciseTime,
+    debouncedFieldValues,
+    promoCode,
+    selectedTechnicianId,
+    technicianChoiceMode,
+  ]);
 
   // مطابق لـ RescheduleSection's fetchRescheduleOptions/rescheduleOrder بالحرف (نفس اتفاقية
   // "T00:00:00.000Z" لليوم المجرّد) — الوقت الدقيق (precise/start-time-only بس) بيتضاف فوق نفس
@@ -408,15 +482,37 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }
 
   if (!isAuthenticated) {
+    // **بوابة الزائر** — نظير `_SignInInvitationSheet` في التطبيق. الفرق اللي اتقفل هنا: النسخة
+    // القديمة كانت سطر وزرار وسط صفحة فاضية، والتطبيق بيقول **ليه** محتاجين حساب ويطمّن العميل
+    // إنه مش هيبدأ من الأول بعد التسجيل. نفس المعلومة ونفس النبرة، وكارت بدل فراغ.
     return (
-      <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <p className="mb-4 text-lg">لازم تسجّل دخول الأول عشان تكمّل الحجز</p>
-        <button
-          onClick={() => router.push(`/login?next=/services/${id}`)}
-          className="rounded-lg bg-primary px-6 py-3 font-medium text-primary-foreground hover:opacity-90"
-        >
-          تسجيل الدخول
-        </button>
+      <div className="mx-auto max-w-md px-4 py-12">
+        <div className="motion-rise rounded-2xl border border-border bg-surface p-7 text-center">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden>
+              <path
+                d="M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 20a7.5 7.5 0 0115 0"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <h1 className="mt-4 text-lg font-semibold">كمّل حجز «{service.name_ar}»</h1>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            عشان نحجزلك الخدمة دي محتاجين نعرف عنوانك ونقدر نتواصل معاك. أول ما تسجّل هترجع لنفس
+            الصفحة وتكمّل من نفس المكان.
+          </p>
+          <button
+            onClick={() => router.push(`/login?next=/services/${id}`)}
+            className="motion-press mt-6 w-full rounded-xl bg-primary px-6 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            تسجيل الدخول
+          </button>
+          <Link href="/search" className="mt-3 inline-block text-sm text-muted hover:text-primary">
+            أفضل أتفرّج دلوقتي
+          </Link>
+        </div>
       </div>
     );
   }
@@ -452,7 +548,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // بلقطة شاشة مالك: الكارت 0 ج وملخص السعر تحته 150 ج على نفس الشاشة). المعاينة الحية هي
   // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
   const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
-  const effectiveRequestRemoteQuote = remoteRouteForced ? true : requestRemoteQuote;
+  const effectiveRequestRemoteQuote = resolveEffectiveRemoteQuote(service, bookingMode, requestRemoteQuote);
   // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `prepayment_method: undefined`
   // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
   // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
@@ -514,8 +610,19 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     : availabilityAddressId === selectedAddressId
       ? serviceAvailabilityError
       : null;
-  const stepTwoComplete =
-    stepOneComplete && serviceAvailableForAddress && allRequiredAccepted && remoteQuoteValid;
+  // **المنفّذ متقفل؟** — نفس تعريف الأندرويد بالحرف: الطوارئ ومسار الصور مالهمش اختيار منفّذ
+  // أصلاً (أول فني يقبل / الإدارة بتحدد)، وغير كده لازم تذكرة حقيقية: تلقائي = معاينة مطابقة،
+  // يدوي = فني/شركة مختارة. من غير الشرط ده الخطوة ٢ بتعدّي والعميل لسه مش عارف مين هينفّذ.
+  const providerLocked =
+    effectiveRequestRemoteQuote ||
+    bookingMode === 'emergency' ||
+    (technicianChoiceMode === 'auto' ? !!activePreview : !!selectedTechnicianId);
+  const stepTwoComplete = stepOneComplete && serviceAvailableForAddress && providerLocked;
+
+  // **مصدر واحد لتفكيك السعر**: التذكرة المقفولة لو موجودة (نفس الرقم اللي هيتسجّل على الطلب)،
+  // وإلا تقدير `POST /orders/preview`. الاتنين نفس الشكل (`PreviewOrderResponseDto`)، فالجدول
+  // تحت مابيفرّقش بينهم — وده اللي بيمنع «رقمين مختلفين على نفس الشاشة».
+  const priceBreakdown: PreviewOrderResponseDto | null = activePreview?.pricing ?? orderPreview;
 
   const canSubmit =
     !!selectedAddressId &&
@@ -528,8 +635,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     remoteQuoteValid &&
     // بند 9 — في الوضع التلقائي التأكيد **محتاج معاينة فعلية**: العميل لازم يكون شاف الفني
     // وسعره قبل ما يأكد. من غير الشرط ده الوضع التلقائي بيرجع «أكّد وإحنا هندوّر بعدين».
-    (effectiveRequestRemoteQuote ||
-      (technicianChoiceMode === 'auto' ? !!activePreview : !!selectedTechnicianId)) &&
+    // التعريف اتوحّد في `providerLocked` فوق — كانت نسخة موازية بتفرّق عن شرط الخطوة ٢.
+    providerLocked &&
     allRequiredAccepted &&
     !submitting &&
     !submitted;
@@ -538,7 +645,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     <div className="mx-auto max-w-2xl px-4 py-8">
       {service.icon_url && (
         // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-        <img src={service.icon_url} alt="" className="mb-4 aspect-[3/1] w-full rounded-xl object-cover" />
+        <img
+          src={service.icon_url}
+          alt=""
+          loading="eager"
+          fetchPriority="high"
+          decoding="async"
+          className="mb-4 aspect-[3/1] w-full rounded-xl bg-surface-variant object-cover"
+        />
       )}
       <h1 className="text-2xl font-bold">{service.name_ar}</h1>
       {service.short_description_ar && <p className="mt-1 text-muted">{service.short_description_ar}</p>}
@@ -551,8 +665,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       <ol className="mt-6 flex items-center gap-2 text-sm">
         {[
           { n: 1 as const, label: 'الشغل والموعد' },
-          { n: 2 as const, label: 'العنوان والتفاصيل' },
-          { n: 3 as const, label: 'الفني والتأكيد' },
+          { n: 2 as const, label: 'العنوان والفني' },
+          { n: 3 as const, label: 'التفاصيل والتأكيد' },
         ].map((s) => (
           // `min-w-0` **ضروري**: بلاها `truncate` جوّه العنصر ده مالهاش أي أثر خالص.
           // عنصر الـflex افتراضيًا `min-width: auto`، يعني مايقدرش يصغّر تحت عرض محتواه، فالنص
@@ -666,7 +780,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
         <section className="motion-rise mt-6">
-          <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
+          <h2 className="mb-1 font-semibold">تفاصيل الشغل</h2>
+          {/* نفس الجملة بالحرف اللي `JobDetailsScreen` في التطبيق بيقولها. الفكرة إن العميل
+              يفهم **ليه** بنسأله قبل ما نعرض أي سعر: من غير التفاصيل دي، السعر اللي هيتعرض
+              جنب كل فني في القايمة مش هيكون رقمه الحقيقي. */}
+          <p className="mb-3 text-sm text-muted">
+            دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة
+          </p>
           <div className="space-y-4">
             {pricingFields
               .slice()
@@ -763,7 +883,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       </section>
       )}
 
-      {step === 3 && selectedAddressId && !effectiveRequestRemoteQuote && (
+      {/* **اختيار الفني بقى في الخطوة ٢ جنب العنوان (2026-09-11)** — مطابقة حرفية لفلو
+          الأندرويد: `catalog_navigation.dart` بيروح `TechnicianSelectionScreen` **قبل**
+          `CreateOrderScreen`، والشاشة دي هي اللي بتاخد العنوان كمان. الترتيب القديم (عنوان ←
+          تفاصيل ← فني) كان بيخلي العميل يعدّي على كل التفاصيل وهو لسه مش عارف مين هينفّذ ولا
+          بكام — وده مصدر «فلو التسعير مختلف» في بلاغ المالك.
+
+          **الطوارئ مستثناة** (`bookingMode !== 'emergency'`) — نفس الاستثناء بالحرف في
+          `catalog_navigation.dart`: حجز اليوم بيروح لإنشاء الطلب مباشرة، وأول فني يقبل
+          بياخده. سؤال العميل «مين يعمل الشغل؟» في الحالة دي بيوعده باختيار مش موجود. */}
+      {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && bookingMode !== 'emergency' && (
         <section className="motion-rise mt-6">
           <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -888,7 +1017,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {step === 2 && !effectiveRequestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
+      {step === 3 && !effectiveRequestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
         <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
@@ -918,7 +1047,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {step === 2 && (
+      {step === 3 && (
       <section className="motion-rise mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
@@ -932,7 +1061,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       </section>
       )}
 
-      {step === 2 && (
+      {step === 3 && (
       <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
         <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
@@ -1066,7 +1195,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       </section>
       )}
 
-      {step === 2 && !effectiveRequestRemoteQuote && (
+      {step === 3 && !effectiveRequestRemoteQuote && (
         <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
           <input
@@ -1084,7 +1213,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* مسار الصور برسم: مفيش اختيار طريقة دفع أصلاً — الكاش ممنوع (مفيش فني رايح يستلمه)
           والدفع بيتم دلوقتي على الرسم بس. القسم بيشرح ده بدل ما العميل يوصل للتأكيد ويترفض. */}
-      {step === 2 && remoteAssessmentFeeDueCents > 0 && (
+      {step === 3 && remoteAssessmentFeeDueCents > 0 && (
         <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">رسم التقييم</h2>
           <p className="text-sm text-muted">
@@ -1095,7 +1224,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {step === 2 && !effectiveRequestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
+      {step === 3 && !effectiveRequestRemoteQuote && paymentChannels && paymentChannels.some((c) => c.method === 'card' && c.is_available) && (
         <section className="motion-rise mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex gap-2">
@@ -1117,7 +1246,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
       {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
           مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
-      {step === 2 && postpaidPolicies.length > 0 && (
+      {step === 3 && postpaidPolicies.length > 0 && (
         <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">شروط الدفع</h2>
           {postpaidPolicies.map((policy) => {
@@ -1149,76 +1278,121 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      <section className="mt-8 rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-muted">{effectiveRequestRemoteQuote ? 'السعر' : 'السعر المتوقع'}</span>
-          {/* بيومض عند كل تغيّر — العميل يعرف إن اختياره أثّر في السعر من غير ما يدوّر (§122). */}
-          <LiveAmount
-            className="text-xl font-bold text-primary"
-            value={
-              effectiveRequestRemoteQuote
-                ? 'الإدارة هتحدده من الصور'
-                : activePreview
-                  ? // السعر المقفول مع الفني اللي اتعرض — نفس الرقم اللي هيتسجّل على الطلب.
-                    formatEgp(activePreview.pricing.total_amount_cents)
-                  : estimating
-                    ? '...'
-                    : totalCents !== null
-                      ? formatEgp(totalCents)
-                      : 'يتحدد بعد المعاينة'
-            }
-          />
-        </div>
-        {/* بند 10 — النطاق التقديري بنفس صياغة customer-app بالحرف (Web/Flutter parity).
-            الأرقام من **حقول العرض** مش من min/max_price_cents: دول حدود قصّ للمحرك، وعرضهم
-            كنطاق للعميل ممنوع بالنص في البند 29.
-            لما تبقى في تذكرة مطابقة، السعر بقى مقفول برقم واحد فالنطاق مالوش لازمة. */}
-        {!activePreview &&
-          !effectiveRequestRemoteQuote &&
-          estimate?.price_certainty_mode === 'estimated_range' &&
-          estimate.display_price_min_cents !== null &&
-          estimate.display_price_max_cents !== null && (
-            <p className="mt-1 text-sm text-muted">
-              نطاق تقديري: {formatEgp(estimate.display_price_min_cents)} –{' '}
-              {formatEgp(estimate.display_price_max_cents)}
-            </p>
-          )}
-        {/* بند 4 — الخصم بيظهر بس لو فيه خصم فعلي (ممنوع «الخصم 0 ج»). كان موجود في
-            الـDTO/customer-app من الأول وناقص هنا بس — فجوة عرض بين الواجهتين مش قصد. */}
-        {activePreview && activePreview.pricing.discount_cents > 0 && (
-          <p className="mt-1 text-sm text-success">
-            خصم {activePreview.pricing.discount_source === 'building' ? 'العمارة' : 'كود الخصم'}: -
-            {formatEgp(activePreview.pricing.discount_cents)}
-          </p>
-        )}
-        {service.pricing_model === 'inspection_then_quote' && !effectiveRequestRemoteQuote && (
-          <p className="mt-1 text-sm text-muted">
-            رسوم المعاينة {formatEgp(resolvedInspectionFeeCents)} — السعر النهائي بعد ما الفني يشوف الشغل
-          </p>
-        )}
-        {/* الطوارئ مستثناة: العميل مابيختارش فني فيها أصلاً، فالجملة كانت بتوعده بمقارنة مش
-            موجودة وتخوّفه بزيادة مالهاش سياق (بلاغ مالك 2026-09-04). نفس الاستثناء بالحرف في
-            `apps/customer-app`'s create_order_screen.dart. */}
-        {technicianChoiceMode === 'auto' &&
-          !activePreview &&
-          bookingMode !== 'emergency' &&
-          service.pricing_model !== 'inspection_then_quote' && (
-            <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
-              <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
-              <p className="text-muted">
-                قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.
+      {/* ── ملخص السعر ────────────────────────────────────────────────────────────────────
+          **إعادة بناء 2026-09-11 لمطابقة `create_order_screen.dart` بالحرف** (بلاغ المالك:
+          «فلو التسعير مختلف»). فرقين جوهريين اتقفلوا:
+
+          ١. **الملخص بقى في الخطوة التالتة بس.** الأندرويد مابيعرضش أي سعر قبل ما المنفّذ
+             يتقفل — `JobDetailsScreen` بتقول صراحةً «دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر
+             النهائي الحقيقي لكل فني في القايمة»، وشاشة اختيار الفني مافيهاش أي رقم. الويب كان
+             بيعرض «السعر المتوقع» من الخطوة الأولى، وبعدين الرقم يتغيّر بعد اختيار الفني —
+             وده اللي خلّى المالك يحس إن فيه تسعيرتين.
+
+          ٢. **صندوق «قد يزيد الإجمالي حسب مستوى الفني» اتشال نهائيًا.** الأندرويد بيعرضه بشرط
+             `requestedTechnicianId == null`، وفي مساره ده **مستحيل** يتحقق في حجز عادي:
+             `TechnicianSelectionScreen._confirmSelection` بيمرّر `preview.provider.id` حتى في
+             الوضع التلقائي. يعني العميل على الأندرويد مابيشوفش الجملة دي أصلاً، وعلى الويب
+             كانت بتقعد قدامه طول الخطوتين الأولانيتين. مكانها الطبيعي بقى الرقم المقفول نفسه.
+
+          الجدول تحت بنفس ترتيب `_buildPriceBreakdown` بالحرف: أساسي ← نطاق ← فحص ← إضافات ←
+          خصم ← ضمان ← مدة ← فاصل ← إجمالي ← إيداع/باقي. */}
+      {step === 3 && (
+        <section className="mt-8 rounded-2xl border border-border bg-surface p-4">
+          {effectiveRequestRemoteQuote ? (
+            <>
+              {remoteAssessmentFeeDueCents > 0 && (
+                <PriceRow label="رسم التقييم (يتدفع دلوقتي)" value={formatEgp(remoteAssessmentFeeDueCents)} />
+              )}
+              <p className="mt-1.5 text-sm leading-6 text-muted">
+                {remoteAssessmentFeeDueCents > 0
+                  ? 'سعر الشغل نفسه هيوصلك بعد ما الإدارة تشوف الصور — وموافقتك عليه شرط قبل أي دفع تاني.'
+                  : 'مفيش أي مبلغ بيتدفع دلوقتي. الإدارة هتشوف الصور وتبعتلك السعر، وإنت توافق أو ترفض.'}
               </p>
-            </div>
+            </>
+          ) : showsDynamicForm && !pricingFieldsValid ? (
+            <p className="text-sm text-muted">كمّل بيانات السعر فوق عشان نحسبلك السعر</p>
+          ) : (estimating || orderPreviewLoading) && !priceBreakdown ? (
+            <p className="text-sm text-muted">بيتحسب السعر...</p>
+          ) : !priceBreakdown ? (
+            <p className="text-sm text-muted">كمّل بيانات الحجز عشان نعرضلك السعر</p>
+          ) : (
+            <>
+              <PriceRow label="السعر الأساسي" value={formatEgp(priceBreakdown.base_price_cents)} />
+              {/* بند 10/29 — النطاق من **حقول العرض** مش من min/max_price_cents: دول حدود قصّ
+                  للمحرك، وعرضهم كنطاق للعميل ممنوع بالنص. وللخدمات «نطاق تقديري» بس. */}
+              {priceBreakdown.price_certainty_mode === 'estimated_range' &&
+                priceBreakdown.display_price_min_cents !== null &&
+                priceBreakdown.display_price_max_cents !== null && (
+                  <p className="mt-0.5 text-xs text-muted">
+                    نطاق تقديري: {formatEgp(priceBreakdown.display_price_min_cents)} –{' '}
+                    {formatEgp(priceBreakdown.display_price_max_cents)}
+                  </p>
+                )}
+              {priceBreakdown.inspection_fee_cents > 0 && (
+                <PriceRow label="رسوم الفحص" value={formatEgp(priceBreakdown.inspection_fee_cents)} />
+              )}
+              {/* رسوم الطوارئ **مابتتعرضش كبند مستقل للعميل** — بتفضل في الإجمالي واللقطة
+                  المالية وشاشة الأدمن زي ما هي. نفس القاعدة بالحرف في التطبيق. */}
+              {priceBreakdown.addons_total_cents > 0 && (
+                <PriceRow label="الإضافات" value={`+${formatEgp(priceBreakdown.addons_total_cents)}`} />
+              )}
+              {priceBreakdown.discount_cents > 0 && (
+                <PriceRow
+                  label={`الخصم${priceBreakdown.discount_source === 'building' ? ' (العمارة)' : priceBreakdown.discount_source === 'promo_code' ? ' (كود الخصم)' : ''}`}
+                  value={`-${formatEgp(priceBreakdown.discount_cents)}`}
+                  tone="success"
+                />
+              )}
+              {priceBreakdown.warranty_price_cents > 0 && (
+                <PriceRow
+                  label="الضمان الاختياري"
+                  value={`+${formatEgp(priceBreakdown.warranty_price_cents)}`}
+                  tone="info"
+                />
+              )}
+              {service.pricing_model === 'inspection_then_quote' && (
+                <p className="mt-0.5 text-xs text-muted">
+                  السعر النهائي بعد ما الفني يشوف الشغل
+                </p>
+              )}
+              {formatWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days) !== null && (
+                <p className="mt-0.5 text-xs text-muted">
+                  المدة المتوقعة:{' '}
+                  {formatWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days)}
+                </p>
+              )}
+
+              <div className="my-3 border-t border-border" />
+
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">الإجمالي</span>
+                {/* بيومض عند كل تغيّر — العميل يعرف إن اختياره أثّر في السعر من غير ما يدوّر (§122). */}
+                <LiveAmount
+                  className="text-xl font-bold text-primary"
+                  value={formatEgp(priceBreakdown.total_amount_cents)}
+                />
+              </div>
+
+              {priceBreakdown.deposit_amount_cents !== null && (
+                <div className="mt-2">
+                  <PriceRow
+                    label="المطلوب دلوقتي (إيداع)"
+                    value={formatEgp(priceBreakdown.deposit_amount_cents)}
+                    bold
+                    tone="primary"
+                  />
+                  <PriceRow
+                    label="الباقي بعد ما الشغل يخلص"
+                    value={formatEgp(priceBreakdown.remaining_amount_cents ?? 0)}
+                  />
+                </div>
+              )}
+
+              {(estimating || orderPreviewLoading) && <p className="mt-1 text-xs text-muted">بيتحدّث...</p>}
+            </>
           )}
-        {/* المدة المتوقعة — كانت فجوة تكافؤ: راجعة في `POST /orders/preview` من الأول ومعروضة
-            في تطبيق العميل بس. نفس الصياغة المشتركة (`lib/work-scope.ts`). */}
-        {estimate &&
-          formatWorkDuration(estimate.duration_minutes, estimate.estimated_duration_days) !== null && (
-            <p className="mt-1 text-sm text-muted">
-              المدة المتوقعة: {formatWorkDuration(estimate.duration_minutes, estimate.estimated_duration_days)}
-            </p>
-          )}
-      </section>
+        </section>
+      )}
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
@@ -1257,6 +1431,36 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       {step === 2 && !stepTwoComplete && (
         <p className="mt-2 text-sm text-muted">اختار عنوان ووافق على الشروط المطلوبة عشان تعدّي.</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * سطر واحد في تفكيك السعر — نظير `_buildPriceLine` في `create_order_screen.dart` بالحرف.
+ *
+ * موجود كمكوّن مستقل عشان كل السطور تاخد **نفس** المسافة والوزن والمحاذاة تلقائيًا. لما كانت
+ * السطور مكتوبة كـ`<p>` منفصلة، كل واحد كان بياخد `mt-1`/`text-sm` بالإيد — والنتيجة سطور
+ * الفلوس مش على نفس الشبكة البصرية، وده أول حاجة بتخلي ملخص سعر يبان «مش مظبوط».
+ */
+function PriceRow({
+  label,
+  value,
+  bold,
+  tone,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  tone?: 'success' | 'info' | 'primary';
+}) {
+  const toneClass =
+    tone === 'success' ? 'text-success' : tone === 'info' ? 'text-info' : tone === 'primary' ? 'text-primary' : '';
+  return (
+    <div className={`flex items-baseline justify-between gap-4 py-1 text-sm ${bold ? 'font-semibold' : ''}`}>
+      <span className={tone === 'primary' ? 'text-primary' : 'text-muted'}>{label}</span>
+      <span className={`tabular-nums ${toneClass}`} dir="ltr">
+        {value}
+      </span>
     </div>
   );
 }
@@ -1563,7 +1767,15 @@ function IndividualCard({
       <input type="radio" name="technician" checked={selected} onChange={onSelect} className="mt-1.5" />
       {t.avatar_url ? (
         // eslint-disable-next-line @next/next/no-img-element -- صور فنيين خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-        <img src={t.avatar_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+        <img
+          src={t.avatar_url}
+          alt=""
+          width={48}
+          height={48}
+          loading="lazy"
+          decoding="async"
+          className="h-12 w-12 shrink-0 rounded-full bg-surface-variant object-cover"
+        />
       ) : (
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant text-lg">👤</div>
       )}

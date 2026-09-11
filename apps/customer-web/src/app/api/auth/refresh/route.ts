@@ -8,10 +8,17 @@ import { backendUrl, REFRESH_TOKEN_COOKIE } from '@/lib/backend';
 export async function POST(req: NextRequest) {
   const refreshToken = req.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
   if (!refreshToken) {
-    return NextResponse.json(
-      { success: false, data: null, meta: null, error: { code: 'AUTH_NO_SESSION', message: 'مفيش جلسة' }, request_id: '' },
-      { status: 401 },
-    );
+    // **200 مش 401 عمدًا.** «زائر مالوش جلسة» مش فشل مصادقة — دي الحالة الطبيعية لأي زائر
+    // بيفتح الموقع لأول مرة. الـ401 كان بيطبع خطأ في كونسول المتصفح **على كل صفحة لكل زائر**،
+    // وبيخلّي كل صفحة تترصد كـ"فيها مشكلة" في `scripts/sweep-customer.js` — ضجيج بيخبّي
+    // الأعطال الحقيقية. الرد هنا نجاح صريح بـ`data: null`، والعميل بيفهمها كـ«مفيش جلسة».
+    return NextResponse.json({
+      success: true,
+      data: null,
+      meta: null,
+      error: null,
+      request_id: '',
+    });
   }
 
   const res = await fetch(backendUrl('/auth/refresh'), {

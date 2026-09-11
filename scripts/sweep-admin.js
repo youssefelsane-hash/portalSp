@@ -26,7 +26,10 @@ const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2';
 
 // اسم قاعدة البيانات كان مكتوب بالإيد (`baytak_main`) — الأداة كانت بتفشل من أول استعلام على
 // أي جهاز اسم قاعدته مختلف (الجهاز ده اسمها `baytak`). بيتقرا من البيئة دلوقتي.
-const DB = process.env.PGDATABASE || (process.env.DATABASE_URL || '').split('/').pop() || 'baytak';
+// اسم القاعدة بيتقرا من نفس المصدر اللي الـAPI بيقلع بيه — التخمين هنا كان بيخلّي
+// تسجيل الدخول يفشل بصمت والزحف يكمّل كزائر، والمعرّفات ترجّع 404 مالهاش وجود.
+const { resolveApiDatabase } = require('./lib/resolve-api-db');
+const DB = resolveApiDatabase();
 const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,'-Atc',q],
   { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' }).trim();
 
@@ -139,9 +142,39 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
   const problems = [];
   for (const path of links) {
     const errors = [], failed = [];
-    const onC = (m) => { if (m.type() === 'error') errors.push(m.text().slice(0,180)); };
+    // المتصفح بيطبع «Failed to load resource… 404» تلقائيًا لأي fetch فاشل — مش من كود الصفحة،
+    // فلو الرد نفسه في قايمة المستثنى فوق، السطر ده ضجيج تابع ليه ولازم يتشال معاه.
+    let suppressed4xx = 0;
+    const onC = (m) => {
+      if (m.type() !== 'error') return;
+      const text = m.text();
+      if (suppressed4xx > 0 && /Failed to load resource/i.test(text)) {
+        suppressed4xx -= 1;
+        return;
+      }
+      errors.push(text.slice(0, 180));
+    };
     const onE = (e) => errors.push('PAGEERROR: ' + String(e).slice(0,180));
-    const onResp = (r) => { if (r.status() >= 400) failed.push(`${r.status()} ${r.request().method()} ${r.url().replace('http://localhost:3000','API').replace('http://localhost:3001','')}`.slice(0,110)); };
+    // ردود ≥400 **مقصودة وموثّقة** — عقد حقيقي مش عطل. أي استثناء هنا لازم يكون مكتوب بسببه،
+    // وإلا التقرير بيفضل فيه ضجيج ثابت والناس بتتعوّد تتجاهله فتفوت عطل حقيقي.
+    const EXPECTED_4XX = [
+      {
+        // المحافظ بتتعمل **كسول** عند أول حركة مالية (`getOrCreateWallet`)، فعميل/فني لسه مادفعش
+        // ولا كسب حاجة مالوش صف محفظة أصلاً. الصفحة بتتعامل مع الـ404 صراحةً وبتعرض «لسه مفيش
+        // محفظة» بدل خطأ أحمر — راجع `loadWallet()` في customers/[userId]/page.tsx.
+        test: (status, url) => status === 404 && /\/admin\/wallets\/[^/]+$/.test(url),
+        why: 'محفظة لسه ما اتعملتش (كسولة) — الصفحة بتعرض حالة فاضية مقصودة',
+      },
+    ];
+    const onResp = (r) => {
+      const status = r.status();
+      if (status < 400) return;
+      if (EXPECTED_4XX.some((e) => e.test(status, r.url()))) {
+        suppressed4xx += 1;
+        return;
+      }
+      failed.push(`${status} ${r.request().method()} ${r.url().replace('http://localhost:3000','API').replace('http://localhost:3001','')}`.slice(0,110));
+    };
     page.on('console', onC); page.on('pageerror', onE); page.on('response', onResp);
     let status = 'ok';
     try {
