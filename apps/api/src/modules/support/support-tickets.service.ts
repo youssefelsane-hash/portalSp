@@ -1,7 +1,12 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import {
+  SUPPORT_TICKET_CREATED_EVENT,
+  SupportTicketCreatedEvent,
+} from '../../common/events/support-ticket-created.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -25,6 +30,7 @@ export class SupportTicketsService {
     @InjectRepository(SupportTicket) private readonly tickets: Repository<SupportTicket>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private async nextTicketNumber(manager: EntityManager): Promise<string> {
@@ -35,7 +41,7 @@ export class SupportTicketsService {
   }
 
   async create(user: JwtPayload, dto: CreateSupportTicketDto): Promise<SupportTicket> {
-    return this.dataSource.transaction(async (manager) => {
+    const ticket = await this.dataSource.transaction(async (manager) => {
       const ticketNumber = await this.nextTicketNumber(manager);
       const ticket = manager.create(SupportTicket, {
         ticketNumber,
@@ -49,6 +55,8 @@ export class SupportTicketsService {
       await manager.save(ticket);
       return ticket;
     });
+    this.events.emit(SUPPORT_TICKET_CREATED_EVENT, new SupportTicketCreatedEvent(ticket.id, ticket.ticketNumber));
+    return ticket;
   }
 
   private async findOrThrow(id: string): Promise<SupportTicket> {

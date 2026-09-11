@@ -26,32 +26,72 @@ class SupportRepository {
     required String title,
     required String description,
   }) async {
-    final data = await auth.authedRequest('POST', '/complaints', body: {
-      'order_id': ?orderId,
-      'category': category.apiValue,
-      'title': title,
-      'description': description,
-    });
+    final data = await auth.authedRequest(
+      'POST',
+      '/complaints',
+      body: {
+        'order_id': ?orderId,
+        'category': category.apiValue,
+        'title': title,
+        'description': description,
+      },
+    );
     return Complaint.fromJson(data!);
   }
 
   Future<List<ComplaintMessage>> listMessages(String complaintId) async {
-    final items = await auth.authedRequestList('/complaints/$complaintId/messages');
+    final items = await auth.authedRequestList(
+      '/complaints/$complaintId/messages',
+    );
     return items.map(ComplaintMessage.fromJson).toList();
   }
 
-  Future<ComplaintMessage> addMessage(String complaintId, String message) async {
-    final data = await auth.authedRequest('POST', '/complaints/$complaintId/messages', body: {'message': message});
+  Future<ComplaintMessage> addMessage(
+    String complaintId,
+    String message,
+  ) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/complaints/$complaintId/messages',
+      body: {'message': message},
+    );
     return ComplaintMessage.fromJson(data!);
   }
 
   Future<List<ComplaintAttachment>> listAttachments(String complaintId) async {
-    final items = await auth.authedRequestList('/complaints/$complaintId/attachments');
+    final items = await auth.authedRequestList(
+      '/complaints/$complaintId/attachments',
+    );
     return items.map(ComplaintAttachment.fromJson).toList();
   }
 
-  Future<ComplaintAttachment> uploadAttachment(String complaintId, List<int> fileBytes, String filename) async {
-    final data = await auth.authedUpload('/complaints/$complaintId/attachments', fileBytes: fileBytes, filename: filename);
+  Future<ComplaintAttachment> uploadAttachment(
+    String complaintId,
+    List<int> fileBytes,
+    String filename,
+  ) async {
+    final data = await auth.authedUpload(
+      '/complaints/$complaintId/attachments',
+      fileBytes: fileBytes,
+      filename: filename,
+    );
     return ComplaintAttachment.fromJson(data!);
+  }
+
+  Future<List<SupportTicket>> listTickets() async {
+    final items = await auth.authedRequestList('/support-tickets');
+    return items.map(SupportTicket.fromJson).toList();
+  }
+
+  Future<SupportTicket> createTicket({
+    required String subject,
+    required String category,
+  }) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/support-tickets',
+      body: {'subject': subject, 'category': category, 'channel': 'app'},
+    );
+    return SupportTicket.fromJson(data!);
   }
 }

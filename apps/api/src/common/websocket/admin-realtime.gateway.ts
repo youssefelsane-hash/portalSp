@@ -87,6 +87,10 @@ import {
   ComplaintFiledEvent,
 } from '../../common/events/complaint-filed.event';
 import {
+  SUPPORT_TICKET_CREATED_EVENT,
+  SupportTicketCreatedEvent,
+} from '../../common/events/support-ticket-created.event';
+import {
   SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT,
   SupportChatMessageReceivedEvent,
 } from '../../common/events/support-chat-message-received.event';
@@ -495,6 +499,16 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
   @OnEvent(COMPLAINT_FILED_EVENT)
   onComplaintFiled(event: ComplaintFiledEvent): void {
     this.emitTopic('support', { entity: 'complaint', action: 'filed', entity_id: event.complaintId, data: { complaint_number: event.complaintNumber } });
+  }
+
+  @OnEvent(SUPPORT_TICKET_CREATED_EVENT)
+  onSupportTicketCreated(event: SupportTicketCreatedEvent): void {
+    this.emitTopic('support', {
+      entity: 'support_ticket',
+      action: 'created',
+      entity_id: event.ticketId,
+      data: { ticket_number: event.ticketNumber },
+    });
   }
 
   @OnEvent(SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT)

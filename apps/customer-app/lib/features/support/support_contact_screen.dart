@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/external_links.dart';
 import '../chat/chat_screen.dart';
+import 'support_tickets_screen.dart';
 import 'support_contact_repository.dart';
 
 // "تواصل معنا" (docs/08 §22 بند 15-19) — نقطة وصول واحدة واضحة لكل طرق التواصل مع خدمة العملاء.
@@ -10,10 +11,15 @@ import 'support_contact_repository.dart';
 class SupportContactScreen extends StatelessWidget {
   const SupportContactScreen({super.key});
 
-  Future<void> _call(BuildContext context, String phone) => openPhoneDialer(context, phone);
+  Future<void> _call(BuildContext context, String phone) =>
+      openPhoneDialer(context, phone);
 
   Future<void> _openWhatsapp(BuildContext context, String url) =>
-      openExternalUrl(context, Uri.parse(url), failureMessage: 'تعذّر فتح واتساب');
+      openExternalUrl(
+        context,
+        Uri.parse(url),
+        failureMessage: 'تعذّر فتح واتساب',
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -29,11 +35,42 @@ class SupportContactScreen extends StatelessWidget {
             }
             final contact = snapshot.data;
             final hasDirectContact =
-                contact != null && contact.enabled && (contact.phoneNumber != null || contact.whatsappUrl != null);
+                contact != null &&
+                contact.enabled &&
+                (contact.phoneNumber != null || contact.whatsappUrl != null);
 
             return ListView(
               padding: const EdgeInsets.all(20),
               children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'تحتاج متابعة من فريق الدعم؟',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'افتح تذكرة واحتفظ برقمها للمتابعة. شكاوى الطلبات تظل من صفحة الطلب.',
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const SupportTicketsScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.confirmation_number_outlined),
+                          label: const Text('تذاكر الدعم'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 if (hasDirectContact) ...[
                   const Text(
                     'محتاج مساعدة؟ كلّمنا على طول',
@@ -45,15 +82,26 @@ class SupportContactScreen extends StatelessWidget {
                     FilledButton.icon(
                       onPressed: () => _call(context, contact.phoneNumber!),
                       icon: const Icon(Icons.call),
-                      label: const Text('اتصل بينا', style: TextStyle(fontSize: 16)),
-                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18)),
+                      label: const Text(
+                        'اتصل بينا',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                      ),
                     ),
-                  if (contact.phoneNumber != null && contact.whatsappUrl != null) const SizedBox(height: 12),
+                  if (contact.phoneNumber != null &&
+                      contact.whatsappUrl != null)
+                    const SizedBox(height: 12),
                   if (contact.whatsappUrl != null)
                     FilledButton.icon(
-                      onPressed: () => _openWhatsapp(context, contact.whatsappUrl!),
+                      onPressed: () =>
+                          _openWhatsapp(context, contact.whatsappUrl!),
                       icon: const Icon(Icons.chat),
-                      label: const Text('واتساب', style: TextStyle(fontSize: 16)),
+                      label: const Text(
+                        'واتساب',
+                        style: TextStyle(fontSize: 16),
+                      ),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF25D366),
                         padding: const EdgeInsets.symmetric(vertical: 18),
@@ -63,11 +111,16 @@ class SupportContactScreen extends StatelessWidget {
                   const Divider(),
                   const SizedBox(height: 12),
                 ],
-                const Text('أو ابعتلنا رسالة من هنا', textAlign: TextAlign.center),
+                const Text(
+                  'أو ابعتلنا رسالة من هنا',
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ChatScreen.support()),
+                    MaterialPageRoute(
+                      builder: (_) => const ChatScreen.support(),
+                    ),
                   ),
                   icon: const Icon(Icons.chat_bubble_outline),
                   label: const Text('شات الدعم'),

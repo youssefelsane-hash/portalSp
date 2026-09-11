@@ -17,6 +17,7 @@ import '../projects/my_projects_screen.dart';
 import '../warranty/warranties_screen.dart';
 import '../referrals/referrals_screen.dart';
 import '../support/complaints_screen.dart';
+import '../support/support_tickets_screen.dart';
 import '../technician_referral/technician_referral_screen.dart';
 
 // حساب/سجل عميل موحّد (docs/08 §Retention) — كانت فجوة موثّقة صراحة: كل ميزة (طلبات، عناوين،
@@ -95,7 +96,9 @@ class _AccountScreenState extends State<AccountScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
             child: const Text('احذف حسابي'),
           ),
         ],
@@ -110,7 +113,9 @@ class _AccountScreenState extends State<AccountScreen> {
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final e = ApiException.from(eRaw);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
@@ -317,6 +322,15 @@ class _AccountScreenState extends State<AccountScreen> {
               trailing: const Icon(Icons.chevron_left),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.support_agent_outlined),
+              title: const Text('تذاكر الدعم'),
+              subtitle: const Text('للمساعدة العامة ومشاكل الحساب أو التطبيق'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportTicketsScreen()),
               ),
             ),
             if (_biometricAvailable) ...[

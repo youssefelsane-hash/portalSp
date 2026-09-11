@@ -6,6 +6,7 @@ import '../catalog/categories_screen.dart';
 import '../projects/my_projects_screen.dart';
 import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
+import '../support/support_tickets_screen.dart';
 import 'site_info_repository.dart';
 import 'social_brand_mark.dart';
 
@@ -100,7 +101,10 @@ class _AppFooterState extends State<AppFooter> {
           const SizedBox(height: 8),
           Text(
             'صنايعية معتمدين لكل شغلانة في البيت — سعر واضح قبل ما تبدأ، تتبّع لحظي، ودفع آمن.',
-            style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.6),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: muted,
+              height: 1.6,
+            ),
           ),
 
           if (_social.isNotEmpty) ...[
@@ -190,7 +194,8 @@ class _AppFooterState extends State<AppFooter> {
                   children: [
                     _FooterLink(
                       label: 'كل الفئات',
-                      onTap: () => _push(CategoriesScreen(zoneId: widget.zoneId)),
+                      onTap: () =>
+                          _push(CategoriesScreen(zoneId: widget.zoneId)),
                     ),
                     _FooterLink(
                       label: 'مشاريعي',
@@ -228,17 +233,26 @@ class _AppFooterState extends State<AppFooter> {
                         'الشكاوى مرتبطة بطلباتك، فمحتاجين نعرف حسابك.',
                       ),
                     ),
+                    _FooterLink(
+                      label: 'تذاكر الدعم',
+                      onTap: () => _pushGuarded(
+                        const SupportTicketsScreen(),
+                        'تذاكر الدعم بتتحفظ على حسابك عشان تتابعها.',
+                      ),
+                    ),
                     // نص قانوني قايم بالفعل — الربط بالـanchor بيوصّل لمحتوى حقيقي بدل صفحة
                     // تسويقية فاضية بتقول نفس الكلام بصياغة تانية (وتتعارض معاه بعدين).
                     _FooterLink(
                       label: 'الضمان',
                       external: true,
-                      onTap: () => _openUrl('$_siteOrigin/legal/terms#section-10'),
+                      onTap: () =>
+                          _openUrl('$_siteOrigin/legal/terms#section-10'),
                     ),
                     _FooterLink(
                       label: 'الإلغاء والاسترداد',
                       external: true,
-                      onTap: () => _openUrl('$_siteOrigin/legal/terms#section-9'),
+                      onTap: () =>
+                          _openUrl('$_siteOrigin/legal/terms#section-9'),
                     ),
                   ],
                 ),
@@ -274,7 +288,10 @@ class _AppFooterState extends State<AppFooter> {
           const SizedBox(height: 14),
           DefaultTextStyle(
             style:
-                theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.7) ??
+                theme.textTheme.bodySmall?.copyWith(
+                  color: muted,
+                  height: 1.7,
+                ) ??
                 TextStyle(color: muted),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +304,8 @@ class _AppFooterState extends State<AppFooter> {
                 if (_entity.legalAddress != null) Text(_entity.legalAddress!),
                 if (_entity.commercialRegister != null)
                   Text('السجل التجاري: ${_entity.commercialRegister}'),
-                if (_entity.taxId != null) Text('الرقم الضريبي: ${_entity.taxId}'),
+                if (_entity.taxId != null)
+                  Text('الرقم الضريبي: ${_entity.taxId}'),
               ],
             ),
           ),

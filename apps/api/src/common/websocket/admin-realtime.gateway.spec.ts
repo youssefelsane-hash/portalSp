@@ -56,6 +56,26 @@ describe('AdminRealtimeGateway', () => {
     );
   });
 
+  it('broadcasts a newly created support ticket to support staff', () => {
+    const gateway = new AdminRealtimeGateway(realtimeAccess as never, sessions as never, dataSource as never);
+    const emit = jest.fn();
+    const to = jest.fn().mockReturnValue({ emit });
+    gateway.server = { to } as never;
+
+    gateway.onSupportTicketCreated({ ticketId: 'ticket-id', ticketNumber: 'TKT-2026-000001' });
+
+    expect(to).toHaveBeenCalledWith('admin:topic:support');
+    expect(emit).toHaveBeenCalledWith(
+      'admin:live',
+      expect.objectContaining({
+        topic: 'support',
+        entity: 'support_ticket',
+        action: 'created',
+        entity_id: 'ticket-id',
+      }),
+    );
+  });
+
   it('broadcasts project and warranty changes on their permission-scoped topics', () => {
     const gateway = new AdminRealtimeGateway(realtimeAccess as never, sessions as never, dataSource as never);
     const emit = jest.fn();

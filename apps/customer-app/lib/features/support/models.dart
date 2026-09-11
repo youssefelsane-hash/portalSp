@@ -17,7 +17,10 @@ enum ComplaintCategory {
   const ComplaintCategory(this.apiValue, this.labelAr);
 
   static ComplaintCategory fromApiValue(String value) =>
-      ComplaintCategory.values.firstWhere((c) => c.apiValue == value, orElse: () => ComplaintCategory.other);
+      ComplaintCategory.values.firstWhere(
+        (c) => c.apiValue == value,
+        orElse: () => ComplaintCategory.other,
+      );
 }
 
 const Map<String, String> complaintStatusLabelsAr = {
@@ -30,6 +33,53 @@ const Map<String, String> complaintStatusLabelsAr = {
   'escalated': 'مُصعَّدة',
   'closed': 'مقفولة',
 };
+
+// تذكرة الدعم مختلفة عن الشكوى: الشكوى نزاع أو مشكلة مرتبطة بطلب، أمّا التذكرة فهي سؤال
+// عام عن الحساب أو الدفع أو التطبيق. الفصل ده بيمنع وصول شكاوى الطلبات للفريق الخطأ.
+const Map<String, String> supportTicketStatusLabelsAr = {
+  'open': 'مفتوحة',
+  'in_progress': 'قيد المتابعة',
+  'resolved': 'اتحلّت',
+  'closed': 'مقفولة',
+};
+
+const Map<String, String> supportTicketCategoryLabelsAr = {
+  'account': 'الحساب وتسجيل الدخول',
+  'payment': 'الدفع والفواتير',
+  'technical': 'مشكلة في التطبيق',
+  'general': 'استفسار عام',
+  'other': 'حاجة تانية',
+};
+
+class SupportTicket {
+  final String id;
+  final String ticketNumber;
+  final String subject;
+  final String category;
+  final String priority;
+  final String ticketStatus;
+  final DateTime createdAt;
+
+  SupportTicket({
+    required this.id,
+    required this.ticketNumber,
+    required this.subject,
+    required this.category,
+    required this.priority,
+    required this.ticketStatus,
+    required this.createdAt,
+  });
+
+  factory SupportTicket.fromJson(Map<String, dynamic> json) => SupportTicket(
+    id: json['id'] as String,
+    ticketNumber: json['ticket_number'] as String,
+    subject: json['subject'] as String,
+    category: json['category'] as String,
+    priority: json['priority'] as String,
+    ticketStatus: json['ticket_status'] as String,
+    createdAt: DateTime.parse(json['created_at'] as String),
+  );
+}
 
 class Complaint {
   final String id;
@@ -61,19 +111,19 @@ class Complaint {
   });
 
   factory Complaint.fromJson(Map<String, dynamic> json) => Complaint(
-        id: json['id'] as String,
-        complaintNumber: json['complaint_number'] as String,
-        orderId: json['order_id'] as String?,
-        category: json['category'] as String,
-        severity: json['severity'] as String,
-        title: json['title'] as String,
-        description: json['description'] as String,
-        complaintStatus: json['complaint_status'] as String,
-        resolutionType: json['resolution_type'] as String?,
-        resolutionNotes: json['resolution_notes'] as String?,
-        compensationCents: json['compensation_cents'] as int? ?? 0,
-        createdAt: DateTime.parse(json['created_at'] as String),
-      );
+    id: json['id'] as String,
+    complaintNumber: json['complaint_number'] as String,
+    orderId: json['order_id'] as String?,
+    category: json['category'] as String,
+    severity: json['severity'] as String,
+    title: json['title'] as String,
+    description: json['description'] as String,
+    complaintStatus: json['complaint_status'] as String,
+    resolutionType: json['resolution_type'] as String?,
+    resolutionNotes: json['resolution_notes'] as String?,
+    compensationCents: json['compensation_cents'] as int? ?? 0,
+    createdAt: DateTime.parse(json['created_at'] as String),
+  );
 }
 
 class ComplaintMessage {
@@ -82,9 +132,15 @@ class ComplaintMessage {
   final String message;
   final DateTime createdAt;
 
-  ComplaintMessage({required this.id, required this.senderRole, required this.message, required this.createdAt});
+  ComplaintMessage({
+    required this.id,
+    required this.senderRole,
+    required this.message,
+    required this.createdAt,
+  });
 
-  factory ComplaintMessage.fromJson(Map<String, dynamic> json) => ComplaintMessage(
+  factory ComplaintMessage.fromJson(Map<String, dynamic> json) =>
+      ComplaintMessage(
         id: json['id'] as String,
         senderRole: json['sender_role'] as String,
         message: json['message'] as String,
@@ -97,9 +153,14 @@ class ComplaintAttachment {
   final String fileUrl;
   final String? fileType;
 
-  ComplaintAttachment({required this.id, required this.fileUrl, required this.fileType});
+  ComplaintAttachment({
+    required this.id,
+    required this.fileUrl,
+    required this.fileType,
+  });
 
-  factory ComplaintAttachment.fromJson(Map<String, dynamic> json) => ComplaintAttachment(
+  factory ComplaintAttachment.fromJson(Map<String, dynamic> json) =>
+      ComplaintAttachment(
         id: json['id'] as String,
         fileUrl: json['file_url'] as String,
         fileType: json['file_type'] as String?,

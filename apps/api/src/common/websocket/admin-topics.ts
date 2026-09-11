@@ -58,6 +58,7 @@ export interface AdminLiveEvent {
     | 'payout'
     | 'refund'
     | 'complaint'
+    | 'support_ticket'
     | 'support_message'
     | 'installment_application'
     | 'installment_payment'
