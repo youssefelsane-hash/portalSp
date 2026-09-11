@@ -32,7 +32,10 @@ const { Client } = require('pg');
 const API = process.env.API_BASE || 'http://localhost:3000/api/v1';
 const DB_URL = process.env.DATABASE_URL || 'postgres://baytak:baytak@localhost:5432/baytak_main';
 const QUICK = process.argv.includes('--quick');
-const API_LOG = process.env.API_LOG || `${__dirname}/../.dev-logs/api.log`;
+// المسار بيتحل وقت التشغيل — `.dev-logs/api.log` في الجذر مكانش موجود أصلاً (الـharness
+// بيكتب في `apps/api/.dev-logs/api.out`)، فالأداة كانت بتقف على «مش لاقي كود OTP».
+const { resolveApiLog } = require('./lib/resolve-api-log');
+const API_LOG = process.env.API_LOG || resolveApiLog() || `${__dirname}/../.dev-logs/api.log`;
 
 const G = '\x1b[32m', R = '\x1b[31m', Y = '\x1b[33m', D = '\x1b[2m', B = '\x1b[1m', O = '\x1b[0m';
 
