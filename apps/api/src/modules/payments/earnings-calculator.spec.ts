@@ -118,6 +118,46 @@ describe('Unified Workforce Earnings Engine V2', () => {
     expect(result.participantShares.map((share) => share.shareCents)).toEqual([100_000, 65_000]);
   });
 
+  // ADR-0055 §3 — «مساعد شايل طلب لوحده → participant_role = leader → نصيب القائد الكامل».
+  // كانت بتترمي هنا بـ«A permanent assistant must use the assistant earning role»، فالتسوية
+  // بتفشل والطلب بيتعلّق على work_completed/unpaid من غير ما حد ياخد مليم.
+  it('يدي المساعد اللي شايل الطلب لوحده نصيب القائد الكامل بلا نسبة مساعد', () => {
+    const result = calculateEarningsV2(100_000, 20_000, [
+      participant('lead', { technicianKindSnapshot: 'assistant', assistantRatioBps: 6_500 }),
+    ]);
+
+    expect(result.participantShares[0].shareCents).toBe(80_000);
+    expect(result.participantShares[0].earningRole).toBe('technician');
+  });
+
+  it('يدي المساعد القائد نصيب قائد كامل جنب طاقم، مش نصيب مخفّض', () => {
+    // نفس المعاملات بالظبط لقائد مساعد وقائد فني — النتيجة لازم تطابق، وإلا يبقى نوع الحساب
+    // بيخصم من حد عمل الشغلانة، وده اللي ADR-0055 رفضه صراحةً.
+    const crew = (leaderKind: 'technician' | 'assistant') =>
+      calculateEarningsV2(165_000, 0, [
+        participant('lead', { levelWeightBps: 10_000, technicianKindSnapshot: leaderKind }),
+        participant('helper', {
+          isLeader: false,
+          earningRole: 'assistant',
+          technicianKindSnapshot: 'assistant',
+          levelWeightBps: 10_000,
+          assistantRatioBps: 6_500,
+        }),
+      ]).participantShares.map((share) => share.shareCents);
+
+    expect(crew('assistant')).toEqual([100_000, 65_000]);
+    expect(crew('assistant')).toEqual(crew('technician'));
+  });
+
+  it('لسه بيرفض مساعد منضم لطاقم حد تاني بتسعيرة فني', () => {
+    expect(() =>
+      calculateEarningsV2(10_000, 0, [
+        participant('lead'),
+        participant('helper', { isLeader: false, technicianKindSnapshot: 'assistant' }),
+      ]),
+    ).toThrow('joining another crew must use the assistant earning role');
+  });
+
   it('supports commission equal to total without creating worker money', () => {
     const result = calculateEarningsV2(50_000, 50_000, [participant('lead')]);
     expect(result.workerPoolCents).toBe(0);

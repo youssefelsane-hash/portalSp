@@ -144,6 +144,9 @@ describe('وزن المسافة الديناميكي في المطابقة (ADR-
   afterAll(async () => {
     try {
       await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.order]);
+      // جولات التوزيع اللي التستات بتشغّلها بتكتب تاريخ حالة — من غير حذفه، حذف الطلب بيقع
+      // على `order_status_history_order_id_fkey` وتنضيف السويت كله بيفشل.
+      await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
       const profiles = [ids.nearProfile, ids.farProfile];
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [profiles]);

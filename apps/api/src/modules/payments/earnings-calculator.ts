@@ -140,8 +140,15 @@ function validateParticipants(participants: EarningsParticipantInput[]): void {
     ids.add(participant.technicianId);
 
     if (participant.isLeader) leaders += 1;
-    if (participant.technicianKindSnapshot === 'assistant' && participant.earningRole !== 'assistant') {
-      throw new Error('A permanent assistant must use the assistant earning role');
+    // مقيّد بغير القائد عمدًا (ADR-0055 §3): المساعد اللي شايل الطلب لوحده **قائد بتسعيرة
+    // قائد**. الحارس بيفضل على المنضم لطاقم حد تاني — صف مساعد مسجّل `team_member` معناه
+    // بيانات مخالفة هتديله تسعيرة فني جوّه طاقم، وده اللي الحارس اتكتب عشانه.
+    if (
+      !participant.isLeader &&
+      participant.technicianKindSnapshot === 'assistant' &&
+      participant.earningRole !== 'assistant'
+    ) {
+      throw new Error('A permanent assistant joining another crew must use the assistant earning role');
     }
     if (participant.isLeader && participant.earningRole === 'assistant') {
       throw new Error('An assistant cannot lead a V2 earning crew');
