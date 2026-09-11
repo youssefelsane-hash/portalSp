@@ -247,6 +247,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.fawry_enabled': { type: 'boolean', default: false, group: 'payments', description: 'تفعيل الدفع بكود فوري المرجعي (Fawry) — معطّل افتراضيًا، مش أولوية V1 (ADR-0013)' },
   'payments.installments_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إتاحة خطط التقسيط المرتبطة بالخدمات عند جاهزية Paymob' },
   'payments.instapay_confirmation_window_hours': { type: 'number', default: 24, group: 'payments', description: 'مدة صلاحية كود تحويل InstaPay قبل ما يتطلب إعادة الدفع من جديد (ساعات)' },
+  // InstaPay كوسيلة أساسية (migration 0319، طلب مالك 2026-09-11).
+  'payments.recommended_method': { type: 'string', default: 'instapay', group: 'payments', description: 'وسيلة الدفع اللي بيتكتب جنبها وسم «الأنسب» في شاشة الدفع. فاضي = مفيش ترشيح. الوسم مابيظهرش لو الوسيلة نفسها مش متاحة' },
+  'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)' },
+  'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)' },
   'payments.instapay_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار InstaPay للعملاء عند اكتمال بيانات المستلم' },
   'payments.instapay.ipa_address': { type: 'string', default: '', group: 'payments', description: 'عنوان IPA أو رقم موبايل InstaPay المسجّل — بيتعرض للعميل كتعليمات تحويل. فاضي = InstaPay معطّلة (isConfigured=false)' },
   'payments.instapay.qr_image': { type: 'string', default: '', group: 'payments', description: 'صورة QR لاستقبال تحويلات InstaPay — إما "storage://<key>" لملف مرفوع من لوحة الأدمن، أو رابط https خارجي. فاضي = مفيش QR (العميل بيشوف تعليمات التحويل النصية بس)' },

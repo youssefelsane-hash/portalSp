@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { TechnicianEarningsService } from './technician-earnings.service';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — docs/08 §95 (سؤال مالك مباشر بلقطتين شاشة).
 //
@@ -112,7 +113,7 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id = $1`, [ids.walletId]);
+      await deleteWalletTransactions(q, `wallet_id = $1`, [ids.walletId]);
       await q(`DELETE FROM wallets WHERE id = $1`, [ids.walletId]);
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);

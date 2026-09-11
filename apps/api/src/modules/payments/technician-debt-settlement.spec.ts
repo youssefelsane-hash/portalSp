@@ -6,6 +6,7 @@ import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.e
 import { WalletsService } from './wallets.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { User } from '../auth/entities/user.entity';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // ADR-0041 / docs/08 §63.أ2 — اختبار حي: هل تسجيل السداد بيحرّك الرصيد فعلاً، وبيتسجّل بمبلغه
 // وطريقته ومرجعه، وبيمنع المبالغة والحالات الغلط؟
@@ -63,7 +64,7 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, p?: unknown[]) => dataSource.query(sql, p);
     await q(`DELETE FROM technician_debt_settlements WHERE technician_id = $1`, [ids.techId]);
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id = $1`, [ids.techWalletId]);
+    await deleteWalletTransactions(q, `wallet_id = $1`, [ids.techWalletId]);
     await q(`DELETE FROM wallets WHERE id = $1`, [ids.techWalletId]);
     await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techId]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.techUserId]);

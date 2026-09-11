@@ -32,6 +32,7 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — زيارة فاشلة/عدم حضور (docs/08 §22 بند 3-6). بيغطي الدورة الكاملة:
 // الفني بيبلّغ (no-show أو required_work_rejected) → الطلب DISPUTED + شكوى مسجّلة بالتصنيف الصح →
@@ -343,7 +344,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       }
       await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-      await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
+      await deleteWalletTransactions(q, `reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
       await q(`DELETE FROM refund_settlement_reversals WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
       await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);

@@ -165,9 +165,47 @@ export interface FawryReferenceResponseDto {
 export interface InstaPayReferenceResponseDto {
   payment: PaymentResponseDto;
   reference_code: string;
+  /** خطوات التحويل بالكلام بس — الأرقام نفسها في الحقول تحت، مش مدفونة جوّه النص. */
   instructions_ar: string;
   /** صورة QR لاستقبال التحويل (docs/08 §78-د) — `null` لو الأدمن ما رفعش/ما ربطش واحدة. */
   qr_image_url: string | null;
+  /**
+   * الحساب اللي العميل بيحوّل عليه (عنوان IPA أو رقم موبايل).
+   *
+   * حقل مستقل عمدًا (طلب مالك 2026-09-11: «يبقى رقم التليفون مكتوب جوه بوضوح سطر لوحده كده
+   * عشان ما تتدخلش العربي مع الإنجليزي») — الواجهة بتعرضه LTR في سطر لوحده مع زرار نسخ.
+   */
+  recipient_address: string | null;
+  recipient_name: string | null;
+  amount_cents: number;
+  /** وعد وقت التأكيد المعروض للعميل — المعتاد والسقف، بالدقايق (migration 0319). */
+  confirm_typical_minutes: number;
+  confirm_max_minutes: number;
+}
+
+/** شكل واحد لرد InstaPay — بيتستخدم في مسار بدء الدفع ومسار الاستئناف، فمستحيل يفرقوا. */
+export function toInstaPayReferenceResponseDto(details: {
+  payment: Payment;
+  referenceCode: string;
+  instructionsAr: string;
+  qrImageUrl: string | null;
+  recipientAddress: string | null;
+  recipientName: string | null;
+  amountCents: number;
+  confirmTypicalMinutes: number;
+  confirmMaxMinutes: number;
+}): InstaPayReferenceResponseDto {
+  return {
+    payment: toPaymentResponseDto(details.payment),
+    reference_code: details.referenceCode,
+    instructions_ar: details.instructionsAr,
+    qr_image_url: details.qrImageUrl,
+    recipient_address: details.recipientAddress,
+    recipient_name: details.recipientName,
+    amount_cents: details.amountCents,
+    confirm_typical_minutes: details.confirmTypicalMinutes,
+    confirm_max_minutes: details.confirmMaxMinutes,
+  };
 }
 
 export interface PayoutResponseDto {
@@ -299,4 +337,14 @@ export interface PaymentChannelResponseDto {
   unavailable_reason: string | null;
   /** تشخيص تشغيلي — **بيتبعت للأدمن بس**، بيبقى `undefined` تمامًا في رد العميل. */
   admin_note?: string;
+  /**
+   * **الوسيلة المرشّحة من المنصة** (طلب مالك 2026-09-11: «InstaPay… مكتوب جنبها إنها الأفضل»).
+   *
+   * بييجي من إعداد `payments.recommended_method` مش من ثابت في الكود — الترشيح قرار تسويقي
+   * بيتغيّر، ولو اتكتب في الكود كان هيحتاج deploy في كل مرة. والوسم مابيظهرش خالص لو الوسيلة
+   * نفسها مش متاحة، عشان ما نرشّحش حاجة العميل مش قادر يستخدمها.
+   */
+  is_recommended: boolean;
+  /** نص الوسم الجاهز للعرض — سطح واحد يكتبه، مش كل تطبيق يخترع صيغته. */
+  recommended_label_ar: string | null;
 }

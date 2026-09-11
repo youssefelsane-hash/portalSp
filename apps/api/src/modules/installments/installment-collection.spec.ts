@@ -22,6 +22,7 @@ import { Installment } from './entities/installment.entity';
 import { InstallmentApplication } from './entities/installment-application.entity';
 import { InstallmentPlan } from './entities/installment-plan.entity';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 /**
  * محرك تحصيل الأقساط (migration 0177) — أدلة التعريف الحرجة:
@@ -181,11 +182,8 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
-      await q(
-        `DELETE FROM wallet_transactions WHERE reference_type = 'installment'
-         AND reference_id IN (SELECT id FROM installments WHERE application_id = $1)`,
-        [ids.application],
-      );
+      await deleteWalletTransactions(q, `reference_type = 'installment'
+         AND reference_id IN (SELECT id FROM installments WHERE application_id = $1)`, [ids.application]);
       await q(`UPDATE installments SET payment_id = NULL WHERE application_id = $1`, [ids.application]);
       await q(`DELETE FROM payments WHERE installment_id IN (SELECT id FROM installments WHERE application_id = $1)`, [ids.application]);
       await q(`DELETE FROM installments WHERE application_id = $1`, [ids.application]);

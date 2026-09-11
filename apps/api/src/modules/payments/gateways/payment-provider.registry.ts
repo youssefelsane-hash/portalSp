@@ -47,6 +47,16 @@ export class PaymentProviderRegistry {
     return provider;
   }
 
+  /**
+   * الوصول للنوع الملموس لـInstaPay — محتاجينه لمسار «استئناف شاشة التحويل» اللي بيقرا تفاصيل
+   * العرض (الحساب، المبلغ، وعد وقت التأكيد). دي حاجات خاصة بـInstaPay وحدها، فمالهاش مكان في
+   * واجهة `PaymentProvider` العامة، والبديل كان حقنه في `PaymentsService` وتغيير مُنشئ بيتبني
+   * بـpositional args في عشرات السبيكات.
+   */
+  getInstaPayProvider(): InstaPayProvider {
+    return this.instaPayProvider;
+  }
+
   getByProviderKey(providerKey: string): PaymentProvider {
     const provider = this.byProviderKey.get(providerKey);
     if (!provider) {

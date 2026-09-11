@@ -129,6 +129,26 @@ export type OrderCollectionBreakdown = {
   amountDueToTechnicianCents: number;
 };
 
+/**
+ * تفاصيل تحويل InstaPay اللي العميل محتاجها على الشاشة.
+ *
+ * **الأرقام حقول مستقلة مش نص واحد** (طلب مالك 2026-09-11): الحساب والمبلغ ورقم الطلب كانوا
+ * مدفونين جوّه جملة `instructionsAr` العربية، والـbidi بيقلب خانات الأرقام اللاتينية وسط
+ * العربي — العميل بينسخ أو يكتب رقم حساب غلط على تحويل بنكي حقيقي. الفصل هنا هو اللي بيخلّي
+ * كل واجهة تعرضهم LTR في سطر لوحده مع زرار نسخ.
+ */
+export interface InstaPayTransferDetails {
+  payment: Payment;
+  referenceCode: string;
+  instructionsAr: string;
+  qrImageUrl: string | null;
+  recipientAddress: string | null;
+  recipientName: string | null;
+  amountCents: number;
+  confirmTypicalMinutes: number;
+  confirmMaxMinutes: number;
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -1746,7 +1766,7 @@ export class PaymentsService {
     userId: string,
     orderId: string,
     idempotencyKey: string,
-  ): Promise<{ payment: Payment; referenceCode: string; instructionsAr: string; qrImageUrl: string | null }> {
+  ): Promise<InstaPayTransferDetails> {
     const { payment, result } = await this.payWithProvider(userId, orderId, idempotencyKey, PaymentMethod.INSTAPAY);
     if (result.kind !== 'reference') {
       throw new Error('InstaPay provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
@@ -1756,7 +1776,40 @@ export class PaymentsService {
       referenceCode: result.referenceCode,
       instructionsAr: result.instructionsAr,
       qrImageUrl: result.qrImageUrl ?? null,
+      recipientAddress: result.recipientAddress ?? null,
+      recipientName: result.recipientName ?? null,
+      amountCents: result.amountCents ?? payment.amountCents,
+      confirmTypicalMinutes: result.confirmTypicalMinutes ?? 20,
+      confirmMaxMinutes: result.confirmMaxMinutes ?? 60,
     };
+  }
+
+  /**
+   * تفاصيل تحويل InstaPay **القايم بالفعل** على الطلب — مسار الاستئناف (قراءة بحتة).
+   *
+   * بيرجّع نفس الأرقام بالحرف اللي اتعرضت أول مرة، لأن الاتنين بيقروا من نفس الدالة في
+   * `InstaPayProvider`. العميل اللي خرج لتطبيق البنك ورجع لازم يلاقي نفس الحساب — أي فرق
+   * هنا معناه تحويل رايح لمكان تاني.
+   */
+  async getInstaPayTransfer(userId: string, orderId: string): Promise<InstaPayTransferDetails> {
+    const order = await this.loadPayableOrderForCustomer(userId, orderId);
+    const payment = await this.payments.findOne({
+      where: {
+        orderId: order.id,
+        paymentMethod: PaymentMethod.INSTAPAY,
+        paymentStatus: PaymentGatewayStatus.PENDING,
+      },
+      order: { initiatedAt: 'DESC' },
+    });
+    if (!payment) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مفيش تحويل InstaPay مفتوح على الطلب ده',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const details = await this.paymentProviders.getInstaPayProvider().describeExistingTransfer(order.orderNumber, payment.amountCents);
+    return { payment, ...details };
   }
 
   /**

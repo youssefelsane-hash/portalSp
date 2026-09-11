@@ -38,6 +38,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
 import { TechnicianEarningsService } from './technician-earnings.service';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح فجوة محاسبية جوهرية (docs/08 §20 بند 2/3/4، تدقيق
 // تسوية مالية شامل قبل الإطلاق): settleAndComplete() كانت دايمًا بتحوّل technicianEarningCents
@@ -287,10 +288,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
       // wallet_transactions بتتحذف بـwallet_id (مش بس reference_id=order) — قيود الاسترداد بترجع
       // referenceType='refund'/referenceId=refund.id، مش الطلب نفسه.
-      await q(
-        `DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`,
-        [ids.techUser, ids.customerUser],
-      );
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [ids.techUser, ids.customerUser]);
       await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-csd-%${runId}%`]);
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);

@@ -14,6 +14,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { purgeAuditLogs } from '../../common/db/audit-purge.testing';
 import { FinancialDashboardService } from '../analytics/financial-dashboard.service';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت واتصلحت في docs/08 §20 بند 9:
 // WalletsService.releaseReservation() (بتنادى من PayoutsService.adminReject()) كانت بتطرح
@@ -128,15 +129,11 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
            AND entity_id IN (SELECT id FROM payouts WHERE technician_id = $1)`,
         [ids.techProfile],
       );
-      await q(
-        `DELETE FROM wallet_transactions
-         WHERE reference_type = 'payout_phase6_test'
-            OR (reference_type = 'payout' AND reference_id IN (SELECT id FROM payouts WHERE technician_id = $1))`,
-        [ids.techProfile],
-      );
+      await deleteWalletTransactions(q, `reference_type = 'payout_phase6_test'
+            OR (reference_type = 'payout' AND reference_id IN (SELECT id FROM payouts WHERE technician_id = $1))`, [ids.techProfile]);
       await q(`DELETE FROM payout_order_items WHERE payout_id IN (SELECT id FROM payouts WHERE technician_id = $1)`, [ids.techProfile]);
       await q(`DELETE FROM payouts WHERE technician_id = $1`, [ids.techProfile]);
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
       await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
       await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.adminUser]);

@@ -30,6 +30,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح البَقّة الحرجة اللي ADR-0015 وثّقها (docs/08 §19
 // بند 2 + اكتشاف عاجل): طلب مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) كان بيفضل عالق في
@@ -224,12 +225,8 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
-      await q(
-        `DELETE FROM wallet_transactions
-         WHERE reference_id IN (SELECT id FROM orders WHERE customer_id = $1)
-            OR wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($2, $3))`,
-        [ids.customerProfile, ids.techUser, ids.customerUser],
-      );
+      await deleteWalletTransactions(q, `reference_id IN (SELECT id FROM orders WHERE customer_id = $1)
+            OR wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($2, $3))`, [ids.customerProfile, ids.techUser, ids.customerUser]);
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       // بَقّة نظافة (docs/08 §64): إقفال الطلب بينشئ محادثة (chat_threads) — التنظيف ما كانش

@@ -861,8 +861,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _payWithInstaPay() async {
     setState(() => _paying = true);
     try {
-      _instapayIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
-      final reference = await _paymentsRepository.payWithInstaPay(widget.orderId, _instapayIdempotencyKey!);
+      // **تحويل قايم بالفعل؟ افتحه بدل ما تعمل واحد جديد.**
+      //
+      // `_instapayIdempotencyKey` بيحمي من الدوس مرتين في نفس الجلسة بس. لو التطبيق اتقفل
+      // خالص (وده بالظبط اللي بيحصل: العميل بيسيبنا ويفتح تطبيق البنك)، المفتاح بيضيع
+      // والدوس تاني كان هيبدأ دفعة جديدة. القراءة دي بتلاقي الدفعة المعلّقة وترجّع نفس
+      // بياناتها، فالعميل بيرجع لنفس الشاشة بنفس الأرقام.
+      InstaPayReference? reference;
+      try {
+        reference = await _paymentsRepository.getInstaPayTransfer(widget.orderId);
+      } catch (_) {
+        // مفيش تحويل مفتوح (٤٠٤) أو الشبكة وقعت — بنكمّل على الإنشاء العادي تحت.
+      }
+      if (reference == null) {
+        _instapayIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
+        reference = await _paymentsRepository.payWithInstaPay(widget.orderId, _instapayIdempotencyKey!);
+      }
       if (!mounted) return;
       final confirmedPaid = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => InstaPayReferenceScreen(orderId: widget.orderId, reference: reference)),

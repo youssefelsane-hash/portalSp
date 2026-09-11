@@ -151,6 +151,19 @@ class PaymentsRepository {
     return InstaPayReference.fromJson(data!);
   }
 
+  /// استئناف شاشة التحويل — **قراءة بحتة، مابتعملش دفعة جديدة**.
+  ///
+  /// العميل بيسيب تطبيقنا ويفتح تطبيق البنك ويرجع؛ ده الاستخدام الطبيعي لـInstaPay. المسار
+  /// ده بيرجّع نفس تفاصيل الدفعة المعلّقة، فالرجوع مابيحتاجش `Idempotency-Key` ولا بيخاطر
+  /// بدفعة تانية.
+  Future<InstaPayReference> getInstaPayTransfer(String orderId) async {
+    final data = await auth.authedRequest(
+      'GET',
+      '/orders/$orderId/instapay-transfer',
+    );
+    return InstaPayReference.fromJson(data!);
+  }
+
   // العميل بيقول "أنا حوّلت فعلاً" — بيسجّل customer_confirmed_transfer_at بس، مش تأكيد نهائي
   // للدفعة (ده لسه شغل موظف Finance عبر confirm-instapay). كانت فجوة حقيقية: الزرار في الشاشة
   // كان بيعمل polling محلي بس من غير ما ينادي أي endpoint يسجّل إن العميل ادّعى التحويل خالص.
@@ -170,10 +183,27 @@ class InstaPayReference {
   /// `null` يعني مفيش واحدة مضبوطة، والشاشة بتعرض التعليمات النصية بس زي ما كانت.
   final String? qrImageUrl;
 
+  /// الحساب اللي العميل بيحوّل عليه (عنوان IPA أو رقم موبايل).
+  ///
+  /// **حقل مستقل مش جوّه `instructionsAr`** (طلب مالك 2026-09-11) — الشاشة بتعرضه LTR في
+  /// سطر لوحده مع زرار نسخ، عشان الـbidi ما يقلبش خانات الرقم وسط النص العربي.
+  final String? recipientAddress;
+  final String? recipientName;
+  final int? amountCents;
+
+  /// وعد وقت التأكيد المعروض للعميل — المعتاد والسقف بالدقايق.
+  final int confirmTypicalMinutes;
+  final int confirmMaxMinutes;
+
   InstaPayReference({
     required this.referenceCode,
     required this.instructionsAr,
     this.qrImageUrl,
+    this.recipientAddress,
+    this.recipientName,
+    this.amountCents,
+    this.confirmTypicalMinutes = 20,
+    this.confirmMaxMinutes = 60,
   });
 
   factory InstaPayReference.fromJson(Map<String, dynamic> json) =>
@@ -181,6 +211,13 @@ class InstaPayReference {
         referenceCode: json['reference_code'] as String,
         instructionsAr: json['instructions_ar'] as String,
         qrImageUrl: json['qr_image_url'] as String?,
+        recipientAddress: json['recipient_address'] as String?,
+        recipientName: json['recipient_name'] as String?,
+        amountCents: json['amount_cents'] as int?,
+        // الافتراضيات هنا مش أرقام مخترعة: هي نفس افتراضات الباك-إند، وبتغطي نسخة تطبيق
+        // قديمة بتقرا رد من سيرفر أقدم من الحقول دي.
+        confirmTypicalMinutes: json['confirm_typical_minutes'] as int? ?? 20,
+        confirmMaxMinutes: json['confirm_max_minutes'] as int? ?? 60,
       );
 }
 

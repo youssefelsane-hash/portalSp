@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { FinancialDashboardService } from './financial-dashboard.service';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 /**
  * ADR-0081 §5 — لوحة المال، و«Unreconciled money = 0» اللي المالك سمّاه أهم سطر.
@@ -67,7 +68,7 @@ describe('FinancialDashboardService — لوحة المال وفحص التسو�
   });
 
   afterAll(async () => {
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id = $1`, [ids.wallet]);
+    await deleteWalletTransactions(q, `wallet_id = $1`, [ids.wallet]);
     await q(`DELETE FROM wallets WHERE id = $1`, [ids.wallet]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.user]);
     await dataSource.destroy();
@@ -171,6 +172,9 @@ describe('FinancialDashboardService — لوحة المال وفحص التسو�
       // اللي هو اللي بيثبت إن المعكوسة اتستبعدت من المجموع.
       expect(issues.some((i) => i.kind === 'balance_mismatch')).toBe(false);
 
+      // حذف خام **عن قصد**، مش `deleteWalletTransactions`: الصف ده اتكتب فوق من غير ما
+      // يغيّر رصيد المحفظة (ده نص الاختبار)، فإرجاع أثره كان هيخصم 9000 من رصيد مظبوط
+      // ويخلق `balance_mismatch` حقيقي بدل ما ينضّف.
       await q(`DELETE FROM wallet_transactions WHERE id = $1`, [tx.id]);
       expect(await myIssues()).toEqual([]);
     });

@@ -25,9 +25,12 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
 
   const fakeRegistry = {
     listAll: () => [
+      // الترتيب هنا **عمدًا** مش ترتيب العرض المطلوب — الاختبار بيثبت إن الـcontroller
+      // هو اللي بيرتّب، مش إنه بيرجّع ترتيب السجل بالصدفة.
       { method: PaymentMethod.CASH, isConfigured: true },
       { method: PaymentMethod.CARD, isConfigured: false },
       { method: PaymentMethod.WALLET, isConfigured: true },
+      { method: PaymentMethod.INSTAPAY, isConfigured: true },
     ],
   } as unknown as PaymentProviderRegistry;
 
@@ -106,5 +109,46 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
       await cache.del('settings:payments.cash_enabled');
       settingsService.invalidateLocalCache('payments.cash_enabled');
     }
+  });
+
+  // طلب مالك 2026-09-11: «InstaPay تبقى أول واحدة فوق وتحتها الكاش وبعد كده الباقي، ومكتوب
+  // جنبها إنها المرشّحة».
+  describe('ترتيب العرض ووسم الترشيح', () => {
+    it('InstaPay أول واحدة، الكاش تحتها، والباقي بعدهم', async () => {
+      const items = await controller.list(CUSTOMER);
+      expect(items.map((item) => item.method).slice(0, 2)).toEqual([
+        PaymentMethod.INSTAPAY,
+        PaymentMethod.CASH,
+      ]);
+      // التقسيط بيتضاف بعد حلقة السجل، فلازم يفضل داخل الترتيب مش ملزوق في الآخر بالصدفة.
+      expect(items.map((item) => item.method)).toContain('installment');
+    });
+
+    it('الوسم على الوسيلة المرشّحة بس، وبنصّه الجاهز', async () => {
+      const items = await controller.list(CUSTOMER);
+      const recommended = items.filter((item) => item.is_recommended);
+      expect(recommended.map((item) => item.method)).toEqual([PaymentMethod.INSTAPAY]);
+      expect(recommended[0].recommended_label_ar).toBeTruthy();
+      // أي وسيلة تانية لازم ترجع `null` مش نص فاضي — الواجهة بتفرّق بينهم.
+      expect(items.find((item) => item.method === PaymentMethod.CASH)?.recommended_label_ar).toBeNull();
+    });
+
+    it('وسيلة مش متاحة مابتترشّحش حتى لو الإعداد مسمّيها', async () => {
+      await dataSource.query(`UPDATE settings SET value = 'false' WHERE key = 'payments.instapay_enabled'`);
+      await cache.del('settings:payments.instapay_enabled');
+      settingsService.invalidateLocalCache('payments.instapay_enabled');
+      try {
+        const items = await controller.list(CUSTOMER);
+        const instapay = items.find((item) => item.method === PaymentMethod.INSTAPAY);
+        expect(instapay?.is_available).toBe(false);
+        // ترشيح وسيلة العميل مش قادر يستخدمها بيضايقه مش بيساعده.
+        expect(instapay?.is_recommended).toBe(false);
+        expect(items.some((item) => item.is_recommended)).toBe(false);
+      } finally {
+        await dataSource.query(`UPDATE settings SET value = 'true' WHERE key = 'payments.instapay_enabled'`);
+        await cache.del('settings:payments.instapay_enabled');
+        settingsService.invalidateLocalCache('payments.instapay_enabled');
+      }
+    });
   });
 });

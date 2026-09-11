@@ -23,6 +23,20 @@ import { PaymentMethodAvailabilityGuard } from './payment-method-availability.gu
  */
 const CUSTOMER_UNAVAILABLE_REASON = 'الطريقة دي مش متاحة دلوقتي — اختار طريقة تانية';
 
+/** نص وسم الترشيح — سطح واحد بيكتبه، فالتطبيق والويب مايخترعوش صيغتين. */
+const RECOMMENDED_LABEL_AR = 'الأنسب';
+
+/**
+ * **ترتيب العرض الرسمي لوسائل الدفع** (طلب مالك 2026-09-11).
+ *
+ * > «InstaPay تبقى أول واحدة فوق وتحتها الكاش وبعد كده الباقي.»
+ *
+ * الترتيب هنا مش في كل تطبيق لوحده — نفس مبدأ `social-links.controller.ts`: أي سطح بيرتّب
+ * بنفسه بيخرج عن الباقي أول ما حد يعدّل في مكان واحد. أي وسيلة مش في القايمة دي بتنزل في
+ * الآخر بترتيبها الطبيعي، فوسيلة جديدة مابتختفيش لو حد نسي يضيفها هنا.
+ */
+const DISPLAY_ORDER: string[] = [PaymentMethod.INSTAPAY, PaymentMethod.CASH];
+
 // Script 2 Part I (findings #46/#47/#48) — كان مفيش endpoint خالص يعرض للعميل أي طرق دفع مُفعّلة
 // فعليًا في الباك-إند. الكلاينت (apps/customer-app) كان بيثبّت قايمة طرق دفع ثابتة في الكود، فلو
 // Paymob/Fawry مش مُعدّين، العميل كان يقدر يختار طريقة الباك-إند هيرفضها في آخر خطوة (بعد ما
@@ -55,13 +69,15 @@ export class PaymentChannelsController {
       PaymentMethod.INSTAPAY,
       PaymentMethod.FAWRY_REFERENCE,
     ];
-    const [installmentsEnabled, ...methodFlags] = await Promise.all([
+    const [installmentsEnabled, recommendedMethod, ...methodFlags] = await Promise.all([
       this.settingsService.getBoolean('payments.installments_enabled', true),
+      this.settingsService.getString('payments.recommended_method', PaymentMethod.INSTAPAY),
       ...methods.map((m) => this.methodAvailability.isEnabled(m)),
     ]);
     const enabledByMethod = new Map<PaymentMethod, boolean>(
       methods.map((m, i) => [m, methodFlags[i]]),
     );
+    const recommended = (recommendedMethod ?? '').trim();
     const channels: PaymentChannelResponseDto[] = this.registry.listAll().map((entry) => {
       const isEnabled = enabledByMethod.get(entry.method) ?? false;
       const isAvailable = isEnabled && entry.isConfigured;
@@ -77,6 +93,9 @@ export class PaymentChannelsController {
         is_configured: entry.isConfigured,
         is_available: isAvailable,
         unavailable_reason: isAvailable ? null : CUSTOMER_UNAVAILABLE_REASON,
+        // الوسم مشروط بالإتاحة عمدًا: ترشيح وسيلة العميل مش قادر يستخدمها بيضايقه مش بيساعده.
+        is_recommended: isAvailable && entry.method === recommended,
+        recommended_label_ar: isAvailable && entry.method === recommended ? RECOMMENDED_LABEL_AR : null,
         // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
         ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
       };
@@ -95,8 +114,21 @@ export class PaymentChannelsController {
       is_configured: paymobStatus.configured,
       is_available: installmentAvailable,
       unavailable_reason: installmentAvailable ? null : CUSTOMER_UNAVAILABLE_REASON,
+      is_recommended: installmentAvailable && recommended === 'installment',
+      recommended_label_ar:
+        installmentAvailable && recommended === 'installment' ? RECOMMENDED_LABEL_AR : null,
       ...(isAdmin && installmentAdminNote ? { admin_note: installmentAdminNote } : {}),
     });
-    return channels;
+
+    // الترتيب آخر خطوة عشان يشمل التقسيط اللي بيتضاف فوق. `Infinity` للوسائل اللي مش في
+    // القايمة بيخلّيها تنزل تحت بترتيبها الطبيعي بدل ما تتصدّر بالصدفة.
+    const rank = (method: string) => {
+      const index = DISPLAY_ORDER.indexOf(method);
+      return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    return channels
+      .map((channel, index) => ({ channel, index }))
+      .sort((left, right) => rank(left.channel.method) - rank(right.channel.method) || left.index - right.index)
+      .map((entry) => entry.channel);
   }
 }

@@ -317,6 +317,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // Script 2 Part I (findings #46/#47/#48) — فاضية لحد ما /payment-channels يرد؛ زرار "ادفع بعد
   // الخدمة" (value: null) دايمًا ظاهر بغض النظر عن القيمة دي لأنه مش بيعتمد على أي provider خارجي.
   Map<String, PaymentChannelAvailability> _paymentChannels = {};
+
+  /// العميل اختار يدفع الطلب كامل بدل العربون (طلب مالك 2026-09-11).
+  ///
+  /// `false` = العربون (السلوك الافتراضي والباقي كاش للصنايعي بعد الشغل). الاختيار ده
+  /// بيظهر بس لما الخدمة فعلاً عليها عربون.
+  bool _payFullInsteadOfDeposit = false;
   List<OptionalWarrantyPlan> _optionalWarranties = [];
   bool _hasInstallmentPlans = false;
   String? _selectedWarrantyPlanId;
@@ -385,10 +391,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _selectedPaymentMethod = null;
     }
     if (_requiresElectronicPayment && _selectedPaymentMethod == null) {
-      if (_availablePaymentMethods.contains('card')) {
-        _selectedPaymentMethod = 'card';
+      // **الوسيلة المرشّحة أولاً** (طلب مالك 2026-09-11: InstaPay هي وسيلة الدفع الأساسية).
+      // بنسأل الباك-إند مين المرشّح بدل ما نثبّت اسم وسيلة هنا — لو الترشيح اتغيّر من
+      // لوحة الأدمن، الاختيار الافتراضي بيتغيّر معاه بلا نسخة تطبيق جديدة.
+      final recommended = _paymentChannels.values
+          .where((channel) => channel.available && channel.isRecommended)
+          .map((channel) => channel.method)
+          .firstOrNull;
+      if (recommended != null && recommended != 'installment') {
+        _selectedPaymentMethod = recommended;
       } else if (_availablePaymentMethods.contains('instapay')) {
         _selectedPaymentMethod = 'instapay';
+      } else if (_availablePaymentMethods.contains('card')) {
+        _selectedPaymentMethod = 'card';
       } else if (_availablePaymentMethods.contains('fawry_reference')) {
         _selectedPaymentMethod = 'fawry_reference';
       }
@@ -1048,6 +1063,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         repeatFrequency: _effectiveRemoteQuote
             ? null
             : (_canRepeat ? _repeatFrequency : null),
+        // لو الخدمة مافيهاش عربون، الباك-إند بيتجاهل القيمة دي — فمفيش شرط إضافي هنا.
+        payFullAmount: _payFullInsteadOfDeposit,
         idempotencyKey: _orderIdempotencyKey,
         // بند 12 — قفل السعر: نفس التذكرة اللي العميل شاف عليها الفني وسعره.
         matchPreviewId: effectiveMatchPreviewId,
@@ -1132,11 +1149,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             : 'جاري التحقق من الجاهزية');
     // `enabled` بدل `onChanged: null` (Flutter شال groupValue/onChanged من Radio لصالح
     // RadioGroup الأب). نفس السلوك بالظبط: الطريقة غير المتاحة مايتضغطش عليها وبتوضّح السبب.
+    // وسم «الأنسب» بييجي من الباك-إند (إعداد `payments.recommended_method`) — التطبيق
+    // مابيقررش مين المرشّح، وبالتالي تغيير الترشيح مابيحتاجش نسخة جديدة من التطبيق.
+    final recommended = available && channel?.isRecommended == true;
+    final badgeText = channel?.recommendedLabelAr;
     return RadioListTile<String?>(
       value: method,
       enabled: available,
       secondary: Icon(icon),
-      title: Text(title),
+      title: recommended && badgeText != null
+          ? Row(
+              children: [
+                Flexible(child: Text(title)),
+                const SizedBox(width: 8),
+                _RecommendedBadge(label: badgeText),
+              ],
+            )
+          : Text(title),
       subtitle: Text(available ? subtitle : reason),
     );
   }
@@ -1974,25 +2003,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
               const SizedBox(height: 8),
             ] else if (_pricePreview?.depositAmountCents != null) ...[
-              Card(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.info_outline),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'الخدمة دي محتاجة دفع إيداع ${_formatEgp(_pricePreview!.depositAmountCents!)} دلوقتي، '
-                          'والباقي (${_formatEgp(_pricePreview!.remainingAmountCents ?? 0)}) هيتحصّل تلقائيًا بعد ما '
-                          'الشغل يخلص. الدفع لازم يكون بالبطاقة أو InstaPay أو فوري.',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              // **العميل بيختار: عربون ولا الطلب كامل** (طلب مالك 2026-09-11).
+              //
+              // قبل كده كان بيتفرض عليه العربون بجملة خبرية بس. فيه ناس بتفضّل تخلص الدفع
+              // مرة واحدة، وفيه ناس بتفضّل تدفع الأقل دلوقتي والباقي كاش للصنايعي — الاتنين
+              // مسارين مشروعين، فالقرار قراره.
+              _DepositChoiceCard(
+                depositText: _formatEgp(_pricePreview!.depositAmountCents!),
+                remainingText: _formatEgp(_pricePreview!.remainingAmountCents ?? 0),
+                totalText: _formatEgp(_pricePreview!.totalAmountCents),
+                payFull: _payFullInsteadOfDeposit,
+                onChanged: (value) => setState(() => _payFullInsteadOfDeposit = value),
               ),
               const SizedBox(height: 8),
             ] else if (!widget.service.cashAllowed) ...[
@@ -2040,6 +2061,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               child: Card(
                 child: Column(
                   children: [
+                    // **الترتيب: InstaPay فالكاش فالباقي** (طلب مالك 2026-09-11) — نفس
+                    // ترتيب `/payment-channels` من الباك-إند، مكرّر هنا لأن الخيارات دي
+                    // مكتوبة كـwidgets ثابتة بعناوين ووصف مختلف لكل واحدة، مش مولّدة من
+                    // القايمة. أي تعديل في ترتيب الباك-إند لازم ينزل هنا كمان.
+                    _paymentOption(
+                      method: 'instapay',
+                      title: 'تحويل InstaPay',
+                      subtitle:
+                          'حوّل من تطبيق البنك بتاعك — التأكيد عادةً خلال ٢٠ دقيقة',
+                      icon: Icons.send_outlined,
+                    ),
                     RadioListTile<String?>(
                       value: null,
                       enabled:
@@ -2080,12 +2112,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                                 !_hasInstallmentPlans
                           ? 'مفيش خطة تقسيط متاحة للخدمة دي'
                           : null,
-                    ),
-                    _paymentOption(
-                      method: 'instapay',
-                      title: 'الدفع عبر InstaPay',
-                      subtitle: 'تحويل بكود مرجعي وتأكيد يدوي من فريق المالية',
-                      icon: Icons.send_outlined,
                     ),
                     _paymentOption(
                       method: 'fawry_reference',
@@ -2141,3 +2167,105 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 }
 
 /// حقل تاريخ واحد جوّه فترة الاشتراك (ADR-0050 §4) — عرض بس، الاختيار كله في `showDatePicker`.
+
+/// شارة «الأنسب» جنب وسيلة الدفع المرشّحة.
+///
+/// نصها بييجي من الباك-إند مش مكتوب هنا (إعداد `payments.recommended_method`)، فالترشيح
+/// بيتغيّر من لوحة الأدمن بلا نسخة تطبيق جديدة.
+class _RecommendedBadge extends StatelessWidget {
+  const _RecommendedBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: scheme.primary,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: scheme.onPrimary,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// اختيار العميل بين العربون والدفع الكامل (طلب مالك 2026-09-11).
+///
+/// > «لما يكون الطلب فيه deposit، يكون فيه option برضه إن الشخص يدفع الطلب كامل… ومسموح له
+/// >  إن هو يدفع deposit والباقي بيدفعه كاش عادي جدًا بعد الشغل بيسلمه الكاش للصنايعي.»
+///
+/// الاتنين مسارين مشروعين، فالكارت بيعرض **رقم كل اختيار صريحًا** بدل ما يشرح سياسة: العميل
+/// بيقارن مبلغين ويختار، مش بيقرا فقرة ويستنتج.
+class _DepositChoiceCard extends StatelessWidget {
+  const _DepositChoiceCard({
+    required this.depositText,
+    required this.remainingText,
+    required this.totalText,
+    required this.payFull,
+    required this.onChanged,
+  });
+
+  final String depositText;
+  final String remainingText;
+  final String totalText;
+  final bool payFull;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+              child: Text(
+                'تحب تدفع كام دلوقتي؟',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            RadioGroup<bool>(
+              groupValue: payFull,
+              onChanged: (value) => onChanged(value ?? false),
+              child: Column(
+                children: [
+                  RadioListTile<bool>(
+                    value: false,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('العربون دلوقتي — $depositText'),
+                    subtitle: Text('والباقي ($remainingText) تدفعه كاش للصنايعي بعد الشغل'),
+                  ),
+                  RadioListTile<bool>(
+                    value: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('الطلب كامل دلوقتي — $totalText'),
+                    subtitle: const Text('تخلّص الدفع مرة واحدة ومش هيتبقى عليك حاجة بعد الشغل'),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: Text(
+                'الدفع لازم يكون بالبطاقة أو InstaPay أو فوري.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

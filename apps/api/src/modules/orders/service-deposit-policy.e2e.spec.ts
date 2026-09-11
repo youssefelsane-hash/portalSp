@@ -51,6 +51,7 @@ import { ComplaintAttachment } from '../support/entities/complaint-attachment.en
 import { OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
 
 /**
  * ADR-0027 (docs/08 §42 Phase A.3) — سياسة إيداع لكل خدمة. الاختبار ده بيغطي:
@@ -336,7 +337,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       await q(`DELETE FROM payment_notification_outbox WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_earning_shares WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
-      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await deleteWalletTransactions(q, `wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
       await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);

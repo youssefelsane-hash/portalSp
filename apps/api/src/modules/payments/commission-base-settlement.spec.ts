@@ -30,6 +30,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { deleteWalletTransactions } from './wallet-cleanup.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت أساس العمولة الجديد (ADR-0037، docs/08 §60.1).
 //
@@ -258,12 +259,8 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
-      await q(
-        `DELETE FROM wallet_transactions
-         WHERE reference_id IN (SELECT id FROM orders WHERE customer_id = $1)
-            OR wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($2, $3))`,
-        [ids.customerProfile, ids.techUser, ids.customerUser],
-      );
+      await deleteWalletTransactions(q, `reference_id IN (SELECT id FROM orders WHERE customer_id = $1)
+            OR wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($2, $3))`, [ids.customerProfile, ids.techUser, ids.customerUser]);
       await q(`DELETE FROM customer_warranties WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);

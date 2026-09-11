@@ -1544,7 +1544,17 @@ export class OrderCreationService {
       // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot مبلغ الإيداع بعد كل الخصومات
       // (نفس سبب ترتيب requiresPrepay تحت بالحرف: النسبة بتتحسب على الإجمالي النهائي مش الخام).
       // إعادة الزيارة (originalOrder) وأي إجمالي صفر مستثنيان — مفيش إيداع لمبلغ صفر أصلاً.
-      if (!originalOrder && !remoteQuoteRequested && service.depositRequired && order.totalAmountCents > 0) {
+      //
+      // **العميل يقدر يختار يدفع كامل بدل العربون** (طلب مالك 2026-09-11): لو اختار كده،
+      // `deposit_amount_cents` مابيتحطّش أصلاً، فالطلب بيتصرّف زي أي طلب بلا عربون في كل
+      // المسار المالي (`amountOwedNow`، التحصيل، الاسترداد) — صفر فرع جديد في كود الفلوس.
+      if (
+        !originalOrder &&
+        !remoteQuoteRequested &&
+        service.depositRequired &&
+        order.totalAmountCents > 0 &&
+        !dto.pay_full_amount
+      ) {
         order.depositAmountCents = Math.round((order.totalAmountCents * Number(service.depositPercentage)) / 100);
         await manager.save(order);
       }
