@@ -944,9 +944,13 @@ deploy. والوسم مابيظهرش خالص لو الوسيلة نفسها م
 المتقاسة في `docs/08-pricing-engine-and-platform-vision.md` §136، والشرح جنب الكود في
 `earnings-policy.service.ts`.
 
-**فجوة مفتوحة**: `order_earning_adjustments` بيتقرا في الحسبة وشغّال صح، بس **مفيش أي مسار
-كتابة** ليه في المستودع كله — فاستثناء «على طلب بعينه» مستحيل الأدمن يعمله. محتاج
-`POST /admin/earnings-policy/orders/:id/adjustments` + شاشة. §136 فيه التفاصيل.
+**اتقفلت**: `order_earning_adjustments` بقى له مسار كتابة كامل —
+`POST`/`DELETE`/`GET /admin/earnings-policy/orders/:id/adjustments` بصلاحية + step-up + سجل
+تدقيق، وقسم في صفحة الطلب في الأدمن. الحارسان اللي مالهمش نظير في استثناء الشخص: **الرفض بعد
+إقفال التسوية** (الحصص snapshot ثابت، فاستثناء بعدها صف ميت والأدمن يفتكر إنه عدّل)، و**رفض
+أي حد مش مشارك في الطلب** (الاستعلام أصلاً مش هيقرا صفه). التغطية:
+`order-earning-adjustment.spec.ts` (١٢ حي) + `scripts/order-earning-adjustment-audit.js`
+(١٠ على الـAPI). التفاصيل في §136.
 
 ## InstaPay في customer-web (2026-09-11)
 

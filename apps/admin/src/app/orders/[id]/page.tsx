@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import type {
@@ -22,6 +22,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { OrderEarningAdjustmentsSection } from './order-earning-adjustments-section';
 import { resolveMediaUrl } from '@/lib/media-url';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
@@ -271,6 +272,32 @@ export default function OrderDetailPage() {
   const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
   const [earningShares, setEarningShares] = useState<OrderEarningShareResponseDto[] | null>(null);
   const [earningSharesError, setEarningSharesError] = useState(false);
+
+  /**
+   * قابل لإعادة النداء عمدًا: بعد إضافة/إلغاء استثناء على الطلب، الحصص المعروضة (وهي معاينة
+   * حيّة من نفس محرك التسوية قبل الإقفال) لازم تتحدّث فورًا — وإلا الأدمن يعدّل ويشوف الأرقام
+   * القديمة ويفتكر إن التعديل مامشيش.
+   */
+  const loadEarningShares = useCallback(() => {
+    setEarningSharesError(false);
+    authedFetch<OrderEarningShareResponseDto[]>(`/admin/orders/${id}/earning-shares`)
+      .then(setEarningShares)
+      .catch(() => {
+        setEarningShares([]);
+        setEarningSharesError(true);
+      });
+  }, [authedFetch, id]);
+
+  /**
+   * المشاركون المسموح لهم باستثناء على الطلب — **من الحصص نفسها**، مش من قايمة فنيين عامة.
+   * الباك-إند بيرفض أي حد مش مشارك، فالقايمة دي بتمنع الاختيار الغلط من الأصل بدل ما الأدمن
+   * يكتشفه برسالة رفض.
+   */
+  const adjustmentParticipants = (earningShares ?? []).map((share) => ({
+    technician_id: share.technician_id,
+    full_name: share.full_name,
+    role_label: EARNING_SHARE_ROLE_LABELS[share.participant_role],
+  }));
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
   // بند 8 — إصدارات عرض السعر. الـendpoint كان موجود من غير أي شاشة بتقراه.
   const [quotes, setQuotes] = useState<AdminOrderQuote[]>([]);
@@ -409,13 +436,7 @@ export default function OrderDetailPage() {
       .then(setFinancialSummary)
       .catch(() => setFinancialSummary(null));
     // توزيع أرباح الطاقم إداري فقط. فشل المسار لا يمنع عرض الملخص المالي أو باقي الطلب.
-    setEarningSharesError(false);
-    authedFetch<OrderEarningShareResponseDto[]>(`/admin/orders/${id}/earning-shares`)
-      .then(setEarningShares)
-      .catch(() => {
-        setEarningShares([]);
-        setEarningSharesError(true);
-      });
+    loadEarningShares();
     // تعيين مساعد يدوي بعد التصعيد (ADR-0008) — محتاجين نعرف كام مساعد اتعيّن فعلاً عشان
     // نعرف نعرض فورم التعيين ولا لأ (لو الأماكن اكتملت بالفعل، مفيش داعي نعرضه).
     authedFetch<TeamMemberResponseDto[]>(`/admin/orders/${id}/team-members`)
@@ -2302,6 +2323,15 @@ export default function OrderDetailPage() {
                       </TableBody>
                     </Table>
                   )}
+
+                  {/* استثناء على الطلب ده بالذات (docs/08 §136) — القسم بيتعطّل بنفسه بعد
+                      إقفال التسوية، لأن الحصص ساعتها snapshot ثابت ومفيش استثناء بيحرّكه. */}
+                  <OrderEarningAdjustmentsSection
+                    authedFetch={authedFetch}
+                    orderId={id}
+                    participants={adjustmentParticipants}
+                    onChanged={loadEarningShares}
+                  />
                 </div>
 
                 <div>

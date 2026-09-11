@@ -139,6 +139,40 @@ export class CreateTechnicianEarningAdjustmentDto {
   effective_until?: string;
 }
 
+/**
+ * استثناء مستحقات **على طلب واحد بعينه** — «الشغلانة دي بالذات كانت أصعب/أسهل».
+ *
+ * مختلف عن `CreateTechnicianEarningAdjustmentDto` في حاجة جوهرية: ده **مالوش نافذة صلاحية**
+ * (`effective_from/until`). استثناء الشخص سياسة بتمشي على طلبات جاية، فمحتاجة تواريخ؛ ده
+ * بيتعلّق بطلب واحد اتنفّذ مرة واحدة، فالتواريخ مالهاش أي معنى هنا وإضافتها كانت هتخلّي
+ * الأدمن يحط تواريخ بتتجاهَل في صمت.
+ *
+ * الحدود مطابقة لـ`CHECK` بتاع `order_earning_adjustments` في migration 0227 بالحرف — مصدرين
+ * للرقم ده ممنوع يختلفوا، وإلا الـAPI بيقبل قيمة والداتابيز ترفضها بـ500 خام.
+ */
+export class CreateOrderEarningAdjustmentDto {
+  @IsUUID()
+  technician_id: string;
+
+  @IsInt()
+  @Min(-9999)
+  @Max(20000)
+  adjustment_bps: number;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(1000)
+  reason: string;
+}
+
+/** إلغاء استثناء طلب قائم — السبب إجباري زي الإنشاء، عشان السجل يفضل مفهوم. */
+export class DisableOrderEarningAdjustmentDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(1000)
+  reason: string;
+}
+
 export class UpdateServiceLevelEarningsOverrideDto {
   @IsInt()
   @Min(1)
