@@ -10,6 +10,14 @@ export interface FunnelStageRow {
   count: number;
   /** محاولات المرحلة دي اللي **فشلت** — المنتج منع العميل يكمّل، مش إنه غيّر رأيه. */
   failed_count: number;
+  /**
+   * أحداث ناجحة **مالهاش هوية محاولة** (لا طلب ولا جلسة) — كلاينت قديم، تخزين المتصفح
+   * مقفول، أو سكربت/أداة بتنده الـAPI مباشرة.
+   *
+   * **مش داخلة في `count`** عن قصد: حدث مجهول ماينفعش يتحسب «محاولة» وإلا المرحلة بتتضخّم
+   * بعدد النداءات. بتتعرض هنا عشان الأدمن يفرّق بين «مفيش حركة» و«فيه حركة مش متتبّعة».
+   */
+  untracked_count: number;
   /** النسبة من أول مرحلة فيها بيانات (نقطة البداية الفعلية للفنل). */
   pct_of_entry: number | null;
   /** اللي اتفقدوا بين المرحلة اللي قبلها ودي. */
@@ -60,16 +68,32 @@ export class FunnelService {
    */
   async bookingFunnel(from: Date, to: Date): Promise<FunnelReport> {
     const recorded = await this.dataSource.query<
-      { stage: string; count: string; failed_count: string; sources: string[] }[]
+      { stage: string; count: string; untracked_count: string; failed_count: string; sources: string[] }[]
     >(
-      // `order_id` أول واحد في `COALESCE` عن قصد: `order_placed` لازم تتعد **بالطلب** عشان
-      // نفس الرقم بالظبط يبقى نهاية النص الأول وبداية النص التاني المشتق من
-      // `order_status_history` (الجملة اللي فوق بتوعد بده). جلسة واحدة عملت طلبين كانت بتتعد
-      // «١» هنا و«٢» في المشتق، فالمراحل بعد الطلب تطلع أكبر من الطلب نفسه — فنل صاعد،
-      // مستحيل منطقيًا. باقي المراحل `order_id` فيها NULL فبتقع على الجلسة زي ما كانت.
+      // **وحدة العد = هوية المحاولة، ومفيش رجوع لـ`id`.**
+      //
+      // `order_id` أول واحد عن قصد: `order_placed` لازم تتعد **بالطلب** عشان نفس الرقم بالظبط
+      // يبقى نهاية النص الأول وبداية النص التاني المشتق من `order_status_history`. باقي
+      // المراحل `order_id` فيها NULL فبتقع على الجلسة.
+      //
+      // **بَقّة حقيقية اتقاست واتصلحت (بلاغ المالك 2026-09-11)**: كان فيه طرف تالت في
+      // الـ`COALESCE` هو `id::text` — ومفتاح الصف **فريد لكل صف بحكم التعريف**. يعني أي حدث
+      // من غير معرّف جلسة كان بيتعد **محاولة مستقلة**، فالمرحلة بتتضخّم بعدد النداءات مش
+      // بعدد الناس. النتيجة اللي المالك شافها: «شاف الفنيين» أكبر من «شاف الخدمة» — **فنل
+      // صاعد، مستحيل منطقيًا**.
+      //
+      // الأرقام المتقاسة على قاعدة التطوير وقت الإصلاح:
+      //   service_viewed  : 20 صف / 10 جلسات ⇒ 10  ✅ (الجلسة بتوحّد التكرار)
+      //   price_previewed : 50 صف / 0 جلسات  ⇒ 50  ❌ (كل صف بقى «محاولة»)
+      //
+      // الصفوف المجهولة **ماتتخبّاش**: بتتعد في `untracked_count` وبتظهر في التقرير، عشان
+      // الأدمن يفرّق بين «مفيش حركة» و«فيه حركة من كلاينت مش مبعِت الهيدر».
       `SELECT stage,
-              COUNT(DISTINCT COALESCE(order_id::text, funnel_session_id::text, id::text))
+              COUNT(DISTINCT COALESCE(order_id::text, funnel_session_id::text))
                 FILTER (WHERE outcome = 'success') AS count,
+              COUNT(*) FILTER (
+                WHERE outcome = 'success' AND order_id IS NULL AND funnel_session_id IS NULL
+              ) AS untracked_count,
               COUNT(*) FILTER (WHERE outcome = 'failed') AS failed_count,
               array_agg(DISTINCT source) AS sources
          FROM booking_funnel_events
@@ -117,6 +141,7 @@ export class FunnelService {
       rows.push({
         stage,
         count: Number(row?.count ?? 0),
+        untracked_count: Number(row?.untracked_count ?? 0),
         failed_count: Number(row?.failed_count ?? 0),
         pct_of_entry: null,
         dropped_from_previous: null,
@@ -128,6 +153,9 @@ export class FunnelService {
       rows.push({
         stage,
         count: derivedCounts[stage],
+        // المراحل المشتقة مصدرها `order_status_history` — كل صف فيها مربوط بطلب حقيقي،
+        // فمفيش حاجة اسمها «حدث مجهول» هنا أصلاً.
+        untracked_count: 0,
         failed_count: 0,
         pct_of_entry: null,
         dropped_from_previous: null,

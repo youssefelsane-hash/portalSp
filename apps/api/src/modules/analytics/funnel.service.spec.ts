@@ -256,6 +256,67 @@ describe('FunnelService + FunnelTracker (ADR-0081) — حي', () => {
       expect(report.worst_drop?.dropped).toBe(2);
     });
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // بلاغ المالك 2026-09-11: «شاف الخدمة عدده أقل من شاف الفنيين» — فنل صاعد.
+    //
+    // السبب: العد كان `COALESCE(order_id, funnel_session_id, id)`، و`id` مفتاح الصف —
+    // **فريد لكل صف بحكم التعريف**. فأي حدث بلا معرّف محاولة كان بيتعد «محاولة» لوحده،
+    // والمرحلة بتتضخّم بعدد النداءات مش بعدد الناس.
+    // ═══════════════════════════════════════════════════════════════════════
+    it('أحداث بلا معرّف محاولة مابتتعدّش كمحاولات — ومابتتخبّاش', async () => {
+      // شخص واحد (محاولة واحدة) شاف السعر، مقابل ٥ أحداث مجهولة لنفس المرحلة.
+      const real = session();
+      await tracker.track({ stage: 'price_previewed', source: 'server', funnelSessionId: real, serviceId: ids.service });
+      for (let i = 0; i < 5; i++) {
+        await tracker.track({ stage: 'price_previewed', source: 'server', funnelSessionId: null, serviceId: ids.service });
+      }
+
+      const report = await funnel.bookingFunnel(windowStart, now());
+      const row = stage(report, 'price_previewed');
+
+      // قبل الإصلاح كان بيطلع ٦ (١ + ٥ صفوف كل واحد «محاولة»).
+      expect(row.count).toBe(1);
+      // ومابتتخبّاش: الأدمن لازم يفرّق بين «مفيش حركة» و«حركة مش متتبّعة».
+      expect(row.untracked_count).toBe(5);
+    });
+
+    it('تكرار نفس المرحلة في نفس المحاولة بيتعد مرة واحدة (الرجوع بالسهم مايضخّمش)', async () => {
+      // السيناريو اللي وصفه المالك بالحرف: العميل بيرجع بالسهم كذا مرة، فالشاشة بتعيد
+      // النداء. نفس معرّف المحاولة ⇒ محاولة واحدة مهما تكرر النداء.
+      const sid = session();
+      for (let i = 0; i < 7; i++) {
+        await tracker.track({ stage: 'providers_viewed', source: 'server', funnelSessionId: sid, serviceId: ids.service });
+      }
+
+      const report = await funnel.bookingFunnel(windowStart, now());
+      expect(stage(report, 'providers_viewed').count).toBe(1);
+      expect(stage(report, 'providers_viewed').untracked_count).toBe(0);
+    });
+
+    it('الفنل مايصعدش: كل مرحلة أقل من أو تساوي اللي قبلها لمحاولات معروفة', async () => {
+      // ٣ محاولات كاملة من أول مرحلة لآخر واحدة قبل الطلب — الشكل الطبيعي للفنل.
+      const attempts = [session(), session(), session()];
+      for (const sid of attempts) {
+        await tracker.track({ stage: 'service_viewed', source: 'client', funnelSessionId: sid, serviceId: ids.service });
+      }
+      for (const sid of attempts.slice(0, 2)) {
+        await tracker.track({ stage: 'price_previewed', source: 'server', funnelSessionId: sid, serviceId: ids.service });
+      }
+      await tracker.track({
+        stage: 'providers_viewed',
+        source: 'server',
+        funnelSessionId: attempts[0],
+        serviceId: ids.service,
+      });
+
+      const report = await funnel.bookingFunnel(windowStart, now());
+      const ordered = ['service_viewed', 'price_previewed', 'providers_viewed'].map((st) => stage(report, st).count);
+
+      for (let i = 1; i < ordered.length; i++) {
+        expect(ordered[i]).toBeLessThanOrEqual(ordered[i - 1]);
+      }
+    });
+
     it('المراحل بعد الطلب بتتحسب من `order_status_history` مش من الجدول', async () => {
       const done = await makeOrder(['technician_assigned', 'technician_arrived', 'completed']);
       const arrivedOnly = await makeOrder(['technician_assigned', 'technician_arrived']);
@@ -314,10 +375,15 @@ describe('FunnelService + FunnelTracker (ADR-0081) — حي', () => {
       expect(stage(report, 'price_previewed').trust).toBe('server');
     });
 
-    it('محاولة بلا معرّف رحلة بتتعد في المرحلة بس التغطية بتقول إنها مش مربوطة', async () => {
+    // **الاختبار ده كان بيثبّت السلوك الغلط** (بلاغ المالك 2026-09-11): كان بيتوقّع إن حدث
+    // بلا معرّف محاولة يتعد «١» في المرحلة. ده بالظبط اللي كان بيخلّي الفنل يصعد — حدث
+    // مجهول واحد بيتعد محاولة، فعشرة أحداث مجهولة بيبقوا عشر «محاولات» وهُمّا ممكن يكونوا
+    // شخص واحد بيرجع بالسهم. التوقّع الصح: مايدخلش العدّاد، ويتعرض منفصل.
+    it('محاولة بلا معرّف رحلة مابتتعدّش في المرحلة — بتتعرض كحركة مجهولة', async () => {
       await tracker.track({ stage: 'price_previewed', source: 'server', serviceId: ids.service });
       const report = await funnel.bookingFunnel(windowStart, now());
-      expect(stage(report, 'price_previewed').count).toBe(1);
+      expect(stage(report, 'price_previewed').count).toBe(0);
+      expect(stage(report, 'price_previewed').untracked_count).toBe(1);
       expect(report.sessions_untracked).toBe(1);
       expect(report.sessions_tracked).toBe(0);
     });

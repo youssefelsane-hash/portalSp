@@ -463,7 +463,12 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         window.location.assign(cardResult.redirect_url);
         return;
       }
-      router.push(`/orders/${order.id}`);
+      // **`replace` مش `push`** — نفس قرار `pushAndRemoveUntil` في التطبيق بالظبط
+      // (بلاغ المالك 2026-09-11). مع `push` كان زرار «رجوع» في المتصفح بيرجّع لصفحة حجز
+      // **اتعمل خلاص**، بكل حالتها (الفني المختار، الموعد، السعر) — وإرسالها تاني من هناك
+      // بيعمل **طلب تاني حقيقي**. `replace` بيشيل صفحة الحجز من السجل، فالرجوع بيوصّل
+      // للمكان اللي العميل كان فيه قبل ما يبدأ.
+      router.replace(`/orders/${order.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
       setSubmitted(false);

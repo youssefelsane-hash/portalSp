@@ -21,6 +21,7 @@ import '../payments/payments_repository.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
+import 'post_order_navigation.dart';
 import 'orders_repository.dart';
 import 'qr_code_scan_screen.dart';
 import '../technicians/technicians_repository.dart';
@@ -1062,10 +1063,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         await _startPrepayment(order.id, _selectedPaymentMethod!);
       }
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => OrderDetailScreen(orderId: order.id),
-          ),
+        // مكدّس الحجز بيتشال كله لحد الشاشة الرئيسية — الشرح الكامل والسبب في
+        // `post_order_navigation.dart`.
+        await replaceBookingStack(
+          context,
+          (_) => OrderDetailScreen(orderId: order.id),
         );
       }
     } catch (errRaw) {

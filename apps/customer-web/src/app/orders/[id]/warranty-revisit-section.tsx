@@ -46,7 +46,10 @@ export function WarrantyRevisitSection({
         },
         idempotencyKey,
       );
-      router.push(`/orders/${revisit.id}`);
+      // `replace` مطابقةً لتطبيق العميل (`pushReplacement` في `order_detail_screen.dart`) —
+      // طلب المالك إن الويب والأندرويد نسخة واحدة. وكمان بيمنع مكدّس من صفحات طلبات شبه
+      // متطابقة: الرجوع بيوصّل لقايمة الطلبات مش لصفحة الطلب الأصلي اللي اتعمل عليها الإجراء.
+      router.replace(`/orders/${revisit.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'تعذّر إرسال طلب إعادة الزيارة');
       setBusy(false);

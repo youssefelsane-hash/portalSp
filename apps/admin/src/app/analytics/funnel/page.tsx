@@ -31,6 +31,17 @@ function StageBar({ row, isWorst }: { row: FunnelStageRow; isWorst: boolean }) {
         />
       </div>
       <span className="w-20 shrink-0 text-sm tabular-nums">{formatCount(row.count)}</span>
+      {/* حركة مجهولة الهوية: أحداث وصلت من غير معرّف محاولة، فمستحيل نعرف هي كام شخص.
+          بتتعرض جنب الرقم بدل ما تتجمع عليه — جمعها كان بيخلّي المرحلة تتضخّم بعدد
+          النداءات وتطلع أكبر من المرحلة اللي قبلها (بلاغ المالك 2026-09-11). */}
+      {row.untracked_count > 0 && (
+        <span
+          className="text-muted-foreground w-20 shrink-0 text-xs tabular-nums"
+          title="أحداث من غير معرّف محاولة — مش متحسبة في الرقم لأنها ممكن تكون كلها من شخص واحد"
+        >
+          +{formatCount(row.untracked_count)} مجهول
+        </span>
+      )}
       <span className="text-muted-foreground w-16 shrink-0 text-sm tabular-nums">
         {row.pct_of_entry === null ? '—' : `${row.pct_of_entry}%`}
       </span>
