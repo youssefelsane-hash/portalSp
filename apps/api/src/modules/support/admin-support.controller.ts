@@ -22,7 +22,10 @@ export class AdminSupportController {
   @RequirePermission('complaints.view')
   async listAll(@Query('order_id') orderId?: string) {
     const complaints = await this.supportService.listAllForAdmin(orderId);
-    return complaints.map(toComplaintResponseDto);
+    // ADR-0084 §3 — الأدمن لازم يشوف **مين** قدّم الشكوى و**على مين**، مش نص مجهول الطرفين.
+    // استعلام واحد للقايمة كلها، مش واحد لكل صف.
+    const names = await this.supportService.loadPartyNames(complaints);
+    return complaints.map((complaint) => toComplaintResponseDto(complaint, names));
   }
 
   // بَقّة أمنية حقيقية اتلقطت واتصلحت (Script 7 Phase 24): compensation_cents بتحوّل فلوس حقيقية

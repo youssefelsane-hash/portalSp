@@ -33,7 +33,8 @@ export class SupportController {
   @Get()
   async listMine(@CurrentUser() user: JwtPayload) {
     const complaints = await this.supportService.listMine(user.sub);
-    return complaints.map(toComplaintResponseDto);
+    // بلا أسماء عمدًا — ده مسار العميل/الفني، مش المفروض يحمّل بيانات الطرف التاني.
+    return complaints.map((complaint) => toComplaintResponseDto(complaint));
   }
 
   @Get(':id')

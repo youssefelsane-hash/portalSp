@@ -299,7 +299,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   it('مفيش وسيلة دفع محفوظة — المحاولة تفشل فورًا بـobligation واضح، المبلغ يفضل مستحق (§10/§18)', async () => {
     const orderId = await insertPrepaidOrder(`nosaved-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة اختبار', quantity: 1, unit_price_cents: 15000 },
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة اختبار', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 15000 },
     ]);
     const { order } = await orderItemsService.approve(ids.customerUser, orderId);
     expect(order.totalAmountCents).toBe(115000);
@@ -326,7 +326,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
 
     const orderId = await insertPrepaidOrder(`saved-ok-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'أجرة إضافية', quantity: 1, unit_price_cents: 15000 },
+      { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'أجرة إضافية', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 15000 },
     ]);
     fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-ok', failureReason: null };
     await orderItemsService.approve(ids.customerUser, orderId);
@@ -375,7 +375,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
 
     const orderId = await insertPrepaidOrder(`dupwebhook-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.ADDON, name_ar: 'إضافة اختبار', quantity: 1, unit_price_cents: 8000 },
+      { item_type: OrderItemType.ADDON, name_ar: 'إضافة اختبار', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 8000 },
     ]);
     fakeChargeTokenResult = { succeeded: true, providerReference: 'gw-ref-dup', failureReason: null };
     await orderItemsService.approve(ids.customerUser, orderId);
@@ -396,7 +396,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   it('العميل رفض البنود — صفر تأثير مالي وصفر محاولة دفع، مع بقاء الدليل المرفوض قابلًا للمراجعة (§2)', async () => {
     const orderId = await insertPrepaidOrder(`declined-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة مرفوضة', quantity: 1, unit_price_cents: 20000 },
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة مرفوضة', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 20000 },
     ]);
     const { order } = await orderItemsService.decline(ids.customerUser, orderId);
     expect(order.totalAmountCents).toBe(100000); // زي ما هو، صفر تغيير
@@ -415,7 +415,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   it('العميل اختار الدفع كاش للمبلغ الإضافي — صفر محاولة تحصيل إلكتروني، الدلتا تتجمّع في total_amount_cents بس (docs/08 §22 بند 8)', async () => {
     const orderId = await insertPrepaidOrder(`cashchoice-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة اختارها العميل كاش', quantity: 1, unit_price_cents: 12000 },
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة اختارها العميل كاش', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 12000 },
     ]);
     const { order } = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
     expect(order.totalAmountCents).toBe(112000);
@@ -434,14 +434,14 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const orderId = await insertPrepaidOrder(`multibatch-${runId}`, 100000);
 
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة أولى', quantity: 1, unit_price_cents: 5000 },
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة أولى', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 5000 },
     ]);
     const first = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
     expect(first.order.totalAmountCents).toBe(105000);
 
     // دورة تانية مستقلة — الطلب رجع in_progress بعد الموافقة الأولى، فالفني يقدر يقترح تاني
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'أجرة إضافية تانية', quantity: 1, unit_price_cents: 7000 },
+      { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'أجرة إضافية تانية', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 7000 },
     ]);
     const second = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
     expect(second.order.totalAmountCents).toBe(112000); // 100000 + 5000 + 7000، صفر تعارض بين الدفعتين
@@ -466,10 +466,10 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const orderId = await insertPrepaidOrder(`propose-race-${runId}`, 100000);
     const results = await Promise.allSettled([
       orderItemsService.propose(ids.techUser, orderId, [
-        { item_type: OrderItemType.SPARE_PART, name_ar: 'اقتراح متزامن أ', quantity: 1, unit_price_cents: 5000 },
+        { item_type: OrderItemType.SPARE_PART, name_ar: 'اقتراح متزامن أ', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 5000 },
       ]),
       orderItemsService.propose(ids.techUser, orderId, [
-        { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'اقتراح متزامن ب', quantity: 1, unit_price_cents: 7000 },
+        { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'اقتراح متزامن ب', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 7000 },
       ]),
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
@@ -485,7 +485,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   it('approve × decline المتزامن يختار قرارًا نهائيًا واحدًا، من دون حذف أو total_amount متناقض', async () => {
     const orderId = await insertPrepaidOrder(`decision-race-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
-      { item_type: OrderItemType.SPARE_PART, name_ar: 'بند قرار متزامن', quantity: 1, unit_price_cents: 9000 },
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'بند قرار متزامن', description: 'تبرير إجباري للاختبار — البند بيزوّد فلوس الطلب', quantity: 1, unit_price_cents: 9000 },
     ]);
 
     const results = await Promise.allSettled([

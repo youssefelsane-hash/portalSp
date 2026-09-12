@@ -5,12 +5,14 @@ import { AdminOperationsOverviewService } from './admin-operations-overview.serv
 import { AdminWorkloadForecastService } from './admin-workload-forecast.service';
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
+import { AdminReviewCenterService } from './admin-review-center.service';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
 import { AdminOrderTraceService, OrderTrace } from './admin-order-trace.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
 import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
+import { ReviewCenterQueryDto } from './dto/review-center-query.dto';
 import { CoverageIntelligenceQueryDto } from './dto/coverage-intelligence-query.dto';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 
@@ -62,6 +64,7 @@ export class AdminOperationsController {
     private readonly exceptionCenterService: AdminExceptionCenterService,
     private readonly coverageIntelligenceService: AdminCoverageIntelligenceService,
     private readonly orderTraceService: AdminOrderTraceService,
+    private readonly reviewCenterService: AdminReviewCenterService,
   ) {}
 
   /**
@@ -197,6 +200,103 @@ export class AdminOperationsController {
           order_technician_count: r.orderTechnicianCount,
         })),
         meta: result.feed.meta,
+      },
+    };
+  }
+
+  /**
+   * **مركز المراجعة والشواذ** (ADR-0084، طلب مالك docs/08 §139).
+   *
+   * مختلف عن `GET exceptions` اللي تحته: ده «حد اتحرّك ومحتاج حكم»، وده «حاجة واقفة محتاجة
+   * تحريك». القراءة بس — كل قرار (موافقة عرض، حل زيارة فاشلة، حسم كاش) ليه endpoint مخصّص
+   * بصلاحيته وstep-up بتاعه، وده **مابيستبدلهومش**.
+   *
+   * `operations.view` كفاية عليه: كله بيانات الأدمن شايفها أصلاً في صفحة الطلب — الجديد هو
+   * **تجميعها عبر الطلبات** عشان تتراجع كسلوك مش كحالة فردية.
+   */
+  @Get('review-center')
+  @RequirePermission('operations.view')
+  async getReviewCenter(@Query() query: ReviewCenterQueryDto) {
+    const result = await this.reviewCenterService.getReviewCenter({
+      technicianId: query.technician_id ?? null,
+      pendingOnly: query.pending_only ?? false,
+      sinceDays: query.since_days,
+    });
+    return {
+      technician_money_actions: {
+        total: result.technician_money_actions.total,
+        pending: result.technician_money_actions.pending,
+        items: result.technician_money_actions.items.map((i) => ({
+          kind: i.kind,
+          id: i.id,
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          action_type: i.actionType,
+          status: i.status,
+          is_pending: i.isPending,
+          amount_cents: i.amountCents,
+          name_ar: i.nameAr,
+          justification: i.justification,
+          scope_included: i.scopeIncluded,
+          scope_excluded: i.scopeExcluded,
+          revision_reason: i.revisionReason,
+          justification_missing: i.justificationMissing,
+          technician_id: i.technicianId,
+          technician_name: i.technicianName,
+          submitted_by_user_id: i.submittedByUserId,
+          created_at: i.createdAt,
+        })),
+      },
+      failed_visits: {
+        total: result.failed_visits.total,
+        items: result.failed_visits.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          technician_id: i.technicianId,
+          technician_name: i.technicianName,
+          customer_name: i.customerName,
+          reason_category: i.reasonCategory,
+          description: i.description,
+          reported_at: i.reportedAt,
+          scheduled_at: i.scheduledAt,
+          total_amount_cents: i.totalAmountCents,
+        })),
+      },
+      cash_disputes: {
+        total: result.cash_disputes.total,
+        conflicts: result.cash_disputes.conflicts,
+        items: result.cash_disputes.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          technician_id: i.technicianId,
+          technician_name: i.technicianName,
+          customer_name: i.customerName,
+          total_amount_cents: i.totalAmountCents,
+          customer_cash_confirmed_at: i.customerCashConfirmedAt,
+          technician_cash_not_received_at: i.technicianCashNotReceivedAt,
+          is_conflict: i.isConflict,
+          order_status: i.orderStatus,
+        })),
+      },
+      unresolved_complaints: {
+        total: result.unresolved_complaints.total,
+        overdue: result.unresolved_complaints.overdue,
+        items: result.unresolved_complaints.items.map((i) => ({
+          complaint_id: i.complaintId,
+          complaint_number: i.complaintNumber,
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          category: i.category,
+          severity: i.severity,
+          title: i.title,
+          filed_by_name: i.filedByName,
+          filed_by_type: i.filedByType,
+          against_name: i.againstName,
+          against_type: i.againstType,
+          sla_due_at: i.slaDueAt,
+          is_overdue: i.isOverdue,
+          created_at: i.createdAt,
+        })),
       },
     };
   }

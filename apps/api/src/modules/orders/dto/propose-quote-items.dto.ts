@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsOptional, IsPositive, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsOptional, IsPositive, IsString, Length, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { OrderItemType } from '../entities/order-item.entity';
 
 // 'service' مش مسموح هنا عمداً — الفني بيقترح بنود إضافية بس (قطع غيار/أجرة إضافية/إضافات)،
@@ -14,10 +14,16 @@ export class QuoteItemDto {
   @MaxLength(160)
   name_ar: string;
 
-  @IsOptional()
+  /**
+   * **تبرير إجباري** (ADR-0084 §2، طلب مالك §139 بند ٣) — «لما ييجي يزود السعر يبقى فيه خانة
+   * إجبارية». البند ده بيزوّد فلوس على طلب حقيقي وبيتراجع إداريًا، والمراجعة اللي مالهاش نص
+   * مالهاش معنى: الأدمن كان بيشوف «قطعة غيار — ٥٠٠ جنيه» وخلاص.
+   *
+   * الحد الأدنى ١٠ حروف مش تجميل: `@IsString()` لوحدها بتعدّي نقطة واحدة.
+   */
   @IsString()
-  @MaxLength(2000)
-  description?: string;
+  @Length(10, 2000)
+  description: string;
 
   @IsPositive()
   @Max(9999)

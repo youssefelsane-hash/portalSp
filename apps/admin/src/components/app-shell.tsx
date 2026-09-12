@@ -47,6 +47,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  ScanSearch,
   Star,
   Tag,
   ToggleLeft,
@@ -85,6 +86,10 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'العمليات',
     items: [
       { href: '/operations', label: 'مركز العمليات', icon: Activity, permission: 'operations.view' },
+      // ADR-0084 — مكان واحد لكل الشواذ اللي محتاجة **حكم بشري** (أفعال الفني المالية، النشو،
+      // الكاش اللي ماوصلش، الشكاوى المفتوحة). مختلف عن مركز العمليات اللي جنبه: ده «حد اتحرّك
+      // ومحتاج مراجعة»، وده «حاجة واقفة محتاجة تحريك».
+      { href: '/review-center', label: 'مركز المراجعة', icon: ScanSearch, permission: 'operations.view' },
       { href: '/orders', label: 'الطلبات', icon: ClipboardList, permission: 'orders.view' },
       // بند 7 — الطلبات اللي سعرها لسه مش مستقر لها طابور مخصّص: في قايمة الطلبات العامة بتضيع
       // وسط طلبات مفيش عليها قرار مطلوب.

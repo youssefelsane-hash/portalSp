@@ -48,6 +48,7 @@ describe('AdminOperationsController.getDispatchDelivery() — تمرير order_n
       {} as never,
       {} as never,
       {} as never,
+          {} as never,
     );
 
     const result = await controller.getDispatchDelivery({ hours: 24, page: 1, per_page: 20 } as DispatchDeliveryQueryDto);
@@ -155,6 +156,7 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
       exceptionCenterService as never,
       {} as never,
       {} as never,
+          {} as never,
     );
 
     const result = await controller.getExceptions({} as never);
@@ -237,6 +239,7 @@ describe('AdminOperationsController.listOrderTraces() — التعشيش بيو�
       {} as never,
       {} as never,
       orderTraceService as never,
+          {} as never,
     );
 
     const result = await controller.listOrderTraces();

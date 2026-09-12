@@ -32,10 +32,24 @@ export type ComplaintResolutionType =
   | 'technician_suspended'
   | 'no_action';
 
+/**
+ * طرف في الشكوى (ADR-0084 §3) — `full_name`/`user_type` بيوصلوا في مسار الأدمن بس؛ مسار
+ * العميل/الفني بيرجّع المعرّف وخلاص عشان مايسرّبش بيانات الطرف التاني.
+ */
+export interface ComplaintPartyDto {
+  user_id: string;
+  full_name: string | null;
+  user_type: string | null;
+}
+
 export interface ComplaintResponseDto {
   id: string;
   complaint_number: string;
   order_id: string | null;
+  /** مقدّم الشكوى — كان **محذوف من العقد بالكامل** قبل ADR-0084 §3. */
+  filed_by: ComplaintPartyDto;
+  /** المشكو في حقه — `null` لو الشكوى على المنصة نفسها. */
+  against: ComplaintPartyDto | null;
   category: ComplaintCategory;
   severity: ComplaintSeverity;
   title: string;

@@ -74,13 +74,24 @@ const PRICE_LOCKED_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.DISPUTED,
 ]);
 
-// الحالات التي لا يزال فيها المنفّذ قابلًا للاستبدال تشغيليًا. القبول يعني أن الموعد تأكد،
-// لا أن العمل بدأ؛ لذلك الاستبدال فيه لا يغيّر السعر أو حالة الدفع. بعد أن يبدأ الفني التحرك
-// أو يصل، لا نبدّل صاحب العمل بصمت لأن ذلك يصبح قرار شكوى/زيارة فاشلة له أثر تشغيلي ومالي.
+/**
+ * الحالات اللي المنفّذ لسه قابل للاستبدال فيها — **الحد هو بداية الشغل الفعلي** (ADR-0084 §4).
+ *
+ * القايمة كانت بتقف عند `accepted`، فالسيناريو اللي المالك وصفه بالظبط — «الأوردر مقبول قاعد
+ * ساعات، الصنايعي بيبلّغ إنه مش هيقدر ييجي» — كان مغطّى، لكن اللي بعده مباشرة (اتحرّك وبعدين
+ * اعتذر، أو وصل ولقى نفسه مش قادر) كان بيلاقي الزرار ميت. مفيش شغل اتعمل في الحالتين دول،
+ * فمفيش أي أثر مالي للاستبدال.
+ *
+ * **`in_progress` بيفضل مقفول، وده قرار صريح مش سهو**: الشغل بدأ يبقى للفني الأصلي حق مالي في
+ * الطلب، وتبديل القائد هناك بيمسح مشاركته من حساب التسوية بصمت. المسار الصح هناك هو الزيارة
+ * الفاشلة أو الشكوى — الاتنين بيحسبوا رسوم/تعويض. الواجهة بتقول ده بالنص بدل ما تخفي الزرار.
+ */
 const REASSIGNABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.SEARCHING_TECHNICIAN,
   OrderStatus.TECHNICIAN_ASSIGNED,
   OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
 ]);
 
 export function formatEligibleTechniciansForAdmin(result: {
@@ -884,7 +895,7 @@ export class AdminOrdersService {
     if (!REASSIGNABLE_STATUSES.has(snapshot.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
-        `مينفعش تبدّل منفّذ الطلب في حالة ${snapshot.orderStatus} — التبديل متاح لحد ما الفني يبدأ التحرك للعنوان`,
+        `مينفعش تبدّل منفّذ الطلب في حالة ${snapshot.orderStatus} — التبديل متاح لحد ما الشغل يبدأ فعليًا. بعد كده استخدم الزيارة الفاشلة أو الشكوى عشان حق الفني الأصلي يتحسب`,
         HttpStatus.CONFLICT,
       );
     }
@@ -967,13 +978,19 @@ export class AdminOrdersService {
       }
 
       if (previousStatus !== OrderStatus.ACCEPTED) {
+        // الرجوع لـACCEPTED مقصود ودقيق: المنفّذ الجديد ما اتحركش ولا وصل، فتسجيله «في الطريق»
+        // أو «وصل» كذب على العميل وعلى كل شاشة بتقرا الحالة.
         order.orderStatus = OrderStatus.ACCEPTED;
         order.acceptedAt = now;
         await manager.save(order);
         await manager.save(
           manager.create(OrderStatusHistory, {
             orderId: order.id,
-            previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+            // **الحالة السابقة الحقيقية** — كانت مكتوبة `TECHNICIAN_ASSIGNED` ثابتة، وده كان
+            // صح لما القايمة كانت بتوقف عند `accepted`. بعد ADR-0084 §4 الاستبدال بقى ممكن من
+            // `technician_on_way`/`technician_arrived`، فالثابت ده كان هيكتب تاريخًا غلط.
+            previousStatus:
+              previousStatus === OrderStatus.SEARCHING_TECHNICIAN ? OrderStatus.TECHNICIAN_ASSIGNED : previousStatus,
             newStatus: OrderStatus.ACCEPTED,
             changedByUserId: adminUserId,
             changedByRole: 'admin',

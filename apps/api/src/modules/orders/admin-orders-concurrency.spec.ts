@@ -277,6 +277,51 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     });
   });
 
+  /**
+   * ADR-0084 §4 (طلب مالك docs/08 §139 بند ٧): «تأكد إن استبدال منفّذ الخدمة يكون دايمًا شغّال…
+   * ما ينفعش الأدمن يلاقيه مقفول».
+   *
+   * السيناريو اللي اتوصف بالحرف (الفني قابل ومعتذر بعد ساعات) كان شغّال أصلاً من `accepted`،
+   * لكن اللي بعده مباشرة — اتحرّك للعنوان وبعدين اعتذر، أو وصل ولقى نفسه مش قادر — كان مقفول.
+   */
+  it('الاستبدال شغّال بعد ما الفني يتحرّك ولما يوصل — مفيش شغل اتعمل فمفيش أثر مالي', async () => {
+    // رقم الطلب بيتقص على ٢٤ حرف، فـ`ra-technic-…` للحالتين بيتصادم — عدّاد قصير بدل تركيب نص.
+    let seq = 0;
+    for (const status of [OrderStatus.TECHNICIAN_ON_WAY, OrderStatus.TECHNICIAN_ARRIVED]) {
+      const orderId = await insertOrder(`ra${seq++}${runId}`.slice(0, 15), {
+        bookingMode: BookingMode.INDIVIDUAL,
+        technicianId: ids.individualOldProfile,
+        orderStatus: status,
+      });
+
+      const updated = await adminOrdersService.reassign(ids.adminUserA, orderId, ids.individualNewProfile);
+      expect(updated.technicianId).toBe(ids.individualNewProfile);
+      // **بترجع لـaccepted عن قصد**: المنفّذ الجديد ما اتحركش ولا وصل، فإبقاء الحالة «في
+      // الطريق»/«وصل» كان هيكذب على العميل. والتاريخ بيسجّل الحالة السابقة الحقيقية.
+      expect(updated.orderStatus).toBe(OrderStatus.ACCEPTED);
+      const [hist] = await q(
+        `SELECT previous_status FROM order_status_history WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [orderId],
+      );
+      expect(hist.previous_status).toBe(status);
+
+      // نرجّع المنفّذ عشان الطلب اللي بعده في اللوب مايلاقيش الفني الجديد مشغول بالتزام جديد.
+      await q(`UPDATE orders SET technician_id = $2 WHERE id = $1`, [orderId, ids.individualOldProfile]);
+    }
+  });
+
+  it('بعد ما الشغل يبدأ فعليًا الاستبدال بيترفض برسالة بتقول المسار الصح — مش زرار ميت', async () => {
+    const orderId = await insertOrder(`rip${runId}`.slice(0, 15), {
+      bookingMode: BookingMode.INDIVIDUAL,
+      technicianId: ids.individualOldProfile,
+      orderStatus: OrderStatus.IN_PROGRESS,
+    });
+
+    await expect(adminOrdersService.reassign(ids.adminUserA, orderId, ids.individualNewProfile)).rejects.toThrow(
+      /الزيارة الفاشلة أو الشكوى/,
+    );
+  });
+
   it('سباق حقيقي: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي — واحد بس ينجح، التاني يرجع 409 نضيف (مش 500 خام)', async () => {
     const orderId = await insertOrder(`crew-add-race-${runId}`, {
       bookingMode: BookingMode.TEAM,
