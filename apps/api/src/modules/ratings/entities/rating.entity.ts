@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
 
 export enum RatingType {
   CUSTOMER_TO_TECHNICIAN = 'customer_to_technician',
@@ -6,11 +6,12 @@ export enum RatingType {
 }
 
 @Entity('ratings')
+@Index('ux_ratings_order_direction', ['orderId', 'ratingType'], { unique: true })
 export class Rating {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
   id: string;
 
-  @Column({ name: 'order_id', type: 'uuid', unique: true })
+  @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
 
   @Column({ name: 'rated_by_user_id', type: 'uuid' })

@@ -12,6 +12,7 @@ import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/shell/customer_shell.dart';
 import 'features/notifications/floating_notification_alert.dart';
+import 'features/ratings/pending_rating_prompt.dart';
 
 void main() {
   assertProductionApiConfig();
@@ -45,6 +46,8 @@ class BaytakApp extends StatelessWidget {
           return Stack(
             children: [
               DesktopAppFrame(child: child ?? const SizedBox.shrink()),
+              if (auth.isAuthenticated && !auth.biometricUnlockPending)
+                const PendingRatingPromptHost(),
               if (auth.isAuthenticated && !auth.biometricUnlockPending)
                 // الزر يظل فوق كل الصفحات، لكنه بلا Overlay أو Hero مستقلين حتى لا يتعارض
                 // مع دورة حياة Navigator عند فتح شاشة جديدة.

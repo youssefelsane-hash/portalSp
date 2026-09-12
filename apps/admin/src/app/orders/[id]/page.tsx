@@ -11,6 +11,7 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMatchingFunnelDto,
+  OrderRatingResponseDto,
   OrderTraceDto,
   OrderTraceResponseDto,
   OrderMediaResponseDto,
@@ -300,6 +301,7 @@ export default function OrderDetailPage() {
     role_label: EARNING_SHARE_ROLE_LABELS[share.participant_role],
   }));
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
+  const [ratings, setRatings] = useState<OrderRatingResponseDto[]>([]);
   // بند 8 — إصدارات عرض السعر. الـendpoint كان موجود من غير أي شاشة بتقراه.
   const [quotes, setQuotes] = useState<AdminOrderQuote[]>([]);
   const [quoteDecisionReason, setQuoteDecisionReason] = useState('');
@@ -426,6 +428,9 @@ export default function OrderDetailPage() {
     authedFetch<OrderMediaResponseDto[]>(`/admin/orders/${id}/media`)
       .then(setMedia)
       .catch(() => setMedia([]));
+    authedFetch<OrderRatingResponseDto[]>(`/admin/orders/${id}/ratings`)
+      .then(setRatings)
+      .catch(() => setRatings([]));
     authedFetch<OrderItemResponseDto[]>(`/admin/orders/${id}/quote-items`)
       .then(setQuoteItems)
       .catch(() => setQuoteItems([]));
@@ -490,7 +495,7 @@ export default function OrderDetailPage() {
     }
   }
 
-  useAdminLiveRefresh(['orders', 'payments'], (event) => {
+  useAdminLiveRefresh(['orders', 'payments', 'ratings'], (event) => {
     if (event.entity_id === null || event.entity_id === id || event.data?.orderId === id) load();
   });
 
@@ -2860,6 +2865,48 @@ export default function OrderDetailPage() {
             )}
           </Card>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">تقييمات الطلب</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {ratings.length === 0 ? (
+              <EmptyState title="الطلب لسه ما اتقيّمش" />
+            ) : (
+              <div className="flex flex-col gap-4">
+                {ratings.map((rating) => (
+                  <div key={rating.id} className="rounded-lg border p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <Badge variant="secondary">
+                        {rating.rating_type === 'customer_to_technician' ? 'العميل قيّم الفني' : 'الفني قيّم العميل'}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(rating.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                      </span>
+                    </div>
+                    <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                      {[
+                        ['التقييم العام', rating.overall_rating],
+                        ['الالتزام بالمواعيد', rating.punctuality_rating],
+                        ['جودة الشغل', rating.quality_rating],
+                        ['الاحترافية', rating.professionalism_rating],
+                        ['عدالة السعر', rating.price_fairness_rating],
+                        ['النظافة', rating.cleanliness_rating],
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+                          <span>{label}</span>
+                          <strong>{value === null ? 'لم يُقيّم' : `${value} / 5`}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    {rating.comment && <p className="mt-3 rounded-md bg-muted/50 p-3 text-sm">{rating.comment}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

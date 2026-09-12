@@ -33,11 +33,6 @@ export class RatingsService {
   // مالوش رقم محدد لده) — مختلف عن سعر صرف نقاط الولاء اللي فعلاً قرار مالي محتاج اعتماد رسمي.
   private static readonly LOW_RATING_THRESHOLD = 2;
 
-  /**
-   * ملاحظة على تصميم القاموس: `ratings.order_id` UNIQUE — يعني تقييم واحد بس لكل طلب،
-   * مش تقييمين (واحد من كل طرف). أول طرف يقيّم ياخد السلوت. ده قرار من docs/02-data-dictionary.md
-   * §8.1 الأصلي، مش تبسيط مني — لو غلط لازم يتصحح بتحديث موثّق للقاموس، مش هنا بصمت.
-   */
   async rateAsCustomer(userId: string, orderId: string, dto: CreateRatingDto): Promise<Rating> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const order = await this.orders.findOne({ where: { id: orderId, customerId: customerProfile.id } });
@@ -134,6 +129,46 @@ export class RatingsService {
     return this.createRating(order.id, userId, customerProfile.userId, RatingType.TECHNICIAN_TO_CUSTOMER, dto);
   }
 
+  /**
+   * الطلبات المكتملة التي ما زالت تنتظر تقييم العميل. الاستعلام يفلتر اتجاه تقييم العميل فقط:
+   * تقييم الفني للعميل لا يمنع ظهور الطلب ولا يمنع العميل من إرسال تقييمه المستقل.
+   */
+  async listPendingForCustomer(userId: string): Promise<
+    {
+      orderId: string;
+      orderNumber: string;
+      serviceNameAr: string;
+      technicianName: string;
+      completedAt: Date;
+    }[]
+  > {
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    return this.ratings.manager.query(
+      `SELECT
+         o.id AS "orderId",
+         o.order_number AS "orderNumber",
+         s.name_ar AS "serviceNameAr",
+         u.full_name AS "technicianName",
+         COALESCE(o.closed_at, o.work_completed_at, o.updated_at) AS "completedAt"
+       FROM orders o
+       JOIN services s ON s.id = o.service_id
+       JOIN technician_profiles tp ON tp.id = o.technician_id
+       JOIN users u ON u.id = tp.user_id
+       WHERE o.customer_id = $1
+         AND o.order_status = 'completed'
+         AND o.deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM ratings r
+           WHERE r.order_id = o.id
+             AND r.rating_type = 'customer_to_technician'
+         )
+       ORDER BY COALESCE(o.closed_at, o.work_completed_at, o.updated_at) ASC, o.id ASC
+       LIMIT 10`,
+      [customerProfile.id],
+    );
+  }
+
   private assertRatable(order: Order): void {
     if (
       order.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER ||
@@ -164,7 +199,7 @@ export class RatingsService {
     ratingType: RatingType,
     dto: CreateRatingDto,
   ): Promise<Rating> {
-    const existing = await this.ratings.findOne({ where: { orderId } });
+    const existing = await this.ratings.findOne({ where: { orderId, ratingType } });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده اتقيّم قبل كده', HttpStatus.CONFLICT);
     }

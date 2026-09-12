@@ -653,7 +653,7 @@ CHECK (قيدا المحفظة إما كلاهما NULL أو كلاهما موج
 ### 8.1 `ratings`
 
 ```sql
-id, order_id FK UNIQUE, rated_by_user_id FK, rated_user_id FK,
+id, order_id FK, rated_by_user_id FK, rated_user_id FK,
 rating_type ENUM,                  -- customer_to_technician | technician_to_customer
 overall_rating SMALLINT,           -- 1..5
 punctuality_rating SMALLINT NULL,
@@ -664,7 +664,8 @@ comment TEXT NULL,
 tags TEXT[] NULL,                  -- ['ملتزم','نضيف','شرح كويس']
 is_published BOOLEAN DEFAULT true,
 is_flagged BOOLEAN DEFAULT false, flagged_reason TEXT NULL,
-moderated_by_user_id UUID NULL, created_at
+moderated_by_user_id UUID NULL, created_at,
+UNIQUE (order_id, rating_type)     -- تقييم واحد لكل اتجاه؛ الطرفان يقيّمان باستقلال
 ```
 
 ### 8.2 `complaints`
