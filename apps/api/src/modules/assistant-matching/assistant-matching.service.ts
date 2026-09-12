@@ -6,10 +6,10 @@ import { Queue } from 'bullmq';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
+  assistantServiceQualificationCondition,
   technicianAvailabilityCondition,
   technicianCityCoverageCondition,
   technicianKindCondition,
-  technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 import {
@@ -28,6 +28,11 @@ import { BookingMode, Order } from '../orders/entities/order.entity';
 import { OrderTeamMember } from '../orders/entities/order-team-member.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
+import {
+  assistantCandidateRankingJoinsSql,
+  candidateQualityScoreSql,
+  resolveCandidateQualityRankingSettings,
+} from '../matching/candidate-quality-ranking';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssistantLinkStatus } from '../technicians/entities/technician-profile.entity';
 import {
@@ -119,7 +124,7 @@ export class AssistantMatchingService {
         AND tp.deleted_at IS NULL
         -- ADR-0050 — الاتجاه العكسي: المسار ده بيدوّر على **مساعد**، فالفنيين مستبعدين منه.
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
-        AND ${technicianServiceQualificationCondition({
+        AND ${assistantServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
@@ -222,6 +227,7 @@ export class AssistantMatchingService {
 
     const batchSize = await this.settingsService.getNumber('assistant_matching.batch_size', BATCH_SIZE_FALLBACK);
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+    const ranking = await resolveCandidateQualityRankingSettings(this.settingsService);
     const candidates = await this.dataSource.query<EligibleAssistantRow[]>(
       `
       SELECT tp.id AS technician_id
@@ -232,13 +238,18 @@ export class AssistantMatchingService {
         AND ts.verification_status = 'approved'
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
+      ${assistantCandidateRankingJoinsSql({
+        activeStatusesParam: '$5',
+        fairnessLookbackDaysParam: '$13',
+        fairnessDeclineWeightParam: '$14',
+      })}
       WHERE tp.verification_status = 'approved'
         -- ADR-0050 — الاتجاه العكسي: مجمع المساعدين بيضم المساعدين بس. قبل كده كان بيبث لأي فني
         -- مؤهّل، فالفنيين الكاملين كانوا بياخدوا عروض مساعدة بنسبة أقل من نصيبهم العادي.
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
         -- المساعد لازم يكون معتمدًا على الخدمة نفسها أو فئتها، بالضبط مثل الفني. ده يمنع مساعد
         -- السباكة من استلام كهرباء لمجرد إن دوره في الطلب "مساعد".
-        AND ${technicianServiceQualificationCondition({
+        AND ${assistantServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
@@ -269,11 +280,14 @@ export class AssistantMatchingService {
           dailyCapacityMinutesParam: '$10',
         })}
       ORDER BY ST_Distance(tp.current_location, a.location) ASC,
-               CASE tp.current_level
-                 WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
-                 WHEN 'verified' THEN 1 ELSE 0
-               END DESC,
-               tp.average_rating DESC
+               ${candidateQualityScoreSql({
+                 workloadWeightParam: '$12',
+                 fairnessWeightParam: '$15',
+                 reliabilityBaselineParam: '$16',
+                 reliabilityWeightParam: '$17',
+                 reliabilityMinRatingsParam: '$18',
+               })} DESC,
+               tp.id ASC
       LIMIT $4
       `,
       [
@@ -288,6 +302,13 @@ export class AssistantMatchingService {
         order.bookingMode === BookingMode.EMERGENCY,
         dailyCapacityMinutes,
         order.id,
+        ranking.workloadWeight,
+        ranking.fairnessLookbackDays,
+        ranking.fairnessDeclineWeight,
+        ranking.fairnessWeight,
+        ranking.reliabilityBaselineRating,
+        ranking.reliabilityWeight,
+        ranking.reliabilityMinRatingsCount,
       ],
     );
 

@@ -237,6 +237,22 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     expect(typeof result.rankInfo?.rankScore).toBe('number');
   });
 
+  it('المساعد يظهر في المفتش بسبب واضح لكنه غير مؤهل لقيادة الطلب', async () => {
+    await q(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.eligibleProfile]);
+    try {
+      const result = await service.explainTechnicianForOrder(
+        await dataSource.getRepository(Order).findOneByOrFail({ id: ids.order }),
+        ids.eligibleProfile,
+      );
+      expect(result.eligible).toBe(false);
+      expect(result.checks.find((check) => check.key === 'correct_kind')?.passed).toBe(false);
+      expect(result.reasonAr).toContain('لا يقود');
+      expect(result.rankInfo).toBeNull();
+    } finally {
+      await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.eligibleProfile]);
+    }
+  });
+
   // docs/08 §107 — تناقض حقيقي اتلقط حي: المفتّش كان بيقول «مؤهّل بالكامل» لشخص مستواه أقل من
   // حد قيادة طلب الاعتماد، بينما قايمة التعيين الإجباري (listForServiceBooking(isTeamBooking))
   // مش بتعرضه أصلاً وassertCoreEligibility() هترفضه بـ409 وقت التنفيذ. الشرط كان مفروضًا في

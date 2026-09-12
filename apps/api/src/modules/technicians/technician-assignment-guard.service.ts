@@ -4,7 +4,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
-import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianKind, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { classifyTechnicianCapacity, technicianAvailabilityCondition, technicianServiceQualificationCondition } from './technician-eligibility.sql';
 import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
@@ -132,14 +132,9 @@ export class TechnicianAssignmentGuardService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
-    // ADR-0055 (تصحيح مالك) — **الرفض على أساس الدور اتشال**. كان هنا حارس بيمنع تعيين أي مساعد
-    // على طلب، وده اللي كان بيمنع التعيين الإداري القسري كمان. المالك صحّح الفهم: «المساعد» نوع
-    // شغل مختلف (نقل/شيل) مش مستوى مهارة أقل، والشغل ده شغله هو بيعمله لوحده. ADR-0056 ثبّت إن
-    // المساعد، مثل الفني، لازم يكون معتمدًا في التخصص؛ حجب الأدمن طبقة إضافية فوق الاعتماد.
-    //
-    // الأثر المالي طبيعي مش استثناء: المساعد اللي بيشيل طلب لوحده بياخد نصيب **القائد** الكامل
-    // (`participant_role = 'leader'`)، وتسعيرة المساعد المخفّضة بتفضل مقصورة على انضمامه لطاقم
-    // حد تاني (`participant_role = 'assistant'`). صفر تغيير في كود القسمة.
+    if (technician.technicianKind !== TechnicianKind.TECHNICIAN) {
+      throw new ApiException(ErrorCode.ORDR_003, 'المساعد لا يمكن تعيينه قائدًا للطلب', HttpStatus.CONFLICT);
+    }
     // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
     // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،
     // التعيين القسري قرار إداري صريح مش انتظار قبول عادي). التوافر الحقيقي بيتفحص تحت عبر

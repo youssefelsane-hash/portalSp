@@ -373,12 +373,53 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
 
   it('listRecruitCandidates — قائمة المساعدين لا تعرض الفنيين وتلتزم بالتخصص والمدينة', async () => {
     const orderId = await insertOrder(`list-assistants-${runId}`, { requiredTechnicians: 1, requiredAssistants: 2 });
+    await q(
+      `INSERT INTO technician_excluded_services (technician_id, service_id, excluded_by_user_id, reason)
+       VALUES ($1,$2,$3,'ممنوع يقود الخدمة، لكنه يقدر يساعد فيها')`,
+      [ids.assistantProfile, ids.service, users[0]],
+    );
     const candidates = await orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'assistant');
     const candidateIds = candidates.map((candidate) => candidate.technicianId);
 
     expect(candidateIds).toContain(ids.assistantProfile);
     expect(candidateIds).not.toContain(ids.juniorProfile);
     expect(candidateIds).not.toContain(ids.leaderProfile);
+    await q(`DELETE FROM technician_excluded_services WHERE technician_id = $1`, [ids.assistantProfile]);
+  });
+
+  it('ترتيب المساعدين: المسافة أولًا ثم نفس أولوية المستوى عند تساوي المسافة', async () => {
+    const orderId = await insertOrder(`assistant-ranking-${runId}`, { requiredTechnicians: 1, requiredAssistants: 3 });
+    const betterProfile = await insertTechnician('assistant-ranked', {
+      level: TechnicianLevel.VERIFIED,
+      hasLocation: true,
+      kind: TechnicianKind.ASSISTANT,
+    });
+    const [betterUser] = await q(`SELECT user_id FROM technician_profiles WHERE id = $1`, [betterProfile]);
+
+    try {
+      await q(
+        `UPDATE technician_profiles
+         SET current_location = ST_SetSRID(ST_MakePoint(31.60, 30.40), 4326)::geography
+         WHERE id = $1`,
+        [ids.assistantProfile],
+      );
+      let candidates = await orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'assistant');
+      expect(candidates[0].technicianId).toBe(betterProfile);
+
+      await q(
+        `UPDATE technician_profiles
+         SET current_location = ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography
+         WHERE id = $1`,
+        [ids.assistantProfile],
+      );
+      candidates = await orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'assistant');
+      expect(candidates[0].technicianId).toBe(betterProfile);
+    } finally {
+      await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [betterProfile]);
+      await q(`DELETE FROM technician_services WHERE technician_id = $1`, [betterProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [betterProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [betterUser.user_id]);
+    }
   });
 
   it('recruitMember — فني LIGHT بيتضاف فورًا، بلا فحص شركة خالص، ويطلق ORDER_CREW_CHANGED_EVENT بـaddedByType=technician', async () => {

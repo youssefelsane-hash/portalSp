@@ -3,15 +3,8 @@ import { TechnicianAssignmentGuardService } from './technician-assignment-guard.
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { Order } from '../orders/entities/order.entity';
 
-/**
- * ADR-0055 (docs/08 §104، تصحيح مالك) — «طالما أنا ما منعتش عنهم الشغل، يبقى زيهم زي الفنيين
- * بالضبط… يظهروا في التعيين الإجباري من عند الأدمن».
- *
- * الاختبار ده بيغطّي **حارس التعيين** تحديدًا: هو آخر خط دفاع وبيتنادى من التعيين الإداري القسري
- * وقبول الفرص. كان بيرفض أي مساعد صراحةً بغض النظر عن أي حاجة تانية — يعني حتى لو الأدمن قرر
- * صراحةً يعيّن مساعد على طلب، الرفض كان بييجي من هنا.
- */
-describe('ADR-0055 — المساعد مشارك كامل (حارس التعيين)', () => {
+/** ADR-0086 — حارس التعيين آخر خط دفاع ضد قيادة المساعد للطلب من أي مسار. */
+describe('المساعد عضو طاقم فقط — حارس تعيين القائد', () => {
   let dataSource: DataSource;
   let guard: TechnicianAssignmentGuardService;
   const runId = Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
@@ -151,12 +144,12 @@ describe('ADR-0055 — المساعد مشارك كامل (حارس التعيي
     return { technician, order };
   }
 
-  it('الأدمن يقدر يعيّن مساعد على طلب — الرفض على أساس الدور اتشال', async () => {
+  it('التعيين المباشر يرفض المساعد حتى لو تخصصه معتمد', async () => {
     const { technician, order } = await loadEntities();
-    await expect(guard.assertEligible(dataSource.manager, technician, order)).resolves.toBeUndefined();
+    await expect(guard.assertEligible(dataSource.manager, technician, order)).rejects.toThrow('المساعد لا يمكن تعيينه قائدًا');
   }, 20000);
 
-  it('حجب الخدمة عن المساعد بيمنع التعيين — طبقة إضافية فوق اعتماد التخصص', async () => {
+  it('حجب الخدمة لا يفتح ثغرة تسمح بتعيين المساعد قائدًا', async () => {
     await q(
       `INSERT INTO technician_excluded_services (technician_id,service_id,excluded_by_user_id,reason)
        VALUES ($1,$2,$3,'مش بيعرف يعملها')`,
@@ -170,8 +163,8 @@ describe('ADR-0055 — المساعد مشارك كامل (حارس التعيي
     }
   }, 20000);
 
-  it('بعد رفع الحجب التعيين بيرجع يعدّي — الحجب قابل للتراجع', async () => {
+  it('رفع الحجب لا يغيّر قاعدة أن المساعد لا يقود الطلب', async () => {
     const { technician, order } = await loadEntities();
-    await expect(guard.assertEligible(dataSource.manager, technician, order)).resolves.toBeUndefined();
+    await expect(guard.assertEligible(dataSource.manager, technician, order)).rejects.toThrow('المساعد لا يمكن تعيينه قائدًا');
   }, 20000);
 });

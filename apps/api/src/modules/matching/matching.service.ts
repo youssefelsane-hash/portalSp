@@ -35,6 +35,7 @@ import {
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
   technicianIndividualVisibilityCondition,
+  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -50,6 +51,7 @@ import {
 } from '../orders/revisit-pin';
 import { DispatchRouteDecision, isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { candidateQualityScoreSql } from './candidate-quality-ranking';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -314,19 +316,17 @@ export class MatchingService {
       SELECT tp.id AS technician_id,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km,
              (
-               COALESCE(tlc.order_priority_weight, 0)
-               - COALESCE(workload.active_count, 0) * $14::int
-               - COALESCE(fairness.recent_effective_workload, 0) * $15::numeric
+               ${candidateQualityScoreSql({
+                 workloadWeightParam: '$14',
+                 fairnessWeightParam: '$15',
+                 reliabilityBaselineParam: '$21',
+                 reliabilityWeightParam: '$20',
+                 reliabilityMinRatingsParam: '$22',
+               })}
                -- ADR-0062 — المسافة مكوّن حقيقي في النتيجة، مش كاسر تعادل بس. الوزن بيتحسب في
                -- resolveDistanceWeight() حسب سياق الطلب (طوارئ/موعد قريب/شغل رخيص)، و0 (الافتراضي)
                -- بيرجّع السلوك القديم بالحرف.
                - (ST_Distance(tp.current_location, a.location) / 1000.0) * $26::numeric
-               + (
-                 CASE WHEN tp.total_ratings_count >= $22::int
-                   THEN (tp.average_rating - $21::numeric) * $20::numeric
-                   ELSE 0
-                 END
-               )
                + (
                  CASE WHEN $19::boolean IS TRUE
                            AND $23::int >= $24::int
@@ -445,9 +445,9 @@ export class MatchingService {
           ) AS recent_effective_workload
       ) fairness ON true
       WHERE tp.verification_status = 'approved'
-        -- ADR-0055/0056 — مفيش استبعاد شامل على أساس الدور هنا؛ الفني والمساعد مشاركان كاملان،
-        -- لكن كليهما لازم يكون معتمدًا على الخدمة أو فئتها. الحجب الإداري طبقة إضافية فوق اعتماد
-        -- التخصص، وليس بديلًا عنه.
+        -- القائد لازم يكون فنيًا. المساعد يظهر فقط في مسارات تكوين الطاقم، ولا يمكن أن يتسلل
+        -- للمطابقة المباشرة حتى لو كان تخصصه معتمدًا.
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
         AND ${technicianServiceQualificationCondition({

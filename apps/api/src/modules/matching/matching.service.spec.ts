@@ -233,6 +233,18 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
   });
 
+  it('المساعد لا يدخل مطابقة قائد الطلب حتى لو كل شروط الخدمة والموقع متحققة', async () => {
+    await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
+    await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.technicianProfile]);
+    try {
+      const candidates = await findCandidates(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
+    } finally {
+      await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.technicianProfile]);
+      await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
+    }
+  });
+
   it('طلب ASAP (بلا scheduledAt) لسه بيرفض صح لو الفني عنده طلب تاني شاغل يوم كامل النهاردة — الحماية الحقيقية اتحافظ عليها', async () => {
     const candidates = await findCandidates(null);
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);

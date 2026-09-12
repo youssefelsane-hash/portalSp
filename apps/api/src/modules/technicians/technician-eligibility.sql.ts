@@ -586,11 +586,10 @@ export async function describeTechnicianCapacity(
  * بقى خطر حقيقي: تطبيقه على تمنية من تسعة معناه إن الفني المحجوب يفضل بيوصله الشغل من المسار
  * المنسي، **والأدمن شايف في الواجهة إنه محجوب** — تسريب صامت أسوأ من عدم بناء الميزة أصلاً.
  *
- * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض، لنفس الشخص سواء شغال في الطلب كفني أو مساعد:
- *  1. **مؤهّل**: صف خدمة مباشر معتمد، أو اعتماد الفئة كلها.
- *  2. **مش محجوب**: مفيش صف في `technician_excluded_services` للفني/الخدمة دول.
+ * أساس التخصص (صف خدمة مباشر معتمد أو اعتماد الفئة كلها) مشترك. حجب خدمة بعينها يضاف في مسار
+ * القيادة فقط؛ مسار المساعدة يتعمد تجاهله ويظل مقيدًا باعتماد التخصص.
  */
-export function technicianServiceQualificationCondition(opts: {
+interface TechnicianServiceQualificationOptions {
   /** تعبير SQL لمعرّف الفني، مثلاً `tp.id` أو `member.id` أو `$1`. */
   technicianIdExpr: string;
   /** تعبير SQL لمعرّف الخدمة المطلوبة، مثلاً `$1` أو `svc.id` أو `s.id`. */
@@ -602,14 +601,9 @@ export function technicianServiceQualificationCondition(opts: {
    * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
    */
   directServiceAlias?: string;
-}): string {
-  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
-  const notExcluded = `NOT EXISTS (
-          SELECT 1 FROM technician_excluded_services tes
-          WHERE tes.technician_id = ${opts.technicianIdExpr}
-            AND tes.service_id = ${opts.serviceIdExpr}
-        )`;
+}
 
+function approvedSpecialtyCondition(opts: TechnicianServiceQualificationOptions): string {
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
     : `EXISTS (
@@ -628,9 +622,28 @@ export function technicianServiceQualificationCondition(opts: {
               AND tec_cat.category_id = ${opts.categoryIdExpr}
               AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
           )
-        )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
-        AND ${notExcluded}`;
+        )`;
+}
+
+/**
+ * أهلية الشخص لقيادة الطلب مباشرة. اعتماد الخدمة/الفئة مطلوب، وحجب الخدمة يمنع وصول الطلب له
+ * كقائد سواء من اختيار العميل أو المطابقة أو التعيين الإداري.
+ */
+export function technicianServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
+  return `${approvedSpecialtyCondition(opts)}
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )`;
+}
+
+/**
+ * أهلية المساعد للمشاركة في طاقم داخل تخصصه. حجب الخدمات الفردية معناه «لا يقود الخدمة» ولا
+ * يمس اعتماد الفئة الذي يسمح له بمساعدة قائد مؤهل. إلغاء اعتماد الفئة/الخدمة نفسها يظل يمنعه.
+ */
+export function assistantServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
+  return approvedSpecialtyCondition(opts);
 }
 
 /**
@@ -700,13 +713,9 @@ export function technicianCityCoverageCondition(opts: {
  * - `'assistant'` → مجمع بث فرص المساعدة وضم مساعد لطاقم طلب: **الفنيين الكاملين مستبعدين**.
  * - `'technician'` → خانة «إضافة فني» في طاقم الطلب: **المساعدين مستبعدين**.
  *
- * **تصحيح توثيقي (تدقيق ج-٤، 2026-09-09)**: التعليق هنا كان لسه بيقول إن `'technician'` مطبّقة
- * كمان على «التوزيع/اختيار العميل» عشان تستبعد المساعدين. ده **ملغي بـADR-0055** (طلب مالك
- * صريح: «طالما أنا ما منعتش عنهم الشغل، يبقى زيهم زي الفنيين بالضبط») — شجرة الأهلية مافيهاش
- * أي شرط `technician_kind`، والمساعد المؤهّل على الخدمة بياخد الطلب كقائد عادي (ونصيبه وقتها
- * نصيب القائد الكامل، ADR-0055 §تسعير). الاستخدام الفعلي دلوقتي محصور في `order-team.service`
- * و`assistant-matching.service` بس — التعليق القديم كان بيوصف نية اتلغت، ودقيقة كفاية إنها
- * تخلّي أي حد يفتكر إن في بَقّة استبعاد ناقصة ويضيفها فيكسر الميزة.
+ * القرار الحالي: `'technician'` مطبقة أيضًا على كل مسارات قيادة الطلب (اختيار العميل، المطابقة،
+ * التعيين القسري). المساعد لا يقود طلبًا منفردًا، لكنه يظل مؤهلًا للانضمام كعضو طاقم داخل
+ * تخصصه عبر `assistantServiceQualificationCondition()` حتى لو خدماته الفردية كلها محجوبة.
  */
 export function technicianKindCondition(opts: {
   /** تعبير SQL لمعرّف صف الفني، مثلاً `tp` أو `member` (الـalias مش الـid — بنقرا العمود منه). */

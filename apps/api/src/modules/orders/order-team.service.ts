@@ -9,6 +9,7 @@ import { TechnicianKind, TechnicianLevel, TechnicianProfile } from '../technicia
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import {
+  assistantServiceQualificationCondition,
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
   technicianCityCoverageCondition,
@@ -23,6 +24,12 @@ import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { orderCandidateLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
+import {
+  assistantCandidateRankingJoinsSql,
+  candidateQualityScoreSql,
+  resolveCandidateQualityRankingSettings,
+} from '../matching/candidate-quality-ranking';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 
@@ -96,7 +103,7 @@ export async function assertCrewCandidateScope(
     `SELECT
        (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
        (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
-       (${technicianServiceQualificationCondition({
+       (${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
          technicianIdExpr: 'tp.id',
          serviceIdExpr: 'svc.id',
          categoryIdExpr: 'svc.category_id',
@@ -484,6 +491,9 @@ export class OrderTeamService {
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const leaderRank = TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel];
+    const ranking = role === 'assistant'
+      ? await resolveCandidateQualityRankingSettings(this.settingsService)
+      : null;
 
     const rows = await this.teamMembers.manager.query<Omit<RecruitCandidateRow, 'capacityTier'>[]>(
       `
@@ -503,6 +513,13 @@ export class OrderTeamService {
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = o.service_id
         AND ts.is_active = true AND ts.verification_status = 'approved'
       CROSS JOIN LATERAL (SELECT location FROM addresses WHERE id = o.address_id) a
+      ${role === 'assistant'
+        ? assistantCandidateRankingJoinsSql({
+            activeStatusesParam: '$5',
+            fairnessLookbackDaysParam: '$7',
+            fairnessDeclineWeightParam: '$8',
+          })
+        : ''}
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.current_location IS NOT NULL
         AND tp.id != $2
@@ -511,8 +528,7 @@ export class OrderTeamService {
         -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
         -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
-        -- ADR-0056 — نفس شرط اعتماد التخصص مفروض على الفني والمساعد، والحجب الإداري طبقة إضافية.
-        AND ${technicianServiceQualificationCondition({
+        AND ${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
@@ -531,16 +547,34 @@ export class OrderTeamService {
       ORDER BY ${
         role === 'assistant'
           ? `"distanceKm" ASC NULLS LAST,
-             CASE tp.current_level
-               WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
-               WHEN 'verified' THEN 1 ELSE 0
-             END DESC,
-             tp.average_rating DESC`
+             ${candidateQualityScoreSql({
+               workloadWeightParam: '$6',
+               fairnessWeightParam: '$9',
+               reliabilityBaselineParam: '$10',
+               reliabilityWeightParam: '$11',
+               reliabilityMinRatingsParam: '$12',
+             })} DESC,
+             tp.id ASC`
           : '"isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC'
       }
       LIMIT 30
       `,
-      [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
+      role === 'assistant'
+        ? [
+            orderId,
+            leaderProfileId,
+            leaderRank,
+            leaderProfile.companyId,
+            ACTIVE_TECHNICIAN_ORDER_STATUSES,
+            ranking!.workloadWeight,
+            ranking!.fairnessLookbackDays,
+            ranking!.fairnessDeclineWeight,
+            ranking!.fairnessWeight,
+            ranking!.reliabilityBaselineRating,
+            ranking!.reliabilityWeight,
+            ranking!.reliabilityMinRatingsCount,
+          ]
+        : [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
     );
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
