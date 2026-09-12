@@ -25,6 +25,7 @@ import { Complaint, COMPLAINT_DEFAULT_SLA_HOURS, ComplaintCategory, ComplaintSev
 import { ComplaintAttachment } from './entities/complaint-attachment.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { canTransitionComplaint } from './complaint-state-machine';
+import { ComplaintPartyNames } from './dto/complaint-response.dto';
 
 export interface IncomingComplaintFile {
   buffer: Buffer;
@@ -174,6 +175,25 @@ export class SupportService {
   // بطلب معيّن من شاشة تفاصيله، بدل ما يدوّر في شاشة الشكاوى العامة بالراحة.
   async listAllForAdmin(orderId?: string): Promise<Complaint[]> {
     return this.complaints.find({ where: orderId ? { orderId } : {}, order: { createdAt: 'DESC' } });
+  }
+
+  /**
+   * أسماء أطراف الشكاوى (ADR-0084 §3) — استعلام واحد للقايمة كلها، مش استعلام لكل صف.
+   *
+   * الشكوى بترجّع `filed_by_user_id`/`against_user_id` وهما معرّفات؛ الأدمن محتاج **اسم** يقرأه.
+   * التحميل هنا (مش relation على الـentity) عشان مسارات الشكاوى التانية — العميل والفني —
+   * مايحمّلوش بيانات طرف تاني هما مش المفروض يشوفوها.
+   */
+  async loadPartyNames(complaints: Complaint[]): Promise<ComplaintPartyNames> {
+    const ids = [
+      ...new Set(complaints.flatMap((c) => [c.filedByUserId, c.againstUserId]).filter((id): id is string => Boolean(id))),
+    ];
+    if (ids.length === 0) return new Map();
+    const rows = await this.dataSource.query<{ id: string; full_name: string | null; user_type: string | null }[]>(
+      `SELECT id, full_name, user_type FROM users WHERE id = ANY($1::uuid[])`,
+      [ids],
+    );
+    return new Map(rows.map((r) => [r.id, { full_name: r.full_name, user_type: r.user_type }]));
   }
 
   async addMessage(user: JwtPayload, complaintId: string, dto: AddComplaintMessageDto): Promise<ComplaintMessage> {

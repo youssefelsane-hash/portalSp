@@ -30,6 +30,12 @@ const STATUS_FILTERS: { value: ComplaintStatus | 'all' | 'open'; label: string }
   { value: 'closed', label: 'مقفولة' },
 ];
 
+const COMPLAINT_PARTY_TYPE_LABELS: Record<string, string> = {
+  customer: 'عميل',
+  technician: 'فني',
+  admin: 'موظف',
+};
+
 export default function SupportPage() {
   const { isLoading, authedFetch } = useAuth();
   const [complaints, setComplaints] = useState<ComplaintResponseDto[] | null>(null);
@@ -86,6 +92,10 @@ export default function SupportPage() {
             <TableRow>
               <TableHead>الرقم</TableHead>
               <TableHead>العنوان</TableHead>
+              {/* ADR-0084 §3 — الطرفان كانوا موجودين في الجدول ومحذوفين من العقد، فالشكوى
+                  كانت بتتعرض مجهولة المصدر والوجهة. */}
+              <TableHead>من</TableHead>
+              <TableHead>على</TableHead>
               <TableHead>الفئة</TableHead>
               <TableHead>الخطورة</TableHead>
               <TableHead>الحالة</TableHead>
@@ -104,6 +114,30 @@ export default function SupportPage() {
                   <Link href={`/support/${complaint.id}`} className="block">
                     {complaint.title}
                   </Link>
+                </TableCell>
+                <TableCell className="text-xs">
+                  {complaint.filed_by.full_name ?? '—'}
+                  {complaint.filed_by.user_type && (
+                    <span className="text-muted-foreground">
+                      {' '}
+                      ({COMPLAINT_PARTY_TYPE_LABELS[complaint.filed_by.user_type] ?? complaint.filed_by.user_type})
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="text-xs">
+                  {complaint.against ? (
+                    <>
+                      {complaint.against.full_name ?? '—'}
+                      {complaint.against.user_type && (
+                        <span className="text-muted-foreground">
+                          {' '}
+                          ({COMPLAINT_PARTY_TYPE_LABELS[complaint.against.user_type] ?? complaint.against.user_type})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">على المنصة</span>
+                  )}
                 </TableCell>
                 <TableCell>{COMPLAINT_CATEGORY_LABELS[complaint.category]}</TableCell>
                 <TableCell>
