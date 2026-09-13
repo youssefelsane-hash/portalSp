@@ -5,6 +5,8 @@ describe('HomepageContentController hero images', () => {
   it('returns only the first four safe image URLs in admin order', async () => {
     const settings = {
       getString: jest.fn().mockResolvedValue('رسالة ثقة'),
+      // قسم المشروعات ظاهر افتراضيًا (docs/08 §146) — الاختبار هنا عن صور الـhero بس.
+      getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
       getJson: jest.fn(async (key: string) => {
         if (key === 'homepage.search_content') {
           return {

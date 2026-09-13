@@ -90,6 +90,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ImageProvider<Object>> _heroImageProviders = const [];
   HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
+  /// قسم «ابدأ مشروعك» — بيبدأ ظاهر لحد ما الإعداد يوصل (docs/08 §146).
+  bool _projectsEnabled = true;
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
   BrandingLogo? _heroBackground;
@@ -213,6 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _heroImageProviders = providers;
       _searchContent = content.search;
       _tips = content.tips;
+      _projectsEnabled = content.projectsEnabled;
       _activeSlide = 0;
     });
     for (final provider in providers) {
@@ -384,7 +387,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       // كانت 24 — بلاغ مالك: «فيه مسافة كبيرة بين آخر كلمة موجودة وكل الفئات».
                       const SizedBox(height: 16),
                     ],
-                    ProjectCtaCard(
+                    // مخفي/ظاهر من لوحة الإدارة (docs/08 §146). بيبدأ `true` فالقسم بيبان
+                    // فورًا ومايعملش وميض اختفاء لو المحتوى اتأخر شوية.
+                    if (_projectsEnabled) ProjectCtaCard(
                       // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
                       // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
                       onTap: () async {

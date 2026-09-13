@@ -73,11 +73,16 @@ class HomepageContent {
   final HomepageSearchContent search;
   final List<HomepageTip> tips;
 
+  /// قسم «ابدأ مشروعك» ظاهر ولا لأ (docs/08 §146) — زرار إخفاء/إظهار واحد عند الأدمن.
+  /// الافتراضي `true` عشان نسخة تطبيق قديمة مع باك-إند جديد (أو العكس) ماتخفيش القسم بالغلط.
+  final bool projectsEnabled;
+
   HomepageContent({
     required this.trustMessage,
     required this.heroImages,
     required this.search,
     required this.tips,
+    this.projectsEnabled = true,
   });
 
   factory HomepageContent.fromJson(Map<String, dynamic> json) {
@@ -90,6 +95,7 @@ class HomepageContent {
       tips: (json['tips'] as List<dynamic>? ?? [])
           .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
           .toList(),
+      projectsEnabled: json['projects_enabled'] as bool? ?? true,
     );
   }
 }
