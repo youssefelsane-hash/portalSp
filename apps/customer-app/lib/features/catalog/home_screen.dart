@@ -722,47 +722,102 @@ class _HomeScreenState extends State<HomeScreen> {
         (contact.phoneNumber == null && contact.whatsappUrl == null)) {
       return const SizedBox.shrink();
     }
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 28, bottom: 8),
-      child: Column(
-        children: [
-          const Divider(),
-          const SizedBox(height: 16),
-          Text('الدعم', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            'محتاج مساعدة؟ إحنا هنا',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              if (contact.phoneNumber != null)
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      openPhoneDialer(context, contact.phoneNumber!),
-                  icon: const Icon(Icons.call_outlined),
-                  label: Text(
-                    contact.phoneNumber!,
-                    textDirection: TextDirection.ltr,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: context.accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.support_agent_rounded,
+                    color: context.accentColor,
+                    size: 21,
                   ),
                 ),
-              if (contact.whatsappUrl != null)
-                OutlinedButton.icon(
-                  onPressed: () => openExternalUrl(
-                    context,
-                    Uri.parse(contact.whatsappUrl!),
-                    failureMessage: 'تعذّر فتح واتساب',
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'الدعم',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'محتاج مساعدة؟ إحنا هنا',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.chat_outlined),
-                  label: const Text('واتساب'),
                 ),
-            ],
-          ),
-        ],
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                if (contact.phoneNumber != null)
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        openPhoneDialer(context, contact.phoneNumber!),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.colorScheme.primary,
+                      side: BorderSide(
+                        color: context.accentColor.withValues(alpha: 0.65),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                    ),
+                    icon: const Icon(Icons.call_outlined, size: 19),
+                    label: Text(
+                      contact.phoneNumber!,
+                      textDirection: TextDirection.ltr,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                if (contact.whatsappUrl != null)
+                  OutlinedButton.icon(
+                    onPressed: () => openExternalUrl(
+                      context,
+                      Uri.parse(contact.whatsappUrl!),
+                      failureMessage: 'تعذّر فتح واتساب',
+                    ),
+                    icon: const Icon(Icons.chat_outlined, size: 19),
+                    label: const Text('واتساب'),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -796,11 +851,13 @@ class ProjectCtaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final onContainer = theme.colorScheme.onPrimaryContainer;
+    final onContainer = theme.colorScheme.onPrimary;
 
     return Material(
-      color: theme.colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(16),
+      color: theme.colorScheme.primary,
+      elevation: 1,
+      shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.16),
+      borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -812,13 +869,13 @@ class ProjectCtaCard extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: onContainer.withValues(alpha: 0.10),
+                  color: theme.colorScheme.tertiary,
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: Icon(
                   Icons.design_services_rounded,
                   size: 20,
-                  color: onContainer,
+                  color: theme.colorScheme.onTertiary,
                 ),
               ),
               const SizedBox(width: 12),
@@ -849,7 +906,11 @@ class ProjectCtaCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.arrow_back_rounded, size: 18, color: onContainer),
+              Icon(
+                Icons.arrow_back_rounded,
+                size: 18,
+                color: theme.colorScheme.tertiary,
+              ),
             ],
           ),
         ),
