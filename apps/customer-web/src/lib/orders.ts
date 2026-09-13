@@ -198,6 +198,11 @@ export interface OrderResponseDto {
   inspection_fee_cents: number;
   surge_amount_cents: number;
   discount_amount_cents: number;
+  /**
+   * الجزء اللي جه من حافز الدفع أونلاين بإنستاباي (ADR-0091) — **جزء من**
+   * `discount_amount_cents` مش زيادة عليه. منفصل عشان السبب يتكتب للعميل بدل رقم بلا تفسير.
+   */
+  instapay_discount_cents: number;
   // تكافؤ مع تطبيق العميل — الحقول دي راجعة في نفس الرد وكانت مقروءة في التطبيق بس
   // (اتلقطت بـ`scripts/check-contract-drift.js`).
   level_premium_cents: number;

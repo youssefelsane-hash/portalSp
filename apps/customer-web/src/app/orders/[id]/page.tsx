@@ -126,6 +126,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </p>
       )}
 
+      {/* حافز الدفع أونلاين (ADR-0091) داخل `discount_amount_cents` فوق، فالعميل كان بيشوف
+          الرقم من غير سببه. نفس منطق سطر «فني Premium» تحت: الرقم اللي بيتغيّر لوحده لازم
+          يكون مكتوب جنبه إيه اللي غيّره. */}
+      {order.instapay_discount_cents > 0 && (
+        <p className="mt-1 text-sm text-success">
+          منها {formatEgp(order.instapay_discount_cents)} — حافز الدفع أونلاين بإنستاباي
+        </p>
+      )}
+
       {/* تكافؤ مع تطبيق العميل (اتلقط بـ`scripts/check-contract-drift.js`): كل الأرقام دي
           راجعة في نفس الرد وكانت معروضة في التطبيق بس. أهمها `level_premium_cents` — docs/08
           §60.3 بيفرض إن زيادة سعر «الفني المميّز» تبان **بسببها مكتوب** مش كرقم بيتغيّر لوحده. */}
