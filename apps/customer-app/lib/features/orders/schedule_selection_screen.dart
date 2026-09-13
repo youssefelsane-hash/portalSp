@@ -51,6 +51,7 @@ class ScheduleSelectionScreen extends StatefulWidget {
   final bool allowsDateRangeBooking;
   // محتاجة وقت بداية دقيق (docs/08 §84 جزء ج) — لو true، كارت "الساعة" بيظهر بعد اختيار اليوم.
   final bool requiresPreciseTime;
+
   /// هل الخدمة بتتعمل في نفس اليوم؟ (`allows_emergency`، ADR-0048 §3).
   ///
   /// لو `false`، التقويم بيبدأ من **بكرة** — العميل مايختارش يوم الباك-إند هيرفضه بعدين. نفس
@@ -118,7 +119,8 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   /// هيختفي من المسار الرئيسي بالظبط — وهو المسار اللي المالك طلب الاقتراح فيه.
   String? _resolvedAddressId;
 
-  bool get _canSuggest => widget.serviceId != null && _resolvedAddressId != null;
+  bool get _canSuggest =>
+      widget.serviceId != null && _resolvedAddressId != null;
 
   Future<void> _resolveAddressId() async {
     if (widget.addressId != null) {
@@ -149,7 +151,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         if (widget.durationMinutes != null)
           'duration_minutes': '${widget.durationMinutes}',
       };
-      final qs = query.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      final qs = query.entries
+          .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
       // **مسار محمي** (@Roles(CUSTOMER)) — لازم يمرّ بـauthedRequest. `apiRequest` العادي
       // بيبعت بلا توكن وكان هيترفض 401 بصمت ويخفي الاقتراح دايمًا.
       final data = await _auth.authedRequest('GET', '/booking-slots/days?$qs');
@@ -176,7 +180,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         if (widget.durationMinutes != null)
           'duration_minutes': '${widget.durationMinutes}',
       };
-      final qs = query.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      final qs = query.entries
+          .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
       final data = await _auth.authedRequest('GET', '/booking-slots/times?$qs');
       if (!mounted) return;
       setState(() {
@@ -416,22 +422,28 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 // اقتراح الأيام (ADR-0088) — فوق الكالندر عمدًا: ضغطة واحدة بتخلّص الشاشة،
                 // والكالندر تحته لأي حد عايز يختار بنفسه.
                 if (_suggestedDays.isNotEmpty) ...[
-                  const Text(
-                    'أقرب مواعيد فيها متخصصين متاحين',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  const _SuggestionIntro(
+                    title: 'اقتراحات مناسبة ليك',
+                    subtitle:
+                        'اخترناها لأنها أقرب أيام فيها متخصصين متاحين في منطقتك.',
                   ),
                   const SizedBox(height: 10),
                   ..._suggestedDays.map((suggestion) {
                     final day = suggestion['day'] as String? ?? '';
-                    final available = (suggestion['available_technicians'] as num?)?.toInt() ?? 0;
+                    final available =
+                        (suggestion['available_technicians'] as num?)
+                            ?.toInt() ??
+                        0;
                     final isEarliest = suggestion['is_earliest'] == true;
                     final parts = day.split('-');
                     final label = parts.length == 3
-                        ? _formatDate(DateTime(
-                            int.parse(parts[0]),
-                            int.parse(parts[1]),
-                            int.parse(parts[2]),
-                          ))
+                        ? _formatDate(
+                            DateTime(
+                              int.parse(parts[0]),
+                              int.parse(parts[1]),
+                              int.parse(parts[2]),
+                            ),
+                          )
                         : day;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -439,9 +451,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                         icon: Icons.bolt_outlined,
                         title: label,
                         subtitle: isEarliest
-                            ? '$available متخصص متاح · أقرب فرصة'
-                            : '$available متخصص متاح',
-                        selected: _selectedDate != null &&
+                            ? '$available متخصص متاح · أقرب فرصة لك'
+                            : '$available متخصص متاح في منطقتك',
+                        selected:
+                            _selectedDate != null &&
                             _formatDate(_selectedDate!) == label &&
                             _selectedRangeEnd == null,
                         onTap: () => _pickSuggestedDay(context, day),
@@ -449,9 +462,12 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                     );
                   }),
                   const SizedBox(height: 6),
-                  const Text(
-                    'أو اختار يوم تاني بنفسك',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'مش مناسبين؟ اختار اليوم أو الفترة اللي تناسبك بنفسك',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -482,9 +498,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 if (widget.requiresPreciseTime && _selectedDate != null) ...[
                   if (_suggestedTimes.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    const Text(
-                      'ساعات فاضية في اليوم ده',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    const _SuggestionIntro(
+                      title: 'ساعات مقترحة في اليوم ده',
+                      subtitle:
+                          'دي الساعات اللي فيها أكبر مساحة لفني يوصلك في الموعد.',
                     ),
                     const SizedBox(height: 10),
                     Wrap(
@@ -492,21 +509,27 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                       runSpacing: 8,
                       children: _suggestedTimes.map((slot) {
                         final time = slot['time'] as String? ?? '';
-                        final free = (slot['free_technicians'] as num?)?.toInt() ?? 0;
+                        final free =
+                            (slot['free_technicians'] as num?)?.toInt() ?? 0;
                         final parts = time.split(':');
                         final asTimeOfDay = parts.length == 2
-                            ? TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]))
+                            ? TimeOfDay(
+                                hour: int.parse(parts[0]),
+                                minute: int.parse(parts[1]),
+                              )
                             : null;
-                        final isPicked = _selectedTime != null &&
+                        final isPicked =
+                            _selectedTime != null &&
                             asTimeOfDay != null &&
                             _selectedTime!.hour == asTimeOfDay.hour &&
                             _selectedTime!.minute == asTimeOfDay.minute;
                         return ChoiceChip(
                           selected: isPicked,
-                          label: Text('$time · $free متاح'),
+                          label: Text('$time · $free فني فاضي'),
                           onSelected: asTimeOfDay == null
                               ? null
-                              : (_) => setState(() => _selectedTime = asTimeOfDay),
+                              : (_) =>
+                                    setState(() => _selectedTime = asTimeOfDay),
                         );
                       }).toList(),
                     ),
@@ -540,6 +563,52 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SuggestionIntro extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _SuggestionIntro({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.auto_awesome_outlined, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
