@@ -80,23 +80,65 @@ class _AppFooterState extends State<AppFooter> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
+    final footerText = theme.colorScheme.onPrimary;
+    final muted = footerText.withValues(alpha: 0.68);
     final year = DateTime.now().year;
 
     return Container(
       width: double.infinity,
-      color: theme.colorScheme.surfaceContainerLowest,
-      padding: const EdgeInsets.fromLTRB(16, 28, 16, 24),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── الطبقة الأولى: العلامة ─────────────────────────────────────────
-          Text(
-            _entity.platformNameAr,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: theme.colorScheme.primary,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.tertiary,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  Icons.home_work_rounded,
+                  color: theme.colorScheme.onTertiary,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _entity.platformNameAr,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: footerText,
+                    ),
+                  ),
+                  Text(
+                    _entity.platformNameEn.toUpperCase(),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: footerText.withValues(alpha: 0.62),
+                      letterSpacing: 1.4,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
@@ -135,9 +177,22 @@ class _AppFooterState extends State<AppFooter> {
                             width: 44,
                             height: 44,
                             child: Center(
-                              child: SocialBrandMark(
-                                network: link.network,
-                                size: 22,
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: footerText.withValues(alpha: 0.09),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: footerText.withValues(alpha: 0.13),
+                                  ),
+                                ),
+                                child: Center(
+                                  child: SocialBrandMark(
+                                    network: link.network,
+                                    size: 22,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -148,6 +203,10 @@ class _AppFooterState extends State<AppFooter> {
                     OutlinedButton(
                       onPressed: () => _openUrl(link.url),
                       style: OutlinedButton.styleFrom(
+                        foregroundColor: footerText,
+                        side: BorderSide(
+                          color: footerText.withValues(alpha: 0.28),
+                        ),
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 14,
@@ -180,7 +239,7 @@ class _AppFooterState extends State<AppFooter> {
           ],
 
           const SizedBox(height: 22),
-          Divider(height: 1, color: theme.dividerColor),
+          Divider(height: 1, color: footerText.withValues(alpha: 0.16)),
           const SizedBox(height: 18),
 
           // ── الطبقة الثانية: التنقّل ────────────────────────────────────────
@@ -261,7 +320,7 @@ class _AppFooterState extends State<AppFooter> {
           ),
 
           const SizedBox(height: 22),
-          Divider(height: 1, color: theme.dividerColor),
+          Divider(height: 1, color: footerText.withValues(alpha: 0.16)),
           const SizedBox(height: 16),
 
           // ── الطبقة الثالثة: الشريط القانوني ────────────────────────────────
@@ -330,7 +389,7 @@ class _FooterColumn extends StatelessWidget {
         Text(
           title,
           style: theme.textTheme.labelMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+            color: theme.colorScheme.onPrimary.withValues(alpha: 0.66),
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -359,7 +418,9 @@ class _FooterLink extends StatelessWidget {
     final theme = Theme.of(context);
     final text = Text(
       label,
-      style: theme.textTheme.bodyMedium,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: theme.colorScheme.onPrimary.withValues(alpha: 0.92),
+      ),
       textDirection: ltr ? TextDirection.ltr : null,
     );
     return InkWell(
@@ -375,7 +436,7 @@ class _FooterLink extends StatelessWidget {
                   Icon(
                     Icons.open_in_new,
                     size: 13,
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: theme.colorScheme.onPrimary.withValues(alpha: 0.62),
                   ),
                 ],
               )
@@ -401,7 +462,7 @@ class _LegalLink extends StatelessWidget {
         child: Text(
           label,
           style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+            color: theme.colorScheme.onPrimary.withValues(alpha: 0.66),
           ),
         ),
       ),

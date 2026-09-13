@@ -58,8 +58,8 @@ import '../shell/app_footer.dart';
 // TIP_FALLBACK_BACKGROUNDS بالحرف).
 const List<Color> _tipFallbackColors = [
   AppColors.primary,
-  AppColors.success,
-  AppColors.warning,
+  AppColors.accent,
+  Color(0xFF26364B),
 ];
 
 class HomeScreen extends StatefulWidget {
@@ -90,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ImageProvider<Object>> _heroImageProviders = const [];
   HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
+
   /// قسم «ابدأ مشروعك» — بيبدأ ظاهر لحد ما الإعداد يوصل (docs/08 §146).
   bool _projectsEnabled = true;
   SupportContact? _supportContact;
@@ -277,17 +278,16 @@ class _HomeScreenState extends State<HomeScreen> {
           // للوجو. ولوجو كلمة (wordmark زي «أسطى») محتاج **عرض** مش ارتفاع — فتكبير الارتفاع
           // لوحده مكانش هيحل حاجة، لازم `leadingWidth` نفسه يكبر.
           //
-          // 96 مقصودة كسقف مش أكتر: على شاشة 360dp بيفضل ~170dp للعنوان بعد أيقونتين الأكشن —
-          // العنوان (اللي هو أهم عنصر في الرأس بقرار §75-ب) بيفضل مقروء بدل ما يتقصّ.
-          leadingWidth: 96,
+          // 112 مقصودة عشان كلمة العلامة تفضل مقروءة من غير ما تزاحم عنوان المكان.
+          leadingWidth: 112,
           leading:
               _brandingLogo != null &&
                   !_brandingLogo!.isDefault &&
                   _brandingLogo!.url.isNotEmpty
               ? Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 8,
+                    horizontal: 7,
+                    vertical: 6,
                   ),
                   child: Image.network(
                     _resolveHeroImageUrl(_brandingLogo!.url),
@@ -389,28 +389,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                     // مخفي/ظاهر من لوحة الإدارة (docs/08 §146). بيبدأ `true` فالقسم بيبان
                     // فورًا ومايعملش وميض اختفاء لو المحتوى اتأخر شوية.
-                    if (_projectsEnabled) ProjectCtaCard(
-                      // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
-                      // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
-                      onTap: () async {
-                        if (!await ensureSignedIn(
-                          context,
-                          reason:
-                              'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
-                          headline: 'ابدأ مشروعك',
-                        )) {
-                          return;
-                        }
-                        if (!context.mounted) return;
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => CreateProjectScreen(
-                              auth: context.read<AuthRepository>(),
+                    if (_projectsEnabled)
+                      ProjectCtaCard(
+                        // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
+                        // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
+                        onTap: () async {
+                          if (!await ensureSignedIn(
+                            context,
+                            reason:
+                                'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                            headline: 'ابدأ مشروعك',
+                          )) {
+                            return;
+                          }
+                          if (!context.mounted) return;
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CreateProjectScreen(
+                                auth: context.read<AuthRepository>(),
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                      ),
                     const SizedBox(height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -423,7 +424,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           // لمسة العلامة التانية والأخيرة على الشاشة دي (ADR-0093 §2) — المالك
                           // سمّى «عرض الكل» بالاسم. نفس اللون بالظبط في customer-web عشان
                           // الشاشتين يفضلوا نسخة واحدة.
-                          style: TextButton.styleFrom(foregroundColor: context.accentColor),
+                          style: TextButton.styleFrom(
+                            foregroundColor: context.accentColor,
+                          ),
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => CategoriesScreen(
@@ -546,7 +549,25 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('نصايح مفيدة', style: Theme.of(context).textTheme.titleMedium),
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 21,
+                decoration: BoxDecoration(
+                  color: context.accentColor,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'نصايح مفيدة',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
           const SizedBox(height: 2),
           Text(
             'حاجات كويس تعرفها قبل ما تحجز أي شغلانة',
@@ -574,20 +595,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             imageUrl,
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Container(
-                              height: 80,
-                              color:
-                                  _tipFallbackColors[index %
-                                      _tipFallbackColors.length],
-                            ),
+                            errorBuilder: (_, _, _) =>
+                                _tipFallback(context, index),
                           )
                         else
-                          Container(
-                            height: 80,
-                            color:
-                                _tipFallbackColors[index %
-                                    _tipFallbackColors.length],
-                          ),
+                          _tipFallback(context, index),
                         // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 190)` ثابت،
                         // والصورة بتاخد 80 منهم. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
                         // سطور كانت بتطلع أطول من الفاضل وترمي `RenderFlex overflowed by N pixels
@@ -629,6 +641,31 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _tipFallback(BuildContext context, int index) {
+    final color = _tipFallbackColors[index % _tipFallbackColors.length];
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+          colors: [color, Color.lerp(color, Colors.black, 0.22)!],
+        ),
+      ),
+      child: Align(
+        alignment: AlignmentDirectional.topStart,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Icon(
+            Icons.auto_awesome_outlined,
+            color: Colors.white.withValues(alpha: 0.9),
+            size: 25,
+          ),
+        ),
       ),
     );
   }

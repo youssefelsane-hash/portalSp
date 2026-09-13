@@ -146,22 +146,31 @@ class AppTheme {
       colorScheme: colorScheme,
       // رمادي بارد مقصود — الكريمي رجع أصول حملة تحت brand/ وبس (ADR-0093 §3): شاشة المنتج
       // المحايدة هي اللي بتخلي صور الخدمات والفنيين تبان بلونها الحقيقي.
-      scaffoldBackgroundColor: isLight ? const Color(0xFFF6F7F9) : const Color(0xFF0F1318),
+      scaffoldBackgroundColor: isLight
+          ? const Color(0xFFF3F5F8)
+          : const Color(0xFF0F1318),
       cardTheme: CardThemeData(
-        elevation: 0,
+        elevation: 1,
         color: colorScheme.surface,
+        shadowColor: colorScheme.shadow.withValues(
+          alpha: isLight ? 0.08 : 0.28,
+        ),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.62),
+          ),
         ),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: isLight ? Colors.white : colorScheme.surface,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
-        scrolledUnderElevation: 1,
+        scrolledUnderElevation: 2,
+        shadowColor: colorScheme.shadow.withValues(alpha: 0.08),
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
+        toolbarHeight: 72,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -195,7 +204,30 @@ class AppTheme {
         backgroundColor: isLight ? Colors.white : colorScheme.surface,
         indicatorColor: colorScheme.primaryContainer,
         surfaceTintColor: Colors.transparent,
-        elevation: 0,
+        elevation: 3,
+        shadowColor: colorScheme.shadow.withValues(
+          alpha: isLight ? 0.10 : 0.32,
+        ),
+        indicatorShape: const StadiumBorder(),
+        iconTheme: WidgetStateProperty.resolveWith<IconThemeData?>((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+            size: selected ? 24 : 22,
+          );
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>((states) {
+          final selected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+          );
+        }),
       ),
       dividerTheme: DividerThemeData(
         color: colorScheme.outlineVariant,
