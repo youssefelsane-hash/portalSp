@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 
 /**
  * جلب بيانات لصفحات الأدمن بلا `setState` متزامن جوّه `useEffect`.
@@ -24,6 +25,15 @@ export function useAdminQuery<T>(
   fetcher: () => Promise<T>,
   errorMessage: string,
 ): { data: T | null; loading: boolean; error: string | null; reload: () => void } {
+  // **الجلب مايبدأش قبل ما التوكن يجهز** (تدقيق ماراثوني 2026-09-13، docs/08 §148).
+  //
+  // `AuthProvider` بيقلع بـ`trySilentRefresh()` (كوكي → access token)، و`isLoading` بيفضل true
+  // لحد ما تخلص. الهوك ده كان بيجيب فورًا على الـmount، فأي صفحة بتستخدمه بمفتاح ثابت كانت
+  // بتنادي الـAPI **بلا توكن**: 401 → `authedFetch` يعمل refresh تاني → يعيد المحاولة فتنجح.
+  // الصفحة بتشتغل، بس التكلفة حقيقية: نداء ضايع، ودورة refresh زيادة على كل فتح (والـrefresh
+  // token بيتدوّر كل استخدام)، و401 ثابت في لوج الـAPI بيشوّش على أي مراقبة أمنية.
+  // اتلقط في `scripts/sweep-admin.js` على `/operations/live-map` و`/risk-center`.
+  const { isLoading: authLoading } = useAuth();
   const [nonce, setNonce] = useState(0);
   const [result, setResult] = useState<{ key: string; nonce: number; data: T | null; error: string | null } | null>(null);
 
@@ -33,7 +43,7 @@ export function useAdminQuery<T>(
   });
 
   useEffect(() => {
-    if (key === null) return;
+    if (key === null || authLoading) return;
     let cancelled = false;
     fetcherRef
       .current()
@@ -46,7 +56,7 @@ export function useAdminQuery<T>(
     return () => {
       cancelled = true;
     };
-  }, [key, nonce, errorMessage]);
+  }, [key, nonce, errorMessage, authLoading]);
 
   const fresh = result !== null && result.key === key && result.nonce === nonce;
   const reload = useCallback(() => setNonce((n) => n + 1), []);

@@ -14,7 +14,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 
 export default function NewEmployeePage() {
-  const { authedFetch } = useAuth();
+  const { authedFetch, isLoading } = useAuth();
   const router = useRouter();
 
   const [form, setForm] = useState<CreateEmployeeBody>({
@@ -31,11 +31,14 @@ export default function NewEmployeePage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // مستنّي التوكن يجهز (docs/08 §148): من غير الشرط ده الجلب بيحصل قبل ما
+  // `trySilentRefresh()` تخلص، فبيروح بلا توكن ⇒ 401 ⇒ refresh زيادة ⇒ إعادة محاولة.
   useEffect(() => {
+    if (isLoading) return;
     authedFetch<RoleResponseDto[]>('/admin/roles')
       .then(setAllRoles)
       .catch(() => setAllRoles([]));
-  }, [authedFetch]);
+  }, [authedFetch, isLoading]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
