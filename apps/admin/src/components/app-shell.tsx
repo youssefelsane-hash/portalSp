@@ -344,7 +344,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-72 shrink-0 flex-col border-s border-border/70 bg-card/85 shadow-[-18px_0_45px_-38px_oklch(0.2_0.05_255_/_55%)] backdrop-blur-xl">
         <div className="flex items-center gap-3 border-b border-border/60 px-4 py-4">
-          <div className="flex size-10 items-center justify-center overflow-hidden rounded-xl bg-[#f7f2e8] p-1.5 shadow-md shadow-primary/15 ring-1 ring-border/70">
+          <div className="flex size-10 items-center justify-center overflow-hidden rounded-xl bg-[#fff8f2] p-1.5 shadow-md shadow-primary/15 ring-1 ring-border/70">
             {brandMarkUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- رابط branding ديناميكي وقد يكون data URI أو presigned URL
               <img src={brandMarkUrl} alt="رمز OSTA" className="size-full object-contain" />

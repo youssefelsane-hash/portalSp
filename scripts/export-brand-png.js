@@ -15,7 +15,7 @@ function ensureDir(dir) {
 async function render(svgName, output, width, height = width, opaque = false) {
   ensureDir(path.dirname(output));
   let image = sharp(path.join(svgDir, svgName), { density: 384 }).resize(width, height, { fit: 'contain' });
-  if (opaque) image = image.flatten({ background: '#f7f2e8' }).removeAlpha();
+  if (opaque) image = image.flatten({ background: '#fff8f2' }).removeAlpha();
   await image.png({ compressionLevel: 9, adaptiveFiltering: true }).toFile(output);
 }
 
@@ -70,11 +70,11 @@ function installAdaptiveAndroid(appPath, technician = false) {
     'M50,4 A46,46 0,1 1,49.99,4 Z M76.5,55.196 Q79.5,50 76.5,44.804 L67.75,29.648 Q64.75,24.452 58.75,24.452 L41.25,24.452 Q35.25,24.452 32.25,29.648 L23.5,44.804 Q20.5,50 23.5,55.196 L32.25,70.352 Q35.25,75.548 41.25,75.548 L58.75,75.548 Q64.75,75.548 67.75,70.352 Z';
   const hexPath =
     'M68,53.528 Q70,50 68,46.472 L59,30.884 Q57,27.42 53,27.42 L47,27.42 Q43,27.42 41,30.884 L32,46.472 Q30,50 32,53.528 L41,69.116 Q43,72.58 47,72.58 L53,72.58 Q57,72.58 59,69.116 Z';
+  const technicianCenter = technician ? `\n    <path android:fillColor="#B54724" android:pathData="${hexPath}"/>` : '';
   const foreground = `<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="140" android:viewportHeight="140">
   <group android:translateX="20" android:translateY="20">
-    <path android:fillColor="${technician ? '#153F38' : '#F7F2E8'}" android:fillType="evenOdd" android:pathData="${markPath}"/>
-    ${technician ? `<path android:fillColor="#C66F45" android:pathData="${hexPath}"/>` : ''}
+    <path android:fillColor="${technician ? '#123B69' : '#FFF8F2'}" android:fillType="evenOdd" android:pathData="${markPath}"/>${technicianCenter}
   </group>
 </vector>\n`;
   const monochrome = `<?xml version="1.0" encoding="utf-8"?>
@@ -95,7 +95,7 @@ function installAdaptiveAndroid(appPath, technician = false) {
   fs.writeFileSync(path.join(anydpi, 'ic_launcher_round.xml'), adaptive);
   fs.writeFileSync(
     path.join(values, 'ic_launcher_background.xml'),
-    `<?xml version="1.0" encoding="utf-8"?>\n<resources><color name="ic_launcher_background">${technician ? '#F7F2E8' : '#153F38'}</color></resources>\n`,
+    `<?xml version="1.0" encoding="utf-8"?>\n<resources><color name="ic_launcher_background">${technician ? '#FFF8F2' : '#B54724'}</color></resources>\n`,
   );
 }
 

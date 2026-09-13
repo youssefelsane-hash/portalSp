@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 
 /// نظام التصميم المشترك (docs/12 — مرحلة تحسين UI/UX، امتداد Flutter بعد Admin Panel).
-/// نفس القيم الدلالية المستخدمة في apps/admin/src/app/globals.css (أخضر حرفي عميق + نظام
+/// نفس القيم الدلالية المستخدمة في apps/admin/src/app/globals.css (كحلي موثوق + نحاسي للفعل + نظام
 /// حالات success/warning/danger/info) — معادِلة بصريًا (Flutter Material3 بيستخدم sRGB مش OKLCH
 /// زي CSS، فمفيش تطابق رقمي حرفي، بس نفس الانطباع البصري بالظبط).
 class AppColors {
   AppColors._();
 
-  static const primary = Color(0xFF153F38);
-  static const primaryDark = Color(0xFF8FC2B5);
-  static const brandAccent = Color(0xFFC66F45);
+  static const primary = Color(0xFFB54724);
+  static const primaryDark = Color(0xFFEF9A6D);
+  static const brandAccent = Color(0xFF123B69);
 
   static const success = Color(0xFF3C8B4A);
   static const successDark = Color(0xFF6FBF7A);
@@ -59,7 +59,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.brightness == Brightness.light
-          ? const Color(0xFFF7F4EE)
+          ? const Color(0xFFFAF7F2)
           : null,
       cardTheme: CardThemeData(
         elevation: 0,
@@ -70,7 +70,7 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: colorScheme.brightness == Brightness.light
-            ? const Color(0xFFFFFDF8)
+            ? const Color(0xFFFFFAF6)
             : null,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
@@ -103,7 +103,7 @@ class AppTheme {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         filled: true,
         fillColor: colorScheme.brightness == Brightness.light
-            ? const Color(0xFFFFFDF8)
+            ? const Color(0xFFFFFAF6)
             : colorScheme.surfaceContainerHighest,
       ),
       dividerTheme: DividerThemeData(

@@ -92,13 +92,13 @@ export default function BrandingPage() {
       <PageHeader title="البراندنج" description="رفع/استبدال شعارات المنصة — بتتحدّث فورًا في كل التطبيقات من غير أي deployment. PNG/JPEG/WEBP بس، حتى 5MB، أبعاد بين 32 و4096 بكسل." />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
-      <Card className="mb-5 overflow-hidden border-primary/20 bg-[linear-gradient(135deg,#153f38_0%,#0d2d29_68%,#17211f_100%)] text-[#f7f2e8]">
+      <Card className="mb-5 overflow-hidden border-primary/20 bg-[linear-gradient(135deg,#123b69_0%,#09294b_68%,#142235_100%)] text-[#fff8f2]">
         <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
-            <p className="text-xs font-semibold tracking-[0.22em] text-[#d99a78]">OSTA BRAND SYSTEM</p>
+            <p className="text-xs font-semibold tracking-[0.22em] text-[#f0a178]">OSTA BRAND SYSTEM</p>
             <h2 className="mt-2 text-2xl font-bold">صنعة تِطَمِّن</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-[#f7f2e8]/75">
-              الأخضر العميق للثقة، العاجي للدفء، والنحاسي كتوقيع محدود. حافظ على الرمز والحملة بنفس النِسب والألوان حتى يتعرّف الناس على OSTA قبل قراءة الاسم.
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-[#fff8f2]/75">
+              الكحلي يثبت الثقة، العاجي يضيف دفء البيت، والنحاسي يوجّه للفعل بوضوح. حافظ على الرمز والحملة بنفس النِسب والألوان حتى يتعرّف الناس على OSTA قبل قراءة الاسم.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {BRAND_DOWNLOADS.map((item) => (
@@ -112,12 +112,12 @@ export default function BrandingPage() {
           </div>
           <div className="grid grid-cols-4 gap-2" aria-label="ألوان OSTA الأساسية">
             {[
-              ['#153F38', 'أخضر'],
-              ['#F7F2E8', 'عاجي'],
-              ['#C66F45', 'نحاسي'],
-              ['#17211F', 'حبر'],
+              ['#123B69', 'كحلي'],
+              ['#FFF8F2', 'عاجي'],
+              ['#B54724', 'نحاسي'],
+              ['#142235', 'حبر'],
             ].map(([color, name]) => (
-              <div key={color} className="text-center text-[10px] text-[#f7f2e8]/70">
+              <div key={color} className="text-center text-[10px] text-[#fff8f2]/70">
                 <div className="mx-auto mb-1 size-10 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: color }} />
                 <span>{name}</span>
               </div>

@@ -1,15 +1,14 @@
 """مولّد هوية OSTA — كل الأشكال محسوبة هندسيًا، مفيش رقم متحطّ بالنظر."""
 import math
 
-# لوحة OSTA الأساسية: أخضر عميق للثقة والحرفة، عاجي دافئ للضيافة، ونحاسي كتوقيع محدود.
-# الأزرق القديم كان سليمًا وظيفيًا لكنه قريب بصريًا من منصات مالية/تقنية كثيرة؛ اللوحة الجديدة
-# تربط البراند بالبيت والخامة الطبيعية من غير ما تقع في كليشيه أيقونة البيت.
-INK     = "#17211f"
-FOREST  = "#153f38"
-FOREST_D = "#0d2d29"
-FOREST_HI = "#245f54"
-IVORY   = "#f7f2e8"
-COPPER  = "#c66f45"
+# لوحة OSTA الأساسية: كحلي عميق للثقة والبنية، عاجي دافئ للبيت، ونحاسي واضح للفعل.
+# النحاسي لا يحل محل الكحلي: الكحلي يحمل الوعد والموثوقية، والنحاسي يوجّه العين للقرار.
+INK     = "#142235"
+NAVY    = "#123b69"
+NAVY_D  = "#09294b"
+NAVY_HI = "#1f568d"
+IVORY   = "#fff8f2"
+COPPER  = "#b54724"
 WHITE   = "#ffffff"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -142,14 +141,14 @@ os.makedirs(out, exist_ok=True)
 
 # ١) الرمز لوحده
 open(f"{out}/osta-mark.svg","w").write(
-    svg(100, 100, f'<path d="{mark_path()}" fill="{FOREST}" fill-rule="evenodd"/>'))
+    svg(100, 100, f'<path d="{mark_path()}" fill="{NAVY}" fill-rule="evenodd"/>'))
 
 # ٢) اللوجو الأساسي (أفقي)
 body, total = wordmark_group(INK)
 open(f"{out}/osta-logo.svg","w").write(svg(round(total,2), 60, body))
 
-# ٣) نسخة كلها أزرق
-body_b, _ = wordmark_group(FOREST)
+# ٣) نسخة كلها كحلي (الاسم محفوظ لتوافق روابط الأصول القائمة)
+body_b, _ = wordmark_group(NAVY)
 open(f"{out}/osta-logo-blue.svg","w").write(svg(round(total,2), 60, body_b))
 
 # ٤) نسخة للخلفية الغامقة
@@ -185,9 +184,9 @@ def icon_svg(bg_top, bg_bot, fg, size=1024, mark_ratio=0.58, rounded=None, grad_
     return svg(size, size, body, defs)
 
 # مربع كامل (iOS بيحط الماسك بنفسه)
-open(f"{out}/osta-icon.svg","w").write(icon_svg(FOREST_HI, FOREST_D, IVORY, 1024, 0.58, None, "gi"))
+open(f"{out}/osta-icon.svg","w").write(icon_svg(COPPER, "#9f3c20", IVORY, 1024, 0.58, None, "gi"))
 # مربع بأركان مدوّرة — للعرض والويب
-open(f"{out}/osta-icon-rounded.svg","w").write(icon_svg(FOREST_HI, FOREST_D, IVORY, 1024, 0.58, 224, "gr"))
+open(f"{out}/osta-icon-rounded.svg","w").write(icon_svg(COPPER, "#9f3c20", IVORY, 1024, 0.58, 224, "gr"))
 # طبقة المقدّمة لأيقونة أندرويد التكيّفية (خلفية منفصلة)
 open(f"{out}/osta-icon-foreground.svg","w").write(
     svg(1024, 1024, f'<g transform="translate({(1024-1024*0.42)/2:.2f} {(1024-1024*0.42)/2:.2f}) scale({1024*0.42/100:.5f})">'
@@ -195,13 +194,13 @@ open(f"{out}/osta-icon-foreground.svg","w").write(
 open(f"{out}/osta-icon-background.svg","w").write(
     svg(1024, 1024, '<rect width="1024" height="1024" fill="url(#gb)"/>',
         f'<defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1">'
-        f'<stop offset="0" stop-color="{FOREST_HI}"/><stop offset="1" stop-color="{FOREST_D}"/></linearGradient></defs>'))
+        f'<stop offset="0" stop-color="{COPPER}"/><stop offset="1" stop-color="#9f3c20"/></linearGradient></defs>'))
 # طبقة monochrome المطلوبة لأيقونات Android الملوّنة حسب ثيم الجهاز.
 open(f"{out}/osta-icon-monochrome.svg","w").write(
     svg(1024, 1024, f'<g transform="translate({(1024-1024*0.42)/2:.2f} {(1024-1024*0.42)/2:.2f}) scale({1024*0.42/100:.5f})">'
                     f'<path d="{mark_path()}" fill="#000000" fill-rule="evenodd"/></g>'))
 # نسخة فاتحة
-open(f"{out}/osta-icon-light.svg","w").write(icon_svg("#fffdf8", "#ebe2d4", FOREST, 1024, 0.58, 224, "gl"))
+open(f"{out}/osta-icon-light.svg","w").write(icon_svg("#fffaf6", "#f1dfd3", NAVY, 1024, 0.58, 224, "gl"))
 
 # أيقونة تطبيق الفني: نفس الرمز والنِسب، لكن بخامة عاجية ومركز نحاسي حتى يقدر الشخص اللي عنده
 # التطبيقان يميّز بينهما فورًا. الاختلاف لوني فقط؛ الهوية لا تتفرع لشعار ثانٍ.
@@ -217,7 +216,7 @@ def technician_icon_svg(rounded=None):
             f'</linearGradient></defs>')
     body = (bg +
             f'<g transform="translate({off:.2f} {off:.2f}) scale({scale:.5f})">'
-            f'<path d="{mark_path()}" fill="{FOREST}" fill-rule="evenodd"/>'
+            f'<path d="{mark_path()}" fill="{NAVY}" fill-rule="evenodd"/>'
             f'<path d="{rounded_hexagon(50, 50, 18.0, 4.0)}" fill="{COPPER}"/></g>')
     return svg(size, size, body, defs)
 

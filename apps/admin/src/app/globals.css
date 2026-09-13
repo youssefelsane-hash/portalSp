@@ -5,27 +5,27 @@
 
 :root {
   --radius: 0.875rem;
-  --background: #f7f4ee;
-  --foreground: #17211f;
-  --card: #fffdf8;
-  --card-foreground: #17211f;
-  --popover: #fffdf8;
-  --popover-foreground: #17211f;
-  /* ADR-0092: أخضر حرفي عميق + عاجي دافئ. حالات success/warning/danger تحت منفصلة عمدًا
+  --background: #faf7f2;
+  --foreground: #142235;
+  --card: #fffaf6;
+  --card-foreground: #142235;
+  --popover: #fffaf6;
+  --popover-foreground: #142235;
+  /* ADR-0092: كحلي موثوق + نحاسي للفعل + عاجي دافئ. حالات success/warning/danger تحت منفصلة عمدًا
      عن البراند حتى اللون يفضل معلومة تشغيلية، مش مجرد زينة. */
-  --primary: #153f38;
-  --primary-foreground: #f7f2e8;
-  --secondary: #eee8dd;
-  --secondary-foreground: #24312e;
-  --muted: #eee8dd;
-  --muted-foreground: #65716e;
-  --accent: #e2eee9;
-  --accent-foreground: #153f38;
+  --primary: #b54724;
+  --primary-foreground: #fff8f2;
+  --secondary: #f3ebe3;
+  --secondary-foreground: #253a56;
+  --muted: #f3ebe3;
+  --muted-foreground: #64748b;
+  --accent: #fbe4d7;
+  --accent-foreground: #a94520;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: #d9d2c6;
-  --input: #d9d2c6;
-  --ring: rgb(21 63 56 / 40%);
+  --border: #e3d7ca;
+  --input: #e3d7ca;
+  --ring: rgb(181 71 36 / 40%);
   /* حالات دلالية (status chips، تنبيهات، ملخصات لوحة التحكم) — نجاح/تحذير/خطر/معلومة، منفصلة
      عمداً عن --destructive (ده لإجراءات هدّامة زي "حذف"، مش لعرض حالة "طلب اتلغى"). */
   --success: oklch(0.5 0.13 152);
@@ -43,25 +43,25 @@
 }
 
 .dark {
-  --background: #101816;
-  --foreground: #f3eee5;
-  --card: #182320;
-  --card-foreground: #f3eee5;
-  --popover: #182320;
-  --popover-foreground: #f3eee5;
-  --primary: #8fc2b5;
-  --primary-foreground: #10231f;
-  --secondary: #26322f;
-  --secondary-foreground: #f3eee5;
-  --muted: #26322f;
-  --muted-foreground: #a9b5b1;
-  --accent: #28453f;
-  --accent-foreground: #dcebe6;
+  --background: #0b1c31;
+  --foreground: #f5f7fb;
+  --card: #11273f;
+  --card-foreground: #f5f7fb;
+  --popover: #11273f;
+  --popover-foreground: #f5f7fb;
+  --primary: #ef9a6d;
+  --primary-foreground: #3c1a0d;
+  --secondary: #1a334f;
+  --secondary-foreground: #f5f7fb;
+  --muted: #1a334f;
+  --muted-foreground: #b6c5d8;
+  --accent: #2a4665;
+  --accent-foreground: #f8d4c2;
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: rgb(143 194 181 / 45%);
+  --ring: rgb(239 154 109 / 45%);
   --success: oklch(0.72 0.15 152);
   --success-foreground: oklch(0.16 0.02 255);
   --success-bg: oklch(0.27 0.05 152);

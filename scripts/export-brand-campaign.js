@@ -18,10 +18,10 @@ function textLayer(width, height, variant) {
       <style>
         .ar { font-family: Tahoma, Arial, sans-serif; direction: rtl; }
       </style>
-      <text class="ar" x="${width / 2}" y="${titleY}" text-anchor="middle" fill="#f7f2e8" font-size="${story ? 92 : 72}" font-weight="700">صنعة تِطَمِّن</text>
-      <text class="ar" x="${width / 2}" y="${bodyY}" text-anchor="middle" fill="#dce8e4" font-size="${story ? 40 : 32}" font-weight="400">فنيين موثّقين · سعر واضح · متابعة من أول الطلب</text>
-      <rect x="${width - (story ? 410 : 330)}" y="${ctaY - (story ? 63 : 52)}" width="${story ? 334 : 254}" height="${story ? 88 : 72}" rx="${story ? 44 : 36}" fill="#c66f45"/>
-      <text class="ar" x="${width - (story ? 243 : 203)}" y="${ctaY}" text-anchor="middle" dominant-baseline="middle" fill="#fffdf8" font-size="${story ? 36 : 28}" font-weight="700">احجز دلوقتي</text>
+      <text class="ar" x="${width / 2}" y="${titleY}" text-anchor="middle" fill="#fff8f2" font-size="${story ? 92 : 72}" font-weight="700">صنعة تِطَمِّن</text>
+      <text class="ar" x="${width / 2}" y="${bodyY}" text-anchor="middle" fill="#d9e7f7" font-size="${story ? 40 : 32}" font-weight="400">فنيين موثّقين · سعر واضح · متابعة من أول الطلب</text>
+      <rect x="${width - (story ? 410 : 330)}" y="${ctaY - (story ? 63 : 52)}" width="${story ? 334 : 254}" height="${story ? 88 : 72}" rx="${story ? 44 : 36}" fill="#b54724"/>
+      <text class="ar" x="${width - (story ? 243 : 203)}" y="${ctaY}" text-anchor="middle" dominant-baseline="middle" fill="#fff8f2" font-size="${story ? 36 : 28}" font-weight="700">احجز دلوقتي</text>
     </svg>`);
 }
 
@@ -31,7 +31,7 @@ async function makeFeed() {
   const photoHeight = 820;
   const photo = await sharp(hero).resize(width, photoHeight, { fit: 'cover', position: 'left' }).toBuffer();
   const logoBuffer = await sharp(logo).resize(250).toBuffer();
-  await sharp({ create: { width, height, channels: 4, background: '#153f38' } })
+  await sharp({ create: { width, height, channels: 4, background: '#123b69' } })
     .composite([
       { input: photo, top: 0, left: 0 },
       { input: logoBuffer, top: 875, left: 754 },
@@ -48,9 +48,9 @@ async function makeStory() {
   const overlay = Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <defs><linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="35%" stop-color="#0d2d29" stop-opacity="0"/>
-        <stop offset="78%" stop-color="#0d2d29" stop-opacity=".9"/>
-        <stop offset="100%" stop-color="#0d2d29"/>
+        <stop offset="35%" stop-color="#09294b" stop-opacity="0"/>
+        <stop offset="78%" stop-color="#09294b" stop-opacity=".9"/>
+        <stop offset="100%" stop-color="#09294b"/>
       </linearGradient></defs>
       <rect width="${width}" height="${height}" fill="url(#fade)"/>
     </svg>`);

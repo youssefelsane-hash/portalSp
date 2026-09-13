@@ -16,7 +16,7 @@ describe('branding defaults', () => {
     const encoded = DEFAULT_BRANDING_ASSETS[BrandingAssetType.LOGO_MARK].url.split(',')[1];
     const svg = Buffer.from(encoded, 'base64').toString('utf8');
 
-    expect(svg).toContain('#153f38');
+    expect(svg).toContain('#123b69');
     expect(svg).toContain('fill-rule="evenodd"');
     expect(svg).not.toContain('<text');
   });

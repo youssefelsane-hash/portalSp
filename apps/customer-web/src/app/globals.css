@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 /* نفس القيم الدلالية المستخدمة في apps/customer-app/lib/design/app_theme.dart وapps/admin —
-   هوية بصرية موحّدة عبر المنصات الثلاث (ADR-0092: أخضر حرفي + عاجي دافئ). */
+   هوية بصرية موحّدة عبر المنصات الثلاث (ADR-0092: كحلي موثوق + نحاسي للفعل). */
 :root {
-  --background: #f7f4ee;
-  --foreground: #17211f;
-  --surface: #fffdf8;
-  --surface-variant: #eee8dd;
-  --border: #d9d2c6;
-  --primary: #153f38;
-  --primary-foreground: #f7f2e8;
+  --background: #faf7f2;
+  --foreground: #142235;
+  --surface: #fffaf6;
+  --surface-variant: #f3ebe3;
+  --border: #e3d7ca;
+  --primary: #b54724;
+  --primary-foreground: #fff8f2;
   --success: #3c8b4a;
   --warning: #c98a1f;
   --danger: #c0392b;
@@ -35,18 +35,18 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #101816;
-    --foreground: #f3eee5;
-    --surface: #182320;
-    --surface-variant: #26322f;
-    --border: #34423e;
-    --primary: #8fc2b5;
-    --primary-foreground: #10231f;
+    --background: #0b1c31;
+    --foreground: #f5f7fb;
+    --surface: #11273f;
+    --surface-variant: #1a334f;
+    --border: #2a4665;
+    --primary: #ef9a6d;
+    --primary-foreground: #3c1a0d;
     --success: #6fbf7a;
     --warning: #e0ac4e;
     --danger: #e07a6b;
     --info: #8ab4d2;
-    --muted: #a9b5b1;
+    --muted: #b6c5d8;
   }
 }
 
