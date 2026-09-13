@@ -19,6 +19,12 @@
  *
  *   node scripts/financial-idempotency-audit.js [--only S1,S4] [--keep]
  *
+ * **شغّل الـAPI بسقف throttle مرفوع، وإلا التدقيق بيقيس الـthrottle مش الـidempotency**:
+ *   `cd apps/api && THROTTLE_LIMIT=100000 PAYMENTS_THROTTLE_LIMIT=100000 node dist/main.js`
+ * (`PAYMENTS_THROTTLE_LIMIT` متغيّر منفصل عن `THROTTLE_LIMIT` — مسارات الدفع سقفها الخاص ٢٠
+ * في الدقيقة، وهو مقفول بالكود في أي بيئة شبه-إنتاجية.) أي سيناريو بياخد 429 بيترصد
+ * صراحةً كـ«مقيس غلط» مش كفشل idempotency.
+ *
  * محتاج API شغّال (`scripts/dev-api.sh start`) وPostgres/Redis. بيمسح بياناته وراه.
  * سيناريو الـwebhook (S4) بيحتاج بوابة Paymob «مُعدّة» — السكريبت بيزرع اعتمادات وهمية في
  * `settings` ويعيد تشغيل الـAPI، وبيرجّعها زي ما كانت في الآخر (`finally`، حتى لو فشل).
@@ -73,6 +79,16 @@ function record(scenario, ok, detail) {
   console.log(`${ok ? '✅' : '❌'} ${scenario} — ${detail}`);
   if (!ok) findings.push(`${scenario}: ${detail}`);
 }
+
+/**
+ * 429 معناه إن السيناريو **ما اتقاسش أصلاً** — مش إن الـidempotency مكسورة. تمييزه صراحةً
+ * بيمنع أخطر حاجة في أداة تدقيق: أحمر بسبب إعداد بيئة، بيتعوّد عليه فيبقى «طبيعي»، فلما
+ * يجي عطل حقيقي محدش ياخد باله.
+ */
+const THROTTLE_HINT = 'شغّل الـAPI بـPAYMENTS_THROTTLE_LIMIT=100000 THROTTLE_LIMIT=100000';
+const isThrottled = (res) => res?.status === 429 || res?.body?.error?.code === 'RATE_001';
+const throttleNote = (responses) =>
+  [responses].flat().some(isThrottled) ? ` ⚠️ اترفض بـ429 (throttle) — السيناريو ما اتقاسش. ${THROTTLE_HINT}` : '';
 
 async function q(sql, params) {
   return (await db.query(sql, params)).rows;
@@ -404,7 +420,8 @@ async function scenarioS1(ctx) {
     'S1 نفس Idempotency-Key ×10 متزامن',
     ok,
     `أكواد=${JSON.stringify(codes)} دفعات=${rows.length} معرّفات مميزة=${paymentIds.size} ` +
-      `رصيد=${wallet.balance_cents} مخصوم=${debits[0].total} (المتوقع دفعة واحدة، رصيد 0، مخصوم ${PRICE_CENTS})`,
+      `رصيد=${wallet.balance_cents} مخصوم=${debits[0].total} (المتوقع دفعة واحدة، رصيد 0، مخصوم ${PRICE_CENTS})` +
+      (ok ? '' : throttleNote(responses)),
   );
 }
 
@@ -443,7 +460,7 @@ async function scenarioS2(ctx) {
     'S2 نفس الطلب ×10 مفاتيح مختلفة',
     ok,
     `أكواد=${JSON.stringify(codes)} دفعات ناجحة=${succeeded[0].n} رصيد=${wallet.balance_cents} ` +
-      `(المتوقع 1 و ${expectedBalance})`,
+      `(المتوقع 1 و ${expectedBalance})` + (ok ? '' : throttleNote(responses)),
   );
 }
 
@@ -484,7 +501,7 @@ async function scenarioS3(ctx) {
     'S3 رصيد لطلب واحد وطلبين متزامنين',
     ok,
     `أكواد=${JSON.stringify(codes)} دفعات ناجحة=${succeeded[0].n} رصيد=${wallet.balance_cents} ` +
-      `(المتوقع 1 و 0 — ومفيش رصيد سالب)`,
+      `(المتوقع 1 و 0 — ومفيش رصيد سالب)` + (ok ? '' : throttleNote(responses)),
   );
 }
 
@@ -582,7 +599,7 @@ async function scenarioS4(ctx) {
     ok,
     `أكواد=${JSON.stringify(codes)} حالة الدفعة=${pay.payment_status} دفعات ناجحة=${succeededCount[0].n} ` +
       `صفوف webhook_events=${events[0].n} (retry=${events[0].retries}, ${events[0].status}) ` +
-      `أرباح فني=${earnings[0].n} انتقالات توزيع=${statusHistory[0].n}`,
+      `أرباح فني=${earnings[0].n} انتقالات توزيع=${statusHistory[0].n}` + (ok ? '' : throttleNote(all)),
   );
   return { order, payment, customer };
 }
@@ -599,7 +616,11 @@ async function scenarioS5(ctx) {
     headers: { 'idempotency-key': `s5-${runId}` },
   });
   if (pay.status !== 201 && pay.status !== 200) {
-    record('S5 استرداد مزدوج متزامن', false, `الدفع الأولي فشل: ${pay.status} ${JSON.stringify(pay.body).slice(0, 200)}`);
+    record(
+      'S5 استرداد مزدوج متزامن',
+      false,
+      `الدفع الأولي فشل: ${pay.status} ${JSON.stringify(pay.body).slice(0, 200)}${throttleNote(pay)}`,
+    );
     return;
   }
 
@@ -645,11 +666,22 @@ async function scenarioS6(ctx) {
   await fundWallet(customer.userId, PRICE_CENTS);
   const order = await createOrder(customer, ctx.service.id);
   await driveToPayable(order.id);
-  await api(`/orders/${order.id}/pay-with-wallet`, {
+  // **الدفع كان بيتبعت ورده بيتهمل**: لو اترفض (429 مثلاً) الطلب بيفضل `unpaid`، والاسترداد
+  // بعده بيترفض برسالة «الطلب لازم يكون مدفوع الأول» — فالسيناريو كان بيترصد كفشل استرداد
+  // وهو أصلاً فشل دفع. السبب الحقيقي لازم يبان في السطر نفسه.
+  const s6Pay = await api(`/orders/${order.id}/pay-with-wallet`, {
     method: 'POST',
     token: customer.token,
     headers: { 'idempotency-key': `s6-${runId}` },
   });
+  if (s6Pay.status !== 201 && s6Pay.status !== 200) {
+    record(
+      'S6 استرداد جزئي بعد الدفع (إلغاء برسم)',
+      false,
+      `الدفع الأولي فشل: ${s6Pay.status} ${JSON.stringify(s6Pay.body?.error ?? s6Pay.body).slice(0, 200)}${throttleNote(s6Pay)}`,
+    );
+    return;
+  }
 
   const walletBefore = await walletOf(customer.userId);
   const token = await stepUpToken(ctx.admin.userId);
@@ -753,11 +785,21 @@ async function restoreGateway(before) {
  */
 async function restartApi() {
   try {
-    execFileSync('pkill', ['-9', '-f', 'node ./dist/main.js'], { stdio: 'ignore' });
+    // **النمط كان `node ./dist/main.js` بالحرف** — أي نسخة متشغّلة بصيغة تانية (`node dist/main.js`،
+    // أو عبر `setsid`/`nohup`) ما كانتش بتتقتل. النتيجة أخطر من مجرد فشل: النسخة القديمة بتفضل
+    // ماسكة بورت 3000 وبترد على `isApiUp()`، والنسخة الجديدة بتموت فورًا على EADDRINUSE — فالتدقيق
+    // بيكمّل وهو بيكلّم **سيرفر بإعدادات قديمة**. ده اللي خلّى سيناريو الـwebhook يرصد «توقيع غلط»
+    // لمدة تشغيلات: السر الوهمي اتزرع في القاعدة، والسيرفر اللي بيرد عمره ما قراه.
+    execFileSync('pkill', ['-9', '-f', 'dist/main.js'], { stdio: 'ignore' });
   } catch {
     /* مفيش نسخة شغّالة — مش خطأ */
   }
   for (let i = 0; i < 20 && (await isApiUp()); i++) await new Promise((r) => setTimeout(r, 500));
+  // حارس صريح: لو لسه فيه حاجة بترد على البورت، فالنسخة الجديدة مش هتقدر تقلع أصلاً وكل اللي
+  // بعد كده هيتقاس على سيرفر غلط. الفشل الصريح أرخص بكتير من نتيجة كاذبة.
+  if (await isApiUp()) {
+    throw new Error('فيه نسخة API لسه ماسكة بورت 3000 بعد محاولة الإيقاف — التدقيق هيقيس سيرفر بإعدادات قديمة');
+  }
 
   const apiDir = path.join(ROOT, 'apps/api');
   fs.mkdirSync(path.join(apiDir, '.dev-logs'), { recursive: true });
@@ -766,6 +808,17 @@ async function restartApi() {
     cwd: apiDir,
     detached: true,
     stdio: ['ignore', log, log],
+    // **بَقّة حقيقية في الأداة نفسها (تدقيق ماراثوني 2026-09-13)**: النسخة اللي بيشغّلها
+    // السكربت هنا كانت بتقلع بسقف الـthrottle الافتراضي (٢٠ دفعة/دقيقة)، فكل سيناريو بعد
+    // إعادة التشغيل دي (S4/S5/S6) كان بياخد 429 ويترصد كـ«فشل idempotency» — وهو في الحقيقة
+    // بيقيس الـthrottle مش الـidempotency. ده بالظبط نفس العطل اللي التعليق فوق
+    // `PAYMENT_THROTTLE_LIMIT` في `payments.controller.ts` بيقول إنه اتصلح مرة قبل كده،
+    // ورجع من باب تاني. القيم بتتورّث من البيئة لو متحطّة، وإلا بترتفع افتراضيًا هنا.
+    env: {
+      ...process.env,
+      THROTTLE_LIMIT: process.env.THROTTLE_LIMIT ?? '100000',
+      PAYMENTS_THROTTLE_LIMIT: process.env.PAYMENTS_THROTTLE_LIMIT ?? '100000',
+    },
   }).unref();
 
   for (let i = 0; i < 90; i++) {
