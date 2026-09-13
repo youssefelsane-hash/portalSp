@@ -40,6 +40,9 @@ const KNOWN_EVENT_TYPES = [
   'payment.cash_collected',
   'payout.completed',
   'rating.low_rating_submitted',
+  'payment.instapay_transfer_reported',
+  'support_ticket.created',
+  'warranty_claim.opened',
 ];
 
 export default function NotificationRoutingPage() {

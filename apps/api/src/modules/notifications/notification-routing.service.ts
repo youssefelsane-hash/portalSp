@@ -127,7 +127,7 @@ export class NotificationRoutingService {
         const users = await this.dataSource.query<{ user_id: string }[]>(
           `SELECT DISTINCT u.id AS user_id
            FROM user_roles ur
-           JOIN roles r ON r.id = ur.role_id AND r.name = $1 AND r.deleted_at IS NULL
+           JOIN roles r ON r.id = ur.role_id AND r.name IN ($1, 'super_admin') AND r.deleted_at IS NULL
            JOIN users u ON u.id = ur.user_id AND u.is_blocked = false AND u.deleted_at IS NULL`,
           [rule.roleName],
         );

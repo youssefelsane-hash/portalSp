@@ -24,7 +24,9 @@ interface AdminNotification {
   created_at: string;
 }
 
-const POLL_INTERVAL_MS = 60_000;
+// التحديث كل 20 ثانية يخلّي مركز العمليات عمليًا قريبًا من اللحظي من غير socket جديد في القشرة
+// المشتركة أو حمل ثابت كبير على الـAPI.
+const POLL_INTERVAL_MS = 20_000;
 
 /**
  * **صندوق إشعارات الأدمن (ADR-0067).**
@@ -113,7 +115,13 @@ export function NotificationBell() {
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) void load();
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="relative" aria-label="الإشعارات">
           <Bell className="size-4" />
@@ -156,6 +164,17 @@ export function NotificationBell() {
             ))}
           </div>
         )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="justify-center font-medium text-primary"
+          onSelect={(event) => {
+            event.preventDefault();
+            setOpen(false);
+            router.push('/notifications');
+          }}
+        >
+          فتح مركز الإشعارات
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

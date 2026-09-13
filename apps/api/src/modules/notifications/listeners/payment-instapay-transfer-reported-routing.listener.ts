@@ -23,7 +23,8 @@ export class PaymentInstaPayTransferReportedRoutingListener {
         bodyAr: `قيمة ${(event.amountCents / 100).toFixed(2)} ج.م — محتاج مراجعة وتأكيد.`,
         referenceType: 'payment',
         referenceId: event.paymentId,
-        deepLink: `/orders/${event.orderId}`,
+        // التحويل يحتاج اعتمادًا ماليًا، فالتنبيه يفتح طابور المراجعة مباشرة بدل تفاصيل الطلب.
+        deepLink: '/instapay-confirmations',
       });
     } catch (err) {
       this.logger.error(`فشل توجيه إشعار تبليغ تحويل InstaPay ${event.paymentId}`, err instanceof Error ? err.stack : err);

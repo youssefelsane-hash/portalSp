@@ -173,6 +173,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/employees', label: 'الموظفين', icon: UserCog, permission: 'employees.view' },
       { href: '/roles', label: 'الأدوار والصلاحيات', icon: Shield, permission: 'roles.manage' },
+      { href: '/notifications', label: 'مركز الإشعارات', icon: Bell, permission: 'notifications.view' },
       { href: '/notification-routing', label: 'توجيه الإشعارات', icon: Bell, permission: 'notifications.view' },
       { href: '/notification-type-configs', label: 'إعدادات أنواع الإشعارات', icon: BellRing, permission: 'notifications.view' },
       { href: '/cancellation-reasons', label: 'أسباب الإلغاء', icon: ListX, permission: 'cancellation_reasons.view' },
