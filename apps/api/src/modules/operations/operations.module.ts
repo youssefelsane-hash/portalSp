@@ -9,6 +9,7 @@ import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
 import { AdminOrderTraceService } from './admin-order-trace.service';
 import { AdminReviewCenterService } from './admin-review-center.service';
+import { AdminLiveMapService } from './admin-live-map.service';
 import { AdminRiskCenterController } from './risk/admin-risk-center.controller';
 import { RiskCenterService } from './risk/risk-center.service';
 import { RiskDetectorService } from './risk/risk-detector.service';
@@ -29,6 +30,7 @@ import { AuditModule } from '../audit/audit.module';
     AdminCoverageIntelligenceService,
     AdminOrderTraceService,
     AdminReviewCenterService,
+    AdminLiveMapService,
     RiskCenterService,
     RiskDetectorService,
     RiskDetectorScheduler,

@@ -49,6 +49,7 @@ describe('AdminOperationsController.getDispatchDelivery() — تمرير order_n
       {} as never,
       {} as never,
           {} as never,
+      {} as never,
     );
 
     const result = await controller.getDispatchDelivery({ hours: 24, page: 1, per_page: 20 } as DispatchDeliveryQueryDto);
@@ -157,6 +158,7 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
       {} as never,
       {} as never,
           {} as never,
+      {} as never,
     );
 
     const result = await controller.getExceptions({} as never);
@@ -240,6 +242,7 @@ describe('AdminOperationsController.listOrderTraces() — التعشيش بيو�
       {} as never,
       orderTraceService as never,
           {} as never,
+      {} as never,
     );
 
     const result = await controller.listOrderTraces();
@@ -259,6 +262,33 @@ describe('AdminOperationsController.listOrderTraces() — التعشيش بيو�
       viewed_at: '2026-08-28T10:01:00.000Z',
       distance_km: 4.2,
       estimated_eta_minutes: 12,
+    });
+  });
+});
+
+describe('AdminOperationsController.getLiveMap() — خريطة التشغيل', () => {
+  it('يحوّل مصدر الخريطة إلى عقد snake_case بدون إسقاط رابط الفني بالطلب', async () => {
+    const liveMapService = {
+      getSnapshot: jest.fn().mockResolvedValue({
+        generatedAt: '2026-09-13T10:00:00.000Z',
+        technicians: [{
+          id: 'tech-1', fullName: 'فني اختبار', technicianCode: 'TECH-1', isAvailable: true, isOnDuty: true,
+          latitude: 30.05, longitude: 31.22, locationUpdatedAt: '2026-09-13T09:59:00.000Z',
+        }],
+        orders: [{
+          id: 'order-1', orderNumber: 'ORD-1', serviceName: 'سباكة', status: 'in_progress', scheduledAt: null,
+          technicianId: 'tech-1', latitude: 30.06, longitude: 31.23,
+        }],
+      }),
+    };
+    const controller = new AdminOperationsController(
+      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, liveMapService as never,
+    );
+
+    await expect(controller.getLiveMap()).resolves.toMatchObject({
+      generated_at: '2026-09-13T10:00:00.000Z',
+      technicians: [{ full_name: 'فني اختبار', technician_code: 'TECH-1', is_on_duty: true }],
+      orders: [{ order_number: 'ORD-1', technician_id: 'tech-1', service_name: 'سباكة' }],
     });
   });
 });
