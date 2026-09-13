@@ -118,6 +118,19 @@ export class FeatureFlagsService {
    */
   async isEnabledForUser(key: string, userId?: string, zoneId?: string): Promise<boolean> {
     const flag = await this.flags.findOne({ where: { key } });
+    return this.evaluate(flag, key, userId, zoneId);
+  }
+
+  /**
+   * تحميل snapshot واحد للتطبيق بعد الدخول بدل نداء HTTP لكل فلاج. الاستهداف بالمنطقة يظل
+   * فحصًا موضعيًا في الشاشة التي تعرف منطقة الطلب؛ هنا لا نخمن منطقة المستخدم من عنوان قديم.
+   */
+  async listEvaluatedForUser(userId: string): Promise<Array<{ key: string; enabled: boolean }>> {
+    const flags = await this.flags.find({ order: { key: 'ASC' } });
+    return flags.map((flag) => ({ key: flag.key, enabled: this.evaluate(flag, flag.key, userId) }));
+  }
+
+  private evaluate(flag: FeatureFlag | null, key: string, userId?: string, zoneId?: string): boolean {
     if (!flag || !flag.isEnabled) return false;
 
     if (userId && flag.enabledForUserIds?.includes(userId)) return true;

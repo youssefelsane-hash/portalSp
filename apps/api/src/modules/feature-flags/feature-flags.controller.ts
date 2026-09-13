@@ -21,4 +21,9 @@ export class FeatureFlagsController {
     const enabled = await this.featureFlagsService.isEnabledForUser(key, user.sub, query.zone_id);
     return { key, enabled };
   }
+
+  @Get('me')
+  async listForCurrentUser(@CurrentUser() user: JwtPayload) {
+    return { items: await this.featureFlagsService.listEvaluatedForUser(user.sub) };
+  }
 }

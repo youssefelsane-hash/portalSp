@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'core/api_config.dart';
 import 'core/auth_repository.dart';
 import 'core/deep_link_router.dart';
+import 'core/feature_flags.dart';
 import 'features/catalog/branding_repository.dart';
 import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
@@ -28,8 +29,14 @@ class BaytakApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AuthRepository()..init(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthRepository()..init()),
+        ChangeNotifierProxyProvider<AuthRepository, FeatureFlags>(
+          create: (_) => FeatureFlags(),
+          update: (_, auth, flags) => flags!..attach(auth),
+        ),
+      ],
       child: MaterialApp(
         title: 'أسطى',
         debugShowCheckedModeBanner: false,
@@ -43,12 +50,23 @@ class BaytakApp extends StatelessWidget {
         locale: const Locale('ar', 'EG'),
         builder: (context, child) {
           final auth = context.watch<AuthRepository>();
+          final flags = context.watch<FeatureFlags>();
           return Stack(
             children: [
               DesktopAppFrame(child: child ?? const SizedBox.shrink()),
-              if (auth.isAuthenticated && !auth.biometricUnlockPending)
+              if (auth.isAuthenticated &&
+                  !auth.biometricUnlockPending &&
+                  flags.isEnabled(
+                    'customer_pending_rating_prompt',
+                    fallback: true,
+                  ))
                 const PendingRatingPromptHost(),
-              if (auth.isAuthenticated && !auth.biometricUnlockPending)
+              if (auth.isAuthenticated &&
+                  !auth.biometricUnlockPending &&
+                  flags.isEnabled(
+                    'customer_floating_notification_alert',
+                    fallback: true,
+                  ))
                 // الزر يظل فوق كل الصفحات، لكنه بلا Overlay أو Hero مستقلين حتى لا يتعارض
                 // مع دورة حياة Navigator عند فتح شاشة جديدة.
                 const PositionedDirectional(
