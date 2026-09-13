@@ -191,4 +191,19 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
     expect(dto.order_status).toBe('in_progress');
     expect(dto.problem_description).toBe('حنفية بتنقّط');
   });
+
+  it('فشل المعاينة المالية لا يخفي الطلب ولا يسرّب أو يختلق أي رقم مالي', () => {
+    const dto = toTechnicianOrderResponseDto(
+      { ...fullOrder, customer_name: 'أحمد', service_name_ar: 'سباكة' },
+      null,
+    ) as unknown as Record<string, unknown>;
+
+    expect(dto.order_number).toBe('ORD-1');
+    expect(dto.customer_name).toBe('أحمد');
+    expect(dto.service_name_ar).toBe('سباكة');
+    for (const field of FORBIDDEN_FIELDS) expect(dto[field]).toBeUndefined();
+    expect(dto.cash_to_collect_cents).toBeUndefined();
+    expect(dto.my_earning_cents).toBeUndefined();
+    expect(dto.has_online_payment).toBeUndefined();
+  });
 });

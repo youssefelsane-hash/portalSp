@@ -164,6 +164,23 @@ describe('Unified Workforce Earnings Engine V2', () => {
     expect(result.participantShares[0].shareCents).toBe(0);
   });
 
+  it('supports a platform-funded discount without reducing technician earnings', () => {
+    // Original commissionable work is 120 EGP at 15%; customer pays 90 after a 30 EGP incentive.
+    // The technician keeps 102 EGP and the platform funds the remaining 12 EGP.
+    const result = calculateEarningsV2(9_000, -1_200, [participant('lead')]);
+
+    expect(result.platformCommissionCents).toBe(-1_200);
+    expect(result.workerPoolCents).toBe(10_200);
+    expect(result.participantShares[0].shareCents).toBe(10_200);
+    expect(result.platformCommissionCents + result.workerPoolCents).toBe(result.orderTotalCents);
+  });
+
+  it('still rejects a non-integer platform share', () => {
+    expect(() => calculateEarningsV2(10_000, -1.5, [participant('lead')])).toThrow(
+      'safe integer in piasters',
+    );
+  });
+
   it('allows bounded adjustments without changing platform commission', () => {
     const baseline = calculateEarningsV2(500_000, 50_000, [
       participant('lead'),

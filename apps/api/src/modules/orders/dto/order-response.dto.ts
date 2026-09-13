@@ -338,21 +338,21 @@ export interface TechnicianOrderResponseDto
   > {
   /** المطلوب تحصيله من العميل كاش. صفر لأي عضو طاقم مش القائد (docs/08 §108-B) — القائد
    * (أو الفني الوحيد لو مفيش طاقم) بس اللي بيشوف الرقم الحقيقي، هو اللي فعليًا بيحصّله. */
-  cash_to_collect_cents: number;
+  cash_to_collect_cents?: number;
   /** الكاش الذي حصّله الفني بالفعل واتسجل في تسوية الطلب. صفر لأي عضو طاقم مش القائد (نفس السبب). */
-  cash_collected_cents: number;
+  cash_collected_cents?: number;
   /** نصيب الفني من الطلب (بعد نسبة الشركة). ظاهر دايمًا، بلا شرح لتكوينه. */
-  my_earning_cents: number;
+  my_earning_cents?: number;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
-  has_online_payment: boolean;
+  has_online_payment?: boolean;
   /** كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص. */
-  fully_paid_online: boolean;
+  fully_paid_online?: boolean;
   /** السعر لسه ما اتحددش فـ`my_earning_cents` بصفر حسابيًا — مش «شغل ببلاش» (docs/08 §64.ب). */
-  earning_pending: boolean;
+  earning_pending?: boolean;
   /** الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040). */
-  is_crew_share: boolean;
+  is_crew_share?: boolean;
   /** لا توجد حصة تاريخية مسجلة لطلب مقفل؛ لا يعرض التطبيق رقمًا مُعاد حسابه. */
-  earning_snapshot_missing: boolean;
+  earning_snapshot_missing?: boolean;
   /**
    * **فيه استرداد اتعمل للعميل على الطلب ده** — طلب مالك صريح 2026-09-11: «الفني يشوف تلميح
    * بسيط **جوّه** الطلب، لازم يفتحه عشان يشوفه، مش بره».
@@ -362,7 +362,7 @@ export interface TechnicianOrderResponseDto
    * بيقول «حصل استرداد» عشان الفني يفهم ليه مستحقه اتغيّر، من غير ما يعرف العميل دفع كام
    * ولا رجعله كام. الرقم اللي يخصّه — نصيبه هو — موجود بالفعل في `my_earning_cents`.
    */
-  has_customer_refund: boolean;
+  has_customer_refund?: boolean;
 }
 
 export function toTechnicianOrderResponseDto(
@@ -377,7 +377,7 @@ export function toTechnicianOrderResponseDto(
     isCrewShare?: boolean;
     earningSnapshotMissing?: boolean;
     hasCustomerRefund?: boolean;
-  },
+  } | null,
 ): TechnicianOrderResponseDto {
   const {
     total_amount_cents: _totalAmount,
@@ -401,6 +401,12 @@ export function toTechnicianOrderResponseDto(
     customer_notices: _customerNotices,
     ...visible
   } = base;
+
+  if (!money) {
+    // Fail open for operational visibility, fail closed for money: the order remains visible but
+    // no amount is guessed or leaked. The app already treats absent money fields as "updating".
+    return visible;
+  }
 
   return {
     ...visible,

@@ -74,7 +74,16 @@ export class TechnicianOrderExecutionController {
       // الباك-إند مش في التطبيق: لو الأرقام خرجت على السلك، أي حد بتوكن فني يقراها من الـAPI
       // مهما كانت الواجهة بتخفيها.
       // ADR-0040 (docs/08 §64.ب): عضو الطاقم كان بيشوف وعاء القائد كله كأنه نصيبه هو.
-      this.paymentsService.getTechnicianMoneyView(order, undefined, viewerProfileId),
+      this.paymentsService.getTechnicianMoneyView(order, undefined, viewerProfileId).catch((reason: unknown) => {
+        // Money mutations remain fail-closed in PaymentsService. A read-only preview failure must
+        // never hide an assigned job: return the operational order without financial fields, and
+        // let the app show its existing "updating amounts" state instead of a fabricated zero.
+        this.logger.error(
+          `تعذّر تجهيز الصورة المالية للطلب ${order.orderNumber} — الطلب سيظل ظاهرًا للفني بدون أرقام مالية`,
+          reason instanceof Error ? reason.stack : undefined,
+        );
+        return null;
+      }),
       contactVisible ? this.customerProfilesService.findContactInfoOrThrow(order.customerId) : Promise.resolve(null),
       // بَقّة حقيقية (docs/08 §64.أ): كانت findServiceOrThrow() اللي بتفلتر is_active=true —
       // فأي طلب خدمته اتوقفت بعد إنشائه كان بيرمي 404 يفضّي شاشة الفني بالكامل ويمنع تنفيذ الشغل.

@@ -24,13 +24,22 @@ export function allocateSettlementRefundReversal(input: {
   if (orderTotal <= 0) throw new Error('Refund allocation requires a positive original order total');
   if (previous + current > orderTotal) throw new Error('Cumulative refund cannot exceed the original order total');
 
-  const bucketTotal = input.buckets.reduce((sum, bucket) => sum + money('originalCents', bucket.originalCents), 0);
+  const bucketTotal = input.buckets.reduce((sum, bucket) => {
+    const original = bucket.bucketType === 'platform'
+      ? signedMoney('platform originalCents', bucket.originalCents)
+      : money('participant originalCents', bucket.originalCents);
+    return sum + original;
+  }, 0);
   if (bucketTotal !== orderTotal) {
     throw new Error('Settlement refund buckets must equal the original order total');
   }
 
-  const previousTargets = cumulativeTargets(previous, orderTotal, input.buckets);
-  const nextTargets = cumulativeTargets(previous + current, orderTotal, input.buckets);
+  const hasPlatformSubsidy = input.buckets.some(
+    (bucket) => bucket.bucketType === 'platform' && bucket.originalCents < 0,
+  );
+  const targetResolver = hasPlatformSubsidy ? cumulativeSubsidizedTargets : cumulativeTargets;
+  const previousTargets = targetResolver(previous, orderTotal, input.buckets);
+  const nextTargets = targetResolver(previous + current, orderTotal, input.buckets);
   const reversals = input.buckets.map((bucket, index) => ({
     ...bucket,
     reversalCents: nextTargets[index] - previousTargets[index],
@@ -40,6 +49,37 @@ export function allocateSettlementRefundReversal(input: {
     throw new Error('Settlement refund reversal does not equal the current refund');
   }
   return reversals;
+}
+
+/**
+ * A platform-funded discount creates a negative platform bucket and participant shares whose sum
+ * is greater than the customer total. Participant reversals still telescope proportionally to
+ * their complete immutable shares; the platform bucket is the exact residual, and can therefore
+ * be negative. Keeping this separate preserves the original largest-remainder behavior for every
+ * historical non-subsidized settlement.
+ */
+function cumulativeSubsidizedTargets(
+  cumulativeRefundCents: number,
+  orderTotalCents: number,
+  buckets: SettlementRefundBucket[],
+): number[] {
+  const platformIndexes = buckets
+    .map((bucket, index) => ({ bucket, index }))
+    .filter(({ bucket }) => bucket.bucketType === 'platform');
+  if (platformIndexes.length !== 1) {
+    throw new Error('Subsidized settlement requires exactly one platform bucket');
+  }
+
+  const total = BigInt(orderTotalCents);
+  const cumulative = BigInt(cumulativeRefundCents);
+  const targets = buckets.map((bucket) =>
+    bucket.bucketType === 'participant'
+      ? Number((cumulative * BigInt(bucket.originalCents)) / total)
+      : 0,
+  );
+  const participantTotal = targets.reduce((sum, target) => sum + target, 0);
+  targets[platformIndexes[0].index] = cumulativeRefundCents - participantTotal;
+  return targets;
 }
 
 function cumulativeTargets(
@@ -70,5 +110,10 @@ function cumulativeTargets(
 
 function money(name: string, value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be non-negative integer piasters`);
+  return value;
+}
+
+function signedMoney(name: string, value: number): number {
+  if (!Number.isSafeInteger(value)) throw new Error(`${name} must be integer piasters`);
   return value;
 }

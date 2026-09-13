@@ -66,6 +66,7 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       optionalAssistantsAdded: 0,
       optionalAssistantSlots: 0,
     },
+    moneyError?: Error,
   ): TechnicianOrderExecutionController {
     return new TechnicianOrderExecutionController(
       {
@@ -92,12 +93,14 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       { findByUserIdOrThrow: jest.fn().mockResolvedValue({ id: current.technicianId }) } as never,
       {
         // docs/08 §60.2 — الكولر بقى بينادي الصورة المفلترة بدل التفصيل الكامل.
-        getTechnicianMoneyView: jest.fn().mockResolvedValue({
-          cashToCollectCents: 10000,
-          myEarningCents: 9000,
-          hasOnlinePayment: false,
-          fullyPaidOnline: false,
-        }),
+        getTechnicianMoneyView: moneyError
+          ? jest.fn().mockRejectedValue(moneyError)
+          : jest.fn().mockResolvedValue({
+              cashToCollectCents: 10000,
+              myEarningCents: 9000,
+              hasOnlinePayment: false,
+              fullyPaidOnline: false,
+            }),
       } as never,
       { findServiceForDisplay: jest.fn().mockResolvedValue({ nameAr: 'خدمة اختبار' }) } as never,
       {} as never,
@@ -145,5 +148,33 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
     );
 
     expect((dto as { crew_status?: unknown }).crew_status).toMatchObject({ missingAssistants: 1, crewComplete: false });
+  });
+
+  it('keeps an assigned order visible when its read-only money preview fails', async () => {
+    const current = order(OrderStatus.ACCEPTED);
+    const dto = await controller(
+      current,
+      {
+        requiredTechnicians: 1,
+        requiredAssistants: 0,
+        assignedTechnicians: 1,
+        assignedAssistants: 0,
+        missingTechnicians: 0,
+        missingAssistants: 0,
+        crewComplete: true,
+        optionalAssistantsAdded: 0,
+        optionalAssistantSlots: 0,
+      },
+      new Error('financial preview unavailable'),
+    ).getOne(
+      { sub: 'technician-user' } as never,
+      '00000000-0000-4000-8000-000000000001',
+    );
+
+    expect(dto.order_number).toBe('ORD-CONTACT-1');
+    expect(dto.customer_name).toBe(contact.name);
+    expect(dto.my_earning_cents).toBeUndefined();
+    expect(dto.cash_to_collect_cents).toBeUndefined();
+    expect((dto as unknown as Record<string, unknown>).total_amount_cents).toBeUndefined();
   });
 });

@@ -44,7 +44,7 @@ export function calculateEarningsV2(
   participants: EarningsParticipantInput[],
 ): EarningsCalculationResult {
   assertMoney('orderTotalCents', orderTotalCents);
-  assertMoney('platformCommissionCents', platformCommissionCents);
+  assertSignedMoney('platformCommissionCents', platformCommissionCents);
   if (platformCommissionCents > orderTotalCents) {
     throw new Error('V2 platform commission cannot exceed the final order total');
   }
@@ -162,6 +162,17 @@ function validateParticipants(participants: EarningsParticipantInput[]): void {
 function assertMoney(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${name} must be a non-negative safe integer in piasters`);
+  }
+}
+
+/**
+ * A platform-funded discount can make the platform share negative while the technician keeps
+ * their full pre-discount earning. The value is still exact integer money; only its direction
+ * differs. Rejecting it here made valid discounted orders disappear from technician reads.
+ */
+function assertSignedMoney(name: string, value: number): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(`${name} must be a safe integer in piasters`);
   }
 }
 

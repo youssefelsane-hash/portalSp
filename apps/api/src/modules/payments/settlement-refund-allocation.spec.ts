@@ -111,4 +111,44 @@ describe('V2 settlement refund allocation', () => {
     expect(result.reduce((sum, row) => sum + row.reversalCents, 0)).toBe(refund);
     expect(result.every((row) => row.reversalCents <= row.originalCents)).toBe(true);
   });
+
+  it('reverses a platform-funded discount without leaving technician money behind', () => {
+    const subsidized: SettlementRefundBucket[] = [
+      { bucketType: 'platform', technicianId: null, originalCents: -1_200 },
+      { bucketType: 'participant', technicianId: 'lead', originalCents: 10_200 },
+    ];
+    const first = allocateSettlementRefundReversal({
+      orderTotalCents: 9_000,
+      previouslyRefundedCents: 0,
+      currentRefundCents: 3_000,
+      buckets: subsidized,
+    });
+    const final = allocateSettlementRefundReversal({
+      orderTotalCents: 9_000,
+      previouslyRefundedCents: 3_000,
+      currentRefundCents: 6_000,
+      buckets: subsidized,
+    });
+
+    expect(first.reduce((sum, row) => sum + row.reversalCents, 0)).toBe(3_000);
+    expect(final.reduce((sum, row) => sum + row.reversalCents, 0)).toBe(6_000);
+    expect(first.map((row, index) => row.reversalCents + final[index].reversalCents)).toEqual([
+      -1_200,
+      10_200,
+    ]);
+  });
+
+  it('never permits a negative participant settlement bucket', () => {
+    expect(() =>
+      allocateSettlementRefundReversal({
+        orderTotalCents: 9_000,
+        previouslyRefundedCents: 0,
+        currentRefundCents: 1_000,
+        buckets: [
+          { bucketType: 'platform', technicianId: null, originalCents: 10_000 },
+          { bucketType: 'participant', technicianId: 'lead', originalCents: -1_000 },
+        ],
+      }),
+    ).toThrow('participant originalCents must be non-negative');
+  });
 });
