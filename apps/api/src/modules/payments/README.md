@@ -1002,3 +1002,50 @@ deploy. والوسم مابيظهرش خالص لو الوسيلة نفسها م
 
 `node scripts/instapay-anytime-audit.js [--verbose]` — ٣٨ بند على API حقيقي. محتاج
 `THROTTLE_LIMIT=100000 npm run start:dev`، وبيرجّع إعدادات حساب InstaPay زي ما كانت بعد ما يخلص.
+
+## وعاء العمولة: قصّ الحد الأدنى/الأقصى سعر خدمة مش «زيادة منطقة» (docs/08 §145، بلاغ مالك 2026-09-13)
+
+### البلاغ
+
+طلب بـ١٢٠ ج.م راحت **كلها** عمولة للمنصة ومستحق الفني صفر.
+
+### السبب الجذري
+
+`splitEstimatedTotal()` كانت بتستنتج زيادة المنطقة **بالطرح**: أي فرق بين الإجمالي و
+`base_price_cents × مضاعف المستوى`. وسياسة `commission_base.include_zone_surge = false` بتشيل
+الفرق ده من الوعاء.
+
+الفرق ده مش زيادة منطقة. زيادة المنطقة بتتطبّق في `catalog.service.ts` **جوّه**
+`zoneAdjustedBaseCents`، واللي بيتحط في `estimate.base_price_cents` — يعني داخلة في سعر الشغل
+أصلاً. اللي كان بيتلقط بالطرح هو **قصّ `min_price_cents`/`max_price_cents`**، وده سعر خدمة
+حقيقي العميل دفعه.
+
+خدمة سعر معادلتها صفر وحدها الأدنى ١٢٠ ج.م ⇒ `commissionable_base_cents = 0` ⇒
+`technicianEarningCents = 0` ⇒ `platformCommissionCents = totalAmountCents` (١٠٠٪ للمنصة).
+
+### الإصلاح
+
+`estimate.zone_surge_cents` بقى حقل معلن في عقد التسعير وبيتمرَّر صراحةً لـ
+`OrderRevenueComponents`. `splitEstimatedTotal()` بقت بتاخده زي ما هو وبترمي **باقي الإجمالي**
+في سعر الشغل. الثابت `work + level + zone === total` محفوظ، و`include_zone_surge` بقى ليه
+معنى حقيقي لأول مرة (قبل كده كان بيشيل القصّ مش المنطقة).
+
+### ليه الاختبارات مامسكتهاش
+
+`commission-base.spec.ts` كان بيفترض إن زيادة المنطقة بتتضرب **بعد** الإجمالي، فكان أخضر وهو
+بيوصف خط أنابيب مش موجود. اتصلح ليطابق الواقع + حالة بلاغ المالك بالحرف.
+
+### التدقيق
+
+`node scripts/order-money-integrity-audit.js` — بيعمل الطلبات بـ`POST /orders` **حقيقي**
+وبيفحص `commissionable_base_cents` المخزّن على ٦ تركيبات تسعير.
+
+⚠️ **`money-paths-audit.js` مش بديل عنه**: هو بيزرع الطلب بـ
+`commissionable_base_cents = total_amount_cents`، يعني بيفترض إن الوعاء صح — وعدّى ١٣١/١٣١
+والبقّة دي موجودة.
+
+### الطلبات القديمة
+
+`commissionable_base_cents` بيتخزّن كـsnapshot وقت الإنشاء عمدًا، فالإصلاح بيسري على الجديد بس.
+الاستعلام اللي بيلاقي الطلبات المتأثرة موجود في docs/08 §145؛ التعويض قرار مالك ومساره
+`AdminWalletController` (تصحيح محفظة يدوي بسبب مكتوب).

@@ -18,7 +18,16 @@ import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pri
 import { BookingModeFilter } from './dto/list-services.dto';
 
 export interface PriceEstimate {
+  /** سعر الشغل **بعد** زيادة المنطقة (`zoneAdjustedBaseCents`) وقبل مضاعف المستوى والقصّ. */
   base_price_cents: number;
+  /**
+   * زيادة مضاعف المنطقة لوحدها، بالقروش (docs/08 §145).
+   *
+   * لازم تتعلن صراحةً لأنها **داخلة جوّه `base_price_cents`** فوق — من غيرها كان اللي بيحسب
+   * وعاء العمولة بيستنتجها بالطرح، والطرح ده كان بيلقط قصّ الحد الأدنى/الأقصى بالغلط ويشيله
+   * من مستحق الفني.
+   */
+  zone_surge_cents: number;
   inspection_fee_cents: number;
   surge_multiplier: number;
   level_price_multiplier: number;
@@ -555,6 +564,7 @@ export class CatalogService {
     const emergencyBaseCents = estimatedTotalCents + inspectionFeeCents;
     return {
       base_price_cents: zoneAdjustedBaseCents,
+      zone_surge_cents: Math.max(zoneAdjustedBaseCents - result.priceCents, 0),
       inspection_fee_cents: inspectionFeeCents,
       surge_multiplier: surgeMultiplier,
       level_price_multiplier: levelMultiplier,
