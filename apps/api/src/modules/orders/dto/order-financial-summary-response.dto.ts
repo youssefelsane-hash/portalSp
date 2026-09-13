@@ -5,6 +5,12 @@ import { Refund, RefundMethod, RefundStatus, RefundType } from '../../payments/e
 // للسبب: الحقول دي (عمولة/أرباح) كانت محسوبة ومخزّنة على الطلب من زمان بس مش معروضة لأي أدمن.
 export interface OrderPaymentSummaryDto {
   id: string;
+  /**
+   * رقم الدفعة المعروض (`PAY-…`) — **المعرّف الوحيد اللي الأدمن يقدر يطابق بيه** الدفعة في
+   * قايمة اختيار الاسترداد وفي سجل تحويلات InstaPay. دفعات الطلب المركّب بتبقى كلها بنفس
+   * الوسيلة وفي نفس اليوم، فالمبلغ وحده مش تمييز كافٍ.
+   */
+  payment_number: string;
   payment_method: PaymentMethod;
   payment_status: PaymentGatewayStatus;
   amount_cents: number;
@@ -19,6 +25,11 @@ export interface OrderPaymentSummaryDto {
 
 export interface OrderRefundSummaryDto {
   id: string;
+  /**
+   * الدفعـة اللي الاسترداد ده متعلّق بيها. الطلب المركّب (دفعة أساسية + دفعات شغل إضافي) بيبقى
+   * فيه أكتر من دفعة قابلة للاسترداد، والأدمن لازم يشوف المتبقي لكل واحدة لوحدها قبل ما يختار.
+   */
+  payment_id: string;
   amount_cents: number;
   refund_type: RefundType;
   refund_method: RefundMethod;
@@ -55,6 +66,7 @@ export function toOrderFinancialSummaryResponseDto(summary: {
   payments: Pick<
     Payment,
     | 'id'
+    | 'paymentNumber'
     | 'paymentMethod'
     | 'paymentStatus'
     | 'amountCents'
@@ -64,7 +76,7 @@ export function toOrderFinancialSummaryResponseDto(summary: {
     | 'failureMessage'
     | 'customerConfirmedTransferAt'
   >[];
-  refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
+  refunds: Pick<Refund, 'id' | 'paymentId' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
 }): OrderFinancialSummaryResponseDto {
   return {
     total_amount_cents: summary.totalAmountCents,
@@ -79,6 +91,7 @@ export function toOrderFinancialSummaryResponseDto(summary: {
     cancellation_fee_cents: summary.cancellationFeeCents,
     payments: summary.payments.map((p) => ({
       id: p.id,
+      payment_number: p.paymentNumber,
       payment_method: p.paymentMethod,
       payment_status: p.paymentStatus,
       amount_cents: p.amountCents,
@@ -90,6 +103,7 @@ export function toOrderFinancialSummaryResponseDto(summary: {
     })),
     refunds: summary.refunds.map((r) => ({
       id: r.id,
+      payment_id: r.paymentId,
       amount_cents: r.amountCents,
       refund_type: r.refundType,
       refund_method: r.refundMethod,

@@ -3253,6 +3253,7 @@ export class PaymentsService {
     payments: Pick<
       Payment,
       | 'id'
+      | 'paymentNumber'
       | 'paymentMethod'
       | 'paymentStatus'
       | 'amountCents'
@@ -3262,7 +3263,7 @@ export class PaymentsService {
       | 'failureMessage'
       | 'customerConfirmedTransferAt'
     >[];
-    refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
+    refunds: Pick<Refund, 'id' | 'paymentId' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
   }> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order) {
@@ -3611,7 +3612,7 @@ export class PaymentsService {
         if (!paymentId && refundablePayments.length > 1) {
           throw new ApiException(
             ErrorCode.PAY_003,
-            'الطلب فيه أكثر من دفعة قابلة للاسترداد — ابعت payment_id لتحديد الدفعة المقصودة',
+            'الطلب فيه أكثر من دفعة قابلة للاسترداد — اختار الدفعة المقصودة من قايمة الدفعات',
             HttpStatus.CONFLICT,
           );
         }

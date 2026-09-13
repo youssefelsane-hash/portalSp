@@ -7,6 +7,7 @@ import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refun
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { toOrderFinancialSummaryResponseDto } from '../orders/dto/order-financial-summary-response.dto';
 
 // اختبار حي ضد Postgres حقيقي — docs/08 §20 بند 11: PaymentsService.getFinancialSummaryForOrder()
 // جديدة (كانت فجوة عرض حقيقية: platform_commission_cents/technician_earning_cents محسوبين
@@ -169,6 +170,18 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
     expect(summary.refunds[0].refundType).toBe(RefundType.PARTIAL);
     expect(summary.refunds[0].refundMethod).toBe(RefundMethod.WALLET_CREDIT);
     expect(summary.refunds[0].refundStatus).toBe(RefundStatus.COMPLETED);
+  });
+
+  // بلاغ مالك 2026-09-13 (docs/08 §147): الطلب المركّب بيترفض استرداده بلا `payment_id`، وقايمة
+  // اختيار الدفعة في صفحة الأدمن مبنية بالكامل على الحقلين دول. غيابهم بيرجّع الأدمن لنفس
+  // الطريق المسدود من غير ما أي اختبار تاني يزعق.
+  it('شكل الملخص المعروض للأدمن: رقم لكل دفعة + كل استرداد مربوط بدفعته', async () => {
+    const dto = toOrderFinancialSummaryResponseDto(await service.getFinancialSummaryForOrder(ids.order));
+
+    expect(dto.payments).toHaveLength(1);
+    expect(dto.payments[0].payment_number).toBe(`PAYFIN-${runId}`.slice(0, 24));
+    expect(dto.refunds).toHaveLength(1);
+    expect(dto.refunds[0].payment_id).toBe(ids.payment);
   });
 
   it('طلب غير موجود يترفض بوضوح بدل ما يرجّع بيانات فاضية بصمت', async () => {
