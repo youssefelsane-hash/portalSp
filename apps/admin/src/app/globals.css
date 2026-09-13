@@ -5,29 +5,27 @@
 
 :root {
   --radius: 0.875rem;
-  --background: oklch(0.975 0.008 247);
-  --foreground: oklch(0.18 0.014 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.014 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.014 255);
-  /* هوية "صُنّاع" — نظام التصميم المشترك (docs/12، مرحلة تحسين UI/UX 2026-08-13). كانت الواجهة
-     كلها رمادي محايد بالكامل (oklch بدون chroma/hue) — بدون هوية بصرية ولا تفريق دلالي بين
-     حالات (نجاح/تحذير/خطر). أزرق ثقة احترافي (نفس نطاق الألوان المستخدم في أنظمة تشغيل B2B
-     عالمية) بدل الرمادي البحت، واستُبقي التباين العالي لضمان قراءة عربية واضحة. */
-  --primary: oklch(0.47 0.16 258);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.006 255);
-  --secondary-foreground: oklch(0.22 0.02 255);
-  --muted: oklch(0.96 0.006 255);
-  --muted-foreground: oklch(0.5 0.02 255);
-  --accent: oklch(0.94 0.03 258);
-  --accent-foreground: oklch(0.3 0.09 258);
+  --background: #f7f4ee;
+  --foreground: #17211f;
+  --card: #fffdf8;
+  --card-foreground: #17211f;
+  --popover: #fffdf8;
+  --popover-foreground: #17211f;
+  /* ADR-0092: أخضر حرفي عميق + عاجي دافئ. حالات success/warning/danger تحت منفصلة عمدًا
+     عن البراند حتى اللون يفضل معلومة تشغيلية، مش مجرد زينة. */
+  --primary: #153f38;
+  --primary-foreground: #f7f2e8;
+  --secondary: #eee8dd;
+  --secondary-foreground: #24312e;
+  --muted: #eee8dd;
+  --muted-foreground: #65716e;
+  --accent: #e2eee9;
+  --accent-foreground: #153f38;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0.006 255);
-  --input: oklch(0.9 0.006 255);
-  --ring: oklch(0.47 0.16 258 / 40%);
+  --border: #d9d2c6;
+  --input: #d9d2c6;
+  --ring: rgb(21 63 56 / 40%);
   /* حالات دلالية (status chips، تنبيهات، ملخصات لوحة التحكم) — نجاح/تحذير/خطر/معلومة، منفصلة
      عمداً عن --destructive (ده لإجراءات هدّامة زي "حذف"، مش لعرض حالة "طلب اتلغى"). */
   --success: oklch(0.5 0.13 152);
@@ -45,25 +43,25 @@
 }
 
 .dark {
-  --background: oklch(0.16 0.012 255);
-  --foreground: oklch(0.96 0.004 255);
-  --card: oklch(0.2 0.014 255);
-  --card-foreground: oklch(0.96 0.004 255);
-  --popover: oklch(0.2 0.014 255);
-  --popover-foreground: oklch(0.96 0.004 255);
-  --primary: oklch(0.72 0.13 258);
-  --primary-foreground: oklch(0.16 0.02 255);
-  --secondary: oklch(0.27 0.014 255);
-  --secondary-foreground: oklch(0.96 0.004 255);
-  --muted: oklch(0.27 0.014 255);
-  --muted-foreground: oklch(0.68 0.014 255);
-  --accent: oklch(0.3 0.05 258);
-  --accent-foreground: oklch(0.9 0.03 258);
+  --background: #101816;
+  --foreground: #f3eee5;
+  --card: #182320;
+  --card-foreground: #f3eee5;
+  --popover: #182320;
+  --popover-foreground: #f3eee5;
+  --primary: #8fc2b5;
+  --primary-foreground: #10231f;
+  --secondary: #26322f;
+  --secondary-foreground: #f3eee5;
+  --muted: #26322f;
+  --muted-foreground: #a9b5b1;
+  --accent: #28453f;
+  --accent-foreground: #dcebe6;
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.72 0.13 258 / 45%);
+  --ring: rgb(143 194 181 / 45%);
   --success: oklch(0.72 0.15 152);
   --success-foreground: oklch(0.16 0.02 255);
   --success-bg: oklch(0.27 0.05 152);
@@ -125,7 +123,11 @@
   body {
     @apply bg-background text-foreground;
     background-image:
-      radial-gradient(circle at 85% -10%, oklch(0.82 0.09 255 / 20%), transparent 32rem),
+      radial-gradient(
+        circle at 85% -10%,
+        oklch(0.82 0.09 255 / 20%),
+        transparent 32rem
+      ),
       linear-gradient(180deg, oklch(1 0 0 / 70%), transparent 24rem);
   }
   ::selection {
@@ -173,8 +175,14 @@
   /* دخول محتوى جديد: شفافية + إزاحة 4px بس. الإزاحة الصغيرة هي اللي بتخلي العين تلاحظ
      إن ده محتوى **جديد**، والكبيرة هي اللي بتخلي الصفحة تبان بتترجرج. */
   @keyframes motion-rise {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: none; }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
   .motion-rise {
     animation: motion-rise var(--motion-base) var(--motion-ease) both;
@@ -182,20 +190,42 @@
 
   /* تدرّج بسيط لقايمة قصيرة (كروت/صفوف). بيقف عند العنصر الثامن عمدًا — أي تأخير أطول من
      كده بيتحوّل من «إحساس بالترتيب» لـ«انتظار». */
-  .motion-list > *:nth-child(1) { animation-delay: 0ms; }
-  .motion-list > *:nth-child(2) { animation-delay: 25ms; }
-  .motion-list > *:nth-child(3) { animation-delay: 50ms; }
-  .motion-list > *:nth-child(4) { animation-delay: 75ms; }
-  .motion-list > *:nth-child(5) { animation-delay: 100ms; }
-  .motion-list > *:nth-child(6) { animation-delay: 125ms; }
-  .motion-list > *:nth-child(7) { animation-delay: 150ms; }
-  .motion-list > *:nth-child(n + 8) { animation-delay: 175ms; }
+  .motion-list > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .motion-list > *:nth-child(2) {
+    animation-delay: 25ms;
+  }
+  .motion-list > *:nth-child(3) {
+    animation-delay: 50ms;
+  }
+  .motion-list > *:nth-child(4) {
+    animation-delay: 75ms;
+  }
+  .motion-list > *:nth-child(5) {
+    animation-delay: 100ms;
+  }
+  .motion-list > *:nth-child(6) {
+    animation-delay: 125ms;
+  }
+  .motion-list > *:nth-child(7) {
+    animation-delay: 150ms;
+  }
+  .motion-list > *:nth-child(n + 8) {
+    animation-delay: 175ms;
+  }
 
   /* رقم اتغيّر (عدّاد لحظي، سعر، رصيد): ومضة خفيفة على القيمة نفسها. أنضف بكتير من عدّاد
      بيلف من رقم لرقم — ده بيخلي القراءة أصعب وقت التغيير بالظبط. */
   @keyframes motion-value-change {
-    0%   { transform: translateY(-2px); opacity: 0.55; }
-    100% { transform: none; opacity: 1; }
+    0% {
+      transform: translateY(-2px);
+      opacity: 0.55;
+    }
+    100% {
+      transform: none;
+      opacity: 1;
+    }
   }
   .motion-value-change {
     animation: motion-value-change var(--motion-slow) var(--motion-ease);
@@ -204,8 +234,12 @@
   /* صف اتحدّث لحظيًا: تظليل بيروح لوحده. المستخدم بيعرف **أنهي** صف اتغيّر من غير ما نضطر
      نلوّنه للأبد ولا نحطّ بادچ زيادة. */
   @keyframes motion-row-flash {
-    from { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
-    to   { background-color: transparent; }
+    from {
+      background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+    }
+    to {
+      background-color: transparent;
+    }
   }
   .motion-row-flash {
     animation: motion-row-flash 900ms var(--motion-ease);
@@ -229,8 +263,9 @@
   /* استجابة اللمس/الضغط على أي عنصر تفاعلي — أصغر feedback ممكن وأكترهم إفادة: بيقول
      «الضغطة وصلت» قبل ما الشبكة ترد أصلاً. */
   .motion-press {
-    transition: transform var(--motion-fast) var(--motion-ease),
-                box-shadow var(--motion-fast) var(--motion-ease);
+    transition:
+      transform var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease);
   }
   .motion-press:active {
     transform: scale(0.985);

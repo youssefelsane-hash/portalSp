@@ -13,6 +13,22 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 
+const ASSET_GUIDANCE: Record<BrandingAssetType, string> = {
+  primary_logo: 'شعار أفقي شفاف بنسبة قريبة من 3.5:1. الأفضل PNG بعرض 1200 بكسل.',
+  logo_mark: 'رمز مربع شفاف بلا نص. الأفضل PNG مقاس 512×512 بكسل.',
+  splash: 'صورة أفقية 3:2 ومساحة هادئة للنص. الأفضل 1536×1024 بكسل.',
+};
+
+const BRAND_DOWNLOADS = [
+  { href: '/brand/osta-logo.png', label: 'تحميل الشعار' },
+  { href: '/brand/osta-mark.png', label: 'تحميل الرمز' },
+  { href: '/brand/osta-customer-icon.png', label: 'أيقونة العميل' },
+  { href: '/brand/osta-technician-icon.png', label: 'أيقونة الفني' },
+  { href: '/brand/sanaa-tetammen-hero.png', label: 'صورة الحملة' },
+  { href: '/brand/sanaa-tetammen-feed.png', label: 'بوستر Feed' },
+  { href: '/brand/sanaa-tetammen-story.png', label: 'بوستر Story' },
+];
+
 // إدارة البراندنج (ADR-0014) — Super Admin يرفع/يستبدل/يمسح أي أصل من غير أي deployment.
 // Step-Up (POST/DELETE) بيتعامل معاه تلقائيًا جوّه authedFetch، الصفحة دي مش عارفة عنه خالص.
 export default function BrandingPage() {
@@ -73,11 +89,42 @@ export default function BrandingPage() {
 
   return (
     <AppShell>
-      <PageHeader
-        title="البراندنج"
-        description="رفع/استبدال شعارات المنصة — بتتحدّث فورًا في كل التطبيقات من غير أي deployment. PNG/JPEG/WEBP بس، حتى 5MB، أبعاد بين 32 و4096 بكسل."
-      />
+      <PageHeader title="البراندنج" description="رفع/استبدال شعارات المنصة — بتتحدّث فورًا في كل التطبيقات من غير أي deployment. PNG/JPEG/WEBP بس، حتى 5MB، أبعاد بين 32 و4096 بكسل." />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+
+      <Card className="mb-5 overflow-hidden border-primary/20 bg-[linear-gradient(135deg,#153f38_0%,#0d2d29_68%,#17211f_100%)] text-[#f7f2e8]">
+        <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <p className="text-xs font-semibold tracking-[0.22em] text-[#d99a78]">OSTA BRAND SYSTEM</p>
+            <h2 className="mt-2 text-2xl font-bold">صنعة تِطَمِّن</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-7 text-[#f7f2e8]/75">
+              الأخضر العميق للثقة، العاجي للدفء، والنحاسي كتوقيع محدود. حافظ على الرمز والحملة بنفس النِسب والألوان حتى يتعرّف الناس على OSTA قبل قراءة الاسم.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {BRAND_DOWNLOADS.map((item) => (
+                <Button key={item.href} asChild size="sm" variant="secondary">
+                  <a href={item.href} download>
+                    {item.label}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2" aria-label="ألوان OSTA الأساسية">
+            {[
+              ['#153F38', 'أخضر'],
+              ['#F7F2E8', 'عاجي'],
+              ['#C66F45', 'نحاسي'],
+              ['#17211F', 'حبر'],
+            ].map(([color, name]) => (
+              <div key={color} className="text-center text-[10px] text-[#f7f2e8]/70">
+                <div className="mx-auto mb-1 size-10 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: color }} />
+                <span>{name}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {BRANDING_ASSET_TYPES.map((assetType) => (
@@ -120,6 +167,7 @@ function BrandingAssetCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <p className="mb-3 min-h-10 text-xs leading-5 text-muted-foreground">{ASSET_GUIDANCE[assetType]}</p>
         {/* معاينة على الخلفيتين مع بعض (docs/08 §78-ج): التطبيق بيدعم الوضع الفاتح والداكن،
             فاللوجو بيتعرض فوق الاتنين فعلاً. معاينة على خلفية واحدة كانت بتخفي المشكلة الشائعة
             (لوجو أبيض على خلفية بيضا = مختفي) لحد ما تظهر على جهاز مستخدم حقيقي. */}
@@ -137,7 +185,8 @@ function BrandingAssetCard({
         </div>
         {asset && asset.is_default === false && (
           <p className="mt-2 text-xs text-muted-foreground" dir="ltr">
-            {asset.width_px}×{asset.height_px}px · {asset.file_size_bytes ? Math.round(asset.file_size_bytes / 1024) : 0}KB
+            {asset.width_px}×{asset.height_px}px · {asset.file_size_bytes ? Math.round(asset.file_size_bytes / 1024) : 0}
+            KB
           </p>
         )}
       </CardContent>

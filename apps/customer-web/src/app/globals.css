@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 /* نفس القيم الدلالية المستخدمة في apps/customer-app/lib/design/app_theme.dart وapps/admin —
-   هوية بصرية موحّدة عبر المنصات الثلاث (§71: SONNA3 brand palette، مش استنساخ Thumbtack/Angi). */
+   هوية بصرية موحّدة عبر المنصات الثلاث (ADR-0092: أخضر حرفي + عاجي دافئ). */
 :root {
-  --background: #f7f8fa;
-  --foreground: #14171f;
-  --surface: #ffffff;
-  --surface-variant: #eef1f6;
-  --border: #dde2ea;
-  --primary: #2f5aa6;
-  --primary-foreground: #ffffff;
+  --background: #f7f4ee;
+  --foreground: #17211f;
+  --surface: #fffdf8;
+  --surface-variant: #eee8dd;
+  --border: #d9d2c6;
+  --primary: #153f38;
+  --primary-foreground: #f7f2e8;
   --success: #3c8b4a;
   --warning: #c98a1f;
   --danger: #c0392b;
-  --info: #3d62a6;
+  --info: #356a91;
   --muted: #6b7280;
 }
 
@@ -35,18 +35,18 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0f1115;
-    --foreground: #eef1f6;
-    --surface: #171a21;
-    --surface-variant: #1f232c;
-    --border: #2a2f3a;
-    --primary: #7fa6e0;
-    --primary-foreground: #0f1115;
+    --background: #101816;
+    --foreground: #f3eee5;
+    --surface: #182320;
+    --surface-variant: #26322f;
+    --border: #34423e;
+    --primary: #8fc2b5;
+    --primary-foreground: #10231f;
     --success: #6fbf7a;
     --warning: #e0ac4e;
     --danger: #e07a6b;
-    --info: #87a9de;
-    --muted: #9aa3b2;
+    --info: #8ab4d2;
+    --muted: #a9b5b1;
   }
 }
 
@@ -90,8 +90,14 @@ body {
   /* دخول محتوى جديد: شفافية + إزاحة 4px بس. الإزاحة الصغيرة هي اللي بتخلي العين تلاحظ
      إن ده محتوى **جديد**، والكبيرة هي اللي بتخلي الصفحة تبان بتترجرج. */
   @keyframes motion-rise {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: none; }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
   .motion-rise {
     animation: motion-rise var(--motion-base) var(--motion-ease) both;
@@ -99,20 +105,42 @@ body {
 
   /* تدرّج بسيط لقايمة قصيرة (كروت/صفوف). بيقف عند العنصر الثامن عمدًا — أي تأخير أطول من
      كده بيتحوّل من «إحساس بالترتيب» لـ«انتظار». */
-  .motion-list > *:nth-child(1) { animation-delay: 0ms; }
-  .motion-list > *:nth-child(2) { animation-delay: 25ms; }
-  .motion-list > *:nth-child(3) { animation-delay: 50ms; }
-  .motion-list > *:nth-child(4) { animation-delay: 75ms; }
-  .motion-list > *:nth-child(5) { animation-delay: 100ms; }
-  .motion-list > *:nth-child(6) { animation-delay: 125ms; }
-  .motion-list > *:nth-child(7) { animation-delay: 150ms; }
-  .motion-list > *:nth-child(n + 8) { animation-delay: 175ms; }
+  .motion-list > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .motion-list > *:nth-child(2) {
+    animation-delay: 25ms;
+  }
+  .motion-list > *:nth-child(3) {
+    animation-delay: 50ms;
+  }
+  .motion-list > *:nth-child(4) {
+    animation-delay: 75ms;
+  }
+  .motion-list > *:nth-child(5) {
+    animation-delay: 100ms;
+  }
+  .motion-list > *:nth-child(6) {
+    animation-delay: 125ms;
+  }
+  .motion-list > *:nth-child(7) {
+    animation-delay: 150ms;
+  }
+  .motion-list > *:nth-child(n + 8) {
+    animation-delay: 175ms;
+  }
 
   /* رقم اتغيّر (عدّاد لحظي، سعر، رصيد): ومضة خفيفة على القيمة نفسها. أنضف بكتير من عدّاد
      بيلف من رقم لرقم — ده بيخلي القراءة أصعب وقت التغيير بالظبط. */
   @keyframes motion-value-change {
-    0%   { transform: translateY(-2px); opacity: 0.55; }
-    100% { transform: none; opacity: 1; }
+    0% {
+      transform: translateY(-2px);
+      opacity: 0.55;
+    }
+    100% {
+      transform: none;
+      opacity: 1;
+    }
   }
   .motion-value-change {
     animation: motion-value-change var(--motion-slow) var(--motion-ease);
@@ -121,8 +149,12 @@ body {
   /* صف اتحدّث لحظيًا: تظليل بيروح لوحده. المستخدم بيعرف **أنهي** صف اتغيّر من غير ما نضطر
      نلوّنه للأبد ولا نحطّ بادچ زيادة. */
   @keyframes motion-row-flash {
-    from { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
-    to   { background-color: transparent; }
+    from {
+      background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+    }
+    to {
+      background-color: transparent;
+    }
   }
   .motion-row-flash {
     animation: motion-row-flash 900ms var(--motion-ease);
@@ -146,8 +178,9 @@ body {
   /* استجابة اللمس/الضغط على أي عنصر تفاعلي — أصغر feedback ممكن وأكترهم إفادة: بيقول
      «الضغطة وصلت» قبل ما الشبكة ترد أصلاً. */
   .motion-press {
-    transition: transform var(--motion-fast) var(--motion-ease),
-                box-shadow var(--motion-fast) var(--motion-ease);
+    transition:
+      transform var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease);
   }
   .motion-press:active {
     transform: scale(0.985);

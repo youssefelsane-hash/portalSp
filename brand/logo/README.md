@@ -5,7 +5,8 @@
 
 ```bash
 python3 brand/logo/generate-logo.py brand/logo/svg      # يولّد الـSVG
-node scripts/export-brand-png.js                        # (اختياري) يصدّر الـPNG
+node scripts/export-brand-png.js                        # يصدّر PNG ويركّب أيقونات التطبيقات
+node scripts/export-brand-campaign.js                   # يصدّر مقاسات الحملة
 ```
 
 ## الفكرة في سطر
@@ -57,7 +58,7 @@ node scripts/export-brand-png.js                        # (اختياري) يص�
 
 - الرمز بياخد **٥٨٪** من عرض الكانفاس. منطقة الأمان في أيقونة أندرويد القابلة للقص (maskable)
   هي الدايرة المركزية بقطر **٨٠٪**، فالرمز جوّاها بهامش حقيقي وأي قصّ من النظام مش هيلمسه.
-- التدرّج `#3D6FC4 → #1B3564` قطري. مفيش ظل ولا لمعة — الاتنين بيتكسّروا عند ١٦ بكسل.
+- التدرّج `#245F54 → #0D2D29` قطري. مفيش ظل ولا لمعة — الاتنين بيتكسّروا عند ١٦ بكسل.
 - `osta-icon.svg` **مربع كامل بلا تدوير** — ده المطلوب لـiOS لأن النظام بيحط الماسك بنفسه.
   `osta-icon-rounded.svg` (تدوير ٢١.٩٪) للعرض والويب بس.
 - أندرويد التكيّفية بتاخد `osta-icon-foreground.svg` + `osta-icon-background.svg` كطبقتين.
@@ -73,6 +74,8 @@ node scripts/export-brand-png.js                        # (اختياري) يص�
 | `svg/osta-icon.svg` | أيقونة التطبيق — مربع كامل (iOS/المتاجر) |
 | `svg/osta-icon-rounded.svg` | نفسها بأركان مدوّرة — عرض وويب |
 | `svg/osta-icon-light.svg` | بديل فاتح |
+| `svg/osta-icon-technician.svg` | أيقونة الفني — نفس العائلة وتمييز نحاسي محدود |
+| `svg/osta-icon-monochrome.svg` | طبقة Android themed icon |
 | `svg/osta-icon-foreground.svg` · `-background.svg` | طبقتا أندرويد التكيّفية |
 | `png/icon-{16…1024}.png` | ١٢ حجم جاهز |
 | `png/logo-{300,600,1200}.png` | الشعار PNG (+ نسخة بيضا) |
@@ -91,10 +94,10 @@ node scripts/export-brand-png.js                        # (اختياري) يص�
 
 ## الألوان
 
-كلها موجودة أصلاً في `apps/customer-web/src/app/globals.css` و`app_theme.dart`. الهوية
-**مادخلتش لون برّه نظام المنصة** عشان اللوجو مايبقاش جسم غريب جوّه التطبيق.
+كلها موحّدة في `apps/customer-web/src/app/globals.css` و`app_theme.dart` وصفحة الأدمن. التفاصيل
+الكاملة وقواعد الحملات في `brand/BRAND-GUIDE.md`.
 
-`#2F5AA6` الأساسي · `#3D6FC4` أعلى التدرّج · `#1B3564` أسفله · `#14171F` الحبر
+`#153F38` الأساسي · `#F7F2E8` العاجي · `#C66F45` اللمسة النحاسية · `#17211F` الحبر
 
 ## بدائل اتجرّبت واترفضت
 

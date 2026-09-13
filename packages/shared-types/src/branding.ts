@@ -1,8 +1,8 @@
 // مطابق لـ apps/api/src/modules/branding (ADR-0014)
-// **نوعين بس (migration 0210، docs/08 §78-ج)** — الأربعة المتشالة (logo_mark/logo_light/
-// logo_dark/login_logo) مكانش ليهم أي مستهلك في أي تطبيق. لازم يفضل مطابقًا لـ
+// `logo_mark` رجع في ADR-0092 مع مستهلك فعلي في شِل لوحة الإدارة؛ الأنواع الشكلية الأخرى
+// (logo_light/logo_dark/login_logo) ما زالت مستبعدة. لازم يفضل مطابقًا لـ
 // apps/api/src/modules/branding/entities/branding-asset.entity.ts's BrandingAssetType.
-export type BrandingAssetType = 'primary_logo' | 'splash';
+export type BrandingAssetType = 'primary_logo' | 'logo_mark' | 'splash';
 
 export interface BrandingAssetResponseDto {
   asset_type: BrandingAssetType;
@@ -23,11 +23,12 @@ export interface AdminBrandingAssetResponseDto extends BrandingAssetResponseDto 
 export type BrandingPayloadDto = Record<BrandingAssetType, BrandingAssetResponseDto>;
 export type AdminBrandingPayloadDto = Record<BrandingAssetType, AdminBrandingAssetResponseDto>;
 
-export const BRANDING_ASSET_TYPES: BrandingAssetType[] = ['primary_logo', 'splash'];
+export const BRANDING_ASSET_TYPES: BrandingAssetType[] = ['primary_logo', 'logo_mark', 'splash'];
 
 export const BRANDING_ASSET_LABELS_AR: Record<BrandingAssetType, string> = {
   // اللوجو الوحيد في المنصة: رأس الشاشة الرئيسية + شاشة الدخول في تطبيق العميل.
   primary_logo: 'لوجو الشركة (الرأس + شاشة الدخول)',
+  logo_mark: 'الرمز المختصر (القائمة + المساحات الصغيرة)',
   // بلاغ مالك صريح 2026-08-23: كان اسمها "شاشة البداية (Splash)" — عمل تحمل ديه توهم إنها
   // خلفية الـsplash التقنية بس، بينما هي فعليًا الصورة اللي وراء صندوق البحث في الشاشة الرئيسية
   // (أول ما تفتح التطبيق). نفس asset_type='splash' في الـDB/الـAPI زي ما هو (مفيش migration)،

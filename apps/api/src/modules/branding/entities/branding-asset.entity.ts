@@ -1,13 +1,12 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 /**
- * **نوعين بس عمدًا (migration 0210، docs/08 §78-ج)** — كان فيه ستة، والأربعة المتشالة
- * (`logo_mark`/`logo_light`/`logo_dark`/`login_logo`) مكانش ليهم **ولا مستهلك واحد** في أي
- * تطبيق: خانات رفع بترفع ملف لتخزين حقيقي وما تظهرش في أي مكان. أي نوع جديد هنا لازم يتضاف
- * **مع** الكود اللي بيعرضه في نفس الـPR، مش قبله.
+ * الأنواع هنا لا تُضاف إلا مع مستهلك حقيقي. `logo_mark` أعيد في ADR-0092 لأنه يُعرض فعليًا
+ * في شِل لوحة الإدارة؛ `logo_light`/`logo_dark`/`login_logo` ما زالت مستبعدة لتجنب خانات وهمية.
  */
 export enum BrandingAssetType {
   PRIMARY_LOGO = 'primary_logo',
+  LOGO_MARK = 'logo_mark',
   SPLASH = 'splash',
 }
 
@@ -21,7 +20,13 @@ export class BrandingAsset {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
   id: string;
 
-  @Column({ name: 'asset_type', type: 'enum', enum: BrandingAssetType, enumName: 'branding_asset_type', unique: true })
+  @Column({
+    name: 'asset_type',
+    type: 'enum',
+    enum: BrandingAssetType,
+    enumName: 'branding_asset_type',
+    unique: true,
+  })
   assetType: BrandingAssetType;
 
   // مفتاح التخزين بس، مش رابط — الرابط بيتولّد طازة وقت كل قراءة (storage.getUrl()، ADR-0014).
@@ -40,7 +45,12 @@ export class BrandingAsset {
   @Column({ name: 'file_size_bytes', type: 'integer' })
   fileSizeBytes: number;
 
-  @Column({ name: 'original_file_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'original_file_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   originalFileName: string | null;
 
   @Column({ name: 'uploaded_by_user_id', type: 'uuid' })

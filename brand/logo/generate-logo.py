@@ -1,11 +1,16 @@
 """مولّد هوية OSTA — كل الأشكال محسوبة هندسيًا، مفيش رقم متحطّ بالنظر."""
 import math
 
-NAVY   = "#14171f"
-BLUE   = "#2f5aa6"
-BLUE_D = "#24467f"   # ظل التدرّج
-GOLD   = "#c98a1f"
-WHITE  = "#ffffff"
+# لوحة OSTA الأساسية: أخضر عميق للثقة والحرفة، عاجي دافئ للضيافة، ونحاسي كتوقيع محدود.
+# الأزرق القديم كان سليمًا وظيفيًا لكنه قريب بصريًا من منصات مالية/تقنية كثيرة؛ اللوحة الجديدة
+# تربط البراند بالبيت والخامة الطبيعية من غير ما تقع في كليشيه أيقونة البيت.
+INK     = "#17211f"
+FOREST  = "#153f38"
+FOREST_D = "#0d2d29"
+FOREST_HI = "#245f54"
+IVORY   = "#f7f2e8"
+COPPER  = "#c66f45"
+WHITE   = "#ffffff"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # الرمز: دايرة خارجية مثالية + مسدّس داخلي مدوّر الأركان (صامولة = حرفة، ختم = ثقة)
@@ -137,14 +142,14 @@ os.makedirs(out, exist_ok=True)
 
 # ١) الرمز لوحده
 open(f"{out}/osta-mark.svg","w").write(
-    svg(100, 100, f'<path d="{mark_path()}" fill="{BLUE}" fill-rule="evenodd"/>'))
+    svg(100, 100, f'<path d="{mark_path()}" fill="{FOREST}" fill-rule="evenodd"/>'))
 
 # ٢) اللوجو الأساسي (أفقي)
-body, total = wordmark_group(NAVY)
+body, total = wordmark_group(INK)
 open(f"{out}/osta-logo.svg","w").write(svg(round(total,2), 60, body))
 
 # ٣) نسخة كلها أزرق
-body_b, _ = wordmark_group(BLUE)
+body_b, _ = wordmark_group(FOREST)
 open(f"{out}/osta-logo-blue.svg","w").write(svg(round(total,2), 60, body_b))
 
 # ٤) نسخة للخلفية الغامقة
@@ -179,22 +184,43 @@ def icon_svg(bg_top, bg_bot, fg, size=1024, mark_ratio=0.58, rounded=None, grad_
             f'<path d="{mark_path()}" fill="{fg}" fill-rule="evenodd"/></g>')
     return svg(size, size, body, defs)
 
-BLUE_HI = "#3d6fc4"
-NAVY_D  = "#1b3companion"  # placeholder — بيتستبدل تحت
-NAVY_D  = "#1b3564"
-
 # مربع كامل (iOS بيحط الماسك بنفسه)
-open(f"{out}/osta-icon.svg","w").write(icon_svg(BLUE_HI, NAVY_D, WHITE, 1024, 0.58, None, "gi"))
+open(f"{out}/osta-icon.svg","w").write(icon_svg(FOREST_HI, FOREST_D, IVORY, 1024, 0.58, None, "gi"))
 # مربع بأركان مدوّرة — للعرض والويب
-open(f"{out}/osta-icon-rounded.svg","w").write(icon_svg(BLUE_HI, NAVY_D, WHITE, 1024, 0.58, 224, "gr"))
+open(f"{out}/osta-icon-rounded.svg","w").write(icon_svg(FOREST_HI, FOREST_D, IVORY, 1024, 0.58, 224, "gr"))
 # طبقة المقدّمة لأيقونة أندرويد التكيّفية (خلفية منفصلة)
 open(f"{out}/osta-icon-foreground.svg","w").write(
     svg(1024, 1024, f'<g transform="translate({(1024-1024*0.42)/2:.2f} {(1024-1024*0.42)/2:.2f}) scale({1024*0.42/100:.5f})">'
-                    f'<path d="{mark_path()}" fill="{WHITE}" fill-rule="evenodd"/></g>'))
+                    f'<path d="{mark_path()}" fill="{IVORY}" fill-rule="evenodd"/></g>'))
 open(f"{out}/osta-icon-background.svg","w").write(
     svg(1024, 1024, '<rect width="1024" height="1024" fill="url(#gb)"/>',
         f'<defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1">'
-        f'<stop offset="0" stop-color="{BLUE_HI}"/><stop offset="1" stop-color="{NAVY_D}"/></linearGradient></defs>'))
+        f'<stop offset="0" stop-color="{FOREST_HI}"/><stop offset="1" stop-color="{FOREST_D}"/></linearGradient></defs>'))
+# طبقة monochrome المطلوبة لأيقونات Android الملوّنة حسب ثيم الجهاز.
+open(f"{out}/osta-icon-monochrome.svg","w").write(
+    svg(1024, 1024, f'<g transform="translate({(1024-1024*0.42)/2:.2f} {(1024-1024*0.42)/2:.2f}) scale({1024*0.42/100:.5f})">'
+                    f'<path d="{mark_path()}" fill="#000000" fill-rule="evenodd"/></g>'))
 # نسخة فاتحة
-open(f"{out}/osta-icon-light.svg","w").write(icon_svg("#ffffff", "#eef1f6", BLUE, 1024, 0.58, 224, "gl"))
+open(f"{out}/osta-icon-light.svg","w").write(icon_svg("#fffdf8", "#ebe2d4", FOREST, 1024, 0.58, 224, "gl"))
+
+# أيقونة تطبيق الفني: نفس الرمز والنِسب، لكن بخامة عاجية ومركز نحاسي حتى يقدر الشخص اللي عنده
+# التطبيقان يميّز بينهما فورًا. الاختلاف لوني فقط؛ الهوية لا تتفرع لشعار ثانٍ.
+def technician_icon_svg(rounded=None):
+    size = 1024
+    mark_size = size * 0.58
+    off = (size - mark_size) / 2
+    scale = mark_size / 100.0
+    bg = (f'<rect width="{size}" height="{size}" rx="{rounded}" fill="url(#gt)"/>'
+          if rounded else f'<rect width="{size}" height="{size}" fill="url(#gt)"/>')
+    defs = (f'<defs><linearGradient id="gt" x1="0" y1="0" x2="1" y2="1">'
+            f'<stop offset="0" stop-color="#fffdf8"/><stop offset="1" stop-color="#e8ddcc"/>'
+            f'</linearGradient></defs>')
+    body = (bg +
+            f'<g transform="translate({off:.2f} {off:.2f}) scale({scale:.5f})">'
+            f'<path d="{mark_path()}" fill="{FOREST}" fill-rule="evenodd"/>'
+            f'<path d="{rounded_hexagon(50, 50, 18.0, 4.0)}" fill="{COPPER}"/></g>')
+    return svg(size, size, body, defs)
+
+open(f"{out}/osta-icon-technician.svg","w").write(technician_icon_svg())
+open(f"{out}/osta-icon-technician-rounded.svg","w").write(technician_icon_svg(224))
 print("icons OK")

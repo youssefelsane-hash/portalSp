@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
 /// نظام التصميم المشترك (docs/12 — مرحلة تحسين UI/UX، امتداد Flutter بعد Admin Panel).
-/// نفس القيم الدلالية المستخدمة في apps/admin/src/app/globals.css (أزرق ثقة احترافي + نظام
+/// نفس القيم الدلالية المستخدمة في apps/admin/src/app/globals.css (أخضر حرفي عميق + نظام
 /// حالات success/warning/danger/info) — معادِلة بصريًا (Flutter Material3 بيستخدم sRGB مش OKLCH
 /// زي CSS، فمفيش تطابق رقمي حرفي، بس نفس الانطباع البصري بالظبط).
 class AppColors {
   AppColors._();
 
-  static const primary = Color(0xFF2F5AA6);
-  static const primaryDark = Color(0xFF7FA6E0);
+  static const primary = Color(0xFF153F38);
+  static const primaryDark = Color(0xFF8FC2B5);
+  static const brandAccent = Color(0xFFC66F45);
 
   static const success = Color(0xFF3C8B4A);
   static const successDark = Color(0xFF6FBF7A);
@@ -16,8 +17,8 @@ class AppColors {
   static const warning = Color(0xFFC98A1F);
   static const warningDark = Color(0xFFE0AC4E);
 
-  static const info = Color(0xFF3D62A6);
-  static const infoDark = Color(0xFF87A9DE);
+  static const info = Color(0xFF356A91);
+  static const infoDark = Color(0xFF8AB4D2);
 
   // danger بيستخدم colorScheme.error مباشرة (نفس فلسفة admin's --danger: var(--destructive)).
 }
@@ -58,7 +59,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.brightness == Brightness.light
-          ? const Color(0xFFF7F8FA)
+          ? const Color(0xFFF7F4EE)
           : null,
       cardTheme: CardThemeData(
         elevation: 0,
@@ -69,7 +70,7 @@ class AppTheme {
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: colorScheme.brightness == Brightness.light
-            ? Colors.white
+            ? const Color(0xFFFFFDF8)
             : null,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
@@ -102,7 +103,7 @@ class AppTheme {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         filled: true,
         fillColor: colorScheme.brightness == Brightness.light
-            ? Colors.white
+            ? const Color(0xFFFFFDF8)
             : colorScheme.surfaceContainerHighest,
       ),
       dividerTheme: DividerThemeData(
