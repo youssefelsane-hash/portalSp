@@ -19,6 +19,7 @@ import '../schedule/schedule_repository.dart';
 import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
+import 'quote_item_request.dart';
 import 'recruit_team_screen.dart';
 import '../../design/order_number_title.dart';
 
@@ -607,12 +608,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     try {
       final items = drafts
           .map(
-            (d) => {
-              'item_type': d.itemType,
-              'name_ar': d.nameAr,
-              'quantity': d.quantity,
-              'unit_price_cents': d.unitPriceCents,
-            },
+            (d) => buildQuoteItemRequest(
+              itemType: d.itemType,
+              nameAr: d.nameAr,
+              description: d.description,
+              quantity: d.quantity,
+              unitPriceCents: d.unitPriceCents,
+            ),
           )
           .toList();
       _order = await _repository.proposeQuoteItems(_order.id, items);
@@ -2033,12 +2035,14 @@ class _PhotoGallery extends StatelessWidget {
 class _QuoteItemDraft {
   String itemType;
   String nameAr;
+  String description;
   double quantity;
   int unitPriceCents;
 
   _QuoteItemDraft({
     this.itemType = 'spare_part',
     this.nameAr = '',
+    this.description = '',
     this.quantity = 1,
     this.unitPriceCents = 0,
   });
@@ -2185,17 +2189,22 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
   final List<TextEditingController> _nameControllers = [
     TextEditingController(),
   ];
+  final List<TextEditingController> _descriptionControllers = [
+    TextEditingController(),
+  ];
   final List<TextEditingController> _qtyControllers = [
     TextEditingController(text: '1'),
   ];
   final List<TextEditingController> _priceControllers = [
     TextEditingController(),
   ];
+  String? _validationError;
 
   @override
   void dispose() {
     for (final c in [
       ..._nameControllers,
+      ..._descriptionControllers,
       ..._qtyControllers,
       ..._priceControllers,
     ]) {
@@ -2208,6 +2217,7 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
     setState(() {
       _drafts.add(_QuoteItemDraft());
       _nameControllers.add(TextEditingController());
+      _descriptionControllers.add(TextEditingController());
       _qtyControllers.add(TextEditingController(text: '1'));
       _priceControllers.add(TextEditingController());
     });
@@ -2217,6 +2227,7 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
     setState(() {
       _drafts.removeAt(index);
       _nameControllers.removeAt(index).dispose();
+      _descriptionControllers.removeAt(index).dispose();
       _qtyControllers.removeAt(index).dispose();
       _priceControllers.removeAt(index).dispose();
     });
@@ -2226,19 +2237,52 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
     final result = <_QuoteItemDraft>[];
     for (var i = 0; i < _drafts.length; i++) {
       final name = _nameControllers[i].text.trim();
+      final description = _descriptionControllers[i].text.trim();
       final qty = double.tryParse(_qtyControllers[i].text.trim());
       final priceEgp = double.tryParse(_priceControllers[i].text.trim());
-      if (name.isEmpty ||
-          qty == null ||
-          qty <= 0 ||
-          priceEgp == null ||
-          priceEgp < 0) {
-        continue;
+      final itemNumber = i + 1;
+      if (name.isEmpty) {
+        setState(() => _validationError = 'اكتب اسم البند رقم $itemNumber');
+        return;
+      }
+      if (name.length > 160) {
+        setState(
+          () => _validationError =
+              'اسم البند رقم $itemNumber طويل زيادة (الحد 160 حرف)',
+        );
+        return;
+      }
+      if (description.length < 10) {
+        setState(
+          () => _validationError =
+              'اكتب سبب أو تفاصيل البند رقم $itemNumber (10 حروف على الأقل)',
+        );
+        return;
+      }
+      if (description.length > 2000) {
+        setState(
+          () => _validationError = 'تفاصيل البند رقم $itemNumber طويلة زيادة',
+        );
+        return;
+      }
+      if (qty == null || qty <= 0 || qty > 9999) {
+        setState(
+          () => _validationError = 'اكتب كمية صحيحة للبند رقم $itemNumber',
+        );
+        return;
+      }
+      if (priceEgp == null || priceEgp < 0 || priceEgp > 100000) {
+        setState(
+          () => _validationError =
+              'اكتب سعر وحدة صحيح للبند رقم $itemNumber (حتى 100,000 ج.م)',
+        );
+        return;
       }
       result.add(
         _QuoteItemDraft(
           itemType: _drafts[i].itemType,
           nameAr: name,
+          description: description,
           quantity: qty,
           unitPriceCents: (priceEgp * 100).round(),
         ),
@@ -2301,8 +2345,20 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                         ),
                         TextField(
                           controller: _nameControllers[i],
+                          maxLength: 160,
                           decoration: const InputDecoration(
                             labelText: 'اسم البند',
+                          ),
+                        ),
+                        TextField(
+                          controller: _descriptionControllers[i],
+                          minLines: 2,
+                          maxLines: 4,
+                          maxLength: 2000,
+                          decoration: const InputDecoration(
+                            labelText: 'سبب الزيادة أو تفاصيل البند',
+                            helperText:
+                                'إجباري: وضّح للعميل والإدارة سبب إضافة البند (10 حروف على الأقل)',
                           ),
                         ),
                         Row(
@@ -2343,6 +2399,13 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                   icon: const Icon(Icons.add),
                   label: const Text('بند تاني'),
                 ),
+                if (_validationError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _validationError!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
               ],
             ),
           ),
