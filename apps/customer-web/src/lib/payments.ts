@@ -90,6 +90,10 @@ export interface InstaPayPreviewDto {
   confirm_max_minutes: number;
   has_open_transfer: boolean;
   is_payable: boolean;
+  /** الشغل لسه ما خلصش — دفع مسبق، والسعر ممكن يزيد ببند إضافي بعدين (ADR-0091). */
+  is_prepayment: boolean;
+  /** زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز. */
+  is_additional_charge: boolean;
 }
 
 export const previewInstaPay = (authedFetch: AuthedFetch, orderId: string) =>

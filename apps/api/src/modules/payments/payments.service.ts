@@ -20,6 +20,7 @@ import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '.
 import type { RefundResolvedEvent } from '../../common/events/refund-resolved.event';
 import { InstaPayPaymentResponseDto } from './dto/payments-response.dto';
 import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
+import { ORDER_PREPAID_MID_FLIGHT_EVENT, OrderPrepaidMidFlightEvent } from '../../common/events/order-prepaid-mid-flight.event';
 import {
   PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT,
   PaymentInstaPayTransferReportedEvent,
@@ -99,6 +100,25 @@ export interface TechnicianMoneyView {
 }
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
+/**
+ * ADR-0091 §2 — الطلب الحي اللي العميل يقدر يدفعه أونلاين قبل ما الشغل يخلص.
+ *
+ * حالات موافقة عرض السعر الثلاث **مستثناة عمدًا**: السعر تحت التفاوض حرفيًا في اللحظة دي،
+ * وتحصيل رقم على وشك يتغيّر أسوأ من الانتظار. وكل الحالات النهائية مستثناة بحكم غيابها هنا.
+ *
+ * ⚠️ خط أحمر (ADR-0091 §1): أي مسار بيقبل الحالات دي **لازم** يمرّ بـhandlePaymentConfirmed()،
+ * مش بـsettleAndComplete() مباشرةً — وإلا هيقفل طلب لسه الفني شغّال فيه ويوزّع أرباحه بدري.
+ */
+const PREPAYABLE_ORDER_STATUSES = new Set([
+  OrderStatus.SEARCHING_TECHNICIAN,
+  OrderStatus.TECHNICIAN_ASSIGNED,
+  OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_TECHNICIAN_SELECTION,
+  OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
@@ -110,6 +130,15 @@ const ACTIVE_ORDER_PAYMENT_STATUSES = [
 
 type PaymentConfirmedEffects = {
   dispatchStarted: boolean;
+  /**
+   * ADR-0091 §5 — الدفع اتأكد والطلب **لسه شغّال**: لا توزيع بدأ ولا تسوية حصلت.
+   *
+   * غيابه في صفوف `webhook_events` القديمة بيقرا `undefined` = السلوك القديم بالحرف، وده
+   * مقصود: الحمولة دي بتتخزّن وبتتعاد قراءتها بعد إعادة التشغيل.
+   */
+  prepaidMidFlight?: boolean;
+  /** الطلب بقى مغطّى أونلاين بالكامل — الفني مش هيحصّل كاش. واقعة بلا رقم (docs/08 §60.2). */
+  fullyCoveredOnline?: boolean;
   orderId: string;
   orderNumber: string;
   customerId: string;
@@ -572,20 +601,55 @@ export class PaymentsService {
    * الوحيدة اللي `settleAlreadyPaidOrder()` تحت بتحط الطلب فيها، فمسموح بيها هنا. أي حالة تانية
    * فيها `PAID` (يعني الطلب اتقفل خلاص عبر `settleAndComplete()`) تفضل مرفوضة زي زمان بالظبط.
    */
-  private assertPayable(order: Order): void {
-    if (order.paymentStatus === OrderPaymentStatus.PAID && order.orderStatus !== OrderStatus.AWAITING_PAYMENT) {
+  private assertPayable(order: Order, options: { allowPrepayment?: boolean } = {}): void {
+    const allowPrepayment = options.allowPrepayment === true;
+    const prepayableNow = allowPrepayment && PREPAYABLE_ORDER_STATUSES.has(order.orderStatus);
+
+    // ADR-0091 §3 — الاستثناء الوحيد اللي اتضاف على القاعدة القديمة: طلب **لسه شغّال** ومدفوع
+    // يبقى عليه دلتا زيادة موافَق عليها، والدلتا دي لازم تتدفع. أي حالة تانية فيها PAID تفضل
+    // مرفوضة بنفس الرسالة وبنفس الترتيب — «مدفوع بالفعل» أدق من رسالة الحالة لطلب مقفول،
+    // والترتيب ده هو اللي بيحافظ عليها.
+    if (
+      order.paymentStatus === OrderPaymentStatus.PAID &&
+      order.orderStatus !== OrderStatus.AWAITING_PAYMENT &&
+      !prepayableNow
+    ) {
       throw new ApiException(ErrorCode.PAY_003, 'الطلب مدفوع بالفعل', HttpStatus.CONFLICT);
     }
     if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
       return;
     }
+    if (prepayableNow) {
+      return;
+    }
     if (!PAYABLE_ORDER_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
-        `مينفعش تدفع للطلب وهو في حالة ${order.orderStatus} — لازم الشغل يخلص الأول`,
+        allowPrepayment
+          ? `مينفعش تدفع للطلب وهو في حالة ${order.orderStatus}`
+          : `مينفعش تدفع للطلب وهو في حالة ${order.orderStatus} — لازم الشغل يخلص الأول`,
         HttpStatus.CONFLICT,
       );
     }
+  }
+
+  /**
+   * بوابة المبلغ المصاحبة لـ`assertPayable(..., { allowPrepayment: true })` — بتتنادى **بعد**
+   * حساب المستحق تحت نفس القفل.
+   *
+   * ممنوع نداؤها في مسار تأكيد دفعة موجودة (webhook/تأكيد إداري): الفلوس هناك وصلت بالفعل،
+   * ومستحق صفر وقتها معناه "اتغطّى" مش "ارفض".
+   */
+  private assertAmountOwed(order: Order, owedNowCents: number): void {
+    if (owedNowCents > 0) return;
+    if (order.totalAmountCents <= 0) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'الطلب لسه مالوش سعر نهائي — هتقدر تدفع أول ما السعر يتحدد',
+        HttpStatus.CONFLICT,
+      );
+    }
+    throw new ApiException(ErrorCode.PAY_003, 'الطلب مدفوع بالفعل', HttpStatus.CONFLICT);
   }
 
   /**
@@ -809,6 +873,9 @@ export class PaymentsService {
    *   (التوزيع يبدأ بعدها مباشرة عبر ORDER_CREATED_EVENT، مش settleAndComplete اللي بتقفل الطلب).
    * - الطلب WORK_COMPLETED/AWAITING_PAYMENT (المسار الحالي، دفع بعد اكتمال الشغل) → settleAndComplete
    *   زي ما هي بالظبط، صفر تغيير سلوكي.
+   * - **(ADR-0091 §4)** الطلب لسه شغّال (بيدوّر على فني، الفني في الطريق، شغل جارٍ) → تسجيل
+   *   الدفع وبس: الحالة ماتتغيّرش والأرباح ماتتوزّعش. التسوية بتحصل في مكانها الطبيعي لما
+   *   الشغل يخلص عبر PrepaidOrderSettlementListener → settleAlreadyPaidOrder() (ADR-0015).
    */
   private async handlePaymentConfirmed(
     manager: EntityManager,
@@ -816,7 +883,7 @@ export class PaymentsService {
     paymentMethod: PaymentMethod,
     changedByUserId: string,
     changedByRole: 'customer' | 'system',
-  ): Promise<{ dispatchStarted: boolean }> {
+  ): Promise<{ dispatchStarted: boolean; prepaidMidFlight: boolean; fullyCoveredOnline: boolean }> {
     if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
       const previousStatus = order.orderStatus;
       // بند 9 — طلب تقييم بالصور: اللي اتدفع هو **رسم التقييم**، مش سعر شغل. مفيش حاجة تتوزّع
@@ -840,11 +907,38 @@ export class PaymentsService {
           reason: isRemoteAssessmentFee ? 'رسم التقييم اتدفع — الطلب راح لفرز الإدارة' : 'الدفع اتأكد — التوزيع بدأ',
         }),
       );
-      return { dispatchStarted };
+      return { dispatchStarted, prepaidMidFlight: false, fullyCoveredOnline: false };
+    }
+
+    if (PREPAYABLE_ORDER_STATUSES.has(order.orderStatus)) {
+      // **الفرع الوحيد اللي مابيغيّرش حالة الطلب.** أي إضافة هنا بتقفل الطلب أو توزّع أرباح
+      // بتكسر ADR-0091 §4 — الفني لسه شغّال والشغل ما اتسلّمش.
+      order.paymentStatus = OrderPaymentStatus.PAID;
+      order.paymentMethod = paymentMethod;
+      await manager.save(order);
+      // سطر بنفس الحالة: أثر مراجعة لواقعة مالية، مش انتقال. تخطّيه كان هيخلّي الدفع المبكر
+      // الحدث الوحيد في دورة حياة الطلب اللي مالوش أي أثر في السجل.
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: order.orderStatus,
+          newStatus: order.orderStatus,
+          changedByUserId,
+          changedByRole: changedByRole === 'system' ? 'system' : 'customer',
+          changeSource: changedByRole === 'system' ? OrderChangeSource.SYSTEM : OrderChangeSource.CUSTOMER,
+          reason: `الدفع اتأكد بـ${paymentMethod} والشغل لسه شغّال — التسوية عند اكتمال الشغل`,
+        }),
+      );
+      const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
+      return {
+        dispatchStarted: false,
+        prepaidMidFlight: true,
+        fullyCoveredOnline: breakdown.amountDueToTechnicianCents <= 0,
+      };
     }
 
     await this.settleAndComplete(manager, order, paymentMethod, changedByUserId, changedByRole === 'system' ? 'customer' : changedByRole);
-    return { dispatchStarted: false };
+    return { dispatchStarted: false, prepaidMidFlight: false, fullyCoveredOnline: false };
   }
 
   /**
@@ -1389,7 +1483,8 @@ export class PaymentsService {
   ): Promise<{ payment: Payment; result: import('./gateways/payment-provider.interface').CreatePaymentResult }> {
     const provider = this.paymentProviders.getProvider(method);
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
-    this.assertPayable(order);
+    // فحص مبدئي رخيص بره القفل؛ الفحص المُلزِم جوّه الـtransaction تحت.
+    this.assertPayable(order, { allowPrepayment: true });
 
     const existing = await this.payments.findOne({ where: { idempotencyKey } });
     if (existing) {
@@ -1439,7 +1534,10 @@ export class PaymentsService {
           .where('o.id = :orderId', { orderId })
           .getOne();
         if (!lockedOrder) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-        this.assertPayable(lockedOrder);
+        // ADR-0091 §1 — الدفع الإلكتروني بس هو اللي بياخد الإذن ده: تأكيده بيمرّ على
+        // handlePaymentConfirmed() اللي فيها فرع الطلب الشغّال. الكاش والمحفظة بيسوّوا فورًا
+        // فبيفضلوا على البوابة القديمة بالحرف.
+        this.assertPayable(lockedOrder, { allowPrepayment: true });
 
         const activePayment = await manager.getRepository(Payment).findOne({
           where: { orderId, paymentStatus: In([...ACTIVE_ORDER_PAYMENT_STATUSES]) },
@@ -1456,6 +1554,7 @@ export class PaymentsService {
         }
 
         const owedNowCents = await this.amountOwedNow(lockedOrder, manager);
+        this.assertAmountOwed(lockedOrder, owedNowCents);
         const amountCents = method === PaymentMethod.INSTAPAY
           ? await this.applyInstaPayDiscount(manager, lockedOrder, userId, owedNowCents)
           : owedNowCents;
@@ -1895,13 +1994,18 @@ export class PaymentsService {
     confirmMaxMinutes: number;
     hasOpenTransfer: boolean;
     isPayable: boolean;
+    /** الشغل لسه ما خلصش — الدفع دلوقتي دفع مسبق، والسعر ممكن يزيد ببند إضافي بعدين. */
+    isPrepayment: boolean;
+    /** دي زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز (ADR-0091 §6). */
+    isAdditionalCharge: boolean;
   }> {
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     // **مابنرميش لو مش قابل للدفع** — بنقول للواجهة وبس. الخانة دي بتتعرض جوّه صفحة الطلب،
     // ورمي استثناء هنا كان هيحوّل «الطلب مدفوع خلاص» لرسالة خطأ حمرا في نص الصفحة.
     let isPayable = true;
     try {
-      this.assertPayable(order);
+      this.assertPayable(order, { allowPrepayment: true });
+      this.assertAmountOwed(order, await this.amountOwedNow(order));
     } catch {
       isPayable = false;
     }
@@ -1916,8 +2020,20 @@ export class PaymentsService {
       : order.paymentStatus === OrderPaymentStatus.PAID
         ? 0
         : order.totalAmountCents;
+    const isPrepayment = PREPAYABLE_ORDER_STATUSES.has(order.orderStatus);
+    // الأساسي اتدفع ولسه فيه مستحق = بند إضافي اتوافق عليه بعد الدفع. `eligibleInstaPayDiscountCents`
+    // بترفض الحافز في الحالة دي أصلاً؛ العَلَم هنا عشان الواجهة تقول ليه بدل ما تسكت.
+    const isAdditionalCharge = order.paymentStatus === OrderPaymentStatus.PAID && payableAmountCents > 0;
     const prospectiveDiscountCents = await this.eligibleInstaPayDiscountCents(order, payableAmountCents);
-    const appliedDiscountCents = order.instapayDiscountCents;
+    // الحافز اللي **اتمنح فعلاً** للطلب. بيتعرض بدل المتوقَّع لما يكون فيه تحويل مفتوح بالفعل
+    // (العميل رجع يكمّل تحويله) — `totalAmountCents` وقتها بيكون متخصوم منه أصلاً.
+    //
+    // **بَقّة حقيقية اتلقطت في التدقيق الحي (scripts/instapay-anytime-audit.js بند ٥)**: الحافز
+    // ده بيفضل متسجّل على الطلب بعد ما الأساسي يتدفع، فكان بيتعرض تاني على **دلتا الزيادة** —
+    // «وفّر ٣٠ ج.م.» على مبلغ مالوش أي خصم، وسعر مشطوب مخترع. الحافز يخصّ الفاتورة اللي اتمنح
+    // عليها بس، والدلتا بتيجي بعد `paymentStatus = paid` فمالهاش نصيب فيه (ADR-0091 §6).
+    const appliedDiscountCents =
+      order.paymentStatus === OrderPaymentStatus.PAID ? 0 : order.instapayDiscountCents;
     const instapayDiscountCents = payableAmountCents > 0 ? appliedDiscountCents || prospectiveDiscountCents : 0;
     const amountCents = Math.max(0, payableAmountCents - prospectiveDiscountCents);
     const cashAmountCents = payableAmountCents > 0 ? payableAmountCents + appliedDiscountCents : 0;
@@ -1939,6 +2055,8 @@ export class PaymentsService {
       instapayDiscountCents,
       hasOpenTransfer: openTransfer !== null,
       isPayable,
+      isPrepayment,
+      isAdditionalCharge,
     };
   }
 
@@ -2151,12 +2269,14 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       }
 
-      const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, PaymentMethod.INSTAPAY, adminUserId, 'system');
+      const confirmed = await this.handlePaymentConfirmed(manager, lockedOrder, PaymentMethod.INSTAPAY, adminUserId, 'system');
       await recordAudit();
       return {
         payment: lockedPayment,
         dispatchInfo: {
-          dispatchStarted,
+          dispatchStarted: confirmed.dispatchStarted,
+          prepaidMidFlight: confirmed.prepaidMidFlight,
+          fullyCoveredOnline: confirmed.fullyCoveredOnline,
           orderId: lockedOrder.id,
           orderNumber: lockedOrder.orderNumber,
           customerId: lockedOrder.customerId,
@@ -2190,6 +2310,19 @@ export class PaymentsService {
           OrderStatus.SEARCHING_TECHNICIAN,
           info.customerId,
           info.technicianId,
+        ),
+      );
+    } else if (info.prepaidMidFlight === true) {
+      // ADR-0091 §5 — الطلب لسه شغّال: بث "اكتمل" هنا كان هيولّد إشعار اكتمال كاذب، ويقفل
+      // الشات تلقائيًا، ويعيد حساب إحصائيات فني لسه ما سلّمش. الحدث الصح هو تأكيد الدفع نفسه.
+      this.events.emit(
+        ORDER_PREPAID_MID_FLIGHT_EVENT,
+        new OrderPrepaidMidFlightEvent(
+          info.orderId,
+          info.orderNumber,
+          info.customerId,
+          info.technicianId,
+          info.fullyCoveredOnline === true,
         ),
       );
     } else {
@@ -2553,12 +2686,16 @@ export class PaymentsService {
           if (!lockedOrder) {
             throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
           }
-          this.assertPayable(lockedOrder);
+          // نفس إذن المسار اللي أنشأ الدفعة (payWithProvider) — رفضها هنا معناه فلوس وصلت
+          // بلا أي أثر على الطلب. بلا بوابة مبلغ عمدًا: الفلوس دي اتحصّلت بالفعل.
+          this.assertPayable(lockedOrder, { allowPrepayment: true });
           // بتفرّق بين "الطلب PENDING_PAYMENT، التوزيع لسه ما بدأش" و"الطلب WORK_COMPLETED
           // العادي بعد الشغل" — نفس مسار confirmInstaPayPayment بالظبط (ADR-0013 §4).
-          const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
+          const confirmed = await this.handlePaymentConfirmed(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
           const effects: PaymentConfirmedEffects = {
-            dispatchStarted,
+            dispatchStarted: confirmed.dispatchStarted,
+            prepaidMidFlight: confirmed.prepaidMidFlight,
+            fullyCoveredOnline: confirmed.fullyCoveredOnline,
             orderId: lockedOrder.id,
             orderNumber: lockedOrder.orderNumber,
             customerId: lockedOrder.customerId,

@@ -35,6 +35,7 @@ import { OrderCrewShortageEscalatedRoutingListener } from './listeners/order-cre
 import { OrderCrewShortageLeaderReminderListener } from './listeners/order-crew-shortage-leader-reminder.listener';
 import { PaymentInstaPayRejectedNotificationListener } from './listeners/payment-instapay-rejected-notification.listener';
 import { PaymentInstaPayConfirmedNotificationListener } from './listeners/payment-instapay-confirmed-notification.listener';
+import { OrderPrepaidMidFlightNotificationListener } from './listeners/order-prepaid-mid-flight-notification.listener';
 import { PaymentInstaPayTransferReportedRoutingListener } from './listeners/payment-instapay-transfer-reported-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
@@ -162,6 +163,7 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
     OrderCrewShortageLeaderReminderListener,
     PaymentInstaPayRejectedNotificationListener,
     PaymentInstaPayConfirmedNotificationListener,
+    OrderPrepaidMidFlightNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
     ProjectNotificationOutboxProcessor,
     PaymentNotificationOutboxProcessor,
