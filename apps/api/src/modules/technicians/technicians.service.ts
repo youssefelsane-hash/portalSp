@@ -30,7 +30,6 @@ import {
   technicianAvailabilityCondition,
   technicianScheduleConflictCondition,
   technicianIndividualVisibilityCondition,
-  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
@@ -465,7 +464,8 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0087 — **مفيش استبعاد على أساس النوع**. المساعد المؤهّل وغير المحجوب عن الخدمة
+        -- بيظهر للعميل كمقدّم خدمة زيه زي الفني؛ الحجب جوّه شرط التأهيل تحت هو اللي بيمنع.
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
         -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
         -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
@@ -636,14 +636,13 @@ export class TechniciansService {
       JOIN technician_profiles tp ON tp.company_id = tc.id
         AND tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.current_location IS NOT NULL
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN services svc ON svc.id = $1
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tc.is_active = true
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0087 — نفس قاعدة القايمة الأساسية: الحجب هو اللي بيمنع القيادة، مش النوع.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -800,7 +799,7 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0087 — نفس قاعدة القايمة الأساسية: مفيش استبعاد على أساس الدور.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -956,7 +955,7 @@ export class TechniciansService {
         JOIN services svc ON svc.id = $1
         CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
         WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-          AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+          -- ADR-0087 — «فيه حد متاح اليوم ده؟» بتشمل المساعدين، لأنهم بياخدوا شغل فعلاً.
           AND ${technicianServiceQualificationCondition({
             technicianIdExpr: 'tp.id',
             serviceIdExpr: 'svc.id',

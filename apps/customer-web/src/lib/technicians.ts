@@ -111,3 +111,52 @@ export interface TechnicianProfileDto {
 
 export const fetchTechnicianProfile = (authedFetch: AuthedFetch, technicianId: string) =>
   authedFetch<TechnicianProfileDto>(`/technicians/${technicianId}/profile`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// اقتراح المواعيد (ADR-0088، docs/08 §141)
+//
+// الاقتراح **مش قيد**: العميل يقدر يتجاهله ويكتب أي يوم/ساعة بإيده. الغرض إن الخانة الفاضية
+// يبقى فيها ٣ ضغطات جاهزة مبنية على طاقة الصنايعية الحقيقية بدل ما العميل يخمّن.
+// مطابق لـ apps/api/src/modules/technicians/booking-slots.controller.ts بالحرف.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SuggestedDayDto {
+  /** YYYY-MM-DD بتوقيت مصر. */
+  day: string;
+  available_technicians: number;
+  is_earliest: boolean;
+}
+
+export interface SuggestedDaysResponseDto {
+  days: SuggestedDayDto[];
+  lead_hours: number;
+  horizon_days: number;
+}
+
+export interface SuggestedTimeDto {
+  /** HH:MM بتوقيت مصر. */
+  time: string;
+  free_technicians: number;
+}
+
+export const fetchSuggestedDays = (
+  authedFetch: AuthedFetch,
+  params: { serviceId: string; addressId: string; durationMinutes?: number | null },
+) => {
+  const query = new URLSearchParams({ service_id: params.serviceId, address_id: params.addressId });
+  if (params.durationMinutes) query.set('duration_minutes', String(params.durationMinutes));
+  return authedFetch<SuggestedDaysResponseDto>(`/booking-slots/days?${query.toString()}`);
+};
+
+export const fetchSuggestedTimes = (
+  authedFetch: AuthedFetch,
+  params: { serviceId: string; addressId: string; day: string; durationMinutes?: number | null },
+) => {
+  const query = new URLSearchParams({
+    service_id: params.serviceId,
+    address_id: params.addressId,
+    day: params.day,
+  });
+  if (params.durationMinutes) query.set('duration_minutes', String(params.durationMinutes));
+  return authedFetch<{ times: SuggestedTimeDto[] }>(`/booking-slots/times?${query.toString()}`);
+};

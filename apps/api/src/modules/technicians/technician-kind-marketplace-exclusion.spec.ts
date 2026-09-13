@@ -7,11 +7,15 @@ import { User } from '../auth/entities/user.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechniciansService } from './technicians.service';
 
-// اختبار حي ضد Postgres حقيقي — ADR-0086: المساعد لا يظهر كقائد في سوق العميل.
+// اختبار حي ضد Postgres حقيقي — ADR-0055 / docs/08 §104 (تصحيح مالك مباشر).
+//
+// **القاعدة اتقلبت**: ADR-0050 كان بيستبعد المساعد من قايمة اختيار العميل على أساس إنه «معندهوش
+// الخبرة الكافية ياخد شغلانة لوحده». المساعد يظل مشاركًا كاملًا، لكن أحدث قرار للمالك أعاد
+// جدار اعتماد التخصص: مشاركته لا تعني فتح السباكة والكهرباء والمحارة كلها تلقائيًا.
 //
 // الفني والمساعد في الاختبار ده متطابقين تمامًا ماعدا `technician_kind` — عشان أي فرق في النتيجة
 // يبقى سببه الدور بالظبط، مش أي حاجة تانية.
-describe('TechniciansService.listForServiceBooking() — المساعد لا يقود طلبًا منفردًا', () => {
+describe('TechniciansService.listForServiceBooking() — المساعد بيظهر زي الفني (ADR-0055)', () => {
   jest.setTimeout(30_000);
 
   let dataSource: DataSource;
@@ -147,11 +151,14 @@ describe('TechniciansService.listForServiceBooking() — المساعد لا ي�
     await dataSource.destroy();
   });
 
-  it('الفني فقط يظهر في قائمة اختيار قائد الطلب', async () => {
+  // ADR-0055 (تصحيح مالك) — الاختبار ده كان بيقفل على العكس بالظبط («المساعد مايظهرش»). المالك
+  // صحّح الفهم: «المساعد» نوع شغل مختلف مش مستوى مهارة أقل، وطالما الأدمن ما حجبش عنه الخدمة
+  // فهو زي الفني بالظبط في كل حتة. الاختبار اتعاد كتابته ليقفل على القاعدة الجديدة.
+  it('المساعد والفني الاتنين بيظهروا في قايمة اختيار العميل — مفيش استبعاد على أساس الدور', async () => {
     const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
     const technicianIds = items.map((item) => item.technicianId);
     expect(technicianIds).toContain(ids.technicianId);
-    expect(technicianIds).not.toContain(ids.assistantId);
+    expect(technicianIds).toContain(ids.assistantId);
   });
 
   it('المساعد بلا اعتماد صنعة لا يظهر لحد ما يقدم ويتقبل', async () => {
@@ -205,14 +212,14 @@ describe('TechniciansService.listForServiceBooking() — المساعد لا ي�
         ids.serviceId,
       ]);
       const allowed = await service.listForServiceBooking(ids.serviceId, ids.addressId);
-      expect(allowed.items.map((i) => i.technicianId)).not.toContain(ids.assistantId);
+      expect(allowed.items.map((i) => i.technicianId)).toContain(ids.assistantId);
     } finally {
       await q(`DELETE FROM technician_excluded_services WHERE technician_id = $1`, [ids.assistantId]);
       await q(`DELETE FROM users WHERE id = $1`, [admin.id]);
     }
   });
 
-  it('ترقية المساعد لفني تفتح له قيادة الخدمة فورًا', async () => {
+  it('ترقية المساعد لفني ما بتغيّرش ظهوره — الدور قابل للتغيير في الاتجاهين وبقى مالوش أثر على الظهور', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.assistantId]);
     try {

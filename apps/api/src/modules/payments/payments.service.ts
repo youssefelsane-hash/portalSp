@@ -1785,6 +1785,57 @@ export class PaymentsService {
   }
 
   /**
+   * **معاينة تحويل InstaPay قبل ما يتفتح أصلاً** (ADR-0089، طلب مالك 2026-09-13).
+   *
+   * طلب المالك: «خلي دايمًا موجود جوّه الطلب خانة الدفع by InstaPay… يظهر له السعر والبيانات
+   * اللي بتظهر عادي جدًا اللي هو كان هيدفع InstaPay من الأول».
+   *
+   * ليه مسار منفصل عن `getInstaPayTransfer()` فوق: دي بترمي ٤٠٤ لو مفيش دفعة معلّقة، وده
+   * بالظبط حال **كل** طلب كاش. والبديل التاني — نداء `pay-with-instapay` (كتابة) عشان نعرض
+   * رقم حساب — كان هيفتح دفعة معلّقة لكل واحد **بيبص** على الطلب، ويقفل مسار الكاش عليه
+   * (`activePayment` بيمنع أي محاولة تانية). فالعرض محتاج قراءة، والقراءة دي هي.
+   *
+   * **صفر كتابة، صفر أثر على الحالة**: بترجّع بيانات الحساب المعلنة + المستحق دلوقتي، وبس.
+   * `hasOpenTransfer` بتقول للواجهة تكمّل تحويل قايم ولا تبدأ واحد جديد.
+   */
+  async previewInstaPayTransfer(userId: string, orderId: string): Promise<{
+    amountCents: number;
+    recipientAddress: string | null;
+    recipientName: string | null;
+    instructionsAr: string;
+    qrImageUrl: string | null;
+    referenceCode: string;
+    confirmTypicalMinutes: number;
+    confirmMaxMinutes: number;
+    hasOpenTransfer: boolean;
+    isPayable: boolean;
+  }> {
+    const order = await this.loadPayableOrderForCustomer(userId, orderId);
+    // **مابنرميش لو مش قابل للدفع** — بنقول للواجهة وبس. الخانة دي بتتعرض جوّه صفحة الطلب،
+    // ورمي استثناء هنا كان هيحوّل «الطلب مدفوع خلاص» لرسالة خطأ حمرا في نص الصفحة.
+    let isPayable = true;
+    try {
+      this.assertPayable(order);
+    } catch {
+      isPayable = false;
+    }
+
+    const amountCents = isPayable ? await this.amountOwedNow(order) : 0;
+    const details = await this.paymentProviders
+      .getInstaPayProvider()
+      .describeExistingTransfer(order.orderNumber, amountCents);
+    const openTransfer = await this.payments.findOne({
+      where: {
+        orderId: order.id,
+        paymentMethod: PaymentMethod.INSTAPAY,
+        paymentStatus: PaymentGatewayStatus.PENDING,
+      },
+    });
+
+    return { ...details, hasOpenTransfer: openTransfer !== null, isPayable };
+  }
+
+  /**
    * تفاصيل تحويل InstaPay **القايم بالفعل** على الطلب — مسار الاستئناف (قراءة بحتة).
    *
    * بيرجّع نفس الأرقام بالحرف اللي اتعرضت أول مرة، لأن الاتنين بيقروا من نفس الدالة في

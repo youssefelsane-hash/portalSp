@@ -35,7 +35,6 @@ import {
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
   technicianIndividualVisibilityCondition,
-  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -445,9 +444,10 @@ export class MatchingService {
           ) AS recent_effective_workload
       ) fairness ON true
       WHERE tp.verification_status = 'approved'
-        -- القائد لازم يكون فنيًا. المساعد يظهر فقط في مسارات تكوين الطاقم، ولا يمكن أن يتسلل
-        -- للمطابقة المباشرة حتى لو كان تخصصه معتمدًا.
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0087 — **مفيش استبعاد على أساس النوع هنا**. اللي بيقرر مين يقود هو صف الحجب في
+        -- technician_excluded_services جوّه شرط التأهيل تحت، مش عمود technician_kind. مساعد
+        -- مش محجوب عن الخدمة بياخد البث كقائد زيه زي الفني بالظبط.
+        -- (بلا backticks عمدًا: التعليق ده جوّه template literal.)
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
         AND ${technicianServiceQualificationCondition({

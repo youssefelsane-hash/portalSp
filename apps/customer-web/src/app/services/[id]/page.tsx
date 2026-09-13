@@ -22,7 +22,15 @@ import {
 import { fetchApplicablePolicies } from '@/lib/installments';
 import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
-import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
+import {
+  fetchTechniciansForService,
+  fetchSuggestedDays,
+  fetchSuggestedTimes,
+  SuggestedDayDto,
+  SuggestedTimeDto,
+  TechnicianBookingListItemDto,
+  TECHNICIAN_LEVEL_LABELS_AR,
+} from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
@@ -94,6 +102,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
   const [availabilityAddressId, setAvailabilityAddressId] = useState<string | null>(null);
   const [serviceAvailabilityError, setServiceAvailabilityError] = useState<string | null>(null);
+
+  // اقتراح المواعيد (ADR-0088) — **مساعدة مش قيد**: العميل لسه يقدر يكتب أي يوم/ساعة بإيده.
+  // الفشل هنا بيتبلع عمدًا: الاقتراح ميزة فوق الفلو، ومينفعش غيابه يمنع الحجز أصلاً.
+  const [suggestedDays, setSuggestedDays] = useState<SuggestedDayDto[] | null>(null);
+  const [suggestedTimes, setSuggestedTimes] = useState<SuggestedTimeDto[] | null>(null);
 
   // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي أسطى يختار" افتراضي/أساسي، "اختار بنفسك"
   // ثانوي، وبيظهر بس لو الخدمة فعلاً بتسمح بأكتر من فني (نفس منطق showBookingModeSelector في
@@ -309,6 +322,45 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // ADR-0060 — الـeffect القديم اللي كان بيسعّر `per_unit`/`monthly`/`hourly` من مدخلات منفصلة
   // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و
   // `inspection_then_quote` (مفيش سعر قبل المعاينة أصلاً).
+
+  // اقتراح الأيام (ADR-0088) — بيتنادى أول ما يبقى فيه عنوان مختار، قبل ما العميل يلمس التاريخ.
+  // المدة بتتبعت لو التسعير حسبها، عشان الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  useEffect(() => {
+    if (!selectedAddressId || !service?.allows_scheduling) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSuggestedDays(null);
+      return;
+    }
+    let active = true;
+    fetchSuggestedDays(authedFetch, {
+      serviceId: id,
+      addressId: selectedAddressId,
+      durationMinutes: estimate?.duration_minutes ?? null,
+    })
+      .then((res) => { if (active) setSuggestedDays(res.days); })
+      // الاقتراح ميزة فوق الفلو — فشله بيخفي الشيبس بس ومابيوقفش الحجز.
+      .catch(() => { if (active) setSuggestedDays(null); });
+    return () => { active = false; };
+  }, [authedFetch, id, selectedAddressId, service?.allows_scheduling, estimate?.duration_minutes]);
+
+  // اقتراح الساعات — بعد ما اليوم يتحدد، ولخدمات «ساعة وصول» بس.
+  useEffect(() => {
+    if (!selectedAddressId || !scheduledDate || service?.schedule_precision !== 'start_time') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSuggestedTimes(null);
+      return;
+    }
+    let active = true;
+    fetchSuggestedTimes(authedFetch, {
+      serviceId: id,
+      addressId: selectedAddressId,
+      day: scheduledDate,
+      durationMinutes: estimate?.duration_minutes ?? null,
+    })
+      .then((res) => { if (active) setSuggestedTimes(res.times); })
+      .catch(() => { if (active) setSuggestedTimes(null); });
+    return () => { active = false; };
+  }, [authedFetch, id, selectedAddressId, scheduledDate, service?.schedule_precision, estimate?.duration_minutes]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -807,16 +859,51 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           </div>
 
           {scheduleDayMode === 'specific' ? (
-            <input
-              type="date"
-              value={scheduledDate}
-              onChange={(e) => {
-                setScheduledDate(e.target.value);
-                markBookingStarted();
-                if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
-              }}
-              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
-            />
+            <>
+              {/* اقتراح الأيام (ADR-0088) — ضغطة واحدة بتحط الموعد. مرتّبة بالأقرب من بين
+                  الأيام اللي فيها براح حقيقي، ومحدش بيتقفل عليه: مدخل التاريخ تحت زي ما هو. */}
+              {suggestedDays && suggestedDays.length > 0 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-sm text-muted">أقرب مواعيد فيها متخصصين متاحين:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedDays.map((suggestion) => {
+                      const isPicked = scheduledDate === suggestion.day;
+                      return (
+                        <button
+                          key={suggestion.day}
+                          type="button"
+                          onClick={() => {
+                            setScheduledDate(suggestion.day);
+                            markBookingStarted();
+                            setRequestRemoteQuote(false);
+                          }}
+                          className={`rounded-xl border px-4 py-2 text-right text-sm transition ${
+                            isPicked ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <span className="block font-medium">{formatSuggestedDay(suggestion.day)}</span>
+                          <span className="block text-xs text-muted">
+                            {suggestion.available_technicians} متخصص متاح
+                            {suggestion.is_earliest ? ' · أقرب فرصة' : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-muted">أو اختار أي يوم تاني بنفسك من تحت</p>
+                </div>
+              )}
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => {
+                  setScheduledDate(e.target.value);
+                  markBookingStarted();
+                  if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
+                }}
+                className="mt-3 block rounded-lg border border-border bg-surface px-4 py-2"
+              />
+            </>
           ) : (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input
@@ -854,7 +941,29 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           )}
 
           {needsPreciseTime && (
-            <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="mt-4">
+              {suggestedTimes && suggestedTimes.length > 0 && (
+                <div className="mb-3">
+                  <p className="mb-2 text-sm text-muted">ساعات فاضية في اليوم ده:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedTimes.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => setPreciseTime(slot.time)}
+                        className={`rounded-xl border px-4 py-2 text-sm transition ${
+                          preciseTime === slot.time
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <span className="block font-medium" dir="ltr">{slot.time}</span>
+                        <span className="block text-xs text-muted">{slot.free_technicians} متاح</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm">
                 <span>الساعة</span>
                 <input
@@ -2002,4 +2111,17 @@ function CompanyCard({
       </div>
     </label>
   );
+}
+
+/**
+ * «الخميس ١٧ سبتمبر» من YYYY-MM-DD — بلا مكتبة تواريخ.
+ *
+ * الـstring بيتقسم بالإيد مش بـ`new Date(day)`: الأخيرة بتقرا التاريخ المجرّد كـUTC، فبتطلع
+ * اليوم اللي قبله لأي متصفح شرق جرينتش — وده بالظبط نفس فئة البَقّة اللي ADR-0059 §6 اتكتب
+ * عشانها في الباك-إند.
+ */
+function formatSuggestedDay(day: string): string {
+  const [year, month, dayOfMonth] = day.split('-').map(Number);
+  const date = new Date(year, month - 1, dayOfMonth);
+  return date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
 }

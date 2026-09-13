@@ -902,9 +902,12 @@ compatibility, matching and admin explainability: 41 tests passed on isolated Po
 
 ### ملاحظات أهلية اتأكدت في نفس التدقيق
 
-- **المساعد عضو طاقم فقط** (ADR-0086) — شجرة أهلية القيادة وحارس التعيين يشترطان
-  `technician_kind='technician'`. مجمع المساعدين مستقل، ويستخدم اعتماد التخصص دون حجب خدمات
-  القيادة، مع ترتيب المسافة أولًا ثم جودة المطابقة المشتركة.
+- **المساعد بياخد الطلب كقائد طالما الخدمة مش محجوبة عنه** (ADR-0087، يلغي ADR-0086) — شجرة
+  أهلية القيادة عمدًا **مافيهاش** شرط `technician_kind`؛ اللي بيمنع القيادة هو صف
+  `technician_excluded_services` جوّه `technicianServiceQualificationCondition()`. مجمع
+  المساعدين (`assistant-matching`) مستقل وبيستخدم `assistantServiceQualificationCondition()`
+  (اعتماد التخصص بلا حجب) عشان المساعد المحجوب عن القيادة يفضل ينفع **يساعد**، مع ترتيب
+  المسافة أولًا ثم جودة المطابقة المشتركة.
 - **تفضيل ≠ قفل**: `requested_technician_id` لوحده = تفضيل والبديل مقصود؛ مع
   `provider_lock_source` = قفل، والطلب بيروح `awaiting_technician_reselection` بدل أي استبدال.
 - **فجوة مفتوحة**: الـsweep دفعة ٢٥/دورة مرتّبة بالأقدم أولاً (~١٥٠٠ طلب/ساعة). تراكم أكبر من

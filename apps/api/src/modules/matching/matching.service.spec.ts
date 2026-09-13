@@ -233,13 +233,37 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
   });
 
-  it('المساعد لا يدخل مطابقة قائد الطلب حتى لو كل شروط الخدمة والموقع متحققة', async () => {
+  // ADR-0087 — المساعد المؤهّل وغير المحجوب **بيدخل** بث المطابقة كقائد. اللي بيستبعده هو
+  // صف الحجب، مش عمود `technician_kind`.
+  it('المساعد غير المحجوب بيدخل مطابقة قائد الطلب زيه زي الفني', async () => {
     await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
     await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.technicianProfile]);
     try {
       const candidates = await findCandidates(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
+    } finally {
+      await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.technicianProfile]);
+      await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
+    }
+  });
+
+  it('المساعد المحجوب عن الخدمة **مابيدخلش** المطابقة كقائد', async () => {
+    await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
+    await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.technicianProfile]);
+    const [{ user_id: adminUser }] = await dataSource.query<{ user_id: string }[]>(
+      `SELECT user_id FROM technician_profiles WHERE id = $1`,
+      [ids.technicianProfile],
+    );
+    await dataSource.query(
+      `INSERT INTO technician_excluded_services (technician_id, service_id, excluded_by_user_id, reason)
+       VALUES ($1, $2, $3, 'اختبار ADR-0087')`,
+      [ids.technicianProfile, ids.service, adminUser],
+    );
+    try {
+      const candidates = await findCandidates(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
       expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
     } finally {
+      await dataSource.query(`DELETE FROM technician_excluded_services WHERE technician_id = $1`, [ids.technicianProfile]);
       await dataSource.query(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.technicianProfile]);
       await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
     }

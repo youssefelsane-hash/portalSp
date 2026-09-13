@@ -237,17 +237,18 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     expect(typeof result.rankInfo?.rankScore).toBe('number');
   });
 
-  it('المساعد يظهر في المفتش بسبب واضح لكنه غير مؤهل لقيادة الطلب', async () => {
+  // ADR-0087 — القاعدة اتقلبت: المفتش مابيستبعدش على أساس النوع خالص. مساعد مش محجوب عن
+  // الخدمة **مؤهّل لقيادتها**، والمحجوب بيترفض من شرط الحجب نفسه (مغطّى في
+  // technician-kind-marketplace-exclusion.spec.ts) مش من شرط نوع.
+  it('المساعد غير المحجوب مؤهّل لقيادة الطلب زيه زي الفني', async () => {
     await q(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.eligibleProfile]);
     try {
       const result = await service.explainTechnicianForOrder(
         await dataSource.getRepository(Order).findOneByOrFail({ id: ids.order }),
         ids.eligibleProfile,
       );
-      expect(result.eligible).toBe(false);
-      expect(result.checks.find((check) => check.key === 'correct_kind')?.passed).toBe(false);
-      expect(result.reasonAr).toContain('لا يقود');
-      expect(result.rankInfo).toBeNull();
+      expect(result.eligible).toBe(true);
+      expect(result.checks.some((check) => check.key === 'correct_kind')).toBe(false);
     } finally {
       await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.eligibleProfile]);
     }

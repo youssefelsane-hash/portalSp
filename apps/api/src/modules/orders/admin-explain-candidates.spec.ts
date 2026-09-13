@@ -190,12 +190,14 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
     await dataSource.destroy();
   });
 
-  it('طلب الطاقم يعرض الفني المؤهل للقيادة فقط', async () => {
+  // ده بالظبط اللي المالك شافه: طلب طاقم، ومساعدينه مستواهم `new`، فاختفوا من الخانة خالص.
+  it('طلب الطاقم كان بيخفي المساعد الجديد من قايمة التعيين — والفني الجديد كمان، نفس القاعدة', async () => {
     const eligible = await service.listEligibleTechniciansForReassign(ids.teamOrder);
     const eligibleIds = eligible.items.map((item) => item.technicianId);
 
     expect(eligibleIds).toContain(ids.techPro);
-    expect(eligibleIds).not.toContain(ids.asstPro);
+    expect(eligibleIds).toContain(ids.asstPro);
+    // الاستبعاد على المستوى مش على الدور — الفني الجديد بيتشال بنفس الشرط بالظبط.
     expect(eligibleIds).not.toContain(ids.asstNew);
     expect(eligibleIds).not.toContain(ids.techNew);
   });
@@ -210,27 +212,27 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
     expect(byId.get(ids.asstNew)!.technicianKind).toBe('assistant');
     expect(byId.get(ids.techNew)!.technicianKind).toBe('technician');
     // العلامة لازم تطابق قايمة التعيين بالحرف — الواجهة بتفرّق بيها بصريًا.
-    expect(byId.get(ids.asstPro)!.isEligibleNow).toBe(false);
+    expect(byId.get(ids.asstPro)!.isEligibleNow).toBe(true);
     expect(byId.get(ids.asstNew)!.isEligibleNow).toBe(false);
     expect(byId.get(ids.techNew)!.isEligibleNow).toBe(false);
   });
 
-  it('الطلب الفردي يقبل الفنيين ولا يقبل المساعدين كقادة', async () => {
+  it('المساعد الجديد مؤهّل عادي في الطلب الفردي — الحاجز حاجز مستوى قيادة مش حاجز دور', async () => {
     const eligible = await service.listEligibleTechniciansForReassign(ids.individualOrder);
     const eligibleIds = eligible.items.map((item) => item.technicianId);
 
-    expect(eligibleIds).not.toContain(ids.asstNew);
-    expect(eligibleIds).not.toContain(ids.asstPro);
+    expect(eligibleIds).toContain(ids.asstNew);
+    expect(eligibleIds).toContain(ids.asstPro);
     expect(eligibleIds).toContain(ids.techNew);
   });
 
-  it('قايمة التعيين الإجباري لا تسرب المساعد وتعيد بيانات الفني القائد', async () => {
+  it('قايمة التعيين الإجباري بترجّع دور كل مرشّح — مصدر رمز FN/HF في الأدمن', async () => {
     const eligible = await service.listEligibleTechniciansForReassign(ids.individualOrder);
     const byId = new Map(eligible.items.map((item) => [item.technicianId, item]));
 
-    expect(byId.has(ids.asstNew)).toBe(false);
+    expect(byId.get(ids.asstNew)!.technicianKind).toBe('assistant');
     expect(byId.get(ids.techNew)!.technicianKind).toBe('technician');
-    expect(byId.get(ids.techNew)!.currentLevel).toBe('new');
+    expect(byId.get(ids.asstNew)!.currentLevel).toBe('new');
   });
 
   // المساعد اللي الأدمن حجب عنه الخدمة لازم يفضل ظاهر في المفتّش — ده بالظبط السؤال اللي

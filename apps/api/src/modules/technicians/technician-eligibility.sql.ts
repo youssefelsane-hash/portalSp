@@ -626,8 +626,9 @@ function approvedSpecialtyCondition(opts: TechnicianServiceQualificationOptions)
 }
 
 /**
- * أهلية الشخص لقيادة الطلب مباشرة. اعتماد الخدمة/الفئة مطلوب، وحجب الخدمة يمنع وصول الطلب له
- * كقائد سواء من اختيار العميل أو المطابقة أو التعيين الإداري.
+ * أهلية الشخص لقيادة الطلب مباشرة — **لأي `technician_kind`** (ADR-0087). اعتماد الخدمة/الفئة
+ * مطلوب، وحجب الخدمة هو **المفتاح الوحيد** اللي بيمنع وصول الطلب له كقائد، سواء من اختيار
+ * العميل أو المطابقة أو التعيين الإداري.
  */
 export function technicianServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
   return `${approvedSpecialtyCondition(opts)}
@@ -639,8 +640,9 @@ export function technicianServiceQualificationCondition(opts: TechnicianServiceQ
 }
 
 /**
- * أهلية المساعد للمشاركة في طاقم داخل تخصصه. حجب الخدمات الفردية معناه «لا يقود الخدمة» ولا
- * يمس اعتماد الفئة الذي يسمح له بمساعدة قائد مؤهل. إلغاء اعتماد الفئة/الخدمة نفسها يظل يمنعه.
+ * أهلية المشاركة في طاقم داخل التخصص. الصف في `technician_excluded_services` معناه بالحرف
+ * **«مايقودش الخدمة دي»** — مش «مايقربش منها» — فهو مابيمسّش اعتماد الفئة اللي بيسمح له يساعد
+ * قائد مؤهل (ADR-0087). إلغاء اعتماد الفئة/الخدمة نفسها هو اللي بيمنعه تمامًا.
  */
 export function assistantServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
   return approvedSpecialtyCondition(opts);
@@ -713,9 +715,13 @@ export function technicianCityCoverageCondition(opts: {
  * - `'assistant'` → مجمع بث فرص المساعدة وضم مساعد لطاقم طلب: **الفنيين الكاملين مستبعدين**.
  * - `'technician'` → خانة «إضافة فني» في طاقم الطلب: **المساعدين مستبعدين**.
  *
- * القرار الحالي: `'technician'` مطبقة أيضًا على كل مسارات قيادة الطلب (اختيار العميل، المطابقة،
- * التعيين القسري). المساعد لا يقود طلبًا منفردًا، لكنه يظل مؤهلًا للانضمام كعضو طاقم داخل
- * تخصصه عبر `assistantServiceQualificationCondition()` حتى لو خدماته الفردية كلها محجوبة.
+ * **ADR-0087 (يلغي ADR-0086)**: الشرط ده **ممنوع** يتحط على أي مسار قيادة (اختيار العميل،
+ * المطابقة التلقائية، التعيين الإداري). اللي بيقرر مين يقود هو صف `technician_excluded_services`
+ * جوّه `technicianServiceQualificationCondition()` — مساعد مش محجوب عن الخدمة بياخدها كقائد
+ * زيه زي الفني بالظبط (طلب مالك حرفي: «طالما أنا ما منعتش عنهم الشغل، يبقى زيهم زي الفنيين»).
+ *
+ * لو لقيت نفسك بتضيفه في مسار قيادة عشان «المساعد مايقودش» — ده بالظبط اللي ADR-0086 عمله
+ * واتلغى في نفس اليوم: بيتخطّى مفتاح الأدمن ويخلّي الشاشة تقول «مسموح» والسيستم يرفض.
  */
 export function technicianKindCondition(opts: {
   /** تعبير SQL لمعرّف صف الفني، مثلاً `tp` أو `member` (الـalias مش الـid — بنقرا العمود منه). */

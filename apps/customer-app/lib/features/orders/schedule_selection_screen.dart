@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/auth_repository.dart';
+import '../addresses/addresses_repository.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
 // **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
@@ -54,11 +57,24 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// فلسفة `allowsDateRangeBooking` فوق بالحرف.
   final bool allowsSameDay;
 
+  /// الخدمة والعنوان — مطلوبين **لاقتراح المواعيد بس** (ADR-0088).
+  ///
+  /// اختياريين عمدًا: الشاشة ليها مدخلين، وواحد منهم ممكن يكون لسه معندوش عنوان مختار. من
+  /// غيرهم الشاشة بتشتغل **بالظبط** زي ما كانت — الاقتراح بيختفي والتقويم اليدوي زي ما هو.
+  final String? serviceId;
+  final String? addressId;
+
+  /// مدة الشغلانة لو التسعير حسبها — بتخلّي الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  final int? durationMinutes;
+
   const ScheduleSelectionScreen({
     super.key,
     required this.allowsDateRangeBooking,
     this.requiresPreciseTime = false,
     this.allowsSameDay = true,
+    this.serviceId,
+    this.addressId,
+    this.durationMinutes,
   });
 
   @override
@@ -79,10 +95,119 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   TimeOfDay? _selectedTime;
   final _durationController = TextEditingController();
 
+  // اقتراح المواعيد (ADR-0088) — **مساعدة مش قيد**. فشل التحميل بيسيب القايمة فاضية بهدوء
+  // زي `_nearTermHours` بالظبط: مايصحّش اقتراح ناقص يمنع العميل من اختيار موعد بإيده.
+  List<Map<String, dynamic>> _suggestedDays = const [];
+  List<Map<String, dynamic>> _suggestedTimes = const [];
+
+  /// بيتقري مرة واحدة في `initState` — استخدام `context` بعد `await` بيكسر قاعدة
+  /// `use_build_context_synchronously` (والـWidget ممكن يكون اتشال أصلاً).
+  late final AuthRepository _auth;
+
   @override
   void initState() {
     super.initState();
+    _auth = context.read<AuthRepository>();
     _loadBookingPolicy();
+    _loadSuggestedDays();
+  }
+
+  /// العنوان المستخدم في الاقتراح — المبعوت من الشاشة اللي فتحتنا، وإلا العنوان الافتراضي.
+  ///
+  /// المدخل من الكتالوج بييجي **قبل** اختيار العنوان أصلاً، فمن غير الاحتياطي ده الاقتراح كان
+  /// هيختفي من المسار الرئيسي بالظبط — وهو المسار اللي المالك طلب الاقتراح فيه.
+  String? _resolvedAddressId;
+
+  bool get _canSuggest => widget.serviceId != null && _resolvedAddressId != null;
+
+  Future<void> _resolveAddressId() async {
+    if (widget.addressId != null) {
+      _resolvedAddressId = widget.addressId;
+      return;
+    }
+    if (widget.serviceId == null) return;
+    try {
+      final addresses = await AddressesRepository(_auth).list();
+      if (addresses.isEmpty) return;
+      final preferred = addresses.firstWhere(
+        (address) => address.isDefault,
+        orElse: () => addresses.first,
+      );
+      _resolvedAddressId = preferred.id;
+    } catch (error) {
+      debugPrint('تعذّر تحديد العنوان الافتراضي للاقتراح: $error');
+    }
+  }
+
+  Future<void> _loadSuggestedDays() async {
+    await _resolveAddressId();
+    if (!_canSuggest) return;
+    try {
+      final query = <String, String>{
+        'service_id': widget.serviceId!,
+        'address_id': _resolvedAddressId!,
+        if (widget.durationMinutes != null)
+          'duration_minutes': '${widget.durationMinutes}',
+      };
+      final qs = query.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      // **مسار محمي** (@Roles(CUSTOMER)) — لازم يمرّ بـauthedRequest. `apiRequest` العادي
+      // بيبعت بلا توكن وكان هيترفض 401 بصمت ويخفي الاقتراح دايمًا.
+      final data = await _auth.authedRequest('GET', '/booking-slots/days?$qs');
+      if (!mounted) return;
+      setState(() {
+        _suggestedDays = ((data?['days'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      });
+    } catch (error) {
+      debugPrint('فشل تحميل الأيام المقترحة: $error');
+    }
+  }
+
+  Future<void> _loadSuggestedTimes(DateTime day) async {
+    if (!_canSuggest || !widget.requiresPreciseTime) return;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final dayString = '${day.year}-${two(day.month)}-${two(day.day)}';
+    try {
+      final query = <String, String>{
+        'service_id': widget.serviceId!,
+        'address_id': _resolvedAddressId!,
+        'day': dayString,
+        if (widget.durationMinutes != null)
+          'duration_minutes': '${widget.durationMinutes}',
+      };
+      final qs = query.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+      final data = await _auth.authedRequest('GET', '/booking-slots/times?$qs');
+      if (!mounted) return;
+      setState(() {
+        _suggestedTimes = ((data?['times'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      });
+    } catch (error) {
+      debugPrint('فشل تحميل الساعات المقترحة: $error');
+    }
+  }
+
+  /// ضغطة على يوم مقترح = نفس مسار اختيار اليوم اليدوي بالحرف، بكل بواباته.
+  ///
+  /// **مهم**: تنبيه رسوم الاستعجال بيتنادى هنا برضه. لو الاقتراح كان بيعدّي من غيره كان هيبقى
+  /// باب خلفي لنفس اليوم بلا تحذير — نفس البَقّة اللي ADR-0048 اتكتب عشان يمنعها.
+  Future<void> _pickSuggestedDay(BuildContext context, String day) async {
+    final parts = day.split('-').map(int.parse).toList();
+    final date = DateTime(parts[0], parts[1], parts[2]);
+    if (_isToday(date) && !await _confirmSameDayUrgency(context)) return;
+    if (!context.mounted) return;
+    if (!widget.requiresPreciseTime) {
+      Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
+      return;
+    }
+    setState(() {
+      _selectedDate = _startOfDay(date);
+      _selectedRangeEnd = null;
+      _suggestedTimes = const [];
+    });
+    await _loadSuggestedTimes(date);
   }
 
   @override
@@ -201,7 +326,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     setState(() {
       _selectedDate = _startOfDay(date);
       _selectedRangeEnd = null;
+      _suggestedTimes = const [];
     });
+    await _loadSuggestedTimes(date);
   }
 
   Future<void> _pickFlexibleRange(BuildContext context) async {
@@ -286,6 +413,48 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 8),
+                // اقتراح الأيام (ADR-0088) — فوق الكالندر عمدًا: ضغطة واحدة بتخلّص الشاشة،
+                // والكالندر تحته لأي حد عايز يختار بنفسه.
+                if (_suggestedDays.isNotEmpty) ...[
+                  const Text(
+                    'أقرب مواعيد فيها متخصصين متاحين',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  ..._suggestedDays.map((suggestion) {
+                    final day = suggestion['day'] as String? ?? '';
+                    final available = (suggestion['available_technicians'] as num?)?.toInt() ?? 0;
+                    final isEarliest = suggestion['is_earliest'] == true;
+                    final parts = day.split('-');
+                    final label = parts.length == 3
+                        ? _formatDate(DateTime(
+                            int.parse(parts[0]),
+                            int.parse(parts[1]),
+                            int.parse(parts[2]),
+                          ))
+                        : day;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _ScheduleOptionCard(
+                        icon: Icons.bolt_outlined,
+                        title: label,
+                        subtitle: isEarliest
+                            ? '$available متخصص متاح · أقرب فرصة'
+                            : '$available متخصص متاح',
+                        selected: _selectedDate != null &&
+                            _formatDate(_selectedDate!) == label &&
+                            _selectedRangeEnd == null,
+                        onTap: () => _pickSuggestedDay(context, day),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'أو اختار يوم تاني بنفسك',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 _ScheduleOptionCard(
                   icon: Icons.calendar_month_outlined,
                   title: 'اختار يوم محدد',
@@ -311,6 +480,37 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 // خطوة الساعة (+عدد الساعات) — بتظهر بمجرد ما يختار العميل يوم، في نفس الشاشة دي
                 // مباشرة (docs/08 §84 جزء ج، طلب مالك صريح: "خلي حاجات الوقت كلها تظهر مع بعض").
                 if (widget.requiresPreciseTime && _selectedDate != null) ...[
+                  if (_suggestedTimes.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'ساعات فاضية في اليوم ده',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _suggestedTimes.map((slot) {
+                        final time = slot['time'] as String? ?? '';
+                        final free = (slot['free_technicians'] as num?)?.toInt() ?? 0;
+                        final parts = time.split(':');
+                        final asTimeOfDay = parts.length == 2
+                            ? TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]))
+                            : null;
+                        final isPicked = _selectedTime != null &&
+                            asTimeOfDay != null &&
+                            _selectedTime!.hour == asTimeOfDay.hour &&
+                            _selectedTime!.minute == asTimeOfDay.minute;
+                        return ChoiceChip(
+                          selected: isPicked,
+                          label: Text('$time · $free متاح'),
+                          onSelected: asTimeOfDay == null
+                              ? null
+                              : (_) => setState(() => _selectedTime = asTimeOfDay),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _ScheduleOptionCard(
                     icon: Icons.schedule_outlined,

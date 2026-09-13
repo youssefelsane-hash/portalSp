@@ -68,3 +68,25 @@ export const getInstaPayTransfer = (authedFetch: AuthedFetch, orderId: string) =
 /** العميل بيقول «حوّلت» — بيتسجّل في الباك-إند عشان الأدمن يعرف مين مستني مراجعة. */
 export const confirmInstaPayTransfer = (authedFetch: AuthedFetch, orderId: string) =>
   authedFetch<PaymentResponseDto>(`/orders/${orderId}/confirm-instapay-transfer`, { method: 'POST' });
+
+/**
+ * **معاينة الدفع بـInstaPay جوّه الطلب** (ADR-0089) — قراءة بحتة، مابتفتحش أي دفعة.
+ *
+ * ده اللي بيخلّي خانة «ادفع بـInstaPay» تعرض الحساب والمبلغ **من غير** ما تقفل مسار الكاش:
+ * نداء `payWithInstaPay` كان هيفتح دفعة معلّقة لأي حد بيبص على الطلب.
+ */
+export interface InstaPayPreviewDto {
+  amount_cents: number;
+  recipient_address: string | null;
+  recipient_name: string | null;
+  instructions_ar: string;
+  qr_image_url: string | null;
+  reference_code: string;
+  confirm_typical_minutes: number;
+  confirm_max_minutes: number;
+  has_open_transfer: boolean;
+  is_payable: boolean;
+}
+
+export const previewInstaPay = (authedFetch: AuthedFetch, orderId: string) =>
+  authedFetch<InstaPayPreviewDto>(`/orders/${orderId}/instapay-preview`);

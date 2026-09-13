@@ -43,6 +43,7 @@ const fullOrder: OrderResponseDto = {
   optional_warranty: { name_ar: 'ضمان سنة', coverage_months: 12 },
   deposit_amount_cents: 60_000,
   payment_status: 'partially_paid',
+  payment_method: 'cash',
   placed_at: null,
   cancelled_at: null,
   cancellation_reason_id: null,
