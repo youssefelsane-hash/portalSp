@@ -13,11 +13,9 @@ import { useCatalogZone } from '@/lib/catalog-zone';
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
 // الـAPIs بالضبط (§59: مفيش محرك اكتشاف خدمة منفصل للويب).
 //
-// ── إعادة تخطيط 2026-09-11 (طلب مالك: «الهيرو ياخد الشاشة كلها») ──────────────────────────
-// الهيرو كان `section` بعرض الشاشة الكامل وارتفاع ~٤٥٠px، فالفئات — اللي هي **الغرض** من
-// الصفحة — مكانتش بتبان غير بعد scroll. دلوقتي الهيرو كارت مضغوط بيقعد **جنب** شبكة الفئات
-// على الشاشات الكبيرة (٥ أعمدة مقابل ٧)، وفوقها على الموبايل. نفس المحتوى بالحرف (نفس الـeyebrow
-// والعنوان والوصف والبحث ورسالة الثقة) — التغيير في الحجم والمكان بس.
+// ── تخطيط الصفحة الرئيسية ──────────────────────────────────────────────────────────────────
+// الهيرو هو مدخل الصفحة البصري، ثم المشروعات، ثم الفئات. وضع العناصر الثلاثة في شبكة واحدة كان
+// يقلص الصورة إلى عمود جانبي ويترك مساحة فارغة كبيرة على الشاشات الواسعة؛ كل قسم الآن يأخذ صفه.
 const HERO_SLIDES = [
   'linear-gradient(135deg, #1c3a6e 0%, #2f5aa6 55%, #4d78c4 100%)',
   'linear-gradient(135deg, #0f1115 0%, #22314f 45%, #2f5aa6 100%)',
@@ -192,11 +190,9 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-5 sm:pt-8">
-      {/* ── الهيرو + الفئات جنب بعض ────────────────────────────────────────────────────────
-          على lg: خمسة أعمدة للهيرو وسبعة للفئات. تحت كده: الهيرو فوق بارتفاع محدود، والفئات
-          تحته مباشرة — من غير ما أي واحد فيهم ياخد الشاشة كلها. */}
-      <div className="grid items-start gap-5 lg:grid-cols-12">
-        <section className="relative isolate overflow-hidden rounded-3xl lg:col-span-5" aria-labelledby="hero-title">
+      <div className="space-y-8 sm:space-y-10">
+        {/* الهيرو يأخذ عرضه الطبيعي حتى تظهر الصورة ورسالة البحث كواجهة واحدة متماسكة. */}
+        <section className="relative isolate overflow-hidden rounded-3xl" aria-labelledby="hero-title">
           <div aria-hidden className="absolute inset-0" style={{ backgroundColor: HERO_NEUTRAL }}>
             <div
               ref={heroMediaRef}
@@ -240,8 +236,8 @@ export default function HomePage() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />
           </div>
 
-          <div className="relative flex min-h-[260px] flex-col justify-end gap-3 p-5 sm:min-h-[340px] sm:gap-4 sm:p-8 lg:min-h-[420px]">
-            <div className="text-white [text-shadow:0_2px_18px_rgb(0_0_0/0.45)]">
+          <div className="relative flex min-h-[320px] flex-col justify-end gap-3 p-5 sm:min-h-[400px] sm:gap-4 sm:p-8 lg:min-h-[460px] lg:max-w-3xl lg:p-12">
+            <div className="max-w-2xl text-white [text-shadow:0_2px_18px_rgb(0_0_0/0.45)]">
               <p className="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-sm">
                 {searchContent.eyebrow}
               </p>
@@ -295,32 +291,36 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* **كان ناقص في الويب بالكامل** (بلاغ مالك: «الويب فيه حاجات ناقصة كتير عن
-            الأبليكيشن»): صفحات /projects موجودة من زمان بس مفيش أي مدخل ليها من الصفحة
-            الرئيسية. نفس مكانه في التطبيق بالظبط — فوق كل الفئات (docs/08 §76-د). */}
+        {/* المشروعات قبل الفئات: مسار مستقل وواضح لمن يجهز أو يشطب منزله. */}
         {projectsEnabled && (
-          <section className="lg:col-span-7">
+          <section aria-labelledby="projects-title">
             <Link
               href="/projects"
-              className="motion-rise motion-press group flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-primary"
+              className="motion-rise motion-press group flex flex-col gap-5 overflow-hidden rounded-3xl border border-border bg-surface p-5 transition-colors hover:border-primary sm:flex-row sm:items-center sm:justify-between sm:p-7"
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden>
-                  <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              <span className="flex min-w-0 items-center gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary sm:h-14 sm:w-14">
+                  <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-hidden>
+                    <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold text-accent">مشروعات البيت</span>
+                  <span id="projects-title" className="mt-1 block text-lg font-semibold leading-snug sm:text-xl">بتجهّز أو بتشطّب بيتك؟</span>
+                  <span className="mt-1 block text-sm text-muted">من المعاينة للتسليم في مكان واحد</span>
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform group-hover:-translate-x-0.5 sm:self-auto">
+                استكشف المشروعات
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                  <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-semibold leading-snug">بتجهّز أو بتشطّب بيتك؟</span>
-                <span className="block text-sm text-muted">من المعاينة للتسليم في مكان واحد</span>
-              </span>
-              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0 text-muted transition-transform group-hover:-translate-x-0.5" aria-hidden>
-                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
             </Link>
           </section>
         )}
 
-        <section className="lg:col-span-7" aria-labelledby="categories-title">
+        <section aria-labelledby="categories-title">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 id="categories-title" className="text-lg font-semibold">
               كل الفئات
@@ -349,7 +349,7 @@ export default function HomePage() {
               مفيش فئات خدمات متاحة دلوقتي
             </p>
           ) : (
-            <div className="motion-list grid grid-cols-3 gap-3 sm:grid-cols-4">
+            <div className="motion-list grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
               {(shownCategories ?? []).map((c) => (
                 <CategoryTile key={c.id} category={c} />
               ))}
