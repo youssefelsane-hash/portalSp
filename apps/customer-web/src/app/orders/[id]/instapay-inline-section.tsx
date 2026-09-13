@@ -56,7 +56,10 @@ export function InstaPayInlineSection({
           {preview.instapay_discount_cents > 0 && (
             <span className="block text-sm text-muted line-through">{formatEgp(preview.cash_amount_cents)}</span>
           )}
-          <span className="text-lg font-bold">{formatEgp(preview.amount_cents)}</span>
+          {/* طلب لسه مالوش سعر بيرجّع صفر — و«0 ج.م.» في خانة دفع بتقري "ببلاش". */}
+          <span className="text-lg font-bold">
+            {preview.amount_cents > 0 ? formatEgp(preview.amount_cents) : 'لسه بيتحدد'}
+          </span>
         </span>
       </div>
 
@@ -66,13 +69,25 @@ export function InstaPayInlineSection({
         </p>
       )}
 
-      {isCashOrder && (
+      {/* ADR-0091 §6 — الزيادة بعد طلب مدفوع مالهاش حافز. السكوت عن السبب كان بيخلّي العميل
+          يفتكر الخصم اتسحب منه، فالسطر ده بيقول القاعدة بدل ما يخبّيها. */}
+      {preview.is_additional_charge ? (
+        <p className="mt-1 text-sm text-muted">
+          ده مبلغ الزيادة اللي وافقت عليها بس. الخصم بياخده الطلب مرة واحدة، وهو اتحسب على الدفعة الأولى.
+        </p>
+      ) : preview.is_prepayment ? (
         <p className="mt-1 text-sm text-muted">
           {preview.instapay_discount_cents > 0
-            ? 'الكاش بالسعر المعتاد؛ اختار InstaPay لما يكون الدفع مستحقًا عشان تستفيد من الخصم.'
+            ? 'تقدر تحوّل دلوقتي على طول وتاخد الخصم — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
+            : 'تقدر تحوّل دلوقتي على طول — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'}
+        </p>
+      ) : isCashOrder ? (
+        <p className="mt-1 text-sm text-muted">
+          {preview.instapay_discount_cents > 0
+            ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الخصم.'
             : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.'}
         </p>
-      )}
+      ) : null}
 
       {preview.recipient_address && (
         <div className="mt-3 rounded-lg border border-border bg-surface p-3">
@@ -116,7 +131,9 @@ export function InstaPayInlineSection({
           {preview.has_open_transfer ? 'كمّل التحويل' : 'ابدأ التحويل بـInstaPay'}
         </Link>
       ) : (
-        <p className="mt-3 text-sm text-muted">هتقدر تبدأ التحويل أول ما يصبح فيه مبلغ مستحق.</p>
+        // ADR-0091 §2 — «مش عايز أستنى لحد ما الفني يخلّص عشان أعرف أدفع» (طلب مالك). الحالة
+        // الوحيدة الفاضلة هنا إن الطلب لسه مالوش سعر.
+        <p className="mt-3 text-sm text-muted">هتقدر تبدأ التحويل أول ما السعر يتحدد.</p>
       )}
     </section>
   );

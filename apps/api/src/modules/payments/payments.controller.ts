@@ -159,6 +159,8 @@ export class PaymentsController {
       confirm_max_minutes: preview.confirmMaxMinutes,
       has_open_transfer: preview.hasOpenTransfer,
       is_payable: preview.isPayable,
+      is_prepayment: preview.isPrepayment,
+      is_additional_charge: preview.isAdditionalCharge,
     };
   }
 

@@ -32,9 +32,28 @@ describe('PaymentsService — حماية من دفع مزدوج (§90.2)', () =>
       createPayment: jest.fn().mockResolvedValue({ kind: 'redirect', providerReference: 'ref-123', redirectUrl: 'https://pay.example/x' }),
     };
     const paymentProviders = { getProvider: jest.fn().mockReturnValue(provider) };
-    // مرّر manager وهمي فيه query() عشان nextPaymentNumber() (بيتنادى جوّه transaction في
-    // payWithProvider وpayWithWallet الاتنين) يلاقي حاجة يشتغل عليها.
-    const fakeManager = { query: jest.fn().mockResolvedValue([{ next_human_readable_number: 'PAY-000001' }]) };
+    // الطلب اللي payWithProvider بيقفله جوّه الـtransaction — نفس صف الـorders mock تحت بالحرف.
+    // orderStatus=PENDING_PAYMENT بيخلي assertPayable() يعدّي فورًا وamountOwedNow() يرجّع
+    // totalAmountCents من غير أي استعلام.
+    const lockedOrder = { id: 'order-1', orderNumber: 'ORD-1', orderStatus: OrderStatus.PENDING_PAYMENT, totalAmountCents: 10_000 };
+    // manager وهمي بكل اللي payWithProvider بينادیه جوّه الـtransaction (ADR-0091 نقلت إنشاء
+    // الدفعة + حاجز الدفع النشط + الحافز جوّه قفل واحد على الطلب):
+    //   query()            → nextPaymentNumber()
+    //   createQueryBuilder → قفل الطلب pessimistic_write
+    //   getRepository()    → فحص الدفعة النشطة (بيرجّع نفس paymentRepository عشان
+    //                        findOneSequence يفضل واصف تسلسل النداءات زي ما هو)
+    //   create()/save()    → صف الدفعة الجديد (بيمرّ على saveImpl عشان اختبار القيد الفريد)
+    const fakeManager = {
+      query: jest.fn().mockResolvedValue([{ next_human_readable_number: 'PAY-000001' }]),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(lockedOrder),
+      }),
+      getRepository: jest.fn().mockImplementation(() => paymentRepository),
+      create: jest.fn().mockImplementation((_entity: unknown, data: Partial<Payment>) => data as Payment),
+      save: jest.fn().mockImplementation((payment: Payment) => paymentRepository.save(payment)),
+    };
     const dataSource = {
       transaction: jest.fn().mockImplementation(
         options?.transactionImpl ?? (async (fn: (manager: unknown) => unknown) => fn(fakeManager as never)),

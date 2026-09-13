@@ -249,6 +249,10 @@ class InstaPayPreview {
   final int confirmMaxMinutes;
   final bool hasOpenTransfer;
   final bool isPayable;
+  /// الشغل لسه ما خلصش — ده دفع مسبق، والسعر ممكن يزيد ببند إضافي بعدين (ADR-0091).
+  final bool isPrepayment;
+  /// زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز.
+  final bool isAdditionalCharge;
 
   InstaPayPreview({
     required this.amountCents,
@@ -263,6 +267,8 @@ class InstaPayPreview {
     this.confirmMaxMinutes = 60,
     this.hasOpenTransfer = false,
     this.isPayable = true,
+    this.isPrepayment = false,
+    this.isAdditionalCharge = false,
   });
 
   factory InstaPayPreview.fromJson(Map<String, dynamic> json) => InstaPayPreview(
@@ -278,6 +284,8 @@ class InstaPayPreview {
         confirmMaxMinutes: (json['confirm_max_minutes'] as num?)?.toInt() ?? 60,
         hasOpenTransfer: json['has_open_transfer'] as bool? ?? false,
         isPayable: json['is_payable'] as bool? ?? true,
+        isPrepayment: json['is_prepayment'] as bool? ?? false,
+        isAdditionalCharge: json['is_additional_charge'] as bool? ?? false,
       );
 }
 

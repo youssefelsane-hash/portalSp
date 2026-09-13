@@ -321,6 +321,9 @@ export interface TechnicianOrderResponseDto
     | 'surge_amount_cents'
     | 'level_premium_cents'
     | 'discount_amount_cents'
+    // حافز InstaPay خصم على فاتورة العميل تتحمله المنصة (ADR-0091 §6) — رقم فلوس عميل صريح،
+    // ومستحق الفني بيتحسب من الإجمالي بعد الخصم فمش محتاج يشوف تكوينه.
+    | 'instapay_discount_cents'
     | 'warranty_price_cents'
     | 'deposit_amount_cents'
     | 'optional_warranty'
@@ -383,6 +386,7 @@ export function toTechnicianOrderResponseDto(
     surge_amount_cents: _surge,
     level_premium_cents: _levelPremium,
     discount_amount_cents: _discount,
+    instapay_discount_cents: _instapayDiscount,
     warranty_price_cents: _warrantyPrice,
     deposit_amount_cents: _deposit,
     optional_warranty: _optionalWarranty,

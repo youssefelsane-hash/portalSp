@@ -1845,7 +1845,10 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
                       ),
                     ),
                   Text(
-                    '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.',
+                    // طلب لسه مالوش سعر بيرجّع صفر — و«0 ج.م.» في خانة دفع بتقري "ببلاش".
+                    preview.amountCents > 0
+                        ? '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.'
+                        : 'لسه بيتحدد',
                     style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
                 ],
@@ -1859,11 +1862,27 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary),
             ),
           ],
-          if (widget.isCashOrder) ...[
+          // ADR-0091 §6 — الزيادة بعد طلب مدفوع مالهاش حافز. السكوت عن السبب كان بيخلّي
+          // العميل يفتكر الخصم اتسحب منه، فالسطر ده بيقول القاعدة بدل ما يخبّيها.
+          if (preview.isAdditionalCharge) ...[
+            const SizedBox(height: 4),
+            Text(
+              'ده مبلغ الزيادة اللي وافقت عليها بس. الخصم بياخده الطلب مرة واحدة، وهو اتحسب على الدفعة الأولى.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ] else if (preview.isPrepayment) ...[
             const SizedBox(height: 4),
             Text(
               preview.instapayDiscountCents > 0
-                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay لما يكون الدفع مستحقًا عشان تستفيد من الخصم.'
+                  ? 'تقدر تحوّل دلوقتي على طول وتاخد الخصم — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
+                  : 'تقدر تحوّل دلوقتي على طول — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ] else if (widget.isCashOrder) ...[
+            const SizedBox(height: 4),
+            Text(
+              preview.instapayDiscountCents > 0
+                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الخصم.'
                   : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.',
               style: theme.textTheme.bodySmall,
             ),
@@ -1936,8 +1955,10 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
               onPressed: widget.onPay,
               icon: const Icon(Icons.send_outlined),
               label: Text(
+                // ADR-0091 §2 — «مش عايز أستنى لحد ما الفني يخلّص عشان أعرف أدفع» (طلب مالك).
+                // الحالة الوحيدة الفاضلة هنا إن الطلب لسه مالوش سعر، ووقتها السبب مكتوب صريح.
                 !preview.isPayable
-                    ? 'هتقدر تحوّل عند استحقاق الدفع'
+                    ? 'هتقدر تحوّل أول ما السعر يتحدد'
                     : preview.hasOpenTransfer
                         ? 'كمّل التحويل'
                         : 'ابدأ التحويل بـInstaPay',
