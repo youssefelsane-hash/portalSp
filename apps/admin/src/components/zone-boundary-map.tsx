@@ -46,6 +46,7 @@ export function ZoneBoundaryMap({ center, initialPoints, isSaving, onSave, onCan
         maxZoom: mapTileLayer.maxZoom,
         tileSize: mapTileLayer.tileSize,
         zoomOffset: mapTileLayer.zoomOffset,
+        referrerPolicy: mapTileLayer.referrerPolicy,
       }).addTo(map);
 
       const redraw = (pts: LngLatPoint[]) => {

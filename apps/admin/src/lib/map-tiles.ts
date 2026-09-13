@@ -6,6 +6,7 @@ export type MapTileLayerConfig = {
   maxZoom: number;
   tileSize: number;
   zoomOffset: number;
+  referrerPolicy: 'strict-origin-when-cross-origin';
 };
 
 // Mapbox's styles endpoint serves 512px tiles, so Leaflet needs the matching
@@ -17,6 +18,10 @@ export const mapTileLayer: MapTileLayerConfig | null = mapboxAccessToken
       maxZoom: 22,
       tileSize: 512,
       zoomOffset: -1,
+      // The admin shell intentionally uses no-referrer globally. Mapbox token
+      // URL restrictions need the requesting origin, so scope this exception
+      // to tile images only instead of weakening the rest of the dashboard.
+      referrerPolicy: 'strict-origin-when-cross-origin',
     }
   : null;
 

@@ -65,6 +65,7 @@ export function OperationsLiveMap({ technicians, orders }: { technicians: LiveMa
           maxZoom: mapTileLayer.maxZoom,
           tileSize: mapTileLayer.tileSize,
           zoomOffset: mapTileLayer.zoomOffset,
+          referrerPolicy: mapTileLayer.referrerPolicy,
         }).addTo(map);
         mapRef.current = map;
       })
