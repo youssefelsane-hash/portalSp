@@ -1481,6 +1481,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
+                      // خانة InstaPay اطلاع دائم: تعرض الحساب والحافز من لحظة إنشاء الطلب،
+                      // لكن بدء التحويل لا يتاح إلا عندما يقرر الخادم أن هناك مبلغًا مستحقًا.
+                      if (_instapayPreview != null) ...[
+                        const SizedBox(height: 16),
+                        _InstaPayInlineCard(
+                          preview: _instapayPreview!,
+                          isCashOrder: order.paymentMethod == 'cash',
+                          onPay: _instapayPreview!.isPayable && !_paying ? _payWithInstaPay : null,
+                        ),
+                      ],
                       if (_payableOrderStatuses.contains(order.orderStatus) &&
                           (order.paymentStatus != 'paid' || (order.amountDueNowCents ?? 0) > 0)) ...[
                         const SizedBox(height: 16),
@@ -1490,23 +1500,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           const SizedBox(height: 8),
-                        ],
-                        // **خانة InstaPay الثابتة** (ADR-0089، طلب مالك 2026-09-13): «خلي
-                        // دايمًا موجود جوّه الطلب خانة الدفع by InstaPay… يظهر له السعر
-                        // والبيانات اللي بتظهر عادي جدًا اللي هو كان هيدفع InstaPay من الأول».
-                        //
-                        // قبل كده كان فيه **زرار** بس؛ العميل اللي اختار كاش مكانش عنده أي
-                        // سبب يدوس عليه، فمكانش بيعرف إن الخيار موجود. البيانات قدام عينه
-                        // بتحوّل الخيار من «حاجة أدوّر عليها» لـ«حاجة قدامي».
-                        if (_instapayPreview != null &&
-                            _instapayPreview!.isPayable &&
-                            _instapayPreview!.amountCents > 0) ...[
-                          _InstaPayInlineCard(
-                            preview: _instapayPreview!,
-                            isCashOrder: order.paymentMethod == 'cash',
-                            onPay: _paying ? null : _payWithInstaPay,
-                          ),
-                          const SizedBox(height: 12),
                         ],
                         FilledButton.icon(
                           onPressed: _paying ? null : _payWithWallet,
@@ -1526,12 +1519,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onPressed: _paying ? null : _payWithFawryReference,
                           icon: const Icon(Icons.storefront_outlined),
                           label: const Text('ادفع في أقرب فوري'),
-                        ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: _paying ? null : _payWithInstaPay,
-                          icon: const Icon(Icons.send_outlined),
-                          label: const Text('ادفع عبر InstaPay'),
                         ),
                         // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو العميل هيدفع كاش
                         // في إيد الفني (مش من خلال التطبيق)، بعد ما يسلّم يضغط هنا يأكّد.
@@ -1846,16 +1833,38 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
                   style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
-              Text(
-                '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (preview.instapayDiscountCents > 0)
+                    Text(
+                      '${(preview.cashAmountCents / 100).toStringAsFixed(0)} ج.م.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        decoration: TextDecoration.lineThrough,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  Text(
+                    '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ],
               ),
             ],
           ),
+          if (preview.instapayDiscountCents > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'وفّر ${(preview.instapayDiscountCents / 100).toStringAsFixed(0)} ج.م. عند الدفع بـInstaPay.',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ],
           if (widget.isCashOrder) ...[
             const SizedBox(height: 4),
             Text(
-              'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت — نفس المبلغ بالظبط.',
+              preview.instapayDiscountCents > 0
+                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay لما يكون الدفع مستحقًا عشان تستفيد من الخصم.'
+                  : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.',
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -1926,7 +1935,13 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
             child: FilledButton.icon(
               onPressed: widget.onPay,
               icon: const Icon(Icons.send_outlined),
-              label: Text(preview.hasOpenTransfer ? 'كمّل التحويل' : 'ابدأ التحويل بـInstaPay'),
+              label: Text(
+                !preview.isPayable
+                    ? 'هتقدر تحوّل عند استحقاق الدفع'
+                    : preview.hasOpenTransfer
+                        ? 'كمّل التحويل'
+                        : 'ابدأ التحويل بـInstaPay',
+              ),
             ),
           ),
         ],

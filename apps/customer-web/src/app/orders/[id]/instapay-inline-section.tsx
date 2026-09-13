@@ -42,7 +42,7 @@ export function InstaPayInlineSection({
     return () => { active = false; };
   }, [authedFetch, orderId]);
 
-  if (!preview || !preview.is_payable || preview.amount_cents <= 0) return null;
+  if (!preview) return null;
 
   const isCashOrder = paymentMethod === 'cash';
 
@@ -52,12 +52,25 @@ export function InstaPayInlineSection({
         <h2 className="font-semibold">
           {isCashOrder ? 'تحب تدفع أونلاين بدل الكاش؟' : 'ادفع بـInstaPay'}
         </h2>
-        <span className="text-lg font-bold">{formatEgp(preview.amount_cents)}</span>
+        <span className="text-right">
+          {preview.instapay_discount_cents > 0 && (
+            <span className="block text-sm text-muted line-through">{formatEgp(preview.cash_amount_cents)}</span>
+          )}
+          <span className="text-lg font-bold">{formatEgp(preview.amount_cents)}</span>
+        </span>
       </div>
+
+      {preview.instapay_discount_cents > 0 && (
+        <p className="mt-1 text-sm text-primary">
+          وفّر {formatEgp(preview.instapay_discount_cents)} عند الدفع بـInstaPay.
+        </p>
+      )}
 
       {isCashOrder && (
         <p className="mt-1 text-sm text-muted">
-          الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت — نفس المبلغ بالظبط.
+          {preview.instapay_discount_cents > 0
+            ? 'الكاش بالسعر المعتاد؛ اختار InstaPay لما يكون الدفع مستحقًا عشان تستفيد من الخصم.'
+            : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.'}
         </p>
       )}
 
@@ -95,12 +108,16 @@ export function InstaPayInlineSection({
         دقيقة في أوقات الزحمة)، وعايزين نخلّصها والفني لسه معاك.
       </p>
 
-      <Link
-        href={`/orders/${orderId}/instapay`}
-        className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
-      >
-        {preview.has_open_transfer ? 'كمّل التحويل' : 'ابدأ التحويل بـInstaPay'}
-      </Link>
+      {preview.is_payable ? (
+        <Link
+          href={`/orders/${orderId}/instapay`}
+          className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
+        >
+          {preview.has_open_transfer ? 'كمّل التحويل' : 'ابدأ التحويل بـInstaPay'}
+        </Link>
+      ) : (
+        <p className="mt-3 text-sm text-muted">هتقدر تبدأ التحويل أول ما يصبح فيه مبلغ مستحق.</p>
+      )}
     </section>
   );
 }

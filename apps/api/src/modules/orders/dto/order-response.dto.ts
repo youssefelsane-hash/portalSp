@@ -63,6 +63,7 @@ export interface OrderResponseDto {
    * "فني مميّز" عشان العميل يفهم الزيادة جاية منين، مش يحس إن السعر اتغيّر عليه فجأة. */
   level_premium_cents: number;
   discount_amount_cents: number;
+  instapay_discount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
   /** مسارات الفني تضيف الحقول دي من دفتر الدفعات؛ باقي القوائم قد لا تحملها لتجنب N+1. */
@@ -235,6 +236,7 @@ export function toOrderResponseDto(
     surge_amount_cents: order.surgeAmountCents,
     level_premium_cents: order.levelPremiumCents,
     discount_amount_cents: order.discountAmountCents,
+    instapay_discount_cents: order.instapayDiscountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
     warranty_plan_id: order.warrantyPlanId,

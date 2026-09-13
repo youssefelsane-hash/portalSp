@@ -38,8 +38,6 @@ import { InstaPayInlineSection } from './instapay-inline-section';
  * `apps/customer-app/lib/features/orders/order_detail_screen.dart`. أي تغيير هنا لازم يتغيّر
  * هناك، وإلا الويب والتطبيق يعرضوا مدخلين دفع مختلفين على نفس الطلب.
  */
-const PAYABLE_ORDER_STATUSES = new Set(['work_completed', 'awaiting_payment', 'pending_payment']);
-
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
 const TIMELINE_STATUSES = [
   'searching_technician',
@@ -254,20 +252,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
       )}
 
-      {/* **خانة InstaPay على الطلب نفسه** (ADR-0089) — كانت زرار بيوصّل لصفحة تانية، وبقت
-          خانة كاملة بالحساب والمبلغ والتنبيه الزمني. الفرق مش تجميلي: العميل اللي اختار كاش
-          مكانش عنده أي سبب يدوس على زرار دفع، فمكانش بيعرف إن الخيار موجود أصلاً.
-
-          الشرط مطابق لشرط التطبيق بالحرف (`_payableOrderStatuses` + المستحق دلوقتي): الطلب
-          المدفوع بالكامل مابيعرضش الخانة، والمدفوع جزئيًا بيعرضها على الباقي. */}
-      {PAYABLE_ORDER_STATUSES.has(order.order_status) &&
-        (order.payment_status !== 'paid' || (order.amount_due_now_cents ?? 0) > 0) && (
-          <InstaPayInlineSection
-            authedFetch={authedFetch}
-            orderId={order.id}
-            paymentMethod={order.payment_method ?? null}
-          />
-        )}
+      {/* يظهر دائمًا للطلب القائم: البيانات والحافز من البداية، وزر التحويل نفسه يتعطّل
+          إلى أن تصبح هناك فاتورة قابلة للدفع. */}
+      <InstaPayInlineSection
+        authedFetch={authedFetch}
+        orderId={order.id}
+        paymentMethod={order.payment_method ?? null}
+      />
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">

@@ -238,6 +238,8 @@ class InstaPayReference {
 /// قابل للدفع أصلاً. مافيهاش `payment` لأن **مفيش دفعة اتفتحت** — دي قراءة بحتة.
 class InstaPayPreview {
   final int amountCents;
+  final int cashAmountCents;
+  final int instapayDiscountCents;
   final String? recipientAddress;
   final String? recipientName;
   final String instructionsAr;
@@ -250,6 +252,8 @@ class InstaPayPreview {
 
   InstaPayPreview({
     required this.amountCents,
+    this.cashAmountCents = 0,
+    this.instapayDiscountCents = 0,
     required this.instructionsAr,
     required this.referenceCode,
     this.recipientAddress,
@@ -263,6 +267,8 @@ class InstaPayPreview {
 
   factory InstaPayPreview.fromJson(Map<String, dynamic> json) => InstaPayPreview(
         amountCents: (json['amount_cents'] as num?)?.toInt() ?? 0,
+        cashAmountCents: (json['cash_amount_cents'] as num?)?.toInt() ?? (json['amount_cents'] as num?)?.toInt() ?? 0,
+        instapayDiscountCents: (json['instapay_discount_cents'] as num?)?.toInt() ?? 0,
         instructionsAr: json['instructions_ar'] as String? ?? '',
         referenceCode: json['reference_code'] as String? ?? '',
         recipientAddress: json['recipient_address'] as String?,

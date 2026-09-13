@@ -614,6 +614,86 @@ export class PaymentsService {
     return (await this.getCollectionBreakdownForOrder(order, manager)).amountDueToTechnicianCents;
   }
 
+  /** قيمة الحافز مضبوطة بالجنيه في الإدارة، لكن كل الحسابات تحتها تظل بالقروش الصحيحة. */
+  private async configuredInstaPayDiscountCents(): Promise<number> {
+    const egp = await this.settingsService.getNumber('payments.instapay_discount_egp', 0);
+    if (!Number.isFinite(egp) || egp <= 0) return 0;
+    return Math.max(0, Math.round(egp * 100));
+  }
+
+  /**
+   * لا نمنح الحافز على دفعة لاحقة أو دلتا بعد ما العميل دفع بالفعل.
+   *
+   * الحافز هنا قرار وسيلة الدفع للفاتورة الأصلية، وليس وسيلة لتخفيض شغل إضافي بعد التنفيذ.
+   * كما أن منع تخفيض المستحق إلى صفر يحافظ على انتقال `pending_payment` واضحًا ومراجَعًا.
+   */
+  private async eligibleInstaPayDiscountCents(order: Order, amountCents: number): Promise<number> {
+    if (order.instapayDiscountCents > 0 || order.paymentStatus === OrderPaymentStatus.PAID || amountCents <= 0) {
+      return 0;
+    }
+    const configuredCents = await this.configuredInstaPayDiscountCents();
+    if (configuredCents <= 0 || configuredCents >= amountCents || configuredCents >= order.totalAmountCents) {
+      return 0;
+    }
+    return configuredCents;
+  }
+
+  /** يطبق الحافز داخل قفل الطلب؛ لا يوجد هنا أي I/O مع بوابة دفع. */
+  private async applyInstaPayDiscount(
+    manager: EntityManager,
+    order: Order,
+    customerUserId: string,
+    amountDueBeforeDiscountCents: number,
+  ): Promise<number> {
+    const discountCents = await this.eligibleInstaPayDiscountCents(order, amountDueBeforeDiscountCents);
+    if (discountCents === 0) return amountDueBeforeDiscountCents;
+
+    order.instapayDiscountCents = discountCents;
+    order.discountAmountCents += discountCents;
+    order.totalAmountCents -= discountCents;
+    // الإيداع snapshot بالمبلغ وليس بالنسبة. نخصم الحافز من نفس الفاتورة التي سيدفعها العميل
+    // الآن كي لا يدفع عربونًا بالسعر القديم ثم يجد الخصم متأخرًا في الزيارة.
+    if (order.depositAmountCents !== null) {
+      order.depositAmountCents -= discountCents;
+    }
+    await manager.save(order);
+    await this.auditLog.record(
+      {
+        actorUserId: customerUserId,
+        actorRole: 'customer',
+        action: 'order.instapay_discount_applied',
+        entityType: 'order',
+        entityId: order.id,
+        newValues: { instapay_discount_cents: discountCents, total_amount_cents: order.totalAmountCents },
+      },
+      manager,
+    );
+    return amountDueBeforeDiscountCents - discountCents;
+  }
+
+  /** يعيد فقط الحافز المعلق بعد رفض التحويل، ولا يلمس أي خصم تسويقي آخر. */
+  private async revertInstaPayDiscountIfUnpaid(manager: EntityManager, order: Order): Promise<void> {
+    if (order.instapayDiscountCents <= 0) return;
+    const successfulPayments = await manager.getRepository(Payment).count({
+      where: {
+        orderId: order.id,
+        paymentStatus: In([
+          PaymentGatewayStatus.SUCCEEDED,
+          PaymentGatewayStatus.PARTIALLY_REFUNDED,
+          PaymentGatewayStatus.REFUNDED,
+        ]),
+      },
+    });
+    if (successfulPayments > 0) return;
+
+    const discountCents = order.instapayDiscountCents;
+    order.totalAmountCents += discountCents;
+    order.discountAmountCents = Math.max(0, order.discountAmountCents - discountCents);
+    if (order.depositAmountCents !== null) order.depositAmountCents += discountCents;
+    order.instapayDiscountCents = 0;
+    await manager.save(order);
+  }
+
   /**
    * مصدر واحد للرقم الذي يجوز للفني تحصيله من العميل. دفعات الأقساط تسدد مديونية العميل
    * للمنصة ولا تُحصّل مرة ثانية عند الزيارة، والخطة المعتمدة تغطي أصل سعر الخدمة وفق نموذج
@@ -1347,46 +1427,50 @@ export class PaymentsService {
       throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
-    // محاولة بوابة معلقة قد تتحول لتحصيل حقيقي حتى لو مر عليها وقت طويل. لا نفتح محاولة
-    // بديلة بمجرد انتهاء نافذة زمنية؛ ينهيها webhook موثق أو مراجعة مالية صريحة فقط.
-    const activePayment = await this.payments.findOne({
-      where: {
-        orderId,
-        paymentStatus: In([...ACTIVE_ORDER_PAYMENT_STATUSES]),
-      },
-      order: { initiatedAt: 'DESC' },
-    });
-    if (activePayment) {
-      throw new ApiException(
-        ErrorCode.PAY_003,
-        activePayment.paymentStatus === PaymentGatewayStatus.MANUAL_REVIEW
-          ? 'فيه محاولة دفع تحتاج مراجعة مالية لنفس الطلب — لن ننشئ تحصيلًا جديدًا تلقائيًا'
-          : 'فيه محاولة دفع سابقة معلّقة لنفس الطلب — استنى نتيجتها أو راجع الدعم',
-        HttpStatus.CONFLICT,
-      );
-    }
-
-    // المبلغ المستحق دلوقتي (ADR-0015) — راجع تعليق collectCash فوق لنفس المنطق بالحرف. صف
-    // الدفعة (Payment.amountCents) هو نفسه اللي التحقق من مبلغ الـwebhook بيقارن بيه لاحقًا
-    // (P0-7)، فمفيش تعديل إضافي مطلوب هناك — هيتحقق صح تلقائيًا ضد الدلتا مش الإجمالي الكامل.
-    const owedNowCents = await this.amountOwedNow(order);
-
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-
-    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
-    const payment = this.payments.create({
-      paymentNumber,
-      orderId: order.id,
-      customerId: customerProfile.id,
-      amountCents: owedNowCents,
-      paymentMethod: method,
-      paymentGateway: provider.providerKey,
-      paymentStatus: PaymentGatewayStatus.PENDING,
-      idempotencyKey,
-      activeOrderPaymentGuard: this.activeOrderPaymentGuard(order.id),
-    });
+    // إنشاء صف الدفعة، حاجز الدفع النشط، وحافز InstaPay عملية واحدة تحت قفل الطلب. لو سباق
+    // بين كاش/InstaPay أو ضغطتين InstaPay، يفوز واحد فقط ولا يظل خصم بلا دفعة مقابلة.
+    let payment: Payment;
     try {
-      await this.payments.save(payment);
+      payment = await this.dataSource.transaction(async (manager) => {
+        const lockedOrder = await manager
+          .createQueryBuilder(Order, 'o')
+          .setLock('pessimistic_write')
+          .where('o.id = :orderId', { orderId })
+          .getOne();
+        if (!lockedOrder) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+        this.assertPayable(lockedOrder);
+
+        const activePayment = await manager.getRepository(Payment).findOne({
+          where: { orderId, paymentStatus: In([...ACTIVE_ORDER_PAYMENT_STATUSES]) },
+          order: { initiatedAt: 'DESC' },
+        });
+        if (activePayment) {
+          throw new ApiException(
+            ErrorCode.PAY_003,
+            activePayment.paymentStatus === PaymentGatewayStatus.MANUAL_REVIEW
+              ? 'فيه محاولة دفع تحتاج مراجعة مالية لنفس الطلب — لن ننشئ تحصيلًا جديدًا تلقائيًا'
+              : 'فيه محاولة دفع سابقة معلّقة لنفس الطلب — استنى نتيجتها أو راجع الدعم',
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        const owedNowCents = await this.amountOwedNow(lockedOrder, manager);
+        const amountCents = method === PaymentMethod.INSTAPAY
+          ? await this.applyInstaPayDiscount(manager, lockedOrder, userId, owedNowCents)
+          : owedNowCents;
+        return manager.save(manager.create(Payment, {
+          paymentNumber: await this.nextPaymentNumber(manager),
+          orderId: lockedOrder.id,
+          customerId: customerProfile.id,
+          amountCents,
+          paymentMethod: method,
+          paymentGateway: provider.providerKey,
+          paymentStatus: PaymentGatewayStatus.PENDING,
+          idempotencyKey,
+          activeOrderPaymentGuard: this.activeOrderPaymentGuard(lockedOrder.id),
+        }));
+      });
     } catch (err) {
       // نفس سباق payWithWallet: ضغطتين متزامنتين حقيقيتين ممكن يعدّوا فحص idempotencyKey فوق
       // الاتنين بنفس اللحظة. القيد الفريد في الداتابيز بيمنع صف مكرر؛ بدل 500 خام للخاسر، نرجّع
@@ -1800,6 +1884,8 @@ export class PaymentsService {
    */
   async previewInstaPayTransfer(userId: string, orderId: string): Promise<{
     amountCents: number;
+    cashAmountCents: number;
+    instapayDiscountCents: number;
     recipientAddress: string | null;
     recipientName: string | null;
     instructionsAr: string;
@@ -1820,7 +1906,21 @@ export class PaymentsService {
       isPayable = false;
     }
 
-    const amountCents = isPayable ? await this.amountOwedNow(order) : 0;
+    // قبل استحقاق الدفع بنعرض للعميل سعر الطلب المتوقع، لا نصفر البطاقة. كده يقدر يشوف
+    // الحافز وبيانات التحويل من لحظة إنشاء طلب كاش، لكن زر بدء التحويل يفضل مقفول لحد ما
+    // توجد فاتورة فعلية قابلة للتحصيل.
+    const payableAmountCents = isPayable
+      ? await this.amountOwedNow(order)
+      // الطلب المكتمل/المدفوع لا يجوز أن يبدو كأن عليه مبلغ جديد لمجرد أن البطاقة دائمة.
+      // الطلب غير المدفوع قبل نهاية الشغل يعرض سعره المتوقع فقط.
+      : order.paymentStatus === OrderPaymentStatus.PAID
+        ? 0
+        : order.totalAmountCents;
+    const prospectiveDiscountCents = await this.eligibleInstaPayDiscountCents(order, payableAmountCents);
+    const appliedDiscountCents = order.instapayDiscountCents;
+    const instapayDiscountCents = payableAmountCents > 0 ? appliedDiscountCents || prospectiveDiscountCents : 0;
+    const amountCents = Math.max(0, payableAmountCents - prospectiveDiscountCents);
+    const cashAmountCents = payableAmountCents > 0 ? payableAmountCents + appliedDiscountCents : 0;
     const details = await this.paymentProviders
       .getInstaPayProvider()
       .describeExistingTransfer(order.orderNumber, amountCents);
@@ -1832,7 +1932,14 @@ export class PaymentsService {
       },
     });
 
-    return { ...details, hasOpenTransfer: openTransfer !== null, isPayable };
+    return {
+      ...details,
+      amountCents,
+      cashAmountCents,
+      instapayDiscountCents,
+      hasOpenTransfer: openTransfer !== null,
+      isPayable,
+    };
   }
 
   /**
@@ -1934,6 +2041,16 @@ export class PaymentsService {
       lockedPayment.failureMessage = reason;
       lockedPayment.failedAt = new Date();
       await manager.save(lockedPayment);
+
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId: lockedPayment.orderId })
+        .getOne();
+      if (!lockedOrder) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      await this.revertInstaPayDiscountIfUnpaid(manager, lockedOrder);
 
       await this.auditLog.record(
         {

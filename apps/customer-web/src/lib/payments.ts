@@ -77,6 +77,10 @@ export const confirmInstaPayTransfer = (authedFetch: AuthedFetch, orderId: strin
  */
 export interface InstaPayPreviewDto {
   amount_cents: number;
+  /** السعر المعتاد قبل حافز InstaPay، للعرض فقط. */
+  cash_amount_cents: number;
+  /** الحافز الثابت الممول من المنصة، بالقروش. */
+  instapay_discount_cents: number;
   recipient_address: string | null;
   recipient_name: string | null;
   instructions_ar: string;

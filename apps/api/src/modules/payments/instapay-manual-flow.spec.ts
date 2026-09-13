@@ -39,6 +39,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     instapayPayment3: '',
     order4: '',
     instapayPayment4: '',
+    order5: '',
     cardPayment: '',
   };
 
@@ -107,8 +108,8 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
 
     const [order] = await q(
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
-         payment_status, total_amount_cents, placed_at)
-       VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+         payment_status, total_amount_cents, discount_amount_cents, instapay_discount_cents, placed_at)
+       VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',97000,3000,3000, now()) RETURNING id`,
       [`TESTIP-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     ids.order = order.id;
@@ -116,7 +117,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     const [instapayPayment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, initiated_at)
        VALUES ($1,$2,$3,$4,'instapay','pending',$5, now()) RETURNING id`,
-      [`PAYIP-${runId}`.slice(0, 24), ids.order, ids.customerProfile, 100000, `idem-ip-${runId}`],
+      [`PAYIP-${runId}`.slice(0, 24), ids.order, ids.customerProfile, 97000, `idem-ip-${runId}`],
     );
     ids.instapayPayment = instapayPayment.id;
 
@@ -182,17 +183,36 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
           if (userId === ids.otherCustomerUser) return { id: ids.otherCustomerProfile } as CustomerProfile;
           throw new Error('مستخدم اختبار غير معروف');
         },
+        findByProfileIdOrThrow: async (profileId: string) => {
+          if (profileId === ids.customerProfile) return { id: ids.customerProfile, userId: ids.customerUser } as CustomerProfile;
+          if (profileId === ids.otherCustomerProfile) return { id: ids.otherCustomerProfile, userId: ids.otherCustomerUser } as CustomerProfile;
+          throw new Error('ملف اختبار غير معروف');
+        },
       } as never,
       {} as never,
       {} as never,
       {} as never,
       {} as never,
-      { getNumber: async () => 4 } as never, // settingsService
+      {
+        getNumber: async (key: string) => key === 'payments.instapay_discount_egp' ? 30 : 4,
+      } as never, // settingsService
       { record: auditRecord } as never,
       // events — emitAsync() كمان بيتنادى (مش emit() بس) جوّه emitPaymentConfirmedEvents()
       // لحدث ORDER_CREATED_EVENT.
       { emit: eventsEmit, emitAsync: async () => undefined } as never,
-      {} as never,
+      {
+        getProvider: () => ({
+          providerKey: 'instapay',
+          isConfigured: true,
+          createPayment: async (input: { paymentId: string; orderNumber: string; amountCents: number }) => ({
+            kind: 'reference' as const,
+            providerReference: input.paymentId,
+            referenceCode: input.orderNumber,
+            instructionsAr: 'تعليمات اختبار',
+            amountCents: input.amountCents,
+          }),
+        }),
+      } as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
       crewEarningsServiceStub(),
@@ -206,7 +226,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     // الاسترداد بيتعلّق بالدفعة والطلب الاتنين — لازم يتمسح قبلهم وإلا التنظيف بيفشل على FK
     // ويسيب صفوف ورا كل تشغيلة (نفس فئة البَقّة الموثّقة فوق بتاعت صف الدولة).
-    await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order, ids.order2]]);
+    await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order, ids.order2, ids.order5]]);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
     // order2/instapayPayment2 (§28 — confirmInstaPayPayment() تست) — بيولّد order_status_history
@@ -214,6 +234,8 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order2]);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order2]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order2]);
+    await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order5]);
+    await q(`DELETE FROM orders WHERE id = $1`, [ids.order5]);
     // طلبات §11 (تأكيد متزامن / تأكيد بعد رفض) — نفس ترتيب المسح بالظبط.
     await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
@@ -229,6 +251,29 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     await dataSource.destroy();
+  });
+
+  describe('payWithInstaPay() — الحافز جزء ذري من محاولة التحويل', () => {
+    it('يسجّل السعر المخفّض والدفعة بنفس transaction، والفرق يدخل discount_amount_cents فقط كتكلفة منصة', async () => {
+      const [order] = await dataSource.query(
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+           payment_status, total_amount_cents, placed_at)
+         VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+        [`TESTIP5-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      );
+      ids.order5 = order.id;
+
+      const transfer = await service.payWithInstaPay(ids.customerUser, ids.order5, `instapay-discount-${runId}`);
+      expect(transfer.payment.amountCents).toBe(97000);
+
+      const [row] = await dataSource.query(
+        `SELECT total_amount_cents, discount_amount_cents, instapay_discount_cents FROM orders WHERE id = $1`,
+        [ids.order5],
+      );
+      expect(Number(row.total_amount_cents)).toBe(97000);
+      expect(Number(row.discount_amount_cents)).toBe(3000);
+      expect(Number(row.instapay_discount_cents)).toBe(3000);
+    });
   });
 
   describe('confirmInstaPayTransferByCustomer()', () => {
@@ -390,6 +435,16 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       ]);
       expect(row.payment_status).toBe(PaymentGatewayStatus.FAILED);
       expect(row.failure_code).toBe('instapay_manual_rejection');
+
+      // الحافز ليس كوبونًا دائمًا: تحويل InstaPay المرفوض يعيد السعر والخصم كما كانا قبل
+      // اختيار الوسيلة، فلا يستطيع العميل التحول للكاش والاحتفاظ بخصم لم يستخدمه.
+      const [orderRow] = await dataSource.query(
+        `SELECT total_amount_cents, discount_amount_cents, instapay_discount_cents FROM orders WHERE id = $1`,
+        [ids.order],
+      );
+      expect(Number(orderRow.total_amount_cents)).toBe(100000);
+      expect(Number(orderRow.discount_amount_cents)).toBe(0);
+      expect(Number(orderRow.instapay_discount_cents)).toBe(0);
 
       await expect(
         service.rejectInstaPayPayment('admin-1', ids.instapayPayment, 'محاولة رفض تانية'),

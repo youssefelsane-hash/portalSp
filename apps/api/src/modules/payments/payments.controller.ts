@@ -148,6 +148,8 @@ export class PaymentsController {
     const preview = await this.paymentsService.previewInstaPayTransfer(user.sub, id);
     return {
       amount_cents: preview.amountCents,
+      cash_amount_cents: preview.cashAmountCents,
+      instapay_discount_cents: preview.instapayDiscountCents,
       recipient_address: preview.recipientAddress,
       recipient_name: preview.recipientName,
       instructions_ar: preview.instructionsAr,

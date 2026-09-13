@@ -407,6 +407,7 @@ parts_amount_cents          INTEGER       DEFAULT 0
 addons_amount_cents         INTEGER       DEFAULT 0
 surge_amount_cents          INTEGER       DEFAULT 0
 discount_amount_cents       INTEGER       DEFAULT 0
+instapay_discount_cents     INTEGER       DEFAULT 0          -- جزء خصم InstaPay فقط؛ يعاد عند رفض تحويل معلّق، ولا يلمس خصم الكوبون/العمارة
 tax_amount_cents            INTEGER       DEFAULT 0
 subtotal_cents              INTEGER       DEFAULT 0
 total_amount_cents          INTEGER       DEFAULT 0
