@@ -144,6 +144,14 @@ export interface OrderCrewSummary {
   isTeamBooking: boolean;
 }
 
+export interface CustomerCancellationSummary {
+  reasonId: string | null;
+  reasonAr: string | null;
+  note: string | null;
+  feeCents: number;
+  cancelledAt: Date | null;
+}
+
 @Injectable()
 export class AdminOrdersService {
   constructor(
@@ -438,6 +446,7 @@ export class AdminOrdersService {
     technicianCancellations: TechnicianOrderCancellation[];
     crewStatus: ReturnType<typeof computeCrewComposition> | null;
     crewShortageUrgent: boolean;
+    customerCancellation: CustomerCancellationSummary | null;
   }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
@@ -448,6 +457,27 @@ export class AdminOrdersService {
       where: { orderId },
       order: { cancelledAt: 'ASC' },
     });
+    // السبب المنظّم والنص الحر مصدرهما مختلفان عن قصد: الأول سياسة اختارها العميل من قائمة
+    // الإدارة، والثاني سياق إضافي في سجل انتقال الحالة. نعيدهما معًا للأدمن بدل UUID مبهم.
+    const cancellationReasonRow = order.cancellationReasonId
+      ? await this.dataSource.query<{ reason_ar: string }[]>(
+          `SELECT reason_ar FROM cancellation_reasons WHERE id = $1`,
+          [order.cancellationReasonId],
+        )
+      : [];
+    const cancellationHistory = [...history].reverse().find(
+      (entry) => entry.newStatus === OrderStatus.CANCELLED_BY_CUSTOMER,
+    );
+    const customerCancellation =
+      order.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER || order.cancellationReasonId || cancellationHistory
+        ? {
+            reasonId: order.cancellationReasonId,
+            reasonAr: cancellationReasonRow[0]?.reason_ar ?? null,
+            note: cancellationHistory?.reason ?? null,
+            feeCents: order.cancellationFeeCents,
+            cancelledAt: order.cancelledAt,
+          }
+        : null;
     // docs/08 §35، ADR-0021 §1 — نفس crewStatus اللي apps/technician-app بيشوفه بالظبط (مصدر
     // حقيقة واحد)، عشان الأدمن يشوف الحالة الحقيقية للطاقم بلا حاجة يعدّ الأعضاء يدويًا.
     let crewStatus: ReturnType<typeof computeCrewComposition> | null = null;
@@ -469,7 +499,7 @@ export class AdminOrdersService {
         crewShortageUrgent = order.scheduledAt.getTime() - Date.now() <= hoursBefore * 60 * 60 * 1000;
       }
     }
-    return { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent };
+    return { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent, customerCancellation };
   }
 
   /**

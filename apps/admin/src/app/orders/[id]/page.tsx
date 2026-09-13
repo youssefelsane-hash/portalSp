@@ -3020,6 +3020,24 @@ export default function OrderDetailPage() {
           </Card>
         )}
 
+        {order.customer_cancellation && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">إلغاء العميل</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p><span className="text-muted-foreground">السبب المختار:</span> {order.customer_cancellation.reason_ar ?? 'لم يختر سببًا من القائمة'}</p>
+              {order.customer_cancellation.note && (
+                <p><span className="text-muted-foreground">ملاحظة العميل:</span> {order.customer_cancellation.note}</p>
+              )}
+              <p><span className="text-muted-foreground">رسوم الإلغاء:</span> {order.customer_cancellation.fee_cents > 0 ? formatEgp(order.customer_cancellation.fee_cents) : 'لا توجد رسوم'}</p>
+              {order.customer_cancellation.cancelled_at && (
+                <p className="text-xs text-muted-foreground">وقت الإلغاء: {new Date(order.customer_cancellation.cancelled_at).toLocaleString('ar-EG-u-nu-latn')}</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">بنود عرض السعر</CardTitle>

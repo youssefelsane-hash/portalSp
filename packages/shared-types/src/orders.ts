@@ -296,6 +296,14 @@ export interface OrderDetailResponseDto extends OrderResponseDto {
   status_history: OrderStatusHistoryResponseDto[];
   pricing_evaluation: OrderPricingEvaluationResponseDto | null;
   technician_cancellations: TechnicianOrderCancellationResponseDto[];
+  /** سبب إلغاء العميل المنظّم والنص الإضافي كما يظهران للإدارة فقط. */
+  customer_cancellation: {
+    reason_id: string | null;
+    reason_ar: string | null;
+    note: string | null;
+    fee_cents: number;
+    cancelled_at: string | null;
+  } | null;
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts
