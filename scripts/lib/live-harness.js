@@ -13,8 +13,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { Client } = require('/home/user/portalSp/node_modules/pg');
-const jwt = require('/home/user/portalSp/node_modules/jsonwebtoken');
+// Resolve through Node's normal module lookup. The old absolute `/home/user/portalSp` path
+// only existed in one development machine, so every local financial audit failed elsewhere.
+const { Client } = require('pg');
+const jwt = require('jsonwebtoken');
 
 const ROOT = path.resolve(__dirname, '../..');
 const API = process.env.API_BASE_URL ?? 'http://localhost:3000/api/v1';

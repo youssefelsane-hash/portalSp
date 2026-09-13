@@ -168,9 +168,8 @@ export class CatalogService {
   }
 
   async findActiveCategories(zoneId?: string): Promise<ServiceCategory[]> {
-    if (!zoneId) {
-      return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
-    }
+    // الفئة وعد للعميل إن فيها خدمة قابلة للحجز. إرجاع فئة فارغة (خصوصًا لزائر الويب بلا
+    // عنوان بعد) بيخليه يدخل خطوة بلا نتيجة؛ نفس فلتر التغطية الجغرافية ينطبق بلا منطقة أيضًا.
     const ids = await this.findVisibleCategoryIds(zoneId);
     if (ids.length === 0) return [];
     const categories = await this.categories.find({ where: { id: In(ids), isActive: true } });
@@ -385,7 +384,7 @@ export class CatalogService {
     }
   }
 
-  private async findVisibleCategoryIds(zoneId: string): Promise<string[]> {
+  private async findVisibleCategoryIds(zoneId?: string): Promise<string[]> {
     const rows = await this.categories.manager.query<{ id: string }[]>(
       `WITH RECURSIVE category_tree AS (
          SELECT category.id AS root_id, category.id, ARRAY[category.id] AS path
@@ -407,10 +406,10 @@ export class CatalogService {
               JOIN services service ON service.category_id = tree.id
              WHERE tree.root_id = root.id
                AND service.is_active = true AND service.deleted_at IS NULL
-               AND catalog_service_enabled_in_zone(service.id, $1)
+               AND ($1::uuid IS NULL OR catalog_service_enabled_in_zone(service.id, $1))
           )
         ORDER BY root.display_order ASC, root.name_ar ASC`,
-      [zoneId],
+      [zoneId ?? null],
     );
     return rows.map((row) => row.id);
   }
