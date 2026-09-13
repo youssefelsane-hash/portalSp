@@ -1526,6 +1526,7 @@ export class OrderCreationService {
         {
           basePriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.base_price_cents,
           levelPriceMultiplier: originalOrder ? 1 : estimate.level_price_multiplier,
+          zoneSurgeCents: originalOrder || remoteQuoteRequested ? 0 : estimate.zone_surge_cents,
           estimatedTotalCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
           inspectionFeeCents: order.inspectionFeeCents,
           emergencySurchargeCents: order.surgeAmountCents,

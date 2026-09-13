@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
-import '../orders/orders_repository.dart';
 import 'payments_repository.dart';
 
 // شاشة تحويل InstaPay — **وسيلة الدفع الأساسية للمنصة** (طلب مالك 2026-09-11)، فمتعاملة
@@ -37,7 +36,6 @@ class InstaPayReferenceScreen extends StatefulWidget {
 enum _CheckState { idle, checking, confirmedPaid, stillPending }
 
 class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> with WidgetsBindingObserver {
-  late final OrdersRepository _ordersRepository;
   late final PaymentsRepository _paymentsRepository;
   _CheckState _checkState = _CheckState.idle;
   InstaPayReference? _reference;
@@ -47,7 +45,6 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> with 
   @override
   void initState() {
     super.initState();
-    _ordersRepository = OrdersRepository(context.read<AuthRepository>());
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
     _reference = widget.reference;
     WidgetsBinding.instance.addObserver(this);
@@ -87,11 +84,26 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> with 
     }
   }
 
-  /// فحص صامت لحالة الدفع: بيقفل الشاشة لو اتأكّد، وبيسكت لو لسه — **من غير ما يقلق العميل**.
+  /// هل **التحويلة دي** اتبتّ فيها؟
+  ///
+  /// **بَقّة حقيقية اتصلحت (بلاغ مالك 2026-09-13، docs/08 §145)**: الشاشة كانت بتقرا
+  /// `order.paymentStatus == 'paid'` كدليل على إن التحويل اتأكّد. ده صح لدفعة الطلب الأصلية
+  /// بس. لما العميل يدفع **دلتا زيادة** على طلب مدفوع أصلاً، حالة الطلب بتكون `paid` **قبل**
+  /// ما يحوّل حاجة — فأول نبضة polling كانت بتلاقيها `paid` وتعرض «اتأكّد الدفع ✅» وتقفل
+  /// الشاشة، والتحويلة لسه محدش بصّ عليها. رسالة نجاح كاذبة على فلوس حقيقية.
+  ///
+  /// الإشارة الصح هي وجود **تحويلة مفتوحة** للطلب: طول ما هي مفتوحة يبقى لسه تحت المراجعة،
+  /// وأول ما تتبت (تأكيد أو رفض) بتقفل. `has_open_transfer` بيوصف الدفعة نفسها مش الطلب.
+  Future<bool> _transferStillOpen() async {
+    final preview = await _paymentsRepository.previewInstaPay(widget.orderId);
+    return preview?.hasOpenTransfer ?? false;
+  }
+
+  /// فحص صامت: بيقفل الشاشة لو التحويلة اتبتّ فيها، وبيسكت لو لسه — **من غير ما يقلق العميل**.
   Future<void> _refreshPaymentStatus() async {
     try {
-      final order = await _ordersRepository.getOne(widget.orderId);
-      if (!mounted || order.paymentStatus != 'paid') return;
+      if (!mounted || await _transferStillOpen()) return;
+      if (!mounted) return;
       setState(() => _checkState = _CheckState.confirmedPaid);
       await Future<void>.delayed(const Duration(seconds: 1));
       if (mounted) Navigator.of(context).pop(true);
@@ -109,19 +121,27 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> with 
     } catch (_) {
       // مش بلوكر — لو الشبكة قطعت هنا، الـpolling تحت لسه بيحاول يكتشف تأكيد الأدمن نفسه.
     }
+    // **وعد المراجعة بيظهر فورًا** (طلب مالك): «المفروض ييجي نفس الرسالة… إنت حولت هنراجع
+    // ونرد عليك خلال ٢٠ دقيقة». الانتظار ١٠ ثواني على spinner قبل ما نقول أي حاجة كان بيخلّي
+    // العميل حاسس إن مفيش حاجة اتسجّلت.
+    if (mounted) setState(() => _checkState = _CheckState.stillPending);
+
+    // بعد كده polling خفيف: لو المالية أكّدت وهو لسه فاتح الشاشة، بتقفل لوحدها. الشرط هنا
+    // بقى «التحويلة دي اتبتّ فيها» مش «الطلب مدفوع» — شوف `_transferStillOpen` فوق.
     for (var attempt = 0; attempt < 5; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      final order = await _ordersRepository.getOne(widget.orderId);
-      if (order.paymentStatus == 'paid') {
-        if (mounted) {
-          setState(() => _checkState = _CheckState.confirmedPaid);
-          await Future<void>.delayed(const Duration(seconds: 1));
-          if (mounted) Navigator.of(context).pop(true);
-        }
-        return;
+      if (!mounted) return;
+      try {
+        if (await _transferStillOpen()) continue;
+      } catch (_) {
+        continue; // الشبكة وقعت — نفضل على رسالة «تحت المراجعة»، وهي الصح.
       }
+      if (!mounted) return;
+      setState(() => _checkState = _CheckState.confirmedPaid);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (mounted) Navigator.of(context).pop(true);
+      return;
     }
-    if (mounted) setState(() => _checkState = _CheckState.stillPending);
   }
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(2)} ج.م';
@@ -252,8 +272,9 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> with 
                 ),
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  'وصلنا إنك حوّلت ✅ بنراجع التحويل دلوقتي، وهيوصلك إشعار أول ما يتأكّد. '
-                  'تقدر تقفل الشاشة عادي — مش محتاج تستنى هنا.',
+                  'وصلنا إنك حوّلت ✅ بنراجع التحويل دلوقتي — عادةً '
+                  '${reference.confirmTypicalMinutes} دقيقة (لحد ${reference.confirmMaxMinutes} دقيقة في وقت الزحمة)، '
+                  'وهيوصلك إشعار أول ما يتأكّد. تقدر تقفل الشاشة عادي — مش محتاج تستنى هنا.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: scheme.onSecondaryContainer),
                 ),

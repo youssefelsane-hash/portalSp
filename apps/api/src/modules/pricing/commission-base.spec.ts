@@ -13,6 +13,7 @@ const ownerScenario: OrderRevenueComponents = {
   basePriceCents: 100_000,
   levelPriceMultiplier: 1,
   estimatedTotalCents: 100_000,
+  zoneSurgeCents: 0,
   inspectionFeeCents: 0,
   emergencySurchargeCents: 0,
   addonsTotalCents: 0,
@@ -34,22 +35,53 @@ describe('أساس العمولة (ADR-0037)', () => {
     expect(split.technicianEarningCents).not.toBe(102_000);
   });
 
-  it('مضاعف مستوى الفني للفني، ومضاعف المنطقة/التضخم للشركة', () => {
+  // **الاختبار ده كان بيقفل على خط أنابيب مش موجود** (docs/08 §145): كان مفترض إن زيادة
+  // المنطقة بتتضرب **بعد** الإجمالي، فكان بيمرّر `estimatedTotalCents` أكبر ويستنتج الزيادة
+  // بالطرح. الحقيقة إن `catalog.service.ts` بيطبّق زيادة المنطقة **جوّه** `base_price_cents`
+  // نفسه. النتيجة إن الاختبار كان بيعدّي وهو بيوصف حاجة تانية خالص، والبقّة الحقيقية (قصّ
+  // الحد الأدنى بيتحسب «زيادة منطقة» ويتشال من مستحق الفني) عدّت من تحته.
+  it('زيادة المنطقة معلنة صراحةً وبتتشال من الوعاء، ومضاعف المستوى بيفضل للفني', () => {
     const components: OrderRevenueComponents = {
       ...ownerScenario,
+      // 1000 × 1.1 (منطقة) = 1100 هو base_price_cents، وزيادة المنطقة 100 معلنة لوحدها.
+      basePriceCents: 110_000,
+      zoneSurgeCents: 10_000,
       levelPriceMultiplier: 1.2,
-      // 1000 × 1.2 (مستوى) × 1.1 (تضخم المنطقة) = 1320
+      // 1100 × 1.2 = 1320
       estimatedTotalCents: 132_000,
       warrantyPriceCents: 0,
     };
     const parts = splitEstimatedTotal(components);
     expect(parts.workPriceCents).toBe(100_000);
-    expect(parts.levelPremiumCents).toBe(20_000);
-    expect(parts.zoneSurgeCents).toBe(12_000);
+    expect(parts.levelPremiumCents).toBe(22_000);
+    expect(parts.zoneSurgeCents).toBe(10_000);
+    expect(parts.workPriceCents + parts.levelPremiumCents + parts.zoneSurgeCents).toBe(132_000);
 
     const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY);
-    // 1000 (شغل) + 200 (مستوى الفني) = 1200 — الـ120ج بتاعت التضخم بره الوعاء.
-    expect(commissionableBaseCents).toBe(120_000);
+    // 1000 (شغل) + 220 (مستوى الفني) = 1220 — الـ100ج بتاعت المنطقة بره الوعاء.
+    expect(commissionableBaseCents).toBe(122_000);
+  });
+
+  // بلاغ المالك بالحرف (ORD-2026-000683): خدمة سعر معادلتها صفر وحدها الأدنى 120ج.
+  it('السعر اللي كله جاي من الحد الأدنى بيفضل مستحق فني — مش عمولة منصة', () => {
+    const components: OrderRevenueComponents = {
+      ...ownerScenario,
+      basePriceCents: 0,
+      estimatedTotalCents: 12_000,
+      warrantyPriceCents: 0,
+    };
+    const parts = splitEstimatedTotal(components);
+    expect(parts.workPriceCents).toBe(12_000);
+    expect(parts.zoneSurgeCents).toBe(0);
+
+    const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY);
+    expect(commissionableBaseCents).toBe(12_000);
+
+    const split = splitOrderRevenue({ totalAmountCents: 12_000, commissionableBaseCents, commissionRatePercentage: 20 });
+    expect(split.technicianEarningCents).toBe(9_600);
+    expect(split.platformCommissionCents).toBe(2_400);
+    // السلوك المكسور اللي المالك شافه: الفني صفر والمنصة بتاخد الـ120 كلها.
+    expect(split.technicianEarningCents).not.toBe(0);
   });
 
   it('تفكيك الإجمالي بيجمع للإجمالي بالظبط حتى لما حدود min/max تقصّ الناتج', () => {
@@ -62,6 +94,8 @@ describe('أساس العمولة (ADR-0037)', () => {
     expect(parts.workPriceCents + parts.levelPremiumCents + parts.zoneSurgeCents).toBe(110_000);
     expect(parts.zoneSurgeCents).toBe(0);
     expect(parts.levelPremiumCents).toBe(10_000);
+    // القصّ بينقص من زيادة المستوى، وسعر الشغل بيفضل كامل — الفني مايتحاسبش على قصّ إداري.
+    expect(parts.workPriceCents).toBe(100_000);
   });
 
   it('رسوم الطوارئ بره الوعاء افتراضيًا، وبتدخل لو الأدمن غيّر السياسة', () => {

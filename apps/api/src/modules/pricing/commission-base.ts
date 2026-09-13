@@ -49,6 +49,16 @@ export interface OrderRevenueComponents {
   levelPriceMultiplier: number;
   /** السعر بعد كل المضاعفات وحدود min/max (`estimate.estimated_total_cents`). */
   estimatedTotalCents: number;
+  /**
+   * زيادة مضاعف المنطقة الحقيقية (`estimate.zone_surge_cents`) — **بتتمرَّر صراحةً**، مابتتحسبش
+   * بالطرح.
+   *
+   * كانت بتتحسب قبل كده كـ«أي فرق بين الإجمالي وسعر الشغل × مضاعف المستوى»، وده كان غلط لأن
+   * زيادة المنطقة بتتطبّق في `catalog.service.ts` **جوّه** `zoneAdjustedBaseCents` اللي بيبقى
+   * هو نفسه `base_price_cents` — يعني هي داخلة في سعر الشغل أصلاً. الفرق اللي كان بيتحسب
+   * «زيادة منطقة» كان في الحقيقة **قصّ الحد الأدنى/الأقصى**، وهو سعر خدمة حقيقي دفعه العميل.
+   */
+  zoneSurgeCents: number;
   inspectionFeeCents: number;
   emergencySurchargeCents: number;
   addonsTotalCents: number;
@@ -82,18 +92,30 @@ export function splitEstimatedTotal(components: OrderRevenueComponents): {
   zoneSurgeCents: number;
 } {
   const { basePriceCents, levelPriceMultiplier, estimatedTotalCents } = components;
+  const totalCents = Math.max(estimatedTotalCents, 0);
+  const priceBeforeLevelCents = Math.max(basePriceCents, 0);
+
+  // زيادة المنطقة رقم معلن جاي من التسعير، مش باقي قسمة.
+  const zoneSurgeCents = Math.min(Math.max(components.zoneSurgeCents, 0), totalCents);
 
   // القصّ عند الإجمالي بيمنع "زيادة مستوى" أكبر من السعر النهائي نفسه لما max_price_cents يقصّ.
   const withLevelCents = Math.min(
-    Math.max(Math.round(basePriceCents * levelPriceMultiplier), 0),
-    Math.max(estimatedTotalCents, 0),
+    Math.max(Math.round(priceBeforeLevelCents * levelPriceMultiplier), 0),
+    totalCents,
   );
-  const workPriceCents = Math.min(Math.max(basePriceCents, 0), withLevelCents);
-  return {
-    workPriceCents,
-    levelPremiumCents: withLevelCents - workPriceCents,
-    zoneSurgeCents: estimatedTotalCents - withLevelCents,
-  };
+  const levelPremiumCents = Math.min(
+    Math.max(withLevelCents - priceBeforeLevelCents, 0),
+    Math.max(totalCents - zoneSurgeCents, 0),
+  );
+
+  // **البَقّة المالية اللي الملف ده اتصلح عشانها (بلاغ مالك 2026-09-13، docs/08 §145)**:
+  // الباقي بعد زيادة المستوى وزيادة المنطقة كان بيتصنّف «زيادة منطقة» ويتشال من الوعاء
+  // (`include_zone_surge = false`). الباقي ده في الحقيقة **قصّ الحد الأدنى/الأقصى** — سعر
+  // خدمة حقيقي العميل دفعه. النتيجة المتقاسة حيًا: خدمة سعر معادلتها صفر وحدها الأدنى ١٢٠ج
+  // طلّعت وعاء صفر ⇒ مستحق الفني **صفر** والمنصة خدت الـ١٢٠ كلها. بيرمي سعر الشغل هنا بيخلّي
+  // الثابت `work + level + zone === total` محفوظ وكل قرش دفعه العميل منسوب لمكانه الصح.
+  const workPriceCents = Math.max(totalCents - levelPremiumCents - zoneSurgeCents, 0);
+  return { workPriceCents, levelPremiumCents, zoneSurgeCents };
 }
 
 /**
