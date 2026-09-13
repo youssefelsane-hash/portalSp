@@ -101,4 +101,22 @@ describe('FeatureFlagsService.isEnabledForUser() (docs/08 §19 بند 23)', () =
     await insertFlag({ key: partialKey, isEnabled: true, rollout: 50 });
     expect(await service.isEnabledForUser(partialKey)).toBe(false);
   });
+
+  it('snapshot التطبيق يقيّم كل الفلاجز في query واحد منطقيًا، ولا يطبّق استهداف المنطقة بلا سياق منطقة', async () => {
+    const enabledKey = `test_ff_${runId}_snapshot_enabled`;
+    const zoneOnlyKey = `test_ff_${runId}_snapshot_zone_only`;
+    await insertFlag({ key: enabledKey, isEnabled: true, rollout: 100 });
+    await insertFlag({
+      key: zoneOnlyKey,
+      isEnabled: true,
+      rollout: 0,
+      zones: ['01a00000-0000-7000-9000-000000000099'],
+    });
+
+    const snapshot = await service.listEvaluatedForUser(userA);
+    expect(snapshot).toEqual(expect.arrayContaining([
+      { key: enabledKey, enabled: true },
+      { key: zoneOnlyKey, enabled: false },
+    ]));
+  });
 });
