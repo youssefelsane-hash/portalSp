@@ -267,7 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // docs/08 §75-ب — العنوان بقى هو عنوان الشاشة نفسه («فوق خالص يبقى العنوان إن
           // الـcustomer بينتمي لي»). طلباتي/حسابي اتنقلوا للشريط السفلي، فالرأس فضي من
           // الأربع أيقونات المزحومة وفضل فيه اللي بيتفتح عند حدث بس: الإشعارات والدعم.
-          titleSpacing: 8,
+          titleSpacing: 2,
           // شعار الأدمن المرفوع بيفضل ظاهر — بس صغير على الجنب، مش عنوان الشاشة. لو الأدمن
           // ما رفعش شعار (`isDefault`)، مفيش leading خالص والعنوان بياخد العرض كله: الشكل
           // المرجعي اللي المالك بعته مفيهوش شعار في الرأس أصلاً.
@@ -278,16 +278,16 @@ class _HomeScreenState extends State<HomeScreen> {
           // للوجو. ولوجو كلمة (wordmark زي «أسطى») محتاج **عرض** مش ارتفاع — فتكبير الارتفاع
           // لوحده مكانش هيحل حاجة، لازم `leadingWidth` نفسه يكبر.
           //
-          // 112 مقصودة عشان كلمة العلامة تفضل مقروءة من غير ما تزاحم عنوان المكان.
-          leadingWidth: 112,
+          // 102 مقصودة: اللوجو يفضل واضحًا، والمساحة المستعادة تترك عنوان المنطقة مقروءًا أكثر.
+          leadingWidth: 102,
           leading:
               _brandingLogo != null &&
                   !_brandingLogo!.isDefault &&
                   _brandingLogo!.url.isNotEmpty
               ? Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 6,
+                    horizontal: 4,
+                    vertical: 3,
                   ),
                   child: Image.network(
                     _resolveHeroImageUrl(_brandingLogo!.url),
@@ -310,6 +310,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context, snapshot) {
                     final unread = snapshot.data ?? 0;
                     return IconButton(
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(40, 40),
+                        maximumSize: const Size(40, 40),
+                        padding: EdgeInsets.zero,
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHigh,
+                        foregroundColor: Theme.of(context).colorScheme.primary,
+                        shape: const CircleBorder(),
+                      ),
                       icon: Badge(
                         isLabelVisible: unread > 0,
                         label: Text('$unread'),
@@ -326,6 +336,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             IconButton(
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                maximumSize: const Size(40, 40),
+                padding: EdgeInsets.zero,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHigh,
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                shape: const CircleBorder(),
+              ),
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
               onPressed: () => Navigator.of(context).push(
@@ -362,11 +382,33 @@ class _HomeScreenState extends State<HomeScreen> {
                     // فوق، خليها موجودة قبل كل الفئات». والمنطق سليم — الشبكة الكاملة (9+
                     // فئة) بتاخد شاشة كاملة، فأي حاجة تحتها فعليًا مش موجودة لأغلب العملاء.
                     if (featured.isNotEmpty) ...[
-                      Text(
-                        'الأكثر طلبًا',
-                        style: Theme.of(context).textTheme.titleMedium,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: context.accentColor.withValues(
+                                alpha: 0.12,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.trending_up_rounded,
+                              color: context.accentColor,
+                              size: 19,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'الأكثر طلبًا',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       SizedBox(
                         // 84 → ~72: الصف بقى أصغر بطلب المالك، والرقم محسوب من الأيقونة +
                         // المسافة + سطر الاسم بمقياس خط المستخدم — مش تقدير ثابت.

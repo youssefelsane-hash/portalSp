@@ -170,7 +170,7 @@ class AppTheme {
         shadowColor: colorScheme.shadow.withValues(alpha: 0.08),
         surfaceTintColor: Colors.transparent,
         centerTitle: false,
-        toolbarHeight: 72,
+        toolbarHeight: 60,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
