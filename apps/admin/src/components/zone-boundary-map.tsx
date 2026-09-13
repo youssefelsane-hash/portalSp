@@ -3,12 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LngLatPoint } from '@baytak/shared-types';
 import { Button } from '@/components/ui/button';
+import { mapTileLayer, mapTilesConfigurationMessage } from '@/lib/map-tiles';
 import 'leaflet/dist/leaflet.css';
 
-// خرائط OpenStreetMap مجانية بالكامل (بلاطات tile مفتوحة، مش محتاجة API key زي Google Maps) —
-// مناسبة تماماً للوحة رسم داخلية في apps/admin. تفاصيل خيارات الخرائط التانية (لو احتجنا Google
-// Maps فعلي لاحقاً) موثّقة في docs/03-external-integrations.md.
-const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const DEFAULT_CENTER: [number, number] = [30.0444, 31.2357]; // القاهرة، fallback لو المدينة معندهاش مركز محفوظ
 
 interface ZoneBoundaryMapProps {
@@ -40,9 +37,15 @@ export function ZoneBoundaryMap({ center, initialPoints, isSaving, onSave, onCan
       map = L.map(containerRef.current).setView(startCenter, 12);
       mapRef.current = map;
 
-      L.tileLayer(OSM_TILE_URL, {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19,
+      if (!mapTileLayer) {
+        console.error(mapTilesConfigurationMessage);
+        return;
+      }
+      L.tileLayer(mapTileLayer.url, {
+        attribution: mapTileLayer.attribution,
+        maxZoom: mapTileLayer.maxZoom,
+        tileSize: mapTileLayer.tileSize,
+        zoomOffset: mapTileLayer.zoomOffset,
       }).addTo(map);
 
       const redraw = (pts: LngLatPoint[]) => {

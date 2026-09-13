@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import Link from 'next/link';
 import 'leaflet/dist/leaflet.css';
+import { mapTileLayer, mapTilesConfigurationMessage } from '@/lib/map-tiles';
 
 export type LiveMapTechnician = {
   id: string;
@@ -26,7 +26,6 @@ export type LiveMapOrder = {
   longitude: number;
 };
 
-const OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const CAIRO_FALLBACK: [number, number] = [30.0444, 31.2357];
 
 function escapeHtml(value: string): string {
@@ -57,7 +56,16 @@ export function OperationsLiveMap({ technicians, orders }: { technicians: LiveMa
       .then((L) => {
         if (cancelled || !containerRef.current || mapRef.current) return;
         const map = L.map(containerRef.current, { zoomControl: true }).setView(CAIRO_FALLBACK, 11);
-        L.tileLayer(OSM_TILE_URL, { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map);
+        if (!mapTileLayer) {
+          console.error(mapTilesConfigurationMessage);
+          return;
+        }
+        L.tileLayer(mapTileLayer.url, {
+          attribution: mapTileLayer.attribution,
+          maxZoom: mapTileLayer.maxZoom,
+          tileSize: mapTileLayer.tileSize,
+          zoomOffset: mapTileLayer.zoomOffset,
+        }).addTo(map);
         mapRef.current = map;
       })
       .catch((error: unknown) => console.error('فشل تحميل الخريطة الحية', error));
