@@ -264,6 +264,58 @@ function OrderTraceRounds({ trace }: { trace: OrderTraceDto | null }) {
   );
 }
 
+/**
+ * صف دفعة قابلة للاسترداد مع المتبقي منها فعليًا.
+ *
+ * القاعدة هنا **نسخة حرفية** من `PaymentsService.refundOrder()`: الدفعة قابلة للاسترداد لو
+ * حالتها `succeeded` أو `partially_refunded`، والمحجوز منها هو مجموع الاستردادات `completed`
+ * **و`processing`** — الـ`processing` حجز حقيقي مش تقدير، لأن نتيجة البوابة لسه غير مؤكدة
+ * وممكن تكون الفلوس خرجت بالفعل. الترتيب بالأحدث زي الباك-إند بالظبط.
+ */
+type RefundablePaymentRow = {
+  payment: OrderFinancialSummaryResponseDto['payments'][number];
+  refundedCents: number;
+  remainingCents: number;
+};
+
+function refundablePaymentsOf(summary: OrderFinancialSummaryResponseDto | null): RefundablePaymentRow[] {
+  if (!summary) return [];
+  const reservedByPayment = new Map<string, number>();
+  for (const refund of summary.refunds) {
+    if (refund.refund_status !== 'completed' && refund.refund_status !== 'processing') continue;
+    reservedByPayment.set(refund.payment_id, (reservedByPayment.get(refund.payment_id) ?? 0) + refund.amount_cents);
+  }
+  return summary.payments
+    .filter((payment) => payment.payment_status === 'succeeded' || payment.payment_status === 'partially_refunded')
+    .map((payment) => {
+      const refundedCents = reservedByPayment.get(payment.id) ?? 0;
+      return { payment, refundedCents, remainingCents: payment.amount_cents - refundedCents };
+    })
+    .sort((a, b) => (b.payment.completed_at ?? '').localeCompare(a.payment.completed_at ?? ''));
+}
+
+/**
+ * وسم اختياري: `order_item_batch_id` بيتملي **بس** في مسار الخصم التلقائي بالكارت
+ * (`attemptAdditionalWorkCharge`). دفعة الزيادة المدفوعة بـInstaPay بتيجي بلا batch، فلو
+ * سمّينا اللي بلا batch «الدفعة الأساسية» هنكدب على الأدمن في أكتر حالة شائعة. الفاضي = بلا
+ * وسم، والتمييز بيبقى برقم الدفعة والمبلغ والتاريخ.
+ */
+function refundPaymentKindLabel(payment: OrderFinancialSummaryResponseDto['payments'][number]): string {
+  return payment.order_item_batch_id ? 'شغل إضافي معتمد' : '';
+}
+
+/**
+ * رقم الدفعة أول حاجة عمدًا: دفعات الطلب الواحد بتبقى غالبًا بنفس الوسيلة وفي نفس اليوم
+ * (الأساسية + الزيادات المعتمدة)، فرقم الدفعة هو التمييز الوحيد المضمون، وهو نفسه اللي بيبان
+ * في سجل تحويلات InstaPay فالأدمن يقدر يطابق بينهم.
+ */
+function refundPaymentOptionLabel(row: RefundablePaymentRow): string {
+  const when = row.payment.completed_at ? new Date(row.payment.completed_at).toLocaleDateString('ar-EG') : 'بلا تاريخ تحصيل';
+  const alreadyRefunded = row.refundedCents > 0 ? ` · اترد منها ${formatEgp(row.refundedCents)}` : '';
+  const kind = refundPaymentKindLabel(row.payment);
+  return `${row.payment.payment_number}${kind ? ` · ${kind}` : ''} · ${PAYMENT_METHOD_LABELS_FULL[row.payment.payment_method]} · ${when} · متبقٍ ${formatEgp(row.remainingCents)} من ${formatEgp(row.payment.amount_cents)}${alreadyRefunded}`;
+}
+
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
@@ -363,6 +415,7 @@ export default function OrderDetailPage() {
   const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
   const [cashDisputeNotes, setCashDisputeNotes] = useState('');
   const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundPaymentId, setRefundPaymentId] = useState('');
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [reconcilingRefundId, setReconcilingRefundId] = useState<string | null>(null);
@@ -604,6 +657,18 @@ export default function OrderDetailPage() {
     }
   }
 
+  const refundablePaymentsWithBalance = refundablePaymentsOf(financialSummary).filter((row) => row.remainingCents > 0);
+  // مشتق من البيانات، مش state موازي بيتزامن معاها: اختيار الأدمن بيفضل طول ما الدفعة لسه
+  // صالحة، والطلب بدفعة واحدة مايستاهلش قرار أصلاً، وأي اختيار بطل صالح (الدفعة اترّدت بالكامل
+  // بعد ما الصفحة اتحمّلت) بيسقط لوحده بدل ما يتبعت للسيرفر ويترفض.
+  const effectiveRefundPaymentId = refundablePaymentsWithBalance.some((row) => row.payment.id === refundPaymentId)
+    ? refundPaymentId
+    : refundablePaymentsWithBalance.length === 1
+      ? refundablePaymentsWithBalance[0].payment.id
+      : '';
+  const selectedRefundPayment =
+    refundablePaymentsWithBalance.find((row) => row.payment.id === effectiveRefundPaymentId) ?? null;
+
   // كانت فجوة موثّقة صراحة: POST /admin/orders/:id/refund موجود ومختبر من زمان (payments/README.md)
   // بس مفيش زرار ليه في أي شاشة — نفس فئة فجوة "endpoint إداري من غير واجهة" اللي ظهرت في
   // /customers, /support, /payouts. مطابق تماماً لشروط payments.service.ts's refundOrder():
@@ -623,14 +688,30 @@ export default function OrderDetailPage() {
       window.alert('مبلغ الاسترجاع لازم يكون رقم أكبر من صفر');
       return;
     }
+    // الباك-إند بيرفض الطلب المركّب من غير `payment_id` عشان مايخمّنش أي دفعة المقصودة. القرار
+    // ده قرار أدمن حقيقي (دفعة أساسية ولا دفعة شغل إضافي)، فالواجهة بتاخده صراحة بدل ما العملية
+    // تتقفل على رسالة خطأ بلا مخرج.
+    if (refundablePaymentsWithBalance.length > 1 && !effectiveRefundPaymentId) {
+      window.alert('الطلب فيه أكتر من دفعة قابلة للاسترداد — اختار الدفعة المقصودة الأول');
+      return;
+    }
+    if (amountCents !== undefined && selectedRefundPayment && amountCents > selectedRefundPayment.remainingCents) {
+      window.alert(`المبلغ أكبر من المتبقي في الدفعة المختارة (${formatEgp(selectedRefundPayment.remainingCents)})`);
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
       await authedFetch(`/admin/orders/${id}/refund`, {
         method: 'POST',
-        body: JSON.stringify({ reason_notes: refundReason, ...(amountCents !== undefined ? { amount_cents: amountCents } : {}) }),
+        body: JSON.stringify({
+          reason_notes: refundReason,
+          ...(amountCents !== undefined ? { amount_cents: amountCents } : {}),
+          ...(effectiveRefundPaymentId ? { payment_id: effectiveRefundPaymentId } : {}),
+        }),
       });
       setShowRefundForm(false);
+      setRefundPaymentId('');
       setRefundAmountEgp('');
       setRefundReason('');
       load();
@@ -1949,7 +2030,10 @@ export default function OrderDetailPage() {
               )}
             </CardFooter>
           )}
-          {order.payment_status === 'paid' &&
+          {/* `partially_refunded` مقصودة هنا: الطلب المركّب بيبقى جزئيًا بعد أول استرداد، والباك-إند
+              بيقبل الاستردادات الباقية عادي — الشرط القديم (`paid` بس) كان بيخفي الزرار ويقفل
+              استرداد بقية الدفعات من الواجهة خالص. */}
+          {(order.payment_status === 'paid' || order.payment_status === 'partially_refunded') &&
             (order.order_status === 'completed' || order.order_status === 'disputed') && (
               <CardFooter className="flex-col items-stretch gap-3">
                 <Button
@@ -1962,23 +2046,69 @@ export default function OrderDetailPage() {
                 </Button>
                 {showRefundForm && (
                   <form onSubmit={handleRefund} className="flex flex-col gap-2">
+                    {financialSummary && refundablePaymentsWithBalance.length === 0 && (
+                      <p className="text-sm text-destructive">
+                        مفيش دفعة عليها مبلغ متبقٍ قابل للاسترداد دلوقتي — راجع «الدفعات» و«الاستردادات» تحت
+                        (استرداد قيد التأكيد مع البوابة بيحجز مبلغه لحد ما يتراجع).
+                      </p>
+                    )}
+                    {refundablePaymentsWithBalance.length > 0 && (
+                      <div>
+                        <Label htmlFor="refund_payment_id">الدفعة المقصودة</Label>
+                        <SelectNative
+                          id="refund_payment_id"
+                          value={effectiveRefundPaymentId}
+                          onChange={(e) => {
+                            setRefundPaymentId(e.target.value);
+                            setRefundAmountEgp('');
+                          }}
+                        >
+                          {refundablePaymentsWithBalance.length > 1 && <option value="">اختار الدفعة…</option>}
+                          {refundablePaymentsWithBalance.map((row) => (
+                            <option key={row.payment.id} value={row.payment.id}>
+                              {refundPaymentOptionLabel(row)}
+                            </option>
+                          ))}
+                        </SelectNative>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          الطلب ممكن يبقى فيه دفعة أساسية + دفعات شغل إضافي معتمد، وكل واحدة بتترد لوحدها —
+                          الاسترجاع ده بيمشي على الدفعة المختارة بس.
+                        </p>
+                      </div>
+                    )}
                     <div>
-                      <Label htmlFor="refund_amount_egp">مبلغ الاسترجاع (جنيه) — اختياري، فاضي = استرجاع كامل</Label>
+                      <Label htmlFor="refund_amount_egp">مبلغ الاسترجاع (جنيه) — فاضي = المتبقي من الدفعة كله</Label>
                       <Input
                         id="refund_amount_egp"
                         type="number"
                         min={0.01}
                         step="0.01"
+                        max={selectedRefundPayment ? selectedRefundPayment.remainingCents / 100 : undefined}
                         value={refundAmountEgp}
                         onChange={(e) => setRefundAmountEgp(e.target.value)}
-                        placeholder={`الكامل: ${(order.total_amount_cents / 100).toFixed(2)} ج.م.`}
+                        placeholder={
+                          selectedRefundPayment
+                            ? `الكامل: ${(selectedRefundPayment.remainingCents / 100).toFixed(2)} ج.م.`
+                            : refundablePaymentsWithBalance.length > 1
+                              ? 'اختار الدفعة الأول'
+                              : `الكامل: ${(order.total_amount_cents / 100).toFixed(2)} ج.م.`
+                        }
                       />
                     </div>
                     <div>
                       <Label htmlFor="refund_reason">سبب الاسترجاع</Label>
                       <Input id="refund_reason" value={refundReason} onChange={(e) => setRefundReason(e.target.value)} minLength={2} required />
                     </div>
-                    <Button type="submit" size="sm" variant="destructive" disabled={isSaving}>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="destructive"
+                      disabled={
+                        isSaving ||
+                        (!!financialSummary && refundablePaymentsWithBalance.length === 0) ||
+                        (refundablePaymentsWithBalance.length > 1 && !effectiveRefundPaymentId)
+                      }
+                    >
                       تأكيد الاسترجاع
                     </Button>
                   </form>
@@ -2479,6 +2609,18 @@ export default function OrderDetailPage() {
                             </span>
                             <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
                           </div>
+                          {/* الطلب المركّب بيبقى فيه أكتر من دفعة، فرقم استرداد بلا دفعة = رقم بلا معنى. */}
+                          {financialSummary.payments.length > 1 && (
+                            <span className="text-muted-foreground">
+                              من:{' '}
+                              {(() => {
+                                const source = financialSummary.payments.find((p) => p.id === r.payment_id);
+                                if (!source) return 'دفعة غير معروضة';
+                                const kind = refundPaymentKindLabel(source);
+                                return `${source.payment_number} (${formatEgp(source.amount_cents)})${kind ? ` — ${kind}` : ''}`;
+                              })()}
+                            </span>
+                          )}
                           {r.refund_status === 'processing' && r.refund_method === 'original_method' && (
                             <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-950">
                               <p>

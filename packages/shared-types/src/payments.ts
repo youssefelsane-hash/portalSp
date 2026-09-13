@@ -59,6 +59,12 @@ export type RefundStatus = 'pending' | 'approved' | 'processing' | 'completed' |
 // عمولة المنصة/أرباح الفني محسوبة ومخزّنة على الطلب من زمان بس صفر endpoint كان بيرجّعها.
 export interface OrderPaymentSummaryDto {
   id: string;
+  /**
+   * رقم الدفعة المعروض (`PAY-…`) — **المعرّف الوحيد اللي الأدمن يقدر يطابق بيه** الدفعة في
+   * قايمة اختيار الاسترداد وفي سجل تحويلات InstaPay. دفعات الطلب المركّب بتبقى كلها بنفس
+   * الوسيلة وفي نفس اليوم، فالمبلغ وحده مش تمييز كافٍ.
+   */
+  payment_number: string;
   payment_method: PaymentMethod;
   payment_status: PaymentGatewayStatus;
   amount_cents: number;
@@ -102,6 +108,12 @@ export interface AdminRefundResponseDto {
 
 export interface OrderRefundSummaryDto {
   id: string;
+  /**
+   * الدفعـة اللي الاسترداد ده متعلّق بيها. الطلب المركّب (دفعة أساسية + دفعات شغل إضافي
+   * منفصلة) بيبقى فيه أكتر من دفعة قابلة للاسترداد، فصفحة الطلب محتاجة الربط ده عشان تحسب
+   * المتبقي لكل دفعة لوحدها وتخلي الأدمن يختار.
+   */
+  payment_id: string;
   amount_cents: number;
   refund_type: RefundType;
   refund_method: RefundMethod;
