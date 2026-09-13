@@ -1,19 +1,29 @@
 @import "tailwindcss";
 
 /* نفس القيم الدلالية المستخدمة في apps/customer-app/lib/design/app_theme.dart وapps/admin —
-   هوية بصرية موحّدة عبر المنصات الثلاث (ADR-0092: كحلي موثوق + نحاسي للفعل). */
+   هوية بصرية موحّدة عبر المنصات الثلاث.
+
+   **نسبة التطبيق محكومة بـADR-0093** (بلاغ مالك، docs/08 §144): ~٩٠٪ محايد بارد ·
+   ~٧٪ كحلي للأفعال · ~٣٪ نحاسي لمسة علامة. الهوية من ADR-0092 زي ما هي — اللي اتغيّر
+   هو فين اللون بيتحطّ، مش اللون نفسه. */
 :root {
-  --background: #faf7f2;
-  --foreground: #142235;
-  --surface: #fffaf6;
-  --surface-variant: #f3ebe3;
-  --border: #e3d7ca;
-  --primary: #b54724;
-  --primary-foreground: #fff8f2;
+  --background: #f6f7f9;
+  --foreground: #141a22;
+  --surface: #ffffff;
+  --surface-variant: #f1f3f6;
+  --border: #e3e6eb;
+  /* لون الفعل: الزرار الأساسي، اللينك، الحالة المختارة، حلقة التركيز. */
+  --primary: #123b69;
+  --primary-foreground: #ffffff;
+  /* **لمسة العلامة — قايمة مقفولة (ADR-0093 §2)**: الرمز، عنوان صفحة البداية، سهم زرار
+     البحث، شيفرون «عرض الكل»، نجوم التقييم. ممنوع على أي زرار أساسي عام، تبويب مختار،
+     اختيار وقت/تاريخ، شريحة حالة، أو أي مساحة مصمتة أكبر من أيقونة. */
+  --accent: #b54724;
+  --accent-foreground: #ffffff;
   --success: #3c8b4a;
   --warning: #c98a1f;
   --danger: #c0392b;
-  --info: #356a91;
+  --info: #2563a8;
   --muted: #6b7280;
 }
 
@@ -25,6 +35,8 @@
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
@@ -35,18 +47,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b1c31;
-    --foreground: #f5f7fb;
-    --surface: #11273f;
-    --surface-variant: #1a334f;
-    --border: #2a4665;
-    --primary: #ef9a6d;
-    --primary-foreground: #3c1a0d;
+    --background: #0f1318;
+    --foreground: #e7eaef;
+    --surface: #12161c;
+    --surface-variant: #1f242d;
+    --border: #333a44;
+    --primary: #a9c4e4;
+    --primary-foreground: #0b2444;
+    --accent: #ef9a6d;
+    --accent-foreground: #4a1a08;
     --success: #6fbf7a;
     --warning: #e0ac4e;
     --danger: #e07a6b;
     --info: #8ab4d2;
-    --muted: #b6c5d8;
+    --muted: #9aa3b2;
   }
 }
 

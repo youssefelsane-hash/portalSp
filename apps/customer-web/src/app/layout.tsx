@@ -23,7 +23,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#2f5aa6',
+  // لازم يطابق manifest.webmanifest — الاتنين بيلوّنوا شريط المتصفح، واختلافهم بيدّي لونين
+  // مختلفين على نفس الصفحة حسب المنصة.
+  themeColor: '#123b69',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

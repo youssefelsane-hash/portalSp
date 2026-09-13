@@ -415,6 +415,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         TextButton(
+                          // لمسة العلامة التانية والأخيرة على الشاشة دي (ADR-0093 §2) — المالك
+                          // سمّى «عرض الكل» بالاسم. نفس اللون بالظبط في customer-web عشان
+                          // الشاشتين يفضلوا نسخة واحدة.
+                          style: TextButton.styleFrom(foregroundColor: context.accentColor),
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => CategoriesScreen(
