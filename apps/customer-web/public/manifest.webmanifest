@@ -4,8 +4,8 @@
   "description": "احجز صنايعي معتمد لأي شغلانة في البيت — سعر واضح، تتبّع لحظي، دفع آمن.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7f4ee",
-  "theme_color": "#b54724",
+  "background_color": "#f6f7f9",
+  "theme_color": "#123b69",
   "dir": "rtl",
   "lang": "ar",
   "icons": [

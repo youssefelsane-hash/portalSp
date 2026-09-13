@@ -364,7 +364,10 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
                 SizedBox.square(
                   dimension: 36,
                   child: Material(
-                    color: AppColors.primary,
+                    // لمسة العلامة المسموحة على الشاشة دي (ADR-0093 §2): سهم البحث سمّاه
+                    // المالك بالاسم كمكان مناسب للنحاسي. حلقة التركيز والمؤشّر تحت فضلوا
+                    // كحلي لأنهم حالة تفاعل مش علامة.
+                    color: AppColors.accent,
                     shape: const CircleBorder(),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(

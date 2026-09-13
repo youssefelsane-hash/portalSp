@@ -5,27 +5,29 @@
 
 :root {
   --radius: 0.875rem;
-  --background: #faf7f2;
-  --foreground: #142235;
-  --card: #fffaf6;
-  --card-foreground: #142235;
-  --popover: #fffaf6;
-  --popover-foreground: #142235;
-  /* ADR-0092: كحلي موثوق + نحاسي للفعل + عاجي دافئ. حالات success/warning/danger تحت منفصلة عمدًا
-     عن البراند حتى اللون يفضل معلومة تشغيلية، مش مجرد زينة. */
-  --primary: #b54724;
-  --primary-foreground: #fff8f2;
-  --secondary: #f3ebe3;
+  --background: #f6f7f9;
+  --foreground: #141a22;
+  --card: #ffffff;
+  --card-foreground: #141a22;
+  --popover: #ffffff;
+  --popover-foreground: #141a22;
+  /* هوية ADR-0092 (كحلي + نحاسي) بنسبة تطبيق ADR-0093: الكحلي هو لون الأفعال، والنحاسي لمسة
+     علامة محدودة. لوحة الإدارة أداة شغل يومية تُقرأ ساعات — فالنحاسي هنا **مالوش وجود** في
+     عناصر الواجهة أصلاً، وبيفضل في الشِل/اللوجو بس. حالات success/warning/danger تحت منفصلة
+     عمدًا عن البراند حتى اللون يفضل معلومة تشغيلية، مش مجرد زينة. */
+  --primary: #123b69;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f3f6;
   --secondary-foreground: #253a56;
-  --muted: #f3ebe3;
+  --muted: #f1f3f6;
   --muted-foreground: #64748b;
-  --accent: #fbe4d7;
-  --accent-foreground: #a94520;
+  --accent: #e8edf4;
+  --accent-foreground: #123b69;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: #e3d7ca;
-  --input: #e3d7ca;
-  --ring: rgb(181 71 36 / 40%);
+  --border: #e3e6eb;
+  --input: #e3e6eb;
+  --ring: rgb(18 59 105 / 40%);
   /* حالات دلالية (status chips، تنبيهات، ملخصات لوحة التحكم) — نجاح/تحذير/خطر/معلومة، منفصلة
      عمداً عن --destructive (ده لإجراءات هدّامة زي "حذف"، مش لعرض حالة "طلب اتلغى"). */
   --success: oklch(0.5 0.13 152);
@@ -43,25 +45,25 @@
 }
 
 .dark {
-  --background: #0b1c31;
-  --foreground: #f5f7fb;
-  --card: #11273f;
-  --card-foreground: #f5f7fb;
-  --popover: #11273f;
-  --popover-foreground: #f5f7fb;
-  --primary: #ef9a6d;
-  --primary-foreground: #3c1a0d;
-  --secondary: #1a334f;
-  --secondary-foreground: #f5f7fb;
-  --muted: #1a334f;
-  --muted-foreground: #b6c5d8;
-  --accent: #2a4665;
-  --accent-foreground: #f8d4c2;
+  --background: #0f1318;
+  --foreground: #e7eaef;
+  --card: #12161c;
+  --card-foreground: #e7eaef;
+  --popover: #12161c;
+  --popover-foreground: #e7eaef;
+  --primary: #a9c4e4;
+  --primary-foreground: #0b2444;
+  --secondary: #1f242d;
+  --secondary-foreground: #e7eaef;
+  --muted: #1f242d;
+  --muted-foreground: #9aa3b2;
+  --accent: #1f242d;
+  --accent-foreground: #a9c4e4;
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: rgb(239 154 109 / 45%);
+  --ring: rgb(169 196 228 / 45%);
   --success: oklch(0.72 0.15 152);
   --success-foreground: oklch(0.16 0.02 255);
   --success-bg: oklch(0.27 0.05 152);

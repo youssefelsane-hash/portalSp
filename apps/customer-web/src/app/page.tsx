@@ -257,9 +257,12 @@ export default function HomePage() {
                   aria-label={searchContent.title}
                   className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground outline-none placeholder:text-muted"
                 />
+                {/* **النحاسي هنا وبس على الصفحة دي** (ADR-0093 §2، طلب مالك: «في صفحة
+                    البداية يكون فيه طابع للون»). ده الفعل الواحد اللي الصفحة مبنية حواليه،
+                    فاللمسة عليه بتقرا كعلامة؛ نفس اللون على كل زرار بيقرا كضوضاء. */}
                 <button
                   type="submit"
-                  className="motion-press shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                  className="motion-press shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90"
                 >
                   بحث
                 </button>
@@ -294,8 +297,14 @@ export default function HomePage() {
             <h2 id="categories-title" className="text-lg font-semibold">
               كل الفئات
             </h2>
-            <Link href="/search" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+            <Link
+              href="/search"
+              className="group inline-flex items-center gap-1 text-sm font-medium text-accent underline-offset-4 hover:underline"
+            >
               تصفّح كل الخدمات
+              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" aria-hidden>
+                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </Link>
           </div>
 
@@ -323,7 +332,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setShowAllCategories(true)}
-              className="motion-press mt-3 w-full rounded-2xl border border-border bg-surface-variant/50 py-3 text-sm font-medium text-primary transition-colors hover:border-primary"
+              className="motion-press mt-3 w-full rounded-2xl border border-border bg-surface-variant/50 py-3 text-sm font-medium text-accent transition-colors hover:border-accent"
             >
               عرض كل الفئات ({visibleCategories?.length})
             </button>
