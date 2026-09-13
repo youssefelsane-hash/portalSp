@@ -61,6 +61,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'booking.suggestion_day_start_hour': { type: 'number', default: 9, group: 'booking', description: 'أول ساعة في نافذة الاقتراح اليومي (توقيت مصر) — مابتمنعش اختيار ساعة برّاها يدويًا' },
   'booking.suggestion_day_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة بداية في نافذة الاقتراح اليومي (توقيت مصر)' },
   'booking.suggestion_roominess_ratio': { type: 'number', default: 0.7, group: 'booking', description: 'اليوم بيتعد «فيه براح» لو عدد الصنايعية المتاحين فيه ≥ النسبة دي × أحسن يوم في الأفق' },
+  'booking.suggestion_delay_penalty_per_day': { type: 'number', default: 0.04, group: 'booking', description: 'كام بتقل درجة اليوم عن كل يوم تأخير (٠.٠٤ = ٤٪). أعلى = بنفضّل الأقرب حتى لو أزحم، أقل = بنروح لأيام أبعد فيها صنايعية أكتر.' },
+  'booking.suggestion_min_day_spacing': { type: 'number', default: 2, group: 'booking', description: 'أقل مسافة بالأيام بين أي اقتراحين — بتمنع تلات أيام متلاصقة لما الطاقة متساوية.' },
+  'booking.suggestion_min_hour_spacing': { type: 'number', default: 3, group: 'booking', description: 'أقل مسافة بالساعات بين أي اقتراحين في نفس اليوم — بتفرد الاقتراحات على اليوم بدل تلات ساعات أول النافذة.' },
+  'booking.suggestion_cache_ttl_seconds': { type: 'number', default: 90, group: 'booking', description: 'مدة كاش طاقة أيام الاقتراح بالثواني. صفر = بلا كاش.' },
 
   // ── assistant_matching ────────────────────────────────────────────────
   'assistant_matching.batch_size': { type: 'number', default: 10, group: 'assistant_matching', description: 'عدد المساعدين المرشّحين اللي بيتبعتلهم عرض في كل بث' },
@@ -93,6 +97,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'homepage.hero_images': { type: 'json', default: [], group: 'homepage', description: 'Ordered homepage hero image URLs (up to 4) shared by customer web and mobile' },
   'homepage.search_content': { type: 'json', default: {"title":"محتاج مساعدة في إيه؟","eyebrow":"أساعدك إزاي؟","description":"قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت","placeholder":"وصّف مشكلتك... زي \"المياه بتنزل من تحت الحوض\""}, group: 'homepage', description: 'Customer homepage search eyebrow, title, description, and input placeholder shared by web and mobile' },
   'homepage.tips': { type: 'json', default: [{"body":"شوف تقييمات الفنيين وعدد الشغلانات اللي خلّصوها قبل ما تأكّد الحجز — كل حاجة ظاهرة قدامك في بروفايله.","title":"إزاي تختار الفني المناسب لشغلانتك؟","image_url":null},{"body":"اسأل عن الضمان، ومدة التنفيذ المتوقعة، وهل السعر شامل قطع الغيار ولا لأ.","title":"أسئلة تسألها قبل أي شغلانة كهرباء","image_url":null},{"body":"الصيانة الدورية بتوفّرلك فلوس على المدى الطويل — اعرف إمتى تحتاج كل نوع.","title":"الفرق بين الصيانة الدورية والطارئة","image_url":null}], group: 'homepage', description: 'كروت "نصايح مفيدة" المعروضة أسفل الصفحة الرئيسية (customer-web/customer-app) — عنوان/نص/رابط صورة اختياري لكل كارت، قابلة للتعديل بالكامل من الأدمن' },
+  'homepage.projects_enabled': { type: 'boolean', default: true, group: 'homepage', description: 'إظهار قسم «ابدأ مشروعك» (تشطيب الشقق) في تطبيق العميل والموقع. إخفاؤه بيشيل المدخل من الصفحة الرئيسية بس — المشاريع القايمة بتفضل شغّالة.' },
   'homepage.trust_message': { type: 'string', default: 'ضمان حقيقي على كل شغلانة — لو في أي عيب بعد التسليم بنرجع نصلحه', group: 'homepage', description: 'رسالة الثقة/الضمان المعروضة في hero الصفحة الرئيسية (customer-web) — قابلة للتعديل بحرية من الأدمن' },
 
   // ── installments ──────────────────────────────────────────────────────

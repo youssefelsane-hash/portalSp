@@ -5,6 +5,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { GeoService } from '../geo/geo.service';
+import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { Address } from '../customers/entities/address.entity';
 import {
   technicianAvailabilityCondition,
@@ -54,18 +55,110 @@ export class BookingSlotSuggestionService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly settingsService: SettingsService,
     private readonly geoService: GeoService,
+    private readonly cache: RedisCacheService,
   ) {}
 
+  /**
+   * طاقة الأفق (٢١ يوم × كل شرط أهلية حقيقي) أغلى استعلام في المسار — مقاس **٢٢٣ms** لـ٢٥ فني
+   * على قاعدة تطوير فاضية، وبيكبر مع عدد الفنيين والحمل. وده سبب «الاقتراحات بتاخد ثانيتين
+   * تلاتة» في بلاغ المالك.
+   *
+   * الكاش هنا آمن لأن الاقتراح **استشاري**: الحجز الحقيقي بيعيد التحقق من الإتاحة تحت قفل
+   * وقت إنشاء الطلب، فاقتراح عمره ٩٠ ثانية أسوأ حالاته إنه يقترح يوم اتملى للتو — وده نفس
+   * سباق أي عميلين بيحجزوا في نفس اللحظة، وموجود أصلاً ومتعامل معاه.
+   *
+   * المفتاح مالوش علاقة بالعميل — الطاقة خاصية (خدمة × نطاق × مدة)، فالعملاء اللي بيبصّوا على
+   * نفس الخدمة في نفس المنطقة بيتشاركوا نفس الحساب. وأي فشل في Redis بيرجع للقاعدة بهدوء
+   * (`RedisCacheService` بيبلع الاستثناء ويرجّع null).
+   */
+  private async cachedDayCapacity(
+    key: string,
+    ttlSeconds: number,
+    compute: () => Promise<{ day: string; availableTechnicians: number }[]>,
+  ): Promise<{ day: string; availableTechnicians: number }[]> {
+    if (ttlSeconds <= 0) return compute();
+    const cached = await this.cache.get(key);
+    if (cached) {
+      try {
+        const parsed: unknown = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed as { day: string; availableTechnicians: number }[];
+      } catch {
+        // صف كاش تالف — نتجاهله ونحسب من القاعدة. مش سبب لتعطيل الاقتراح.
+      }
+    }
+    const fresh = await compute();
+    await this.cache.set(key, JSON.stringify(fresh), Math.round(ttlSeconds));
+    return fresh;
+  }
+
   private async config() {
-    const [leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio] = await Promise.all([
+    const [
+      leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
+      delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds,
+    ] = await Promise.all([
       this.settingsService.getNumber('booking.suggestion_lead_hours', 48),
       this.settingsService.getNumber('booking.suggestion_horizon_days', 21),
       this.settingsService.getNumber('booking.suggestion_count', 3),
       this.settingsService.getNumber('booking.suggestion_day_start_hour', 9),
       this.settingsService.getNumber('booking.suggestion_day_end_hour', 19),
       this.settingsService.getNumber('booking.suggestion_roominess_ratio', 0.7),
+      this.settingsService.getNumber('booking.suggestion_delay_penalty_per_day', 0.04),
+      this.settingsService.getNumber('booking.suggestion_min_day_spacing', 2),
+      this.settingsService.getNumber('booking.suggestion_min_hour_spacing', 3),
+      this.settingsService.getNumber('booking.suggestion_cache_ttl_seconds', 90),
     ]);
-    return { leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio };
+    return {
+      leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
+      delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds,
+    };
+  }
+
+  /**
+   * اختيار جشع بدرجة = وفرة − غرامة تأخير − غرامة تقارب.
+   *
+   * **البلاغ اللي الدالة دي اتكتبت عشانه (docs/08 §146)**: «بتسيب ٤٨ ساعة وتروح مديها تلات
+   * أيام كده». السبب إن الترتيب القديم كان «الأقرب من بين اللي فوق عتبة رخوة» — ولما الطاقة
+   * متساوية (الحالة الغالبة) العتبة بتعدّي الكل، فالنتيجة حرفيًا أول تلات أيام ورا بعض،
+   * وتلات ساعات ورا بعض. اقتراح مالوش أي معلومة.
+   *
+   * التلات حدود بتشتغل مع بعض:
+   *  - **الوفرة** (`ratio`) بتخلّي يوم فيه صنايعية كتير يكسب يوم فاضي حتى لو أبعد.
+   *  - **غرامة التأخير** بتمنع إننا نروح لأسبوعين لمجرد فني زيادة (طلب المالك القديم:
+   *    «ما يبقاش يوم بعيد أوي»).
+   *  - **غرامة التقارب** بتفرد الاقتراحات لما الدرجات تتساوى، فالعميل يشوف اختيار حقيقي
+   *    (الثلاثا / الجمعة / الأحد) بدل تلات أيام متلاصقة.
+   */
+  private pickSpread<T>(
+    items: T[],
+    opts: {
+      count: number;
+      minSpacing: number;
+      /** موضع العنصر على المحور (رقم اليوم أو رقم الساعة) — المسافة بتتقاس بيه. */
+      positionOf: (item: T) => number;
+      /** درجة أساسية في [0,1] قبل أي غرامة. */
+      scoreOf: (item: T) => number;
+    },
+  ): T[] {
+    const SPACING_PENALTY = 0.15;
+    const picked: T[] = [];
+    const remaining = [...items];
+    while (picked.length < opts.count && remaining.length > 0) {
+      let bestIndex = 0;
+      let bestScore = -Infinity;
+      for (let index = 0; index < remaining.length; index += 1) {
+        const position = opts.positionOf(remaining[index]);
+        const tooClose = picked.some(
+          (chosen) => Math.abs(opts.positionOf(chosen) - position) < opts.minSpacing,
+        );
+        const score = opts.scoreOf(remaining[index]) - (tooClose ? SPACING_PENALTY : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      }
+      picked.push(remaining.splice(bestIndex, 1)[0]);
+    }
+    return picked;
   }
 
   /**
@@ -112,6 +205,16 @@ export class BookingSlotSuggestionService {
     const cfg = await this.config();
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
+    // مفتاح الكاش بيضم كل حاجة بتغيّر الناتج، وتاريخ اليوم بتوقيت مصر عشان الأفق يتزحزح مع
+    // منتصف الليل بدل ما يفضل مثبّت على يوم امبارح.
+    const cairoToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+    const cacheKey = [
+      'booking:suggest:days', cairoToday, opts.serviceId, zoneId,
+      opts.durationMinutes ?? '-', opts.estimatedDurationDays ?? '-',
+      cfg.leadHours, cfg.horizonDays,
+    ].join(':');
+
+    const withCapacity = await this.cachedDayCapacity(cacheKey, cfg.cacheTtlSeconds, async () => {
     const rows = await this.dataSource.query<{ day: string; available_technicians: string }[]>(
       `
       WITH bounds AS (
@@ -178,27 +281,30 @@ export class BookingSlotSuggestionService {
       ],
     );
 
-    const withCapacity = rows
-      .map((row) => ({ day: row.day, availableTechnicians: Number(row.available_technicians) }))
-      .filter((row) => row.availableTechnicians > 0);
+      return rows
+        .map((row) => ({ day: row.day, availableTechnicians: Number(row.available_technicians) }))
+        .filter((row) => row.availableTechnicians > 0);
+    });
 
     if (withCapacity.length === 0) {
       return { days: [], leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
     }
 
     const best = Math.max(...withCapacity.map((row) => row.availableTechnicians));
-    const threshold = Math.max(1, Math.ceil(best * cfg.roominessRatio));
-    let roomy = withCapacity.filter((row) => row.availableTechnicians >= threshold);
-    // لو التصفية بالبراح طلّعت أقل من المطلوب، بنكمّل بالأقرب زمنيًا من الباقي بدل ما نرجّع
-    // اقتراح ناقص — يوم فيه فني واحد متاح لسه أحسن من خانة فاضية.
-    if (roomy.length < cfg.count) {
-      const rest = withCapacity.filter((row) => !roomy.includes(row));
-      roomy = [...roomy, ...rest].sort((left, right) => left.day.localeCompare(right.day));
-    }
+    const firstDay = withCapacity[0].day;
+    const dayIndexOf = (day: string) =>
+      Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${firstDay}T00:00:00Z`)) / 86_400_000);
 
-    const days = roomy
+    const days = this.pickSpread(withCapacity, {
+      count: Math.max(1, Math.round(cfg.count)),
+      minSpacing: Math.max(1, Math.round(cfg.minDaySpacing)),
+      positionOf: (row) => dayIndexOf(row.day),
+      // الوفرة نسبةً لأحسن يوم في الأفق، ناقص غرامة تأخير عن أول يوم متاح.
+      scoreOf: (row) =>
+        row.availableTechnicians / best - cfg.delayPenaltyPerDay * dayIndexOf(row.day),
+    })
+      // العرض بترتيب التاريخ عشان القايمة تتقرا طبيعي، بعد ما الاختيار اتعمل بالدرجة.
       .sort((left, right) => left.day.localeCompare(right.day))
-      .slice(0, Math.max(1, Math.round(cfg.count)))
       .map((row, index) => ({ ...row, isEarliest: index === 0 }));
 
     return { days, leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
@@ -292,11 +398,22 @@ export class BookingSlotSuggestionService {
       ],
     );
 
-    const times = rows
+    const available = rows
       .map((row) => ({ time: row.hour, freeTechnicians: Number(row.free_technicians) }))
-      .filter((row) => row.freeTechnicians > 0)
-      .slice(0, Math.max(1, Math.round(cfg.count)))
-      // العرض بترتيب الساعة عشان القايمة تتقرا طبيعي، بعد ما الاختيار اتعمل بالأكثر فراغًا.
+      .filter((row) => row.freeTechnicians > 0);
+    if (available.length === 0) return { times: [] };
+
+    const bestFree = Math.max(...available.map((row) => row.freeTechnicians));
+    const times = this.pickSpread(available, {
+      count: Math.max(1, Math.round(cfg.count)),
+      minSpacing: Math.max(1, Math.round(cfg.minHourSpacing)),
+      positionOf: (row) => Number(row.time.slice(0, 2)),
+      // **مفيش غرامة تأخير هنا عمدًا**: الساعة الأبكر مش «أحسن» زي اليوم الأقرب. الفرق الوحيد
+      // اللي يهم هو الفراغ، والتقارب بيتكسر بالفرد على اليوم (صباح/ضهر/بعد الضهر) بدل تلات
+      // ساعات متلاصقة أول النافذة.
+      scoreOf: (row) => row.freeTechnicians / bestFree,
+    })
+      // العرض بترتيب الساعة عشان القايمة تتقرا طبيعي، بعد ما الاختيار اتعمل بالدرجة.
       .sort((left, right) => left.time.localeCompare(right.time));
 
     return { times };

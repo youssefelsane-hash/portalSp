@@ -64,6 +64,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
 import { AdminTechnicianInternalNotesController } from './admin-technician-internal-notes.controller';
 import { TechnicianInternalNote } from './entities/technician-internal-note.entity';
 import { TechnicianInternalNotesService } from './technician-internal-notes.service';
+import { RedisCacheService } from '../../common/cache/redis-cache.service';
 
 @Module({
   imports: [
@@ -108,6 +109,8 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
     AdminTechnicianInternalNotesController,
   ],
   providers: [
+    // كاش طاقة أيام الاقتراح (docs/08 §146) — فشل Redis بيرجع للقاعدة بهدوء.
+    RedisCacheService,
     BookingSlotSuggestionService,
     TechniciansService,
     TechnicianProfileListener,

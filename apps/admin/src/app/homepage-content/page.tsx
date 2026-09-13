@@ -45,6 +45,8 @@ export default function HomepageContentPage() {
   const [isSavingHeroImages, setIsSavingHeroImages] = useState(false);
   const [isSavingSearchContent, setIsSavingSearchContent] = useState(false);
   const [isSavingTips, setIsSavingTips] = useState(false);
+  const [projectsEnabled, setProjectsEnabled] = useState(true);
+  const [isSavingProjects, setIsSavingProjects] = useState(false);
 
   function load() {
     authedFetch<SettingResponseDto[]>('/admin/settings?group=homepage')
@@ -53,6 +55,8 @@ export default function HomepageContentPage() {
         const heroImagesSetting = settings.find((s) => s.key === 'homepage.hero_images');
         const searchContentSetting = settings.find((s) => s.key === 'homepage.search_content');
         const tipsSetting = settings.find((s) => s.key === 'homepage.tips');
+        const projectsSetting = settings.find((s) => s.key === 'homepage.projects_enabled');
+        if (projectsSetting) setProjectsEnabled(projectsSetting.value !== false);
         if (messageSetting) setTrustMessage(String(messageSetting.value ?? ''));
         if (heroImagesSetting) setHeroImages((heroImagesSetting.value as string[] | null) ?? []);
         if (searchContentSetting) {
@@ -81,6 +85,23 @@ export default function HomepageContentPage() {
       toast.error(err instanceof ApiError ? err.message : 'فشل حفظ رسالة الثقة');
     } finally {
       setIsSavingMessage(false);
+    }
+  }
+
+  /** إخفاء/إظهار قسم المشروعات (docs/08 §146) — عرض بس، المشاريع القايمة مابتتلمسش. */
+  async function saveProjectsVisibility(next: boolean) {
+    setIsSavingProjects(true);
+    try {
+      await authedFetch('/admin/settings/homepage.projects_enabled', {
+        method: 'PATCH',
+        body: JSON.stringify({ value: next }),
+      });
+      setProjectsEnabled(next);
+      toast.success(next ? 'قسم المشروعات بقى ظاهر للعملاء' : 'قسم المشروعات اتخفى من الصفحة الرئيسية');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'فشل حفظ إعداد المشروعات');
+    } finally {
+      setIsSavingProjects(false);
     }
   }
 
@@ -167,6 +188,32 @@ export default function HomepageContentPage() {
         description="صور الواجهة المتحركة ورسالة الثقة و«نصايح مفيدة» للويب والموبايل — بيتحدّثوا من مكان واحد من غير deployment."
       />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">قسم المشروعات (تشطيب الشقق)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            بيتحكم في ظهور كارت «بتجهّز أو بتشطّب بيتك؟» في الصفحة الرئيسية للتطبيق والموقع.
+            الإخفاء بيشيل المدخل بس — المشاريع الجارية بتفضل شغّالة وصفحاتها بتفتح بالرابط،
+            عشان عميل عنده مشروع نصّه مايتقطعش عنه.
+          </p>
+          <p className="mt-3 text-sm font-medium">
+            الحالة دلوقتي: {projectsEnabled ? 'ظاهر للعملاء' : 'مخفي'}
+          </p>
+        </CardContent>
+        <CardFooter>
+          <Button
+            size="sm"
+            variant={projectsEnabled ? 'outline' : 'default'}
+            disabled={isSavingProjects}
+            onClick={() => void saveProjectsVisibility(!projectsEnabled)}
+          >
+            {isSavingProjects ? 'بيحفظ...' : projectsEnabled ? 'إخفاء القسم' : 'إظهار القسم'}
+          </Button>
+        </CardFooter>
+      </Card>
 
       <Card className="mb-6">
         <CardHeader>

@@ -62,6 +62,8 @@ export interface HomepageContentDto {
     placeholder: string;
   };
   tips: HomepageTipDto[];
+  /** قسم «ابدأ مشروعك» (تشطيب الشقق) ظاهر ولا لأ — زرار إخفاء/إظهار عند الأدمن (docs/08 §146). */
+  projects_enabled: boolean;
   // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت مُدارة من الأدمن. الباك-إند بيضمن
   // إنها مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل).
   hero_eyebrow: string;

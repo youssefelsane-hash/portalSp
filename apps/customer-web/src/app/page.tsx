@@ -77,6 +77,8 @@ export default function HomePage() {
   const [trustMessage, setTrustMessage] = useState('');
   const [searchContent, setSearchContent] = useState(DEFAULT_SEARCH_CONTENT);
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
+  // بيبدأ ظاهر عشان القسم مايعملش وميض اختفاء لو المحتوى اتأخر (docs/08 §146).
+  const [projectsEnabled, setProjectsEnabled] = useState(true);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
   useEffect(() => {
@@ -87,6 +89,7 @@ export default function HomePage() {
         setSearchContent(content.search ?? DEFAULT_SEARCH_CONTENT);
         setActiveSlide(0);
         setTips(content.tips);
+        setProjectsEnabled(content.projects_enabled !== false);
       })
       .catch(() => {})
       .finally(() => setHeroSettled((s) => ({ ...s, content: true })));
@@ -291,6 +294,31 @@ export default function HomePage() {
             )}
           </div>
         </section>
+
+        {/* **كان ناقص في الويب بالكامل** (بلاغ مالك: «الويب فيه حاجات ناقصة كتير عن
+            الأبليكيشن»): صفحات /projects موجودة من زمان بس مفيش أي مدخل ليها من الصفحة
+            الرئيسية. نفس مكانه في التطبيق بالظبط — فوق كل الفئات (docs/08 §76-د). */}
+        {projectsEnabled && (
+          <section className="lg:col-span-7">
+            <Link
+              href="/projects"
+              className="motion-rise motion-press group flex items-center gap-3 rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-primary"
+            >
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden>
+                  <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold leading-snug">بتجهّز أو بتشطّب بيتك؟</span>
+                <span className="block text-sm text-muted">من المعاينة للتسليم في مكان واحد</span>
+              </span>
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0 text-muted transition-transform group-hover:-translate-x-0.5" aria-hidden>
+                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Link>
+          </section>
+        )}
 
         <section className="lg:col-span-7" aria-labelledby="categories-title">
           <div className="mb-3 flex items-baseline justify-between gap-3">
