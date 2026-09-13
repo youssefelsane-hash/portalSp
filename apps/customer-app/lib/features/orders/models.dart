@@ -102,6 +102,9 @@ class Order {
   final String? optionalWarrantyNameAr;
   final int? optionalWarrantyCoverageMonths;
   final String paymentStatus;
+  /// طريقة الدفع المسجّلة على الطلب (ADR-0089) — بتحدد نبرة خانة InstaPay جوّه الطلب.
+  /// nullable عشان نسخة تطبيق أحدث تقدر تقرا رد سيرفر أقدم من الحقل ده.
+  final String? paymentMethod;
   final String? placedAt;
   final String? cancelledAt;
   final String? cancellationReasonId;
@@ -162,6 +165,7 @@ class Order {
     this.optionalWarrantyNameAr,
     this.optionalWarrantyCoverageMonths,
     required this.paymentStatus,
+    this.paymentMethod,
     required this.placedAt,
     required this.cancelledAt,
     required this.cancellationReasonId,
@@ -216,6 +220,7 @@ class Order {
         (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months']
             as int?,
     paymentStatus: json['payment_status'] as String,
+    paymentMethod: json['payment_method'] as String?,
     placedAt: json['placed_at'] as String?,
     cancelledAt: json['cancelled_at'] as String?,
     cancellationReasonId: json['cancellation_reason_id'] as String?,

@@ -210,6 +210,8 @@ export interface OrderResponseDto {
   total_amount_cents: number;
   amount_due_now_cents?: number;
   payment_status: string;
+  /** طريقة الدفع المسجّلة على الطلب (ADR-0089) — بتحدد نبرة خانة InstaPay جوّه الطلب. */
+  payment_method: string | null;
   placed_at: string | null;
   cancelled_at: string | null;
   cancellation_reason_id: string | null;

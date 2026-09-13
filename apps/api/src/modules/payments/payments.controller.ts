@@ -133,6 +133,34 @@ export class PaymentsController {
   }
 
   /**
+   * **معاينة الدفع بـInstaPay جوّه الطلب** (ADR-0089، طلب مالك 2026-09-13).
+   *
+   * «خلي دايمًا موجود جوّه الطلب خانة الدفع by InstaPay… يظهر له السعر والبيانات اللي بتظهر
+   * عادي جدًا اللي هو كان هيدفع InstaPay من الأول».
+   *
+   * **قراءة بحتة**: مافيش دفعة بتتفتح، فمسار الكاش بيفضل مفتوح بالكامل لحد ما العميل يقرر.
+   */
+  @Get(':id/instapay-preview')
+  async previewInstaPayTransfer(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const preview = await this.paymentsService.previewInstaPayTransfer(user.sub, id);
+    return {
+      amount_cents: preview.amountCents,
+      recipient_address: preview.recipientAddress,
+      recipient_name: preview.recipientName,
+      instructions_ar: preview.instructionsAr,
+      qr_image_url: preview.qrImageUrl,
+      reference_code: preview.referenceCode,
+      confirm_typical_minutes: preview.confirmTypicalMinutes,
+      confirm_max_minutes: preview.confirmMaxMinutes,
+      has_open_transfer: preview.hasOpenTransfer,
+      is_payable: preview.isPayable,
+    };
+  }
+
+  /**
    * **استئناف شاشة التحويل** (طلب مالك 2026-09-11: «لو شخص طلع من صفحة الدفع وعايز يدخل تاني،
    * أو طلع من التطبيق خالص وراح على InstaPay وبعدين رجع عشان ياخد الرقم copy»).
    *

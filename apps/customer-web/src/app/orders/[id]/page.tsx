@@ -31,6 +31,7 @@ import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
 import { WarrantyRevisitSection } from './warranty-revisit-section';
+import { InstaPayInlineSection } from './instapay-inline-section';
 
 /**
  * الحالات اللي لسه فيها مبلغ ممكن يتدفع — **نسخة طبق الأصل من `_payableOrderStatuses`** في
@@ -253,27 +254,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
       )}
 
-      {/* **مدخل InstaPay على الطلب نفسه** — نظير زرار «ادفع عبر InstaPay» في تطبيق العميل.
-          من غيره، العميل اللي قفل التبويب في نص التحويل، أو حجز بالكاش وغيّر رأيه، مكانش قدامه
-          أي طريق من الويب لوسيلة الدفع الأساسية للمنصة.
+      {/* **خانة InstaPay على الطلب نفسه** (ADR-0089) — كانت زرار بيوصّل لصفحة تانية، وبقت
+          خانة كاملة بالحساب والمبلغ والتنبيه الزمني. الفرق مش تجميلي: العميل اللي اختار كاش
+          مكانش عنده أي سبب يدوس على زرار دفع، فمكانش بيعرف إن الخيار موجود أصلاً.
 
           الشرط مطابق لشرط التطبيق بالحرف (`_payableOrderStatuses` + المستحق دلوقتي): الطلب
-          المدفوع بالكامل مابيعرضش الزرار، والمدفوع جزئيًا بيعرضه على الباقي. */}
+          المدفوع بالكامل مابيعرضش الخانة، والمدفوع جزئيًا بيعرضها على الباقي. */}
       {PAYABLE_ORDER_STATUSES.has(order.order_status) &&
         (order.payment_status !== 'paid' || (order.amount_due_now_cents ?? 0) > 0) && (
-          <section className="mt-4 rounded-xl border border-border bg-surface p-4">
-            {order.payment_status === 'paid' && (order.amount_due_now_cents ?? 0) > 0 && (
-              <p className="mb-2 font-semibold">
-                باقي للسداد: {formatEgp(order.amount_due_now_cents ?? 0)}
-              </p>
-            )}
-            <Link
-              href={`/orders/${order.id}/instapay`}
-              className="inline-block rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
-            >
-              ادفع عبر InstaPay
-            </Link>
-          </section>
+          <InstaPayInlineSection
+            authedFetch={authedFetch}
+            orderId={order.id}
+            paymentMethod={order.payment_method ?? null}
+          />
         )}
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (

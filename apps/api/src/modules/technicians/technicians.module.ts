@@ -22,6 +22,8 @@ import { AdminTechnicianLevelsController } from './admin-technician-levels.contr
 import { AdminTechniciansController } from './admin-technicians.controller';
 import { AdminTechniciansService } from './admin-technicians.service';
 import { PublicTechniciansController } from './public-technicians.controller';
+import { BookingSlotsController } from './booking-slots.controller';
+import { BookingSlotSuggestionService } from './booking-slot-suggestion.service';
 import { PublicTechnicianCompaniesController } from './public-technician-companies.controller';
 import { TechnicianCompaniesController } from './technician-companies.controller';
 import { TechnicianCompaniesService } from './technician-companies.service';
@@ -97,6 +99,7 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
   controllers: [
     TechniciansController,
     PublicTechniciansController,
+    BookingSlotsController,
     AdminTechniciansController,
     TechnicianCompaniesController,
     PublicTechnicianCompaniesController,
@@ -105,6 +108,7 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
     AdminTechnicianInternalNotesController,
   ],
   providers: [
+    BookingSlotSuggestionService,
     TechniciansService,
     TechnicianProfileListener,
     TechnicianDocumentsService,

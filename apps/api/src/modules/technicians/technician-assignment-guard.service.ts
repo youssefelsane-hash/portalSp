@@ -4,7 +4,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
-import { TechnicianKind, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { classifyTechnicianCapacity, technicianAvailabilityCondition, technicianServiceQualificationCondition } from './technician-eligibility.sql';
 import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
@@ -132,9 +132,16 @@ export class TechnicianAssignmentGuardService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
-    if (technician.technicianKind !== TechnicianKind.TECHNICIAN) {
-      throw new ApiException(ErrorCode.ORDR_003, 'المساعد لا يمكن تعيينه قائدًا للطلب', HttpStatus.CONFLICT);
-    }
+    // ADR-0087 (تصحيح مالك، يلغي ADR-0086) — **مفيش رفض على أساس النوع هنا**. المساعد نوع شغل
+    // مختلف (نقل/شيل) مش رتبة أقل، وشغلانته دي بيعملها لوحده من أولها لآخرها. اللي بيقرر مين
+    // يقود هو حجب الخدمة (`technician_excluded_services`) اللي بيتفحص تحت في
+    // `technicianServiceQualificationCondition()` — مساعد محجوب عن الخدمة بيترفض هناك، ومساعد
+    // مش محجوب بيعدّي عادي. حارس على النوع هنا كان بيتخطّى مفتاح الأدمن بالكامل: الشاشة تقول
+    // «الخدمة دي مسموحة له» والسيستم يرفضها — تناقض بين الواجهة والسلوك.
+    //
+    // الأثر المالي طبيعي مش استثناء: المساعد اللي بيشيل طلب لوحده بياخد نصيب **القائد** الكامل
+    // (`participant_role = 'leader'`)، وتسعيرة المساعد المخفّضة بتفضل مقصورة على انضمامه لطاقم
+    // حد تاني. صفر تغيير في كود القسمة.
     // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
     // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،
     // التعيين القسري قرار إداري صريح مش انتظار قبول عادي). التوافر الحقيقي بيتفحص تحت عبر

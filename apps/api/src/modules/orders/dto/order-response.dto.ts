@@ -85,6 +85,11 @@ export interface OrderResponseDto {
    * بيتحصّل تلقائيًا بعد اكتمال الشغل (نفس مسار البند الإضافي، ADR-0015). */
   deposit_amount_cents: number | null;
   payment_status: string;
+  /**
+   * طريقة الدفع المسجّلة على الطلب (ADR-0089) — الواجهة بتستخدمها عشان تخاطب صاحب الطلب
+   * الكاش بنبرة صح («تحب تدفع أونلاين بدل الكاش؟») بدل صياغة عامة تصلح للاتنين ومابتقنعش حد.
+   */
+  payment_method: string | null;
   placed_at: string | null;
   cancelled_at: string | null;
   cancellation_reason_id: string | null;
@@ -242,6 +247,7 @@ export function toOrderResponseDto(
       : null,
     deposit_amount_cents: order.depositAmountCents,
     payment_status: order.paymentStatus,
+    payment_method: order.paymentMethod ?? null,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,
     cancelled_at: order.cancelledAt ? order.cancelledAt.toISOString() : null,
     cancellation_reason_id: order.cancellationReasonId,

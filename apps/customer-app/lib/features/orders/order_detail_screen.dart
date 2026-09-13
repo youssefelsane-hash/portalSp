@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/external_links.dart';
 import '../../core/api_exception.dart';
@@ -84,6 +87,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String? _cardIdempotencyKey;
   String? _fawryIdempotencyKey;
   String? _instapayIdempotencyKey;
+  /// معاينة الدفع بـInstaPay (ADR-0089) — بيانات الحساب والمبلغ من غير ما نفتح أي دفعة.
+  /// `null` = لسه بتتحمّل أو فشلت، والخانة بتختفي بهدوء (زي باقي المساعدات في الشاشة دي).
+  InstaPayPreview? _instapayPreview;
   // §24 — الشاشة كانت بتفضل عارضة الحالة القديمة لحد ما العميل يخرج ويرجع يدوي أو يعمل
   // pull-to-refresh، رغم إن الفني/الأدمن ممكن يغيّروا حالة الطلب وهي مفتوحة (on-way/arrived/
   // in-progress/completed/إلغاء أدمن). نفس آلية technician-app بالظبط — انضمام لغرفة الطلب
@@ -117,10 +123,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     super.dispose();
   }
 
+  /// **قراءة بحتة** — مابتفتحش دفعة، فتنادي بأمان مع كل تحميل للشاشة.
+  Future<void> _loadInstaPayPreview() async {
+    try {
+      final preview = await _paymentsRepository.previewInstaPay(widget.orderId);
+      if (mounted) setState(() => _instapayPreview = preview);
+    } catch (error) {
+      debugPrint('تعذّر تحميل معاينة InstaPay: $error');
+    }
+  }
+
   Future<void> _load() async {
     try {
       final order = await _repository.getOne(widget.orderId);
       if (mounted) setState(() => _order = order);
+      unawaited(_loadInstaPayPreview());
       if (order.orderStatus == 'awaiting_quote_approval') {
         await _loadQuoteItems();
       }
@@ -1474,6 +1491,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                           const SizedBox(height: 8),
                         ],
+                        // **خانة InstaPay الثابتة** (ADR-0089، طلب مالك 2026-09-13): «خلي
+                        // دايمًا موجود جوّه الطلب خانة الدفع by InstaPay… يظهر له السعر
+                        // والبيانات اللي بتظهر عادي جدًا اللي هو كان هيدفع InstaPay من الأول».
+                        //
+                        // قبل كده كان فيه **زرار** بس؛ العميل اللي اختار كاش مكانش عنده أي
+                        // سبب يدوس عليه، فمكانش بيعرف إن الخيار موجود. البيانات قدام عينه
+                        // بتحوّل الخيار من «حاجة أدوّر عليها» لـ«حاجة قدامي».
+                        if (_instapayPreview != null &&
+                            _instapayPreview!.isPayable &&
+                            _instapayPreview!.amountCents > 0) ...[
+                          _InstaPayInlineCard(
+                            preview: _instapayPreview!,
+                            isCashOrder: order.paymentMethod == 'cash',
+                            onPay: _paying ? null : _payWithInstaPay,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         FilledButton.icon(
                           onPressed: _paying ? null : _payWithWallet,
                           icon: const Icon(Icons.account_balance_wallet_outlined),
@@ -1762,6 +1796,139 @@ class _AdminNoticeCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(notice.message, style: const TextStyle(height: 1.45)),
+        ],
+      ),
+    );
+  }
+}
+
+/// **خانة InstaPay الثابتة جوّه الطلب** (ADR-0089، طلب مالك 2026-09-13).
+///
+/// نظيرة `InstaPayInlineSection` في `apps/customer-web` بالحرف — نفس الحقول، نفس التنبيه،
+/// نفس القاعدة: **مابتفتحش دفعة**، بتعرض بس.
+class _InstaPayInlineCard extends StatefulWidget {
+  final InstaPayPreview preview;
+  final bool isCashOrder;
+  final VoidCallback? onPay;
+
+  const _InstaPayInlineCard({
+    required this.preview,
+    required this.isCashOrder,
+    required this.onPay,
+  });
+
+  @override
+  State<_InstaPayInlineCard> createState() => _InstaPayInlineCardState();
+}
+
+class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final preview = widget.preview;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.05),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.isCashOrder ? 'تحب تدفع أونلاين بدل الكاش؟' : 'ادفع بـInstaPay',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          if (widget.isCashOrder) ...[
+            const SizedBox(height: 4),
+            Text(
+              'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت — نفس المبلغ بالظبط.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          if (preview.recipientAddress != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border.all(color: theme.dividerColor),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('حوّل على الحساب ده', style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 4),
+                  // الرقم LTR في سطر لوحده — من غير كده الـbidi بيقلب خانات الرقم وسط
+                  // النص العربي (نفس قاعدة شاشة التحويل، docs/08 §137).
+                  SelectableText(
+                    preview.recipientAddress!,
+                    textDirection: TextDirection.ltr,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (preview.recipientName != null) ...[
+                    const SizedBox(height: 4),
+                    Text('باسم: ${preview.recipientName}', style: theme.textTheme.bodySmall),
+                  ],
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: preview.recipientAddress!));
+                      if (mounted) setState(() => _copied = true);
+                    },
+                    icon: Icon(_copied ? Icons.check : Icons.copy_outlined, size: 18),
+                    label: Text(_copied ? 'اتنسخ' : 'انسخ رقم الحساب'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          // **التنبيه الزمني** (طلب مالك حرفي): «ينبّهه إنه يحوّل الفلوس قبل الشغل ما يخلص
+          // بوقت كافي بحيث نلحق نعمل المراجعة قبل الصنايع ما يمشي». محايد عمدًا — الغرض
+          // إن العميل ما يتفاجئش، مش إننا نخوّفه من الدفع أونلاين.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              border: Border.all(color: theme.dividerColor),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'لو هتحوّل، ابعت التحويل قبل ما الشغل يخلص بوقت كافي — مراجعة التحويل بتاخد '
+              'حوالي ${preview.confirmTypicalMinutes} دقيقة (لحد ${preview.confirmMaxMinutes} '
+              'دقيقة في أوقات الزحمة)، وعايزين نخلّصها والفني لسه معاك.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: widget.onPay,
+              icon: const Icon(Icons.send_outlined),
+              label: Text(preview.hasOpenTransfer ? 'كمّل التحويل' : 'ابدأ التحويل بـInstaPay'),
+            ),
+          ),
         ],
       ),
     );

@@ -53,6 +53,15 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'booking.match_preview_candidate_limit': { type: 'number', default: 25, group: 'booking', description: 'أقصى عدد فنيين مرشّحين بيتحسبوا في معاينة المطابقة قبل الحجز (السقف الصلب 100)' },
   'booking.match_preview_ttl_seconds': { type: 'number', default: 300, group: 'booking', description: 'مدة صلاحية معاينة المطابقة بالثانية قبل ما تتحسب من جديد (السقف الصلب 1800)' },
 
+  // اقتراح المواعيد (ADR-0088، migration 0323) — كل رقم في الخوارزمية إعداد عشان يتظبط
+  // بالموسم والمدينة بدل ما يبقى طلب تطوير.
+  'booking.suggestion_lead_hours': { type: 'number', default: 48, group: 'booking', description: 'الاقتراحات بتبدأ بعد كام ساعة من دلوقتي (48 = بعد بكرة). العميل لسه يقدر يختار أقرب من كده بإيده.' },
+  'booking.suggestion_horizon_days': { type: 'number', default: 21, group: 'booking', description: 'أبعد يوم ممكن ندوّر فيه على اقتراح' },
+  'booking.suggestion_count': { type: 'number', default: 3, group: 'booking', description: 'عدد الأيام/الساعات المقترحة المعروضة' },
+  'booking.suggestion_day_start_hour': { type: 'number', default: 9, group: 'booking', description: 'أول ساعة في نافذة الاقتراح اليومي (توقيت مصر) — مابتمنعش اختيار ساعة برّاها يدويًا' },
+  'booking.suggestion_day_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة بداية في نافذة الاقتراح اليومي (توقيت مصر)' },
+  'booking.suggestion_roominess_ratio': { type: 'number', default: 0.7, group: 'booking', description: 'اليوم بيتعد «فيه براح» لو عدد الصنايعية المتاحين فيه ≥ النسبة دي × أحسن يوم في الأفق' },
+
   // ── assistant_matching ────────────────────────────────────────────────
   'assistant_matching.batch_size': { type: 'number', default: 10, group: 'assistant_matching', description: 'عدد المساعدين المرشّحين اللي بيتبعتلهم عرض في كل بث' },
   'assistant_matching.pool_matching_enabled': { type: 'boolean', default: true, group: 'assistant_matching', description: 'مفتاح إيقاف عام لبث فرص المساعدة لمجمع المساعدين' },

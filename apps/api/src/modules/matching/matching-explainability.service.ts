@@ -13,7 +13,6 @@ import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
-  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import {
@@ -86,7 +85,6 @@ export interface TechnicianEligibilityExplanation {
 
 interface EligibilityRow {
   verified: boolean;
-  correct_kind: boolean;
   category_eligible: boolean;
   zone_eligible: boolean;
   has_location: boolean;
@@ -138,7 +136,6 @@ export class MatchingExplainabilityService {
       `
       SELECT
         (tp.verification_status = 'approved') AS verified,
-        (${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}) AS correct_kind,
         (${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',
@@ -223,11 +220,6 @@ export class MatchingExplainabilityService {
 
     const checks: TechnicianEligibilityCheck[] = [
       { key: 'verified', passed: row.verified, labelAr: 'الفني معتمد (verification_status=approved)' },
-      {
-        key: 'correct_kind',
-        passed: row.correct_kind,
-        labelAr: row.correct_kind ? 'مسجّل كفني يمكنه قيادة الطلب' : 'مسجّل كمساعد؛ يمكنه الانضمام لطاقم ولا يقود الطلب',
-      },
       { key: 'category_eligible', passed: row.category_eligible, labelAr: 'مؤهّل لفئة/خدمة الطلب' },
       { key: 'zone_eligible', passed: row.zone_eligible, labelAr: 'مفعّل في نطاق خدمة الطلب' },
       { key: 'has_location', passed: row.has_location, labelAr: 'عنده موقع GPS مسجّل حاليًا' },
@@ -378,7 +370,6 @@ export class MatchingExplainabilityService {
           AND ts.verification_status = 'approved'
         JOIN services s ON s.id = $1
         WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
-          AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
           AND ${technicianServiceQualificationCondition({
             technicianIdExpr: 'tp.id',
             serviceIdExpr: 's.id',
