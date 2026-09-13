@@ -38,7 +38,7 @@ class BaytakTechnicianApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'أسطى — الفني',
+        title: 'Osta',
         debugShowCheckedModeBanner: false,
         navigatorKey: rootNavigatorKey,
         // docs/08 §108-E — بيخلي الزرار العايم للإشعارات يختفي مؤقتًا لما أي dialog/bottom-sheet

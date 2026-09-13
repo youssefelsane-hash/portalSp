@@ -8,7 +8,7 @@
          وإلا مفيش إشعار هيظهر خالص، بغض النظر عن FCM. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="أسطى"
+        android:label="Osta"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round">
