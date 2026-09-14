@@ -18,6 +18,7 @@ const jwt = require('/home/user/portalSp/node_modules/jsonwebtoken');
 
 const ROOT = path.resolve(__dirname, '../..');
 const API = process.env.API_BASE_URL ?? 'http://localhost:3000/api/v1';
+const { deleteOrdersWhere } = require('./delete-orders-safely');
 
 function envFromFile() {
   const out = {};
@@ -64,6 +65,20 @@ class LiveHarness {
 
   async q(sql, params) {
     return (await this.db.query(sql, params)).rows;
+  }
+
+  /**
+   * حذف طلبات بترتيب آمن للمفاتيح الأجنبية — للتنظيف بعد التدقيق.
+   *
+   * كل تدقيق كان بيكتب `DELETE FROM orders WHERE …` بإيده، وده بيفشل أول ما جدول جديد يشاور
+   * على `orders` (حصل فعلاً: `chat_threads_order_id_fkey` في `booking-suggestion-audit`).
+   * والفشل هنا صامت عمليًا: التدقيق بيكون خلص وطبع نتيجته خلاص، فالبقايا بتفضل وتكسر
+   * التشغيلة اللي بعدها. (تدقيق §148، المرحلة ٩)
+   *
+   *   await h.deleteOrders(`order_number LIKE $1`, ['BSG-%']);
+   */
+  async deleteOrders(whereSql, params = []) {
+    return deleteOrdersWhere(this.db, whereSql, params);
   }
 
   record(name, ok, detail) {

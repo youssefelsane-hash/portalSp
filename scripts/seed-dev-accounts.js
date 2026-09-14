@@ -11,8 +11,9 @@
 //
 // الاستخدام:  node scripts/seed-dev-geo.js && node scripts/seed-dev-accounts.js
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak_main';
+const DATABASE_URL = resolveApiDatabaseUrl();
 
 // الأرقام دي **مش أسرار** — أرقام وهمية في قاعدة تطوير محلية، والدخول بيها بيتم بكود OTP
 // بيتطبع في لوج التطوير بس (الإنتاج مابيطبعهوش). مافيش أي كلمة سر أو توكن متخزّن هنا.

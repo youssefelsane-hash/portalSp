@@ -11,8 +11,9 @@
 //
 // الاستخدام:  node scripts/seed-dev-geo.js
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak_main';
+const DATABASE_URL = resolveApiDatabaseUrl();
 
 // مدن ومناطق حقيقية — بيانات تطوير معقولة، مش أسماء عشوائية، عشان اللقطات البصرية ومراجعات
 // المالك تبان زي الإنتاج.

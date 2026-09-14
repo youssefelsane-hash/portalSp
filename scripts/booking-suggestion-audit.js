@@ -210,7 +210,11 @@ function cairoDayPlus(days) {
       console.log('🟢 اقتراح المواعيد بيعكس الطاقة الحقيقية.');
     }
   } finally {
-    await h.q(`DELETE FROM orders WHERE order_number LIKE 'BSG-%' OR order_number LIKE 'BSH-%' OR order_number LIKE 'BSP-%'`);
+    // حذف آمن للمفاتيح الأجنبية بدل `DELETE FROM orders` المباشر — الأخير كان بيقع على
+    // `chat_threads_order_id_fkey` فمابينضّفش، والتشغيلة اللي بعده تقع على البقايا (§148/٩).
+    await h.deleteOrders(
+      `order_number LIKE 'BSG-%' OR order_number LIKE 'BSH-%' OR order_number LIKE 'BSP-%'`,
+    );
     await h.cleanup();
   }
 })().catch((err) => {

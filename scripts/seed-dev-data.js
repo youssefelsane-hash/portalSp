@@ -38,8 +38,9 @@
  * مستندات حقيقية؛ وصولها لقاعدة إنتاج معناه حسابات مفتوحة بلا تحقق.
  */
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
-const DB_URL = process.env.DATABASE_URL || 'postgres://baytak:baytak@localhost:5432/baytak';
+const DB_URL = resolveApiDatabaseUrl();
 
 // أرقام وهمية بنمط ثابت وسهل الحفظ — مصر (+20) + صفر متكرر + رقم الدور.
 const ACCOUNTS = {
