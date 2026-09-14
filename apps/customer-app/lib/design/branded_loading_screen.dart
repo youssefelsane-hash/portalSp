@@ -1,7 +1,8 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../core/api_config.dart';
 import '../features/catalog/branding_repository.dart';
+import 'cached_remote_image.dart';
 
 /// شاشة الانتظار الوحيدة في التطبيق — بهوية البراند، مش `Scaffold` فاضي بعجلة.
 ///
@@ -37,8 +38,10 @@ class _BrandedLoadingScreenState extends State<BrandedLoadingScreen> {
     BrandingRepository()
         .fetchPrimaryLogo()
         .then((logo) {
-          if (!mounted || logo == null || logo.isDefault || logo.url.isEmpty) return;
-          setState(() => _logoUrl = resolveApiAssetUrl(logo.url));
+          if (!mounted || logo == null || logo.isDefault || logo.url.isEmpty) {
+            return;
+          }
+          setState(() => _logoUrl = logo.url);
         })
         .catchError((_) {});
   }
@@ -59,13 +62,14 @@ class _BrandedLoadingScreenState extends State<BrandedLoadingScreen> {
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 220),
                 child: logoUrl != null
-                    ? Image.network(
-                        logoUrl,
+                    ? CachedNetworkImage(
+                        imageUrl: resolveCachedRemoteImageUrl(logoUrl),
                         key: ValueKey(logoUrl),
                         height: 96,
                         fit: BoxFit.contain,
-                        gaplessPlayback: true,
-                        errorBuilder: (_, _, _) => const _BrandFallbackMark(),
+                        useOldImageOnUrlChange: true,
+                        fadeInDuration: const Duration(milliseconds: 160),
+                        errorWidget: (_, _, _) => const _BrandFallbackMark(),
                       )
                     : const _BrandFallbackMark(),
               ),
@@ -74,13 +78,18 @@ class _BrandedLoadingScreenState extends State<BrandedLoadingScreen> {
             SizedBox(
               width: 28,
               height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.6, color: theme.colorScheme.primary),
+              child: CircularProgressIndicator(
+                strokeWidth: 2.6,
+                color: theme.colorScheme.primary,
+              ),
             ),
             if (widget.message != null) ...[
               const SizedBox(height: 14),
               Text(
                 widget.message!,
-                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],

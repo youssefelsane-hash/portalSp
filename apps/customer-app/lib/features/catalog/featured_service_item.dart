@@ -1,5 +1,7 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../design/cached_remote_image.dart';
 import 'models.dart';
 
 const double _kFeaturedIconSize = 44;
@@ -42,10 +44,27 @@ class FeaturedServiceItem extends StatelessWidget {
               child: iconUrl != null && iconUrl.isNotEmpty
                   ? ClipOval(
                       clipBehavior: Clip.antiAlias,
-                      child: Image.network(
-                        iconUrl,
+                      child: CachedNetworkImage(
+                        imageUrl: resolveCachedRemoteImageUrl(iconUrl),
                         fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) =>
+                        memCacheWidth:
+                            (_kFeaturedIconSize *
+                                    (MediaQuery.maybeDevicePixelRatioOf(
+                                          context,
+                                        ) ??
+                                        1.0))
+                                .round(),
+                        maxWidthDiskCache:
+                            (_kFeaturedIconSize *
+                                    (MediaQuery.maybeDevicePixelRatioOf(
+                                          context,
+                                        ) ??
+                                        1.0))
+                                .round(),
+                        fadeInDuration: const Duration(milliseconds: 160),
+                        placeholder: (_, _) =>
+                            _FeaturedInitial(service: service),
+                        errorWidget: (_, _, _) =>
                             _FeaturedInitial(service: service),
                       ),
                     )

@@ -1,12 +1,13 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/api_config.dart';
 import '../../core/external_links.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
+import '../../design/cached_remote_image.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../notifications/notifications_repository.dart';
@@ -124,7 +125,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _brandingRepository
         .fetchPrimaryLogo()
         .then((logo) {
-          if (mounted) setState(() => _brandingLogo = logo);
+          if (!mounted) return;
+          setState(() => _brandingLogo = logo);
+          if (logo != null && !logo.isDefault && logo.url.isNotEmpty) {
+            unawaited(_precacheHeroImage(cachedRemoteImageProvider(logo.url)));
+          }
         })
         .catchError((_) {});
     // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
@@ -162,13 +167,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    // الطلبان مستقلان، فبدؤهما معاً يقلّل زمن انتظار أول شاشة بدل تسلسل شبكتين.
+    final categoriesRequest = _repository.fetchCategories(zoneId: zoneId);
+    final featuredRequest = _repository.fetchMostRequestedServices(
+      zoneId: zoneId,
+    );
     try {
-      final categories = await _repository.fetchCategories(zoneId: zoneId);
+      final categories = await categoriesRequest;
       if (mounted && generation == _catalogLoadGeneration) {
         setState(() {
           _categories = categories;
           _error = null;
         });
+        unawaited(_precacheCatalogImages(categories: categories));
       }
     } catch (_) {
       if (mounted && generation == _catalogLoadGeneration) {
@@ -178,11 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
     // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
     try {
-      final mostRequested = await _repository.fetchMostRequestedServices(
-        zoneId: zoneId,
-      );
+      final mostRequested = await featuredRequest;
       if (mounted && generation == _catalogLoadGeneration) {
         setState(() => _mostRequested = mostRequested);
+        unawaited(_precacheCatalogImages(featured: mostRequested));
       }
     } catch (_) {
       // بهدوء — القسم تسويقي، مش وظيفي.
@@ -207,8 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _applyHomepageContent(HomepageContent content) {
     if (!mounted) return;
     final providers = content.heroImages
-        .map(_resolveHeroImageUrl)
-        .map<ImageProvider<Object>>(NetworkImage.new)
+        .map(cachedRemoteImageProvider)
         .toList(growable: false);
     setState(() {
       _trustMessage = content.trustMessage;
@@ -222,11 +231,18 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final provider in providers) {
       unawaited(_precacheHeroImage(provider));
     }
+    unawaited(
+      precacheRemoteImages(
+        context,
+        content.tips.map((tip) => tip.imageUrl),
+        logicalWidth: 220,
+      ),
+    );
   }
 
   void _applyLegacyHeroBackground(BrandingLogo? asset) {
     if (!mounted || asset == null || asset.isDefault) return;
-    final provider = NetworkImage(asset.url);
+    final provider = cachedRemoteImageProvider(asset.url);
     setState(() {
       _heroBackground = asset;
       _legacyHeroImageProvider = provider;
@@ -243,6 +259,14 @@ class _HomeScreenState extends State<HomeScreen> {
       // The visual fallback remains available when an admin URL is unreachable.
     }
   }
+
+  Future<void> _precacheCatalogImages({
+    Iterable<ServiceCategory> categories = const [],
+    Iterable<CatalogService> featured = const [],
+  }) => precacheRemoteImages(context, [
+    ...categories.map((category) => category.cardImageUrl),
+    ...featured.map((service) => service.featuredCardIconUrl),
+  ], logicalWidth: 132);
 
   void _openSearch([String value = '']) => Navigator.of(context).push(
     MaterialPageRoute(
@@ -289,11 +313,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     horizontal: 4,
                     vertical: 3,
                   ),
-                  child: Image.network(
-                    _resolveHeroImageUrl(_brandingLogo!.url),
+                  child: CachedNetworkImage(
+                    imageUrl: resolveCachedRemoteImageUrl(_brandingLogo!.url),
                     fit: BoxFit.contain,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    useOldImageOnUrlChange: true,
+                    fadeInDuration: const Duration(milliseconds: 160),
+                    errorWidget: (_, _, _) => const SizedBox.shrink(),
                   ),
                 )
               : null,
@@ -573,10 +598,6 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
   ///     فالتبديل كان بيحصل قطع مفاجئ.
   ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
-  // نفس المنطق بقى في `core/api_config.dart` (محتاجه شاشة الدخول كمان) — الاسم المحلي باقٍ
-  // عشان مواقع النداء ما تتغيّرش.
-  String _resolveHeroImageUrl(String value) => resolveApiAssetUrl(value);
-
   // عنوان الـAppBar — لوجو البراندنج الحقيقي (لو الأدمن رفع واحد، isDefault=false دايمًا صورة
   // raster حقيقية) بدل النص الثابت "أسطى" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على
   // الأبليكيشن" — التطبيق أصلاً مكانش بيستهلك /branding خالص). errorBuilder يرجع للنص لو تحميل
@@ -633,11 +654,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (imageUrl != null && imageUrl.isNotEmpty)
-                          Image.network(
-                            imageUrl,
+                          CachedNetworkImage(
+                            imageUrl: resolveCachedRemoteImageUrl(imageUrl),
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
+                            memCacheHeight:
+                                (80 *
+                                        (MediaQuery.maybeDevicePixelRatioOf(
+                                              context,
+                                            ) ??
+                                            1.0))
+                                    .round(),
+                            maxHeightDiskCache:
+                                (80 *
+                                        (MediaQuery.maybeDevicePixelRatioOf(
+                                              context,
+                                            ) ??
+                                            1.0))
+                                    .round(),
+                            fadeInDuration: const Duration(milliseconds: 180),
+                            placeholder: (_, _) => _tipFallback(context, index),
+                            errorWidget: (_, _, _) =>
                                 _tipFallback(context, index),
                           )
                         else

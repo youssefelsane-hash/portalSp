@@ -1,4 +1,7 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+
+import 'cached_remote_image.dart';
 
 // Script 6 Part 1-2 — "central aspect-ratio standards, placeholders, error fallbacks" لكروت
 // الفئات/الخدمات. نسبة عرض واحدة موحّدة لكل كروت الكتالوج (4:3 — قريبة من نسب كروت Angi/
@@ -54,7 +57,9 @@ class NetworkImageBox extends StatelessWidget {
     // كثافة الشاشة لازم تدخل في الحساب — cacheWidth بالبكسل الفيزيائي مش المنطقي، ومن غير
     // الضرب ده الصورة بتطلع مهترية على شاشات 2x/3x.
     final devicePixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
-    final cacheWidth = decodeWidth == null ? null : (decodeWidth! * devicePixelRatio).round();
+    final cacheWidth = decodeWidth == null
+        ? null
+        : (decodeWidth! * devicePixelRatio).round();
 
     return AspectRatio(
       aspectRatio: aspectRatio,
@@ -62,31 +67,18 @@ class NetworkImageBox extends StatelessWidget {
         borderRadius: borderRadius,
         child: url == null || url.isEmpty
             ? _placeholder(context)
-            : Image.network(
-                url,
+            : CachedNetworkImage(
+                imageUrl: resolveCachedRemoteImageUrl(url),
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,
-                cacheWidth: cacheWidth,
+                memCacheWidth: cacheWidth,
+                maxWidthDiskCache: cacheWidth,
                 // الإطار القديم يفضل ظاهر لحد ما الجديد يجهز — بدل فراغ أبيض بينهم.
-                gaplessPlayback: true,
-                errorBuilder: (context, error, stackTrace) => _placeholder(context),
-                frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                  // جت من الكاش ⇒ اعرضها فورًا بلا أي أنيميشن. أي fade هنا هيبقى وميض
-                  // مصطنع لصورة كانت جاهزة أصلاً.
-                  if (wasSynchronouslyLoaded) return child;
-                  return AnimatedSwitcher(
-                    duration: _kImageFadeDuration,
-                    // Stack layout بيمنع "قفزة" الحجم أثناء التبديل بين الـplaceholder والصورة.
-                    layoutBuilder: (currentChild, previousChildren) => Stack(
-                      fit: StackFit.expand,
-                      children: [...previousChildren, ?currentChild],
-                    ),
-                    child: frame == null
-                        ? _placeholder(context, key: const ValueKey('placeholder'))
-                        : KeyedSubtree(key: const ValueKey('image'), child: child),
-                  );
-                },
+                useOldImageOnUrlChange: true,
+                fadeInDuration: _kImageFadeDuration,
+                placeholder: (_, _) => _placeholder(context),
+                errorWidget: (_, _, _) => _placeholder(context),
               ),
       ),
     );
