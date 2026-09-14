@@ -46,7 +46,11 @@ pgrep -x fluxbox      >/dev/null || { fluxbox >/dev/null 2>&1 & sleep 2; }
 
 "$DIR/build/linux/x64/debug/bundle/$BIN_NAME" >"${TMPDIR:-/tmp}/$BIN_NAME.log" 2>&1 &
 APP_PID=$!
-trap 'kill $APP_PID 2>/dev/null || true' EXIT
+# الـtrap على INT/TERM بس، **مش على EXIT**: السكربت بيقول في آخر سطر «التطبيق شغّال بـPID …
+# للتفاعل بـxdotool»، وCLAUDE.md بيوصف نفس الشيء — وtrap على EXIT كان بيقتله لحظة ما السكربت
+# يخلص، فالتفاعل الموعود به مستحيل والرسالة نفسها غلط. (تدقيق §148، المرحلة ١١)
+# لو اتقاطع السكربت (Ctrl-C/kill) التطبيق بيتقفل عادي — ده اللي الـtrap لسه بيغطّيه.
+trap 'kill $APP_PID 2>/dev/null || true' INT TERM
 # ١٥ ثانية كانت بتكفي لإقلاع التطبيق بس مش دايمًا لوصول بيانات الـAPI — اللقطة كانت بتطلع
 # والفئات لسه skeleton، وده بيخلّي أي مراجعة بصرية تشك في عطل مش موجود. قابل للضبط لو الجهاز
 # أبطأ: `FLUTTER_VISUAL_SETTLE=25 scripts/flutter-visual.sh …`
@@ -55,3 +59,4 @@ sleep "${FLUTTER_VISUAL_SETTLE:-22}"
 import -window root "$OUT"
 echo "✅ لقطة: $OUT  |  لوج التطبيق: ${TMPDIR:-/tmp}/$BIN_NAME.log"
 echo "   للتفاعل: DISPLAY=$DISPLAY xdotool ...  (التطبيق شغّال بـPID $APP_PID)"
+echo "   لما تخلص: kill $APP_PID"
