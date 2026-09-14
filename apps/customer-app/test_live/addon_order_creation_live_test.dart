@@ -15,11 +15,30 @@ void main() {
     final serviceId = await pickBookableServiceId();
     final addressId = await ensureAddressFor(accessToken);
 
-    final addons = await apiRequestList('/services/$serviceId/addons');
-    expect(addons, isNotEmpty, reason: 'محتاجين إضافة نشطة واحدة على الأقل على الخدمة دي');
-    final addon = addons.firstWhere((a) => a['name_ar'] == 'ضمان إضافي 6 شهور');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: كان بيدوّر على إضافة باسم مكتوب بالحرف
+    // («ضمان إضافي 6 شهور») اتعملت في سيشن قديمة — قاعدة نضيفة = «Expected: non-empty» بلا
+    // سبب واضح. دلوقتي بيعمل الإضافة عبر **مسار الأدمن الحقيقي** لو مفيش، وبياخد أي إضافة
+    // موجودة لو فيه.
+    var addons = await apiRequestList('/services/$serviceId/addons');
+    String? createdAddonId;
+    if (addons.isEmpty) {
+      final adminToken = await devAdminToken('+201000000001');
+      final created = await apiRequest('POST', '/admin/services/$serviceId/addons', accessToken: adminToken, body: {
+        'name_ar': 'إضافة اختبار حي',
+        'price_cents': 7500,
+      });
+      createdAddonId = created!['id'] as String;
+      addons = await apiRequestList('/services/$serviceId/addons');
+    }
+    expect(addons, isNotEmpty);
+    final addon = addons.first;
     final addonId = addon['id'] as String;
     final addonPriceCents = addon['price_cents'] as int;
+    // بنسيب المتغيّر مستخدَم صراحةً — الإضافة بتفضل في الكتالوج التطويري عن قصد عشان
+    // التشغيلة الجاية تلاقيها جاهزة (مش زي سبب الإلغاء اللي بيغيّر سياسة).
+    if (createdAddonId != null) {
+      expect(addons.any((a) => a['id'] == createdAddonId), isTrue);
+    }
 
     final order = await apiRequest(
       'POST',

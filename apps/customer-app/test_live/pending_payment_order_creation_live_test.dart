@@ -106,8 +106,10 @@ void main() {
       'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
 
-    // (ب) InstaPay — نفس المنطق بالحرف (مفيش INSTAPAY_IPA_ADDRESS/INSTAPAY_RECIPIENT_NAME
-    // مُعدّين في بيئة التطوير دي برضه، راجع docs/03-external-integrations.md).
+    // (ب) InstaPay — **السلوك بيتفرّع على الإعداد الحي، مش على افتراض مكتوب** (تدقيق §148):
+    // الاختبار كان بيفترض إن InstaPay **مش** مُعدّ في بيئة التطوير ويطالب برفض 503. بعد ما
+    // اتعدّ فعلاً (§12/§13)، الافتراض ده بقى غلط والاختبار بقى بيسقط على سلوك **صحيح**.
+    // دلوقتي بيقرا الإعداد ويتأكد من العقد الصح في الحالتين — ده اللي بيخلّيه صالح في أي بيئة.
     final instapayOrder = await apiRequest(
       'POST',
       '/orders',
@@ -123,16 +125,25 @@ void main() {
     expect(instapayOrder!['order_status'], 'pending_payment');
     final instapayOrderId = instapayOrder['id'] as String;
 
+    // العقد الصح **في الحالتين**، من غير ما الاختبار يفترض حالة إعداد بعينها:
+    //  • InstaPay مُعدّ  ⇒ بيرجّع تعليمات تحويل فيها عنوان IPA فعلي.
+    //  • مش مُعدّ        ⇒ بيرفض 503 برسالة «مش متاح دلوقتي» (مش 500 ولا نجاح صامت).
     try {
-      await apiRequest(
+      final transfer = await apiRequest(
         'POST',
         '/orders/$instapayOrderId/pay-with-instapay',
         accessToken: accessToken,
         extraHeaders: {'Idempotency-Key': 'live-test-instapay-${DateTime.now().microsecondsSinceEpoch}'},
       );
-      fail('المفروض pay-with-instapay يرفض — مفيش IPA address مُعدّ في بيئة التطوير دي');
+      expect(transfer, isNotNull, reason: 'نجح من غير ما يرجّع تعليمات تحويل');
+      // `recipient_address` حقل مستقل عمدًا (طلب المالك 2026-09-11: الرقم في سطر لوحده) —
+      // نجاح من غيره معناه إن العميل شايف تعليمات تحويل بلا حساب يحوّل عليه.
+      expect(transfer!['recipient_address'], isNotNull, reason: 'نجاح بلا حساب استقبال = العميل مش عارف يحوّل لفين');
+      expect(transfer['recipient_address'] as String, isNotEmpty);
+      expect(transfer['reference_code'], isNotNull);
+      expect(transfer['amount_cents'], isA<int>());
     } on ApiException catch (err) {
-      expect(err.statusCode, 503);
+      expect(err.statusCode, 503, reason: 'الرفض لازم يكون 503 واضح مش 500');
       expect(err.message, contains('مش متاح دلوقتي'));
     }
 
