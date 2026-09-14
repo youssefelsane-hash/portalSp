@@ -1,18 +1,12 @@
 // اختبار حي حقيقي لتقييم طلب مكتمل ضد apps/api الشغال فعلاً — نفس أسلوب باقي test_live/.
 // شغّله بـ: flutter test test_live/rating_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 Future<String> _loginAs(String phoneNumber) async {
   await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});

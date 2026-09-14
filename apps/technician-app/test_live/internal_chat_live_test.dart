@@ -1,19 +1,13 @@
 // اختبار حي حقيقي للشات الداخلي (مدير↔فنيين، أدمن↔فنيين) ضد apps/api الشغال فعلاً — نفس أسلوب
 // باقي test_live/. منفصل تماماً عن شات الدعم للعملاء (support_chat في apps/customer-app).
 // شغّله بـ: flutter test test_live/internal_chat_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
 import 'package:technician_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('[OTP]') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 Future<String> _loginAs(String phoneNumber) async {
   await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
@@ -85,7 +79,9 @@ void main() {
     expect(otherTechnicianError!.statusCode, 403);
 
     // عميل ممنوع من الشات الداخلي كله (مقصور على admin/technician).
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
+    // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
+    final customerToken = await registerCustomer(uniquePhone());
     ApiException? customerError;
     try {
       await apiRequest('GET', '/internal-chat/contacts', accessToken: customerToken);

@@ -5,18 +5,12 @@
 // الباك-إند نفسه) — هنا بنتأكد إن الـwire format اللي customer-app بيبعته/بيقراه مفهوم صح.
 // شغّله بـ: flutter test test_live/complaints_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/33b6554f-4f97-567b-a9a1-7de4b0f6b43a/scratchpad/api-server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 Future<String> _registerAndLogin() async {
   final suffix = (DateTime.now().millisecondsSinceEpoch % 100000000).toString().padLeft(8, '0');
@@ -68,19 +62,12 @@ void main() {
     });
     final addressId = address!['id'] as String;
 
-    final categories = await apiRequestList('/service-categories');
-    String? serviceId;
-    for (final category in categories) {
-      final services = await apiRequestList('/services?category_id=${category['id']}');
-      if (services.isNotEmpty) {
-        serviceId = services.first['id'] as String;
-        break;
-      }
-    }
-    expect(serviceId, isNotNull, reason: 'محتاجين خدمة واحدة على الأقل عشان نربط الشكوى بطلب حقيقي');
+    // أول خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula
+    // محتاجة «المساحة» فالطلب بيترفض لسبب مالوش علاقة بالمُختبَر (§148).
+    final serviceId = await pickBookableServiceId();
 
     final order = await apiRequest('POST', '/orders', accessToken: accessToken, body: {
-      'service_id': serviceId!,
+      'service_id': serviceId,
       'address_id': addressId,
       'problem_description': 'اختبار حي — شكوى',
     });

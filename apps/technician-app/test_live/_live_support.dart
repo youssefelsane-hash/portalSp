@@ -1,34 +1,32 @@
-// أدوات مشتركة لاختبارات `test_live/` — سبب وجودها إن كل ملف كان بيكرّر قراءة الـOTP من مسار
-// لوج **مكتوب بالإيد** لسيشن قديمة بعينها، فأي سيشن جديدة كانت بتلاقي الاختبارات دي بتفشل على
-// `FileSystemException` مالهاش أي علاقة بالكود المختبَر. الملف ده بيدوّر على اللوج في المسارات
-// المعروفة وبيقبل تجاوز صريح بـ`--dart-define=API_LOG_PATH=...`.
+// أدوات مشتركة لاختبارات `test_live/` في تطبيق الفني — النسخة المقابلة لـ
+// `apps/customer-app/test_live/_live_support.dart`.
+//
+// **ليه موجود**: كل ملف اختبار هنا كان بيكرّر قراءة الـOTP من مسار لوج **مكتوب بالإيد** لسيشن
+// قديمة بعينها (`/tmp/claude-0/<uuid>/scratchpad/server.log`). المسار ده بيموت مع السيشن، فأي
+// سيشن جديدة كانت بتلاقي الاختبارات دي بتفشل على `FileSystemException` مالهاش أي علاقة بالكود
+// المختبَر — وده بالظبط اللي حصل في التدقيق الماراثوني (docs/08 §148).
 import 'dart:convert';
 import 'dart:io';
-
-import 'package:crypto/crypto.dart';
 import 'dart:math';
 
-import 'package:customer_app/core/api_client.dart';
+import 'package:crypto/crypto.dart';
+import 'package:technician_app/core/api_client.dart';
 
 const _explicitLogPath = String.fromEnvironment('API_LOG_PATH');
 
 const _knownApiLogPaths = <String>[
-  // `apps/api/.dev-logs/api.out` هو المسار اللي `npm run start:dev` بيكتب فيه في البيئة دي،
-  // فهو الأرجح وجودًا — لازم يتجرّب قبل المسارات القديمة.
   '/home/user/portalSp/apps/api/.dev-logs/api.out',
   '/tmp/claude-0/api.log',
   '/home/user/portalSp/.dev-logs/api.log',
 ];
 
-/// ملف لوج الباك-إند الحالي، أو `null` لو مفيش. عام عمدًا: كل ملفات `test_live/` بتستعمله بدل
-/// ما كل واحد يكتب مسار بإيده (المسارات المكتوبة بالإيد بتموت مع السيشن اللي اتكتبت فيها).
+/// ملف لوج الباك-إند الحالي، أو `null` لو مفيش.
 File? resolveApiLogFile() {
   final candidates = <String>[if (_explicitLogPath.isNotEmpty) _explicitLogPath, ..._knownApiLogPaths];
   for (final path in candidates) {
     final file = File(path);
     if (file.existsSync()) return file;
   }
-  // آخر محاولة: أي لوج جوّه scratchpad السيشن الحالية (`.log` أو `.out`).
   final scratch = Directory('/tmp/claude-0');
   if (scratch.existsSync()) {
     final logs = scratch
@@ -47,7 +45,7 @@ Future<String> latestOtpFor(String phoneNumber) async {
   final log = resolveApiLogFile();
   if (log == null) {
     throw StateError(
-      'مالقيتش لوج الباك-إند. شغّل الـAPI وخلّي مخرجاته في /tmp/claude-0/api.log '
+      'مالقيتش لوج الباك-إند. شغّل الـAPI وخلّي مخرجاته في apps/api/.dev-logs/api.out '
       'أو مرّر --dart-define=API_LOG_PATH=/path/to/api.log',
     );
   }
@@ -57,50 +55,6 @@ Future<String> latestOtpFor(String phoneNumber) async {
     throw StateError('مالقيتش أي OTP للرقم $phoneNumber في ${log.path}');
   }
   return matches.last.split('→').last.trim();
-}
-
-/// رقم موبايل فريد لكل تشغيلة — الأرقام المشتركة بتخلّي تشغيلتين متوازيتين تتعاركوا على نفس الحساب.
-///
-/// **البَقّة اللي اتصلحت هنا (تدقيق ماراثوني 2026-09-13، docs/08 §148)**: النسخة القديمة كانت
-/// `millisecondsSinceEpoch % 100000000` وبتاخد أول ٦ خانات — والخانات دي بتتغيّر مرة كل ١٠٠
-/// مللي تقريبًا. و`flutter test` بيشغّل ملفات الاختبار **بالتوازي**، فأكتر من ملف بيبدأ في نفس
-/// النافذة بيولّدوا **نفس الرقم**. الـthrottle بيتعقّب بالرقم (`IdentityThrottlerGuard`) بسقف
-/// ٥ طلبات OTP في الدقيقة، فالأرقام المتصادمة كانت بتستهلك حصة بعضها والنتيجة
-/// «حاولت كتير في وقت قصير» — ١٨ اختبار من ٢١ بيسقطوا لسبب مالوش علاقة بالكود المختبَر.
-///
-/// دلوقتي: عشوائي آمن + خلط بالميكروثانية، فالتصادم بين ملفين متوازيين عمليًا مستحيل.
-String uniquePhone([int seq = 0]) {
-  final micros = DateTime.now().microsecondsSinceEpoch;
-  final mixed = (_phoneRandom.nextInt(1000000) ^ (micros & 0xFFFFF)) % 1000000;
-  return '+2011${mixed.toString().padLeft(6, '0')}${seq.toString().padLeft(2, '0')}';
-}
-
-final Random _phoneRandom = Random.secure();
-
-/// تسجيل عميل جديد بالكامل عبر مسار OTP الحقيقي؛ بيرجّع `access_token`.
-Future<String> registerCustomer(String phoneNumber, {String fullName = 'عميل اختبار حي'}) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'register'});
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  final otp = await latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/register', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-    'full_name': fullName,
-    'user_type': 'customer',
-  });
-  return tokens!['access_token'] as String;
-}
-
-/// تسجيل دخول لحساب موجود بالفعل.
-Future<String> loginCustomer(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  final otp = await latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
 }
 
 /// توكن أدمن للتطوير — موقّع محليًا بـ`JWT_ACCESS_SECRET` بتاع `apps/api/.env`.

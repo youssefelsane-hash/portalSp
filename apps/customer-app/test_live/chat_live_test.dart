@@ -2,21 +2,15 @@
 // test_live/.
 // شغّله بـ: flutter test test_live/chat_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_config.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 Future<String> _loginAs(String phoneNumber) async {
   await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
@@ -31,7 +25,10 @@ Future<String> _loginAs(String phoneNumber) async {
 
 void main() {
   test('عميل وفني حقيقيين يتبادلوا رسائل حية على شات الطلب', () async {
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final customerToken = await registerCustomer(uniquePhone());
 
     // مفيش thread قبل ما فني يقبل — بيتأكد إن الـ 404 الصريح شغال قبل ما نكمل.
     final beforeAccept = await apiRequest(
@@ -39,8 +36,8 @@ void main() {
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': '019fde0d-07ca-70e5-a460-d47bdcdad16f',
-        'address_id': '019fde0d-392b-7b81-b57b-20267dcd239f',
+        'service_id': await pickBookableServiceId(),
+        'address_id': await ensureAddressFor(customerToken),
       },
     );
     final orderId = beforeAccept!['id'] as String;
@@ -138,6 +135,6 @@ void main() {
       technicianSocket.dispose();
     }
 
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
   });
 }

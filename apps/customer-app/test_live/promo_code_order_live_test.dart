@@ -2,34 +2,18 @@
 // test_live/. بيعمل كود خصم تجريبي عبر مسار الأدمن أولاً (مفيش أكواد فعّالة دايماً في القاعدة
 // التطويرية)، يستخدمه، ثم يعطّله بعد الاختبار.
 // شغّله بـ: flutter test test_live/promo_code_order_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يتحقق من كود خصم حقيقي وينشئ طلب مخصوم بيه', () async {
-    final adminToken = await _loginAs('+201000000001');
+    // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الـOTP بيرجّع `mfa_required` من غير
+    // توكن. التوقيع المحلي هو نفس الطريقة المعتمدة في اختبارات الأدمن الحية — تفاصيل في
+    // `_live_support.dart`.
+    final adminToken = await devAdminToken('+201000000001');
     final code = 'LIVETEST${DateTime.now().millisecondsSinceEpoch}';
     final now = DateTime.now().toUtc();
     final promo = await apiRequest(
@@ -50,9 +34,12 @@ void main() {
     expect(promo, isNotNull);
     expect(promo!['is_active'], isTrue);
 
-    final customerToken = await _loginAs('+201000009999');
-    const serviceId = '019fde0d-07ca-70e5-a460-d47bdcdad16f';
-    const addressId = '019fde0d-392b-7b81-b57b-20267dcd239f';
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final customerToken = await registerCustomer(uniquePhone());
+    final serviceId = await pickBookableServiceId();
+    final addressId = await ensureAddressFor(customerToken);
 
     final validation = await apiRequest(
       'GET',
@@ -90,7 +77,7 @@ void main() {
     expect(secondAttemptError, isNotNull);
 
     // نظافة: نلغي الطلب ونعطّل الكود التجريبي
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
     await apiRequest('POST', '/admin/promo-codes/${promo['id']}/deactivate', accessToken: adminToken);
   });
 }

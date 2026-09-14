@@ -2,19 +2,13 @@
 // والواجهة هنا اتوصّلت بيها في نفس الجلسة). نفس نمط order_creation_live_test.dart — apiRequest
 // مباشرة، مش AuthRepository/OrdersRepository، لنفس سبب تعارض flutter_secure_storage.
 // شغّله بـ: flutter test test_live/cancellation_reasons_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 Future<String> _loginAs(String phoneNumber) async {
   await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
@@ -29,7 +23,10 @@ Future<String> _loginAs(String phoneNumber) async {
 
 void main() {
   test('عميل حقيقي يشوف أسباب الإلغاء ويلغي طلب برسوم حقيقية من محفظته', () async {
-    final adminToken = await _loginAs('+201000000001');
+    // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الـOTP بيرجّع `mfa_required` من غير
+    // توكن. التوقيع المحلي هو نفس الطريقة المعتمدة في اختبارات الأدمن الحية — تفاصيل في
+    // `_live_support.dart`.
+    final adminToken = await devAdminToken('+201000000001');
     final customerToken = await _loginAs('+201000009999');
 
     // 1) القايمة العامة (مفيش accessToken هنا عمداً — @Public() في الباك-إند)
@@ -111,7 +108,7 @@ void main() {
         throwsA(isA<ApiException>()),
       );
       // تنظيف الطلب اللي فضل مفتوح بسبب المحاولة المرفوضة
-      await apiRequest('POST', '/orders/$order2Id/cancel', accessToken: customerToken, body: {'reason': 'تنظيف'});
+      await apiRequest('POST', '/orders/$order2Id/cancel', accessToken: customerToken, body: {'reason': 'تنظيف', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
     } finally {
       await apiRequest(
         'PATCH',

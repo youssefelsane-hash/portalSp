@@ -6,6 +6,7 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
+import '_live_support.dart';
 
 Future<String> _latestOtpFor(String phoneNumber, File log) async {
   final lines = await log.readAsLines();
@@ -28,7 +29,9 @@ void main() {
   test('عميل حقيقي يحجز سلوت فاضي من جدول فني بعينه، ويترفض سباق نفس السلوت من عميل تاني', () async {
     // عدّل مسار اللوج ده لملف log السيرفر الفعلي بتاع السيشن اللي بتشغّل الاختبار فيها
     // (نفس القيد الموجود في order_creation_live_test.dart).
-    final serverLog = File(Platform.environment['API_SERVER_LOG'] ?? '/tmp/server.log');
+    // مسار اللوج بيتحدد وقت التشغيل؛ `--dart-define=API_LOG_PATH=...` بيتجاوزه صراحةً.
+    final serverLog = resolveApiLogFile() ??
+        (throw StateError('مالقيتش لوج الباك-إند — شغّل الـAPI ومخرجاته في apps/api/.dev-logs/api.out'));
 
     // فني حقيقي عنده تسجيل دخول مسبق في بيانات الاختبار الحية (نفس المستخدم اللي باقي
     // test_live الأخرى بتستخدمه) — لازم يكون مؤهّل لخدمة حقيقية عشان المطابقة تنجح.
@@ -110,7 +113,7 @@ void main() {
     final winnerToken = orderA != null ? customerAToken : customerBToken;
 
     // تنظيف — الإلغاء بيحرر السلوت تاني (ScheduleSlotReleaseListener)
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: winnerToken, body: {'reason': 'تنظيف اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: winnerToken, body: {'reason': 'تنظيف اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
     final freedSchedule = await apiRequestList('/technicians/$technicianProfileId/schedule', accessToken: customerAToken);
     expect(freedSchedule.firstWhere((s) => s['id'] == slotId)['is_available'], isTrue);
 

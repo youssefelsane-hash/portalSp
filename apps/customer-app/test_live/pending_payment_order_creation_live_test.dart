@@ -4,19 +4,13 @@
 // الحقيقي (مش بس منطق الباك-إند نفسه، ده مختبر أصلاً في apps/api/src/modules/orders — هنا
 // بنتأكد إن الـwire format اللي customer-app بيبعته مفهوم صح من الطرف التاني).
 // شغّله بـ: flutter test test_live/pending_payment_order_creation_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/33b6554f-4f97-567b-a9a1-7de4b0f6b43a/scratchpad/api-server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 // رقم فريد كل تشغيلة (بدل رقم عميل تجريبي ثابت مُجهّز مسبقًا من سيشن تانية — القاعدة هنا فريش)
 // عشان نضمن عميل حقيقي جديد بلا اعتماد على بيانات موجودة مسبقًا.
@@ -69,16 +63,9 @@ void main() {
     );
     final addressId = address!['id'] as String;
 
-    final categories = await apiRequestList('/service-categories');
-    String? serviceId;
-    for (final category in categories) {
-      final services = await apiRequestList('/services?category_id=${category['id']}');
-      if (services.isNotEmpty) {
-        serviceId = services.first['id'] as String;
-        break;
-      }
-    }
-    expect(serviceId, isNotNull, reason: 'محتاجين خدمة واحدة على الأقل عشان نختبر الدفع المسبق');
+    // أول خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula
+    // محتاجة «المساحة» فالطلب بيترفض لسبب مالوش علاقة بالمُختبَر (§148).
+    final serviceId = await pickBookableServiceId();
 
     // (أ) كارت — الطلب لازم يرجع pending_payment (مش searching_technician زي الافتراضي).
     // بيئة التطوير دي مفيهاش بيانات اعتماد Paymob حقيقية (docs/03-external-integrations.md)،
@@ -90,7 +77,7 @@ void main() {
       '/orders',
       accessToken: accessToken,
       body: {
-        'service_id': serviceId!,
+        'service_id': serviceId,
         'address_id': addressId,
         'problem_description': 'اختبار حي — دفع مسبق بالبطاقة',
         'payment_method': 'card',
@@ -116,6 +103,7 @@ void main() {
 
     await apiRequest('POST', '/orders/$cardOrderId/cancel', accessToken: accessToken, body: {
       'reason': 'تنظيف بيانات اختبار حي — دفع مسبق بالبطاقة',
+      'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
 
     // (ب) InstaPay — نفس المنطق بالحرف (مفيش INSTAPAY_IPA_ADDRESS/INSTAPAY_RECIPIENT_NAME
@@ -150,6 +138,7 @@ void main() {
 
     await apiRequest('POST', '/orders/$instapayOrderId/cancel', accessToken: accessToken, body: {
       'reason': 'تنظيف بيانات اختبار حي — دفع مسبق InstaPay',
+      'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
 
     // (ج) regression (طلب بلا payment_method لسه بيتصرف زي زمان — searching_technician فورًا)
