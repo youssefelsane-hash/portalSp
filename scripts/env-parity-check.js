@@ -66,8 +66,36 @@ const MUST_DIFFER = [
   ['JWT_ACCESS_SECRET', 'نفس السر = توكن staging شغّال على الإنتاج'],
 ];
 
+/**
+ * **إنذار كاذب اتصلح (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: الأداة بتشتغل افتراضيًا على
+ * `apps/api/.env` — وده **ملف التطوير المحلي**، مش ملف staging. تشغيلها بلا `--env` كانت
+ * بتطلع «٦ فروق خطيرة بتبطّل قيمة staging» والحقيقة إن الملف المفحوص أصلاً مش staging. ده
+ * تقرير مضلّل بيخلّي القارئ يدوّر على عطل مش موجود (نفس فئة بَقّات الأدوات التانية في §148).
+ *
+ * القاعدة: ملف فيه `NODE_ENV=development` **و**قاعدة بيانات محلية هو ملف تطوير بالتعريف —
+ * الأداة بتقول كده صراحةً وبتوقف، بدل ما تدّي حكم مقارنة مالوش معنى.
+ */
+function looksLikeDevEnv(env) {
+  if (!env) return false;
+  const nodeEnv = (env.NODE_ENV ?? '').toLowerCase();
+  const dbUrl = env.DATABASE_URL ?? '';
+  return nodeEnv === 'development' && /localhost|127\.0\.0\.1/.test(dbUrl);
+}
+
 function main() {
   console.log(`\n=== ج-١٤: تطابق البيئات — بيفحص ${path.relative(ROOT, envPath)} كأنها ${targetEnv} ===\n`);
+
+  const preview = readEnv(envPath);
+  if (looksLikeDevEnv(preview) && !argv.includes('--force')) {
+    console.log(
+      `ℹ️  الملف ده بيئة **تطوير محلية** (NODE_ENV=development + قاعدة بيانات محلية)، مش staging.\n` +
+        `   مقارنته بمتطلبات ${targetEnv} هتطلع «فروق خطيرة» كلها متوقعة ومالهاش أي معنى تشخيصي.\n\n` +
+        `   للفحص الحقيقي وجّه الأداة لملف staging/production الفعلي:\n` +
+        `     node scripts/env-parity-check.js --env /path/to/staging.env --as staging\n\n` +
+        `   ولو عايز تشوف النتيجة على ملف التطوير برضه: زوّد --force.`,
+    );
+    process.exit(0);
+  }
   const env = readEnv(envPath);
   if (!env) {
     console.error(`❌ الملف مش موجود: ${envPath}`);

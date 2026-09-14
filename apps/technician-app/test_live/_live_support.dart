@@ -80,7 +80,13 @@ Future<String> _devTokenFor(String phoneNumber, String userType) async {
   if (secret == null || secret.isEmpty) {
     throw StateError('JWT_ACCESS_SECRET مش موجود في apps/api/.env');
   }
-  final databaseUrl = env['DATABASE_URL'] ?? 'postgres://baytak:baytak@localhost:5432/baytak_main';
+  // مفيش قيمة افتراضية مكتوبة هنا عمدًا: أي رابط قاعدة بيانات مكتوب في كود Dart بيعدّي فحص
+  // الأسرار (`scripts/security-audit.js` ز-٣) وبيبقى سابقة غلط. القيمة بتتقرا من `apps/api/.env`
+  // بس، والغياب بيفشل بصوت عالي.
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
   final dbName = databaseUrl.split('/').last.split('?').first;
   final result = await Process.run(
     'psql',

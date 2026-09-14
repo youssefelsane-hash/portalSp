@@ -520,14 +520,26 @@ class LiveHarness {
    * إعادة تشغيل الـAPI من نود مباشرةً. الشغل عبر `execFileSync('bash', ['dev-api.sh'])` بيعلّق:
    * السكريبت بيسيب السيرفر شغّال في الخلفية و`execFileSync` بيفضل مستني أنابيبه تتقفل.
    */
+  /**
+   * **بَقّة أداة اتصلحت هنا (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: النمط كان
+   * `'node ./dist/main.js'` بالنقطة-شرطة — بيطابق النسخة اللي الهارنس نفسه بيشغّلها بس.
+   * أي نسخة اتشغّلت بطريقة تانية (`npm run start:dev`، `setsid node dist/main.js`، يدوي)
+   * ماكانتش بتتقتل، فالنسخة الجديدة بتموت فورًا على EADDRINUSE والتدقيق بيكمّل وهو بيكلّم
+   * **سيرفر بإعدادات قديمة**. اتلقطت مرتين: في `financial-idempotency-audit` (اتصلحت هناك
+   * محليًا) وفي `crash-resilience-audit` (كان بيسجّل «الباك-إند اتقتل» وهو عمره ما اتقتل).
+   * الإصلاح هنا في المكان المشترك، مع حارس صريح بدل الاعتماد على خروج `pkill`.
+   */
   async restartApi() {
     const { execFileSync } = require('node:child_process');
     try {
-      execFileSync('pkill', ['-9', '-f', 'node ./dist/main.js'], { stdio: 'ignore' });
+      execFileSync('pkill', ['-9', '-f', 'dist/main.js'], { stdio: 'ignore' });
     } catch {
       /* مفيش نسخة شغّالة — مش خطأ */
     }
     for (let i = 0; i < 20 && (await this.isApiUp()); i++) await sleep(500);
+    if (await this.isApiUp()) {
+      throw new Error('فيه نسخة API لسه ماسكة بورت 3000 بعد محاولة الإيقاف — أي قياس بعد كده هيبقى على سيرفر غلط');
+    }
 
     const apiDir = path.join(ROOT, 'apps/api');
     fs.mkdirSync(path.join(apiDir, '.dev-logs'), { recursive: true });

@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { getRedisUrl } from '../../config/redis-url.util';
 import { AssistantMatchingService } from './assistant-matching.service';
 import { ASSISTANT_MATCHING_QUEUE, AssistantOffersExpiredJobData } from './assistant-matching.queue';
+import { ThrottledWorkerErrorLogger } from '../../common/utils/throttled-worker-error-logger';
 
 /**
  * بيتنفّذ لحظة انتهاء مهلة رد المساعدين على بث المطابقة — نفس نمط MatchingQueueProcessor
@@ -23,6 +24,8 @@ import { ASSISTANT_MATCHING_QUEUE, AssistantOffersExpiredJobData } from './assis
 )
 export class AssistantOfferExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(AssistantOfferExpiryProcessor.name);
+  // خنق الفيضان — الشرح الكامل في `ThrottledWorkerErrorLogger` (docs/08 §148).
+  private readonly workerErrors = new ThrottledWorkerErrorLogger(this.logger, 'assistant-matching');
 
   constructor(private readonly assistantMatchingService: AssistantMatchingService) {
     super();
@@ -30,7 +33,7 @@ export class AssistantOfferExpiryProcessor extends WorkerHost {
 
   @OnWorkerEvent('error')
   handleWorkerError(error: Error): void {
-    this.logger.warn(`Worker error (assistant-matching): ${error.message}`);
+    this.workerErrors.record(error);
   }
 
   async process(job: Job<AssistantOffersExpiredJobData>): Promise<void> {
