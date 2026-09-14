@@ -7,31 +7,38 @@ import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يشوف أسباب الإلغاء ويلغي طلب برسوم حقيقية من محفظته', () async {
     // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الـOTP بيرجّع `mfa_required` من غير
     // توكن. التوقيع المحلي هو نفس الطريقة المعتمدة في اختبارات الأدمن الحية — تفاصيل في
     // `_live_support.dart`.
-    final adminToken = await devAdminToken('+201000000001');
-    final customerToken = await _loginAs('+201000009999');
+    const adminPhone = '+201000000001';
+    final adminToken = await devAdminToken(adminPhone);
+    final customerToken = await registerCustomer(uniquePhone());
 
     // 1) القايمة العامة (مفيش accessToken هنا عمداً — @Public() في الباك-إند)
-    final customerReasons = await apiRequestList('/cancellation-reasons?applies_to=customer');
-    expect(customerReasons, isNotEmpty, reason: 'لازم يكون فيه سبب واحد على الأقل من الجلسات السابقة');
+    var customerReasons = await apiRequestList('/cancellation-reasons?applies_to=customer');
+    expect(customerReasons, isNotEmpty, reason: 'لازم يكون فيه سبب واحد على الأقل');
+
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: كل أسباب الإلغاء المزروعة رسومها صفر، وده
+    // قرار سياسة للأدمن مش بَقّة — فالاختبار كان بيقع على `StateError` بدل ما يختبر حاجة.
+    // بدل ما نستنى بيانات من سيشن تانية، بنعمل السبب برسوم عبر **مسار الأدمن الحقيقي** (ده
+    // بيغطي الـendpoint كمان)، وبنعطّله في الآخر عشان مانغيّرش سياسة القاعدة.
+    String? createdFeeReasonId;
+    if (!customerReasons.any((r) => r['charges_fee'] == true)) {
+      final created = await apiRequest('POST', '/admin/cancellation-reasons',
+          accessToken: adminToken, extraHeaders: await stepUpHeader(adminPhone), body: {
+        'reason_ar': 'إلغاء متأخر (اختبار حي)',
+        'reason_en': 'Late cancellation (live test)',
+        'applies_to': 'customer',
+        'charges_fee': true,
+        'fee_percentage': 10,
+      });
+      createdFeeReasonId = created!['id'] as String;
+      customerReasons = await apiRequestList('/cancellation-reasons?applies_to=customer');
+    }
+
     final feeReason = customerReasons.firstWhere(
       (r) => r['charges_fee'] == true,
       orElse: () => throw StateError('محتاجين سبب فيه رسوم لاختبار الحساب'),
@@ -53,24 +60,27 @@ void main() {
       'PATCH',
       '/admin/settings/orders.cancellation_free_window_min',
       accessToken: adminToken,
+      extraHeaders: await stepUpHeader(adminPhone),
       body: {'value': 0},
     );
 
     try {
-      final services = await apiRequestList('/services');
-      final serviceId = services.first['id'] as String;
-      final myOrders = await apiRequestList('/orders', accessToken: customerToken);
-      final existingAddressOrder = myOrders.firstWhere((o) => o['address_id'] != null);
-      final addressId = existingAddressOrder['address_id'] as String;
+      // العميل بقى جديد كل تشغيلة، فمفيش طلبات سابقة يتاخد منها عنوان — بيتعمل واحد حقيقي.
+      // والخدمة لازم تكون **بلا حقول تسعير إجبارية** (§148).
+      final serviceId = await pickBookableServiceId();
+      final addressId = await ensureAddressFor(customerToken);
 
       final walletBefore = await apiRequest('GET', '/wallet', accessToken: customerToken);
       final balanceBefore = walletBefore!['balance_cents'] as int;
 
+      // **وصف مختلف لكل طلب مقصود**: حارس تكرار الطلب (`order-duplicate-guard.ts`) بيشتق مفتاح
+      // من بصمة الطلب + شريحة زمنية، فطلبين متطابقين في نفس النافذة بيرجّعوا **نفس الصف**.
+      // من غير ده، الطلب التاني كان بيطلع هو الأول (المُلغى خلاص) والتنضيف يفشل (§148).
       final order = await apiRequest(
         'POST',
         '/orders',
         accessToken: customerToken,
-        body: {'service_id': serviceId, 'address_id': addressId},
+        body: {'service_id': serviceId, 'address_id': addressId, 'problem_description': 'اختبار رسوم الإلغاء — طلب ١'},
       );
       final orderId = order!['id'] as String;
       final totalCents = order['total_amount_cents'] as int;
@@ -95,7 +105,7 @@ void main() {
         'POST',
         '/orders',
         accessToken: customerToken,
-        body: {'service_id': serviceId, 'address_id': addressId},
+        body: {'service_id': serviceId, 'address_id': addressId, 'problem_description': 'اختبار رفض سبب الفني — طلب ٢'},
       );
       final order2Id = order2!['id'] as String;
       await expectLater(
@@ -114,8 +124,15 @@ void main() {
         'PATCH',
         '/admin/settings/orders.cancellation_free_window_min',
         accessToken: adminToken,
+        extraHeaders: await stepUpHeader(adminPhone),
         body: {'value': originalWindow},
       );
     }
-  });
+
+    // تعطيل السبب اللي الاختبار عمله — مانسيبش سياسة إلغاء جديدة ورانا في القاعدة.
+    if (createdFeeReasonId != null) {
+      await apiRequest('PATCH', '/admin/cancellation-reasons/$createdFeeReasonId',
+          accessToken: adminToken, extraHeaders: await stepUpHeader(adminPhone), body: {'is_active': false});
+    }
+  }, timeout: const Timeout(Duration(seconds: 120)));
 }

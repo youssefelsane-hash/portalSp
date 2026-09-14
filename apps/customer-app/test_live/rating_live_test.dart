@@ -5,26 +5,15 @@ import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يقيّم طلب مكتمل حقيقي، وتاني محاولة ترفض 409 واضح', () async {
-    final accessToken = await _loginAs('+201000009999');
+    final accessToken = await registerCustomer(uniquePhone());
 
-    // لازم نلاقي طلب completed حقيقي بتاع نفس العميل ده لسه مش مُقيَّم — بندوّر جوّه القايمة
-    // بدل ما نفترض id ثابت، عشان الاختبار يفضل شغال حتى لو بيانات القاعدة اتغيّرت.
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: النسخة القديمة كانت بتدوّر على طلب
+    // `completed` موجود أصلاً لعميل ثابت — اعتماد على بيانات سيشن قديمة، وفي قاعدة نضيفة
+    // بتسقط على «Expected: non-empty». دلوقتي بنمشّي دورة تنفيذ حقيقية كاملة الأول.
+    await completeOrderThroughTechnician(accessToken, problemDescription: 'طلب اختبار التقييم');
     final orders = await apiRequestList('/orders', accessToken: accessToken);
     final completedOrders = orders.where((o) => o['order_status'] == 'completed').toList();
     expect(completedOrders, isNotEmpty, reason: 'محتاجين طلب completed واحد على الأقل لنفس العميل عشان نختبر التقييم');

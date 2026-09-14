@@ -43,18 +43,28 @@ File? resolveApiLogFile() {
 }
 
 /// آخر كود OTP اتطبع للرقم ده في لوج الباك-إند (وضع التطوير بس — الإنتاج مابيطبعهوش).
+///
+/// **بيقرا الذيل بس (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: النسخة القديمة كانت بتعمل
+/// `readAsLines()` على الملف كله. لوج تطوير بيوصل لمئات الميجابايت بعد ساعات تشغيل (وأكتر
+/// بكتير قبل إصلاح فيضان أخطاء الـworker)، فكل نداء OTP كان بيحمّل الملف كله في الذاكرة —
+/// بطء شديد، وفي النهاية الاختبار بيموت برسالة **مضلّلة تمامًا**: «تعذر الاتصال بالخادم»
+/// رغم إن السيرفر شغّال ١٠٠٪. الكود موجود في آخر الملف بحكم التعريف، فقراءة آخر ٢ ميجا كافية.
 Future<String> latestOtpFor(String phoneNumber) async {
   final log = resolveApiLogFile();
   if (log == null) {
     throw StateError(
-      'مالقيتش لوج الباك-إند. شغّل الـAPI وخلّي مخرجاته في /tmp/claude-0/api.log '
+      'مالقيتش لوج الباك-إند. شغّل الـAPI وخلّي مخرجاته في apps/api/.dev-logs/api.out '
       'أو مرّر --dart-define=API_LOG_PATH=/path/to/api.log',
     );
   }
-  final lines = await log.readAsLines();
-  final matches = lines.where((line) => line.contains('[OTP]') && line.contains(phoneNumber));
+  const tailBytes = 2 * 1024 * 1024;
+  final length = await log.length();
+  final start = length > tailBytes ? length - tailBytes : 0;
+  final bytes = await (log.openRead(start)).expand((chunk) => chunk).toList();
+  final text = utf8.decode(bytes, allowMalformed: true);
+  final matches = LineSplitter.split(text).where((line) => line.contains('[OTP]') && line.contains(phoneNumber));
   if (matches.isEmpty) {
-    throw StateError('مالقيتش أي OTP للرقم $phoneNumber في ${log.path}');
+    throw StateError('مالقيتش أي OTP للرقم $phoneNumber في آخر ٢ ميجا من ${log.path}');
   }
   return matches.last.split('→').last.trim();
 }
@@ -140,7 +150,7 @@ Future<String> _devTokenFor(String phoneNumber, String userType) async {
      "SELECT id FROM users WHERE phone_number='$phoneNumber' AND deleted_at IS NULL LIMIT 1"],
     environment: {'PGPASSWORD': 'baytak'},
   );
-  final userId = (result.stdout as String).trim();
+  final userId = (result.stdout as String).trim().split('\n').first.trim();
   if (userId.isEmpty) {
     throw StateError('مفيش مستخدم بالرقم $phoneNumber — شغّل scripts/seed-dev-accounts.js');
   }
@@ -231,4 +241,138 @@ Future<String?> pickCustomerCancellationReasonId() async {
   final reasons = await apiRequestList('/cancellation-reasons?applies_to=customer');
   if (reasons.isEmpty) return null;
   return reasons.first['id'] as String;
+}
+
+/// توكن step-up (تأكيد Passkey حديث) لعمليات الأدمن الحساسة — **صف حقيقي** في
+/// `step_up_tokens` بيتستهلك مرة واحدة، زي ما `scripts/lib/live-harness.js` بتعمل بالظبط.
+///
+/// **ليه لازم (تدقيق §148)**: كتابات الأدمن الحساسة (تعديل إعداد، إنشاء سبب إلغاء) محمية
+/// بـ`StepUpGuard`، فبترجّع «العملية دي محتاجة تأكيد Passkey حديث» من غير الهيدر. الاختبار
+/// **مابيتجاوزش الحارس**: هو بيعدّي عليه بنفس الآلية اللي الواجهة بتستعملها (توكن مخزّن في
+/// القاعدة)، فالحارس فعليًا لسه بيتنفّذ ولسه بيرفض أي نداء بلا توكن.
+Future<String> devStepUpToken(String adminPhoneNumber) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "INSERT INTO step_up_tokens (user_id, expires_at) "
+     "SELECT id, now() + interval '30 minutes' FROM users "
+     "WHERE phone_number='$adminPhoneNumber' AND deleted_at IS NULL LIMIT 1 RETURNING id"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  // **أول سطر بس**: `psql` بيطبع سطر حالة (`INSERT 0 1`) بعد صف الـRETURNING، فـ`.trim()`
+  // لوحدها بتسيب «uuid\nINSERT 0 1». القيمة دي بتروح كـheader، وأي سطر جديد جوّه قيمة هيدر
+  // بيخلّي عميل HTTP يرمي استثناء — واللي بيوصل للمختبِر رسالة **مضلّلة تمامًا**: «تعذر
+  // الاتصال بالخادم» رغم إن السيرفر شغّال (تدقيق §148).
+  final token = (result.stdout as String).trim().split('\n').first.trim();
+  if (token.isEmpty) {
+    throw StateError('مقدرتش أعمل توكن step-up لـ$adminPhoneNumber — شغّل scripts/seed-dev-accounts.js');
+  }
+  return token;
+}
+
+/// الهيدر الجاهز للاستعمال مع `apiRequest(..., extraHeaders: await stepUpHeader(phone))`.
+Future<Map<String, String>> stepUpHeader(String adminPhoneNumber) async =>
+    {'X-Step-Up-Token': await devStepUpToken(adminPhoneNumber)};
+
+/// بيوصل طلب جديد لحالة `completed` **عبر المسار الحقيقي بالكامل** (فني بيقبل، ينطلق، يوصل،
+/// يبدأ، يرفع صورة بعد الشغل، يقفل، يحصّل كاش) وبيرجّع `orderId`.
+///
+/// **ليه موجود (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: اختبارات زي التقييم كانت بتدوّر
+/// على طلب `completed` **موجود أصلاً** لعميل ثابت — يعني بتعتمد على بيانات سيشن قديمة، وفي
+/// قاعدة نضيفة بتسقط على «Expected: non-empty» اللي مش بيقول السبب. دلوقتي الاختبار بيجهّز
+/// شرطه بنفسه، وبالمناسبة بيغطي دورة التنفيذ كاملة من طرف العميل كمان.
+Future<String> completeOrderThroughTechnician(
+  String customerToken, {
+  String technicianPhone = '+201000000011',
+  String problemDescription = 'طلب اختبار حي — دورة تنفيذ كاملة',
+}) async {
+  final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
+    'service_id': await pickBookableServiceId(),
+    'address_id': await ensureAddressFor(customerToken),
+    // وصف فريد: حارس تكرار الطلب بيرجّع نفس الصف لطلبين متطابقين في نفس النافذة.
+    'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
+  });
+  final orderId = order!['id'] as String;
+
+  final technicianToken = await devTechnicianToken(technicianPhone);
+  await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+  for (final step in ['depart', 'arrive', 'start']) {
+    await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
+  }
+  await uploadAfterPhotoAs(orderId, technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/collect-cash', accessToken: technicianToken);
+  return orderId;
+}
+
+/// صورة «بعد الشغل» — شرط إجباري قبل `complete` في الباك-إند.
+Future<void> uploadAfterPhotoAs(String orderId, String technicianToken) async {
+  final fixture = File('test_live/fixtures/test-1x1.png');
+  final bytes = fixture.existsSync()
+      ? await fixture.readAsBytes()
+      : base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=');
+  await apiUpload(
+    '/technician/orders/$orderId/media',
+    fileBytes: bytes,
+    filename: 'after.png',
+    fields: {'media_type': 'after_photo'},
+    accessToken: technicianToken,
+  );
+}
+
+/// بيوصل طلب لحالة **قابلة للدفع** (`work_completed` وغير مدفوع) وبيرجّع `orderId`:
+/// نفس دورة `completeOrderThroughTechnician` بس **من غير تحصيل كاش**.
+Future<String> completeOrderAwaitingPayment(
+  String customerToken, {
+  String technicianPhone = '+201000000011',
+  String problemDescription = 'طلب اختبار حي — بانتظار الدفع',
+}) async {
+  final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
+    'service_id': await pickBookableServiceId(),
+    'address_id': await ensureAddressFor(customerToken),
+    'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
+  });
+  final orderId = order!['id'] as String;
+
+  final technicianToken = await devTechnicianToken(technicianPhone);
+  await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+  for (final step in ['depart', 'arrive', 'start']) {
+    await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
+  }
+  await uploadAfterPhotoAs(orderId, technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+  return orderId;
+}
+
+/// بيشحن محفظة العميل بمبلغ كافي **عبر SQL مباشر** — مفيش endpoint لشحن محفظة عميل تجريبي،
+/// ونفس الطريقة بالظبط اللي `scripts/lib/live-harness.js` بتستعملها (`fundWallet`).
+///
+/// **مهم**: الشحن ده بيعدّل `balance_cents` من غير قيد في `wallet_transactions` عمدًا — هو
+/// **تجهيز بيئة** مش عملية مالية، والتدقيقات المالية بتقيس القيود اللي بتتولّد من المسارات
+/// الحقيقية بعد كده. في بيئة تطوير محلية بس.
+Future<void> fundCustomerWallet(String customerToken, int cents) async {
+  final me = await apiRequest('GET', '/auth/me', accessToken: customerToken);
+  final userId = me!['id'] as String;
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "INSERT INTO wallets (owner_user_id, owner_type, balance_cents) VALUES ('$userId','customer',$cents) "
+     "ON CONFLICT (owner_user_id) DO UPDATE SET balance_cents = EXCLUDED.balance_cents"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  if (result.exitCode != 0) {
+    throw StateError('مقدرتش أشحن المحفظة: ${result.stderr}');
+  }
 }

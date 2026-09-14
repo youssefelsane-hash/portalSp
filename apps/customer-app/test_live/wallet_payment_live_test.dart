@@ -7,39 +7,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يدفع طلب حقيقي من رصيد محفظته', () async {
-    final accessToken = await _loginAs('+201000009999');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: قبل كده كان محتاج رصيد محفظة **وطلب في
+    // حالة قابلة للدفع** متحضّرين بالإيد بـpsql من سيشن تانية — فبيسقط في أي قاعدة نضيفة على
+    // «Expected: a value greater than <0>» اللي مش بيقول السبب. دلوقتي بيمشّي دورة تنفيذ
+    // حقيقية لحد `work_completed` (من غير تحصيل كاش)، وبيشحن المحفظة زي ما الهارنس بتعمل.
+    final accessToken = await registerCustomer(uniquePhone());
+    final orderId = await completeOrderAwaitingPayment(accessToken, problemDescription: 'طلب اختبار الدفع من المحفظة');
+
+    final orderBefore = await apiRequest('GET', '/orders/$orderId', accessToken: accessToken);
+    final orderTotal = orderBefore!['total_amount_cents'] as int;
+    await fundCustomerWallet(accessToken, orderTotal + 10000);
 
     final walletBefore = await apiRequest('GET', '/wallet', accessToken: accessToken);
     final balanceBefore = walletBefore!['balance_cents'] as int;
-    expect(balanceBefore, greaterThan(0), reason: 'محتاج رصيد محفظة مُجهّز مسبقاً — راجع تعليق أعلى الملف');
-
-    // بندوّر على أول طلب work_completed/awaiting_payment مش مدفوع بعد لنفس العميل — مفيش
-    // endpoint لإنشاء طلب في الحالة دي مباشرة (لازم يعدّي دورة الفني كاملة)، فالطلب التجريبي
-    // ده اتحضّر مسبقاً بـ psql مباشر (موثّق في README).
-    final orders = await apiRequestList('/orders', accessToken: accessToken);
-    final payableOrder = orders.firstWhere(
-      (o) => (o['order_status'] == 'work_completed' || o['order_status'] == 'awaiting_payment') &&
-          o['payment_status'] != 'paid',
-      orElse: () => throw StateError('مفيش طلب قابل للدفع — جهّزه الأول بـ psql'),
-    );
-    final orderId = payableOrder['id'] as String;
-    final orderTotal = payableOrder['total_amount_cents'] as int;
+    expect(balanceBefore, greaterThan(0));
 
     final payment = await apiRequest(
       'POST',

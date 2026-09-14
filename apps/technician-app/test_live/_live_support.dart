@@ -41,6 +41,12 @@ File? resolveApiLogFile() {
 }
 
 /// آخر كود OTP اتطبع للرقم ده في لوج الباك-إند (وضع التطوير بس — الإنتاج مابيطبعهوش).
+///
+/// **بيقرا الذيل بس (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: النسخة القديمة كانت بتعمل
+/// `readAsLines()` على الملف كله. لوج تطوير بيوصل لمئات الميجابايت بعد ساعات تشغيل (وأكتر
+/// بكتير قبل إصلاح فيضان أخطاء الـworker)، فكل نداء OTP كان بيحمّل الملف كله في الذاكرة —
+/// بطء شديد، وفي النهاية الاختبار بيموت برسالة **مضلّلة تمامًا**: «تعذر الاتصال بالخادم»
+/// رغم إن السيرفر شغّال ١٠٠٪. الكود موجود في آخر الملف بحكم التعريف، فقراءة آخر ٢ ميجا كافية.
 Future<String> latestOtpFor(String phoneNumber) async {
   final log = resolveApiLogFile();
   if (log == null) {
@@ -49,10 +55,14 @@ Future<String> latestOtpFor(String phoneNumber) async {
       'أو مرّر --dart-define=API_LOG_PATH=/path/to/api.log',
     );
   }
-  final lines = await log.readAsLines();
-  final matches = lines.where((line) => line.contains('[OTP]') && line.contains(phoneNumber));
+  const tailBytes = 2 * 1024 * 1024;
+  final length = await log.length();
+  final start = length > tailBytes ? length - tailBytes : 0;
+  final bytes = await (log.openRead(start)).expand((chunk) => chunk).toList();
+  final text = utf8.decode(bytes, allowMalformed: true);
+  final matches = LineSplitter.split(text).where((line) => line.contains('[OTP]') && line.contains(phoneNumber));
   if (matches.isEmpty) {
-    throw StateError('مالقيتش أي OTP للرقم $phoneNumber في ${log.path}');
+    throw StateError('مالقيتش أي OTP للرقم $phoneNumber في آخر ٢ ميجا من ${log.path}');
   }
   return matches.last.split('→').last.trim();
 }
@@ -94,7 +104,7 @@ Future<String> _devTokenFor(String phoneNumber, String userType) async {
      "SELECT id FROM users WHERE phone_number='$phoneNumber' AND deleted_at IS NULL LIMIT 1"],
     environment: {'PGPASSWORD': 'baytak'},
   );
-  final userId = (result.stdout as String).trim();
+  final userId = (result.stdout as String).trim().split('\n').first.trim();
   if (userId.isEmpty) {
     throw StateError('مفيش مستخدم بالرقم $phoneNumber — شغّل scripts/seed-dev-accounts.js');
   }
@@ -224,3 +234,40 @@ Future<void> uploadAfterPhoto(String orderId, String technicianToken) async {
     accessToken: technicianToken,
   );
 }
+
+/// توكن step-up (تأكيد Passkey حديث) لعمليات الأدمن الحساسة — **صف حقيقي** في
+/// `step_up_tokens` بيتستهلك مرة واحدة، زي ما `scripts/lib/live-harness.js` بتعمل بالظبط.
+///
+/// **ليه لازم (تدقيق §148)**: كتابات الأدمن الحساسة (تعديل إعداد، إنشاء سبب إلغاء) محمية
+/// بـ`StepUpGuard`، فبترجّع «العملية دي محتاجة تأكيد Passkey حديث» من غير الهيدر. الاختبار
+/// **مابيتجاوزش الحارس**: هو بيعدّي عليه بنفس الآلية اللي الواجهة بتستعملها (توكن مخزّن في
+/// القاعدة)، فالحارس فعليًا لسه بيتنفّذ ولسه بيرفض أي نداء بلا توكن.
+Future<String> devStepUpToken(String adminPhoneNumber) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "INSERT INTO step_up_tokens (user_id, expires_at) "
+     "SELECT id, now() + interval '30 minutes' FROM users "
+     "WHERE phone_number='$adminPhoneNumber' AND deleted_at IS NULL LIMIT 1 RETURNING id"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  // **أول سطر بس**: `psql` بيطبع سطر حالة (`INSERT 0 1`) بعد صف الـRETURNING، فـ`.trim()`
+  // لوحدها بتسيب «uuid\nINSERT 0 1». القيمة دي بتروح كـheader، وأي سطر جديد جوّه قيمة هيدر
+  // بيخلّي عميل HTTP يرمي استثناء — واللي بيوصل للمختبِر رسالة **مضلّلة تمامًا**: «تعذر
+  // الاتصال بالخادم» رغم إن السيرفر شغّال (تدقيق §148).
+  final token = (result.stdout as String).trim().split('\n').first.trim();
+  if (token.isEmpty) {
+    throw StateError('مقدرتش أعمل توكن step-up لـ$adminPhoneNumber — شغّل scripts/seed-dev-accounts.js');
+  }
+  return token;
+}
+
+/// الهيدر الجاهز للاستعمال مع `apiRequest(..., extraHeaders: await stepUpHeader(phone))`.
+Future<Map<String, String>> stepUpHeader(String adminPhoneNumber) async =>
+    {'X-Step-Up-Token': await devStepUpToken(adminPhoneNumber)};
