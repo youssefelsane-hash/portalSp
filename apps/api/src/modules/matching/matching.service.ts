@@ -1359,6 +1359,9 @@ export class MatchingService {
       // القفل يتفك من المسار الرسمي فقط، مع إبلاغ العميل؛ لا fallback صامت لمنفذ آخر.
       return orderHasLockedProvider(order) ? { ...base, route: 'rounds', reason: 'selected_provider_request' } : base;
     }
+    // موعد إعادة الضمان اختير أصلًا بأول ساعة تجتاز نفس بوابة الأهلية والتعارض. وجود حمل آخر
+    // غير متقاطع في اليوم لا يحوّلها لطلب يدوي؛ الحارس داخل autoConfirm يعيد الفحص تحت القفل.
+    if (base.reason === 'revisit_scheduled_far') return base;
     const tier = await this.classifyCandidate(order, candidate.technician_id, await resolveDailyCapacityMinutes(this.settingsService), manager);
     return tier === 'LIGHT' ? base : { ...base, route: 'rounds', reason: 'same_day_workload' };
   }

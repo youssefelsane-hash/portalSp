@@ -23,6 +23,7 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
 
   let dataSource: DataSource;
   let matching: MatchingService;
+  let technicians: TechniciansService;
   const extraTechs: { id: string; userId: string }[] = [];
   const emitted = jest.fn();
   const runId = Date.now().toString(36).toUpperCase().slice(-6);
@@ -172,6 +173,18 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
       getString: async (_key: string, fallback: string) => fallback,
       getBoolean: async (_key: string, fallback: boolean) => fallback,
     };
+    technicians = new TechniciansService(
+      { manager: dataSource.manager } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      settings as never,
+    );
     matching = new MatchingService(
       dataSource.getRepository(OrderAssignment), dataSource.getRepository(Order), dataSource,
       new TechniciansService(dataSource.getRepository(TechnicianProfile), {} as never, {} as never,
@@ -295,6 +308,42 @@ describe('الجدولة بالساعة مش باليوم (ADR-0077)', () => {
     await makeOrder(day, '09:00', { minutes: 300, days: 1 });
     expect(await isAvailable(day, '13:00', 60, 1)).toBe(false);
     expect(await isAvailable(day, '14:00', 60, 1)).toBe(true);
+  });
+
+  it('إعادة الضمان تختار أول ساعة بعد نهاية الشغل القائم، مش موعدًا ثابتًا متعارضًا', async () => {
+    const day = dayAfter(38);
+    await makeOrder(day, '09:00', { minutes: 180, days: null });
+    const notBefore = await cairoMoment(day, '08:00');
+
+    const firstAvailable = await technicians.findFirstAvailableStartForTechnician(
+      ids.tech,
+      ids.service,
+      ids.zone,
+      ids.address,
+      notBefore,
+      2,
+      { durationMinutes: 60, estimatedDurationDays: null },
+    );
+
+    expect(firstAvailable?.toISOString()).toBe((await cairoMoment(day, '12:00')).toISOString());
+  });
+
+  it('لو اليوم ممتلئ بالكامل، إعادة الضمان تنتقل لأول ساعة في اليوم التالي', async () => {
+    const day = dayAfter(39);
+    await makeOrder(day, '09:00', { minutes: 720, days: null });
+    const notBefore = await cairoMoment(day, '08:00');
+
+    const firstAvailable = await technicians.findFirstAvailableStartForTechnician(
+      ids.tech,
+      ids.service,
+      ids.zone,
+      ids.address,
+      notBefore,
+      2,
+      { durationMinutes: 60, estimatedDurationDays: null },
+    );
+
+    expect(firstAvailable?.toISOString()).toBe((await cairoMoment(dayAfter(40), '09:00')).toISOString());
   });
 
   // ===== اللي مايتغيّرش =====

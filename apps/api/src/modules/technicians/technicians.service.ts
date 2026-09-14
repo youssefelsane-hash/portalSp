@@ -1008,6 +1008,96 @@ export class TechniciansService {
   }
 
   /**
+   * أول ساعة قابلة للتعيين لفني بعينه داخل أفق الحجز. إعادة الضمان تستخدمها بدل إضافة عدد
+   * ثابت من الأيام؛ ونفس شرط الأهلية/التعارض المستخدم في المطابقة هو الذي يحكم النتيجة هنا.
+   * الاستعلام يفحص الأفق كله مرة واحدة حتى لا يتحول أسبوع مزدحم إلى مئات الاستعلامات المتتالية.
+   */
+  async findFirstAvailableStartForTechnician(
+    technicianId: string,
+    serviceId: string,
+    zoneId: string,
+    addressId: string,
+    notBefore: Date,
+    maxDays = 90,
+    candidateLoad?: CandidateOperationalLoad,
+  ): Promise<Date | null> {
+    const [dailyCapacityMinutes, dayStartHour, dayEndHour] = await Promise.all([
+      resolveDailyCapacityMinutes(this.settingsService),
+      this.settingsService.getNumber('booking.suggestion_day_start_hour', 9),
+      this.settingsService.getNumber('booking.suggestion_day_end_hour', 19),
+    ]);
+    const startHour = Math.max(0, Math.min(23, Math.round(dayStartHour)));
+    const endHour = Math.max(startHour, Math.min(23, Math.round(dayEndHour)));
+    const horizonDays = Math.max(1, Math.min(365, Math.round(maxDays)));
+
+    const rows = await this.technicianProfiles.manager.query<{ starts_at: Date }[]>(
+      `
+      WITH candidate_starts AS (
+        SELECT ((day::date + make_interval(hours => hour_of_day)) AT TIME ZONE 'Africa/Cairo') AS starts_at
+        FROM generate_series(
+          ($5::timestamptz AT TIME ZONE 'Africa/Cairo')::date,
+          ($5::timestamptz AT TIME ZONE 'Africa/Cairo')::date + make_interval(days => $6::int),
+          interval '1 day'
+        ) day
+        CROSS JOIN generate_series($7::int, $8::int) hour_of_day
+      )
+      SELECT c.starts_at
+      FROM candidate_starts c
+      JOIN technician_profiles tp ON tp.id = $4
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1
+        AND ts.is_active = true AND ts.verification_status = 'approved'
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
+      CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+      WHERE c.starts_at > $5::timestamptz
+        AND tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        AND tp.current_location IS NOT NULL
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: 'c.starts_at',
+          excludeOrderIdParam: 'NULL',
+          activeStatusesParam: '$9',
+          engagedStatusesParam: '$10',
+          isEmergencyParam: '$11',
+          serviceDurationExpr: 'COALESCE($13::int, COALESCE(svc.estimated_duration_minutes, 60))',
+          candidateLoad: {
+            estimatedDurationDaysExpr: '$14::numeric',
+            durationMinutesExpr: '$13::int',
+            serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+          },
+          preciseDurationHoursExpr: '$13::numeric / 60.0',
+          dailyCapacityMinutesParam: '$12',
+        })}
+      ORDER BY c.starts_at ASC
+      LIMIT 1
+      `,
+      [
+        serviceId,
+        zoneId,
+        addressId,
+        technicianId,
+        notBefore,
+        horizonDays,
+        startHour,
+        endHour,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        dailyCapacityMinutes,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
+      ],
+    );
+    return rows[0]?.starts_at ? new Date(rows[0].starts_at) : null;
+  }
+
+  /**
    * "متاح تاني إمتى؟" (ADR-0030) — بتلف يوم بيوم (لحد `maxDays`) بعد `fromDate` لحد ما تلاقي أول
    * يوم الفني بعينه فيه مؤهّل ومتاح فعليًا، بإعادة استخدام `hasEligibleTechnicianForDate()` نفسها
    * (نفس نمط "مرن — اختار نطاق أيام" A.2، بس لفني واحد محدد بدل "أي فني"). `null` لو محدش لقى

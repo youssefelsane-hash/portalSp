@@ -31,7 +31,9 @@ export class OrderCreatedNotificationListener {
         notificationType: 'order_created',
         titleAr: 'طلبك اتسجّل بنجاح',
         bodyAr:
-          order.orderStatus === 'awaiting_admin_quote'
+          order.orderType === 'revisit' && order.scheduledAt
+            ? `إعادة الزيارة رقم ${order.orderNumber} اتحددلها أول موعد متاح للفني: ${formatCairoDateTime(order.scheduledAt)}.`
+            : order.orderStatus === 'awaiting_admin_quote'
             ? `طلب رقم ${order.orderNumber} — الإدارة بتراجع الصور وهتبعتلك السعر قبل اختيار الفني.`
             : `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
         referenceType: 'order',
@@ -53,4 +55,12 @@ export class OrderCreatedNotificationListener {
       this.logger.error(`فشل إشعار إنشاء الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }
+}
+
+function formatCairoDateTime(value: Date): string {
+  return new Intl.DateTimeFormat('ar-EG', {
+    timeZone: 'Africa/Cairo',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(value);
 }

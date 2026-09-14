@@ -707,7 +707,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           title: const Text('طلب إعادة زيارة (ضمان)'),
           content: const Text(
             'هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل. الفني هيتواصل معاك، '
-            'والزيارة هتكون خلال 3 أيام إلى أسبوع علشان يتنسق الموعد بشكل مناسب.',
+            'والنظام هيحجز أول موعد فاضي في جدوله بعد مهلة التنسيق ويعرضه لك فورًا.',
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('تراجع')),
@@ -733,7 +733,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
         );
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة — الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع')));
+            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة واتحدد أول موعد متاح للفني')));
       }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
@@ -1087,7 +1087,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'إعادة زيارة لطلب سابق — مجانية بالكامل. الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع.',
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل، والموعد المعروض هو أول وقت متاح للفني الأصلي.',
                                   style: TextStyle(color: Theme.of(context).colorScheme.primary),
                                 ),
                               ],

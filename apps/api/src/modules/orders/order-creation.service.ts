@@ -1210,6 +1210,42 @@ export class OrderCreationService {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة عمولة المنصة للخدمة غير صحيحة', HttpStatus.CONFLICT);
     }
 
+    const orderCreatedAt = new Date();
+    let revisitScheduledAt: Date | null = null;
+    if (originalOrder) {
+      if (originalOrder.technicianId) {
+        const [nearTermHours, maxAdvanceDays] = await Promise.all([
+          this.settingsService.getNumber('matching.near_term_request_hours', 48),
+          this.settingsService.getNumber('orders.max_advance_booking_days', 90),
+        ]);
+        // نبدأ بعد نافذة الطلب القريب بدقيقة، حتى يكون الموعد مؤهلاً للتأكيد التلقائي قطعًا
+        // ولا يتحول مرة أخرى إلى request يحتاج قبول الفني.
+        const notBefore = new Date(orderCreatedAt.getTime() + Math.max(0, nearTermHours) * 60 * 60 * 1000 + 60_000);
+        revisitScheduledAt = await this.techniciansService.findFirstAvailableStartForTechnician(
+          originalOrder.technicianId,
+          service.id,
+          zone.id,
+          address.id,
+          notBefore,
+          maxAdvanceDays,
+          {
+            // لو الخدمة باليوم نسيب الدقايق null حتى تظل تحجز اليوم كاملًا. غير ذلك نستخدم
+            // آخر fallback رسمي للمدة كي لا يبدو وقت متداخل متاحًا لمجرد أن المعادلة لم ترجع مدة.
+            durationMinutes:
+              formulaDurationMinutes ??
+              pricingContext.durationMinutes ??
+              ((durationEstimate?.estimated_days ?? formulaDurationDays) == null
+                ? (service.estimatedDurationMinutes ?? 60)
+                : null),
+            estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
+          },
+        );
+      }
+      // بيانات فني قديمة/ناقصة لا تمنع العميل من استعمال حق الضمان. يظل الموعد القديم شبكة
+      // أمان ويظهر الطلب للإدارة بدل إسقاطه بالكامل.
+      revisitScheduledAt ??= defaultRevisitScheduledAt(orderCreatedAt);
+    }
+
     const remoteAssessmentFeeCents = remoteQuoteRequested ? service.remoteAssessmentFeeCents : 0;
     let createdOrder: Order;
     try {
@@ -1247,10 +1283,7 @@ export class OrderCreationService {
         { next_human_readable_number: string }[]
       >("SELECT next_human_readable_number('ORD')");
 
-      const now = new Date();
-      // طلب الضمان بيتعرض على الفني الأصلي فورًا من خلال revisit pin، لكن التنفيذ نفسه مش
-      // طوارئ لحظية. السيرفر هو مصدر الحقيقة للموعد حتى لو عميل قديم ما بعتش scheduled_at.
-      const revisitScheduledAt = originalOrder ? defaultRevisitScheduledAt(now) : null;
+      const now = orderCreatedAt;
       const order = manager.create(Order, {
         orderNumber,
         customerId: customerProfile.id,

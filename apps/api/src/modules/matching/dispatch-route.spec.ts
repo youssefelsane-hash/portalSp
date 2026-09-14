@@ -238,7 +238,8 @@ describe('مسار التوزيع — الشرح المعروض للأدمن = �
     expectedReason: string;
   }[] = [
     { tag: 'EMG', labelAr: 'طوارئ', bookingMode: 'emergency', orderType: 'emergency', hoursFromNow: null, pinned: false, expectedRoute: 'rounds', expectedReason: 'emergency' },
-    { tag: 'PIN', labelAr: 'إعادة زيارة مثبّتة بموعد بعيد', bookingMode: 'individual', orderType: 'revisit', hoursFromNow: 24 * 10, pinned: true, expectedRoute: 'rounds', expectedReason: 'revisit_pinned' },
+    { tag: 'PIN', labelAr: 'إعادة زيارة مثبّتة بموعد بعيد', bookingMode: 'individual', orderType: 'revisit', hoursFromNow: 24 * 10, pinned: true, expectedRoute: 'auto_confirm', expectedReason: 'revisit_scheduled_far' },
+    { tag: 'PINNEAR', labelAr: 'إعادة زيارة مثبّتة داخل ٤٨ ساعة', bookingMode: 'individual', orderType: 'revisit', hoursFromNow: 10, pinned: true, expectedRoute: 'rounds', expectedReason: 'revisit_pinned' },
     { tag: 'NEAR', labelAr: 'فردي بموعد خلال ١٠ ساعات', bookingMode: 'individual', orderType: 'scheduled', hoursFromNow: 10, pinned: false, expectedRoute: 'rounds', expectedReason: 'near_term' },
     { tag: 'FAR', labelAr: 'فردي بموعد بعد ١٠ أيام', bookingMode: 'individual', orderType: 'scheduled', hoursFromNow: 24 * 10, pinned: false, expectedRoute: 'auto_confirm', expectedReason: 'scheduled_far' },
   ];
