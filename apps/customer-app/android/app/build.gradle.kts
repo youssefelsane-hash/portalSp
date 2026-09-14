@@ -64,8 +64,24 @@ val mapsProperties = Properties()
 if (mapsPropertiesFile.exists()) {
     mapsProperties.load(FileInputStream(mapsPropertiesFile))
 }
-// فاضي = الخريطة مش هتحمّل، وده مقصود: أفضل من مفتاح مسرّب شغّال.
+// السر يظل خارج git، لكن البناء لا يُسمح له بعد اليوم أن يشحن قيمة فارغة: SDK يعرض عندها
+// عناصر التحكم فقط وتبقى طبقات الخريطة بيضاء، وهي مشكلة لا يكتشفها العميل إلا بعد التثبيت.
 val googleMapsApiKey = (mapsProperties["googleMapsApiKey"] as String?) ?: ""
+val hasGoogleMapsApiKey = googleMapsApiKey.isNotBlank()
+
+gradle.taskGraph.whenReady {
+    val buildingAndroidApp = allTasks.any {
+        it.name.startsWith("assemble") || it.name.startsWith("bundle")
+    }
+    if (buildingAndroidApp && !hasGoogleMapsApiKey) {
+        throw GradleException(
+            "مفتاح Google Maps غير مضبوط. انسخ android/maps.properties.example إلى " +
+                "android/maps.properties ثم ضع googleMapsApiKey لمفتاح مقيّد بـ " +
+                "com.ostahome.customer وMaps SDK for Android. " +
+                "رفض البناء مقصود حتى لا تصل نسخة بخريطة بيضاء للمستخدم.",
+        )
+    }
+}
 
 android {
     namespace = "com.ostahome.customer"
