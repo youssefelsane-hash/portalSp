@@ -351,7 +351,8 @@ export class TechnicianCompaniesService {
              o.order_status AS "orderStatus", o.booking_mode AS "bookingMode",
              o.scheduled_at AS "scheduledAt", o.created_at AS "createdAt",
              u.full_name AS "technicianName", sz.name_ar AS "zoneNameAr",
-             o.total_amount_cents AS "totalAmountCents"
+             o.total_amount_cents AS "totalAmountCents", o.duration_minutes AS "durationMinutes",
+             o.estimated_duration_days AS "estimatedDurationDays"
       FROM orders o
       JOIN services s ON s.id = o.service_id
       LEFT JOIN service_zones sz ON sz.id = o.service_zone_id

@@ -15,12 +15,13 @@ class Company {
   });
 
   factory Company.fromJson(Map<String, dynamic> json) => Company(
-        id: json['id'] as String,
-        ownerUserId: json['owner_user_id'] as String,
-        name: json['name'] as String,
-        commercialRegistrationNumber: json['commercial_registration_number'] as String?,
-        isActive: json['is_active'] as bool,
-      );
+    id: json['id'] as String,
+    ownerUserId: json['owner_user_id'] as String,
+    name: json['name'] as String,
+    commercialRegistrationNumber:
+        json['commercial_registration_number'] as String?,
+    isActive: json['is_active'] as bool,
+  );
 }
 
 class CompanyBranch {
@@ -29,14 +30,19 @@ class CompanyBranch {
   final String? addressLine;
   final bool isActive;
 
-  CompanyBranch({required this.id, required this.name, required this.addressLine, required this.isActive});
+  CompanyBranch({
+    required this.id,
+    required this.name,
+    required this.addressLine,
+    required this.isActive,
+  });
 
   factory CompanyBranch.fromJson(Map<String, dynamic> json) => CompanyBranch(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        addressLine: json['address_line'] as String?,
-        isActive: json['is_active'] as bool,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    addressLine: json['address_line'] as String?,
+    isActive: json['is_active'] as bool,
+  );
 }
 
 class StaffMember {
@@ -57,13 +63,13 @@ class StaffMember {
   });
 
   factory StaffMember.fromJson(Map<String, dynamic> json) => StaffMember(
-        userId: json['user_id'] as String,
-        fullName: json['full_name'] as String,
-        technicianCode: json['technician_code'] as String,
-        teamRole: json['team_role'] as String,
-        branchId: json['branch_id'] as String?,
-        verificationStatus: json['verification_status'] as String,
-      );
+    userId: json['user_id'] as String,
+    fullName: json['full_name'] as String,
+    technicianCode: json['technician_code'] as String,
+    teamRole: json['team_role'] as String,
+    branchId: json['branch_id'] as String?,
+    verificationStatus: json['verification_status'] as String,
+  );
 }
 
 class CompanyDetail {
@@ -71,15 +77,21 @@ class CompanyDetail {
   final List<CompanyBranch> branches;
   final List<StaffMember> staff;
 
-  CompanyDetail({required this.company, required this.branches, required this.staff});
+  CompanyDetail({
+    required this.company,
+    required this.branches,
+    required this.staff,
+  });
 
   factory CompanyDetail.fromJson(Map<String, dynamic> json) => CompanyDetail(
-        company: Company.fromJson(json['company'] as Map<String, dynamic>),
-        branches: (json['branches'] as List<dynamic>)
-            .map((e) => CompanyBranch.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        staff: (json['staff'] as List<dynamic>).map((e) => StaffMember.fromJson(e as Map<String, dynamic>)).toList(),
-      );
+    company: Company.fromJson(json['company'] as Map<String, dynamic>),
+    branches: (json['branches'] as List<dynamic>)
+        .map((e) => CompanyBranch.fromJson(e as Map<String, dynamic>))
+        .toList(),
+    staff: (json['staff'] as List<dynamic>)
+        .map((e) => StaffMember.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
 }
 
 // مطابق لـ AddStaffDto/UpdateStaffDto's team_role — owner مش موجود هنا عمدًا (مالك واحد بس،
@@ -106,6 +118,8 @@ class CompanyOrderSummary {
   final String? technicianName;
   final String? zoneNameAr;
   final int totalAmountCents;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
 
   CompanyOrderSummary({
     required this.id,
@@ -118,19 +132,27 @@ class CompanyOrderSummary {
     required this.technicianName,
     required this.zoneNameAr,
     required this.totalAmountCents,
+    this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
-  factory CompanyOrderSummary.fromJson(Map<String, dynamic> json) => CompanyOrderSummary(
+  factory CompanyOrderSummary.fromJson(Map<String, dynamic> json) =>
+      CompanyOrderSummary(
         id: json['id'] as String,
         orderNumber: json['order_number'] as String,
         serviceNameAr: json['service_name_ar'] as String,
         orderStatus: json['order_status'] as String,
         bookingMode: json['booking_mode'] as String,
-        scheduledAt: json['scheduled_at'] != null ? DateTime.parse(json['scheduled_at'] as String) : null,
+        scheduledAt: json['scheduled_at'] != null
+            ? DateTime.parse(json['scheduled_at'] as String)
+            : null,
         createdAt: DateTime.parse(json['created_at'] as String),
         technicianName: json['technician_name'] as String?,
         zoneNameAr: json['zone_name_ar'] as String?,
         totalAmountCents: json['total_amount_cents'] as int,
+        durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+        estimatedDurationDays: (json['estimated_duration_days'] as num?)
+            ?.toInt(),
       );
 }
 

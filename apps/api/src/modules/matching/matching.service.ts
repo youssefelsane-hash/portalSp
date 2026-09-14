@@ -148,6 +148,8 @@ export interface AvailableOrderRow {
    */
   booking_mode: string;
   scheduled_at: Date | null;
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
   /**
    * ADR-0051 (docs/08 §96، طلب مالك: «لازم يكون ظاهر على الطلب من برا، الطلب ده إعادة زيارة»).
    * كان مش بيتختار خالص، فالفني كان بيشوف إعادة الزيارة كطلب عادي بلا أي تمييز.
@@ -1462,7 +1464,8 @@ export class MatchingService {
       `
       SELECT oa.id AS assignment_id, o.id AS order_id, o.order_number, s.name_ar AS service_name_ar,
              o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at,
-             o.booking_mode, o.scheduled_at, o.order_type, parent.order_number AS original_order_number
+             o.booking_mode, o.scheduled_at, o.duration_minutes, o.estimated_duration_days,
+             o.order_type, parent.order_number AS original_order_number
       FROM order_assignments oa
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id

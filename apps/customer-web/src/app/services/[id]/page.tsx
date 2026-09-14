@@ -394,15 +394,37 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       setTechnicians(null);
       return;
     }
+    let active = true;
+    setTechnicians(null);
     fetchTechniciansForService(id, selectedAddressId, {
       bookingMode,
+      // The manual marketplace must evaluate availability for the same booking
+      // time as auto matching. Omitting this made future bookings look like ASAP.
+      scheduledAt: computeScheduledAt(scheduledDate),
       fieldValues: service?.pricing_model === 'formula' ? debouncedFieldValues : undefined,
-    }).then(setTechnicians)
+    }).then((items) => {
+      if (active) setTechnicians(items);
+    })
       // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
       // والمستخدم مش عارف ليه (docs/08 §133).
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+      .catch((err: unknown) => {
+        if (active) setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات');
+      });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicianChoiceMode, selectedAddressId, id, bookingMode, debouncedFieldValues]);
+  }, [
+    technicianChoiceMode,
+    selectedAddressId,
+    id,
+    bookingMode,
+    scheduledDate,
+    preciseTime,
+    service?.schedule_precision,
+    service?.pricing_model,
+    debouncedFieldValues,
+  ]);
 
   // **معاينة الطلب الكاملة** — بتتنادى في الخطوة التالتة بس، وبنفس مدخلات `POST /orders`
   // بالظبط (العنوان، الميعاد، المنفّذ المطلوب، كود الخصم، حقول التسعير). ده اللي بيضمن إن
@@ -496,6 +518,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     } finally {
       setPreviewLoading(false);
     }
+  }
+
+  function changeTechnicianChoiceMode(mode: 'auto' | 'manual') {
+    setTechnicianChoiceMode(mode);
+    setSelectedTechnicianId(null);
+    // A preview belongs to one explicit selection path. Never let an auto
+    // preview influence the manual marketplace (or the other way around).
+    setMatchPreview(null);
+    setMatchPreviewKey(null);
+    setPreviewError(null);
   }
 
   async function handleSubmit() {
@@ -1176,10 +1208,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
-              onClick={() => {
-                setTechnicianChoiceMode('auto');
-                setSelectedTechnicianId(null);
-              }}
+              onClick={() => changeTechnicianChoiceMode('auto')}
               className={`booking-option flex-1 ${
                 technicianChoiceMode === 'auto' ? 'booking-option-selected' : ''
               }`}
@@ -1188,7 +1217,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               <p className="text-sm text-muted">أسرع فني متاح بالمنطقة، بأفضل تقييم</p>
             </button>
             <button
-              onClick={() => setTechnicianChoiceMode('manual')}
+              onClick={() => changeTechnicianChoiceMode('manual')}
               className={`booking-option flex-1 ${
                 technicianChoiceMode === 'manual' ? 'booking-option-selected' : ''
               }`}

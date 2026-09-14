@@ -1659,6 +1659,10 @@ class _JobBriefCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1682,6 +1686,21 @@ class _JobBriefCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (duration != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(Icons.timer_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'المدة المتوقعة: $duration',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (order.problemDescription != null &&
                 order.problemDescription!.trim().isNotEmpty) ...[
               const SizedBox(height: 10),

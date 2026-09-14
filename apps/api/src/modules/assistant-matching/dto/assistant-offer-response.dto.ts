@@ -7,6 +7,8 @@ export interface AssistantOfferListRow {
   streetName: string;
   landmark: string | null;
   expiresAt: Date;
+  durationMinutes: number | null;
+  estimatedDurationDays: number | null;
 }
 
 export interface AssistantOfferResponseDto {
@@ -18,6 +20,8 @@ export interface AssistantOfferResponseDto {
   street_name: string;
   landmark: string | null;
   expires_at: string;
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
 }
 
 export function toAssistantOfferResponseDto(row: AssistantOfferListRow): AssistantOfferResponseDto {
@@ -30,5 +34,7 @@ export function toAssistantOfferResponseDto(row: AssistantOfferListRow): Assista
     street_name: row.streetName,
     landmark: row.landmark,
     expires_at: row.expiresAt.toISOString(),
+    duration_minutes: row.durationMinutes,
+    estimated_duration_days: row.estimatedDurationDays,
   };
 }

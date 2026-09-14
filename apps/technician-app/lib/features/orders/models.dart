@@ -15,7 +15,8 @@ class CancellationReason {
     required this.requiresFreeText,
   });
 
-  factory CancellationReason.fromJson(Map<String, dynamic> json) => CancellationReason(
+  factory CancellationReason.fromJson(Map<String, dynamic> json) =>
+      CancellationReason(
         id: json['id'] as String,
         reasonAr: json['reason_ar'] as String,
         chargesFee: json['charges_fee'] as bool,
@@ -31,12 +32,19 @@ class CancellationPolicy {
   final String? reasonIfNot;
   final DateTime? windowExpiresAt;
 
-  CancellationPolicy({required this.canCancel, required this.reasonIfNot, required this.windowExpiresAt});
+  CancellationPolicy({
+    required this.canCancel,
+    required this.reasonIfNot,
+    required this.windowExpiresAt,
+  });
 
-  factory CancellationPolicy.fromJson(Map<String, dynamic> json) => CancellationPolicy(
+  factory CancellationPolicy.fromJson(Map<String, dynamic> json) =>
+      CancellationPolicy(
         canCancel: json['can_cancel'] as bool,
         reasonIfNot: json['reason_if_not'] as String?,
-        windowExpiresAt: json['window_expires_at'] != null ? DateTime.parse(json['window_expires_at'] as String) : null,
+        windowExpiresAt: json['window_expires_at'] != null
+            ? DateTime.parse(json['window_expires_at'] as String)
+            : null,
       );
 }
 
@@ -59,9 +67,12 @@ class AvailableOrder {
   /// من غيرهم التطبيق كان بيرسم الاتنين بكارت أحمر واحد اسمه «طلب طوارئ — محتاج قرارك دلوقتي»
   /// بلا أي تاريخ، فالفني بيقبل شغل بكرة وهو فاكره طوارئ النهارده.
   final String bookingMode;
+
   /// ISO string مش `DateTime` — نفس شكل `Order.scheduledAt` في التطبيق ده بالظبط، عشان
   /// `formatScheduledDayAr()` (اللي كل الكروت التانية بتستخدمها) تشتغل عليه بلا تحويل.
   final String? scheduledAt;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
 
   /// طوارئ = استجابة فورية. أي حاجة تانية = شغل ليه معاد، والمعاد لازم يبان.
   bool get isEmergency => bookingMode == 'emergency';
@@ -78,23 +89,27 @@ class AvailableOrder {
     required this.expiresAt,
     required this.bookingMode,
     required this.scheduledAt,
+    this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
   factory AvailableOrder.fromJson(Map<String, dynamic> json) => AvailableOrder(
-        assignmentId: json['assignment_id'] as String,
-        orderId: json['order_id'] as String,
-        orderNumber: json['order_number'] as String,
-        serviceNameAr: json['service_name_ar'] as String,
-        problemDescription: json['problem_description'] as String?,
-        streetName: json['street_name'] as String,
-        landmark: json['landmark'] as String?,
-        distanceKm: double.parse(json['distance_km'].toString()),
-        expiresAt: DateTime.parse(json['expires_at'] as String),
-        // نسخة سيرفر قديمة (قبل ADR-0048) مابترجّعش الحقلين — بنرجع للسلوك القديم بأمان
-        // (طوارئ بلا تاريخ) بدل ما التطبيق يقع بـcast error على شاشة الشغل الرئيسية.
-        bookingMode: json['booking_mode'] as String? ?? 'emergency',
-        scheduledAt: json['scheduled_at'] as String?,
-      );
+    assignmentId: json['assignment_id'] as String,
+    orderId: json['order_id'] as String,
+    orderNumber: json['order_number'] as String,
+    serviceNameAr: json['service_name_ar'] as String,
+    problemDescription: json['problem_description'] as String?,
+    streetName: json['street_name'] as String,
+    landmark: json['landmark'] as String?,
+    distanceKm: double.parse(json['distance_km'].toString()),
+    expiresAt: DateTime.parse(json['expires_at'] as String),
+    // نسخة سيرفر قديمة (قبل ADR-0048) مابترجّعش الحقلين — بنرجع للسلوك القديم بأمان
+    // (طوارئ بلا تاريخ) بدل ما التطبيق يقع بـcast error على شاشة الشغل الرئيسية.
+    bookingMode: json['booking_mode'] as String? ?? 'emergency',
+    scheduledAt: json['scheduled_at'] as String?,
+    durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+    estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toInt(),
+  );
 }
 
 // طلب شغل إضافي اختياري (docs/08 §34.1b، ADR-0020) — منفصل تمامًا عن AvailableOrder فوق (بث
@@ -109,6 +124,8 @@ class WorkOpportunity {
   final String streetName;
   final String capacityTierAtOffer;
   final String? scheduledAt;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
 
   WorkOpportunity({
     required this.id,
@@ -119,9 +136,12 @@ class WorkOpportunity {
     required this.streetName,
     required this.capacityTierAtOffer,
     required this.scheduledAt,
+    this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
-  factory WorkOpportunity.fromJson(Map<String, dynamic> json) => WorkOpportunity(
+  factory WorkOpportunity.fromJson(Map<String, dynamic> json) =>
+      WorkOpportunity(
         id: json['id'] as String,
         orderId: json['order_id'] as String,
         orderNumber: json['order_number'] as String,
@@ -130,6 +150,9 @@ class WorkOpportunity {
         streetName: json['street_name'] as String,
         capacityTierAtOffer: json['capacity_tier_at_offer'] as String,
         scheduledAt: json['scheduled_at'] as String?,
+        durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+        estimatedDurationDays: (json['estimated_duration_days'] as num?)
+            ?.toInt(),
       );
 }
 
@@ -156,13 +179,13 @@ class TeamMember {
   });
 
   factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
-        id: json['id'] as String,
-        technicianId: json['technician_id'] as String,
-        fullName: json['full_name'] as String,
-        avatarUrl: json['avatar_url'] as String?,
-        roleLabel: json['role_label'] as String,
-        memberType: json['member_type'] as String,
-      );
+    id: json['id'] as String,
+    technicianId: json['technician_id'] as String,
+    fullName: json['full_name'] as String,
+    avatarUrl: json['avatar_url'] as String?,
+    roleLabel: json['role_label'] as String,
+    memberType: json['member_type'] as String,
+  );
 }
 
 // مرشّح للتجنيد (docs/08 §31/§35) — مطابق لـ OrderTeamService.listRecruitCandidates() (RecruitCandidateRow).
@@ -191,15 +214,20 @@ class RecruitCandidate {
     required this.capacityTier,
   });
 
-  factory RecruitCandidate.fromJson(Map<String, dynamic> json) => RecruitCandidate(
+  factory RecruitCandidate.fromJson(Map<String, dynamic> json) =>
+      RecruitCandidate(
         technicianId: json['technician_id'] as String,
         fullName: json['full_name'] as String,
         avatarUrl: json['avatar_url'] as String?,
         currentLevel: json['current_level'] as String,
-        averageRating: double.tryParse(json['average_rating']?.toString() ?? '') ?? 0,
-        distanceKm: json['distance_km'] != null ? (json['distance_km'] as num).toDouble() : null,
+        averageRating:
+            double.tryParse(json['average_rating']?.toString() ?? '') ?? 0,
+        distanceKm: json['distance_km'] != null
+            ? (json['distance_km'] as num).toDouble()
+            : null,
         isLeaderTeamMember: json['is_leader_team_member'] as bool? ?? false,
-        isPreferredCrewMember: json['is_preferred_crew_member'] as bool? ?? false,
+        isPreferredCrewMember:
+            json['is_preferred_crew_member'] as bool? ?? false,
         capacityTier: json['capacity_tier'] as String? ?? 'LIGHT',
       );
 }
@@ -212,7 +240,12 @@ class RecruitOutcome {
   final String? capacityTier;
   final List<TeamMember> items;
 
-  RecruitOutcome({required this.status, this.opportunityId, this.capacityTier, this.items = const []});
+  RecruitOutcome({
+    required this.status,
+    this.opportunityId,
+    this.capacityTier,
+    this.items = const [],
+  });
 
   bool get isOfferSent => status == 'offer_sent';
 }
@@ -231,6 +264,8 @@ class CrewOpportunity {
   final String crewRole;
   final String? teamLeaderName;
   final String? scheduledAt;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
 
   CrewOpportunity({
     required this.id,
@@ -243,9 +278,12 @@ class CrewOpportunity {
     required this.crewRole,
     required this.teamLeaderName,
     required this.scheduledAt,
+    this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
-  factory CrewOpportunity.fromJson(Map<String, dynamic> json) => CrewOpportunity(
+  factory CrewOpportunity.fromJson(Map<String, dynamic> json) =>
+      CrewOpportunity(
         id: json['id'] as String,
         orderId: json['order_id'] as String,
         orderNumber: json['order_number'] as String,
@@ -256,6 +294,9 @@ class CrewOpportunity {
         crewRole: json['crew_role'] as String? ?? 'technician',
         teamLeaderName: json['team_leader_name'] as String?,
         scheduledAt: json['scheduled_at'] as String?,
+        durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+        estimatedDurationDays: (json['estimated_duration_days'] as num?)
+            ?.toInt(),
       );
 }
 
@@ -282,11 +323,20 @@ class OrderRescheduleRequest {
   final String status;
   final DateTime createdAt;
 
-  OrderRescheduleRequest({required this.id, required this.proposedSlotId, required this.proposedAt, required this.proposedEndAt, required this.reason, required this.status, required this.createdAt});
+  OrderRescheduleRequest({
+    required this.id,
+    required this.proposedSlotId,
+    required this.proposedAt,
+    required this.proposedEndAt,
+    required this.reason,
+    required this.status,
+    required this.createdAt,
+  });
 
   bool get isPending => status == 'pending';
 
-  factory OrderRescheduleRequest.fromJson(Map<String, dynamic> json) => OrderRescheduleRequest(
+  factory OrderRescheduleRequest.fromJson(Map<String, dynamic> json) =>
+      OrderRescheduleRequest(
         id: json['id'] as String,
         proposedSlotId: json['proposed_slot_id'] as String,
         proposedAt: DateTime.parse(json['proposed_at'] as String),

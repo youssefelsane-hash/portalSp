@@ -6,6 +6,7 @@ import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'assistant_offers_repository.dart';
 import 'models.dart';
+import '../orders/order.dart' show formatOrderDurationAr;
 
 // مطابقة المساعد التلقائية (ADR-0007) — كانت فجوة موثّقة صراحة: الباك-إند بيبث فرص المساعدة
 // (أولوية 2، لما مفيش مساعد شخصي متاح) عبر GET /technician/assistant-offers/available بس
@@ -58,7 +59,11 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
       // فرصة ضاعت لحد تاني (409) — رسالة واضحة، مش خطأ عام. نفس رسالة الباك-إند بالظبط.
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
       await _load();
     } finally {
       if (mounted) setState(() => _isActing = false);
@@ -74,7 +79,11 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -91,55 +100,78 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _offers == null
-                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                  : _offers!.isEmpty
-                      ? ListView(
-                          children: const [
-                            SizedBox(height: 80),
-                            EmptyState(icon: Icons.handshake_outlined, title: 'مفيش فرص مساعدة متاحة ليك دلوقتي'),
-                          ],
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _offers!.length,
-                          separatorBuilder: (context, index) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final offer = _offers![index];
-                            return Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(offer.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
-                                    const SizedBox(height: 4),
-                                    Text('${offer.streetName}${offer.landmark != null ? ' — ${offer.landmark}' : ''}'),
-                                    if (offer.problemDescription != null) Text(offer.problemDescription!),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'أول واحد يقبل ياخد الفرصة — استعجل!',
-                                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        FilledButton(
-                                          onPressed: _isActing ? null : () => _accept(offer),
-                                          child: const Text('قبول'),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        OutlinedButton(
-                                          onPressed: _isActing ? null : () => _reject(offer),
-                                          child: const Text('رفض'),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+              ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+              : _offers!.isEmpty
+              ? ListView(
+                  children: const [
+                    SizedBox(height: 80),
+                    EmptyState(
+                      icon: Icons.handshake_outlined,
+                      title: 'مفيش فرص مساعدة متاحة ليك دلوقتي',
+                    ),
+                  ],
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _offers!.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final offer = _offers![index];
+                    final duration = formatOrderDurationAr(
+                      durationMinutes: offer.durationMinutes,
+                      estimatedDurationDays: offer.estimatedDurationDays,
+                    );
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              offer.serviceNameAr,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${offer.streetName}${offer.landmark != null ? ' — ${offer.landmark}' : ''}',
+                            ),
+                            if (duration != null)
+                              Text('المدة المتوقعة: $duration'),
+                            if (offer.problemDescription != null)
+                              Text(offer.problemDescription!),
+                            const SizedBox(height: 4),
+                            Text(
+                              'أول واحد يقبل ياخد الفرصة — استعجل!',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                                fontWeight: FontWeight.bold,
                               ),
-                            );
-                          },
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                FilledButton(
+                                  onPressed: _isActing
+                                      ? null
+                                      : () => _accept(offer),
+                                  child: const Text('قبول'),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton(
+                                  onPressed: _isActing
+                                      ? null
+                                      : () => _reject(offer),
+                                  child: const Text('رفض'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
+                      ),
+                    );
+                  },
+                ),
         ),
       ),
     );

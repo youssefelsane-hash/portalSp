@@ -9,6 +9,8 @@ class AssistantOffer {
   final String streetName;
   final String? landmark;
   final DateTime expiresAt;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
 
   AssistantOffer({
     required this.offerId,
@@ -19,16 +21,20 @@ class AssistantOffer {
     required this.streetName,
     required this.landmark,
     required this.expiresAt,
+    this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
   factory AssistantOffer.fromJson(Map<String, dynamic> json) => AssistantOffer(
-        offerId: json['offer_id'] as String,
-        orderId: json['order_id'] as String,
-        orderNumber: json['order_number'] as String,
-        serviceNameAr: json['service_name_ar'] as String,
-        problemDescription: json['problem_description'] as String?,
-        streetName: json['street_name'] as String,
-        landmark: json['landmark'] as String?,
-        expiresAt: DateTime.parse(json['expires_at'] as String),
-      );
+    offerId: json['offer_id'] as String,
+    orderId: json['order_id'] as String,
+    orderNumber: json['order_number'] as String,
+    serviceNameAr: json['service_name_ar'] as String,
+    problemDescription: json['problem_description'] as String?,
+    streetName: json['street_name'] as String,
+    landmark: json['landmark'] as String?,
+    expiresAt: DateTime.parse(json['expires_at'] as String),
+    durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+    estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toInt(),
+  );
 }

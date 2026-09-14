@@ -49,10 +49,15 @@ export const TECHNICIAN_LEVEL_LABELS_AR: Record<string, string> = {
 export function fetchTechniciansForService(
   serviceId: string,
   addressId: string,
-  params: { bookingMode?: string; fieldValues?: Record<string, PricingFieldValue> } = {},
+  params: {
+    bookingMode?: string;
+    fieldValues?: Record<string, PricingFieldValue>;
+    scheduledAt?: string;
+  } = {},
 ) {
   const query = new URLSearchParams({ address_id: addressId });
   if (params.bookingMode) query.set('booking_mode', params.bookingMode);
+  if (params.scheduledAt) query.set('scheduled_at', params.scheduledAt);
   if (params.fieldValues && Object.keys(params.fieldValues).length > 0) {
     query.set('field_values', JSON.stringify(params.fieldValues));
   }

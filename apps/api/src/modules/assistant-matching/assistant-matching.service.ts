@@ -379,7 +379,8 @@ export class AssistantMatchingService {
       `
       SELECT oao.id AS "offerId", o.id AS "orderId", o.order_number AS "orderNumber", s.name_ar AS "serviceNameAr",
              o.problem_description AS "problemDescription", a.street_name AS "streetName", a.landmark AS "landmark",
-             oao.expires_at AS "expiresAt"
+             oao.expires_at AS "expiresAt", o.duration_minutes AS "durationMinutes",
+             o.estimated_duration_days AS "estimatedDurationDays"
       FROM order_assistant_offers oao
       JOIN orders o ON o.id = oao.order_id
       JOIN services s ON s.id = o.service_id
