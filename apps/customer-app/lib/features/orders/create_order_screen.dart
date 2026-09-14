@@ -661,6 +661,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       MaterialPageRoute(
         builder: (_) => ScheduleSelectionScreen(
           allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
+          serviceName: widget.service.nameAr,
+          warrantyDays: widget.service.warrantyDays,
           requiresPreciseTime: widget.service.requiresStartTime,
           // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
           // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
@@ -1530,7 +1532,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Card(child: ListTile(title: Text(widget.service.nameAr))),
+            Card(
+              child: ListTile(
+                leading: Icon(
+                  Icons.home_repair_service_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: Text(widget.service.nameAr),
+                subtitle: widget.service.warrantyDays > 0
+                    ? Text('ضمان ${widget.service.warrantyDays} يوم على الخدمة')
+                    : null,
+                trailing: widget.service.warrantyDays > 0
+                    ? Icon(
+                        Icons.verified_user_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
+              ),
+            ),
             const SizedBox(height: 16),
             Text(
               'عنوان الطلب',

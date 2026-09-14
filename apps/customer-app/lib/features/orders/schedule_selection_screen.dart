@@ -46,6 +46,11 @@ DateTime _startOfDay(DateTime date) =>
 const int _maxFlexibleRangeDays = 14;
 
 class ScheduleSelectionScreen extends StatefulWidget {
+  /// اسم الخدمة ومدة ضمانها لقمة خطوة الحجز. البيانات نفسها جاية من الكتالوج، فالعرض هنا
+  /// لا يغيّر أي قاعدة تسعير أو مطابقة.
+  final String serviceName;
+  final int warrantyDays;
+
   // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — لو false، كارت "مرن" بيتخفي
   // بدل ما العميل يختاره ويترفض من الباك-إند بعدين (orders.service.ts).
   final bool allowsDateRangeBooking;
@@ -71,6 +76,8 @@ class ScheduleSelectionScreen extends StatefulWidget {
   const ScheduleSelectionScreen({
     super.key,
     required this.allowsDateRangeBooking,
+    required this.serviceName,
+    required this.warrantyDays,
     this.requiresPreciseTime = false,
     this.allowsSameDay = true,
     this.serviceId,
@@ -418,7 +425,11 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 8),
+                _ScheduleHeader(
+                  serviceName: widget.serviceName,
+                  warrantyDays: widget.warrantyDays,
+                ),
+                const SizedBox(height: 18),
                 // اقتراح الأيام (ADR-0088) — فوق الكالندر عمدًا: ضغطة واحدة بتخلّص الشاشة،
                 // والكالندر تحته لأي حد عايز يختار بنفسه.
                 if (_suggestedDays.isNotEmpty) ...[
@@ -614,6 +625,101 @@ class _SuggestionIntro extends StatelessWidget {
   }
 }
 
+/// ملخص قصير في أول رحلة الحجز: يربط اختيار الموعد بالخدمة التي اختارها العميل، ويظهر
+/// الضمان الأساسي قبل التأكيد بدل أن يظل تفصيلاً مخفياً في خطوة الدفع الأخيرة.
+class _ScheduleHeader extends StatelessWidget {
+  const _ScheduleHeader({
+    required this.serviceName,
+    required this.warrantyDays,
+  });
+
+  final String serviceName;
+  final int warrantyDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.calendar_month_outlined, color: scheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'الخطوة 1 من 3 · الموعد',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  serviceName,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (warrantyDays > 0) ...[
+                  const SizedBox(height: 9),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.verified_user_outlined,
+                          size: 16,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'ضمان $warrantyDays يوم على الخدمة',
+                          style: textTheme.labelMedium?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ScheduleOptionCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -635,6 +741,8 @@ class _ScheduleOptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
+      clipBehavior: Clip.antiAlias,
+      elevation: selected ? 1.5 : 0,
       color: selected
           ? scheme.primaryContainer
           : (highlighted ? scheme.primaryContainer : null),
@@ -666,7 +774,9 @@ class _ScheduleOptionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_left),
+              selected
+                  ? Icon(Icons.check_circle_rounded, color: scheme.primary)
+                  : const Icon(Icons.chevron_left),
             ],
           ),
         ),

@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchList } from './api-client';
-import { PriceEstimateDto, PricingFieldDto, ServiceCategoryDto, ServiceDto } from './api-types';
+import { PriceEstimateDto, PricingFieldDto, PricingFieldValue, ServiceCategoryDto, ServiceDto } from './api-types';
 
 // كتالوج عام — مفيش access_token مطلوب (Public() في الباك-إند)، نفس نمط
 // apps/customer-app/lib/features/catalog/catalog_repository.dart بالحرف.
@@ -41,7 +41,7 @@ export const estimatePrice = (
   params: {
     zoneId?: string;
     bookingMode?: string;
-    fieldValues?: Record<string, string | number | boolean>;
+    fieldValues?: Record<string, PricingFieldValue>;
     pricingQuantity?: number;
     durationHours?: number;
     // ADR-0050 §4 — فترة التعاقد لخدمة شهرية؛ عدد شهور الفوترة بيتحسب في الباك-إند من الفرق

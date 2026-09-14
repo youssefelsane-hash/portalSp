@@ -1,4 +1,5 @@
 import { apiFetchList } from './api-client';
+import type { PricingFieldValue } from './api-types';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
@@ -48,7 +49,7 @@ export const TECHNICIAN_LEVEL_LABELS_AR: Record<string, string> = {
 export function fetchTechniciansForService(
   serviceId: string,
   addressId: string,
-  params: { bookingMode?: string; fieldValues?: Record<string, string | number | boolean> } = {},
+  params: { bookingMode?: string; fieldValues?: Record<string, PricingFieldValue> } = {},
 ) {
   const query = new URLSearchParams({ address_id: addressId });
   if (params.bookingMode) query.set('booking_mode', params.bookingMode);
