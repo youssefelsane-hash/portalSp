@@ -15355,3 +15355,29 @@ transaction التغيير ومفيش push — ومستهلكيها بنود ب�
 
 **البوابات**: `tsc` ✅ · `eslint --max-warnings 0` ✅ · `nest build` ✅ · `jest`
 **347/347 سويتة، 2233/2233 اختبار** ✅
+
+### المرحلة ٧ — regression على كل المراحل بعد إصلاحات ٥ و٦
+
+تغييرين من المرحلتين السابقتين بيمسّوا مسارات مشتركة، فالتحقق منهم لازم يكون على **كل** الفلو
+مش على اللي اتغيّر بس: تضييق `geo.service.ts` (أي حجز بيمر عليه)، و`ThrottledWorkerErrorLogger`
+(كل الطوابير الخلفية).
+
+| التدقيق | النتيجة |
+|---|---|
+| `money-paths-audit` | **131/131** |
+| `financial-idempotency-audit` | **8/8** (كان 7/8 — تحت) |
+| `audit-booking-flow --quick` | ٩٦ تركيبة، **صفر تركيبة الأدمن بيقبلها والعميل بيتقفل عليها** |
+| `booking-suggestion-audit` | 24/24 |
+| `instapay-deposit-audit` | 37/37 |
+| `revisit-commission-audit` | نضيف (الفني ٢٤٠ / المنصة ٦٠) |
+| `onsite-conversion-visibility-audit` | نضيف |
+| `notification-isolation-audit` | 16/16 |
+| `sweep-customer` | **46/46** صفحة (ديسك + موبايل) |
+| `sweep-admin` | **59/59** صفحة |
+
+**بَقّة أداة أخيرة**: `financial-idempotency-audit` كان بينادي `restartApi()` (اللي بترفع سقف
+الـthrottle) جوّه `enableTestGateway()` بس — يعني **بعد** S1–S3. وS3 بالذات بتقصف نفس الـendpoint
+عمدًا لقياس الـidempotency، فكانت بتترفض `429` والنتيجة «اترفض» مش «اتقاس». الاستدعاء اتنقل
+لبداية التشغيل، فالتدقيق بقى بيقيس اللي بيدّعي إنه بيقيسه: **8/8**.
+
+**الخلاصة**: مفيش أي انحدار من إصلاحات المرحلتين ٥ و٦ على أي مسار.

@@ -844,6 +844,14 @@ async function run() {
   await db.connect();
 
   console.log(`\n=== ج-٢: idempotency مالي كامل — تشغيلة ${runId} ===\n`);
+
+  // **إعادة تشغيل مقصودة قبل أي سيناريو (تدقيق ماراثوني 2026-09-14، docs/08 §148)**:
+  // السيناريوهات دي بتقصف نفس الـendpoint عمدًا لقياس الـidempotency، والـthrottle الافتراضي
+  // بيرفضها بـ429 — فالنتيجة بتبقى «اترفض» مش «اتقاس». `restartApi()` هنا بترفع السقف في
+  // بيئة النسخة اللي هتترد، فالتدقيق بيقيس اللي بيدّعي إنه بيقيسه. قبل كده كانت بتتنادى في
+  // `enableTestGateway()` بس — يعني **بعد** S1–S3، فـS3 كانت بتترفض ٤٢٩ على طول.
+  await restartApi();
+
   const [{ now: startedAt }] = await q(`SELECT now() AS now`);
 
   const ctx = await seedCatalog();
