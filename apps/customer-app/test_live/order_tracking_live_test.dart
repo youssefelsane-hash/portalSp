@@ -23,6 +23,7 @@ void main() {
       body: {
         'service_id': await pickBookableServiceId(),
         'address_id': await ensureAddressFor(customerToken),
+        'problem_description': 'اختبار تتبع لحظي ${DateTime.now().microsecondsSinceEpoch}',
       },
     );
     final orderId = order!['id'] as String;
@@ -30,6 +31,13 @@ void main() {
     final technicianToken = await devTechnicianToken('+201000000011');
     final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
     expect(accepted!['order_status'], 'accepted');
+
+    // **`depart` مش خطوة زيادة (تدقيق §148)**: الـgateway بيبثّ `order:location_updated` للطلبات
+    // اللي الفني **في طريقه ليها** بس (`findOrdersInTransitForTechnician` = `technician_on_way`)،
+    // وده تعريف صح — العميل مايتتبعش فني لسه ماتحركش. الاختبار كان بيقف عند `accepted` وبعدين
+    // يستنى بث عمره ما هييجي، فيسقط بـTimeout على **سلوك سليم**.
+    final departed = await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
+    expect(departed!['order_status'], 'technician_on_way');
 
     final socketBaseUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
 

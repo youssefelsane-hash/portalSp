@@ -1272,6 +1272,8 @@ export class AdminOrdersService {
     let assistantAssignedEvent: OrderAssistantAssignedManuallyEvent | null = null;
     let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
     const outcome = await this.dataSource.transaction(async (manager) => {
+      // **ترتيب القفل: الفني الأول ثم الطلب** (الشرح الكامل فوق `lockTechnician`، docs/08 §148).
+      const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
       const order = await manager
         .createQueryBuilder(Order, 'order')
         .setLock('pessimistic_write')
@@ -1290,7 +1292,6 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
       }
 
-      const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
       if (order.technicianId === technician.id) {
         throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
       }

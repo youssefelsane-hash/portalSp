@@ -1263,22 +1263,35 @@ export class MatchingService {
 
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
     const result = await this.dataSource.transaction(async (manager) => {
-      const order = await manager.createQueryBuilder(Order, 'o')
-        .setLock('pessimistic_write')
+      // **ترتيب القفل: الفني الأول ثم الطلب** (نفس ترتيب `accept()`). المرشّح نفسه مش معروف
+      // إلا بعد قراءة الطلب، فالقراءة الأولى دي **بلا قفل** عمدًا — هي بتختار مرشّح بس. بعد ما
+      // الفني يتقفل بنقفل الطلب **ونعيد التحقق** من حالته، فأي تغيير حصل في النص مابيعديش.
+      // من غير الترتيب ده، الجوب ده كان بيتعارك مع `accept()` على نفس الزوج ⇒ deadlock حقيقي
+      // (docs/08 §148).
+      const orderForCandidate = await manager.createQueryBuilder(Order, 'o')
         .where('o.id = :orderId', { orderId })
         .getOne();
-      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+      if (!orderForCandidate || orderForCandidate.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !orderForCandidate.serviceZoneId) {
         return { kind: 'noop' as const };
       }
 
       // ADR-0078: دخول مسار الطلبات قرار دائم؛ تغيّر الحمل لا يحوّله لتعيين بلا موافقة.
-      const decision = await this.scheduledDispatchDecision(order, manager);
-      if (decision.route === 'rounds') return { kind: 'request' as const, order };
-      const candidate = await this.firstScheduledCandidate(order, manager);
-      if (!candidate) return { kind: 'stalled' as const, order };
+      const decision = await this.scheduledDispatchDecision(orderForCandidate, manager);
+      if (decision.route === 'rounds') return { kind: 'request' as const, order: orderForCandidate };
+      const candidate = await this.firstScheduledCandidate(orderForCandidate, manager);
+      if (!candidate) return { kind: 'stalled' as const, order: orderForCandidate };
 
       const technicianId = candidate.technician_id;
       const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+
+      const order = await manager.createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      // إعادة التحقق بعد القفل: ممكن يكون الطلب اتغطى أو اتلغى بين القراءة الحرة والقفل.
+      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+        return { kind: 'noop' as const };
+      }
       try {
         await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
       } catch (err) {
@@ -1373,6 +1386,12 @@ export class MatchingService {
         throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تعيين قائد — استخدم مسار تجنيد الفريق', HttpStatus.BAD_REQUEST);
       }
 
+      // **ترتيب القفل: الفني الأول ثم الطلب** — نفس ترتيب `accept()` بالظبط. (شوف التعليق
+      // فوق `ORDER_OF_LOCKS` في `accept()`.) النسخة القديمة كانت بتقفل الطلب الأول وبعدين
+      // الفني، والعكس بالظبط لـ`accept()` — فأي تزامن بين المسارين على نفس الزوج كان بيدي
+      // **deadlock حقيقي من Postgres** والفني بياخد «حصل خطأ غير متوقع» وهو بيدوس «اقبل».
+      // اتلقطت فعليًا في التدقيق الماراثوني (docs/08 §148) على `POST /technician/orders/:id/accept`.
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -1382,7 +1401,6 @@ export class MatchingService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح دلوقتي — ممكن يكون اتغطى من فني تاني', HttpStatus.CONFLICT);
       }
 
-      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
       await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
 
       const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, null);
