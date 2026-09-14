@@ -109,6 +109,9 @@ const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 // (10 نقاط)، فالشركة لا تتخطى الجودة/الحمل؛ تكسر التقارب المنطقي لما طاقمها قادر ينفذ الطلب.
 const COMPANY_LARGE_JOB_MIN_CREW_FALLBACK = 4;
 const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
+// الشركة تدخل الأوتو ماتشينج ككيان مستقل؛ الزيادة قابلة للضبط ومتعمدة أن تكون أقل من فرق
+// مستويات الفنيين حتى تفضل الجودة والتوفر والقرب هي الأساس.
+const COMPANY_AUTO_MATCH_BOOST_FALLBACK = 2;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -126,6 +129,8 @@ export interface EligibleTechnicianRow {
   company_name: string | null;
   is_commercial_company: boolean;
   company_available_staff_count: string;
+  /** الشركة التي مثّلها العرض. null = العرض لفني مستقل أو اختيار فردي صريح. */
+  provider_company_id: string | null;
 }
 
 export interface AvailableOrderRow {
@@ -306,12 +311,18 @@ export class MatchingService {
       'matching.company_large_job_boost',
       COMPANY_LARGE_JOB_BOOST_FALLBACK,
     );
+    const companyAutoMatchBoost = await this.settingsService.getNumber(
+      'matching.company_auto_match_boost',
+      COMPANY_AUTO_MATCH_BOOST_FALLBACK,
+    );
     const requiredCrew = Math.max(1, order.requiredTechnicians ?? 1) + Math.max(0, order.requiredAssistants ?? 0);
     // ADR-0062 — شدّة القرب حسب سياق الطلب، كلها من إعدادات الأدمن (نفس الدالة اللي التفسير بيناديها).
     const distanceWeight = await resolveDistanceWeight(this.settingsService, order);
     // نافذة أكبر قبل تمثيل كل شركة مرة واحدة؛ شركة كبيرة لا يجوز أن تملأ LIMIT بأعضائها ثم
     // يترك dedupe دفعة ناقصة. السقف يحافظ على زمن الاستعلام، ونداء التفسير الكبير يحتفظ بحجمه.
-    const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 20, 500));
+    // الشركة تتلخّص بعد الاستعلام في مرشح واحد؛ نافذة أوسع تمنع فريقًا كبيرًا من أكل نتائج
+    // باقي الشركات/المستقلين قبل مرحلة التلخيص.
+    const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 40, 500));
     const candidates = await executor.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -478,7 +489,16 @@ export class MatchingService {
         AND ($9::uuid IS NULL OR tp.company_id = $9)
         -- ADR-0080 — الفني «الحصري للشركة» مايوصلوش أي توزيع عام؛ يوصله بس لما الطلب نفسه
         -- مقيّد بشركته ($9 مش NULL). الشرط ده هو كل الفرق بين «تابع للشركة» و«مخفي تمامًا».
-        AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp', companyScopeParam: '$9' })}
+        AND (
+          ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp', companyScopeParam: '$9' })}
+          -- العضو الحصري لا يدخل كفرد في التوزيع العام، لكنه مسموح كممثل لشركته التجارية
+          -- عندما يكون المحرك نفسه يختار مقدم الخدمة. اختيار فرد محدد يظل فرديًا بالكامل.
+          OR (
+            $29::boolean IS TRUE
+            AND company.id IS NOT NULL
+            AND NULLIF(BTRIM(company.commercial_registration_number), '') IS NOT NULL
+          )
+        )
         -- بَقّة حقيقية اتلقطت وقت تحقيق §36.1 (docs/08، تعميق تسجيل موبايل حقيقي): الاستعلام ده
         -- كان بيكتشف الفني كمرشّح حتى لو مستواه مالوش حد قرار (decision_limit_cents) يكفي قيمة
         -- الطلب — نفس القاعدة اللي assertEligible() (technician-assignment-guard.service.ts)
@@ -553,23 +573,58 @@ export class MatchingService {
         distanceWeight.weight,
         previewLoad?.durationMinutes ?? null,
         previewLoad?.estimatedDurationDays ?? null,
+        requestedTechnicianId === null,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
-    // في الشغل الكبير الشركة كيان واحد، مش أربع فرص متكررة لنفس الشركة داخل نفس الدفعة.
-    // نحتفظ بأعلى ممثل لها فقط عندما الزيادة فعالة؛ أعضاء الفرق/الشركات بلا زيادة يفضلوا أفرادًا
-    // طبيعيين بلا تغيير في السلوك القديم.
-    const prioritizedCompanies = new Set(
-      candidates.filter((candidate) => Number(candidate.company_adjustment) > 0 && candidate.company_id).map((candidate) => candidate.company_id!),
-    );
-    const representedCompanies = new Set<string>();
-    const companyDedupedCandidates = candidates.filter((candidate) => {
-      if (!candidate.company_id || !prioritizedCompanies.has(candidate.company_id)) return true;
-      if (representedCompanies.has(candidate.company_id)) return false;
-      representedCompanies.add(candidate.company_id);
-      return true;
+    const providerCandidates = this.resolveAutoMatchProviders(candidates, requestedTechnicianId, companyAutoMatchBoost);
+    return this.applyTieBreak(providerCandidates, tieBreakThreshold).slice(0, batchSize);
+  }
+
+  /**
+   * في الأوتو ماتشينج الشركة التجارية مرشح واحد، لا N عروض لنفس الشركة. نختار أفضل عضو فيها
+   * أولًا بنفس ترتيب المحرك، ثم نسجل الشركة على العرض لكي القبول والمحاسبة يعرفان أنه كان
+   * ترشيح شركة. اختيار عميل لفني محدد يظل شخصيًا ولا يُعاد تفسيره كشركة.
+   */
+  private resolveAutoMatchProviders(
+    candidates: EligibleTechnicianRow[],
+    requestedTechnicianId: string | null | undefined,
+    companyAutoMatchBoost: number,
+  ): EligibleTechnicianRow[] {
+    if (requestedTechnicianId) {
+      return candidates.map((candidate) => ({ ...candidate, provider_company_id: null }));
+    }
+
+    const independentCandidates: EligibleTechnicianRow[] = [];
+    const bestMemberByCompany = new Map<string, EligibleTechnicianRow>();
+    for (const candidate of candidates) {
+      if (!candidate.company_id || !candidate.is_commercial_company) {
+        independentCandidates.push({ ...candidate, provider_company_id: null });
+        continue;
+      }
+
+      const currentBest = bestMemberByCompany.get(candidate.company_id);
+      if (
+        !currentBest ||
+        Number(candidate.rank_score) > Number(currentBest.rank_score) ||
+        (Number(candidate.rank_score) === Number(currentBest.rank_score) && Number(candidate.distance_km) < Number(currentBest.distance_km))
+      ) {
+        bestMemberByCompany.set(candidate.company_id, candidate);
+      }
+    }
+
+    const companyCandidates = Array.from(bestMemberByCompany.values()).map((candidate) => ({
+      ...candidate,
+      provider_company_id: candidate.company_id,
+      rank_score: String(Number(candidate.rank_score) + companyAutoMatchBoost),
+      company_adjustment: String(Number(candidate.company_adjustment) + companyAutoMatchBoost),
+    }));
+
+    return [...independentCandidates, ...companyCandidates].sort((left, right) => {
+      const scoreDifference = Number(right.rank_score) - Number(left.rank_score);
+      if (scoreDifference !== 0) return scoreDifference;
+      return Number(left.distance_km) - Number(right.distance_km);
     });
-    return this.applyTieBreak(companyDedupedCandidates, tieBreakThreshold).slice(0, batchSize);
   }
 
   /**
@@ -994,6 +1049,7 @@ export class MatchingService {
         manager.create(OrderAssignment, {
           orderId: order.id,
           technicianId: c.technician_id,
+          providerCompanyId: c.provider_company_id,
           assignmentRound: nextRound,
           distanceKm: c.distance_km,
           assignmentStatus: AssignmentStatus.SENT,
@@ -1159,9 +1215,9 @@ export class MatchingService {
    * لأي عضو شركة كانت بتترسّى على الشركة — حتى لو العميل اختار الشخص نفسه، أو ساب التوزيع
    * يختار بلا أي ذكر للشركة. ده كان بيحوّل الانتماء لملكية.
    *
-   * دلوقتي المعيار هو **مسار الحجز**: الشركة بتتحط لو وبس لو العميل اختارها هو
-   * (`requested_technician_company_id`). غير كده الشغلانة للفرد، والشركة مالهاش علاقة —
-   * ومساحة عمل الشركة (`assigned_company_id`) بتعكس ده بالظبط.
+   * دلوقتي المعيار هو **مسار الحجز**: الشركة بتتحط لو العميل اختارها، أو لو محرك الأوتو
+   * ماتشينج اختارها ككيان مستقل وسجّلها صراحة على `order_assignments.provider_company_id`.
+   * انتماء الفني وحده لا يكفي؛ اختيار فرد عادي يظل محسوبًا للفرد.
    */
   private resolveAssignedCompanyId(order: Order): string | null {
     return order.requestedTechnicianCompanyId ?? null;
@@ -1172,12 +1228,14 @@ export class MatchingService {
     order: Order,
     technicianId: string,
     distanceKm: string | null,
+    providerCompanyId: string | null = null,
   ): Promise<{ kind: 'noop' } | { kind: 'confirmed'; order: Order; technicianId: string }> {
     const now = new Date();
     await manager.save(
       manager.create(OrderAssignment, {
         orderId: order.id,
         technicianId,
+        providerCompanyId,
         assignmentRound: 1,
         distanceKm,
         assignmentStatus: AssignmentStatus.ACCEPTED,
@@ -1191,7 +1249,7 @@ export class MatchingService {
       return { kind: 'noop' };
     }
     order.technicianId = technicianId;
-    order.assignedCompanyId = this.resolveAssignedCompanyId(order);
+    order.assignedCompanyId = providerCompanyId ?? this.resolveAssignedCompanyId(order);
     order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
     order.assignedAt = now;
     await manager.save(order);
@@ -1302,7 +1360,13 @@ export class MatchingService {
       }
       const tier = await this.classifyCandidate(order, technicianId, await resolveDailyCapacityMinutes(this.settingsService), manager);
       if (tier !== 'LIGHT') return { kind: 'request' as const, order };
-      const confirmed = await this.confirmTechnicianForOrder(manager, order, technicianId, candidate.distance_km);
+      const confirmed = await this.confirmTechnicianForOrder(
+        manager,
+        order,
+        technicianId,
+        candidate.distance_km,
+        candidate.provider_company_id,
+      );
       return confirmed.kind === 'noop' ? { kind: 'noop' as const } : confirmed;
     });
 
@@ -1560,9 +1624,9 @@ export class MatchingService {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
       order.technicianId = profile.id;
-      // ADR-0080 — نفس قاعدة `resolveAssignedCompanyId()` بالحرف: الشركة بتترسّى على الطلب لو
-      // وبس لو العميل اختارها. قبول الفني لعرض عام مايحوّلش الشغلانة لشركته.
-      order.assignedCompanyId = this.resolveAssignedCompanyId(order);
+      // العرض نفسه مصدر الحقيقة: الشركة تُثبت فقط لو دخلت كمقدم خدمة في هذا العرض، لا بسبب
+      // مجرد عضوية الفني فيها. اختيار فرد عادي يظل null كما كان.
+      order.assignedCompanyId = assignment.providerCompanyId ?? this.resolveAssignedCompanyId(order);
       order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
       order.assignedAt = now;
       await manager.save(order);

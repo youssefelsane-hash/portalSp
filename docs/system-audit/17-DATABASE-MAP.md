@@ -54,7 +54,7 @@
 | `booking_match_previews` | 17 | 6 |
 | `cancellation_reasons` | 12 | 0 |
 | `laundry_orders` | 16 | 5 |
-| `order_assignments` | 12 | 2 |
+| `order_assignments` | 13 | 3 |
 | `order_assistant_offers` | 10 | 2 |
 | `order_earning_adjustments` | 8 | 3 |
 | `order_earning_shares` | 26 | 2 |

@@ -519,13 +519,16 @@ caption VARCHAR(255) NULL, taken_at TIMESTAMPTZ, location GEOGRAPHY(POINT) NULL
 ### 6.6 `order_assignments` (محاولات التوزيع — مهم للتحليل)
 
 ```sql
-id, order_id FK, technician_id FK,
+id, order_id FK, technician_id FK, provider_company_id FK NULL,
 assignment_round SMALLINT,   -- الدفعة رقم كام
 distance_km NUMERIC(6,2), estimated_eta_minutes SMALLINT,
 assignment_status ENUM,      -- sent | viewed | accepted | rejected | timeout | cancelled
 rejection_reason_code VARCHAR(40) NULL,
 sent_at, responded_at, expires_at TIMESTAMPTZ
 ```
+
+`provider_company_id` يسجل أن المحرك رشّح **الشركة** كمقدم للخدمة ثم اختار هذا الفني من
+طاقمها؛ لا يُملأ لمجرد انتماء الفني لشركة أو عند اختيار فني فردي.
 
 ### 6.7 `cancellation_reasons`
 
