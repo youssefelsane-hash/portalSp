@@ -5,18 +5,18 @@
  * الرندر، و`sweep-customer.js` بيدوّر على أعطال مش على شكل.
  *
  * الاستخدام:
- *   node scripts/lib/web-shot.js <path> <out.png> [width] [height] [--full]
+ *   node scripts/web-shot.js <path> <out.png> [width] [height] [--full]
  * أمثلة:
- *   node scripts/lib/web-shot.js / /tmp/home-desktop.png 1280 900 --full
- *   node scripts/lib/web-shot.js / /tmp/home-mobile.png 390 844 --full
- *   node scripts/lib/web-shot.js /orders /tmp/orders.png 1280 900 --login
+ *   node scripts/web-shot.js / /tmp/home-desktop.png 1280 900 --full
+ *   node scripts/web-shot.js / /tmp/home-mobile.png 390 844 --full
+ *   node scripts/web-shot.js /orders /tmp/orders.png 1280 900 --login
  *
  * بيطبع كمان أي رسالة كونسول من نوع error/warning وأي طلب رجع ≥400 — لقطة «حلوة» لصفحة
  * بتطبع أخطاء في الكونسول مش نجاح.
  */
 const { chromium } = require('playwright-core');
 const { execFileSync } = require('child_process');
-const { resolveApiDatabase } = require('./resolve-api-db');
+const { resolveApiDatabase } = require('./lib/resolve-api-db');
 
 const WEB = process.env.WEB_URL || 'http://localhost:3002';
 const API = process.env.API_URL || 'http://localhost:3000';
