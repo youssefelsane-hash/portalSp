@@ -95,6 +95,34 @@ export function dedupeTechnicianBookingItems(
 // (موجود=شركة، فاضي=فريق) — قرار سابق موثّق في technicians/README.md، مش اختراع جديد هنا.
 export type TechnicianType = 'individual' | 'individual_with_assistant' | 'team' | 'company';
 
+// النبذة تظهر علنًا للعميل، لذلك التحذير في التطبيق وحده لا يكفي: أي عميل API مباشر يجب أن
+// يمر بنفس الحماية. نمنع وسائل التواصل الفعلية ونترك للفني مساحة يكتب خبرته وخدماته المهنية.
+const TECHNICIAN_BIO_CONTACT_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/i, label: 'بريدًا إلكترونيًا' },
+  { pattern: /(?:https?:\/\/|www\.)\S+/i, label: 'رابطًا' },
+  { pattern: /(?:\+?\d[\d\s().-]{7,}\d)/, label: 'رقم هاتف' },
+  {
+    pattern: /(?:instagram|facebook|tiktok|whatsapp|واتساب|واتس\s*اب|فيسبوك|انستجرام|تيك\s*توك)\s*[:@-]/i,
+    label: 'وسيلة تواصل شخصية',
+  },
+];
+
+function normalizeArabicDigits(value: string): string {
+  return value.replace(/[٠-٩]/g, (digit) => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)]);
+}
+
+function validatePublicTechnicianBio(value: string): void {
+  const normalized = normalizeArabicDigits(value);
+  const violation = TECHNICIAN_BIO_CONTACT_PATTERNS.find(({ pattern }) => pattern.test(normalized));
+  if (violation) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      `النبذة لا يمكن أن تحتوي على ${violation.label}. اكتب خبرتك والخدمات التي تجيدها فقط.`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
 @Injectable()
 export class TechniciansService {
   constructor(
@@ -156,7 +184,11 @@ export class TechniciansService {
 
   async updateProfile(userId: string, dto: UpdateTechnicianProfileDto): Promise<TechnicianProfile> {
     const profile = await this.findByUserIdOrThrow(userId);
-    if (dto.bio !== undefined) profile.bio = dto.bio;
+    if (dto.bio !== undefined) {
+      const bio = dto.bio.trim();
+      if (bio) validatePublicTechnicianBio(bio);
+      profile.bio = bio || null;
+    }
     await this.technicianProfiles.save(profile);
     return profile;
   }

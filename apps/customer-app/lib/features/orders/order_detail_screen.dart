@@ -1068,12 +1068,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   'الخصم المطبّق: -${_formatEgp(order.discountAmountCents)}',
                                   style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
                                 ),
-                              // حافز الدفع أونلاين (ADR-0091) جوّه رقم الخصم فوق، فالعميل كان
+                              // هدية الدفع أونلاين (ADR-0091) جوّه رقم الخصم فوق، فالعميل كان
                               // بيشوف الرقم بلا سببه. نفس قاعدة سطر «فني Premium» تحت: أي رقم
                               // بيتغيّر لوحده لازم يبان جنبه إيه اللي غيّره.
                               if (order.instapayDiscountCents > 0)
                                 Text(
-                                  'منها ${_formatEgp(order.instapayDiscountCents)} — حافز الدفع أونلاين',
+                                  'منها ${_formatEgp(order.instapayDiscountCents)} — هدية الدفع عبر InstaPay',
                                   style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
                                 ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
@@ -1942,7 +1942,7 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
           if (preview.instapayDiscountCents > 0) ...[
             const SizedBox(height: 4),
             Text(
-              'وفّر ${(preview.instapayDiscountCents / 100).toStringAsFixed(0)} ج.م. عند الدفع بـInstaPay.',
+              'هدية InstaPay: وفّر ${(preview.instapayDiscountCents / 100).toStringAsFixed(0)} ج.م.',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary),
             ),
           ],
@@ -1958,7 +1958,7 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
             const SizedBox(height: 4),
             Text(
               preview.instapayDiscountCents > 0
-                  ? 'تقدر تحوّل دلوقتي على طول وتاخد الخصم — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
+                  ? 'تقدر تحوّل دلوقتي على طول وتاخد الهدية — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
                   : 'تقدر تحوّل دلوقتي على طول — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.',
               style: theme.textTheme.bodySmall,
             ),
@@ -1966,7 +1966,7 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
             const SizedBox(height: 4),
             Text(
               preview.instapayDiscountCents > 0
-                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الخصم.'
+                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الهدية.'
                   : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.',
               style: theme.textTheme.bodySmall,
             ),

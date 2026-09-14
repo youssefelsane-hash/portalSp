@@ -267,7 +267,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)' },
   'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)' },
   'payments.instapay_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار InstaPay للعملاء عند اكتمال بيانات المستلم' },
-  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'خصم ثابت بالجنيه عند تأكيد العميل الدفع عبر InstaPay. صفر = لا يوجد حافز. الخصم تتحمله المنصة ولا يخصم من مستحق الفني.' },
+  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'هدية ثابتة بالجنيه عند تأكيد العميل الدفع عبر InstaPay. صفر = لا توجد هدية. الهدية تتحملها المنصة ولا تخصم من مستحق الفني.' },
   'payments.instapay.ipa_address': { type: 'string', default: '', group: 'payments', description: 'عنوان IPA أو رقم موبايل InstaPay المسجّل — بيتعرض للعميل كتعليمات تحويل. فاضي = InstaPay معطّلة (isConfigured=false)' },
   'payments.instapay.qr_image': { type: 'string', default: '', group: 'payments', description: 'صورة QR لاستقبال تحويلات InstaPay — إما "storage://<key>" لملف مرفوع من لوحة الأدمن، أو رابط https خارجي. فاضي = مفيش QR (العميل بيشوف تعليمات التحويل النصية بس)' },
   'payments.instapay.recipient_name': { type: 'string', default: '', group: 'payments', description: 'الاسم اللي بيتعرض للعميل مع عنوان IPA فوق (يتطمّن إنه بيحوّل للجهة الصح). فاضي = InstaPay معطّلة' },

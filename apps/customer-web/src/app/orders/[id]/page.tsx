@@ -126,12 +126,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </p>
       )}
 
-      {/* حافز الدفع أونلاين (ADR-0091) داخل `discount_amount_cents` فوق، فالعميل كان بيشوف
+      {/* هدية الدفع أونلاين (ADR-0091) داخل `discount_amount_cents` فوق، فالعميل كان بيشوف
           الرقم من غير سببه. نفس منطق سطر «فني Premium» تحت: الرقم اللي بيتغيّر لوحده لازم
           يكون مكتوب جنبه إيه اللي غيّره. */}
       {order.instapay_discount_cents > 0 && (
         <p className="mt-1 text-sm text-success">
-          منها {formatEgp(order.instapay_discount_cents)} — حافز الدفع أونلاين بإنستاباي
+          منها {formatEgp(order.instapay_discount_cents)} — هدية الدفع عبر InstaPay
         </p>
       )}
 

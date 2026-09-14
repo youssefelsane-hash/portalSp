@@ -65,7 +65,7 @@ export function InstaPayInlineSection({
 
       {preview.instapay_discount_cents > 0 && (
         <p className="mt-1 text-sm text-primary">
-          وفّر {formatEgp(preview.instapay_discount_cents)} عند الدفع بـInstaPay.
+          هدية InstaPay: وفّر {formatEgp(preview.instapay_discount_cents)}.
         </p>
       )}
 
@@ -78,13 +78,13 @@ export function InstaPayInlineSection({
       ) : preview.is_prepayment ? (
         <p className="mt-1 text-sm text-muted">
           {preview.instapay_discount_cents > 0
-            ? 'تقدر تحوّل دلوقتي على طول وتاخد الخصم — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
+            ? 'تقدر تحوّل دلوقتي على طول وتاخد الهدية — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
             : 'تقدر تحوّل دلوقتي على طول — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'}
         </p>
       ) : isCashOrder ? (
         <p className="mt-1 text-sm text-muted">
           {preview.instapay_discount_cents > 0
-            ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الخصم.'
+            ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الهدية.'
             : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.'}
         </p>
       ) : null}
