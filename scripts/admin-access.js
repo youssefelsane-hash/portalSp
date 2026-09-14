@@ -26,8 +26,9 @@
  * على جهازه، مش منح ٣٠ صلاحية واحدة واحدة.
  */
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
-const DB_URL = process.env.DATABASE_URL || 'postgres://baytak:baytak@localhost:5432/baytak';
+const DB_URL = resolveApiDatabaseUrl();
 const GREEN = '\x1b[32m'; const YELLOW = '\x1b[33m'; const RED = '\x1b[31m'; const DIM = '\x1b[2m'; const OFF = '\x1b[0m';
 
 async function main() {

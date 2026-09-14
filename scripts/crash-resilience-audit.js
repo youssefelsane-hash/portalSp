@@ -145,13 +145,22 @@ async function crashMidFlight() {
   const inFlight = customers.map((c) => createOrder(c).catch((err) => ({ status: 0, body: { err: String(err) } })));
   await sleep(400);
 
+  // **بَقّة أداة حقيقية (تدقيق ماراثوني 2026-09-14، docs/08 §148 — نفس فئة بَقّة
+  // `financial-idempotency-audit`)**: النمط كان `'node ./dist/main.js'` بالنقطة-شرطة، وهو
+  // بيطابق `npm run start:prod` بس. أي تشغيلة `node dist/main.js` (يدوي، `setsid`، `nohup`)
+  // **ماكانتش بتتقتل خالص** — فالتدقيق كان بيسجّل «٨ × 201» ويعدّي، يعني **اختبار الانهيار
+  // مكانش بيختبر أي انهيار**. النمط دلوقتي بيطابق المسار نفسه مهما كانت طريقة التشغيل.
+  //
+  // و`killed` بقت بتتأكد من **النتيجة** (الـAPI وقف فعلاً) مش من إن `pkill` مارماش استثناء:
+  // pkill بيرجّع 1 لما مايلاقيش حاجة، وده بالظبط اللي كان بيتخبّى ورا `catch` فاضي.
   let killed = false;
   try {
-    execFileSync('pkill', ['-9', '-f', 'node ./dist/main.js'], { stdio: 'ignore' });
-    killed = true;
+    execFileSync('pkill', ['-9', '-f', 'dist/main.js'], { stdio: 'ignore' });
   } catch {
-    /* مفيش نسخة شغّالة */
+    /* مفيش نسخة شغّالة — بيتقاس تحت بالحالة الفعلية مش بالاستثناء */
   }
+  for (let i = 0; i < 20 && (await h.isApiUp()); i++) await sleep(250);
+  killed = !(await h.isApiUp());
   const results = await Promise.all(inFlight);
   h.record(
     'ك-١/أ الباك-إند اتقتل فعلاً وسط الطلبات (SIGKILL مش إغلاق نظيف)',

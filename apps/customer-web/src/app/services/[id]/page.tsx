@@ -1944,7 +1944,12 @@ function NewAddressForm({
             </option>
           ))}
         </select>
-        <select value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={!areas} className="rounded-lg border border-border bg-surface px-3 py-2">
+        <select
+          value={areaId}
+          onChange={(e) => setAreaId(e.target.value)}
+          disabled={!areas || areas.length === 0}
+          className="rounded-lg border border-border bg-surface px-3 py-2"
+        >
           <option value="">المنطقة</option>
           {areas?.map((a) => (
             <option key={a.id} value={a.id}>
@@ -1953,6 +1958,11 @@ function NewAddressForm({
           ))}
         </select>
       </div>
+      {/* مدينة من غير مناطق مُطلَقة كانت بتدّي قايمة فاضية بلا أي تفسير. الباك-إند بقى بيستبعدها
+          أصلاً، وده السطر الاحتياطي لو حصل سباق بين تحميل المدن وتعطيل آخر منطقة. */}
+      {areas !== null && areas.length === 0 && (
+        <p className="text-sm text-muted">مفيش مناطق متاحة في المدينة دي دلوقتي — اختار مدينة تانية.</p>
+      )}
       <input
         value={streetName}
         onChange={(e) => setStreetName(e.target.value)}

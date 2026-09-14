@@ -15,8 +15,29 @@ export class GeoService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * **بَقّة حقيقية اتلقطت في التدقيق الماراثوني (2026-09-14، docs/08 §148)**: الاستعلام القديم
+   * كان بيرجّع أي مدينة `is_active` حتى لو مالهاش ولا منطقة مُطلَقة. العميل بيختارها في نموذج
+   * العنوان، `GET /cities/:id/areas` بيرجّع قايمة فاضية، فالقايمة المنسدلة بتفضل فاضية
+   * والـvalidator بيقول «مطلوب» من غير أي تفسير — طريق مسدود صامت، والعميل مش قادر يحجز خالص.
+   * ونفس القايمة دي بتتعرض كـ«المدن اللي بنغطيها» في customer-web، فمدينة من غير منطقة مُطلَقة
+   * كانت بتبقى **ادّعاء تغطية غير صحيح**. المدينة اللي مفيهاش منطقة قابلة للحجز مش تغطية.
+   */
   findActiveCities(): Promise<City[]> {
-    return this.cities.find({ where: { isActive: true }, order: { nameAr: 'ASC' } });
+    return this.cities
+      .createQueryBuilder('city')
+      .where('city.is_active = true')
+      .andWhere(
+        `EXISTS (
+           SELECT 1 FROM areas area
+           WHERE area.city_id = city.id
+             AND area.is_launched = true
+             AND area.is_active = true
+             AND area.deleted_at IS NULL
+         )`,
+      )
+      .orderBy('city.name_ar', 'ASC')
+      .getMany();
   }
 
   /** استخدام عام عبر الموديولات (مش بس geo) — للتحقق إن نطاق خدمة موجود قبل ربطه بحاجة تانية. */
@@ -28,8 +49,13 @@ export class GeoService {
     return zone;
   }
 
+  /**
+   * `isActive` هنا **مش زيادة**: مسار الكتابة (`isAreaLaunchedInCity`) بيشترط
+   * `isLaunched && isActive` الاتنين. من غيرها القراءة والكتابة بيختلفوا — الأدمن يعطّل منطقة،
+   * تفضل ظاهرة للعميل في القايمة، والعميل يختارها والسيرفر يرفض العنوان. (نفس التدقيق، §148.)
+   */
   findLaunchedAreas(cityId: string): Promise<Area[]> {
-    return this.areas.find({ where: { cityId, isLaunched: true }, order: { nameAr: 'ASC' } });
+    return this.areas.find({ where: { cityId, isLaunched: true, isActive: true }, order: { nameAr: 'ASC' } });
   }
 
   async isAreaLaunched(areaId: string): Promise<boolean> {

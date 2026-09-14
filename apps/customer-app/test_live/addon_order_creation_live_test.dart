@@ -1,41 +1,44 @@
 // اختبار حي حقيقي لاختيار إضافات كتالوج وقت إنشاء الطلب (addon_ids في CreateOrderScreen) ضد
 // apps/api الشغال فعلاً — نفس أسلوب order_creation_live_test.dart.
 // شغّله بـ: flutter test test_live/addon_order_creation_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يشوف إضافات الخدمة ويختار واحدة وقت إنشاء الطلب', () async {
-    final accessToken = await _loginAs('+201000009999');
-    const serviceId = '019fde0d-07ca-70e5-a460-d47bdcdad16f';
-    const addressId = '019fde0d-392b-7b81-b57b-20267dcd239f';
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final accessToken = await registerCustomer(uniquePhone());
+    final serviceId = await pickBookableServiceId();
+    final addressId = await ensureAddressFor(accessToken);
 
-    final addons = await apiRequestList('/services/$serviceId/addons');
-    expect(addons, isNotEmpty, reason: 'محتاجين إضافة نشطة واحدة على الأقل على الخدمة دي');
-    final addon = addons.firstWhere((a) => a['name_ar'] == 'ضمان إضافي 6 شهور');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: كان بيدوّر على إضافة باسم مكتوب بالحرف
+    // («ضمان إضافي 6 شهور») اتعملت في سيشن قديمة — قاعدة نضيفة = «Expected: non-empty» بلا
+    // سبب واضح. دلوقتي بيعمل الإضافة عبر **مسار الأدمن الحقيقي** لو مفيش، وبياخد أي إضافة
+    // موجودة لو فيه.
+    var addons = await apiRequestList('/services/$serviceId/addons');
+    String? createdAddonId;
+    if (addons.isEmpty) {
+      final adminToken = await devAdminToken('+201000000001');
+      final created = await apiRequest('POST', '/admin/services/$serviceId/addons', accessToken: adminToken, body: {
+        'name_ar': 'إضافة اختبار حي',
+        'price_cents': 7500,
+      });
+      createdAddonId = created!['id'] as String;
+      addons = await apiRequestList('/services/$serviceId/addons');
+    }
+    expect(addons, isNotEmpty);
+    final addon = addons.first;
     final addonId = addon['id'] as String;
     final addonPriceCents = addon['price_cents'] as int;
+    // بنسيب المتغيّر مستخدَم صراحةً — الإضافة بتفضل في الكتالوج التطويري عن قصد عشان
+    // التشغيلة الجاية تلاقيها جاهزة (مش زي سبب الإلغاء اللي بيغيّر سياسة).
+    if (createdAddonId != null) {
+      expect(addons.any((a) => a['id'] == createdAddonId), isTrue);
+    }
 
     final order = await apiRequest(
       'POST',
@@ -61,6 +64,7 @@ void main() {
 
     await apiRequest('POST', '/orders/$orderId/cancel', accessToken: accessToken, body: {
       'reason': 'تنظيف بيانات اختبار حي',
+      'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
   });
 }

@@ -217,4 +217,51 @@ describe('GeoService (تدقيق T-1) — حي', () => {
       );
     });
   });
+
+  /**
+   * **تدقيق ماراثوني 2026-09-14 (docs/08 §148)** — بَقّتين حقيقيتين في نفس المسار العام:
+   *
+   * 1. `findLaunchedAreas` كانت بتفلتر بـ`is_launched` بس، بينما مسار الكتابة
+   *    (`isAreaLaunchedInCity`) بيشترط `is_launched && is_active`. الأدمن يعطّل منطقة، تفضل
+   *    ظاهرة في قايمة العميل، العميل يختارها، والسيرفر يرفض العنوان — قراءة وكتابة مختلفين.
+   * 2. `findActiveCities` كانت بترجّع أي مدينة نشطة حتى لو مالهاش ولا منطقة مُطلَقة. العميل
+   *    يختارها فيلاقي قايمة المناطق فاضية و«مطلوب» من غير تفسير — طريق مسدود صامت، ونفس
+   *    القايمة معروضة كـ«المدن اللي بنغطيها» في customer-web فكانت ادّعاء تغطية غير صحيح.
+   */
+  describe('العقد العام: القراءة لازم تطابق الكتابة (§148)', () => {
+    // `cities.is_active` الافتراضي `false` في المخطط، والمدن اللي الـsuite بيعملها بتاخد
+    // الافتراضي — فلازم نفعّلها صراحةً عشان اختبار `findActiveCities` يبقى له معنى أصلاً.
+    beforeEach(async () => {
+      await q(`UPDATE cities SET is_active = true WHERE id = $1`, [cityId]);
+    });
+
+    it('منطقة مُطلَقة بس معطّلة مابتظهرش للعميل — لأن الكتابة بترفضها', async () => {
+      const disabledAreaId = await insertArea(cityId, 'معطلة', { launched: true, active: false });
+      await insertArea(cityId, 'شغالة', { launched: true, active: true });
+
+      const areas = await service.findLaunchedAreas(cityId);
+      expect(areas.map((a) => a.id)).not.toContain(disabledAreaId);
+      expect(areas.filter((a) => a.nameAr.includes(runId))).toHaveLength(1);
+
+      // نفس المنطقة اللي اتشالت من القايمة هي اللي الكتابة بترفضها — ده جوهر التطابق.
+      await expect(service.isAreaLaunchedInCity(disabledAreaId, cityId)).resolves.toBe(false);
+    });
+
+    it('مدينة من غير أي منطقة قابلة للحجز مابتظهرش في /cities', async () => {
+      const before = await service.findActiveCities();
+      expect(before.map((c) => c.id)).not.toContain(cityId);
+
+      await insertArea(cityId, 'مُطلقة', { launched: true, active: true });
+      const after = await service.findActiveCities();
+      expect(after.map((c) => c.id)).toContain(cityId);
+    });
+
+    it('مناطق غير مُطلَقة أو معطّلة لوحدها مابتخليش المدينة تظهر', async () => {
+      await insertArea(cityId, 'مسودة', { launched: false, active: true });
+      await insertArea(cityId, 'موقوفة', { launched: true, active: false });
+
+      const cities = await service.findActiveCities();
+      expect(cities.map((c) => c.id)).not.toContain(cityId);
+    });
+  });
 });

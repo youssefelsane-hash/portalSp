@@ -2,33 +2,17 @@
 // otp_flow_live_test.dart (apiRequest مباشرة، مش AuthRepository، لنفس سبب تعارض
 // flutter_secure_storage مع TestWidgetsFlutterBinding الموثّق هناك).
 // شغّله بـ: flutter test test_live/order_creation_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل حقيقي يضيف عنوان جديد وينشئ طلب حقيقي ويلغيه', () async {
-    final accessToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final accessToken = await registerCustomer(uniquePhone());
 
     final cities = await apiRequestList('/cities');
     expect(cities, isNotEmpty);
@@ -55,26 +39,16 @@ void main() {
     final addressId = address!['id'] as String;
     expect(address['street_name'], 'شارع اختبار حي');
 
-    // بعض الفئات في القاعدة التطويرية دي مالهاش خدمات (فئات تجريبية من اختبارات تانية زي
-    // Playwright) — بندوّر على أول فئة فيها خدمة فعلية بدل ما نفترض إن الأولى دايماً مليانة.
-    final categories = await apiRequestList('/service-categories');
-    expect(categories, isNotEmpty);
-    String? serviceId;
-    for (final category in categories) {
-      final services = await apiRequestList('/services?category_id=${category['id']}');
-      if (services.isNotEmpty) {
-        serviceId = services.first['id'] as String;
-        break;
-      }
-    }
-    expect(serviceId, isNotNull, reason: 'محتاجين خدمة واحدة على الأقل مربوطة بفئة عشان نختبر إنشاء طلب');
+    // أول خدمة **بلا حقول تسعير إجبارية**: فيه فئات بلا خدمات، وفيه خدمات formula محتاجة
+    // «المساحة» فالطلب بيترفض لسبب مالوش علاقة بالمُختبَر (§148).
+    final serviceId = await pickBookableServiceId();
 
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: accessToken,
       body: {
-        'service_id': serviceId!,
+        'service_id': serviceId,
         'address_id': addressId,
         'problem_description': 'اختبار حي من customer-app',
       },
@@ -93,7 +67,7 @@ void main() {
       'POST',
       '/orders/$orderId/cancel',
       accessToken: accessToken,
-      body: {'reason': 'تنظيف بيانات اختبار حي'},
+      body: {'reason': 'تنظيف بيانات اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()},
     );
     expect(cancelled!['order_status'], 'cancelled_by_customer');
 

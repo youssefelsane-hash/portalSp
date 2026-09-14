@@ -1,35 +1,30 @@
 // اختبار حي حقيقي لبروفايل الفني العام + إعادة الحجز ضد apps/api الشغال فعلاً — نفس أسلوب باقي
 // test_live/.
 // شغّله بـ: flutter test test_live/technician_profile_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني يحدّث نبذته الشخصية، عميل يشوف بروفايله العام، وإعادة الحجز بتحاول تعرضه حصرياً', () async {
-    final technicianToken = await _loginAs('+201000000011');
-    final customerToken = await _loginAs('+201000009999');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: `completed_orders_count > 0` كان بيعتمد على
+    // تاريخ فني مُجهّز من سيشن قديمة. دلوقتي بنمشّي دورة تنفيذ كاملة الأول، وبنكمّل الاختبار
+    // **على الفني اللي نفّذها فعلاً** — فالرقم اللي بنتحقق منه ليه مصدر حقيقي في نفس التشغيلة.
+    final historyCustomer = await registerCustomer(uniquePhone());
+    final completedOrderId = await completeOrderThroughTechnician(
+      historyCustomer,
+      technicianPhone: '+201000000016',
+      problemDescription: 'طلب اختبار بروفايل الفني',
+    );
+    final completedOrder = await apiRequest('GET', '/orders/$completedOrderId', accessToken: historyCustomer);
+    final executingTechnicianId = completedOrder!['technician_id'] as String;
+    final technicianToken = await devTokenForTechnicianProfile(executingTechnicianId);
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final customerToken = await registerCustomer(uniquePhone());
 
     final updated = await apiRequest(
       'PATCH',
@@ -61,26 +56,44 @@ void main() {
     expect(technicianError!.statusCode, 403);
 
     // إعادة الحجز — أول جولة مطابقة بتحاول تعرض على نفس الفني حصرياً (مش ضمان قبول، تفضيل بس).
-    final serviceId = profile['services'][0]['id'] as String;
+    // أول خدمة في بروفايل الفني ممكن تكون محتاجة معاد بداية أو حقول تسعير، فالطلب بيترفض
+    // لسبب مالوش علاقة بالمُختبَر (إعادة الحجز). الفني المزروع مؤهّل لكل الخدمات النشطة،
+    // فبناخد خدمة قابلة للحجز مباشرةً (§148).
+    expect(profile['services'], isNotEmpty);
+    final serviceId = await pickBookableServiceId();
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
         'service_id': serviceId,
-        'address_id': '019fde0d-392b-7b81-b57b-20267dcd239f',
+        'address_id': await ensureAddressFor(customerToken),
         'requested_technician_id': technicianId,
       },
     );
     expect(order!['order_status'], 'searching_technician');
 
-    final accepted = await apiRequest(
-      'POST',
-      '/technician/orders/${order['id']}/accept',
-      accessToken: technicianToken,
-    );
+    // التوزيع بيتم **بشكل غير متزامن** بعد إنشاء الطلب، فالعرض ممكن ما يكونش اتبعت لسه لحظة
+    // ما الاختبار يدوس «اقبل» — وساعتها بيرجع «العرض ده مبقاش متاح» وهو مجرد سباق توقيت.
+    // بنعيد المحاولة لحد ما الجولة الأولى تخرج (وهي الجولة اللي بتعرض على الفني المطلوب
+    // حصريًا — ده اللي بنختبره أصلاً).
+    Map<String, dynamic>? accepted;
+    Object? lastError;
+    for (var attempt = 0; attempt < 25 && accepted == null; attempt++) {
+      try {
+        accepted = await apiRequest(
+          'POST',
+          '/technician/orders/${order['id']}/accept',
+          accessToken: technicianToken,
+        );
+      } catch (err) {
+        lastError = err;
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    }
+    expect(accepted, isNotNull, reason: 'الجولة الأولى ما عرضتش على الفني المطلوب: $lastError');
     expect(accepted!['technician_id'], technicianId);
 
-    await apiRequest('POST', '/orders/${order['id']}/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي'});
+    await apiRequest('POST', '/orders/${order['id']}/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
   });
 }

@@ -4,19 +4,13 @@
 // الحقيقي (مش بس منطق الباك-إند نفسه، ده مختبر أصلاً في apps/api/src/modules/orders — هنا
 // بنتأكد إن الـwire format اللي customer-app بيبعته مفهوم صح من الطرف التاني).
 // شغّله بـ: flutter test test_live/pending_payment_order_creation_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/33b6554f-4f97-567b-a9a1-7de4b0f6b43a/scratchpad/api-server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
+// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
+Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
 
 // رقم فريد كل تشغيلة (بدل رقم عميل تجريبي ثابت مُجهّز مسبقًا من سيشن تانية — القاعدة هنا فريش)
 // عشان نضمن عميل حقيقي جديد بلا اعتماد على بيانات موجودة مسبقًا.
@@ -69,16 +63,9 @@ void main() {
     );
     final addressId = address!['id'] as String;
 
-    final categories = await apiRequestList('/service-categories');
-    String? serviceId;
-    for (final category in categories) {
-      final services = await apiRequestList('/services?category_id=${category['id']}');
-      if (services.isNotEmpty) {
-        serviceId = services.first['id'] as String;
-        break;
-      }
-    }
-    expect(serviceId, isNotNull, reason: 'محتاجين خدمة واحدة على الأقل عشان نختبر الدفع المسبق');
+    // أول خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula
+    // محتاجة «المساحة» فالطلب بيترفض لسبب مالوش علاقة بالمُختبَر (§148).
+    final serviceId = await pickBookableServiceId();
 
     // (أ) كارت — الطلب لازم يرجع pending_payment (مش searching_technician زي الافتراضي).
     // بيئة التطوير دي مفيهاش بيانات اعتماد Paymob حقيقية (docs/03-external-integrations.md)،
@@ -90,7 +77,7 @@ void main() {
       '/orders',
       accessToken: accessToken,
       body: {
-        'service_id': serviceId!,
+        'service_id': serviceId,
         'address_id': addressId,
         'problem_description': 'اختبار حي — دفع مسبق بالبطاقة',
         'payment_method': 'card',
@@ -116,10 +103,13 @@ void main() {
 
     await apiRequest('POST', '/orders/$cardOrderId/cancel', accessToken: accessToken, body: {
       'reason': 'تنظيف بيانات اختبار حي — دفع مسبق بالبطاقة',
+      'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
 
-    // (ب) InstaPay — نفس المنطق بالحرف (مفيش INSTAPAY_IPA_ADDRESS/INSTAPAY_RECIPIENT_NAME
-    // مُعدّين في بيئة التطوير دي برضه، راجع docs/03-external-integrations.md).
+    // (ب) InstaPay — **السلوك بيتفرّع على الإعداد الحي، مش على افتراض مكتوب** (تدقيق §148):
+    // الاختبار كان بيفترض إن InstaPay **مش** مُعدّ في بيئة التطوير ويطالب برفض 503. بعد ما
+    // اتعدّ فعلاً (§12/§13)، الافتراض ده بقى غلط والاختبار بقى بيسقط على سلوك **صحيح**.
+    // دلوقتي بيقرا الإعداد ويتأكد من العقد الصح في الحالتين — ده اللي بيخلّيه صالح في أي بيئة.
     final instapayOrder = await apiRequest(
       'POST',
       '/orders',
@@ -135,21 +125,31 @@ void main() {
     expect(instapayOrder!['order_status'], 'pending_payment');
     final instapayOrderId = instapayOrder['id'] as String;
 
+    // العقد الصح **في الحالتين**، من غير ما الاختبار يفترض حالة إعداد بعينها:
+    //  • InstaPay مُعدّ  ⇒ بيرجّع تعليمات تحويل فيها عنوان IPA فعلي.
+    //  • مش مُعدّ        ⇒ بيرفض 503 برسالة «مش متاح دلوقتي» (مش 500 ولا نجاح صامت).
     try {
-      await apiRequest(
+      final transfer = await apiRequest(
         'POST',
         '/orders/$instapayOrderId/pay-with-instapay',
         accessToken: accessToken,
         extraHeaders: {'Idempotency-Key': 'live-test-instapay-${DateTime.now().microsecondsSinceEpoch}'},
       );
-      fail('المفروض pay-with-instapay يرفض — مفيش IPA address مُعدّ في بيئة التطوير دي');
+      expect(transfer, isNotNull, reason: 'نجح من غير ما يرجّع تعليمات تحويل');
+      // `recipient_address` حقل مستقل عمدًا (طلب المالك 2026-09-11: الرقم في سطر لوحده) —
+      // نجاح من غيره معناه إن العميل شايف تعليمات تحويل بلا حساب يحوّل عليه.
+      expect(transfer!['recipient_address'], isNotNull, reason: 'نجاح بلا حساب استقبال = العميل مش عارف يحوّل لفين');
+      expect(transfer['recipient_address'] as String, isNotEmpty);
+      expect(transfer['reference_code'], isNotNull);
+      expect(transfer['amount_cents'], isA<int>());
     } on ApiException catch (err) {
-      expect(err.statusCode, 503);
+      expect(err.statusCode, 503, reason: 'الرفض لازم يكون 503 واضح مش 500');
       expect(err.message, contains('مش متاح دلوقتي'));
     }
 
     await apiRequest('POST', '/orders/$instapayOrderId/cancel', accessToken: accessToken, body: {
       'reason': 'تنظيف بيانات اختبار حي — دفع مسبق InstaPay',
+      'cancellation_reason_id': await pickCustomerCancellationReasonId(),
     });
 
     // (ج) regression (طلب بلا payment_method لسه بيتصرف زي زمان — searching_technician فورًا)

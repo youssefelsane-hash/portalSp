@@ -224,23 +224,16 @@ void main() {
       'label': 'مسح الشاشات',
     });
 
+    // خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula محتاجة
+    // «المساحة» فإنشاء الطلب بيترفض ويقع الـsetUpAll كله (§148).
+    final pickedServiceId = await pickBookableServiceId();
+    final pickedService = (await apiRequest('GET', '/services/$pickedServiceId'))!;
     final categories = await apiRequestList('/service-categories');
-    Map<String, dynamic>? pickedCategory;
-    Map<String, dynamic>? pickedService;
-    for (final c in categories) {
-      final services = await apiRequestList('/services?category_id=${c['id']}');
-      if (services.isNotEmpty) {
-        pickedCategory = c;
-        pickedService = services.first;
-        break;
-      }
-    }
-    category = ServiceCategory.fromJson(pickedCategory!);
+    final pickedCategory = categories.firstWhere((c) => c['id'] == pickedService['category_id']);
+    category = ServiceCategory.fromJson(pickedCategory);
     // الخدمة من مسار التفاصيل مش من القايمة: القايمة عقد مختصر، والشاشات بتعتمد على الحقول
     // الكاملة (الحقول الديناميكية، سياسة المسار، الإضافات).
-    service = CatalogService.fromJson(
-      (await apiRequest('GET', '/services/${pickedService!['id']}'))!,
-    );
+    service = CatalogService.fromJson(pickedService);
 
     final order = await apiRequest('POST', '/orders', accessToken: token, body: {
       'service_id': service.id,

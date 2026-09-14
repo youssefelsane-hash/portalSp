@@ -93,6 +93,10 @@ class Order {
   /// الخصم المطبّق فعلاً على الطلب (كود خصم أو عمارة). العميل كان بيشوفه في المعاينة قبل
   /// التأكيد وبعدين يختفي من سجل الطلب تمامًا — فمكانش عنده أي طريقة يتأكد إن الكود اشتغل.
   final int discountAmountCents;
+
+  /// الجزء اللي جه من حافز الدفع أونلاين بإنستاباي (ADR-0091) — **جزء من**
+  /// [discountAmountCents] مش زيادة عليه. موجود لوحده عشان السبب يتكتب للعميل.
+  final int instapayDiscountCents;
   final int warrantyPriceCents;
 
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
@@ -161,6 +165,7 @@ class Order {
     required this.totalAmountCents,
     this.amountDueNowCents,
     this.discountAmountCents = 0,
+    this.instapayDiscountCents = 0,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
     this.optionalWarrantyCoverageMonths,
@@ -211,6 +216,7 @@ class Order {
     totalAmountCents: json['total_amount_cents'] as int,
     amountDueNowCents: (json['amount_due_now_cents'] as num?)?.round(),
     discountAmountCents: (json['discount_amount_cents'] as num?)?.round() ?? 0,
+    instapayDiscountCents: (json['instapay_discount_cents'] as num?)?.round() ?? 0,
     warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
     levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
     optionalWarrantyNameAr:

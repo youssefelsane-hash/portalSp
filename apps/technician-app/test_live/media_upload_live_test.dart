@@ -6,44 +6,31 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني حقيقي يقبل طلب حقيقي ويرفع صورة قبل/بعد حقيقية عليه', () async {
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
+    // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
+    final customerToken = await registerCustomer(uniquePhone());
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': '019fde0d-07ca-70e5-a460-d47bdcdad16f',
-        'address_id': '019fde0d-392b-7b81-b57b-20267dcd239f',
+        'service_id': await pickBookableServiceId(),
+        'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار حي لرفع الصور',
       },
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await _loginAs('+201000000011');
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    var technicianToken = await devTechnicianToken('+201000000043');
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000043');
+    final accepted = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
     expect(accepted!['order_status'], 'accepted');
 
     final imageBytes = await File('test_live/fixtures/test-1x1.png').readAsBytes();
@@ -63,10 +50,9 @@ void main() {
     await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/arrive', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/start', accessToken: technicianToken);
-    final completed =
-        await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
-    expect(completed!['order_status'], 'work_completed');
-
+    // صورة «بعد الشغل» **قبل** `complete` مش بعده: الباك-إند بقى بيفرض وجودها كشرط لقفل
+    // الطلب («لازم ترفع صورة واحدة على الأقل بعد الشغل قبل ما تقفل الطلب»). الترتيب القديم
+    // كان بيتصرّف كأن الشرط مش موجود (تدقيق §148).
     final afterMedia = await apiUpload(
       '/technician/orders/$orderId/media',
       fileBytes: imageBytes,
@@ -76,6 +62,10 @@ void main() {
     );
     expect(afterMedia, isNotNull);
     expect(afterMedia!['media_type'], 'after_photo');
+
+    final completed =
+        await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+    expect(completed!['order_status'], 'work_completed');
 
     final mediaList = await apiRequestList('/technician/orders/$orderId/media', accessToken: technicianToken);
     expect(mediaList.length, 2);

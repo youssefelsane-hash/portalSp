@@ -20,6 +20,7 @@ const jwt = require('jsonwebtoken');
 
 const ROOT = path.resolve(__dirname, '../..');
 const API = process.env.API_BASE_URL ?? 'http://localhost:3000/api/v1';
+const { deleteOrdersWhere } = require('./delete-orders-safely');
 
 function envFromFile() {
   const out = {};
@@ -66,6 +67,20 @@ class LiveHarness {
 
   async q(sql, params) {
     return (await this.db.query(sql, params)).rows;
+  }
+
+  /**
+   * حذف طلبات بترتيب آمن للمفاتيح الأجنبية — للتنظيف بعد التدقيق.
+   *
+   * كل تدقيق كان بيكتب `DELETE FROM orders WHERE …` بإيده، وده بيفشل أول ما جدول جديد يشاور
+   * على `orders` (حصل فعلاً: `chat_threads_order_id_fkey` في `booking-suggestion-audit`).
+   * والفشل هنا صامت عمليًا: التدقيق بيكون خلص وطبع نتيجته خلاص، فالبقايا بتفضل وتكسر
+   * التشغيلة اللي بعدها. (تدقيق §148، المرحلة ٩)
+   *
+   *   await h.deleteOrders(`order_number LIKE $1`, ['BSG-%']);
+   */
+  async deleteOrders(whereSql, params = []) {
+    return deleteOrdersWhere(this.db, whereSql, params);
   }
 
   record(name, ok, detail) {
@@ -522,14 +537,26 @@ class LiveHarness {
    * إعادة تشغيل الـAPI من نود مباشرةً. الشغل عبر `execFileSync('bash', ['dev-api.sh'])` بيعلّق:
    * السكريبت بيسيب السيرفر شغّال في الخلفية و`execFileSync` بيفضل مستني أنابيبه تتقفل.
    */
+  /**
+   * **بَقّة أداة اتصلحت هنا (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: النمط كان
+   * `'node ./dist/main.js'` بالنقطة-شرطة — بيطابق النسخة اللي الهارنس نفسه بيشغّلها بس.
+   * أي نسخة اتشغّلت بطريقة تانية (`npm run start:dev`، `setsid node dist/main.js`، يدوي)
+   * ماكانتش بتتقتل، فالنسخة الجديدة بتموت فورًا على EADDRINUSE والتدقيق بيكمّل وهو بيكلّم
+   * **سيرفر بإعدادات قديمة**. اتلقطت مرتين: في `financial-idempotency-audit` (اتصلحت هناك
+   * محليًا) وفي `crash-resilience-audit` (كان بيسجّل «الباك-إند اتقتل» وهو عمره ما اتقتل).
+   * الإصلاح هنا في المكان المشترك، مع حارس صريح بدل الاعتماد على خروج `pkill`.
+   */
   async restartApi() {
     const { execFileSync } = require('node:child_process');
     try {
-      execFileSync('pkill', ['-9', '-f', 'node ./dist/main.js'], { stdio: 'ignore' });
+      execFileSync('pkill', ['-9', '-f', 'dist/main.js'], { stdio: 'ignore' });
     } catch {
       /* مفيش نسخة شغّالة — مش خطأ */
     }
     for (let i = 0; i < 20 && (await this.isApiUp()); i++) await sleep(500);
+    if (await this.isApiUp()) {
+      throw new Error('فيه نسخة API لسه ماسكة بورت 3000 بعد محاولة الإيقاف — أي قياس بعد كده هيبقى على سيرفر غلط');
+    }
 
     const apiDir = path.join(ROOT, 'apps/api');
     fs.mkdirSync(path.join(apiDir, '.dev-logs'), { recursive: true });

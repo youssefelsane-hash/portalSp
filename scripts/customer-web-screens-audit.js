@@ -19,7 +19,7 @@ const path = require('path');
 const { chromium } = require('/home/user/portalSp/node_modules/playwright-core');
 
 const WEB = process.env.WEB_BASE_URL || 'http://localhost:3002';
-const API_LOG_CANDIDATES = ['/tmp/claude-0/api.log', '/home/user/portalSp/.dev-logs/api.log'];
+const { resolveApiLog } = require('./lib/resolve-api-log');
 
 const VIEWPORTS = [
   { name: 'موبايل 390×844', width: 390, height: 844 },
@@ -40,13 +40,32 @@ const STATIC_ROUTES = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * الملف ده كان بيقرا مسارين مكتوبين بالإيد، واحد منهم scratchpad سيشن قديمة — فالتسجيل بيفشل
+ * بـ«مالقيتش OTP» وهو مالوش أي علاقة باللي بيتقاس. المسار بيتحل من `resolve-api-log` زي باقي
+ * الأدوات (التعليق فيه بيوصف نفس البَقّة دي بالظبط — الملف ده بس كان فاتها). (تدقيق §148/١٠)
+ *
+ * وبنقرا **آخر ٢ ميجا بس**: لوج التطوير وصل ٦٩٧ ميجا قبل كده، و`readFileSync` عليه كان
+ * بيحمّله كله في الذاكرة في كل نداء OTP.
+ */
+const OTP_TAIL_BYTES = 2 * 1024 * 1024;
+
 function latestOtp(phone) {
-  for (const p of API_LOG_CANDIDATES) {
-    if (!fs.existsSync(p)) continue;
-    const lines = fs.readFileSync(p, 'utf8').split('\n').filter((l) => l.includes('[OTP]') && l.includes(phone));
-    if (lines.length) return lines[lines.length - 1].split('→').pop().trim();
+  const logPath = resolveApiLog();
+  if (logPath) {
+    const { size } = fs.statSync(logPath);
+    const start = size > OTP_TAIL_BYTES ? size - OTP_TAIL_BYTES : 0;
+    const fd = fs.openSync(logPath, 'r');
+    try {
+      const buf = Buffer.alloc(size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      const lines = buf.toString('utf8').split('\n').filter((l) => l.includes('[OTP]') && l.includes(phone));
+      if (lines.length) return lines[lines.length - 1].split('→').pop().trim();
+    } finally {
+      fs.closeSync(fd);
+    }
   }
-  throw new Error(`مالقيتش OTP لـ${phone} في لوج الباك-إند`);
+  throw new Error(`مالقيتش OTP لـ${phone} في لوج الباك-إند (${logPath ?? 'مفيش لوج اتلاقى'})`);
 }
 
 async function api(pathname, options = {}) {
@@ -104,7 +123,17 @@ async function seed() {
 
 async function login(page, phone) {
   await page.goto(`${WEB}/login`, { waitUntil: 'domcontentloaded' });
-  await page.fill('input[type="tel"], input[name="phone"], input', phone);
+
+  // **الكتابة بتتم حرف بحرف عن قصد، و`fill` ممنوعة هنا.** الحقل input متحكَّم فيه من React،
+  // و`fill` بتكتب القيمة في الـDOM قبل ما الـhydration تخلص — فالـDOM بيبان فيه الرقم بينما
+  // state لسه فاضية، والطلب بيروح بـ`phone_number: ""` والصفحة بتعرض «البيانات المرسلة غير
+  // صحيحة». الفشل ده **مضلّل تمامًا**: مالوش أي علاقة بالرقم ولا بالباك-إند (نفس الرقم بالظبط
+  // بيعدّي 200 من curl ومن الكتابة الحقيقية). اتقاس بالتجربة: `fill` ⇒ 400، `pressSequentially`
+  // ⇒ 200. (تدقيق §148، المرحلة ١٠)
+  const phoneInput = page.locator('input[type="tel"]').first();
+  await phoneInput.waitFor({ state: 'visible', timeout: 15000 });
+  await phoneInput.click();
+  await phoneInput.pressSequentially(phone, { delay: 20 });
   await page.getByRole('button', { name: /كود|إرسال|ابعت/ }).first().click();
   await sleep(900);
   // لو الصفحة ما انتقلتش لخطوة الكود، الرسالة اللي عليها هي التشخيص الحقيقي — من غيرها الفحص
@@ -116,7 +145,8 @@ async function login(page, phone) {
   }
   const otp = latestOtp(phone);
   const otpInput = page.locator('input').last();
-  await otpInput.fill(otp);
+  await otpInput.click();
+  await otpInput.pressSequentially(otp, { delay: 20 }); // نفس سبب الرقم فوق — الحقل متحكَّم فيه
   await page.getByRole('button', { name: /دخول|تأكيد|تمام|سجّل/ }).first().click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 }).catch(() => {});
 }

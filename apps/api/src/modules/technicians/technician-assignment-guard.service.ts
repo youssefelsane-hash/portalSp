@@ -15,6 +15,22 @@ import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 export class TechnicianAssignmentGuardService {
   constructor(private readonly settingsService: SettingsService) {}
 
+  /**
+   * **قاعدة ترتيب القفل في المشروع كله: الفني الأول، بعده الطلب.**
+   *
+   * الفني مورد **مشترك بين طلبات مختلفة**، فهو اللي بيتقفل الأول دايمًا. أي مسار بيقفل الطلب
+   * الأول وبعدين الفني بيعمل ABBA مع المسارات اللي بتمشي بالترتيب الصح، والنتيجة **deadlock
+   * حقيقي من Postgres** — الفني بياخد «حصل خطأ غير متوقع» وهو بيدوس «اقبل».
+   *
+   * البَقّة دي اتلقطت حية في التدقيق الماراثوني (docs/08 §148) على
+   * `POST /technician/orders/:id/accept`، وكان سببها إن `accept()` بيقفل بالترتيب الصح بينما
+   * `acceptWorkOpportunity()` و`autoConfirmScheduledOrder()` و`acceptCrewOpportunity()` كانوا
+   * بيقفلوا بالعكس. التلاتة اتظبطوا، و`matching-lock-order.spec.ts` بيحرس القاعدة على الكود
+   * نفسه فأي مسار جديد بيكسرها بيفشل فورًا.
+   *
+   * لو المرشّح مش معروف إلا بعد قراءة الطلب: اقرا الطلب **بلا قفل** عشان تختار، اقفل الفني،
+   * وبعدين اقفل الطلب **وأعد التحقق** من حالته.
+   */
   async lockTechnician(manager: EntityManager, technicianId: string): Promise<TechnicianProfile> {
     const technician = await manager
       .createQueryBuilder(TechnicianProfile, 'technician')

@@ -28,9 +28,10 @@
  * ببادئة `zz-audit-` وبيمسحها هي وطلباتها في الآخر.
  */
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
 const API = process.env.API_BASE || 'http://localhost:3000/api/v1';
-const DB_URL = process.env.DATABASE_URL || 'postgres://baytak:baytak@localhost:5432/baytak_main';
+const DB_URL = resolveApiDatabaseUrl();
 const QUICK = process.argv.includes('--quick');
 // المسار بيتحل وقت التشغيل — `.dev-logs/api.log` في الجذر مكانش موجود أصلاً (الـharness
 // بيكتب في `apps/api/.dev-logs/api.out`)، فالأداة كانت بتقف على «مش لاقي كود OTP».

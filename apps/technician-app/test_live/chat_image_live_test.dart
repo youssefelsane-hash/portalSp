@@ -9,43 +9,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 import 'package:technician_app/core/api_client.dart';
 import 'package:technician_app/core/api_config.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('[OTP]') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني يرفع صورة في شات الطلب والعميل يستقبلها لحظياً عبر WebSocket', () async {
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
+    // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
+    final customerToken = await registerCustomer(uniquePhone());
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': '019fde0d-07ca-70e5-a460-d47bdcdad16f',
-        'address_id': '019fde0d-392b-7b81-b57b-20267dcd239f',
+        'service_id': await pickBookableServiceId(),
+        'address_id': await ensureAddressFor(customerToken),
       },
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await _loginAs('+201000000011');
-    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    var technicianToken = await devTechnicianToken('+201000000046');
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000046');
 
     final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: technicianToken);
     final threadId = threadResponse!['id'] as String;
@@ -99,6 +85,6 @@ void main() {
       customerSocket.dispose();
     }
 
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
   });
 }

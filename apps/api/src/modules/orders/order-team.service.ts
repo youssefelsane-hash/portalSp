@@ -642,8 +642,15 @@ export class OrderTeamService {
     let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
 
     const outcome = await this.orders.manager.transaction(async (manager) => {
-      // كل كاتب للطاقم يقفل الطلب أولاً، ثم الشخص المرشح. لذلك فحص الخانة والجدول لا يتحول
-      // إلى كتابة متأخرة إذا دخل قائد أو أدمن آخر في نفس اللحظة.
+      // **ترتيب القفل: الفني الأول ثم الطلب** (الشرح الكامل فوق `lockTechnician`).
+      //
+      // التعليق اللي كان هنا كان بيقول العكس بالحرف («كل كاتب للطاقم يقفل الطلب أولاً») —
+      // يعني كان في المشروع **اتفاقيتين متناقضتين** على نفس القفلين، وده جذر فئة البَقّة
+      // كلها: أي تزامن بين كاتب طاقم وكاتب قبول بيدي ABBA deadlock (docs/08 §148).
+      // الاتفاقية الموحّدة دلوقتي: الفني (المورد المشترك بين الطلبات) بيتقفل الأول دايمًا.
+      // ضمانة «فحص الخانة والجدول مايتحولش لكتابة متأخرة» محفوظة زي ما هي — الطلب لسه
+      // بيتقفل جوّه نفس المعاملة قبل أي فحص أو كتابة.
+      const candidateProfile = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const order = await manager
         .createQueryBuilder(Order, 'order')
         .setLock('pessimistic_write')
@@ -664,7 +671,6 @@ export class OrderTeamService {
         throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
       }
 
-      const candidateProfile = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const lockedLeader = await manager.findOne(TechnicianProfile, { where: { id: leaderProfile.id } });
       if (!lockedLeader) {
         throw new ApiException(ErrorCode.VAL_001, 'بيانات قائد الطلب غير موجودة', HttpStatus.CONFLICT);
@@ -756,6 +762,10 @@ export class OrderTeamService {
           throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
         }
 
+        // **ترتيب القفل: الفني الأول ثم الطلب** — نفس ترتيب `MatchingService.accept()`. العكس
+        // كان بيدي deadlock حقيقي لما مسار التجنيد ومسار القبول يتزامنوا على نفس الزوج
+        // (docs/08 §148).
+        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
         const order = await manager
           .createQueryBuilder(Order, 'o')
           .setLock('pessimistic_write')
@@ -771,7 +781,6 @@ export class OrderTeamService {
         assertCrewMembershipMutable(order);
 
         const role = opportunity.crew_role;
-        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
         await this.assignmentGuard.assertScheduleAvailable(manager, lockedTechnician.id, order);
         if (role === 'assistant') {
           // المساعد نطاقه المدينة كلها، بينما حارس قيادة الطلب يقصد النطاق الدقيق. استخدام الحارس

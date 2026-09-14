@@ -10,6 +10,12 @@
  *
  * الترتيب: `PGDATABASE` صريح ← `DATABASE_URL` في البيئة ← `DATABASE_URL` من `apps/api/.env`
  * (نفس الملف اللي الـAPI بيقلع بيه فعلاً) ← الافتراضي القديم.
+ *
+ * `resolveApiDatabaseUrl()` بيجاوب على نفس السؤال بس بيرجّع **رابط الاتصال كامل** بدل الاسم،
+ * للأدوات اللي بتفتح اتصال `pg` بنفسها. كان كل واحدة منهم بتحطّ افتراضًا مكتوب بالإيد
+ * (`…/baytak` أو `…/baytak_main`) — وهي نفس البَقّة الموصوفة فوق بالظبط، متكرّرة في أربع
+ * أماكن تانية: على الجهاز ده الافتراضي `baytak` قاعدة موجودة وفاضية، فالأداة بتشتغل وتقول
+ * «نضيف» وهي مافحصتش القاعدة اللي الـAPI شغّال عليها أصلاً (تدقيق §148).
  */
 const fs = require('fs');
 const path = require('path');
@@ -43,4 +49,28 @@ function resolveApiDatabase() {
   return 'baytak';
 }
 
-module.exports = { resolveApiDatabase };
+/**
+ * رابط اتصال كامل بنفس القاعدة اللي الـAPI بيقلع بيها. بيرمي لو مالقاش — الفشل بصوت عالي
+ * أأمن من افتراض بيخلّي الأداة تفحص قاعدة غلط وتقول «نضيف».
+ */
+function resolveApiDatabaseUrl() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+
+  const envPath = path.join(__dirname, '..', '..', 'apps', 'api', '.env');
+  try {
+    const line = fs
+      .readFileSync(envPath, 'utf8')
+      .split('\n')
+      .find((l) => l.trim().startsWith('DATABASE_URL='));
+    const fromFile = line ? line.slice(line.indexOf('=') + 1).trim() : null;
+    if (fromFile) return fromFile;
+  } catch {
+    // مفيش .env محلي — بنرمي تحت برسالة واضحة.
+  }
+
+  throw new Error(
+    'مفيش DATABASE_URL — لا في البيئة ولا في apps/api/.env. حدّده صراحةً قبل تشغيل الأداة.',
+  );
+}
+
+module.exports = { resolveApiDatabase, resolveApiDatabaseUrl };

@@ -1,40 +1,21 @@
 // اختبار حي حقيقي لمحفظة الفني وطلب الصرف ضد apps/api الشغال فعلاً — نفس أسلوب باقي test_live/.
 // شغّله بـ: flutter test test_live/earnings_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني حقيقي يشوف محفظته الحقيقية ويطلب صرف حقيقي', () async {
-    final accessToken = await _loginAs('+201000000011');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: كان معتمد على إن «الفني ده حصّل كاش قبل كده
+    // في اختبار حي تاني» — اعتماد على ترتيب تشغيل اختبارات تانية، فبيسقط في أي قاعدة نضيفة.
+    final accessToken = await devTechnicianToken('+201000000041');
+    await fundTechnicianWallet(accessToken, 50000);
 
     final wallet = await apiRequest('GET', '/wallet', accessToken: accessToken);
     expect(wallet, isNotNull);
     final balanceBefore = wallet!['balance_cents'] as int;
-    expect(balanceBefore, greaterThan(0), reason: 'الفني ده حصّل كاش قبل كده في اختبار حي تاني، لازم يكون له رصيد');
-
-    final transactions = await apiRequestList('/wallet/transactions', accessToken: accessToken);
-    expect(transactions, isNotEmpty);
+    expect(balanceBefore, greaterThan(0));
 
     final payoutsBefore = await apiRequestList('/technician/payouts', accessToken: accessToken);
 

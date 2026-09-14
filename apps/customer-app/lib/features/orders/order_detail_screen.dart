@@ -1006,6 +1006,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   'الخصم المطبّق: -${_formatEgp(order.discountAmountCents)}',
                                   style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
                                 ),
+                              // حافز الدفع أونلاين (ADR-0091) جوّه رقم الخصم فوق، فالعميل كان
+                              // بيشوف الرقم بلا سببه. نفس قاعدة سطر «فني Premium» تحت: أي رقم
+                              // بيتغيّر لوحده لازم يبان جنبه إيه اللي غيّره.
+                              if (order.instapayDiscountCents > 0)
+                                Text(
+                                  'منها ${_formatEgp(order.instapayDiscountCents)} — حافز الدفع أونلاين',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
+                                ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
                               // اتعيّن مستواه أعلى، الزيادة لازم تبان بسببها مكتوب، مش رقم
                               // بيتغيّر من غير تفسير. والسطر التاني تحتها مطمئن ومقصود يكون

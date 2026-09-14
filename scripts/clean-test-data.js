@@ -17,6 +17,7 @@ const { Client } = require('pg');
 // تكون مُصدَّرة في الشِل، وغير كده الأداة بتقع بـ`FATAL 28000` (فشل مصادقة) اللي مابيقولش
 // إن السبب إعداد ناقص — وده حصل فعلاً وقت مناداتها من سكربت تاني.
 const { DATABASE_URL } = require('./lib/live-harness');
+const { deleteOrdersById } = require('./lib/delete-orders-safely');
 
 const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -37,66 +38,12 @@ const param = serviceId ?? orderId ?? numberLike;
     await db.query('BEGIN');
     const { rows: targets } = await db.query(`SELECT id FROM orders WHERE ${where}`, [param]);
     if (targets.length === 0) { console.log('مفيش طلبات مطابقة.'); await db.query('ROLLBACK'); return; }
-    const ids = targets.map((r) => r.id);
 
-    // الجداول اللي بتشاور على orders — من الكتالوج نفسه، مش قايمة مكتوبة بالإيد.
-    const { rows: refs } = await db.query(`
-      SELECT c.conrelid::regclass::text AS table_name,
-             a.attname                  AS column_name,
-             c.confdeltype              AS on_delete
-        FROM pg_constraint c
-        JOIN unnest(c.conkey) k(attnum) ON true
-        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-       WHERE c.confrelid = 'orders'::regclass AND c.contype = 'f'`);
-
-    /**
-     * حذف صفوف جدول **مع أحفاده** — جدول بيشاور على `orders` ممكن يكون هو نفسه مشار إليه من
-     * جدول تالت. اتلقطت حيًا: `refunds.payment_id → payments.id`، فحذف `payments` قبل `refunds`
-     * بيفشل على `refunds_payment_id_fkey`. الحالة الخاصة القديمة (`chat_messages` تحت
-     * `chat_threads`) كانت نفس الفئة بالظبط، متعالجة بالإيد لجدول واحد بس؛ دي بتعمّمها من
-     * الكتالوج فمفيش جدول تالت جديد هيرجّع نفس الفشل تاني.
-     */
-    const deleteWithDependents = async (table, column, values, depth = 0) => {
-      if (depth > 3) return 0;
-      let removed = 0;
-      const { rows: children } = await db.query(`
-        SELECT c.conrelid::regclass::text AS table_name,
-               a.attname                  AS column_name,
-               c.confdeltype              AS on_delete
-          FROM pg_constraint c
-          JOIN unnest(c.conkey) k(attnum) ON true
-          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-         WHERE c.confrelid = $1::regclass AND c.contype = 'f'`, [table]);
-      for (const child of children) {
-        if (child.table_name === table) continue;
-        if (child.on_delete === 'c' || child.on_delete === 'n') continue;
-        const { rows: doomed } = await db.query(
-          `SELECT id FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
-          [values],
-        ).catch(() => ({ rows: null })); // جدول بلا عمود `id` — بيتحذف مباشرةً تحت
-        if (doomed && doomed.length) {
-          removed += await deleteWithDependents(child.table_name, 'id', doomed.map((d) => d.id), depth + 1);
-        } else {
-          const res = await db.query(
-            `DELETE FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
-            [values],
-          );
-          if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${child.table_name}`);
-          removed += res.rowCount;
-        }
-      }
-      const res = await db.query(`DELETE FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [values]);
-      if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${table}`);
-      return removed + res.rowCount;
-    };
-
-    let total = 0;
-    for (const r of refs) {
-      if (r.table_name === 'orders') continue;            // parent_order_id — بيتعامل معاه بالحذف نفسه
-      if (r.on_delete === 'c' || r.on_delete === 'n') continue; // CASCADE/SET NULL بيتصرفوا لوحدهم
-      total += await deleteWithDependents(r.table_name, r.column_name, ids);
-    }
-    const del = await db.query(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids]);
+    // المنطق نفسه في `lib/delete-orders-safely` عشان التدقيقات تقدر تنضّف وراها بنفس الطريقة
+    // بدل ما كل واحد يكتب DELETE بإيده ويقع على أول FK جديد (تدقيق §148، المرحلة ٩).
+    const { orders, related } = await deleteOrdersById(db, targets.map((r) => r.id), { log: (m) => console.log(m) });
+    const del = { rowCount: orders };
+    const total = related;
     await db.query('COMMIT');
     console.log(`✅ اتمسح ${del.rowCount} طلب + ${total} صف مرتبط.`);
   } catch (err) {

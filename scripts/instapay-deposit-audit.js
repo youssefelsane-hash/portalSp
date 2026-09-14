@@ -72,6 +72,14 @@ async function main() {
     await setSetting('payments.instapay.recipient_name', 'Osta Home');
     await setSetting('payments.instapay_enabled', true);
 
+    // **حافز الدفع أونلاين (ADR-0091)**: من وقت ما اتفعّل، المبلغ المطلوب تحويله = الإجمالي
+    // **ناقص** الحافز، مرة واحدة لكل طلب. التدقيق ده كان مكتوب قبله وبيتوقّع الإجمالي الخام،
+    // فكان بيرسب على فرق ٣٠ ج.م. بيتقرا من الإعداد الحي مش ثابت في الكود — لو المالك غيّر
+    // القيمة، الفحص يفضل صح بدل ما يرسب أو يتساهل.
+    const [discountRow] = await h.q(`SELECT value::text AS value FROM settings WHERE key = 'payments.instapay_discount_egp'`);
+    const INSTAPAY_DISCOUNT_CENTS = Math.round(Number(JSON.parse(discountRow?.value ?? '0')) * 100);
+    console.log(`   حافز InstaPay الحالي: ${(INSTAPAY_DISCOUNT_CENTS / 100).toFixed(2)} ج.م`);
+
     console.log('\n═══ ١ — ترتيب وسائل الدفع والترشيح ═══');
     const channels = await h.api('/payment-channels', { token: customer.token });
     check('ترتيب', 'قايمة الوسائل ردّت', channels.status, 200);
@@ -111,7 +119,7 @@ async function main() {
         const first = started.body.data;
         check('تحويل', 'الحساب حقل مستقل', first.recipient_address, 'osta@instapay');
         check('تحويل', 'اسم المستلم حقل مستقل', first.recipient_name, 'Osta Home');
-        check('تحويل', 'المبلغ حقل مستقل', first.amount_cents, PRICE_CENTS);
+        check('تحويل', 'المبلغ حقل مستقل (بعد حافز الدفع أونلاين)', first.amount_cents, PRICE_CENTS - INSTAPAY_DISCOUNT_CENTS);
         check('تحويل', 'رقم الطلب هو الكود المرجعي', first.reference_code, order.order_number);
         // **الأرقام مش مدفونة في النص** — ده جوهر بلاغ الـbidi.
         check('تحويل', 'نص التعليمات مافيهوش الحساب',
@@ -270,8 +278,13 @@ async function main() {
         check('عربون', 'التحويل على طلب الدفع الكامل عدّى', transfer.status, 201,
           transfer.status !== 201 ? JSON.stringify(transfer.body?.error ?? '').slice(0, 200) : undefined);
         if (transfer.status === 201) {
-          check('عربون', 'المطلوب تحويله = الطلب كامل',
-            transfer.body.data.amount_cents, Number(row.total_amount_cents));
+          check('عربون', 'المطلوب تحويله = الطلب كامل ناقص الحافز',
+            transfer.body.data.amount_cents, Number(row.total_amount_cents) - INSTAPAY_DISCOUNT_CENTS);
+          // الحافز مرة واحدة لكل طلب: لازم يكون مسجّل في عموده المستقل كمان، مش مجرد فرق في الرقم.
+          const [afterTransfer] = await h.q(
+            `SELECT instapay_discount_cents FROM orders WHERE id = $1`, [id]);
+          check('عربون', 'الحافز اتسجّل في عموده على الطلب',
+            Number(afterTransfer.instapay_discount_cents), INSTAPAY_DISCOUNT_CENTS);
         }
       }
     }

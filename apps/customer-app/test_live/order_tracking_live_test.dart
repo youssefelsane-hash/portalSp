@@ -3,49 +3,43 @@
 // TestWidgetsFlutterBinding زي http)، فمفيش داعي لأي حاجة تانية غير test() العادي.
 // شغّله بـ: flutter test test_live/order_tracking_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_config.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('عميل بيتابع فني حقيقي لحظياً عبر WebSocket ويستقبل تحديث موقع حقيقي', () async {
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك: الـthrottle بيتعقّب بالرقم (٥ طلبات OTP في
+    // الدقيقة)، و١٢ ملف اختبار كانوا بيسجّلوا دخول بنفس `+201000009999` — فكانوا بياكلوا
+    // حصة بعض والنتيجة «حاولت كتير في وقت قصير» لأسباب مالهاش علاقة بالكود المختبَر.
+    final customerToken = await registerCustomer(uniquePhone());
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': '019fde0d-07ca-70e5-a460-d47bdcdad16f',
-        'address_id': '019fde0d-392b-7b81-b57b-20267dcd239f',
+        'service_id': await pickBookableServiceId(),
+        'address_id': await ensureAddressFor(customerToken),
+        'problem_description': 'اختبار تتبع لحظي ${DateTime.now().microsecondsSinceEpoch}',
       },
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await _loginAs('+201000000011');
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع، فالاختبار مايفترضش النتيجة
+    // (تفاصيل كاملة فوق `claimOrderAsTechnician`، §148).
+    final technicianToken = await claimOrderAsTechnician(orderId, '+201000000013');
+    final accepted = await apiRequest('GET', '/orders/$orderId', accessToken: customerToken);
     expect(accepted!['order_status'], 'accepted');
+
+    // **`depart` مش خطوة زيادة (تدقيق §148)**: الـgateway بيبثّ `order:location_updated` للطلبات
+    // اللي الفني **في طريقه ليها** بس (`findOrdersInTransitForTechnician` = `technician_on_way`)،
+    // وده تعريف صح — العميل مايتتبعش فني لسه ماتحركش. الاختبار كان بيقف عند `accepted` وبعدين
+    // يستنى بث عمره ما هييجي، فيسقط بـTimeout على **سلوك سليم**.
+    final departed = await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
+    expect(departed!['order_status'], 'technician_on_way');
 
     final socketBaseUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
 
@@ -105,6 +99,6 @@ void main() {
     }
 
     // نظافة: نلغي الطلب التجريبي عشان مايفضلش معلّق في searching/accepted
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
   });
 }

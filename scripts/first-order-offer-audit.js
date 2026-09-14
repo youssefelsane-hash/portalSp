@@ -182,10 +182,15 @@ async function run() {
       `SELECT title_ar, body_ar FROM notifications WHERE user_id = $1 AND notification_type = 'first_order_offer'`,
       [on.userId],
     );
+    // **صف لكل قناة، مش صف لكل إشعار**: `notifications` بتسجّل كل قناة اتبعت فيها الرسالة
+    // (`in_app` + `push`)، فالتحقق كان `=== 1` وبيعدّي بالصدفة وقت ما النوع ده مكانش له صف في
+    // `notification_type_configs` (يعني in_app بس). أول ما migration 0331 زرع الصف الناقص وفعّل
+    // الـpush، العدد بقى ٢ والتدقيق بدأ يقول «العميل مااتبلّغش» وهو اتبلّغ **على قناتين**.
+    // الشرط الحقيقي: وصله إشعار واحد على الأقل، وكل نسخة فيه الكود. (تدقيق §148، المرحلة ٩)
     h.record(
       'ف-٣/و العميل اتبلّغ بالكود — عرض محدش يعرفه مالوش قيمة',
-      notes.length === 1 && String(notes[0].body_ar).includes(promo?.code ?? '###'),
-      notes.length ? String(notes[0].body_ar).slice(0, 90) : 'مفيش إشعار',
+      notes.length >= 1 && notes.every((n) => String(n.body_ar).includes(promo?.code ?? '###')),
+      notes.length ? `قنوات=${notes.length} · ${String(notes[0].body_ar).slice(0, 70)}` : 'مفيش إشعار',
     );
 
     // إعادة التسجيل/الحدث مابتضاعفش الكود

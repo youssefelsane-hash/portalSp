@@ -32,16 +32,31 @@ BIN_NAME="$(echo "$APP" | tr '-' '_')"
 # `CMakeCache.txt` قديمة بتخلّي البناء «ينجح» وهو مركّب في /usr/local بدل bundle — اتلقطت
 # فعلاً. مسح دليل البناء بيضمن إعادة ضبط CMake بالـprefix الصح.
 [[ -f "$DIR/build/linux/x64/debug/CMakeCache.txt" ]] && ! [[ -d "$DIR/build/linux/x64/debug/bundle" ]] && rm -rf "$DIR/build/linux"
-( cd "$DIR" && flutter build linux --debug >/dev/null )
+# **بَقّة حقيقية في الأداة نفسها (تدقيق ماراثوني 2026-09-13، docs/08 §148)**: البناء كان بلا
+# `API_BASE_URL`، والقيمة الافتراضية في الكود هي `http://10.0.2.2:3000` (عنوان محاكي أندرويد
+# للوصول للمضيف) — وده **عنوان ميت على سطح مكتب لينكس**. النتيجة إن كل لقطة بصرية كانت بتتاخد
+# لتطبيق **مش موصول بأي API**: الهيدر والبراند بيبانوا، وأي قسم بيانات (الفئات، الأكثر طلبًا،
+# الطلبات) بيفضل skeleton للأبد. يعني الأداة اللي «بتمسك البلاغات البصرية» كانت عمياء عن نص
+# الشاشة. قابل للتجاوز: `API_BASE_URL=http://host:3000/api/v1 scripts/flutter-visual.sh …`
+API_BASE_URL="${API_BASE_URL:-http://localhost:3000/api/v1}"
+( cd "$DIR" && flutter build linux --debug --dart-define=API_BASE_URL="$API_BASE_URL" >/dev/null )
 
 pgrep -f "Xvfb $DISPLAY" >/dev/null || { Xvfb "$DISPLAY" -screen 0 1280x900x24 >/dev/null 2>&1 & sleep 2; }
 pgrep -x fluxbox      >/dev/null || { fluxbox >/dev/null 2>&1 & sleep 2; }
 
 "$DIR/build/linux/x64/debug/bundle/$BIN_NAME" >"${TMPDIR:-/tmp}/$BIN_NAME.log" 2>&1 &
 APP_PID=$!
-trap 'kill $APP_PID 2>/dev/null || true' EXIT
-sleep 15
+# الـtrap على INT/TERM بس، **مش على EXIT**: السكربت بيقول في آخر سطر «التطبيق شغّال بـPID …
+# للتفاعل بـxdotool»، وCLAUDE.md بيوصف نفس الشيء — وtrap على EXIT كان بيقتله لحظة ما السكربت
+# يخلص، فالتفاعل الموعود به مستحيل والرسالة نفسها غلط. (تدقيق §148، المرحلة ١١)
+# لو اتقاطع السكربت (Ctrl-C/kill) التطبيق بيتقفل عادي — ده اللي الـtrap لسه بيغطّيه.
+trap 'kill $APP_PID 2>/dev/null || true' INT TERM
+# ١٥ ثانية كانت بتكفي لإقلاع التطبيق بس مش دايمًا لوصول بيانات الـAPI — اللقطة كانت بتطلع
+# والفئات لسه skeleton، وده بيخلّي أي مراجعة بصرية تشك في عطل مش موجود. قابل للضبط لو الجهاز
+# أبطأ: `FLUTTER_VISUAL_SETTLE=25 scripts/flutter-visual.sh …`
+sleep "${FLUTTER_VISUAL_SETTLE:-22}"
 
 import -window root "$OUT"
 echo "✅ لقطة: $OUT  |  لوج التطبيق: ${TMPDIR:-/tmp}/$BIN_NAME.log"
 echo "   للتفاعل: DISPLAY=$DISPLAY xdotool ...  (التطبيق شغّال بـPID $APP_PID)"
+echo "   لما تخلص: kill $APP_PID"
