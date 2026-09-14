@@ -38,8 +38,10 @@ void main() {
     expect(noThreadError, isNotNull);
     expect(noThreadError!.statusCode, 404);
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع، فالاختبار مايفترضش النتيجة
+    // (تفاصيل كاملة فوق `claimOrderAsTechnician`، §148).
+    final technicianToken = await claimOrderAsTechnician(orderId, '+201000000014');
+    final accepted = await apiRequest('GET', '/orders/$orderId', accessToken: customerToken);
     expect(accepted!['order_status'], 'accepted');
 
     final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: customerToken);

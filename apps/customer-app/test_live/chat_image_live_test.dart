@@ -38,8 +38,9 @@ void main() {
     );
     final orderId = created!['id'] as String;
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع، فالاختبار مايفترضش النتيجة
+    // (تفاصيل كاملة فوق `claimOrderAsTechnician`، §148).
+    final technicianToken = await claimOrderAsTechnician(orderId, '+201000000015');
 
     final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: customerToken);
     final threadId = threadResponse!['id'] as String;

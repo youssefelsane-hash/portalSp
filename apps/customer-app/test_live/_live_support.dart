@@ -215,20 +215,29 @@ Future<String> ensureAddressFor(String accessToken) async {
   return address!['id'] as String;
 }
 
-/// أول خدمة حقيقية قابلة للحجز **بلا حقول تسعير إجبارية** من الكتالوج الحي.
+/// أول خدمة حقيقية قابلة للحجز **بلا أي مدخلات إضافية** من الكتالوج الحي.
 ///
 /// **ليه موجود (تدقيق ماراثوني 2026-09-14، §148)**: عشر ملفات كانت بتحط **UUID خدمة مكتوب
 /// بالإيد** (`019fde0d-07ca-…`) اتعمل في سيشن قديمة — نفس فئة العطب بتاعة مسار اللوج والعنوان.
 ///
-/// وشرط «بلا حقول إجبارية» مش تفصيلة: أول خدمة في الكتالوج ممكن تكون خدمة formula محتاجة
-/// «المساحة»، فالطلب بيترفض بـ«الحقل "المساحة" مطلوب» والاختبار بيفشل لسبب مالوش علاقة بيه.
+/// وشرطين مش تفاصيل:
+///  • **بلا حقول تسعير إجبارية** — وإلا الطلب بيترفض بـ«الحقل "المساحة" مطلوب».
+///  • **دقة الموعد مش `start_time`** — وإلا بيترفض بـ«لازم تحدد معاد بداية الخدمة دي».
+/// الاتنين بيخلّوا الاختبار يفشل لسبب مالوش أي علاقة باللي بيختبره، والأسوأ إن النتيجة
+/// بتتغيّر حسب ترتيب الكتالوج فبتنجح لوحدها وتفشل في السويتة.
 Future<String> pickBookableServiceId() async {
   final services = await apiRequestList('/services');
+  String? fallback;
   for (final service in services) {
     final id = service['id'] as String;
     final fields = await apiRequestList('/services/$id/pricing-fields');
-    if (fields.every((f) => f['is_required'] != true)) return id;
+    if (fields.any((f) => f['is_required'] == true)) continue;
+    final detail = await apiRequest('GET', '/services/$id');
+    if (detail == null) continue;
+    fallback ??= id;
+    if (detail['schedule_precision'] != 'start_time') return id;
   }
+  if (fallback != null) return fallback;
   throw StateError('مفيش خدمة نشطة بلا حقول تسعير إجبارية — شغّل بذور الكتالوج الأول');
 }
 
@@ -300,8 +309,7 @@ Future<String> completeOrderThroughTechnician(
   });
   final orderId = order!['id'] as String;
 
-  final technicianToken = await devTechnicianToken(technicianPhone);
-  await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+  final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
   for (final step in ['depart', 'arrive', 'start']) {
     await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
   }
@@ -340,8 +348,7 @@ Future<String> completeOrderAwaitingPayment(
   });
   final orderId = order!['id'] as String;
 
-  final technicianToken = await devTechnicianToken(technicianPhone);
-  await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+  final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
   for (final step in ['depart', 'arrive', 'start']) {
     await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
   }
@@ -376,3 +383,98 @@ Future<void> fundCustomerWallet(String customerToken, int cents) async {
     throw StateError('مقدرتش أشحن المحفظة: ${result.stderr}');
   }
 }
+
+/// توكن تطوير لفني **بمعرّف البروفايل** (مش بالموبايل) — بيلزم لما المنصّة هي اللي بتختار
+/// الفني (توزيع تلقائي) والاختبار محتاج يكمّل بنفس اللي اتعيّن فعلاً.
+Future<String> devTokenForTechnicianProfile(String technicianProfileId) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "SELECT u.phone_number FROM technician_profiles tp JOIN users u ON u.id = tp.user_id "
+     "WHERE tp.id = '$technicianProfileId' LIMIT 1"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  final phone = (result.stdout as String).trim().split('\n').first.trim();
+  if (phone.isEmpty) throw StateError('مالقيتش فني بالمعرّف $technicianProfileId');
+  return devTechnicianToken(phone);
+}
+
+/// بيرجّع توكن **الفني اللي العرض راح له فعلاً** ويقبل الطلب بيه.
+///
+/// **ليه (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: الفني مايقدرش يقبل طلب إلا لو **العرض
+/// اتبعتله هو** في جولة توزيع (`order_assignments`)، والمنصّة هي اللي بتختار مين. الاختبارات
+/// كانت بتفترض إن الفني بتاعها هو اللي هياخد العرض — وده بيحصل لما الفنيين المتاحين قليلين،
+/// فكانت تنجح لوحدها وتفشل جوّه السويتة الكاملة بـ«العرض ده مبقاش متاح». الفشل ده **توقيت
+/// وتوزيع**، مش كود مكسور. الحل: الاختبار بيسأل مين ماسك العرض دلوقتي ويكمّل بيه — بيختبر
+/// نفس المسار الحقيقي من غير ما يفترض نتيجة التوزيع.
+Future<String> claimOrderAsTechnician(String orderId, String preferredTechnicianPhone) async {
+  final preferred = await devTechnicianToken(preferredTechnicianPhone);
+  try {
+    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: preferred);
+    return preferred;
+  } catch (_) {
+    // العرض راح لفني تاني — نجيبه من `order_assignments` ونكمّل بيه.
+    for (var attempt = 0; attempt < 25; attempt++) {
+      final holder = await _technicianHoldingOrder(orderId);
+      if (holder != null) {
+        final token = await devTokenForTechnicianProfile(holder.profileId);
+        if (holder.alreadyAssigned) return token;
+        try {
+          await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: token);
+          return token;
+        } catch (_) {
+          // جولة جديدة راحت لحد تاني — نعيد السؤال.
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    rethrow;
+  }
+}
+
+class _OrderHolder {
+  _OrderHolder(this.profileId, this.alreadyAssigned);
+  final String profileId;
+  final bool alreadyAssigned;
+}
+
+/// الفني المعيَّن على الطلب، أو صاحب آخر عرض حي عليه.
+Future<_OrderHolder?> _technicianHoldingOrder(String orderId) async {
+  final rows = await _psql(
+    "SELECT COALESCE(o.technician_id::text, '') || '|' || "
+    "COALESCE((SELECT a.technician_id::text FROM order_assignments a "
+    "          WHERE a.order_id = o.id AND a.assignment_status = 'sent' AND a.expires_at > now() "
+    "          ORDER BY a.sent_at DESC LIMIT 1), '') "
+    "FROM orders o WHERE o.id = '$orderId'",
+  );
+  if (rows.isEmpty) return null;
+  final parts = rows.first.split('|');
+  final assigned = parts.isNotEmpty ? parts[0].trim() : '';
+  final offered = parts.length > 1 ? parts[1].trim() : '';
+  if (assigned.isNotEmpty) return _OrderHolder(assigned, true);
+  if (offered.isNotEmpty) return _OrderHolder(offered, false);
+  return null;
+}
+
+/// تنفيذ استعلام قراءة على قاعدة التطوير — نفس أسلوب باقي هيلبرز `test_live/`.
+Future<List<String>> _psql(String sql) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc', sql],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  return (result.stdout as String).trim().split('\n').where((line) => line.trim().isNotEmpty).toList();
+}
+

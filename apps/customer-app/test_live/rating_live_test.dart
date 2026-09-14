@@ -13,7 +13,7 @@ void main() {
     // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: النسخة القديمة كانت بتدوّر على طلب
     // `completed` موجود أصلاً لعميل ثابت — اعتماد على بيانات سيشن قديمة، وفي قاعدة نضيفة
     // بتسقط على «Expected: non-empty». دلوقتي بنمشّي دورة تنفيذ حقيقية كاملة الأول.
-    await completeOrderThroughTechnician(accessToken, problemDescription: 'طلب اختبار التقييم');
+    await completeOrderThroughTechnician(accessToken, technicianPhone: '+201000000017', problemDescription: 'طلب اختبار التقييم');
     final orders = await apiRequestList('/orders', accessToken: accessToken);
     final completedOrders = orders.where((o) => o['order_status'] == 'completed').toList();
     expect(completedOrders, isNotEmpty, reason: 'محتاجين طلب completed واحد على الأقل لنفس العميل عشان نختبر التقييم');

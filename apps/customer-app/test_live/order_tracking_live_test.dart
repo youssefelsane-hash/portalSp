@@ -28,8 +28,10 @@ void main() {
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع، فالاختبار مايفترضش النتيجة
+    // (تفاصيل كاملة فوق `claimOrderAsTechnician`، §148).
+    final technicianToken = await claimOrderAsTechnician(orderId, '+201000000013');
+    final accepted = await apiRequest('GET', '/orders/$orderId', accessToken: customerToken);
     expect(accepted!['order_status'], 'accepted');
 
     // **`depart` مش خطوة زيادة (تدقيق §148)**: الـgateway بيبثّ `order:location_updated` للطلبات

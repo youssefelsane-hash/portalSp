@@ -169,20 +169,29 @@ Future<String> ensureAddressFor(String accessToken) async {
   return address!['id'] as String;
 }
 
-/// أول خدمة حقيقية قابلة للحجز **بلا حقول تسعير إجبارية** من الكتالوج الحي.
+/// أول خدمة حقيقية قابلة للحجز **بلا أي مدخلات إضافية** من الكتالوج الحي.
 ///
 /// **ليه موجود (تدقيق ماراثوني 2026-09-14، §148)**: عشر ملفات كانت بتحط **UUID خدمة مكتوب
 /// بالإيد** (`019fde0d-07ca-…`) اتعمل في سيشن قديمة — نفس فئة العطب بتاعة مسار اللوج والعنوان.
 ///
-/// وشرط «بلا حقول إجبارية» مش تفصيلة: أول خدمة في الكتالوج ممكن تكون خدمة formula محتاجة
-/// «المساحة»، فالطلب بيترفض بـ«الحقل "المساحة" مطلوب» والاختبار بيفشل لسبب مالوش علاقة بيه.
+/// وشرطين مش تفاصيل:
+///  • **بلا حقول تسعير إجبارية** — وإلا الطلب بيترفض بـ«الحقل "المساحة" مطلوب».
+///  • **دقة الموعد مش `start_time`** — وإلا بيترفض بـ«لازم تحدد معاد بداية الخدمة دي».
+/// الاتنين بيخلّوا الاختبار يفشل لسبب مالوش أي علاقة باللي بيختبره، والأسوأ إن النتيجة
+/// بتتغيّر حسب ترتيب الكتالوج فبتنجح لوحدها وتفشل في السويتة.
 Future<String> pickBookableServiceId() async {
   final services = await apiRequestList('/services');
+  String? fallback;
   for (final service in services) {
     final id = service['id'] as String;
     final fields = await apiRequestList('/services/$id/pricing-fields');
-    if (fields.every((f) => f['is_required'] != true)) return id;
+    if (fields.any((f) => f['is_required'] == true)) continue;
+    final detail = await apiRequest('GET', '/services/$id');
+    if (detail == null) continue;
+    fallback ??= id;
+    if (detail['schedule_precision'] != 'start_time') return id;
   }
+  if (fallback != null) return fallback;
   throw StateError('مفيش خدمة نشطة بلا حقول تسعير إجبارية — شغّل بذور الكتالوج الأول');
 }
 

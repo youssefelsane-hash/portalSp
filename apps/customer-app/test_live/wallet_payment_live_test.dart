@@ -15,7 +15,7 @@ void main() {
     // «Expected: a value greater than <0>» اللي مش بيقول السبب. دلوقتي بيمشّي دورة تنفيذ
     // حقيقية لحد `work_completed` (من غير تحصيل كاش)، وبيشحن المحفظة زي ما الهارنس بتعمل.
     final accessToken = await registerCustomer(uniquePhone());
-    final orderId = await completeOrderAwaitingPayment(accessToken, problemDescription: 'طلب اختبار الدفع من المحفظة');
+    final orderId = await completeOrderAwaitingPayment(accessToken, technicianPhone: '+201000000018', problemDescription: 'طلب اختبار الدفع من المحفظة');
 
     final orderBefore = await apiRequest('GET', '/orders/$orderId', accessToken: accessToken);
     final orderTotal = orderBefore!['total_amount_cents'] as int;
