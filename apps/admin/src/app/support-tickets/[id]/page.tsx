@@ -29,7 +29,7 @@ export default function SupportTicketDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   function load() {
-    authedFetch<SupportTicketResponseDto>(`/support-tickets/${id}`)
+    authedFetch<SupportTicketResponseDto>(`/admin/support-tickets/${id}`)
       .then(setTicket)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل التذكرة'));
   }
@@ -139,10 +139,8 @@ export default function SupportTicketDetailPage() {
                 {ticket.satisfaction_rating !== null ? `${ticket.satisfaction_rating}/5` : 'لسه ما اتقيّمتش'}
               </div>
               <div>
-                <span className="text-muted-foreground">صاحب التذكرة (user_id): </span>
-                <span dir="ltr" className="font-mono text-xs">
-                  {ticket.user_id}
-                </span>
+                <span className="text-muted-foreground">صاحب التذكرة: </span>
+                {ticket.owner_name ?? 'اسم غير مسجل'}
               </div>
             </CardContent>
           </Card>

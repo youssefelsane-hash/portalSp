@@ -19,7 +19,14 @@ export class AdminSupportTicketsController {
   @RequirePermission('support_tickets.view')
   async listAll(@Query() query: ListSupportTicketsDto) {
     const tickets = await this.supportTicketsService.listAllForAdmin(query.ticket_status);
-    return tickets.map(toSupportTicketResponseDto);
+    return tickets.map(({ ticket, ownerName }) => toSupportTicketResponseDto(ticket, ownerName));
+  }
+
+  @Get(':id')
+  @RequirePermission('support_tickets.view')
+  async getOne(@Param('id', ParseUUIDPipe) id: string) {
+    const { ticket, ownerName } = await this.supportTicketsService.getForAdmin(id);
+    return toSupportTicketResponseDto(ticket, ownerName);
   }
 
   @Patch(':id/assign')
