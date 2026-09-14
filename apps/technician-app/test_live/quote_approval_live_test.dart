@@ -6,19 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني بيقترح عرض سعر، العميل بيوافق، والمبلغ الإضافي بيتحصّل فعلياً', () async {
@@ -38,7 +25,7 @@ void main() {
     final orderId = order!['id'] as String;
     final baseTotalCents = order['total_amount_cents'] as int;
 
-    final technicianToken = await _loginAs('+201000000011');
+    final technicianToken = await devTechnicianToken('+201000000011');
     await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/arrive', accessToken: technicianToken);
@@ -51,7 +38,16 @@ void main() {
       accessToken: technicianToken,
       body: {
         'items': [
-          {'item_type': 'spare_part', 'name_ar': 'اختبار حي — قطعة غيار', 'quantity': 1, 'unit_price_cents': 6000},
+          {
+            'item_type': 'spare_part',
+            'name_ar': 'اختبار حي — قطعة غيار',
+            // `description` إجباري (ADR-0084 §2، ١٠ حروف على الأقل) — العميل لازم يفهم هو
+            // بيوافق على إيه بالظبط قبل ما يدفع زيادة. من غيره الرد VAL_001 «البيانات المرسلة
+            // غير صحيحة» بلا أي إشارة للحقل الناقص (تدقيق §148).
+            'description': 'قطعة غيار بديلة للقطعة التالفة — اختبار حي',
+            'quantity': 1,
+            'unit_price_cents': 6000,
+          },
         ],
       },
     );
@@ -74,6 +70,7 @@ void main() {
     expect(approvedOrder['order_status'], 'in_progress');
     expect(approvedOrder['total_amount_cents'], baseTotalCents + 6000);
 
+    await uploadAfterPhoto(orderId, technicianToken);
     final completed = await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
     expect(completed!['order_status'], 'work_completed');
 

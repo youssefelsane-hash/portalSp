@@ -10,19 +10,6 @@ import 'package:customer_app/core/api_config.dart';
 import 'package:customer_app/core/api_exception.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 // أصغر PNG صحيح ممكن (1×1 بكسل أحمر) — كافي لاختبار مسار الرفع نفسه، مش محتوى الصورة.
 final List<int> _tinyPng = [
@@ -51,7 +38,7 @@ void main() {
     );
     final orderId = created!['id'] as String;
 
-    final technicianToken = await _loginAs('+201000000011');
+    final technicianToken = await devTechnicianToken('+201000000011');
     await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
 
     final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: customerToken);
@@ -109,7 +96,7 @@ void main() {
       // بما إن الاستخدام الحقيقي الوحيد للدالة دي هو صور حقيقية جايه من image_picker.
 
       // فني تاني مش صاحب الطلب يترفض 403
-      final otherTechnicianToken = await _loginAs('+201099988877');
+      final otherTechnicianToken = await devTechnicianToken('+201099988877');
       ApiException? forbidden;
       try {
         await apiUpload(

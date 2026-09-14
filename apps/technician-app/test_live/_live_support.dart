@@ -66,7 +66,15 @@ Future<String> latestOtpFor(String phoneNumber) async {
 /// مش بَقّة. المسار ده **مابيتجاوزش** الحارس الأمني ولا بيلمس دورة الـOTP: هو بس بيوقّع توكن
 /// تطوير محليًا بنفس طريقة `apps/admin/test/operations-center.e2e.mjs` المعتمدة، ومش هيشتغل
 /// خالص من غير الوصول للسر المحلي (يعني مالوش أي معنى خارج جهاز التطوير).
-Future<String> devAdminToken(String phoneNumber) async {
+Future<String> devAdminToken(String phoneNumber) => _devTokenFor(phoneNumber, 'admin');
+
+/// نفس الفكرة لحساب فني — بس السبب هنا **مش** MFA: الفنيين مش high-privilege فالـOTP بيشتغل
+/// معاهم عادي. السبب إن تمن ملفات اختبار بتسجّل دخول بنفس رقم الفني، والـthrottle بيتعقّب
+/// بالرقم (٥ طلبات OTP/دقيقة) ⇒ «حاولت كتير في وقت قصير». الملفات اللي **مسار الـOTP نفسه**
+/// هو المُختبَر فيها (زي `technician_orders_live_test.dart`) بتفضل على الـOTP الحقيقي عمدًا.
+Future<String> devTechnicianToken(String phoneNumber) => _devTokenFor(phoneNumber, 'technician');
+
+Future<String> _devTokenFor(String phoneNumber, String userType) async {
   final env = _readApiEnv();
   final secret = Platform.environment['JWT_ACCESS_SECRET'] ?? env['JWT_ACCESS_SECRET'];
   if (secret == null || secret.isEmpty) {
@@ -86,7 +94,7 @@ Future<String> devAdminToken(String phoneNumber) async {
   }
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   return _signHs256(
-    {'sub': userId, 'userType': 'admin', 'amr': ['otp'], 'iat': now, 'exp': now + 3600},
+    {'sub': userId, 'userType': userType, 'amr': ['otp'], 'iat': now, 'exp': now + 3600},
     secret,
   );
 }
@@ -171,4 +179,42 @@ Future<String?> pickCustomerCancellationReasonId() async {
   final reasons = await apiRequestList('/cancellation-reasons?applies_to=customer');
   if (reasons.isEmpty) return null;
   return reasons.first['id'] as String;
+}
+
+/// رقم موبايل فريد لكل تشغيلة — الأرقام المشتركة بتخلّي ملفين متوازيين يتعاركوا على نفس حصة
+/// الـthrottle (٥ طلبات OTP في الدقيقة بالرقم).
+String uniquePhone([int seq = 0]) {
+  final micros = DateTime.now().microsecondsSinceEpoch;
+  final mixed = (_phoneRandom.nextInt(1000000) ^ (micros & 0xFFFFF)) % 1000000;
+  return '+2011${mixed.toString().padLeft(6, '0')}${seq.toString().padLeft(2, '0')}';
+}
+
+final Random _phoneRandom = Random.secure();
+
+/// تسجيل عميل جديد بالكامل عبر مسار OTP الحقيقي؛ بيرجّع `access_token`.
+Future<String> registerCustomer(String phoneNumber, {String fullName = 'عميل اختبار حي'}) async {
+  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'register'});
+  await Future<void>.delayed(const Duration(milliseconds: 600));
+  final otp = await latestOtpFor(phoneNumber);
+  final tokens = await apiRequest('POST', '/auth/register', body: {
+    'phone_number': phoneNumber,
+    'otp_code': otp,
+    'full_name': fullName,
+    'user_type': 'customer',
+  });
+  return tokens!['access_token'] as String;
+}
+
+/// صورة «بعد الشغل» — شرط إجباري قبل `complete` في الباك-إند («لازم ترفع صورة واحدة على الأقل
+/// بعد الشغل قبل ما تقفل الطلب»). اختبارات قديمة كانت بترفعها **بعد** القفل أو ما ترفعهاش
+/// خالص، فكانت بتترفض لسبب مالوش علاقة بالمُختبَر (تدقيق §148).
+Future<void> uploadAfterPhoto(String orderId, String technicianToken) async {
+  final bytes = await File('test_live/fixtures/test-1x1.png').readAsBytes();
+  await apiUpload(
+    '/technician/orders/$orderId/media',
+    fileBytes: bytes,
+    filename: 'after.png',
+    fields: {'media_type': 'after_photo'},
+    accessToken: technicianToken,
+  );
 }

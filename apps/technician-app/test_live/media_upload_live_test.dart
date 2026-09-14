@@ -8,19 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني حقيقي يقبل طلب حقيقي ويرفع صورة قبل/بعد حقيقية عليه', () async {
@@ -39,7 +26,7 @@ void main() {
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await _loginAs('+201000000011');
+    final technicianToken = await devTechnicianToken('+201000000011');
     final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
     expect(accepted!['order_status'], 'accepted');
 
@@ -60,10 +47,9 @@ void main() {
     await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/arrive', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/start', accessToken: technicianToken);
-    final completed =
-        await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
-    expect(completed!['order_status'], 'work_completed');
-
+    // صورة «بعد الشغل» **قبل** `complete` مش بعده: الباك-إند بقى بيفرض وجودها كشرط لقفل
+    // الطلب («لازم ترفع صورة واحدة على الأقل بعد الشغل قبل ما تقفل الطلب»). الترتيب القديم
+    // كان بيتصرّف كأن الشرط مش موجود (تدقيق §148).
     final afterMedia = await apiUpload(
       '/technician/orders/$orderId/media',
       fileBytes: imageBytes,
@@ -73,6 +59,10 @@ void main() {
     );
     expect(afterMedia, isNotNull);
     expect(afterMedia!['media_type'], 'after_photo');
+
+    final completed =
+        await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+    expect(completed!['order_status'], 'work_completed');
 
     final mediaList = await apiRequestList('/technician/orders/$orderId/media', accessToken: technicianToken);
     expect(mediaList.length, 2);

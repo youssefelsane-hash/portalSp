@@ -112,7 +112,15 @@ Future<String> loginCustomer(String phoneNumber) async {
 /// مش بَقّة. المسار ده **مابيتجاوزش** الحارس الأمني ولا بيلمس دورة الـOTP: هو بس بيوقّع توكن
 /// تطوير محليًا بنفس طريقة `apps/admin/test/operations-center.e2e.mjs` المعتمدة، ومش هيشتغل
 /// خالص من غير الوصول للسر المحلي (يعني مالوش أي معنى خارج جهاز التطوير).
-Future<String> devAdminToken(String phoneNumber) async {
+Future<String> devAdminToken(String phoneNumber) => _devTokenFor(phoneNumber, 'admin');
+
+/// نفس الفكرة لحساب فني — بس السبب هنا **مش** MFA: الفنيين مش high-privilege فالـOTP بيشتغل
+/// معاهم عادي. السبب إن تمن ملفات اختبار بتسجّل دخول بنفس رقم الفني، والـthrottle بيتعقّب
+/// بالرقم (٥ طلبات OTP/دقيقة) ⇒ «حاولت كتير في وقت قصير». الملفات اللي **مسار الـOTP نفسه**
+/// هو المُختبَر فيها (زي `technician_orders_live_test.dart`) بتفضل على الـOTP الحقيقي عمدًا.
+Future<String> devTechnicianToken(String phoneNumber) => _devTokenFor(phoneNumber, 'technician');
+
+Future<String> _devTokenFor(String phoneNumber, String userType) async {
   final env = _readApiEnv();
   final secret = Platform.environment['JWT_ACCESS_SECRET'] ?? env['JWT_ACCESS_SECRET'];
   if (secret == null || secret.isEmpty) {
@@ -132,7 +140,7 @@ Future<String> devAdminToken(String phoneNumber) async {
   }
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   return _signHs256(
-    {'sub': userId, 'userType': 'admin', 'amr': ['otp'], 'iat': now, 'exp': now + 3600},
+    {'sub': userId, 'userType': userType, 'amr': ['otp'], 'iat': now, 'exp': now + 3600},
     secret,
   );
 }
