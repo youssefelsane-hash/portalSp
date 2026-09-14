@@ -67,6 +67,10 @@ export class Service {
   @Column({ name: 'full_description_ar', type: 'text', nullable: true })
   fullDescriptionAr: string | null;
 
+  /** تعليمات العميل الخاصة بسلامة التعامل والممتلكات أثناء تنفيذ هذه الخدمة. */
+  @Column({ name: 'safety_guidance_ar', type: 'text', nullable: true })
+  safetyGuidanceAr: string | null;
+
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 

@@ -51,6 +51,7 @@ export interface AdminServiceResponseDto {
   slug: string;
   short_description_ar: string | null;
   full_description_ar: string | null;
+  safety_guidance_ar: string | null;
   icon_url: string | null;
   featured_icon_url: string | null;
   featured_name_ar: string | null;
@@ -117,6 +118,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     slug: service.slug,
     short_description_ar: service.shortDescriptionAr,
     full_description_ar: service.fullDescriptionAr,
+    safety_guidance_ar: service.safetyGuidanceAr,
     icon_url: service.iconUrl,
     featured_icon_url: service.featuredIconUrl,
     featured_name_ar: service.featuredNameAr,

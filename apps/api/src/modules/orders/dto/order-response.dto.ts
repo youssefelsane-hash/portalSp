@@ -45,6 +45,8 @@ export interface OrderResponseDto {
   duration_minutes: number | null;
   /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول. فاضية في القوايم. */
   customer_notices: OrderCustomerNoticeDto[];
+  /** يظهر في تفاصيل طلب العميل فقط؛ القوائم تتركه undefined لتجنب استعلام لكل صف. */
+  safety_guidance_ar?: string | null;
   estimated_price_cents: number | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
   initial_quote_note: string | null;
@@ -190,6 +192,7 @@ export function toOrderResponseDto(
     /** رسايل الإدارة للعميل على الطلب ده (ADR-0071) — بتتمرّر في مسار تفاصيل الطلب بس،
      * مش في القوايم (استعلام إضافي لكل صف بلا فايدة عرض). */
     customerNotices?: OrderCustomerNotice[];
+    safetyGuidanceAr?: string | null;
   },
 ): OrderResponseDto {
   return {
@@ -222,6 +225,7 @@ export function toOrderResponseDto(
       message: n.message,
       created_at: n.createdAt.toISOString(),
     })),
+    safety_guidance_ar: viewerExtras?.safetyGuidanceAr,
     estimated_price_cents: order.estimatedPriceCents,
     initial_quote_source: order.initialQuoteSource,
     initial_quote_note: order.initialQuoteNote,

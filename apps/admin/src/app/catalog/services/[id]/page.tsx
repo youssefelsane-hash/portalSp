@@ -521,6 +521,7 @@ export default function ServiceDetailPage() {
       name_en: (form.get('name_en') as string) || undefined,
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
       full_description_ar: (form.get('full_description_ar') as string) || undefined,
+      safety_guidance_ar: (form.get('safety_guidance_ar') as string).trim() || null,
       icon_url: (form.get('icon_url') as string) || undefined,
       featured_icon_url: (form.get('featured_icon_url') as string) || null,
       featured_name_ar: (form.get('featured_name_ar') as string) || null,
@@ -810,6 +811,20 @@ export default function ServiceDetailPage() {
               <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_full_desc">وصف كامل</Label>
                 <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
+              </div>
+              <div className="flex flex-col gap-1 rounded-xl border border-amber-200/70 bg-amber-50/40 p-4">
+                <Label htmlFor="svc_safety_guidance">إرشادات السلامة والتعامل للعميل</Label>
+                <Textarea
+                  id="svc_safety_guidance"
+                  name="safety_guidance_ar"
+                  defaultValue={service.safety_guidance_ar ?? ''}
+                  rows={6}
+                  maxLength={5000}
+                  placeholder="مثال: حفاظًا على سلامتك وممتلكاتك، احتفظ بالمتعلقات الثمينة في مكان آمن..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  يظهر النص داخل تفاصيل كل طلب لهذه الخدمة طوال التنفيذ وبعد اكتماله. اكتب تعليمات عملية ومحايدة تحمي العميل ومقدم الخدمة.
+                </p>
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>

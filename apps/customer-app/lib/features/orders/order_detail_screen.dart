@@ -47,6 +47,11 @@ const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment',
 // المصدر الوحيد اللي بيقرّر البث بيروح لمين.
 const Set<String> _liveTrackingStatuses = {'technician_on_way'};
 
+const String _defaultSafetyGuidanceAr =
+    'حفاظًا على سلامتك وممتلكاتك وسلامة مقدم الخدمة، احتفظ بالمتعلقات الثمينة '
+    'والمستندات والأموال في مكان آمن، ووضّح نطاق العمل قبل البدء، ولا تترك الأطفال '
+    'أو أي شخص يحتاج للرعاية دون إشراف مناسب. إذا لاحظت أي تصرف غير مريح، تواصل مع الدعم فورًا.';
+
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
 
@@ -935,6 +940,63 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
+  Future<void> _showSafetyGuidance(Order order) {
+    final customGuidance = order.safetyGuidanceAr?.trim();
+    final guidance = customGuidance == null || customGuidance.isEmpty
+        ? _defaultSafetyGuidanceAr
+        : customGuidance;
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            4,
+            24,
+            24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.health_and_safety_outlined,
+                      color: Theme.of(sheetContext).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'إرشادات السلامة والتعامل',
+                        style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  guidance,
+                  style: Theme.of(sheetContext).textTheme.bodyLarge?.copyWith(height: 1.7),
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: const Text('فهمت'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = _order;
@@ -1121,6 +1183,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ],
                             ],
                           ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          leading: Icon(
+                            Icons.health_and_safety_outlined,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          title: const Text('إرشادات السلامة والتعامل'),
+                          subtitle: const Text('اقرأها قبل الزيارة لحماية سلامتك وممتلكاتك'),
+                          trailing: const Icon(Icons.chevron_left),
+                          onTap: () => _showSafetyGuidance(order),
                         ),
                       ),
                       if (order.technicianPhone != null) ...[

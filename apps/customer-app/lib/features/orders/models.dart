@@ -130,6 +130,8 @@ class Order {
   final int? durationMinutes;
   /// رسايل الإدارة للعميل (ADR-0071) — الأحدث الأول. فاضية في قايمة الطلبات.
   final List<OrderCustomerNotice> customerNotices;
+  /// نص تديره الإدارة لكل خدمة ويظهر في تفاصيل الطلب طوال التنفيذ وبعد الإغلاق.
+  final String? safetyGuidanceAr;
   // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
   // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
   final String? requestedTechnicianId;
@@ -184,6 +186,7 @@ class Order {
     this.estimatedDurationDays,
     this.durationMinutes,
     this.customerNotices = const [],
+    this.safetyGuidanceAr,
     this.requestedTechnicianId,
     this.technicianName,
     this.technicianPhone,
@@ -244,6 +247,7 @@ class Order {
     customerNotices: ((json['customer_notices'] as List<dynamic>?) ?? const [])
         .map((e) => OrderCustomerNotice.fromJson(e as Map<String, dynamic>))
         .toList(),
+    safetyGuidanceAr: json['safety_guidance_ar'] as String?,
     requestedTechnicianId: json['requested_technician_id'] as String?,
     technicianName: json['technician_name'] as String?,
     technicianPhone: json['technician_phone'] as String?,

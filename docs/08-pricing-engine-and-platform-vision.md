@@ -15099,7 +15099,7 @@ batch بـ«الدفعة الأساسية» هنكدب على الأدمن في 
 23/23 · `booking-suggestion` 24/24 · `funnel-integrity` 17/17 · `first-order-offer` 16/16 ·
 `concurrency-booking-safety`: مفيش double booking تحت ضغط، وصفر 5xx.
 
-**عطل مخطط حقيقي اتلقط (migration 0330)**: `order_problem_image_uploads` و
+**عطل مخطط حقيقي اتلقط (migration 0334)**: `order_problem_image_uploads` و
 `pricing_field_uploads` كل واحد فيهم `claimed_order_id ... ON DELETE SET NULL` **مع**
 `CHECK` بيفرض إن العمودين يبقوا فاضيين مع بعض أو مليانين مع بعض. الاتنين مايتحققوش سوا:
 حذف الطلب بيصفّر العمود الأول وبس، فالـCHECK يرفض والحذف كله يفشل — يعني `ON DELETE SET
@@ -15574,7 +15574,7 @@ pressSequentially → REQ {"phone_number":"+2012…","purpose":"login"} → 200
 الحصيلة النهائية:
 
 - **٣ بَقّات منتج حقيقية** اتصلحت (طريق مسدود في المناطق، طوفان لوج الـworker وقت انقطاع
-  Redis، وdeadlock ترتيب القفل في قبول الفني) + **فهرس FK ناقص** (migration 0332).
+  Redis، وdeadlock ترتيب القفل في قبول الفني) + **فهرس FK ناقص** (migration 0336).
 - **أكتر من ١٥ بَقّة أداة/اختبار** — كلها كانت بتخفي أو بتلفّق نتيجة.
 - **٢٢٣٧ اختبار وحدة**، و**٢١١ اختبار حي** في التطبيقين، و**كل** أدوات `scripts/` خضر.
 - `go-live-preflight` **11/11**.
