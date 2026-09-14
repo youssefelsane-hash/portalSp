@@ -13,7 +13,7 @@ void main() {
     // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
     // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
     final customerToken = await registerCustomer(uniquePhone());
-    final technicianToken = await devTechnicianToken('+201000000011');
+    var technicianToken = await devTechnicianToken('+201000000045');
 
     // قبل أي طلب جديد — ممكن يكون فيه طلب نشط قديم من اختبار تاني، فبنقفله الأول عشان
     // الاختبار ده يبدأ من حالة معروفة (null فعلاً).
@@ -56,7 +56,9 @@ void main() {
     );
     final orderId = order!['id'] as String;
 
-    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000045');
     final afterAccept = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
     expect(afterAccept!['id'], orderId);
     expect(afterAccept['order_status'], 'accepted');

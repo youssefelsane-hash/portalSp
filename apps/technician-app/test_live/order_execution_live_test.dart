@@ -26,13 +26,16 @@ void main() {
     final orderId = order!['id'] as String;
     expect(order['order_status'], 'searching_technician');
 
-    final technicianToken = await devTechnicianToken('+201000000011');
+    var technicianToken = await devTechnicianToken('+201000000042');
 
     final available = await apiRequestList('/technician/orders/available', accessToken: technicianToken);
     expect(available.any((a) => a['order_id'] == orderId), isTrue,
         reason: 'الطلب المُنشأ لازم يظهر في قايمة الفني المتاح في نفس النطاق');
 
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000042');
+    final accepted = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
     expect(accepted!['order_status'], 'accepted');
 
     final departed =

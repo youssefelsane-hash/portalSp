@@ -7,15 +7,15 @@ import '_live_support.dart';
 
 void main() {
   test('فني حقيقي يشوف محفظته الحقيقية ويطلب صرف حقيقي', () async {
-    final accessToken = await devTechnicianToken('+201000000011');
+    // **الاختبار بيجهّز شرطه بنفسه (تدقيق §148)**: كان معتمد على إن «الفني ده حصّل كاش قبل كده
+    // في اختبار حي تاني» — اعتماد على ترتيب تشغيل اختبارات تانية، فبيسقط في أي قاعدة نضيفة.
+    final accessToken = await devTechnicianToken('+201000000041');
+    await fundTechnicianWallet(accessToken, 50000);
 
     final wallet = await apiRequest('GET', '/wallet', accessToken: accessToken);
     expect(wallet, isNotNull);
     final balanceBefore = wallet!['balance_cents'] as int;
-    expect(balanceBefore, greaterThan(0), reason: 'الفني ده حصّل كاش قبل كده في اختبار حي تاني، لازم يكون له رصيد');
-
-    final transactions = await apiRequestList('/wallet/transactions', accessToken: accessToken);
-    expect(transactions, isNotEmpty);
+    expect(balanceBefore, greaterThan(0));
 
     final payoutsBefore = await apiRequestList('/technician/payouts', accessToken: accessToken);
 

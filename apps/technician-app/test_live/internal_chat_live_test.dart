@@ -36,6 +36,11 @@ void main() {
     );
     expect(second!['id'], threadId);
 
+    // **الخيط idempotent عمدًا** (وده اللي الاختبار بيتأكد منه فوق)، يعني نفس الخيط بيفضل
+    // موجود بين التشغيلات والرسايل بتتراكم فيه. فالتحقق لازم يكون على **الفرق**، مش على
+    // العدد الكلي — النسخة القديمة كانت بتتوقع ٢ بالظبط فبتسقط من التشغيلة التانية (§148).
+    final historyBefore = await apiRequestList('/internal-chat/threads/$threadId/messages', accessToken: technicianToken);
+
     await apiRequest(
       'POST',
       '/internal-chat/threads/$threadId/messages',
@@ -50,9 +55,9 @@ void main() {
     );
 
     final history = await apiRequestList('/internal-chat/threads/$threadId/messages', accessToken: technicianToken);
-    expect(history.length, 2);
-    expect(history[0]['content'], 'صباح الخير، عندي استفسار عن الطلب');
-    expect(history[1]['content'], 'اتفضل، قولّي مشكلتك');
+    expect(history.length, historyBefore.length + 2);
+    expect(history[history.length - 2]['content'], 'صباح الخير، عندي استفسار عن الطلب');
+    expect(history.last['content'], 'اتفضل، قولّي مشكلتك');
 
     // فني تاني مش طرف في المحادثة دي.
     final otherTechnicianToken = await devTechnicianToken('+201000000012');

@@ -8,7 +8,7 @@ import '_live_support.dart';
 
 void main() {
   test('فني يضيف لينك يوتيوب ولينك برابط غلط، يشوفهم في القايمة، وبعدين يحذف واحد', () async {
-    final technicianToken = await devTechnicianToken('+201000000011');
+    final technicianToken = await devTechnicianToken('+201000000047');
 
     final added = await apiRequest(
       'POST',

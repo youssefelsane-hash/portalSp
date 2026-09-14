@@ -25,8 +25,10 @@ void main() {
     final orderId = order!['id'] as String;
     final baseTotalCents = order['total_amount_cents'] as int;
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    var technicianToken = await devTechnicianToken('+201000000044');
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000044');
     await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
     await apiRequest('POST', '/technician/orders/$orderId/arrive', accessToken: technicianToken);
     final started = await apiRequest('POST', '/technician/orders/$orderId/start', accessToken: technicianToken);

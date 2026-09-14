@@ -28,8 +28,10 @@ void main() {
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    var technicianToken = await devTechnicianToken('+201000000046');
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000046');
 
     final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: technicianToken);
     final threadId = threadResponse!['id'] as String;

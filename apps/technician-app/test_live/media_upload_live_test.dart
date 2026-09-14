@@ -26,8 +26,11 @@ void main() {
     );
     final orderId = order!['id'] as String;
 
-    final technicianToken = await devTechnicianToken('+201000000011');
-    final accepted = await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: technicianToken);
+    var technicianToken = await devTechnicianToken('+201000000043');
+    // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
+    // `claimOrderAsTechnician`، §148).
+    technicianToken = await claimOrderAsTechnician(orderId, '+201000000043');
+    final accepted = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
     expect(accepted!['order_status'], 'accepted');
 
     final imageBytes = await File('test_live/fixtures/test-1x1.png').readAsBytes();

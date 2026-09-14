@@ -280,3 +280,216 @@ Future<String> devStepUpToken(String adminPhoneNumber) async {
 /// الهيدر الجاهز للاستعمال مع `apiRequest(..., extraHeaders: await stepUpHeader(phone))`.
 Future<Map<String, String>> stepUpHeader(String adminPhoneNumber) async =>
     {'X-Step-Up-Token': await devStepUpToken(adminPhoneNumber)};
+
+/// توكن تطوير لفني **بمعرّف البروفايل** (مش بالموبايل) — بيلزم لما المنصّة هي اللي بتختار
+/// الفني (توزيع تلقائي) والاختبار محتاج يكمّل بنفس اللي اتعيّن فعلاً.
+Future<String> devTokenForTechnicianProfile(String technicianProfileId) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "SELECT u.phone_number FROM technician_profiles tp JOIN users u ON u.id = tp.user_id "
+     "WHERE tp.id = '$technicianProfileId' LIMIT 1"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  final phone = (result.stdout as String).trim().split('\n').first.trim();
+  if (phone.isEmpty) throw StateError('مالقيتش فني بالمعرّف $technicianProfileId');
+  return devTechnicianToken(phone);
+}
+
+/// بيرجّع توكن **الفني اللي العرض راح له فعلاً** ويقبل الطلب بيه.
+///
+/// **ليه (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: الفني مايقدرش يقبل طلب إلا لو **العرض
+/// اتبعتله هو** في جولة توزيع (`order_assignments`)، والمنصّة هي اللي بتختار مين. الاختبارات
+/// كانت بتفترض إن الفني بتاعها هو اللي هياخد العرض — وده بيحصل لما الفنيين المتاحين قليلين،
+/// فكانت تنجح لوحدها وتفشل جوّه السويتة الكاملة بـ«العرض ده مبقاش متاح». الفشل ده **توقيت
+/// وتوزيع**، مش كود مكسور. الحل: الاختبار بيسأل مين ماسك العرض دلوقتي ويكمّل بيه — بيختبر
+/// نفس المسار الحقيقي من غير ما يفترض نتيجة التوزيع.
+Future<String> claimOrderAsTechnician(String orderId, String preferredTechnicianPhone) async {
+  final preferred = await devTechnicianToken(preferredTechnicianPhone);
+  try {
+    await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: preferred);
+    return preferred;
+  } catch (_) {
+    // العرض راح لفني تاني — نجيبه من `order_assignments` ونكمّل بيه.
+    for (var attempt = 0; attempt < 25; attempt++) {
+      final holder = await _technicianHoldingOrder(orderId);
+      if (holder != null) {
+        final token = await devTokenForTechnicianProfile(holder.profileId);
+        if (holder.alreadyAssigned) return token;
+        try {
+          await apiRequest('POST', '/technician/orders/$orderId/accept', accessToken: token);
+          return token;
+        } catch (_) {
+          // جولة جديدة راحت لحد تاني — نعيد السؤال.
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    rethrow;
+  }
+}
+
+class _OrderHolder {
+  _OrderHolder(this.profileId, this.alreadyAssigned);
+  final String profileId;
+  final bool alreadyAssigned;
+}
+
+/// الفني المعيَّن على الطلب، أو صاحب آخر عرض حي عليه.
+Future<_OrderHolder?> _technicianHoldingOrder(String orderId) async {
+  final rows = await _psql(
+    "SELECT COALESCE(o.technician_id::text, '') || '|' || "
+    "COALESCE((SELECT a.technician_id::text FROM order_assignments a "
+    "          WHERE a.order_id = o.id AND a.assignment_status = 'sent' AND a.expires_at > now() "
+    "          ORDER BY a.sent_at DESC LIMIT 1), '') "
+    "FROM orders o WHERE o.id = '$orderId'",
+  );
+  if (rows.isEmpty) return null;
+  final parts = rows.first.split('|');
+  final assigned = parts.isNotEmpty ? parts[0].trim() : '';
+  final offered = parts.length > 1 ? parts[1].trim() : '';
+  if (assigned.isNotEmpty) return _OrderHolder(assigned, true);
+  if (offered.isNotEmpty) return _OrderHolder(offered, false);
+  return null;
+}
+
+/// تنفيذ استعلام قراءة على قاعدة التطوير — نفس أسلوب باقي هيلبرز `test_live/`.
+Future<List<String>> _psql(String sql) async {
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc', sql],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  return (result.stdout as String).trim().split('\n').where((line) => line.trim().isNotEmpty).toList();
+}
+
+/// بيوصل طلب جديد لحالة `completed` **عبر المسار الحقيقي بالكامل** (فني بيقبل، ينطلق، يوصل،
+/// يبدأ، يرفع صورة بعد الشغل، يقفل، يحصّل كاش) وبيرجّع `orderId`.
+///
+/// **ليه موجود (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: اختبارات زي التقييم كانت بتدوّر
+/// على طلب `completed` **موجود أصلاً** لعميل ثابت — يعني بتعتمد على بيانات سيشن قديمة، وفي
+/// قاعدة نضيفة بتسقط على «Expected: non-empty» اللي مش بيقول السبب. دلوقتي الاختبار بيجهّز
+/// شرطه بنفسه، وبالمناسبة بيغطي دورة التنفيذ كاملة من طرف العميل كمان.
+Future<String> completeOrderThroughTechnician(
+  String customerToken, {
+  String technicianPhone = '+201000000011',
+  String problemDescription = 'طلب اختبار حي — دورة تنفيذ كاملة',
+}) async {
+  final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
+    'service_id': await pickBookableServiceId(),
+    'address_id': await ensureAddressFor(customerToken),
+    // وصف فريد: حارس تكرار الطلب بيرجّع نفس الصف لطلبين متطابقين في نفس النافذة.
+    'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
+  });
+  final orderId = order!['id'] as String;
+
+  final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
+  for (final step in ['depart', 'arrive', 'start']) {
+    await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
+  }
+  await uploadAfterPhotoAs(orderId, technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/collect-cash', accessToken: technicianToken);
+  return orderId;
+}
+
+/// صورة «بعد الشغل» — شرط إجباري قبل `complete` في الباك-إند.
+Future<void> uploadAfterPhotoAs(String orderId, String technicianToken) async {
+  final fixture = File('test_live/fixtures/test-1x1.png');
+  final bytes = fixture.existsSync()
+      ? await fixture.readAsBytes()
+      : base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=');
+  await apiUpload(
+    '/technician/orders/$orderId/media',
+    fileBytes: bytes,
+    filename: 'after.png',
+    fields: {'media_type': 'after_photo'},
+    accessToken: technicianToken,
+  );
+}
+
+/// بيوصل طلب لحالة **قابلة للدفع** (`work_completed` وغير مدفوع) وبيرجّع `orderId`:
+/// نفس دورة `completeOrderThroughTechnician` بس **من غير تحصيل كاش**.
+Future<String> completeOrderAwaitingPayment(
+  String customerToken, {
+  String technicianPhone = '+201000000011',
+  String problemDescription = 'طلب اختبار حي — بانتظار الدفع',
+}) async {
+  final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
+    'service_id': await pickBookableServiceId(),
+    'address_id': await ensureAddressFor(customerToken),
+    'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
+  });
+  final orderId = order!['id'] as String;
+
+  final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
+  for (final step in ['depart', 'arrive', 'start']) {
+    await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
+  }
+  await uploadAfterPhotoAs(orderId, technicianToken);
+  await apiRequest('POST', '/technician/orders/$orderId/complete', accessToken: technicianToken);
+  return orderId;
+}
+
+/// بيشحن محفظة العميل بمبلغ كافي **عبر SQL مباشر** — مفيش endpoint لشحن محفظة عميل تجريبي،
+/// ونفس الطريقة بالظبط اللي `scripts/lib/live-harness.js` بتستعملها (`fundWallet`).
+///
+/// **مهم**: الشحن ده بيعدّل `balance_cents` من غير قيد في `wallet_transactions` عمدًا — هو
+/// **تجهيز بيئة** مش عملية مالية، والتدقيقات المالية بتقيس القيود اللي بتتولّد من المسارات
+/// الحقيقية بعد كده. في بيئة تطوير محلية بس.
+Future<void> fundCustomerWallet(String customerToken, int cents) async {
+  final me = await apiRequest('GET', '/auth/me', accessToken: customerToken);
+  final userId = me!['id'] as String;
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "INSERT INTO wallets (owner_user_id, owner_type, balance_cents) VALUES ('$userId','customer',$cents) "
+     "ON CONFLICT (owner_user_id) DO UPDATE SET balance_cents = EXCLUDED.balance_cents"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  if (result.exitCode != 0) {
+    throw StateError('مقدرتش أشحن المحفظة: ${result.stderr}');
+  }
+}
+
+/// بيشحن محفظة الفني **عبر SQL مباشر** — تجهيز بيئة، نفس `live-harness.fundWallet` بالظبط.
+///
+/// **ليه (تدقيق §148)**: رصيد الفني بييجي من طلبات مدفوعة أونلاين، وبناء التاريخ ده جوّه
+/// اختبار الصرف بيخلط اختبارين في واحد. تراكم الأرباح نفسه مغطّى في تدقيقات المسارات المالية
+/// (`money-paths-audit` ١٣١/١٣١)، واللي بيتختبر هنا هو **مسار الصرف** — فبنجهّز الرصيد صراحةً.
+Future<void> fundTechnicianWallet(String technicianToken, int cents) async {
+  final me = await apiRequest('GET', '/auth/me', accessToken: technicianToken);
+  final userId = me!['id'] as String;
+  final env = _readApiEnv();
+  final databaseUrl = env['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  final dbName = databaseUrl.split('/').last.split('?').first;
+  final result = await Process.run(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', dbName, '-Atc',
+     "INSERT INTO wallets (owner_user_id, owner_type, balance_cents) VALUES ('$userId','technician',$cents) "
+     "ON CONFLICT (owner_user_id) DO UPDATE SET balance_cents = EXCLUDED.balance_cents"],
+    environment: {'PGPASSWORD': 'baytak'},
+  );
+  if (result.exitCode != 0) throw StateError('مقدرتش أشحن محفظة الفني: ${result.stderr}');
+}
