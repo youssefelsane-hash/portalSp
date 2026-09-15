@@ -53,8 +53,16 @@ export class PricingFieldsService {
     }
   }
 
+  /**
+   * **`createdAt` فاصل تعادل إجباري مش تحسين شكلي.** `display_order` عمود مكرّر القيم بطبعه
+   * (حقول كتير ممكن تبقى على نفس الرقم)، و`ORDER BY display_order` لوحده بيسيب المتعادلين
+   * لترتيب Postgres الداخلي — وده **بيتغيّر مع أول تعديل** على أي صف منهم (الصف بيتنقل لآخر
+   * الـheap). النتيجة اللي المالك شافها: الحقول بتتنطّط من مكان لمكان من غير ما حد يغيّر
+   * ترتيبها. بالفاصل ده الترتيب بقى ثابت ومتوقَّع: الرقم الأصغر الأول، والمتعادلين بترتيب
+   * إضافتهم.
+   */
   listForService(serviceId: string): Promise<ServicePricingField[]> {
-    return this.fields.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+    return this.fields.find({ where: { serviceId }, order: { displayOrder: 'ASC', createdAt: 'ASC' } });
   }
 
   private assertSupportedIfRequired(fieldType: PricingFieldType, isRequired: boolean): void {
@@ -99,6 +107,25 @@ export class PricingFieldsService {
     return field;
   }
 
+  /**
+   * ترتيب الحقل الجديد لما الأدمن ما يحددش رقم: **يتحط في آخر الطابور**، مش صفر.
+   *
+   * الافتراضي القديم (`?? 0`) كان بيخلّي الخاصية كلها تشتغل بالعكس: الأدمن بيضيف حقوله من غير
+   * ما يلمس خانة الترتيب فكلهم بياخدوا صفر، وبعدين لما يجي يقول «الحقل ده يبقى الأول» ويكتب
+   * **١**، الرقم ١ بيبقى **أكبر** من كل الأصفار فالحقل بينزل **آخر واحد**. ده بالحرف بلاغ
+   * المالك: «بحط رقم واحد بقى يظهر رقم عشرة». اتعاد إنتاجه حيًا على ٩ حقول (docs/08 §149).
+   *
+   * بالإضافة في الآخر، الأرقام بقت تعبّر عن مكان حقيقي: ١ فوق خالص، والحقل الجديد تحت خالص.
+   */
+  private async nextDisplayOrder(serviceId: string): Promise<number> {
+    const { max } = await this.fields
+      .createQueryBuilder('field')
+      .select('COALESCE(MAX(field.display_order), 0)', 'max')
+      .where('field.service_id = :serviceId', { serviceId })
+      .getRawOne<{ max: string }>() ?? { max: '0' };
+    return Number(max) + 1;
+  }
+
   async create(adminUserId: string, serviceId: string, dto: CreatePricingFieldDto, meta?: AuditActorMeta): Promise<ServicePricingField> {
     const existing = await this.fields.findOne({ where: { serviceId, fieldKey: dto.field_key, deletedAt: IsNull() } });
     if (existing) {
@@ -114,7 +141,7 @@ export class PricingFieldsService {
       labelAr: dto.label_ar,
       fieldType: dto.field_type,
       isRequired: dto.is_required ?? true,
-      displayOrder: dto.display_order ?? 0,
+      displayOrder: dto.display_order ?? (await this.nextDisplayOrder(serviceId)),
       unitAr: dto.unit_ar ?? null,
       options: dto.options ?? null,
       minValue: dto.min_value !== undefined ? String(dto.min_value) : null,
