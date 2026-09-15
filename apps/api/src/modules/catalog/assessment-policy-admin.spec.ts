@@ -85,6 +85,8 @@ describe('AdminCatalogService — سياسة تحديد السعر والمعا�
     expect(dto.assessment_fee_credit_mode).toBe(AssessmentFeeCreditMode.NONE);
     expect(dto.quote_validity_minutes).toBeGreaterThan(0);
     expect(dto.safety_guidance_ar).toBeNull();
+    // خدمة الكتالوج الجديدة تطلب وقت وصول ما لم يختَر الأدمن «يوم كامل» صراحةً.
+    expect(dto.schedule_precision).toBe('start_time');
   });
 
   it('إرشادات السلامة تتحفظ كنص الخدمة، ترجع للأدمن، وينفع مسحها بوضوح', async () => {

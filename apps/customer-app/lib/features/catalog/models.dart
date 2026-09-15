@@ -197,7 +197,9 @@ class CatalogService {
     allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
     allowsRecurringBooking: json['allows_recurring_booking'] as bool? ?? false,
     cashAllowed: json['cash_allowed'] as bool? ?? true,
-    schedulePrecision: json['schedule_precision'] as String? ?? 'full_day',
+    // وقت الوصول هو الافتراضي. ده يحافظ على رحلة الحجز لو التطبيق اتصل مؤقتًا بخادم أقدم
+    // لم يرسل الحقل بعد، بينما `full_day` يظل استثناءً صريحًا من الإدارة.
+    schedulePrecision: json['schedule_precision'] as String? ?? 'start_time',
   );
 
   String? get featuredCardIconUrl {

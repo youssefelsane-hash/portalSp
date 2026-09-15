@@ -333,7 +333,9 @@ export class AdminCatalogService {
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       allowsRecurringBooking: dto.allows_recurring_booking ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
-      requiresStartTimeOnly: dto.schedule_precision === 'start_time',
+      // الحجز بساعة وصول هو القاعدة للخدمات الجديدة. «يوم كامل» استثناء صريح فقط، حتى لا
+      // يختفي اختيار الساعة من رحلة الكتالوج إذا لم يرسل نموذج الإدارة الحقل.
+      requiresStartTimeOnly: dto.schedule_precision !== 'full_day',
       minTechnicianLevel: dto.min_technician_level,
       displayOrder: dto.display_order ?? 0,
       launchPhase: dto.launch_phase ?? 1,

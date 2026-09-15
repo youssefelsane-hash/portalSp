@@ -49,5 +49,7 @@ void main() {
     expect(service.allowsIndividual, true);
     expect(service.allowsTeam, false);
     expect(service.unitNameAr, 'قطعة');
+    // الاستجابة القديمة بلا `schedule_precision` لا يجب أن تخفي خطوة الساعة من الحجز.
+    expect(service.requiresStartTime, true);
   });
 }

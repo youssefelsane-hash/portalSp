@@ -156,9 +156,9 @@ export default function ServiceDetailPage() {
   // الحقل ده فعليًا "سعر الساعة" وبيتضرب في عدد الساعات المختارة (ADR-0031 Slice H).
   const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('formula');
   // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
-  // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
+  // ما توصل لتحقق الباك-إند/CHECK constraint. ساعة الوصول هي الافتراضي؛ اليوم الكامل استثناء.
   // ADR-0060 §4 — وضعين بس. التلاتة اللي اتشالوا كانوا بيطلبوا مدخلات تسعير مش بيانات جدولة.
-  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('full_day');
+  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('start_time');
   // ADR-0063/0066 — سياسة تحديد السعر والمعاينة. الأوضاع في state (مش defaultValue) عشان الفورم
   // يعرض الحقول المرتبطة بالوضع المختار بس — إظهار تدريجي، مش 13 حقل كلهم ظاهرين لأي خدمة.
   const [priceCertaintyMode, setPriceCertaintyMode] = useState<PriceCertaintyMode>('confirmed_price');
@@ -1060,14 +1060,14 @@ export default function ServiceDetailPage() {
                 <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
                   <div className="mb-3">
                     <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">وضعين بس: يا إما التاريخ بس، يا إما التاريخ + ساعة الوصول. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">الافتراضي تاريخ + ساعة وصول؛ اختَر «يوم كامل» فقط لو وقت الزيارة غير مهم للخدمة. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
                   </div>
                   {schedulingMode === 'start_time' && <input type="hidden" name="requires_start_time_only" value="on" />}
                   <div className="grid gap-3 md:grid-cols-2">
                     <SchedulingModeChoice
                       active={schedulingMode === 'full_day'}
                       title="يوم كامل"
-                      description="العميل بيختار التاريخ بس — من غير ساعة. مناسب لمعظم شغل الصيانة."
+                      description="العميل بيختار التاريخ بس — من غير ساعة. استخدمه فقط لو وقت الزيارة غير مهم."
                       icon={CalendarDays}
                       onSelect={() => setSchedulingMode('full_day')}
                     />
