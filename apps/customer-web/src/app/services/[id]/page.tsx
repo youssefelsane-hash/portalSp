@@ -1375,6 +1375,28 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                     {channel.recommended_label_ar}
                   </span>
                 )}
+                {/* **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «شطب على السعر
+                    القديم»). الرقم والنص جايين من السيرفر — نفس اللي هيتخصم في الفاتورة فعلاً،
+                    فالواجهة بتعرض مش بتحسب. السعر المشطوب بيظهر بس لما الإجمالي يكون معروف. */}
+                {(channel.discount_cents ?? 0) > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    {priceBreakdown && (
+                      <>
+                        <span className="text-muted line-through">
+                          {formatEgp(priceBreakdown.total_amount_cents)}
+                        </span>
+                        <span className="font-bold text-primary">
+                          {formatEgp(Math.max(0, priceBreakdown.total_amount_cents - (channel.discount_cents ?? 0)))}
+                        </span>
+                      </>
+                    )}
+                    {channel.discount_label_ar && (
+                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                        {channel.discount_label_ar}
+                      </span>
+                    )}
+                  </span>
+                )}
               </button>
             ))}
             {/* «بعد الشغل» مش وسيلة في السجل — هو غياب دفع مسبق، فبيتعرض آخر واحد ومش بيترشّح.

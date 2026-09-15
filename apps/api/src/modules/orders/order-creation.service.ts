@@ -21,6 +21,7 @@ import { TechnicianCompaniesService } from '../technicians/technician-companies.
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { CandidateOperationalLoad } from '../technicians/technician-day-capacity.sql';
+import { loadOnlineDiscountPolicy, resolveOnlineDiscountCents } from '../payments/online-payment-discount';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
@@ -1489,9 +1490,35 @@ export class OrderCreationService {
       // للمقارنة بـminimum_monthly_orders من واجهة الأدمن، تفصيل منفصل تمامًا عن الخصم نفسه).
       if (building) {
         const discountCents = Math.round((order.totalAmountCents * Number(building.discountPercentage)) / 100);
-        order.discountAmountCents = discountCents;
+        // **تراكمي مش إسناد** (ADR-0085): الإسناد كان بيدوس على خصم كود الخصم فوق، فطلب عليه
+        // الاتنين كان `total_amount_cents` فيه مخصوم صح (طرح مرتين) بس `discount_amount_cents`
+        // بيقول رقم واحد منهم بس — والحقل ده بيتقري في تقارير المال وفي شاشة العميل («الخصم
+        // المطبّق»)، يعني رقم غلط معروض. لازم يتصلح قبل ما نضيف مصدر خصم تالت تحت.
+        order.discountAmountCents += discountCents;
         order.totalAmountCents -= discountCents;
         await manager.save(order);
+      }
+
+      // **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «هدية الدفع أونلاين»).
+      //
+      // مكانه هنا بالظبط: بعد كل خصومات الخدمة (كود الخصم + العمارة) وقبل الضمان الإضافي —
+      // لأن الضمان بيتسعّر على **صافي** الخدمة ثم يتضاف كسطر مستقل، فخصم بيتطبّق بعده كان
+      // هيخصم من الضمان كمان وهو مش جزء من العرض.
+      //
+      // الرقم بيتحسب من نفس الدالة اللي `GET /payment-channels` بيعرض بيها الوسم، فمستحيل
+      // الواجهة تقول خصم والفاتورة تقول غيره.
+      if (requestedPrepayMethod) {
+        const discountPolicy = await loadOnlineDiscountPolicy(this.settingsService);
+        const onlineDiscountCents = resolveOnlineDiscountCents(
+          discountPolicy,
+          requestedPrepayMethod,
+          order.totalAmountCents,
+        );
+        if (onlineDiscountCents > 0) {
+          order.discountAmountCents += onlineDiscountCents;
+          order.totalAmountCents -= onlineDiscountCents;
+          await manager.save(order);
+        }
       }
 
       // الضمان الإضافي بيتسعّر بعد خصم الخدمة ثم يُضاف كسطر مستقل. الخطة نفسها اتقرأت من

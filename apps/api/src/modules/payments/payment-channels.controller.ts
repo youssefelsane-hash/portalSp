@@ -9,6 +9,11 @@ import { PaymentMethod } from './entities/payment.entity';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
 import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
+import {
+  loadOnlineDiscountPolicy,
+  onlineDiscountLabelAr,
+  resolveOnlineDiscountCents,
+} from './online-payment-discount';
 
 /**
  * سبب عدم إتاحة طريقة دفع **بلغة العميل** (docs/08 §76-ز).
@@ -69,9 +74,11 @@ export class PaymentChannelsController {
       PaymentMethod.INSTAPAY,
       PaymentMethod.FAWRY_REFERENCE,
     ];
-    const [installmentsEnabled, recommendedMethod, ...methodFlags] = await Promise.all([
+    const [installmentsEnabled, recommendedMethod, discountPolicy, ...methodFlags] = await Promise.all([
       this.settingsService.getBoolean('payments.installments_enabled', true),
       this.settingsService.getString('payments.recommended_method', PaymentMethod.INSTAPAY),
+      // ADR-0085 — نفس السياسة اللي إنشاء الطلب بيخصم بيها، مش حساب موازي.
+      loadOnlineDiscountPolicy(this.settingsService),
       ...methods.map((m) => this.methodAvailability.isEnabled(m)),
     ]);
     const enabledByMethod = new Map<PaymentMethod, boolean>(
@@ -81,6 +88,13 @@ export class PaymentChannelsController {
     const channels: PaymentChannelResponseDto[] = this.registry.listAll().map((entry) => {
       const isEnabled = enabledByMethod.get(entry.method) ?? false;
       const isAvailable = isEnabled && entry.isConfigured;
+      // القيمة بتتحسب بلا سقف إجمالي هنا عمدًا: الإجمالي لسه مش معروف وقت عرض الوسائل
+      // (العميل لسه بيختار). الفاتورة بتعيد الحساب بالإجمالي الحقيقي وقت الإنشاء، فالوسم
+      // وعد بالحد الأقصى والفاتورة هي الحاكمة — ولذلك الحد الأدنى للطلب بيتشرح في الوسم نفسه
+      // لو الأدمن ظبّطه.
+      const discountCents = isAvailable
+        ? resolveOnlineDiscountCents(discountPolicy, entry.method, Number.MAX_SAFE_INTEGER)
+        : 0;
       let adminNote: string | null = null;
       if (!isEnabled) adminNote = 'الطريقة مقفولة من إعدادات الأدمن';
       else if (!entry.isConfigured && entry.method === PaymentMethod.CARD) {
@@ -96,6 +110,8 @@ export class PaymentChannelsController {
         // الوسم مشروط بالإتاحة عمدًا: ترشيح وسيلة العميل مش قادر يستخدمها بيضايقه مش بيساعده.
         is_recommended: isAvailable && entry.method === recommended,
         recommended_label_ar: isAvailable && entry.method === recommended ? RECOMMENDED_LABEL_AR : null,
+        discount_cents: discountCents,
+        discount_label_ar: onlineDiscountLabelAr(discountPolicy, discountCents),
         // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
         ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
       };
@@ -117,6 +133,10 @@ export class PaymentChannelsController {
       is_recommended: installmentAvailable && recommended === 'installment',
       recommended_label_ar:
         installmentAvailable && recommended === 'installment' ? RECOMMENDED_LABEL_AR : null,
+      // التقسيط مش دفع فوري، فمفيش «هدية دفع أونلاين» عليه — وده مكتوب هنا صراحةً بدل ما
+      // يبقى نتيجة إن الوسيلة مش في القايمة بالصدفة.
+      discount_cents: 0,
+      discount_label_ar: null,
       ...(isAdmin && installmentAdminNote ? { admin_note: installmentAdminNote } : {}),
     });
 

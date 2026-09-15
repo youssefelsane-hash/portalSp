@@ -1153,6 +1153,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // مابيقررش مين المرشّح، وبالتالي تغيير الترشيح مابيحتاجش نسخة جديدة من التطبيق.
     final recommended = available && channel?.isRecommended == true;
     final badgeText = channel?.recommendedLabelAr;
+    // **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «يظهرله إن فيه دفع by InstaPay
+    // عليه ٣٠ جنيه خصم… شطب على السعر القديم»). القيمة والنص الاتنين جايين من الباك-إند —
+    // التطبيق بيعرض بس، فتغيير المبلغ من لوحة الأدمن مايحتاجش نسخة جديدة من التطبيق.
+    final discountCents = available ? (channel?.discountCents ?? 0) : 0;
+    final total = _pricePreview?.totalAmountCents;
     return RadioListTile<String?>(
       value: method,
       enabled: available,
@@ -1166,7 +1171,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ],
             )
           : Text(title),
-      subtitle: Text(available ? subtitle : reason),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(available ? subtitle : reason),
+          if (discountCents > 0) ...[
+            const SizedBox(height: 4),
+            _OnlineDiscountLine(
+              discountCents: discountCents,
+              totalCents: total,
+              labelAr: channel?.discountLabelAr,
+              formatEgp: _formatEgp,
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2194,6 +2213,71 @@ class _RecommendedBadge extends StatelessWidget {
           fontWeight: FontWeight.w700,
         ),
       ),
+    );
+  }
+}
+
+/// **سطر خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥).
+///
+/// > «يظهرله بشكل لطيف كده، **شطب على السعر القديم**.»
+///
+/// السعر القديم بيظهر مشطوب جنب الجديد **بس لما نعرف الإجمالي فعلاً**؛ قبل ما التسعير يرجع
+/// (العميل لسه ما اختارش عنوان مثلاً) بنعرض قيمة الخصم لوحدها بدل ما نخترع سعرًا وهميًا
+/// ونشطب عليه.
+class _OnlineDiscountLine extends StatelessWidget {
+  const _OnlineDiscountLine({
+    required this.discountCents,
+    required this.totalCents,
+    required this.labelAr,
+    required this.formatEgp,
+  });
+
+  final int discountCents;
+  final int? totalCents;
+  final String? labelAr;
+  final String Function(int) formatEgp;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // الخصم مش بيزيد على الإجمالي أبدًا (الباك-إند بيسقّفه) — الـclamp هنا حارس عرض بس.
+    final discounted = totalCents == null ? null : (totalCents! - discountCents).clamp(0, totalCents!);
+    return Wrap(
+      spacing: 6,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (totalCents != null && discounted != null) ...[
+          Text(
+            formatEgp(totalCents!),
+            style: TextStyle(
+              decoration: TextDecoration.lineThrough,
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
+          ),
+          Text(
+            formatEgp(discounted),
+            style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w800, fontSize: 14),
+          ),
+        ],
+        if (labelAr != null && labelAr!.trim().isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              labelAr!,
+              style: TextStyle(
+                color: scheme.onPrimaryContainer,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

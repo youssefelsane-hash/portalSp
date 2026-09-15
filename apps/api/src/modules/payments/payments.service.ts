@@ -1793,6 +1793,17 @@ export class PaymentsService {
    */
   async getInstaPayTransfer(userId: string, orderId: string): Promise<InstaPayTransferDetails> {
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
+    // **نفس بوابة الدفع بالظبط** (بلاغ المالك ٦ في §141: «حتى لو الطلب اتقفل، شاشة InstaPay
+    // بتفضل ظاهرة ببيانات التحويل بكل حاجة — ده مش منطقي»).
+    //
+    // القراءة دي كانت بتفحص الملكية بس، فصف الدفعة الـ`pending` اللي فاضل من محاولة قديمة كان
+    // بيفضل يتعرض **بعد ما الطلب يتقفل أو يتدفع بوسيلة تانية**. الضرر مش تجميلي: العميل بيبص
+    // على شاشة فيها رقم حساب ومبلغ ويحوّل فلوس حقيقية لطلب خلاص. الزرار اللي بيوصّل للشاشة
+    // متقفل صح في الويب والتطبيق الاتنين — القراءة كانت آخر باب مفتوح.
+    //
+    // `assertPayable` هي نفس الحارس اللي `payWithInstaPay` بيستخدمه، فالقراءة والكتابة بقوا
+    // بيقولوا نفس الحاجة بنيويًا بدل ما يتفقوا بالصدفة.
+    this.assertPayable(order);
     const payment = await this.payments.findOne({
       where: {
         orderId: order.id,

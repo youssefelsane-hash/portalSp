@@ -262,9 +262,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {PAYABLE_ORDER_STATUSES.has(order.order_status) &&
         (order.payment_status !== 'paid' || (order.amount_due_now_cents ?? 0) > 0) && (
           <section className="mt-4 rounded-xl border border-border bg-surface p-4">
+            {/* **الحالة بتتقال صراحةً** (بلاغ المالك ٧ في §141): «باقي للسداد» لوحدها بتتقري
+                على إن الدفع كله لسه ما تمّش، والعميل اللي دفع فعلاً بيتلخبط. السطر بيوضّح إن
+                الأصل اتدفع وإن ده فرق ظهر بعد كده. نفس نص التطبيق بالحرف. */}
             {order.payment_status === 'paid' && (order.amount_due_now_cents ?? 0) > 0 && (
               <p className="mb-2 font-semibold">
-                باقي للسداد: {formatEgp(order.amount_due_now_cents ?? 0)}
+                دفعت الطلب بالفعل ✅ — ده <strong>فرق مستحق</strong> ظهر بعد تعديل السعر:{' '}
+                {formatEgp(order.amount_due_now_cents ?? 0)}
               </p>
             )}
             <Link

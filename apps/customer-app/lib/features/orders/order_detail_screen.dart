@@ -1467,10 +1467,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       if (_payableOrderStatuses.contains(order.orderStatus) &&
                           (order.paymentStatus != 'paid' || (order.amountDueNowCents ?? 0) > 0)) ...[
                         const SizedBox(height: 16),
+                        // **الحالة بتتقال صراحةً** (بلاغ المالك ٧ في §141: «ممكن أصلاً يكون
+                        // الراجل دفع already… ما أنا دفعت already»). «باقي للسداد» لوحدها كانت
+                        // بتتقري على إن الدفع كله لسه ما تمّش. السطر بيوضّح إن الأصل **اتدفع**
+                        // وإن ده **فرق** ظهر بعد كده — وبالتالي وجود الزراير تحته له معنى.
                         if (order.paymentStatus == 'paid' && (order.amountDueNowCents ?? 0) > 0) ...[
-                          Text(
-                            'باقي للسداد: ${_formatEgp(order.amountDueNowCents!)}',
-                            style: Theme.of(context).textTheme.titleSmall,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'دفعت الطلب بالفعل ✅ — ده **فرق مستحق** ظهر بعد تعديل السعر: '
+                                  '${_formatEgp(order.amountDueNowCents!)}',
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 8),
                         ],
