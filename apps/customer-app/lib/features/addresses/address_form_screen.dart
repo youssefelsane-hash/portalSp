@@ -221,11 +221,21 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                       // overflowed). isExpanded بيخلّيها تاخد عرض الحقل وتقصّ النص بدل ما تكسر التخطيط.
                       isExpanded: true,
                       initialValue: _areaId,
-                      decoration: const InputDecoration(labelText: 'المنطقة'),
+                      decoration: InputDecoration(
+                        labelText: 'المنطقة',
+                        // مدينة من غير مناطق مُطلَقة كانت بتدّي قايمة فاضية + «مطلوب» من غير أي
+                        // تفسير — طريق مسدود صامت. الباك-إند بقى بيستبعد المدن دي أصلاً، وده
+                        // السطر الاحتياطي لو حصل سباق بين تحميل المدن وتعطيل آخر منطقة.
+                        helperText: (_areas != null && _areas!.isEmpty)
+                            ? 'مفيش مناطق متاحة في المدينة دي دلوقتي — اختار مدينة تانية'
+                            : null,
+                      ),
                       items: (_areas ?? [])
                           .map((a) => DropdownMenuItem(value: a.id, child: Text(a.nameAr)))
                           .toList(),
-                      onChanged: _areas == null ? null : (value) => setState(() => _areaId = value),
+                      onChanged: (_areas == null || _areas!.isEmpty)
+                          ? null
+                          : (value) => setState(() => _areaId = value),
                       validator: (value) => value == null ? 'مطلوب' : null,
                     ),
                     const SizedBox(height: 12),

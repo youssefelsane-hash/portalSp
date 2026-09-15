@@ -23,12 +23,14 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final OnboardingRepository _repository;
   final _codeController = TextEditingController();
+  final _bioController = TextEditingController();
   TechnicianMe? _me;
   String? _error;
   bool _acting = false;
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
   bool _uploadingPhoto = false;
+  bool _savingBio = false;
   bool _deletingAccount = false;
 
   @override
@@ -70,13 +72,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _load() async {
     try {
       final me = await _repository.fetchMe();
-      if (mounted) setState(() => _me = me);
+      if (mounted) {
+        setState(() {
+          _me = me;
+          _bioController.text = me.bio ?? '';
+        });
+      }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
+  }
+
+  Future<void> _saveBio() async {
+    setState(() => _savingBio = true);
+    try {
+      final updated = await _repository.updateProfile(_bioController.text);
+      if (!mounted) return;
+      setState(() {
+        _me = updated;
+        _bioController.text = updated.bio ?? '';
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم حفظ نبذتك المهنية')));
+    } catch (errRaw) {
+      final err = ApiException.from(errRaw);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _savingBio = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    _bioController.dispose();
+    super.dispose();
   }
 
   Future<void> _requestAssistant() async {
@@ -246,6 +284,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.workspace_premium_outlined),
+                              const SizedBox(width: 8),
+                              Text(
+                                'نبذة مهنية',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            me.yearsOfExperience > 0
+                                ? 'خبرتك المسجلة: ${me.yearsOfExperience} سنة. أضف تخصصاتك وما يميز شغلك.'
+                                : 'اكتب تخصصاتك وخبرتك وما يميز شغلك.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _bioController,
+                            maxLength: 500,
+                            minLines: 3,
+                            maxLines: 5,
+                            textInputAction: TextInputAction.newline,
+                            decoration: const InputDecoration(
+                              labelText: 'عرّف العملاء بخبرتك',
+                              hintText:
+                                  'مثال: فني سباكة بخبرة 8 سنوات في الصيانة والتركيب.',
+                              helperText:
+                                  'ممنوع كتابة رقم الهاتف أو البريد أو الروابط أو أي وسيلة تواصل شخصية.',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: FilledButton.icon(
+                              onPressed: _savingBio ? null : _saveBio,
+                              icon: _savingBio
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.save_outlined),
+                              label: Text(
+                                _savingBio ? 'جارٍ الحفظ' : 'حفظ النبذة',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),

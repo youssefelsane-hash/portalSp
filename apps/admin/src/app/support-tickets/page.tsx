@@ -70,7 +70,7 @@ export default function SupportTicketsPage() {
       </div>
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!tickets && !error && <TableSkeleton columns={7} />}
+      {!tickets && !error && <TableSkeleton columns={8} />}
       {tickets && tickets.length === 0 && <EmptyState title="مفيش تذاكر" />}
 
       {tickets && tickets.length > 0 && (
@@ -78,6 +78,7 @@ export default function SupportTicketsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>الرقم</TableHead>
+              <TableHead>صاحب التذكرة</TableHead>
               <TableHead>الموضوع</TableHead>
               <TableHead>الفئة</TableHead>
               <TableHead>الأولوية</TableHead>
@@ -94,6 +95,7 @@ export default function SupportTicketsPage() {
                     {ticket.ticket_number}
                   </Link>
                 </TableCell>
+                <TableCell>{ticket.owner_name ?? 'اسم غير مسجل'}</TableCell>
                 <TableCell>{ticket.subject}</TableCell>
                 <TableCell>{ticket.category}</TableCell>
                 <TableCell>{TICKET_PRIORITY_LABELS[ticket.priority]}</TableCell>

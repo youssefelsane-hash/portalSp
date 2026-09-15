@@ -1,12 +1,13 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/api_config.dart';
 import '../../core/external_links.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
+import '../../design/cached_remote_image.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../notifications/notifications_repository.dart';
@@ -58,8 +59,8 @@ import '../shell/app_footer.dart';
 // TIP_FALLBACK_BACKGROUNDS بالحرف).
 const List<Color> _tipFallbackColors = [
   AppColors.primary,
-  AppColors.success,
-  AppColors.warning,
+  AppColors.accent,
+  Color(0xFF26364B),
 ];
 
 class HomeScreen extends StatefulWidget {
@@ -90,6 +91,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ImageProvider<Object>> _heroImageProviders = const [];
   HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
+
+  /// قسم «ابدأ مشروعك» — بيبدأ ظاهر لحد ما الإعداد يوصل (docs/08 §146).
+  bool _projectsEnabled = true;
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
   BrandingLogo? _heroBackground;
@@ -121,7 +125,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _brandingRepository
         .fetchPrimaryLogo()
         .then((logo) {
-          if (mounted) setState(() => _brandingLogo = logo);
+          if (!mounted) return;
+          setState(() => _brandingLogo = logo);
+          if (logo != null && !logo.isDefault && logo.url.isNotEmpty) {
+            unawaited(_precacheHeroImage(cachedRemoteImageProvider(logo.url)));
+          }
         })
         .catchError((_) {});
     // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
@@ -159,13 +167,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       return;
     }
+    // الطلبان مستقلان، فبدؤهما معاً يقلّل زمن انتظار أول شاشة بدل تسلسل شبكتين.
+    final categoriesRequest = _repository.fetchCategories(zoneId: zoneId);
+    final featuredRequest = _repository.fetchMostRequestedServices(
+      zoneId: zoneId,
+    );
     try {
-      final categories = await _repository.fetchCategories(zoneId: zoneId);
+      final categories = await categoriesRequest;
       if (mounted && generation == _catalogLoadGeneration) {
         setState(() {
           _categories = categories;
           _error = null;
         });
+        unawaited(_precacheCatalogImages(categories: categories));
       }
     } catch (_) {
       if (mounted && generation == _catalogLoadGeneration) {
@@ -175,11 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
     // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
     try {
-      final mostRequested = await _repository.fetchMostRequestedServices(
-        zoneId: zoneId,
-      );
+      final mostRequested = await featuredRequest;
       if (mounted && generation == _catalogLoadGeneration) {
         setState(() => _mostRequested = mostRequested);
+        unawaited(_precacheCatalogImages(featured: mostRequested));
       }
     } catch (_) {
       // بهدوء — القسم تسويقي، مش وظيفي.
@@ -204,8 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _applyHomepageContent(HomepageContent content) {
     if (!mounted) return;
     final providers = content.heroImages
-        .map(_resolveHeroImageUrl)
-        .map<ImageProvider<Object>>(NetworkImage.new)
+        .map(cachedRemoteImageProvider)
         .toList(growable: false);
     setState(() {
       _trustMessage = content.trustMessage;
@@ -213,16 +225,24 @@ class _HomeScreenState extends State<HomeScreen> {
       _heroImageProviders = providers;
       _searchContent = content.search;
       _tips = content.tips;
+      _projectsEnabled = content.projectsEnabled;
       _activeSlide = 0;
     });
     for (final provider in providers) {
       unawaited(_precacheHeroImage(provider));
     }
+    unawaited(
+      precacheRemoteImages(
+        context,
+        content.tips.map((tip) => tip.imageUrl),
+        logicalWidth: 220,
+      ),
+    );
   }
 
   void _applyLegacyHeroBackground(BrandingLogo? asset) {
     if (!mounted || asset == null || asset.isDefault) return;
-    final provider = NetworkImage(asset.url);
+    final provider = cachedRemoteImageProvider(asset.url);
     setState(() {
       _heroBackground = asset;
       _legacyHeroImageProvider = provider;
@@ -239,6 +259,14 @@ class _HomeScreenState extends State<HomeScreen> {
       // The visual fallback remains available when an admin URL is unreachable.
     }
   }
+
+  Future<void> _precacheCatalogImages({
+    Iterable<ServiceCategory> categories = const [],
+    Iterable<CatalogService> featured = const [],
+  }) => precacheRemoteImages(context, [
+    ...categories.map((category) => category.cardImageUrl),
+    ...featured.map((service) => service.featuredCardIconUrl),
+  ], logicalWidth: 132);
 
   void _openSearch([String value = '']) => Navigator.of(context).push(
     MaterialPageRoute(
@@ -263,7 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // docs/08 §75-ب — العنوان بقى هو عنوان الشاشة نفسه («فوق خالص يبقى العنوان إن
           // الـcustomer بينتمي لي»). طلباتي/حسابي اتنقلوا للشريط السفلي، فالرأس فضي من
           // الأربع أيقونات المزحومة وفضل فيه اللي بيتفتح عند حدث بس: الإشعارات والدعم.
-          titleSpacing: 8,
+          titleSpacing: 2,
           // شعار الأدمن المرفوع بيفضل ظاهر — بس صغير على الجنب، مش عنوان الشاشة. لو الأدمن
           // ما رفعش شعار (`isDefault`)، مفيش leading خالص والعنوان بياخد العرض كله: الشكل
           // المرجعي اللي المالك بعته مفيهوش شعار في الرأس أصلاً.
@@ -274,23 +302,23 @@ class _HomeScreenState extends State<HomeScreen> {
           // للوجو. ولوجو كلمة (wordmark زي «أسطى») محتاج **عرض** مش ارتفاع — فتكبير الارتفاع
           // لوحده مكانش هيحل حاجة، لازم `leadingWidth` نفسه يكبر.
           //
-          // 96 مقصودة كسقف مش أكتر: على شاشة 360dp بيفضل ~170dp للعنوان بعد أيقونتين الأكشن —
-          // العنوان (اللي هو أهم عنصر في الرأس بقرار §75-ب) بيفضل مقروء بدل ما يتقصّ.
-          leadingWidth: 96,
+          // 102 مقصودة: اللوجو يفضل واضحًا، والمساحة المستعادة تترك عنوان المنطقة مقروءًا أكثر.
+          leadingWidth: 102,
           leading:
               _brandingLogo != null &&
                   !_brandingLogo!.isDefault &&
                   _brandingLogo!.url.isNotEmpty
               ? Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 8,
+                    horizontal: 4,
+                    vertical: 3,
                   ),
-                  child: Image.network(
-                    _resolveHeroImageUrl(_brandingLogo!.url),
+                  child: CachedNetworkImage(
+                    imageUrl: resolveCachedRemoteImageUrl(_brandingLogo!.url),
                     fit: BoxFit.contain,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    useOldImageOnUrlChange: true,
+                    fadeInDuration: const Duration(milliseconds: 160),
+                    errorWidget: (_, _, _) => const SizedBox.shrink(),
                   ),
                 )
               : null,
@@ -307,6 +335,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context, snapshot) {
                     final unread = snapshot.data ?? 0;
                     return IconButton(
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(40, 40),
+                        maximumSize: const Size(40, 40),
+                        padding: EdgeInsets.zero,
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHigh,
+                        foregroundColor: Theme.of(context).colorScheme.primary,
+                        shape: const CircleBorder(),
+                      ),
                       icon: Badge(
                         isLabelVisible: unread > 0,
                         label: Text('$unread'),
@@ -323,6 +361,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             IconButton(
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                maximumSize: const Size(40, 40),
+                padding: EdgeInsets.zero,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHigh,
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                shape: const CircleBorder(),
+              ),
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
               onPressed: () => Navigator.of(context).push(
@@ -359,11 +407,33 @@ class _HomeScreenState extends State<HomeScreen> {
                     // فوق، خليها موجودة قبل كل الفئات». والمنطق سليم — الشبكة الكاملة (9+
                     // فئة) بتاخد شاشة كاملة، فأي حاجة تحتها فعليًا مش موجودة لأغلب العملاء.
                     if (featured.isNotEmpty) ...[
-                      Text(
-                        'الأكثر طلبًا',
-                        style: Theme.of(context).textTheme.titleMedium,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: context.accentColor.withValues(
+                                alpha: 0.12,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.trending_up_rounded,
+                              color: context.accentColor,
+                              size: 19,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'الأكثر طلبًا',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       SizedBox(
                         // 84 → ~72: الصف بقى أصغر بطلب المالك، والرقم محسوب من الأيقونة +
                         // المسافة + سطر الاسم بمقياس خط المستخدم — مش تقدير ثابت.
@@ -384,28 +454,31 @@ class _HomeScreenState extends State<HomeScreen> {
                       // كانت 24 — بلاغ مالك: «فيه مسافة كبيرة بين آخر كلمة موجودة وكل الفئات».
                       const SizedBox(height: 16),
                     ],
-                    ProjectCtaCard(
-                      // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
-                      // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
-                      onTap: () async {
-                        if (!await ensureSignedIn(
-                          context,
-                          reason:
-                              'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
-                          headline: 'ابدأ مشروعك',
-                        )) {
-                          return;
-                        }
-                        if (!context.mounted) return;
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => CreateProjectScreen(
-                              auth: context.read<AuthRepository>(),
+                    // مخفي/ظاهر من لوحة الإدارة (docs/08 §146). بيبدأ `true` فالقسم بيبان
+                    // فورًا ومايعملش وميض اختفاء لو المحتوى اتأخر شوية.
+                    if (_projectsEnabled)
+                      ProjectCtaCard(
+                        // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
+                        // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
+                        onTap: () async {
+                          if (!await ensureSignedIn(
+                            context,
+                            reason:
+                                'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                            headline: 'ابدأ مشروعك',
+                          )) {
+                            return;
+                          }
+                          if (!context.mounted) return;
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CreateProjectScreen(
+                                auth: context.read<AuthRepository>(),
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                      ),
                     const SizedBox(height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -415,6 +488,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         TextButton(
+                          // لمسة العلامة التانية والأخيرة على الشاشة دي (ADR-0093 §2) — المالك
+                          // سمّى «عرض الكل» بالاسم. نفس اللون بالظبط في customer-web عشان
+                          // الشاشتين يفضلوا نسخة واحدة.
+                          style: TextButton.styleFrom(
+                            foregroundColor: context.accentColor,
+                          ),
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => CategoriesScreen(
@@ -519,10 +598,6 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
   ///     فالتبديل كان بيحصل قطع مفاجئ.
   ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
-  // نفس المنطق بقى في `core/api_config.dart` (محتاجه شاشة الدخول كمان) — الاسم المحلي باقٍ
-  // عشان مواقع النداء ما تتغيّرش.
-  String _resolveHeroImageUrl(String value) => resolveApiAssetUrl(value);
-
   // عنوان الـAppBar — لوجو البراندنج الحقيقي (لو الأدمن رفع واحد، isDefault=false دايمًا صورة
   // raster حقيقية) بدل النص الثابت "أسطى" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على
   // الأبليكيشن" — التطبيق أصلاً مكانش بيستهلك /branding خالص). errorBuilder يرجع للنص لو تحميل
@@ -537,7 +612,25 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('نصايح مفيدة', style: Theme.of(context).textTheme.titleMedium),
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 21,
+                decoration: BoxDecoration(
+                  color: context.accentColor,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'نصايح مفيدة',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
           const SizedBox(height: 2),
           Text(
             'حاجات كويس تعرفها قبل ما تحجز أي شغلانة',
@@ -561,24 +654,31 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (imageUrl != null && imageUrl.isNotEmpty)
-                          Image.network(
-                            imageUrl,
+                          CachedNetworkImage(
+                            imageUrl: resolveCachedRemoteImageUrl(imageUrl),
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Container(
-                              height: 80,
-                              color:
-                                  _tipFallbackColors[index %
-                                      _tipFallbackColors.length],
-                            ),
+                            memCacheHeight:
+                                (80 *
+                                        (MediaQuery.maybeDevicePixelRatioOf(
+                                              context,
+                                            ) ??
+                                            1.0))
+                                    .round(),
+                            maxHeightDiskCache:
+                                (80 *
+                                        (MediaQuery.maybeDevicePixelRatioOf(
+                                              context,
+                                            ) ??
+                                            1.0))
+                                    .round(),
+                            fadeInDuration: const Duration(milliseconds: 180),
+                            placeholder: (_, _) => _tipFallback(context, index),
+                            errorWidget: (_, _, _) =>
+                                _tipFallback(context, index),
                           )
                         else
-                          Container(
-                            height: 80,
-                            color:
-                                _tipFallbackColors[index %
-                                    _tipFallbackColors.length],
-                          ),
+                          _tipFallback(context, index),
                         // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 190)` ثابت،
                         // والصورة بتاخد 80 منهم. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
                         // سطور كانت بتطلع أطول من الفاضل وترمي `RenderFlex overflowed by N pixels
@@ -624,6 +724,31 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _tipFallback(BuildContext context, int index) {
+    final color = _tipFallbackColors[index % _tipFallbackColors.length];
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+          colors: [color, Color.lerp(color, Colors.black, 0.22)!],
+        ),
+      ),
+      child: Align(
+        alignment: AlignmentDirectional.topStart,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Icon(
+            Icons.auto_awesome_outlined,
+            color: Colors.white.withValues(alpha: 0.9),
+            size: 25,
+          ),
+        ),
+      ),
+    );
+  }
+
   // قسم "الدعم" آخر الشاشة (طلب مالك صريح 2026-08-23) — نفس بيانات SupportContactScreen
   // الموجودة بالفعل (زرار مستقل في الـAppBar فوق)، عرض مختصر هنا بس لنفس التناسق مع
   // apps/customer-web's homepage. مبيظهرش خالص لو enabled=false أو مفيش رقم حقيقي.
@@ -634,47 +759,102 @@ class _HomeScreenState extends State<HomeScreen> {
         (contact.phoneNumber == null && contact.whatsappUrl == null)) {
       return const SizedBox.shrink();
     }
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 28, bottom: 8),
-      child: Column(
-        children: [
-          const Divider(),
-          const SizedBox(height: 16),
-          Text('الدعم', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            'محتاج مساعدة؟ إحنا هنا',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              if (contact.phoneNumber != null)
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      openPhoneDialer(context, contact.phoneNumber!),
-                  icon: const Icon(Icons.call_outlined),
-                  label: Text(
-                    contact.phoneNumber!,
-                    textDirection: TextDirection.ltr,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: context.accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.support_agent_rounded,
+                    color: context.accentColor,
+                    size: 21,
                   ),
                 ),
-              if (contact.whatsappUrl != null)
-                OutlinedButton.icon(
-                  onPressed: () => openExternalUrl(
-                    context,
-                    Uri.parse(contact.whatsappUrl!),
-                    failureMessage: 'تعذّر فتح واتساب',
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'الدعم',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'محتاج مساعدة؟ إحنا هنا',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.chat_outlined),
-                  label: const Text('واتساب'),
                 ),
-            ],
-          ),
-        ],
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                if (contact.phoneNumber != null)
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        openPhoneDialer(context, contact.phoneNumber!),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.colorScheme.primary,
+                      side: BorderSide(
+                        color: context.accentColor.withValues(alpha: 0.65),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                    ),
+                    icon: const Icon(Icons.call_outlined, size: 19),
+                    label: Text(
+                      contact.phoneNumber!,
+                      textDirection: TextDirection.ltr,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                if (contact.whatsappUrl != null)
+                  OutlinedButton.icon(
+                    onPressed: () => openExternalUrl(
+                      context,
+                      Uri.parse(contact.whatsappUrl!),
+                      failureMessage: 'تعذّر فتح واتساب',
+                    ),
+                    icon: const Icon(Icons.chat_outlined, size: 19),
+                    label: const Text('واتساب'),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -708,11 +888,13 @@ class ProjectCtaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final onContainer = theme.colorScheme.onPrimaryContainer;
+    final onContainer = theme.colorScheme.onPrimary;
 
     return Material(
-      color: theme.colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(16),
+      color: theme.colorScheme.primary,
+      elevation: 1,
+      shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.16),
+      borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -724,13 +906,13 @@ class ProjectCtaCard extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: onContainer.withValues(alpha: 0.10),
+                  color: theme.colorScheme.tertiary,
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: Icon(
                   Icons.design_services_rounded,
                   size: 20,
-                  color: onContainer,
+                  color: theme.colorScheme.onTertiary,
                 ),
               ),
               const SizedBox(width: 12),
@@ -761,7 +943,11 @@ class ProjectCtaCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(Icons.arrow_back_rounded, size: 18, color: onContainer),
+              Icon(
+                Icons.arrow_back_rounded,
+                size: 18,
+                color: theme.colorScheme.tertiary,
+              ),
             ],
           ),
         ),

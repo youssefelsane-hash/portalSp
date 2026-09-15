@@ -15,6 +15,22 @@ import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 export class TechnicianAssignmentGuardService {
   constructor(private readonly settingsService: SettingsService) {}
 
+  /**
+   * **قاعدة ترتيب القفل في المشروع كله: الفني الأول، بعده الطلب.**
+   *
+   * الفني مورد **مشترك بين طلبات مختلفة**، فهو اللي بيتقفل الأول دايمًا. أي مسار بيقفل الطلب
+   * الأول وبعدين الفني بيعمل ABBA مع المسارات اللي بتمشي بالترتيب الصح، والنتيجة **deadlock
+   * حقيقي من Postgres** — الفني بياخد «حصل خطأ غير متوقع» وهو بيدوس «اقبل».
+   *
+   * البَقّة دي اتلقطت حية في التدقيق الماراثوني (docs/08 §148) على
+   * `POST /technician/orders/:id/accept`، وكان سببها إن `accept()` بيقفل بالترتيب الصح بينما
+   * `acceptWorkOpportunity()` و`autoConfirmScheduledOrder()` و`acceptCrewOpportunity()` كانوا
+   * بيقفلوا بالعكس. التلاتة اتظبطوا، و`matching-lock-order.spec.ts` بيحرس القاعدة على الكود
+   * نفسه فأي مسار جديد بيكسرها بيفشل فورًا.
+   *
+   * لو المرشّح مش معروف إلا بعد قراءة الطلب: اقرا الطلب **بلا قفل** عشان تختار، اقفل الفني،
+   * وبعدين اقفل الطلب **وأعد التحقق** من حالته.
+   */
   async lockTechnician(manager: EntityManager, technicianId: string): Promise<TechnicianProfile> {
     const technician = await manager
       .createQueryBuilder(TechnicianProfile, 'technician')
@@ -132,14 +148,16 @@ export class TechnicianAssignmentGuardService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
-    // ADR-0055 (تصحيح مالك) — **الرفض على أساس الدور اتشال**. كان هنا حارس بيمنع تعيين أي مساعد
-    // على طلب، وده اللي كان بيمنع التعيين الإداري القسري كمان. المالك صحّح الفهم: «المساعد» نوع
-    // شغل مختلف (نقل/شيل) مش مستوى مهارة أقل، والشغل ده شغله هو بيعمله لوحده. ADR-0056 ثبّت إن
-    // المساعد، مثل الفني، لازم يكون معتمدًا في التخصص؛ حجب الأدمن طبقة إضافية فوق الاعتماد.
+    // ADR-0087 (تصحيح مالك، يلغي ADR-0086) — **مفيش رفض على أساس النوع هنا**. المساعد نوع شغل
+    // مختلف (نقل/شيل) مش رتبة أقل، وشغلانته دي بيعملها لوحده من أولها لآخرها. اللي بيقرر مين
+    // يقود هو حجب الخدمة (`technician_excluded_services`) اللي بيتفحص تحت في
+    // `technicianServiceQualificationCondition()` — مساعد محجوب عن الخدمة بيترفض هناك، ومساعد
+    // مش محجوب بيعدّي عادي. حارس على النوع هنا كان بيتخطّى مفتاح الأدمن بالكامل: الشاشة تقول
+    // «الخدمة دي مسموحة له» والسيستم يرفضها — تناقض بين الواجهة والسلوك.
     //
     // الأثر المالي طبيعي مش استثناء: المساعد اللي بيشيل طلب لوحده بياخد نصيب **القائد** الكامل
     // (`participant_role = 'leader'`)، وتسعيرة المساعد المخفّضة بتفضل مقصورة على انضمامه لطاقم
-    // حد تاني (`participant_role = 'assistant'`). صفر تغيير في كود القسمة.
+    // حد تاني. صفر تغيير في كود القسمة.
     // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
     // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،
     // التعيين القسري قرار إداري صريح مش انتظار قبول عادي). التوافر الحقيقي بيتفحص تحت عبر

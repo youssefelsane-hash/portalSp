@@ -50,6 +50,7 @@ import {
 } from '../orders/revisit-pin';
 import { DispatchRouteDecision, isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { candidateQualityScoreSql } from './candidate-quality-ranking';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -108,6 +109,9 @@ const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 // (10 نقاط)، فالشركة لا تتخطى الجودة/الحمل؛ تكسر التقارب المنطقي لما طاقمها قادر ينفذ الطلب.
 const COMPANY_LARGE_JOB_MIN_CREW_FALLBACK = 4;
 const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
+// الشركة تدخل الأوتو ماتشينج ككيان مستقل؛ الزيادة قابلة للضبط ومتعمدة أن تكون أقل من فرق
+// مستويات الفنيين حتى تفضل الجودة والتوفر والقرب هي الأساس.
+const COMPANY_AUTO_MATCH_BOOST_FALLBACK = 2;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -125,6 +129,8 @@ export interface EligibleTechnicianRow {
   company_name: string | null;
   is_commercial_company: boolean;
   company_available_staff_count: string;
+  /** الشركة التي مثّلها العرض. null = العرض لفني مستقل أو اختيار فردي صريح. */
+  provider_company_id: string | null;
 }
 
 export interface AvailableOrderRow {
@@ -147,6 +153,8 @@ export interface AvailableOrderRow {
    */
   booking_mode: string;
   scheduled_at: Date | null;
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
   /**
    * ADR-0051 (docs/08 §96، طلب مالك: «لازم يكون ظاهر على الطلب من برا، الطلب ده إعادة زيارة»).
    * كان مش بيتختار خالص، فالفني كان بيشوف إعادة الزيارة كطلب عادي بلا أي تمييز.
@@ -303,30 +311,34 @@ export class MatchingService {
       'matching.company_large_job_boost',
       COMPANY_LARGE_JOB_BOOST_FALLBACK,
     );
+    const companyAutoMatchBoost = await this.settingsService.getNumber(
+      'matching.company_auto_match_boost',
+      COMPANY_AUTO_MATCH_BOOST_FALLBACK,
+    );
     const requiredCrew = Math.max(1, order.requiredTechnicians ?? 1) + Math.max(0, order.requiredAssistants ?? 0);
     // ADR-0062 — شدّة القرب حسب سياق الطلب، كلها من إعدادات الأدمن (نفس الدالة اللي التفسير بيناديها).
     const distanceWeight = await resolveDistanceWeight(this.settingsService, order);
     // نافذة أكبر قبل تمثيل كل شركة مرة واحدة؛ شركة كبيرة لا يجوز أن تملأ LIMIT بأعضائها ثم
     // يترك dedupe دفعة ناقصة. السقف يحافظ على زمن الاستعلام، ونداء التفسير الكبير يحتفظ بحجمه.
-    const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 20, 500));
+    // الشركة تتلخّص بعد الاستعلام في مرشح واحد؛ نافذة أوسع تمنع فريقًا كبيرًا من أكل نتائج
+    // باقي الشركات/المستقلين قبل مرحلة التلخيص.
+    const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 40, 500));
     const candidates = await executor.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km,
              (
-               COALESCE(tlc.order_priority_weight, 0)
-               - COALESCE(workload.active_count, 0) * $14::int
-               - COALESCE(fairness.recent_effective_workload, 0) * $15::numeric
+               ${candidateQualityScoreSql({
+                 workloadWeightParam: '$14',
+                 fairnessWeightParam: '$15',
+                 reliabilityBaselineParam: '$21',
+                 reliabilityWeightParam: '$20',
+                 reliabilityMinRatingsParam: '$22',
+               })}
                -- ADR-0062 — المسافة مكوّن حقيقي في النتيجة، مش كاسر تعادل بس. الوزن بيتحسب في
                -- resolveDistanceWeight() حسب سياق الطلب (طوارئ/موعد قريب/شغل رخيص)، و0 (الافتراضي)
                -- بيرجّع السلوك القديم بالحرف.
                - (ST_Distance(tp.current_location, a.location) / 1000.0) * $26::numeric
-               + (
-                 CASE WHEN tp.total_ratings_count >= $22::int
-                   THEN (tp.average_rating - $21::numeric) * $20::numeric
-                   ELSE 0
-                 END
-               )
                + (
                  CASE WHEN $19::boolean IS TRUE
                            AND $23::int >= $24::int
@@ -448,9 +460,10 @@ export class MatchingService {
           ) AS recent_effective_workload
       ) fairness ON true
       WHERE tp.verification_status = 'approved'
-        -- ADR-0055/0056 — مفيش استبعاد شامل على أساس الدور هنا؛ الفني والمساعد مشاركان كاملان،
-        -- لكن كليهما لازم يكون معتمدًا على الخدمة أو فئتها. الحجب الإداري طبقة إضافية فوق اعتماد
-        -- التخصص، وليس بديلًا عنه.
+        -- ADR-0087 — **مفيش استبعاد على أساس النوع هنا**. اللي بيقرر مين يقود هو صف الحجب في
+        -- technician_excluded_services جوّه شرط التأهيل تحت، مش عمود technician_kind. مساعد
+        -- مش محجوب عن الخدمة بياخد البث كقائد زيه زي الفني بالظبط.
+        -- (بلا backticks عمدًا: التعليق ده جوّه template literal.)
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
         AND ${technicianServiceQualificationCondition({
@@ -483,7 +496,16 @@ export class MatchingService {
         AND ($9::uuid IS NULL OR tp.company_id = $9)
         -- ADR-0080 — الفني «الحصري للشركة» مايوصلوش أي توزيع عام؛ يوصله بس لما الطلب نفسه
         -- مقيّد بشركته ($9 مش NULL). الشرط ده هو كل الفرق بين «تابع للشركة» و«مخفي تمامًا».
-        AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp', companyScopeParam: '$9' })}
+        AND (
+          ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp', companyScopeParam: '$9' })}
+          -- العضو الحصري لا يدخل كفرد في التوزيع العام، لكنه مسموح كممثل لشركته التجارية
+          -- عندما يكون المحرك نفسه يختار مقدم الخدمة. اختيار فرد محدد يظل فرديًا بالكامل.
+          OR (
+            $29::boolean IS TRUE
+            AND company.id IS NOT NULL
+            AND NULLIF(BTRIM(company.commercial_registration_number), '') IS NOT NULL
+          )
+        )
         -- بَقّة حقيقية اتلقطت وقت تحقيق §36.1 (docs/08، تعميق تسجيل موبايل حقيقي): الاستعلام ده
         -- كان بيكتشف الفني كمرشّح حتى لو مستواه مالوش حد قرار (decision_limit_cents) يكفي قيمة
         -- الطلب — نفس القاعدة اللي assertEligible() (technician-assignment-guard.service.ts)
@@ -558,23 +580,58 @@ export class MatchingService {
         distanceWeight.weight,
         previewLoad?.durationMinutes ?? null,
         previewLoad?.estimatedDurationDays ?? null,
+        requestedTechnicianId === null,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
-    // في الشغل الكبير الشركة كيان واحد، مش أربع فرص متكررة لنفس الشركة داخل نفس الدفعة.
-    // نحتفظ بأعلى ممثل لها فقط عندما الزيادة فعالة؛ أعضاء الفرق/الشركات بلا زيادة يفضلوا أفرادًا
-    // طبيعيين بلا تغيير في السلوك القديم.
-    const prioritizedCompanies = new Set(
-      candidates.filter((candidate) => Number(candidate.company_adjustment) > 0 && candidate.company_id).map((candidate) => candidate.company_id!),
-    );
-    const representedCompanies = new Set<string>();
-    const companyDedupedCandidates = candidates.filter((candidate) => {
-      if (!candidate.company_id || !prioritizedCompanies.has(candidate.company_id)) return true;
-      if (representedCompanies.has(candidate.company_id)) return false;
-      representedCompanies.add(candidate.company_id);
-      return true;
+    const providerCandidates = this.resolveAutoMatchProviders(candidates, requestedTechnicianId, companyAutoMatchBoost);
+    return this.applyTieBreak(providerCandidates, tieBreakThreshold).slice(0, batchSize);
+  }
+
+  /**
+   * في الأوتو ماتشينج الشركة التجارية مرشح واحد، لا N عروض لنفس الشركة. نختار أفضل عضو فيها
+   * أولًا بنفس ترتيب المحرك، ثم نسجل الشركة على العرض لكي القبول والمحاسبة يعرفان أنه كان
+   * ترشيح شركة. اختيار عميل لفني محدد يظل شخصيًا ولا يُعاد تفسيره كشركة.
+   */
+  private resolveAutoMatchProviders(
+    candidates: EligibleTechnicianRow[],
+    requestedTechnicianId: string | null | undefined,
+    companyAutoMatchBoost: number,
+  ): EligibleTechnicianRow[] {
+    if (requestedTechnicianId) {
+      return candidates.map((candidate) => ({ ...candidate, provider_company_id: null }));
+    }
+
+    const independentCandidates: EligibleTechnicianRow[] = [];
+    const bestMemberByCompany = new Map<string, EligibleTechnicianRow>();
+    for (const candidate of candidates) {
+      if (!candidate.company_id || !candidate.is_commercial_company) {
+        independentCandidates.push({ ...candidate, provider_company_id: null });
+        continue;
+      }
+
+      const currentBest = bestMemberByCompany.get(candidate.company_id);
+      if (
+        !currentBest ||
+        Number(candidate.rank_score) > Number(currentBest.rank_score) ||
+        (Number(candidate.rank_score) === Number(currentBest.rank_score) && Number(candidate.distance_km) < Number(currentBest.distance_km))
+      ) {
+        bestMemberByCompany.set(candidate.company_id, candidate);
+      }
+    }
+
+    const companyCandidates = Array.from(bestMemberByCompany.values()).map((candidate) => ({
+      ...candidate,
+      provider_company_id: candidate.company_id,
+      rank_score: String(Number(candidate.rank_score) + companyAutoMatchBoost),
+      company_adjustment: String(Number(candidate.company_adjustment) + companyAutoMatchBoost),
+    }));
+
+    return [...independentCandidates, ...companyCandidates].sort((left, right) => {
+      const scoreDifference = Number(right.rank_score) - Number(left.rank_score);
+      if (scoreDifference !== 0) return scoreDifference;
+      return Number(left.distance_km) - Number(right.distance_km);
     });
-    return this.applyTieBreak(companyDedupedCandidates, tieBreakThreshold).slice(0, batchSize);
   }
 
   /**
@@ -999,6 +1056,7 @@ export class MatchingService {
         manager.create(OrderAssignment, {
           orderId: order.id,
           technicianId: c.technician_id,
+          providerCompanyId: c.provider_company_id,
           assignmentRound: nextRound,
           distanceKm: c.distance_km,
           assignmentStatus: AssignmentStatus.SENT,
@@ -1164,9 +1222,9 @@ export class MatchingService {
    * لأي عضو شركة كانت بتترسّى على الشركة — حتى لو العميل اختار الشخص نفسه، أو ساب التوزيع
    * يختار بلا أي ذكر للشركة. ده كان بيحوّل الانتماء لملكية.
    *
-   * دلوقتي المعيار هو **مسار الحجز**: الشركة بتتحط لو وبس لو العميل اختارها هو
-   * (`requested_technician_company_id`). غير كده الشغلانة للفرد، والشركة مالهاش علاقة —
-   * ومساحة عمل الشركة (`assigned_company_id`) بتعكس ده بالظبط.
+   * دلوقتي المعيار هو **مسار الحجز**: الشركة بتتحط لو العميل اختارها، أو لو محرك الأوتو
+   * ماتشينج اختارها ككيان مستقل وسجّلها صراحة على `order_assignments.provider_company_id`.
+   * انتماء الفني وحده لا يكفي؛ اختيار فرد عادي يظل محسوبًا للفرد.
    */
   private resolveAssignedCompanyId(order: Order): string | null {
     return order.requestedTechnicianCompanyId ?? null;
@@ -1177,12 +1235,14 @@ export class MatchingService {
     order: Order,
     technicianId: string,
     distanceKm: string | null,
+    providerCompanyId: string | null = null,
   ): Promise<{ kind: 'noop' } | { kind: 'confirmed'; order: Order; technicianId: string }> {
     const now = new Date();
     await manager.save(
       manager.create(OrderAssignment, {
         orderId: order.id,
         technicianId,
+        providerCompanyId,
         assignmentRound: 1,
         distanceKm,
         assignmentStatus: AssignmentStatus.ACCEPTED,
@@ -1196,7 +1256,7 @@ export class MatchingService {
       return { kind: 'noop' };
     }
     order.technicianId = technicianId;
-    order.assignedCompanyId = this.resolveAssignedCompanyId(order);
+    order.assignedCompanyId = providerCompanyId ?? this.resolveAssignedCompanyId(order);
     order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
     order.assignedAt = now;
     await manager.save(order);
@@ -1270,22 +1330,35 @@ export class MatchingService {
 
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
     const result = await this.dataSource.transaction(async (manager) => {
-      const order = await manager.createQueryBuilder(Order, 'o')
-        .setLock('pessimistic_write')
+      // **ترتيب القفل: الفني الأول ثم الطلب** (نفس ترتيب `accept()`). المرشّح نفسه مش معروف
+      // إلا بعد قراءة الطلب، فالقراءة الأولى دي **بلا قفل** عمدًا — هي بتختار مرشّح بس. بعد ما
+      // الفني يتقفل بنقفل الطلب **ونعيد التحقق** من حالته، فأي تغيير حصل في النص مابيعديش.
+      // من غير الترتيب ده، الجوب ده كان بيتعارك مع `accept()` على نفس الزوج ⇒ deadlock حقيقي
+      // (docs/08 §148).
+      const orderForCandidate = await manager.createQueryBuilder(Order, 'o')
         .where('o.id = :orderId', { orderId })
         .getOne();
-      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+      if (!orderForCandidate || orderForCandidate.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !orderForCandidate.serviceZoneId) {
         return { kind: 'noop' as const };
       }
 
       // ADR-0078: دخول مسار الطلبات قرار دائم؛ تغيّر الحمل لا يحوّله لتعيين بلا موافقة.
-      const decision = await this.scheduledDispatchDecision(order, manager);
-      if (decision.route === 'rounds') return { kind: 'request' as const, order };
-      const candidate = await this.firstScheduledCandidate(order, manager);
-      if (!candidate) return { kind: 'stalled' as const, order };
+      const decision = await this.scheduledDispatchDecision(orderForCandidate, manager);
+      if (decision.route === 'rounds') return { kind: 'request' as const, order: orderForCandidate };
+      const candidate = await this.firstScheduledCandidate(orderForCandidate, manager);
+      if (!candidate) return { kind: 'stalled' as const, order: orderForCandidate };
 
       const technicianId = candidate.technician_id;
       const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+
+      const order = await manager.createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      // إعادة التحقق بعد القفل: ممكن يكون الطلب اتغطى أو اتلغى بين القراءة الحرة والقفل.
+      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+        return { kind: 'noop' as const };
+      }
       try {
         await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
       } catch (err) {
@@ -1294,7 +1367,13 @@ export class MatchingService {
       }
       const tier = await this.classifyCandidate(order, technicianId, await resolveDailyCapacityMinutes(this.settingsService), manager);
       if (tier !== 'LIGHT') return { kind: 'request' as const, order };
-      const confirmed = await this.confirmTechnicianForOrder(manager, order, technicianId, candidate.distance_km);
+      const confirmed = await this.confirmTechnicianForOrder(
+        manager,
+        order,
+        technicianId,
+        candidate.distance_km,
+        candidate.provider_company_id,
+      );
       return confirmed.kind === 'noop' ? { kind: 'noop' as const } : confirmed;
     });
 
@@ -1353,6 +1432,9 @@ export class MatchingService {
       // القفل يتفك من المسار الرسمي فقط، مع إبلاغ العميل؛ لا fallback صامت لمنفذ آخر.
       return orderHasLockedProvider(order) ? { ...base, route: 'rounds', reason: 'selected_provider_request' } : base;
     }
+    // موعد إعادة الضمان اختير أصلًا بأول ساعة تجتاز نفس بوابة الأهلية والتعارض. وجود حمل آخر
+    // غير متقاطع في اليوم لا يحوّلها لطلب يدوي؛ الحارس داخل autoConfirm يعيد الفحص تحت القفل.
+    if (base.reason === 'revisit_scheduled_far') return base;
     const tier = await this.classifyCandidate(order, candidate.technician_id, await resolveDailyCapacityMinutes(this.settingsService), manager);
     return tier === 'LIGHT' ? base : { ...base, route: 'rounds', reason: 'same_day_workload' };
   }
@@ -1380,6 +1462,12 @@ export class MatchingService {
         throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تعيين قائد — استخدم مسار تجنيد الفريق', HttpStatus.BAD_REQUEST);
       }
 
+      // **ترتيب القفل: الفني الأول ثم الطلب** — نفس ترتيب `accept()` بالظبط. (شوف التعليق
+      // فوق `ORDER_OF_LOCKS` في `accept()`.) النسخة القديمة كانت بتقفل الطلب الأول وبعدين
+      // الفني، والعكس بالظبط لـ`accept()` — فأي تزامن بين المسارين على نفس الزوج كان بيدي
+      // **deadlock حقيقي من Postgres** والفني بياخد «حصل خطأ غير متوقع» وهو بيدوس «اقبل».
+      // اتلقطت فعليًا في التدقيق الماراثوني (docs/08 §148) على `POST /technician/orders/:id/accept`.
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -1389,7 +1477,6 @@ export class MatchingService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح دلوقتي — ممكن يكون اتغطى من فني تاني', HttpStatus.CONFLICT);
       }
 
-      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
       await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
 
       const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, null);
@@ -1448,7 +1535,8 @@ export class MatchingService {
       `
       SELECT oa.id AS assignment_id, o.id AS order_id, o.order_number, s.name_ar AS service_name_ar,
              o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at,
-             o.booking_mode, o.scheduled_at, o.order_type, parent.order_number AS original_order_number
+             o.booking_mode, o.scheduled_at, o.duration_minutes, o.estimated_duration_days,
+             o.order_type, parent.order_number AS original_order_number
       FROM order_assignments oa
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id
@@ -1543,9 +1631,9 @@ export class MatchingService {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
       order.technicianId = profile.id;
-      // ADR-0080 — نفس قاعدة `resolveAssignedCompanyId()` بالحرف: الشركة بتترسّى على الطلب لو
-      // وبس لو العميل اختارها. قبول الفني لعرض عام مايحوّلش الشغلانة لشركته.
-      order.assignedCompanyId = this.resolveAssignedCompanyId(order);
+      // العرض نفسه مصدر الحقيقة: الشركة تُثبت فقط لو دخلت كمقدم خدمة في هذا العرض، لا بسبب
+      // مجرد عضوية الفني فيها. اختيار فرد عادي يظل null كما كان.
+      order.assignedCompanyId = assignment.providerCompanyId ?? this.resolveAssignedCompanyId(order);
       order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
       order.assignedAt = now;
       await manager.save(order);

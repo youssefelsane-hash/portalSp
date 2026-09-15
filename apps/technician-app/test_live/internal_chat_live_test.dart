@@ -1,35 +1,16 @@
 // اختبار حي حقيقي للشات الداخلي (مدير↔فنيين، أدمن↔فنيين) ضد apps/api الشغال فعلاً — نفس أسلوب
 // باقي test_live/. منفصل تماماً عن شات الدعم للعملاء (support_chat في apps/customer-app).
 // شغّله بـ: flutter test test_live/internal_chat_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/core/api_client.dart';
 import 'package:technician_app/core/api_exception.dart';
+import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber) async {
-  final log = File(
-    '/tmp/claude-0/-home-user-portalSp/164813e6-b3a9-5e7c-be97-5f3dc168fd13/scratchpad/server.log',
-  );
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('[OTP]') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
 
 void main() {
   test('فني يبدأ محادثة مع أدمن، الاتنين يتبادلوا رسائل، وفني تاني وعميل يتترفضوا', () async {
-    final adminToken = await _loginAs('+201000000030');
-    final technicianToken = await _loginAs('+201000000011');
+    final adminToken = await devAdminToken('+201000000030');
+    final technicianToken = await devTechnicianToken('+201000000011');
 
     // الفني بيشوف الأدمن في قايمة جهات الاتصال بتاعته.
     final contacts = await apiRequestList('/internal-chat/contacts', accessToken: technicianToken);
@@ -55,6 +36,11 @@ void main() {
     );
     expect(second!['id'], threadId);
 
+    // **الخيط idempotent عمدًا** (وده اللي الاختبار بيتأكد منه فوق)، يعني نفس الخيط بيفضل
+    // موجود بين التشغيلات والرسايل بتتراكم فيه. فالتحقق لازم يكون على **الفرق**، مش على
+    // العدد الكلي — النسخة القديمة كانت بتتوقع ٢ بالظبط فبتسقط من التشغيلة التانية (§148).
+    final historyBefore = await apiRequestList('/internal-chat/threads/$threadId/messages', accessToken: technicianToken);
+
     await apiRequest(
       'POST',
       '/internal-chat/threads/$threadId/messages',
@@ -69,12 +55,12 @@ void main() {
     );
 
     final history = await apiRequestList('/internal-chat/threads/$threadId/messages', accessToken: technicianToken);
-    expect(history.length, 2);
-    expect(history[0]['content'], 'صباح الخير، عندي استفسار عن الطلب');
-    expect(history[1]['content'], 'اتفضل، قولّي مشكلتك');
+    expect(history.length, historyBefore.length + 2);
+    expect(history[history.length - 2]['content'], 'صباح الخير، عندي استفسار عن الطلب');
+    expect(history.last['content'], 'اتفضل، قولّي مشكلتك');
 
     // فني تاني مش طرف في المحادثة دي.
-    final otherTechnicianToken = await _loginAs('+201000000012');
+    final otherTechnicianToken = await devTechnicianToken('+201000000012');
     ApiException? otherTechnicianError;
     try {
       await apiRequest('GET', '/internal-chat/threads/$threadId/messages', accessToken: otherTechnicianToken);
@@ -85,7 +71,9 @@ void main() {
     expect(otherTechnicianError!.statusCode, 403);
 
     // عميل ممنوع من الشات الداخلي كله (مقصور على admin/technician).
-    final customerToken = await _loginAs('+201000009999');
+    // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
+    // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
+    final customerToken = await registerCustomer(uniquePhone());
     ApiException? customerError;
     try {
       await apiRequest('GET', '/internal-chat/contacts', accessToken: customerToken);

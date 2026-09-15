@@ -586,11 +586,10 @@ export async function describeTechnicianCapacity(
  * بقى خطر حقيقي: تطبيقه على تمنية من تسعة معناه إن الفني المحجوب يفضل بيوصله الشغل من المسار
  * المنسي، **والأدمن شايف في الواجهة إنه محجوب** — تسريب صامت أسوأ من عدم بناء الميزة أصلاً.
  *
- * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض، لنفس الشخص سواء شغال في الطلب كفني أو مساعد:
- *  1. **مؤهّل**: صف خدمة مباشر معتمد، أو اعتماد الفئة كلها.
- *  2. **مش محجوب**: مفيش صف في `technician_excluded_services` للفني/الخدمة دول.
+ * أساس التخصص (صف خدمة مباشر معتمد أو اعتماد الفئة كلها) مشترك. حجب خدمة بعينها يضاف في مسار
+ * القيادة فقط؛ مسار المساعدة يتعمد تجاهله ويظل مقيدًا باعتماد التخصص.
  */
-export function technicianServiceQualificationCondition(opts: {
+interface TechnicianServiceQualificationOptions {
   /** تعبير SQL لمعرّف الفني، مثلاً `tp.id` أو `member.id` أو `$1`. */
   technicianIdExpr: string;
   /** تعبير SQL لمعرّف الخدمة المطلوبة، مثلاً `$1` أو `svc.id` أو `s.id`. */
@@ -607,9 +606,10 @@ export function technicianServiceQualificationCondition(opts: {
    * إن هو يروح لفنيين فقط، بيروح لأحسن فني»).
    *
    * اختياري عن قصد، وبيتبعت **بس من المسارات اللي الشخص فيها بيبقى قائد الطلب** (التوزيع،
-   * قايمة اختيار العميل، فحص «فيه حد متاح؟»). مسارات المساعدين والتجنيد بدور صريح مابتبعتوش
-   * — حقنه هناك كان هيمنع المساعدين من إنهم يبقوا مساعدين، وهي نفس الغلطة اللي
-   * `technicianKindCondition()` بيحذّر منها بالنص.
+   * قايمة اختيار العميل، فحص «فيه حد متاح؟»). مسار المساعدة
+   * (`assistantServiceQualificationCondition`) مابياخدهوش أصلاً — حقنه هناك كان هيمنع
+   * المساعدين من إنهم يبقوا مساعدين، وهي نفس الغلطة اللي `technicianKindCondition()` بيحذّر
+   * منها بالنص.
    *
    * لو مااتبعتش، الشرط الناتج **مطابق حرفيًا** للسلوك القديم — فمفيش أي مسار بيتغيّر بالسكوت.
    */
@@ -619,25 +619,9 @@ export function technicianServiceQualificationCondition(opts: {
     /** تعبير بوليان بيقول إن الخدمة بتشترط قائدًا فنيًا — مثلاً `svc.requires_technician_lead`. */
     serviceRequiresLeadExpr: string;
   };
-}): string {
-  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
-  const notExcluded = `NOT EXISTS (
-          SELECT 1 FROM technician_excluded_services tes
-          WHERE tes.technician_id = ${opts.technicianIdExpr}
-            AND tes.service_id = ${opts.serviceIdExpr}
-        )`;
+}
 
-  // ADR-0086 — الشرط بيتحقن **بس** لما الكولر يطلبه صراحةً. الخدمة اللي
-  // `requires_technician_lead = false` (الافتراضي لكل الخدمات القايمة) بتعدّي زي ما هي بالظبط،
-  // فقاعدة ADR-0055 («المساعد المؤهّل زيه زي الفني») تفضل سارية بالحرف من غير أي تغيير.
-  const leadRule = opts.technicianLeadRule
-    ? `
-        AND (
-          ${opts.technicianLeadRule.serviceRequiresLeadExpr} IS NOT TRUE
-          OR ${opts.technicianLeadRule.technicianAlias}.technician_kind = 'technician'
-        )`
-    : '';
-
+function approvedSpecialtyCondition(opts: TechnicianServiceQualificationOptions): string {
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
     : `EXISTS (
@@ -656,9 +640,44 @@ export function technicianServiceQualificationCondition(opts: {
               AND tec_cat.category_id = ${opts.categoryIdExpr}
               AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
           )
-        )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
-        AND ${notExcluded}${leadRule}`;
+        )`;
+}
+
+/**
+ * أهلية الشخص لقيادة الطلب مباشرة — **لأي `technician_kind`** (ADR-0087). اعتماد الخدمة/الفئة
+ * مطلوب، وحجب الخدمة هو **المفتاح الوحيد** اللي بيمنع وصول الطلب له كقائد، سواء من اختيار
+ * العميل أو المطابقة أو التعيين الإداري.
+ *
+ * ADR-0086 — واستثناء واحد فوق كده: الخدمة اللي `requires_technician_lead = true` قيادتها
+ * مقصورة على `technician_kind = 'technician'`. الشرط بيتحقن **بس** لما الكولر يبعت
+ * `technicianLeadRule`، والخدمة اللي العمود فيها `false` (الافتراضي لكل الخدمات القايمة) بتعدّي
+ * زي ما هي بالظبط — فقاعدة ADR-0055/0087 تفضل سارية بالحرف من غير أي تغيير صامت.
+ */
+export function technicianServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
+  const leadRule = opts.technicianLeadRule
+    ? `
+        AND (
+          ${opts.technicianLeadRule.serviceRequiresLeadExpr} IS NOT TRUE
+          OR ${opts.technicianLeadRule.technicianAlias}.technician_kind = 'technician'
+        )`
+    : '';
+  return `${approvedSpecialtyCondition(opts)}
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )${leadRule}`;
+}
+
+/**
+ * أهلية المشاركة في طاقم داخل التخصص. الصف في `technician_excluded_services` معناه بالحرف
+ * **«مايقودش الخدمة دي»** — مش «مايقربش منها» — فهو مابيمسّش اعتماد الفئة اللي بيسمح له يساعد
+ * قائد مؤهل (ADR-0087). إلغاء اعتماد الفئة/الخدمة نفسها هو اللي بيمنعه تمامًا.
+ *
+ * ومابياخدش `technicianLeadRule` عن قصد: الاشتراط ده عن **القيادة**، والمساعد بيساعد.
+ */
+export function assistantServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
+  return approvedSpecialtyCondition(opts);
 }
 
 /**
@@ -728,13 +747,13 @@ export function technicianCityCoverageCondition(opts: {
  * - `'assistant'` → مجمع بث فرص المساعدة وضم مساعد لطاقم طلب: **الفنيين الكاملين مستبعدين**.
  * - `'technician'` → خانة «إضافة فني» في طاقم الطلب: **المساعدين مستبعدين**.
  *
- * **تصحيح توثيقي (تدقيق ج-٤، 2026-09-09)**: التعليق هنا كان لسه بيقول إن `'technician'` مطبّقة
- * كمان على «التوزيع/اختيار العميل» عشان تستبعد المساعدين. ده **ملغي بـADR-0055** (طلب مالك
- * صريح: «طالما أنا ما منعتش عنهم الشغل، يبقى زيهم زي الفنيين بالضبط») — شجرة الأهلية مافيهاش
- * أي شرط `technician_kind`، والمساعد المؤهّل على الخدمة بياخد الطلب كقائد عادي (ونصيبه وقتها
- * نصيب القائد الكامل، ADR-0055 §تسعير). الاستخدام الفعلي دلوقتي محصور في `order-team.service`
- * و`assistant-matching.service` بس — التعليق القديم كان بيوصف نية اتلغت، ودقيقة كفاية إنها
- * تخلّي أي حد يفتكر إن في بَقّة استبعاد ناقصة ويضيفها فيكسر الميزة.
+ * **ADR-0087 (يلغي ADR-0086)**: الشرط ده **ممنوع** يتحط على أي مسار قيادة (اختيار العميل،
+ * المطابقة التلقائية، التعيين الإداري). اللي بيقرر مين يقود هو صف `technician_excluded_services`
+ * جوّه `technicianServiceQualificationCondition()` — مساعد مش محجوب عن الخدمة بياخدها كقائد
+ * زيه زي الفني بالظبط (طلب مالك حرفي: «طالما أنا ما منعتش عنهم الشغل، يبقى زيهم زي الفنيين»).
+ *
+ * لو لقيت نفسك بتضيفه في مسار قيادة عشان «المساعد مايقودش» — ده بالظبط اللي ADR-0086 عمله
+ * واتلغى في نفس اليوم: بيتخطّى مفتاح الأدمن ويخلّي الشاشة تقول «مسموح» والسيستم يرفض.
  */
 export function technicianKindCondition(opts: {
   /** تعبير SQL لمعرّف صف الفني، مثلاً `tp` أو `member` (الـalias مش الـid — بنقرا العمود منه). */

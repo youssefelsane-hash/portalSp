@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
@@ -8,7 +8,7 @@ import {
   SupportTicketCreatedEvent,
 } from '../../common/events/support-ticket-created.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
-import { UserType } from '../auth/entities/user.entity';
+import { User, UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AssignSupportTicketDto, UpdateSupportTicketStatusDto } from './dto/admin-update-support-ticket.dto';
 import { CreateSupportTicketDto } from './dto/create-support-ticket.dto';
@@ -24,6 +24,11 @@ const ALLOWED_TRANSITIONS: Record<SupportTicketStatus, SupportTicketStatus[]> = 
   [SupportTicketStatus.CLOSED]: [],
 };
 
+export interface AdminSupportTicket {
+  ticket: SupportTicket;
+  ownerName: string | null;
+}
+
 @Injectable()
 export class SupportTicketsService {
   constructor(
@@ -31,6 +36,7 @@ export class SupportTicketsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
+    @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
   private async nextTicketNumber(manager: EntityManager): Promise<string> {
@@ -79,11 +85,35 @@ export class SupportTicketsService {
     return this.tickets.find({ where: { userId }, order: { createdAt: 'DESC' } });
   }
 
-  listAllForAdmin(status?: SupportTicketStatus): Promise<SupportTicket[]> {
-    return this.tickets.find({
+  private async withOwnerNames(tickets: SupportTicket[]): Promise<AdminSupportTicket[]> {
+    const userIds = [...new Set(tickets.map((ticket) => ticket.userId))];
+    if (userIds.length === 0) return [];
+
+    // نحمّل الأسماء مرة واحدة لكل القائمة؛ لا N+1 مع شاشة الأدمن أو التحديث الحي.
+    const owners = await this.users.find({
+      where: { id: In(userIds) },
+      select: { id: true, fullName: true },
+    });
+    const namesByUserId = new Map(owners.map((owner) => [owner.id, owner.fullName]));
+
+    return tickets.map((ticket) => ({
+      ticket,
+      ownerName: namesByUserId.get(ticket.userId) ?? null,
+    }));
+  }
+
+  async listAllForAdmin(status?: SupportTicketStatus): Promise<AdminSupportTicket[]> {
+    const tickets = await this.tickets.find({
       where: status ? { ticketStatus: status } : {},
       order: { createdAt: 'DESC' },
     });
+    return this.withOwnerNames(tickets);
+  }
+
+  async getForAdmin(id: string): Promise<AdminSupportTicket> {
+    const ticket = await this.findOrThrow(id);
+    const [adminTicket] = await this.withOwnerNames([ticket]);
+    return adminTicket;
   }
 
   async assign(adminUserId: string, id: string, dto: AssignSupportTicketDto, meta?: AuditActorMeta): Promise<SupportTicket> {

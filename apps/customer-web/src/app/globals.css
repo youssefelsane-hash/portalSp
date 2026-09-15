@@ -1,19 +1,29 @@
 @import "tailwindcss";
 
 /* نفس القيم الدلالية المستخدمة في apps/customer-app/lib/design/app_theme.dart وapps/admin —
-   هوية بصرية موحّدة عبر المنصات الثلاث (§71: SONNA3 brand palette، مش استنساخ Thumbtack/Angi). */
+   هوية بصرية موحّدة عبر المنصات الثلاث.
+
+   **نسبة التطبيق محكومة بـADR-0093** (بلاغ مالك، docs/08 §144): ~٩٠٪ محايد بارد ·
+   ~٧٪ كحلي للأفعال · ~٣٪ نحاسي لمسة علامة. الهوية من ADR-0092 زي ما هي — اللي اتغيّر
+   هو فين اللون بيتحطّ، مش اللون نفسه. */
 :root {
-  --background: #f7f8fa;
-  --foreground: #14171f;
+  --background: #f6f7f9;
+  --foreground: #141a22;
   --surface: #ffffff;
-  --surface-variant: #eef1f6;
-  --border: #dde2ea;
-  --primary: #2f5aa6;
+  --surface-variant: #f1f3f6;
+  --border: #e3e6eb;
+  /* لون الفعل: الزرار الأساسي، اللينك، الحالة المختارة، حلقة التركيز. */
+  --primary: #123b69;
   --primary-foreground: #ffffff;
+  /* **لمسة العلامة — قايمة مقفولة (ADR-0093 §2)**: الرمز، عنوان صفحة البداية، سهم زرار
+     البحث، شيفرون «عرض الكل»، نجوم التقييم. ممنوع على أي زرار أساسي عام، تبويب مختار،
+     اختيار وقت/تاريخ، شريحة حالة، أو أي مساحة مصمتة أكبر من أيقونة. */
+  --accent: #b54724;
+  --accent-foreground: #ffffff;
   --success: #3c8b4a;
   --warning: #c98a1f;
   --danger: #c0392b;
-  --info: #3d62a6;
+  --info: #2563a8;
   --muted: #6b7280;
 }
 
@@ -25,6 +35,8 @@
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
@@ -35,17 +47,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0f1115;
-    --foreground: #eef1f6;
-    --surface: #171a21;
-    --surface-variant: #1f232c;
-    --border: #2a2f3a;
-    --primary: #7fa6e0;
-    --primary-foreground: #0f1115;
+    --background: #0f1318;
+    --foreground: #e7eaef;
+    --surface: #12161c;
+    --surface-variant: #1f242d;
+    --border: #333a44;
+    --primary: #a9c4e4;
+    --primary-foreground: #0b2444;
+    --accent: #ef9a6d;
+    --accent-foreground: #4a1a08;
     --success: #6fbf7a;
     --warning: #e0ac4e;
     --danger: #e07a6b;
-    --info: #87a9de;
+    --info: #8ab4d2;
     --muted: #9aa3b2;
   }
 }
@@ -87,11 +101,206 @@ body {
 }
 
 @layer components {
+  /* رحلة الحجز: سطح واحد هادئ وواضح بدل مدخلات متفرقة تخلي العميل يحس أنه في نموذج إداري. */
+  .booking-panel {
+    border: 1px solid var(--border);
+    border-radius: 1.5rem;
+    background: linear-gradient(145deg, var(--surface), color-mix(in oklab, var(--primary) 2.5%, var(--surface)));
+    padding: 1.25rem;
+    box-shadow: 0 18px 40px -34px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
+
+  .booking-option,
+  .booking-suggestion,
+  .booking-choice,
+  .booking-toggle {
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    background: var(--surface);
+    color: var(--foreground);
+    transition:
+      border-color var(--motion-fast) var(--motion-ease),
+      background-color var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease),
+      transform var(--motion-fast) var(--motion-ease);
+  }
+
+  .booking-option:hover,
+  .booking-suggestion:hover,
+  .booking-choice:hover,
+  .booking-toggle:hover {
+    border-color: color-mix(in oklab, var(--primary) 42%, var(--border));
+    box-shadow: 0 10px 22px -19px color-mix(in srgb, var(--primary) 80%, transparent);
+  }
+
+  .booking-option:active,
+  .booking-suggestion:active,
+  .booking-choice:active,
+  .booking-toggle:active {
+    transform: scale(0.99);
+  }
+
+  .booking-option {
+    padding: 1rem;
+  }
+
+  .booking-option-selected,
+  .booking-suggestion-selected,
+  .booking-choice-selected,
+  .booking-toggle-selected {
+    border-color: var(--primary);
+    background: color-mix(in oklab, var(--primary) 7%, var(--surface));
+    color: var(--primary);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+
+  .booking-suggestions {
+    border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
+    border-radius: 1.25rem;
+    background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 4%, var(--surface)), var(--surface));
+    padding: 1rem;
+  }
+
+  .booking-suggestion {
+    min-height: 5.5rem;
+    padding: 0.875rem;
+  }
+
+  .booking-date-input {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    background: var(--surface);
+    padding: 0.85rem 1rem;
+  }
+
+  .booking-date-input:focus-within {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+
+  .booking-date-input input {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--foreground);
+    outline: none;
+  }
+
+  .booking-time-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    background: var(--surface);
+    padding: 0.65rem 0.85rem;
+    color: var(--foreground);
+    transition: all var(--motion-fast) var(--motion-ease);
+  }
+
+  .booking-time-chip:hover,
+  .booking-time-chip-selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  .booking-field {
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    background: var(--surface);
+    padding: 1rem;
+    box-shadow: 0 10px 24px -24px color-mix(in srgb, var(--primary) 80%, transparent);
+  }
+
+  .booking-field-warning {
+    border-color: color-mix(in oklab, var(--warning) 42%, var(--border));
+    background: color-mix(in oklab, var(--warning) 5%, var(--surface));
+  }
+
+  .booking-field-label {
+    display: block;
+    font-weight: 700;
+    color: var(--foreground);
+  }
+
+  .booking-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.625rem;
+  }
+
+  .booking-choice {
+    display: flex;
+    min-height: 3.25rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    text-align: right;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .booking-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+  }
+
+  .booking-toggle-mark {
+    display: grid;
+    height: 1.4rem;
+    width: 1.4rem;
+    flex: none;
+    place-items: center;
+    border: 1.5px solid var(--border);
+    border-radius: 0.45rem;
+    color: transparent;
+  }
+
+  .booking-toggle-mark-selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  .booking-control {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 0.85rem;
+    background: var(--surface-variant);
+    padding: 0.75rem 0.9rem;
+    color: var(--foreground);
+    outline: none;
+  }
+
+  .booking-control:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+
+  .booking-range {
+    accent-color: var(--primary);
+  }
+
   /* دخول محتوى جديد: شفافية + إزاحة 4px بس. الإزاحة الصغيرة هي اللي بتخلي العين تلاحظ
      إن ده محتوى **جديد**، والكبيرة هي اللي بتخلي الصفحة تبان بتترجرج. */
   @keyframes motion-rise {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: none; }
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
   .motion-rise {
     animation: motion-rise var(--motion-base) var(--motion-ease) both;
@@ -99,20 +308,42 @@ body {
 
   /* تدرّج بسيط لقايمة قصيرة (كروت/صفوف). بيقف عند العنصر الثامن عمدًا — أي تأخير أطول من
      كده بيتحوّل من «إحساس بالترتيب» لـ«انتظار». */
-  .motion-list > *:nth-child(1) { animation-delay: 0ms; }
-  .motion-list > *:nth-child(2) { animation-delay: 25ms; }
-  .motion-list > *:nth-child(3) { animation-delay: 50ms; }
-  .motion-list > *:nth-child(4) { animation-delay: 75ms; }
-  .motion-list > *:nth-child(5) { animation-delay: 100ms; }
-  .motion-list > *:nth-child(6) { animation-delay: 125ms; }
-  .motion-list > *:nth-child(7) { animation-delay: 150ms; }
-  .motion-list > *:nth-child(n + 8) { animation-delay: 175ms; }
+  .motion-list > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .motion-list > *:nth-child(2) {
+    animation-delay: 25ms;
+  }
+  .motion-list > *:nth-child(3) {
+    animation-delay: 50ms;
+  }
+  .motion-list > *:nth-child(4) {
+    animation-delay: 75ms;
+  }
+  .motion-list > *:nth-child(5) {
+    animation-delay: 100ms;
+  }
+  .motion-list > *:nth-child(6) {
+    animation-delay: 125ms;
+  }
+  .motion-list > *:nth-child(7) {
+    animation-delay: 150ms;
+  }
+  .motion-list > *:nth-child(n + 8) {
+    animation-delay: 175ms;
+  }
 
   /* رقم اتغيّر (عدّاد لحظي، سعر، رصيد): ومضة خفيفة على القيمة نفسها. أنضف بكتير من عدّاد
      بيلف من رقم لرقم — ده بيخلي القراءة أصعب وقت التغيير بالظبط. */
   @keyframes motion-value-change {
-    0%   { transform: translateY(-2px); opacity: 0.55; }
-    100% { transform: none; opacity: 1; }
+    0% {
+      transform: translateY(-2px);
+      opacity: 0.55;
+    }
+    100% {
+      transform: none;
+      opacity: 1;
+    }
   }
   .motion-value-change {
     animation: motion-value-change var(--motion-slow) var(--motion-ease);
@@ -121,8 +352,12 @@ body {
   /* صف اتحدّث لحظيًا: تظليل بيروح لوحده. المستخدم بيعرف **أنهي** صف اتغيّر من غير ما نضطر
      نلوّنه للأبد ولا نحطّ بادچ زيادة. */
   @keyframes motion-row-flash {
-    from { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
-    to   { background-color: transparent; }
+    from {
+      background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+    }
+    to {
+      background-color: transparent;
+    }
   }
   .motion-row-flash {
     animation: motion-row-flash 900ms var(--motion-ease);
@@ -146,8 +381,9 @@ body {
   /* استجابة اللمس/الضغط على أي عنصر تفاعلي — أصغر feedback ممكن وأكترهم إفادة: بيقول
      «الضغطة وصلت» قبل ما الشبكة ترد أصلاً. */
   .motion-press {
-    transition: transform var(--motion-fast) var(--motion-ease),
-                box-shadow var(--motion-fast) var(--motion-ease);
+    transition:
+      transform var(--motion-fast) var(--motion-ease),
+      box-shadow var(--motion-fast) var(--motion-ease);
   }
   .motion-press:active {
     transform: scale(0.985);

@@ -22,7 +22,7 @@ export class SupportTicketsController {
   @Get()
   async listMine(@CurrentUser() user: JwtPayload) {
     const tickets = await this.supportTicketsService.listMine(user.sub);
-    return tickets.map(toSupportTicketResponseDto);
+    return tickets.map((ticket) => toSupportTicketResponseDto(ticket));
   }
 
   @Get(':id')

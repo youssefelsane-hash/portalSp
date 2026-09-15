@@ -237,6 +237,23 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     expect(typeof result.rankInfo?.rankScore).toBe('number');
   });
 
+  // ADR-0087 — القاعدة اتقلبت: المفتش مابيستبعدش على أساس النوع خالص. مساعد مش محجوب عن
+  // الخدمة **مؤهّل لقيادتها**، والمحجوب بيترفض من شرط الحجب نفسه (مغطّى في
+  // technician-kind-marketplace-exclusion.spec.ts) مش من شرط نوع.
+  it('المساعد غير المحجوب مؤهّل لقيادة الطلب زيه زي الفني', async () => {
+    await q(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.eligibleProfile]);
+    try {
+      const result = await service.explainTechnicianForOrder(
+        await dataSource.getRepository(Order).findOneByOrFail({ id: ids.order }),
+        ids.eligibleProfile,
+      );
+      expect(result.eligible).toBe(true);
+      expect(result.checks.some((check) => check.key === 'correct_kind')).toBe(false);
+    } finally {
+      await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.eligibleProfile]);
+    }
+  });
+
   // docs/08 §107 — تناقض حقيقي اتلقط حي: المفتّش كان بيقول «مؤهّل بالكامل» لشخص مستواه أقل من
   // حد قيادة طلب الاعتماد، بينما قايمة التعيين الإجباري (listForServiceBooking(isTeamBooking))
   // مش بتعرضه أصلاً وassertCoreEligibility() هترفضه بـ409 وقت التنفيذ. الشرط كان مفروضًا في

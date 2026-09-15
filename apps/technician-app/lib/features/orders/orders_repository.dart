@@ -1,6 +1,7 @@
 import '../../core/auth_repository.dart';
 import 'models.dart';
 import 'order.dart';
+import 'quote_item_request.dart';
 
 class OrdersRepository {
   final AuthRepository authRepository;
@@ -252,25 +253,13 @@ class OrdersRepository {
 
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
   // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
-  /// الحمولة متكتوبة هنا **بالحرف** عن قصد بدل `items.map((e) => e.toJson())`: ده المكان
-  /// الوحيد اللي شكل السلك فيه مكتوب، فـ`scripts/mobile-api-contract-audit.js` يقدر يقراه
-  /// ويقارنه بالـDTO. والنوع `QuoteItemInput` بيضمن إن كل حقل إجباري موجود وقت الترجمة.
+  /// شكل السلك متعرّف في `buildQuoteItemRequest` (مكان واحد، وعليه اختبار Dart)، والنوع
+  /// `QuoteItemInput` بيضمن إن كل حقل إجباري موجود **وقت الترجمة**.
   Future<Order> proposeQuoteItems(String orderId, List<QuoteItemInput> items) async {
     final data = await authRepository.authedRequest(
       'POST',
       '/technician/orders/$orderId/quote-items',
-      body: {
-        'items': [
-          for (final item in items)
-            {
-              'item_type': item.itemType,
-              'name_ar': item.nameAr,
-              'description': item.description,
-              'quantity': item.quantity,
-              'unit_price_cents': item.unitPriceCents,
-            },
-        ],
-      },
+      body: {'items': [for (final item in items) buildQuoteItemRequest(item)]},
     );
     final orderJson = data!['order'] as Map<String, dynamic>;
     return Order.fromJson(orderJson);

@@ -661,11 +661,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       MaterialPageRoute(
         builder: (_) => ScheduleSelectionScreen(
           allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
+          serviceName: widget.service.nameAr,
+          warrantyDays: widget.service.warrantyDays,
           requiresPreciseTime: widget.service.requiresStartTime,
           // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
           // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
           // تنبيه رسوم الاستعجال.
           allowsSameDay: widget.service.allowsEmergency,
+          // اقتراح المواعيد (ADR-0088) — العنوان معروف هنا، فالاقتراح بيظهر. لو لسه مفيش
+          // عنوان مختار بيفضل null والشاشة بتشتغل زي ما كانت بالظبط.
+          serviceId: widget.service.id,
+          addressId: _selectedAddress?.id,
+          durationMinutes: _pricePreview?.durationMinutes,
         ),
       ),
     );
@@ -1497,7 +1504,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       ];
     }
     final sortedFields = [..._pricingFields]
-      ..sort((a, b) => a.fieldKey.compareTo(b.fieldKey));
+      ..sort(comparePricingFields);
     return [
       const SizedBox(height: 16),
       Text(
@@ -1544,7 +1551,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Card(child: ListTile(title: Text(widget.service.nameAr))),
+            Card(
+              child: ListTile(
+                leading: Icon(
+                  Icons.home_repair_service_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: Text(widget.service.nameAr),
+                subtitle: widget.service.warrantyDays > 0
+                    ? Text('ضمان ${widget.service.warrantyDays} يوم على الخدمة')
+                    : null,
+                trailing: widget.service.warrantyDays > 0
+                    ? Icon(
+                        Icons.verified_user_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      )
+                    : null,
+              ),
+            ),
             const SizedBox(height: 16),
             Text(
               'عنوان الطلب',

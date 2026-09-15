@@ -449,13 +449,23 @@ async function run() {
   // **باندل Flutter**: أي `--dart-define` أو ثابت في كود Dart بيتشحن جوّه الـAPK. الفحص بيدوّر
   // على أسرار سيرفر (JWT secret، DB URL، مفاتيح خاصة) في كود التطبيقين — دي حاجات ماينفعش
   // أبدًا تكون على تليفون العميل، عكس مفتاح Maps العام اللي مقصود يكون هناك.
-  const dartFiles = execFileSync('git', ['ls-files', 'apps/customer-app', 'apps/technician-app'], {
+  //
+  // **تصحيح نطاق (تدقيق ماراثوني 2026-09-14، docs/08 §148)**: الفحص كان بيمشي على كل ملف
+  // `.dart` متتبّع، ومنهم `test_live/` — وده كود اختبار **مابيتشحنش في الـAPK أصلاً**
+  // (`flutter build` بياخد `lib/` والمنصّات بس). ده كان بيدّي إنذار كاذب على هيلبر اختبار
+  // بيقرا السر من `apps/api/.env` **وقت التشغيل** ومابيخزّنش أي قيمة. الفحص دلوقتي على
+  // الكود اللي بيتشحن فعلاً، وجنبه فحص منفصل (ز-٤) أقسى على كود الاختبار: ممنوع أي **قيمة**
+  // سر مكتوبة، حتى لو الملف مش بيتشحن.
+  const SHIPPED_DART_DIRS = ['/lib/', '/android/', '/ios/', '/web/', '/macos/', '/windows/', '/linux/'];
+  const allDartFiles = execFileSync('git', ['ls-files', 'apps/customer-app', 'apps/technician-app'], {
     cwd: ROOT,
     encoding: 'utf8',
   })
     .trim()
     .split('\n')
     .filter((f) => f.endsWith('.dart'));
+  const dartFiles = allDartFiles.filter((f) => SHIPPED_DART_DIRS.some((d) => f.includes(d)));
+  const testDartFiles = allDartFiles.filter((f) => !dartFiles.includes(f));
   const SERVER_SECRET_IN_CLIENT = [
     ['سر JWT', /JWT_ACCESS_SECRET|JWT_REFRESH_SECRET|jwtSecret/i],
     ['رابط قاعدة بيانات', /postgres(ql)?:\/\/[^\s'"]+/],
@@ -470,9 +480,31 @@ async function run() {
     }
   }
   h.record(
-    'ز-٣ مفيش سر سيرفر مخبوز في كود تطبيقات Flutter',
+    'ز-٣ مفيش سر سيرفر مخبوز في كود Flutter اللي بيتشحن',
     bundleHits.length === 0,
-    bundleHits.length ? `${bundleHits.join('، ')} ❗` : `${dartFiles.length} ملف Dart اتفحصوا`,
+    bundleHits.length ? `${bundleHits.join('، ')} ❗` : `${dartFiles.length} ملف Dart شغّال اتفحصوا`,
+  );
+
+  // **ز-٤**: كود الاختبار مابيتشحنش، بس هو متتبّع في Git — فأي **قيمة** سر مكتوبة فيه بتتسرّب
+  // بنفس الخطورة. الفرق عن ز-٣: هنا بندوّر على قيم حقيقية (رابط قاعدة ببيانات دخول، سلسلة
+  // شبيهة بمفتاح)، مش على **اسم** متغير بيئة — قراءة السر وقت التشغيل من ملف برّه المستودع
+  // هي الطريقة الصح مش مخالفة.
+  const SECRET_VALUE_IN_TEST = [
+    ['رابط قاعدة بيانات ببيانات دخول', /postgres(ql)?:\/\/[^\s'"]*:[^\s'"]*@/],
+    ['مفتاح AWS', /AKIA[0-9A-Z]{16}/],
+    ['مفتاح خاص', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ];
+  const testHits = [];
+  for (const file of testDartFiles) {
+    const content = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    for (const [label, re] of SECRET_VALUE_IN_TEST) {
+      if (re.test(content)) testHits.push(`${file} (${label})`);
+    }
+  }
+  h.record(
+    'ز-٤ مفيش قيمة سر مكتوبة في كود اختبارات Flutter',
+    testHits.length === 0,
+    testHits.length ? `${testHits.join('، ')} ❗` : `${testDartFiles.length} ملف اختبار اتفحصوا`,
   );
 
   // ============ ح: تسريب المعلومات في الأخطاء ============

@@ -15,6 +15,7 @@ import {
   RoundExpiredJobData,
 } from './matching-rounds.queue';
 import { MatchingService } from './matching.service';
+import { ThrottledWorkerErrorLogger } from '../../common/utils/throttled-worker-error-logger';
 
 /**
  * **سقف الشغل الخلفي المتزامن** — ده هو الضغط الخلفي نفسه، مش رقم أداء.
@@ -67,6 +68,8 @@ const DISPATCH_CONCURRENCY = Math.max(1, parseInt(process.env.MATCHING_QUEUE_CON
 )
 export class MatchingQueueProcessor extends WorkerHost {
   private readonly logger = new Logger(MatchingQueueProcessor.name);
+  // خنق الفيضان — الشرح الكامل في `ThrottledWorkerErrorLogger` (docs/08 §148).
+  private readonly workerErrors = new ThrottledWorkerErrorLogger(this.logger, 'matching-rounds');
 
   constructor(
     @InjectRepository(OrderAssignment) private readonly assignments: Repository<OrderAssignment>,
@@ -81,7 +84,7 @@ export class MatchingQueueProcessor extends WorkerHost {
   // الخطأ ده لما محدش مستمع، وده بيوقف mainLoop الداخلي بتاع BullMQ Worker بصمت للأبد.
   @OnWorkerEvent('error')
   handleWorkerError(error: Error): void {
-    this.logger.warn(`Worker error (matching-rounds): ${error.message}`);
+    this.workerErrors.record(error);
   }
 
   /**

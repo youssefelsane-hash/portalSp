@@ -67,6 +67,10 @@ export class Service {
   @Column({ name: 'full_description_ar', type: 'text', nullable: true })
   fullDescriptionAr: string | null;
 
+  /** تعليمات العميل الخاصة بسلامة التعامل والممتلكات أثناء تنفيذ هذه الخدمة. */
+  @Column({ name: 'safety_guidance_ar', type: 'text', nullable: true })
+  safetyGuidanceAr: string | null;
+
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 
@@ -268,14 +272,14 @@ export class Service {
   /**
    * دقة الموعد — العمود الوحيد الباقي من أربعة (ADR-0060 §4، migration 0244).
    *
-   * `false` = «يوم كامل» (تاريخ بس)، `true` = «وقت بداية فقط» (تاريخ + ساعة وصول). التلاتة
+   * `false` = «يوم كامل» (تاريخ بس)، `true` = «وقت بداية فقط» (تاريخ + ساعة وصول، الافتراضي). التلاتة
    * التانيين (`requires_precise_schedule`, `requires_hours_only`, `requires_start_and_end`)
    * أعمدتهم لسه في الداتابيز لبيانات تاريخية، بس CHECK بيفرض إنهم `false` دايمًا، **وماتقراش من
    * الكود خالص** — عشان مايبقاش فيه مسار تاني بيسأل نفس السؤال.
    *
    * أي فرع محتاج يسأل عن دقة الموعد بينادي `schedulePrecision(service)`.
    */
-  @Column({ name: 'requires_start_time_only', type: 'boolean', default: false })
+  @Column({ name: 'requires_start_time_only', type: 'boolean', default: true })
   requiresStartTimeOnly: boolean;
 
   @Column({

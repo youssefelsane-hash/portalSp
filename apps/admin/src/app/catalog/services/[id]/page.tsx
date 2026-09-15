@@ -156,9 +156,9 @@ export default function ServiceDetailPage() {
   // الحقل ده فعليًا "سعر الساعة" وبيتضرب في عدد الساعات المختارة (ADR-0031 Slice H).
   const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('formula');
   // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
-  // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
+  // ما توصل لتحقق الباك-إند/CHECK constraint. ساعة الوصول هي الافتراضي؛ اليوم الكامل استثناء.
   // ADR-0060 §4 — وضعين بس. التلاتة اللي اتشالوا كانوا بيطلبوا مدخلات تسعير مش بيانات جدولة.
-  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('full_day');
+  const [schedulingMode, setSchedulingMode] = useState<'full_day' | 'start_time'>('start_time');
   // ADR-0063/0066 — سياسة تحديد السعر والمعاينة. الأوضاع في state (مش defaultValue) عشان الفورم
   // يعرض الحقول المرتبطة بالوضع المختار بس — إظهار تدريجي، مش 13 حقل كلهم ظاهرين لأي خدمة.
   const [priceCertaintyMode, setPriceCertaintyMode] = useState<PriceCertaintyMode>('confirmed_price');
@@ -521,6 +521,7 @@ export default function ServiceDetailPage() {
       name_en: (form.get('name_en') as string) || undefined,
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
       full_description_ar: (form.get('full_description_ar') as string) || undefined,
+      safety_guidance_ar: (form.get('safety_guidance_ar') as string).trim() || null,
       icon_url: (form.get('icon_url') as string) || undefined,
       featured_icon_url: (form.get('featured_icon_url') as string) || null,
       featured_name_ar: (form.get('featured_name_ar') as string) || null,
@@ -811,6 +812,20 @@ export default function ServiceDetailPage() {
                 <Label htmlFor="svc_full_desc">وصف كامل</Label>
                 <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
               </div>
+              <div className="flex flex-col gap-1 rounded-xl border border-amber-200/70 bg-amber-50/40 p-4">
+                <Label htmlFor="svc_safety_guidance">إرشادات السلامة والتعامل للعميل</Label>
+                <Textarea
+                  id="svc_safety_guidance"
+                  name="safety_guidance_ar"
+                  defaultValue={service.safety_guidance_ar ?? ''}
+                  rows={6}
+                  maxLength={5000}
+                  placeholder="مثال: حفاظًا على سلامتك وممتلكاتك، احتفظ بالمتعلقات الثمينة في مكان آمن..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  يظهر النص داخل تفاصيل كل طلب لهذه الخدمة طوال التنفيذ وبعد اكتماله. اكتب تعليمات عملية ومحايدة تحمي العميل ومقدم الخدمة.
+                </p>
+              </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>
                 <Input
@@ -1045,14 +1060,14 @@ export default function ServiceDetailPage() {
                 <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
                   <div className="mb-3">
                     <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">وضعين بس: يا إما التاريخ بس، يا إما التاريخ + ساعة الوصول. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">الافتراضي تاريخ + ساعة وصول؛ اختَر «يوم كامل» فقط لو وقت الزيارة غير مهم للخدمة. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
                   </div>
                   {schedulingMode === 'start_time' && <input type="hidden" name="requires_start_time_only" value="on" />}
                   <div className="grid gap-3 md:grid-cols-2">
                     <SchedulingModeChoice
                       active={schedulingMode === 'full_day'}
                       title="يوم كامل"
-                      description="العميل بيختار التاريخ بس — من غير ساعة. مناسب لمعظم شغل الصيانة."
+                      description="العميل بيختار التاريخ بس — من غير ساعة. استخدمه فقط لو وقت الزيارة غير مهم."
                       icon={CalendarDays}
                       onSelect={() => setSchedulingMode('full_day')}
                     />

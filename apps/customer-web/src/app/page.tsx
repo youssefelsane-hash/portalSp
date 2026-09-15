@@ -13,11 +13,9 @@ import { useCatalogZone } from '@/lib/catalog-zone';
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
 // الـAPIs بالضبط (§59: مفيش محرك اكتشاف خدمة منفصل للويب).
 //
-// ── إعادة تخطيط 2026-09-11 (طلب مالك: «الهيرو ياخد الشاشة كلها») ──────────────────────────
-// الهيرو كان `section` بعرض الشاشة الكامل وارتفاع ~٤٥٠px، فالفئات — اللي هي **الغرض** من
-// الصفحة — مكانتش بتبان غير بعد scroll. دلوقتي الهيرو كارت مضغوط بيقعد **جنب** شبكة الفئات
-// على الشاشات الكبيرة (٥ أعمدة مقابل ٧)، وفوقها على الموبايل. نفس المحتوى بالحرف (نفس الـeyebrow
-// والعنوان والوصف والبحث ورسالة الثقة) — التغيير في الحجم والمكان بس.
+// ── تخطيط الصفحة الرئيسية ──────────────────────────────────────────────────────────────────
+// الهيرو هو مدخل الصفحة البصري، ثم المشروعات، ثم الفئات. وضع العناصر الثلاثة في شبكة واحدة كان
+// يقلص الصورة إلى عمود جانبي ويترك مساحة فارغة كبيرة على الشاشات الواسعة؛ كل قسم الآن يأخذ صفه.
 const HERO_SLIDES = [
   'linear-gradient(135deg, #1c3a6e 0%, #2f5aa6 55%, #4d78c4 100%)',
   'linear-gradient(135deg, #0f1115 0%, #22314f 45%, #2f5aa6 100%)',
@@ -77,6 +75,8 @@ export default function HomePage() {
   const [trustMessage, setTrustMessage] = useState('');
   const [searchContent, setSearchContent] = useState(DEFAULT_SEARCH_CONTENT);
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
+  // بيبدأ ظاهر عشان القسم مايعملش وميض اختفاء لو المحتوى اتأخر (docs/08 §146).
+  const [projectsEnabled, setProjectsEnabled] = useState(true);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
   useEffect(() => {
@@ -87,6 +87,7 @@ export default function HomePage() {
         setSearchContent(content.search ?? DEFAULT_SEARCH_CONTENT);
         setActiveSlide(0);
         setTips(content.tips);
+        setProjectsEnabled(content.projects_enabled !== false);
       })
       .catch(() => {})
       .finally(() => setHeroSettled((s) => ({ ...s, content: true })));
@@ -189,11 +190,9 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-5 sm:pt-8">
-      {/* ── الهيرو + الفئات جنب بعض ────────────────────────────────────────────────────────
-          على lg: خمسة أعمدة للهيرو وسبعة للفئات. تحت كده: الهيرو فوق بارتفاع محدود، والفئات
-          تحته مباشرة — من غير ما أي واحد فيهم ياخد الشاشة كلها. */}
-      <div className="grid items-start gap-5 lg:grid-cols-12">
-        <section className="relative isolate overflow-hidden rounded-3xl lg:col-span-5" aria-labelledby="hero-title">
+      <div className="space-y-8 sm:space-y-10">
+        {/* الهيرو يأخذ عرضه الطبيعي حتى تظهر الصورة ورسالة البحث كواجهة واحدة متماسكة. */}
+        <section className="relative isolate overflow-hidden rounded-3xl" aria-labelledby="hero-title">
           <div aria-hidden className="absolute inset-0" style={{ backgroundColor: HERO_NEUTRAL }}>
             <div
               ref={heroMediaRef}
@@ -237,8 +236,8 @@ export default function HomePage() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-black/10" />
           </div>
 
-          <div className="relative flex min-h-[260px] flex-col justify-end gap-3 p-5 sm:min-h-[340px] sm:gap-4 sm:p-8 lg:min-h-[420px]">
-            <div className="text-white [text-shadow:0_2px_18px_rgb(0_0_0/0.45)]">
+          <div className="relative flex min-h-[320px] flex-col justify-end gap-3 p-5 sm:min-h-[400px] sm:gap-4 sm:p-8 lg:min-h-[460px] lg:max-w-3xl lg:p-12">
+            <div className="max-w-2xl text-white [text-shadow:0_2px_18px_rgb(0_0_0/0.45)]">
               <p className="inline-flex rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-sm">
                 {searchContent.eyebrow}
               </p>
@@ -257,9 +256,12 @@ export default function HomePage() {
                   aria-label={searchContent.title}
                   className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground outline-none placeholder:text-muted"
                 />
+                {/* **النحاسي هنا وبس على الصفحة دي** (ADR-0093 §2، طلب مالك: «في صفحة
+                    البداية يكون فيه طابع للون»). ده الفعل الواحد اللي الصفحة مبنية حواليه،
+                    فاللمسة عليه بتقرا كعلامة؛ نفس اللون على كل زرار بيقرا كضوضاء. */}
                 <button
                   type="submit"
-                  className="motion-press shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                  className="motion-press shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90"
                 >
                   بحث
                 </button>
@@ -289,13 +291,48 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="lg:col-span-7" aria-labelledby="categories-title">
+        {/* المشروعات قبل الفئات: مسار مستقل وواضح لمن يجهز أو يشطب منزله. */}
+        {projectsEnabled && (
+          <section aria-labelledby="projects-title">
+            <Link
+              href="/projects"
+              className="motion-rise motion-press group flex flex-col gap-5 overflow-hidden rounded-3xl border border-border bg-surface p-5 transition-colors hover:border-primary sm:flex-row sm:items-center sm:justify-between sm:p-7"
+            >
+              <span className="flex min-w-0 items-center gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary sm:h-14 sm:w-14">
+                  <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-hidden>
+                    <path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold text-accent">مشروعات البيت</span>
+                  <span id="projects-title" className="mt-1 block text-lg font-semibold leading-snug sm:text-xl">بتجهّز أو بتشطّب بيتك؟</span>
+                  <span className="mt-1 block text-sm text-muted">من المعاينة للتسليم في مكان واحد</span>
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform group-hover:-translate-x-0.5 sm:self-auto">
+                استكشف المشروعات
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                  <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </Link>
+          </section>
+        )}
+
+        <section aria-labelledby="categories-title">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 id="categories-title" className="text-lg font-semibold">
               كل الفئات
             </h2>
-            <Link href="/search" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+            <Link
+              href="/search"
+              className="group inline-flex items-center gap-1 text-sm font-medium text-accent underline-offset-4 hover:underline"
+            >
               تصفّح كل الخدمات
+              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" aria-hidden>
+                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </Link>
           </div>
 
@@ -312,7 +349,7 @@ export default function HomePage() {
               مفيش فئات خدمات متاحة دلوقتي
             </p>
           ) : (
-            <div className="motion-list grid grid-cols-3 gap-3 sm:grid-cols-4">
+            <div className="motion-list grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
               {(shownCategories ?? []).map((c) => (
                 <CategoryTile key={c.id} category={c} />
               ))}
@@ -323,7 +360,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setShowAllCategories(true)}
-              className="motion-press mt-3 w-full rounded-2xl border border-border bg-surface-variant/50 py-3 text-sm font-medium text-primary transition-colors hover:border-primary"
+              className="motion-press mt-3 w-full rounded-2xl border border-border bg-surface-variant/50 py-3 text-sm font-medium text-accent transition-colors hover:border-accent"
             >
               عرض كل الفئات ({visibleCategories?.length})
             </button>

@@ -84,6 +84,25 @@ describe('AdminCatalogService — سياسة تحديد السعر والمعا�
     expect(dto.onsite_assessment_enabled).toBe(false);
     expect(dto.assessment_fee_credit_mode).toBe(AssessmentFeeCreditMode.NONE);
     expect(dto.quote_validity_minutes).toBeGreaterThan(0);
+    expect(dto.safety_guidance_ar).toBeNull();
+    // خدمة الكتالوج الجديدة تطلب وقت وصول ما لم يختَر الأدمن «يوم كامل» صراحةً.
+    expect(dto.schedule_precision).toBe('start_time');
+  });
+
+  it('إرشادات السلامة تتحفظ كنص الخدمة، ترجع للأدمن، وينفع مسحها بوضوح', async () => {
+    const guidance = 'حافظ على المتعلقات الثمينة في مكان آمن، ووضّح نطاق العمل قبل البدء.';
+    const updated = await service.updateService('admin-policy-spec', ids.service, {
+      safety_guidance_ar: `  ${guidance}  `,
+    } as never);
+
+    expect(toAdminServiceResponseDto(updated).safety_guidance_ar).toBe(guidance);
+    const [saved] = await q(`SELECT safety_guidance_ar FROM services WHERE id = $1`, [ids.service]);
+    expect(saved.safety_guidance_ar).toBe(guidance);
+
+    const cleared = await service.updateService('admin-policy-spec', ids.service, {
+      safety_guidance_ar: null,
+    } as never);
+    expect(toAdminServiceResponseDto(cleared).safety_guidance_ar).toBeNull();
   });
 
   it('«تقييم بالصور» على خدمة معادلة بيترفض — مسار الصور مقصور على «كشف ثم عرض سعر» (docs/08 §131)', async () => {

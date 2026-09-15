@@ -9,11 +9,7 @@ import { PaymentMethod } from './entities/payment.entity';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
 import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
-import {
-  loadOnlineDiscountPolicy,
-  onlineDiscountLabelAr,
-  resolveOnlineDiscountCents,
-} from './online-payment-discount';
+
 
 /**
  * سبب عدم إتاحة طريقة دفع **بلغة العميل** (docs/08 §76-ز).
@@ -74,11 +70,12 @@ export class PaymentChannelsController {
       PaymentMethod.INSTAPAY,
       PaymentMethod.FAWRY_REFERENCE,
     ];
-    const [installmentsEnabled, recommendedMethod, discountPolicy, ...methodFlags] = await Promise.all([
+    const [installmentsEnabled, recommendedMethod, instapayDiscountEgp, ...methodFlags] = await Promise.all([
       this.settingsService.getBoolean('payments.installments_enabled', true),
       this.settingsService.getString('payments.recommended_method', PaymentMethod.INSTAPAY),
-      // ADR-0085 — نفس السياسة اللي إنشاء الطلب بيخصم بيها، مش حساب موازي.
-      loadOnlineDiscountPolicy(this.settingsService),
+      // ADR-0089 — **نفس الإعداد اللي `PaymentsService` بيخصم بيه فعلاً** وقت تأكيد التحويل،
+      // مش حساب موازي. الفصل بينهم هو اللي بينتج «الواجهة بتقول خصم والفاتورة مافيهاش».
+      this.settingsService.getNumber('payments.instapay_discount_egp', 0),
       ...methods.map((m) => this.methodAvailability.isEnabled(m)),
     ]);
     const enabledByMethod = new Map<PaymentMethod, boolean>(
@@ -88,13 +85,16 @@ export class PaymentChannelsController {
     const channels: PaymentChannelResponseDto[] = this.registry.listAll().map((entry) => {
       const isEnabled = enabledByMethod.get(entry.method) ?? false;
       const isAvailable = isEnabled && entry.isConfigured;
-      // القيمة بتتحسب بلا سقف إجمالي هنا عمدًا: الإجمالي لسه مش معروف وقت عرض الوسائل
-      // (العميل لسه بيختار). الفاتورة بتعيد الحساب بالإجمالي الحقيقي وقت الإنشاء، فالوسم
-      // وعد بالحد الأقصى والفاتورة هي الحاكمة — ولذلك الحد الأدنى للطلب بيتشرح في الوسم نفسه
-      // لو الأدمن ظبّطه.
-      const discountCents = isAvailable
-        ? resolveOnlineDiscountCents(discountPolicy, entry.method, Number.MAX_SAFE_INTEGER)
-        : 0;
+      // **الحافز على InstaPay بس** (ADR-0089): الخصم بيتطبّق لما العميل يأكّد تحويل InstaPay
+      // فعلاً، فعرضه جنب أي وسيلة تانية وعد مش هيتنفّذ.
+      //
+      // والرقم هنا **وعد بالحد الأقصى**: الإجمالي لسه مش معروف وقت عرض الوسائل (العميل لسه
+      // بيختار)، والخصم الحقيقي بيتحسب وقت الدفع وبيتقفل لو قيمته ≥ المستحق (عشان المستحق
+      // مايوصلش صفر). الفاتورة هي الحاكمة دايمًا.
+      const discountCents =
+        isAvailable && entry.method === PaymentMethod.INSTAPAY && instapayDiscountEgp > 0
+          ? Math.round(instapayDiscountEgp * 100)
+          : 0;
       let adminNote: string | null = null;
       if (!isEnabled) adminNote = 'الطريقة مقفولة من إعدادات الأدمن';
       else if (!entry.isConfigured && entry.method === PaymentMethod.CARD) {
@@ -111,7 +111,7 @@ export class PaymentChannelsController {
         is_recommended: isAvailable && entry.method === recommended,
         recommended_label_ar: isAvailable && entry.method === recommended ? RECOMMENDED_LABEL_AR : null,
         discount_cents: discountCents,
-        discount_label_ar: onlineDiscountLabelAr(discountPolicy, discountCents),
+        discount_label_ar: discountCents > 0 ? `وفّر ${discountCents / 100} ج.م لما تدفع بـInstaPay` : null,
         // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
         ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
       };

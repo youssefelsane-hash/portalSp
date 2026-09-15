@@ -285,6 +285,15 @@ export class Order {
   @Column({ name: 'discount_amount_cents', type: 'integer', default: 0 })
   discountAmountCents: number;
 
+  /**
+   * جزء من `discount_amount_cents` سببه اختيار العميل لـInstaPay تحديداً.
+   *
+   * نحتفظ به منفصلاً حتى نستطيع إلغاء الحافز لو رفضت الإدارة التحويل قبل تأكيده، من غير
+   * ما نلمس كوبون أو خصم عمارة موجودين على نفس الطلب.
+   */
+  @Column({ name: 'instapay_discount_cents', type: 'integer', default: 0 })
+  instapayDiscountCents: number;
+
   @Column({ name: 'total_amount_cents', type: 'integer', default: 0 })
   totalAmountCents: number;
 

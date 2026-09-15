@@ -25,10 +25,19 @@
  * السكريبت ده أداة تطوير/CI عن قصد، مش حاجة تشتغل على بيئة حقيقية.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, mkdtempSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import jwt from 'jsonwebtoken';
+import { createRequire } from 'node:module';
+
+// `scripts/lib/resolve-api-log.js` بـCommonJS — `createRequire` بيخليه متاح من ملف ESM.
+const { resolveApiLog } = createRequire(import.meta.url)('../../../scripts/lib/resolve-api-log.js');
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:3001';
 const API_URL = process.env.API_URL ?? 'http://localhost:3000/api/v1';
@@ -70,12 +79,85 @@ function record(name, fn) {
     });
 }
 
+/**
+ * توكن أدمن موقّع محليًا بسر التطوير — أداة قراءة للمقارنة، مش التفاف على الأمان: نفس
+ * الطريقة اللي `scripts/lib/live-harness.js` بيستخدمها في كل التدقيقات الحية، والسر بيتقرا من
+ * `apps/api/.env` فمش هيشتغل على أي بيئة حقيقية أصلاً.
+ */
+/** نفس مصدر الإعدادات اللي الـAPI بيقلع بيه — مستخرجة عشان `clearPasskeys` تستعملها كمان. */
+function readEnvFile() {
+  return Object.fromEntries(
+    readFileSync(join(REPO_ROOT, 'apps/api/.env'), 'utf8')
+      .split('\n')
+      .map((line) => /^([A-Z0-9_]+)=(.*)$/.exec(line.trim()))
+      .filter(Boolean)
+      .map((m) => [m[1], m[2]]),
+  );
+}
+
+function signDevAdminToken(phone) {
+  const env = readEnvFile();
+  const secret = process.env.JWT_ACCESS_SECRET ?? env.JWT_ACCESS_SECRET;
+  if (!secret) throw new Error('JWT_ACCESS_SECRET مش موجود في apps/api/.env');
+  const userId = execFileSync(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', env.DATABASE_URL.split('/').pop(), '-Atc',
+      `SELECT id FROM users WHERE phone_number='${phone}' AND deleted_at IS NULL LIMIT 1`],
+    { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' },
+  ).trim();
+  if (!userId) throw new Error(`مفيش مستخدم بالرقم ${phone} — اعمله الأول`);
+  return jwt.sign({ sub: userId, userType: 'admin', amr: ['otp'] }, secret, { expiresIn: '60m' });
+}
+
+/**
+ * مسار اللوج بقى **بيتحلّ لوحده** بدل ما يكون `API_LOG` إجباري من الكولر. الملف ده بيوعد في
+ * أول سطر فيه إن «أي سيشن جاية تقدر تثبت إن الشاشات لسه شغالة **بأمر واحد**» — والوعد ده
+ * كان مكسور: `node test/operations-center.e2e.mjs` لوحده بيرمي «API_LOG مطلوب». نفس
+ * `resolve-api-log` اللي باقي الأدوات بتستعمله (وتعليقه بيوصف نفس الفئة دي بالحرف).
+ * `API_LOG` لسه بيشتغل كتجاوز صريح. (تدقيق §148، المرحلة ١٣)
+ *
+ * وبنقرا **آخر ٢ ميجا بس**: لوج التطوير وصل ٦٩٧ ميجا قبل كده، و`readFileSync` عليه كان
+ * بيحمّله كله في الذاكرة.
+ */
+const OTP_TAIL_BYTES = 2 * 1024 * 1024;
+
 function latestOtp(phone) {
-  if (!API_LOG) throw new Error('API_LOG مطلوب — السكريبت بيقرا كود الـOTP من لوج الباك-إند');
-  const log = readFileSync(API_LOG, 'utf8');
+  const logPath = API_LOG ?? resolveApiLog();
+  if (!logPath) throw new Error('مالقيتش لوج الباك-إند — حدّد API_LOG صراحةً');
+  const { size } = statSync(logPath);
+  const start = size > OTP_TAIL_BYTES ? size - OTP_TAIL_BYTES : 0;
+  const fd = openSync(logPath, 'r');
+  let log;
+  try {
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    log = buf.toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
   const matches = [...log.matchAll(new RegExp(`OTP\\] \\${phone} .*?→ (\\d{6})`, 'g'))];
-  if (matches.length === 0) throw new Error(`مالقيتش كود OTP لـ${phone} في ${API_LOG}`);
+  if (matches.length === 0) throw new Error(`مالقيتش كود OTP لـ${phone} في ${logPath}`);
   return matches[matches.length - 1][1];
+}
+
+/**
+ * **الاختبار بيجهّز شرطه بنفسه.** أول سطر في الملف ده بيقول إن `ADMIN_PHONE` لازم يكون أدمن
+ * «بلا مفتاح مرور (passkey)» — بس الشرط ده كان **موصوف ومش متحقَّق منه**، فالسكربت بيعتمد على
+ * حالة خارجية من تشغيلة قديمة. أول ما الحساب يبقى له passkey مسجّل (وده بيحصل من أول تشغيلة
+ * ناجحة)، صفحة الدخول بتروح لتحدّي الـpasskey بدل خطوة الـOTP — والمصادق الافتراضي بيتولد
+ * **جديد** كل تشغيلة فمش قادر يجاوب على تحدٍّ لبيانات اعتماد اتسجّلت بمصادق تاني. النتيجة
+ * `#otp_code` عمره ما بيظهر، والسكربت بيموت بـTimeout **مالوش أي علاقة بمركز العمليات**
+ * (اللي هو بيختبره أصلاً). `scripts/sweep-admin.js` بيعمل نفس المسح من أول سطر بالظبط لنفس
+ * السبب. (تدقيق §148، المرحلة ١٣)
+ */
+function clearPasskeys(phone) {
+  const env = readEnvFile();
+  execFileSync(
+    'psql',
+    ['-h', 'localhost', '-U', 'baytak', '-d', env.DATABASE_URL.split('/').pop(), '-Atc',
+      `DELETE FROM webauthn_credentials WHERE user_id IN (SELECT id FROM users WHERE phone_number='${phone}')`],
+    { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' },
+  );
 }
 
 async function apiGet(path, token) {
@@ -89,25 +171,28 @@ async function main() {
   console.log(`مصفوفة E2E — مركز العمليات\n  admin=${ADMIN_URL}  api=${API_URL}  shots=${SHOTS_DIR}\n`);
 
   // توكن مستقل للـAPI عشان نقارن **الحقيقة من المصدر** بالمعروض على الشاشة.
-  await fetch(`${API_URL}/auth/otp/request`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone_number: ADMIN_PHONE, purpose: 'login' }),
-  });
-  await new Promise((r) => setTimeout(r, 1200));
-  const verify = await fetch(`${API_URL}/auth/otp/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone_number: ADMIN_PHONE, otp_code: latestOtp(ADMIN_PHONE) }),
-  }).then((r) => r.json());
-  if (!verify?.data?.access_token) {
-    throw new Error(`تسجيل الدخول للـAPI فشل: ${JSON.stringify(verify?.error ?? verify)}`);
-  }
-  const token = verify.data.access_token;
+  //
+  // **كان بيعمل OTP verify ويتوقّع `access_token`** — وده بطل يشتغل من ساعة ما MFA بقى إجباري
+  // لحسابات الأدمن: الرد بقى `{ mfa_required: true, ceremony: 'registration' }` بلا توكن،
+  // فالسكربت كان بيموت من أول خطوة قبل ما يقيس أي حاجة (تدقيق ماراثوني 2026-09-13، docs/08 §148).
+  // التوكن هنا **قراءة بس** لمقارنة المصدر بالشاشة، فالتوقيع المحلي بنفس سر التطوير أبسط
+  // وأثبت من إعادة تمثيل مراسم الـPasskey مرتين. أما الدخول من المتصفح تحت فبيفضل **حقيقي**
+  // بالكامل (بمصادق افتراضي) لأن ده اللي بيغطّي القشرة والحراسة.
+  const token = signDevAdminToken(ADMIN_PHONE);
 
-  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  const page = await context.newPage();
+  // مصادق افتراضي للـPasskey: MFA بقى إجباري لحسابات الأدمن، فالدخول من المتصفح بيعدّي على
+  // مراسم تسجيل/تأكيد Passkey. من غيره السكربت بيقف على شاشة الـMFA للأبد.
+  const cdp = await context.newCDPSession(await context.newPage());
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
+      hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+    },
+  });
+  const page = context.pages()[0];
 
   // أخطاء الصفحة بتتجمّع طول التشغيلة وبتتفحص في النهاية — بَقّة جرس الإشعارات (§117) كانت
   // بتوقّع القشرة كلها، ونوع الخطأ ده لازم يفشّل المصفوفة مش يعدّي بصمت.
@@ -125,13 +210,41 @@ async function main() {
 
   // ── تسجيل دخول حقيقي من الواجهة (مش حقن توكن): التوكن في state مش localStorage،
   //    فالحقن مستحيل أصلاً — والدخول الحقيقي بيغطّي القشرة والحراسة كمان.
+  clearPasskeys(ADMIN_PHONE);
   await goto('/login');
   await page.fill('#phone_number', ADMIN_PHONE);
   await page.click('button[type="submit"]');
-  await page.waitForSelector('#otp_code', { timeout: 30_000 });
+  // لو خطوة الرقم ما عدّتش، **الرسالة اللي على الشاشة هي التشخيص الحقيقي**. من غير السطور دي
+  // الفشل بيطلع «Timeout waiting for #otp_code» وهو عرض لأي سبب تاني خالص (رقم مرفوض، throttle،
+  // تحدّي passkey) — وده ضيّع وقت فعلي في التدقيق. (§148، المرحلة ١٣)
+  try {
+    await page.waitForSelector('#otp_code', { timeout: 30_000 });
+  } catch (err) {
+    const body = (await page.innerText('body')).replace(/\n+/g, ' | ').slice(0, 400);
+    await page.screenshot({ path: join(SHOTS_DIR, 'login-stuck.png'), fullPage: true }).catch(() => {});
+    throw new Error(`خطوة الرقم ما عدّتش (اللقطة: ${join(SHOTS_DIR, 'login-stuck.png')}) — الشاشة: ${body}`);
+  }
   await new Promise((r) => setTimeout(r, 1200));
   await page.fill('#otp_code', latestOtp(ADMIN_PHONE));
   await page.click('button[type="submit"]');
+  // خطوة MFA: تسجيل Passkey (المصادق الافتراضي بيوافق تلقائيًا) ثم إقرار أكواد الاسترجاع.
+  // نفس منطق `scripts/sweep-admin.js` بالحرف — بالاسم الصريح مش `.first()`، عشان ماندوسش
+  // «دخول» بالغلط ونطلب OTP جديد فيبطل الكود اللي حطّيناه.
+  for (let i = 0; i < 4 && page.url().includes('/login'); i++) {
+    if (await page.locator('#ack').count()) {
+      await page.check('#ack');
+      await page.getByRole('button', { name: /كمّل|الإدارة/ }).click().catch(() => {});
+      await page.waitForTimeout(4000);
+      continue;
+    }
+    const mfaButton = page.getByRole('button', { name: /سجّل Passkey دلوقتي|تأكيد بـ ?Passkey/ });
+    if (await mfaButton.count()) {
+      await mfaButton.first().click().catch(() => {});
+      await page.waitForTimeout(4000);
+      continue;
+    }
+    await page.waitForTimeout(1500);
+  }
   await page.waitForURL((u) => !u.pathname.includes('/login'), { timeout: 40_000 });
   console.log('تسجيل الدخول تم.\n');
 

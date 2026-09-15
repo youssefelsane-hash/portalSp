@@ -88,15 +88,21 @@ class _LiveAuth extends AuthRepository {
     String path, {
     Map<String, dynamic>? body,
     Map<String, String>? extraHeaders,
-  }) =>
-      apiRequest(method, path, body: body, accessToken: _token, extraHeaders: extraHeaders);
+  }) => apiRequest(
+    method,
+    path,
+    body: body,
+    accessToken: _token,
+    extraHeaders: extraHeaders,
+  );
 
   @override
   Future<List<Map<String, dynamic>>> authedRequestList(String path) =>
       apiRequestList(path, accessToken: _token);
 
   @override
-  Future<ApiPage> authedRequestPage(String path) => apiRequestPage(path, accessToken: _token);
+  Future<ApiPage> authedRequestPage(String path) =>
+      apiRequestPage(path, accessToken: _token);
 
   @override
   Future<Map<String, dynamic>?> authedUpload(
@@ -104,8 +110,13 @@ class _LiveAuth extends AuthRepository {
     required List<int> fileBytes,
     required String filename,
     Map<String, String> fields = const {},
-  }) =>
-      apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: _token);
+  }) => apiUpload(
+    path,
+    fileBytes: fileBytes,
+    filename: filename,
+    fields: fields,
+    accessToken: _token,
+  );
 }
 
 /// المقاسات اللي كل شاشة لازم تشتغل عليها. الضيّق (320) مقصود: هو اللي بيكشف الـoverflow
@@ -144,7 +155,9 @@ Future<void> _pumpScreen(WidgetTester tester, Widget screen, Size size) async {
   // `pump()` بيرسم الإطار الجديد. وpumpAndSettle نفسها ماينفعش: شاشات فيها مؤقتات دورية
   // أو سوكيت حي مابتستقرش أبدًا.
   for (var i = 0; i < 16; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 250)));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 250)),
+    );
     await tester.pump(const Duration(milliseconds: 250));
     final err = tester.takeException();
     if (err != null) {
@@ -164,13 +177,17 @@ Future<void> _pumpScreen(WidgetTester tester, Widget screen, Size size) async {
 /// بيرمي `!timersPending`، وهو فشل بنية اختبار مش بَقّة في الشاشة.
 Future<void> _disposeTree(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 100)),
+  );
   // شاشات ليها إعادة محاولة مؤجّلة مشروعة (مثال: التقاط موقع الفني بعد ٣ و٨ ثواني) —
   // بنصرّف الزمن الوهمي عشان مؤقتاتها تنطلق وتلاقي `mounted == false` وتخرج. من غير كده
   // الـbinding بيرمي `!timersPending` وهو عطل بنية اختبار مش عطل منتج.
   for (var i = 0; i < 6; i++) {
     await tester.pump(const Duration(seconds: 3));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
   }
   await tester.pump();
   tester.takeException();
@@ -198,14 +215,15 @@ void main() {
     // `flutter_secure_storage` قناة أصلية مالهاش تنفيذ في بيئة الاختبار — من غير البديل ده
     // أي شاشة بتقرا التخزين الآمن (حسابي، البصمة) بترمي MissingPluginException، وهو عطل بيئة
     // مش عطل منتج. بنرد بقيم فاضية = «مفيش جلسة محفوظة»، وهي الحالة الحقيقية لجهاز جديد.
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
-      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-      (call) async => switch (call.method) {
-        'readAll' => <String, String>{},
-        'containsKey' => false,
-        _ => null,
-      },
-    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+          (call) async => switch (call.method) {
+            'readAll' => <String, String>{},
+            'containsKey' => false,
+            _ => null,
+          },
+        );
 
     final phone = uniquePhone();
     final token = await registerCustomer(phone, fullName: 'مسح الشاشات');
@@ -215,38 +233,46 @@ void main() {
     final cities = await apiRequestList('/cities');
     final cityId = cities.first['id'] as String;
     final areas = await apiRequestList('/cities/$cityId/areas');
-    final address = await apiRequest('POST', '/addresses', accessToken: token, body: {
-      'city_id': cityId,
-      'area_id': areas.first['id'],
-      'street_name': 'شارع مسح الشاشات',
-      'latitude': 30.0444,
-      'longitude': 31.2357,
-      'label': 'مسح الشاشات',
-    });
-
-    final categories = await apiRequestList('/service-categories');
-    Map<String, dynamic>? pickedCategory;
-    Map<String, dynamic>? pickedService;
-    for (final c in categories) {
-      final services = await apiRequestList('/services?category_id=${c['id']}');
-      if (services.isNotEmpty) {
-        pickedCategory = c;
-        pickedService = services.first;
-        break;
-      }
-    }
-    category = ServiceCategory.fromJson(pickedCategory!);
-    // الخدمة من مسار التفاصيل مش من القايمة: القايمة عقد مختصر، والشاشات بتعتمد على الحقول
-    // الكاملة (الحقول الديناميكية، سياسة المسار، الإضافات).
-    service = CatalogService.fromJson(
-      (await apiRequest('GET', '/services/${pickedService!['id']}'))!,
+    final address = await apiRequest(
+      'POST',
+      '/addresses',
+      accessToken: token,
+      body: {
+        'city_id': cityId,
+        'area_id': areas.first['id'],
+        'street_name': 'شارع مسح الشاشات',
+        'latitude': 30.0444,
+        'longitude': 31.2357,
+        'label': 'مسح الشاشات',
+      },
     );
 
-    final order = await apiRequest('POST', '/orders', accessToken: token, body: {
-      'service_id': service.id,
-      'address_id': address!['id'],
-      'problem_description': 'مسح الشاشات — طلب اختبار',
-    });
+    // خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula محتاجة
+    // «المساحة» فإنشاء الطلب بيترفض ويقع الـsetUpAll كله (§148).
+    final pickedServiceId = await pickBookableServiceId();
+    final pickedService = (await apiRequest(
+      'GET',
+      '/services/$pickedServiceId',
+    ))!;
+    final categories = await apiRequestList('/service-categories');
+    final pickedCategory = categories.firstWhere(
+      (c) => c['id'] == pickedService['category_id'],
+    );
+    category = ServiceCategory.fromJson(pickedCategory);
+    // الخدمة من مسار التفاصيل مش من القايمة: القايمة عقد مختصر، والشاشات بتعتمد على الحقول
+    // الكاملة (الحقول الديناميكية، سياسة المسار، الإضافات).
+    service = CatalogService.fromJson(pickedService);
+
+    final order = await apiRequest(
+      'POST',
+      '/orders',
+      accessToken: token,
+      body: {
+        'service_id': service.id,
+        'address_id': address!['id'],
+        'problem_description': 'مسح الشاشات — طلب اختبار',
+      },
+    );
     orderId = order!['id'] as String;
     orderNumber = order['order_number'] as String;
   });
@@ -260,29 +286,35 @@ void main() {
     'طلباتي': () => const OrdersScreen(),
     'تفاصيل الطلب': () => OrderDetailScreen(orderId: orderId),
     'تفاصيل الشغلانة قبل الحجز': () => JobDetailsScreen(service: service),
-    'اختيار الموعد': () => const ScheduleSelectionScreen(allowsDateRangeBooking: true),
+    'اختيار الموعد': () => const ScheduleSelectionScreen(
+      allowsDateRangeBooking: true,
+      serviceName: 'خدمة اختبار',
+      warrantyDays: 7,
+    ),
     'اختيار الفني': () => TechnicianSelectionScreen(service: service),
     'الشات': () => ChatScreen(orderId: orderId),
-    'تتبع الطلب': () => TrackingScreen(orderId: orderId, orderNumber: orderNumber),
+    'تتبع الطلب': () =>
+        TrackingScreen(orderId: orderId, orderNumber: orderNumber),
     'العناوين': () => const AddressesScreen(),
-    'إضافة عنوان': () => AddressFormScreen(repository: AddressesRepository(auth)),
+    'إضافة عنوان': () =>
+        AddressFormScreen(repository: AddressesRepository(auth)),
     'حسابي': () => const AccountScreen(),
     'المحفظة': () => const WalletScreen(),
     'وسائل الدفع': () => const PaymentMethodsScreen(),
     'مرجع فوري': () => FawryReferenceScreen(
-          orderId: orderId,
-          reference: FawryReference(
-            referenceNumber: '1234567890',
-            expiresAt: DateTime.now().add(const Duration(days: 2)),
-          ),
-        ),
+      orderId: orderId,
+      reference: FawryReference(
+        referenceNumber: '1234567890',
+        expiresAt: DateTime.now().add(const Duration(days: 2)),
+      ),
+    ),
     'مرجع إنستاباي': () => InstaPayReferenceScreen(
-          orderId: orderId,
-          reference: InstaPayReference(
-            referenceCode: 'REF-123456',
-            instructionsAr: 'حوّل المبلغ على الرقم ده وارفع صورة التحويل',
-          ),
-        ),
+      orderId: orderId,
+      reference: InstaPayReference(
+        referenceCode: 'REF-123456',
+        instructionsAr: 'حوّل المبلغ على الرقم ده وارفع صورة التحويل',
+      ),
+    ),
     'الإشعارات': () => const NotificationsScreen(),
     'تفضيلات الإشعارات': () => const NotificationPreferencesScreen(),
     'المفضّلة': () => const FavoritesScreen(),
@@ -309,7 +341,8 @@ void main() {
         expect(
           stuck,
           isFalse,
-          reason: 'شاشة «$name» لسه على مؤشر التحميل بعد ٤ ثواني — دي نفس حالة بَقّة «طلباتي»',
+          reason:
+              'شاشة «$name» لسه على مؤشر التحميل بعد ٤ ثواني — دي نفس حالة بَقّة «طلباتي»',
         );
       }, timeout: const Timeout(Duration(seconds: 120)));
     }

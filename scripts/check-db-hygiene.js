@@ -21,11 +21,16 @@
  * حكم بشري يختلف عليه اتنين.
  */
 const { Client } = require('pg');
+const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 
 async function main() {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    console.error('خطأ: لازم تحدد DATABASE_URL.');
+  // نفس مصدر باقي الأدوات (`resolve-api-db`) — الأداة دي بتفحص **مخطّط** القاعدة، فلو اتوصلت
+  // لقاعدة غير اللي الـAPI شغّال عليها بترجّع «نضيف» وهي مافحصتش حاجة (تدقيق §148).
+  let url;
+  try {
+    url = resolveApiDatabaseUrl();
+  } catch (err) {
+    console.error(`خطأ: ${err.message}`);
     process.exit(1);
   }
   const client = new Client({ connectionString: url });

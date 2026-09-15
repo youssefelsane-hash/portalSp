@@ -21,7 +21,6 @@ import { TechnicianCompaniesService } from '../technicians/technician-companies.
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { CandidateOperationalLoad } from '../technicians/technician-day-capacity.sql';
-import { loadOnlineDiscountPolicy, resolveOnlineDiscountCents } from '../payments/online-payment-discount';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
@@ -1249,6 +1248,42 @@ export class OrderCreationService {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة عمولة المنصة للخدمة غير صحيحة', HttpStatus.CONFLICT);
     }
 
+    const orderCreatedAt = new Date();
+    let revisitScheduledAt: Date | null = null;
+    if (originalOrder) {
+      if (originalOrder.technicianId) {
+        const [nearTermHours, maxAdvanceDays] = await Promise.all([
+          this.settingsService.getNumber('matching.near_term_request_hours', 48),
+          this.settingsService.getNumber('orders.max_advance_booking_days', 90),
+        ]);
+        // نبدأ بعد نافذة الطلب القريب بدقيقة، حتى يكون الموعد مؤهلاً للتأكيد التلقائي قطعًا
+        // ولا يتحول مرة أخرى إلى request يحتاج قبول الفني.
+        const notBefore = new Date(orderCreatedAt.getTime() + Math.max(0, nearTermHours) * 60 * 60 * 1000 + 60_000);
+        revisitScheduledAt = await this.techniciansService.findFirstAvailableStartForTechnician(
+          originalOrder.technicianId,
+          service.id,
+          zone.id,
+          address.id,
+          notBefore,
+          maxAdvanceDays,
+          {
+            // لو الخدمة باليوم نسيب الدقايق null حتى تظل تحجز اليوم كاملًا. غير ذلك نستخدم
+            // آخر fallback رسمي للمدة كي لا يبدو وقت متداخل متاحًا لمجرد أن المعادلة لم ترجع مدة.
+            durationMinutes:
+              formulaDurationMinutes ??
+              pricingContext.durationMinutes ??
+              ((durationEstimate?.estimated_days ?? formulaDurationDays) == null
+                ? (service.estimatedDurationMinutes ?? 60)
+                : null),
+            estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
+          },
+        );
+      }
+      // بيانات فني قديمة/ناقصة لا تمنع العميل من استعمال حق الضمان. يظل الموعد القديم شبكة
+      // أمان ويظهر الطلب للإدارة بدل إسقاطه بالكامل.
+      revisitScheduledAt ??= defaultRevisitScheduledAt(orderCreatedAt);
+    }
+
     const remoteAssessmentFeeCents = remoteQuoteRequested ? service.remoteAssessmentFeeCents : 0;
     let createdOrder: Order;
     try {
@@ -1286,10 +1321,7 @@ export class OrderCreationService {
         { next_human_readable_number: string }[]
       >("SELECT next_human_readable_number('ORD')");
 
-      const now = new Date();
-      // طلب الضمان بيتعرض على الفني الأصلي فورًا من خلال revisit pin، لكن التنفيذ نفسه مش
-      // طوارئ لحظية. السيرفر هو مصدر الحقيقة للموعد حتى لو عميل قديم ما بعتش scheduled_at.
-      const revisitScheduledAt = originalOrder ? defaultRevisitScheduledAt(now) : null;
+      const now = orderCreatedAt;
       const order = manager.create(Order, {
         orderNumber,
         customerId: customerProfile.id,
@@ -1499,28 +1531,6 @@ export class OrderCreationService {
         await manager.save(order);
       }
 
-      // **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «هدية الدفع أونلاين»).
-      //
-      // مكانه هنا بالظبط: بعد كل خصومات الخدمة (كود الخصم + العمارة) وقبل الضمان الإضافي —
-      // لأن الضمان بيتسعّر على **صافي** الخدمة ثم يتضاف كسطر مستقل، فخصم بيتطبّق بعده كان
-      // هيخصم من الضمان كمان وهو مش جزء من العرض.
-      //
-      // الرقم بيتحسب من نفس الدالة اللي `GET /payment-channels` بيعرض بيها الوسم، فمستحيل
-      // الواجهة تقول خصم والفاتورة تقول غيره.
-      if (requestedPrepayMethod) {
-        const discountPolicy = await loadOnlineDiscountPolicy(this.settingsService);
-        const onlineDiscountCents = resolveOnlineDiscountCents(
-          discountPolicy,
-          requestedPrepayMethod,
-          order.totalAmountCents,
-        );
-        if (onlineDiscountCents > 0) {
-          order.discountAmountCents += onlineDiscountCents;
-          order.totalAmountCents -= onlineDiscountCents;
-          await manager.save(order);
-        }
-      }
-
       // الضمان الإضافي بيتسعّر بعد خصم الخدمة ثم يُضاف كسطر مستقل. الخطة نفسها اتقرأت من
       // الباك-إند واتحفظت snapshot، لذلك العميل لا يقدر يرسل سعرًا ولا يتأثر الطلب بتعديل لاحق.
       if (optionalWarranty) {
@@ -1591,6 +1601,7 @@ export class OrderCreationService {
         {
           basePriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.base_price_cents,
           levelPriceMultiplier: originalOrder ? 1 : estimate.level_price_multiplier,
+          zoneSurgeCents: originalOrder || remoteQuoteRequested ? 0 : estimate.zone_surge_cents,
           estimatedTotalCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
           inspectionFeeCents: order.inspectionFeeCents,
           emergencySurchargeCents: order.surgeAmountCents,

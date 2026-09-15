@@ -93,6 +93,10 @@ class Order {
   /// الخصم المطبّق فعلاً على الطلب (كود خصم أو عمارة). العميل كان بيشوفه في المعاينة قبل
   /// التأكيد وبعدين يختفي من سجل الطلب تمامًا — فمكانش عنده أي طريقة يتأكد إن الكود اشتغل.
   final int discountAmountCents;
+
+  /// الجزء اللي جه من حافز الدفع أونلاين بإنستاباي (ADR-0091) — **جزء من**
+  /// [discountAmountCents] مش زيادة عليه. موجود لوحده عشان السبب يتكتب للعميل.
+  final int instapayDiscountCents;
   final int warrantyPriceCents;
 
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
@@ -102,6 +106,9 @@ class Order {
   final String? optionalWarrantyNameAr;
   final int? optionalWarrantyCoverageMonths;
   final String paymentStatus;
+  /// طريقة الدفع المسجّلة على الطلب (ADR-0089) — بتحدد نبرة خانة InstaPay جوّه الطلب.
+  /// nullable عشان نسخة تطبيق أحدث تقدر تقرا رد سيرفر أقدم من الحقل ده.
+  final String? paymentMethod;
   final String? placedAt;
   final String? cancelledAt;
   final String? cancellationReasonId;
@@ -123,6 +130,8 @@ class Order {
   final int? durationMinutes;
   /// رسايل الإدارة للعميل (ADR-0071) — الأحدث الأول. فاضية في قايمة الطلبات.
   final List<OrderCustomerNotice> customerNotices;
+  /// نص تديره الإدارة لكل خدمة ويظهر في تفاصيل الطلب طوال التنفيذ وبعد الإغلاق.
+  final String? safetyGuidanceAr;
   // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
   // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
   final String? requestedTechnicianId;
@@ -158,10 +167,12 @@ class Order {
     required this.totalAmountCents,
     this.amountDueNowCents,
     this.discountAmountCents = 0,
+    this.instapayDiscountCents = 0,
     this.warrantyPriceCents = 0,
     this.optionalWarrantyNameAr,
     this.optionalWarrantyCoverageMonths,
     required this.paymentStatus,
+    this.paymentMethod,
     required this.placedAt,
     required this.cancelledAt,
     required this.cancellationReasonId,
@@ -175,6 +186,7 @@ class Order {
     this.estimatedDurationDays,
     this.durationMinutes,
     this.customerNotices = const [],
+    this.safetyGuidanceAr,
     this.requestedTechnicianId,
     this.technicianName,
     this.technicianPhone,
@@ -207,6 +219,7 @@ class Order {
     totalAmountCents: json['total_amount_cents'] as int,
     amountDueNowCents: (json['amount_due_now_cents'] as num?)?.round(),
     discountAmountCents: (json['discount_amount_cents'] as num?)?.round() ?? 0,
+    instapayDiscountCents: (json['instapay_discount_cents'] as num?)?.round() ?? 0,
     warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
     levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
     optionalWarrantyNameAr:
@@ -216,6 +229,7 @@ class Order {
         (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months']
             as int?,
     paymentStatus: json['payment_status'] as String,
+    paymentMethod: json['payment_method'] as String?,
     placedAt: json['placed_at'] as String?,
     cancelledAt: json['cancelled_at'] as String?,
     cancellationReasonId: json['cancellation_reason_id'] as String?,
@@ -233,6 +247,7 @@ class Order {
     customerNotices: ((json['customer_notices'] as List<dynamic>?) ?? const [])
         .map((e) => OrderCustomerNotice.fromJson(e as Map<String, dynamic>))
         .toList(),
+    safetyGuidanceAr: json['safety_guidance_ar'] as String?,
     requestedTechnicianId: json['requested_technician_id'] as String?,
     technicianName: json['technician_name'] as String?,
     technicianPhone: json['technician_phone'] as String?,

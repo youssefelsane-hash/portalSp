@@ -20,11 +20,16 @@ import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
 import {
+  assistantServiceQualificationCondition,
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
   technicianCityCoverageCondition,
-  technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
+import {
+  assistantCandidateRankingJoinsSql,
+  candidateQualityScoreSql,
+  resolveCandidateQualityRankingSettings,
+} from '../matching/candidate-quality-ranking';
 import { SettingsService } from '../settings/settings.service';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -44,7 +49,7 @@ import { classifyPriceChange, FULL_PRICE_AUTHORITY, PriceChangeAuthority } from 
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
-import { canTransition } from './order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
@@ -137,6 +142,14 @@ export interface OrderCrewSummary {
   requiredAssistants: number;
   crewComplete: boolean;
   isTeamBooking: boolean;
+}
+
+export interface CustomerCancellationSummary {
+  reasonId: string | null;
+  reasonAr: string | null;
+  note: string | null;
+  feeCents: number;
+  cancelledAt: Date | null;
 }
 
 @Injectable()
@@ -433,6 +446,7 @@ export class AdminOrdersService {
     technicianCancellations: TechnicianOrderCancellation[];
     crewStatus: ReturnType<typeof computeCrewComposition> | null;
     crewShortageUrgent: boolean;
+    customerCancellation: CustomerCancellationSummary | null;
   }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
@@ -443,6 +457,27 @@ export class AdminOrdersService {
       where: { orderId },
       order: { cancelledAt: 'ASC' },
     });
+    // السبب المنظّم والنص الحر مصدرهما مختلفان عن قصد: الأول سياسة اختارها العميل من قائمة
+    // الإدارة، والثاني سياق إضافي في سجل انتقال الحالة. نعيدهما معًا للأدمن بدل UUID مبهم.
+    const cancellationReasonRow = order.cancellationReasonId
+      ? await this.dataSource.query<{ reason_ar: string }[]>(
+          `SELECT reason_ar FROM cancellation_reasons WHERE id = $1`,
+          [order.cancellationReasonId],
+        )
+      : [];
+    const cancellationHistory = [...history].reverse().find(
+      (entry) => entry.newStatus === OrderStatus.CANCELLED_BY_CUSTOMER,
+    );
+    const customerCancellation =
+      order.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER || order.cancellationReasonId || cancellationHistory
+        ? {
+            reasonId: order.cancellationReasonId,
+            reasonAr: cancellationReasonRow[0]?.reason_ar ?? null,
+            note: cancellationHistory?.reason ?? null,
+            feeCents: order.cancellationFeeCents,
+            cancelledAt: order.cancelledAt,
+          }
+        : null;
     // docs/08 §35، ADR-0021 §1 — نفس crewStatus اللي apps/technician-app بيشوفه بالظبط (مصدر
     // حقيقة واحد)، عشان الأدمن يشوف الحالة الحقيقية للطاقم بلا حاجة يعدّ الأعضاء يدويًا.
     let crewStatus: ReturnType<typeof computeCrewComposition> | null = null;
@@ -464,7 +499,7 @@ export class AdminOrdersService {
         crewShortageUrgent = order.scheduledAt.getTime() - Date.now() <= hoursBefore * 60 * 60 * 1000;
       }
     }
-    return { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent };
+    return { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent, customerCancellation };
   }
 
   /**
@@ -697,8 +732,8 @@ export class AdminOrdersService {
   /**
    * مرشّحو **مفتّش المطابقة** (docs/08 §107) — مصدر منفصل تمامًا عن قايمة التعيين الإجباري فوق.
    *
-   * بلاغ المالك كان «المساعدين مش ظاهرين في خانة ليه/ليه لأ». التشخيص الحي أثبت إن السبب مش
-   * فلترة دور (مفيش أي شرط `technician_kind` في شجرة الأهلية أصلاً) لكنه عيب تصميمي أعمق:
+   * مفتش المطابقة يعرض الفنيين والمساعدين معًا عمدًا حتى يشرح أن المساعد غير صالح للقيادة بدل
+   * أن يختفي بلا سبب. أما قائمة التعيين الفعلية فتستخدم شجرة الأهلية المقيدة بدور الفني.
    * الخانة دي كانت بتتغذّى من `listEligibleTechniciansForReassign()` اللي بيرجّع **المؤهّلين
    * فقط** — يعني سؤال «ليه ده مش مختار؟» مستحيل تسأله، لأن أي حد إجابته «لأ» بيتشال من نفس
    * القايمة اللي المفروض تختاره منها. (اللي كان بيخفي مساعدي المالك تحديدًا هو شرط
@@ -1137,6 +1172,7 @@ export class AdminOrdersService {
   > {
     const order = await this.findOrThrow(orderId);
     if (!order.serviceZoneId) return [];
+    const ranking = await resolveCandidateQualityRankingSettings(this.settingsService);
     const rows = await this.dataSource.query<
       { technician_id: string; full_name: string; technician_code: string; current_level: string; distance_km: string | null }[]
     >(
@@ -1146,6 +1182,11 @@ export class AdminOrdersService {
        JOIN users u ON u.id = tp.user_id
        JOIN services svc ON svc.id = $2
        JOIN addresses a ON a.id = $4
+       ${assistantCandidateRankingJoinsSql({
+         activeStatusesParam: '$6',
+         fairnessLookbackDaysParam: '$8',
+         fairnessDeclineWeightParam: '$9',
+       })}
        LEFT JOIN technician_services ts
          ON ts.technician_id = tp.id AND ts.service_id = svc.id
         AND ts.is_active = true AND ts.verification_status = 'approved'
@@ -1154,7 +1195,7 @@ export class AdminOrdersService {
          AND tp.deleted_at IS NULL
          AND tp.current_location IS NOT NULL
          AND tp.id <> COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
-         AND ${technicianServiceQualificationCondition({
+         AND ${assistantServiceQualificationCondition({
            technicianIdExpr: 'tp.id',
            serviceIdExpr: 'svc.id',
            categoryIdExpr: 'svc.category_id',
@@ -1169,12 +1210,29 @@ export class AdminOrdersService {
            WHERE otm.order_id = $5 AND otm.technician_id = tp.id
          )
        ORDER BY distance_km ASC NULLS LAST,
-                CASE tp.current_level
-                  WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
-                  WHEN 'verified' THEN 1 ELSE 0
-                END DESC,
-                tp.average_rating DESC`,
-      [order.serviceZoneId, order.serviceId, order.technicianId, order.addressId, order.id],
+                ${candidateQualityScoreSql({
+                  workloadWeightParam: '$7',
+                  fairnessWeightParam: '$10',
+                  reliabilityBaselineParam: '$11',
+                  reliabilityWeightParam: '$12',
+                  reliabilityMinRatingsParam: '$13',
+                })} DESC,
+                tp.id ASC`,
+      [
+        order.serviceZoneId,
+        order.serviceId,
+        order.technicianId,
+        order.addressId,
+        order.id,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ranking.workloadWeight,
+        ranking.fairnessLookbackDays,
+        ranking.fairnessDeclineWeight,
+        ranking.fairnessWeight,
+        ranking.reliabilityBaselineRating,
+        ranking.reliabilityWeight,
+        ranking.reliabilityMinRatingsCount,
+      ],
     );
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
@@ -1214,6 +1272,8 @@ export class AdminOrdersService {
     let assistantAssignedEvent: OrderAssistantAssignedManuallyEvent | null = null;
     let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
     const outcome = await this.dataSource.transaction(async (manager) => {
+      // **ترتيب القفل: الفني الأول ثم الطلب** (الشرح الكامل فوق `lockTechnician`، docs/08 §148).
+      const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
       const order = await manager
         .createQueryBuilder(Order, 'order')
         .setLock('pessimistic_write')
@@ -1232,7 +1292,6 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
       }
 
-      const technician = await this.assignmentGuard.lockTechnician(manager, technicianProfileId);
       if (order.technicianId === technician.id) {
         throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
       }

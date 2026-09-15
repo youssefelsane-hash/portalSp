@@ -45,6 +45,8 @@ export interface OrderResponseDto {
   duration_minutes: number | null;
   /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول. فاضية في القوايم. */
   customer_notices: OrderCustomerNoticeDto[];
+  /** يظهر في تفاصيل طلب العميل فقط؛ القوائم تتركه undefined لتجنب استعلام لكل صف. */
+  safety_guidance_ar?: string | null;
   estimated_price_cents: number | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;
   initial_quote_note: string | null;
@@ -63,6 +65,7 @@ export interface OrderResponseDto {
    * "فني مميّز" عشان العميل يفهم الزيادة جاية منين، مش يحس إن السعر اتغيّر عليه فجأة. */
   level_premium_cents: number;
   discount_amount_cents: number;
+  instapay_discount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
   /** مسارات الفني تضيف الحقول دي من دفتر الدفعات؛ باقي القوائم قد لا تحملها لتجنب N+1. */
@@ -85,6 +88,11 @@ export interface OrderResponseDto {
    * بيتحصّل تلقائيًا بعد اكتمال الشغل (نفس مسار البند الإضافي، ADR-0015). */
   deposit_amount_cents: number | null;
   payment_status: string;
+  /**
+   * طريقة الدفع المسجّلة على الطلب (ADR-0089) — الواجهة بتستخدمها عشان تخاطب صاحب الطلب
+   * الكاش بنبرة صح («تحب تدفع أونلاين بدل الكاش؟») بدل صياغة عامة تصلح للاتنين ومابتقنعش حد.
+   */
+  payment_method: string | null;
   placed_at: string | null;
   cancelled_at: string | null;
   cancellation_reason_id: string | null;
@@ -184,6 +192,7 @@ export function toOrderResponseDto(
     /** رسايل الإدارة للعميل على الطلب ده (ADR-0071) — بتتمرّر في مسار تفاصيل الطلب بس،
      * مش في القوايم (استعلام إضافي لكل صف بلا فايدة عرض). */
     customerNotices?: OrderCustomerNotice[];
+    safetyGuidanceAr?: string | null;
   },
 ): OrderResponseDto {
   return {
@@ -216,6 +225,7 @@ export function toOrderResponseDto(
       message: n.message,
       created_at: n.createdAt.toISOString(),
     })),
+    safety_guidance_ar: viewerExtras?.safetyGuidanceAr,
     estimated_price_cents: order.estimatedPriceCents,
     initial_quote_source: order.initialQuoteSource,
     initial_quote_note: order.initialQuoteNote,
@@ -230,6 +240,7 @@ export function toOrderResponseDto(
     surge_amount_cents: order.surgeAmountCents,
     level_premium_cents: order.levelPremiumCents,
     discount_amount_cents: order.discountAmountCents,
+    instapay_discount_cents: order.instapayDiscountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
     warranty_plan_id: order.warrantyPlanId,
@@ -242,6 +253,7 @@ export function toOrderResponseDto(
       : null,
     deposit_amount_cents: order.depositAmountCents,
     payment_status: order.paymentStatus,
+    payment_method: order.paymentMethod ?? null,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,
     cancelled_at: order.cancelledAt ? order.cancelledAt.toISOString() : null,
     cancellation_reason_id: order.cancellationReasonId,
@@ -313,6 +325,9 @@ export interface TechnicianOrderResponseDto
     | 'surge_amount_cents'
     | 'level_premium_cents'
     | 'discount_amount_cents'
+    // حافز InstaPay خصم على فاتورة العميل تتحمله المنصة (ADR-0091 §6) — رقم فلوس عميل صريح،
+    // ومستحق الفني بيتحسب من الإجمالي بعد الخصم فمش محتاج يشوف تكوينه.
+    | 'instapay_discount_cents'
     | 'warranty_price_cents'
     | 'deposit_amount_cents'
     | 'optional_warranty'
@@ -327,21 +342,21 @@ export interface TechnicianOrderResponseDto
   > {
   /** المطلوب تحصيله من العميل كاش. صفر لأي عضو طاقم مش القائد (docs/08 §108-B) — القائد
    * (أو الفني الوحيد لو مفيش طاقم) بس اللي بيشوف الرقم الحقيقي، هو اللي فعليًا بيحصّله. */
-  cash_to_collect_cents: number;
+  cash_to_collect_cents?: number;
   /** الكاش الذي حصّله الفني بالفعل واتسجل في تسوية الطلب. صفر لأي عضو طاقم مش القائد (نفس السبب). */
-  cash_collected_cents: number;
+  cash_collected_cents?: number;
   /** نصيب الفني من الطلب (بعد نسبة الشركة). ظاهر دايمًا، بلا شرح لتكوينه. */
-  my_earning_cents: number;
+  my_earning_cents?: number;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
-  has_online_payment: boolean;
+  has_online_payment?: boolean;
   /** كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص. */
-  fully_paid_online: boolean;
+  fully_paid_online?: boolean;
   /** السعر لسه ما اتحددش فـ`my_earning_cents` بصفر حسابيًا — مش «شغل ببلاش» (docs/08 §64.ب). */
-  earning_pending: boolean;
+  earning_pending?: boolean;
   /** الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040). */
-  is_crew_share: boolean;
+  is_crew_share?: boolean;
   /** لا توجد حصة تاريخية مسجلة لطلب مقفل؛ لا يعرض التطبيق رقمًا مُعاد حسابه. */
-  earning_snapshot_missing: boolean;
+  earning_snapshot_missing?: boolean;
   /**
    * **فيه استرداد اتعمل للعميل على الطلب ده** — طلب مالك صريح 2026-09-11: «الفني يشوف تلميح
    * بسيط **جوّه** الطلب، لازم يفتحه عشان يشوفه، مش بره».
@@ -351,7 +366,7 @@ export interface TechnicianOrderResponseDto
    * بيقول «حصل استرداد» عشان الفني يفهم ليه مستحقه اتغيّر، من غير ما يعرف العميل دفع كام
    * ولا رجعله كام. الرقم اللي يخصّه — نصيبه هو — موجود بالفعل في `my_earning_cents`.
    */
-  has_customer_refund: boolean;
+  has_customer_refund?: boolean;
 }
 
 export function toTechnicianOrderResponseDto(
@@ -366,7 +381,7 @@ export function toTechnicianOrderResponseDto(
     isCrewShare?: boolean;
     earningSnapshotMissing?: boolean;
     hasCustomerRefund?: boolean;
-  },
+  } | null,
 ): TechnicianOrderResponseDto {
   const {
     total_amount_cents: _totalAmount,
@@ -375,6 +390,7 @@ export function toTechnicianOrderResponseDto(
     surge_amount_cents: _surge,
     level_premium_cents: _levelPremium,
     discount_amount_cents: _discount,
+    instapay_discount_cents: _instapayDiscount,
     warranty_price_cents: _warrantyPrice,
     deposit_amount_cents: _deposit,
     optional_warranty: _optionalWarranty,
@@ -389,6 +405,12 @@ export function toTechnicianOrderResponseDto(
     customer_notices: _customerNotices,
     ...visible
   } = base;
+
+  if (!money) {
+    // Fail open for operational visibility, fail closed for money: the order remains visible but
+    // no amount is guessed or leaked. The app already treats absent money fields as "updating".
+    return visible;
+  }
 
   return {
     ...visible,

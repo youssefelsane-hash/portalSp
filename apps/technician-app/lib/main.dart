@@ -5,6 +5,7 @@ import 'core/api_exception.dart';
 import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
 import 'core/deep_link_router.dart';
+import 'core/feature_flags.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
@@ -28,10 +29,16 @@ class BaytakTechnicianApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AuthRepository()..init(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthRepository()..init()),
+        ChangeNotifierProxyProvider<AuthRepository, FeatureFlags>(
+          create: (_) => FeatureFlags(),
+          update: (_, auth, flags) => flags!..attach(auth),
+        ),
+      ],
       child: MaterialApp(
-        title: 'أسطى — الفني',
+        title: 'Osta',
         debugShowCheckedModeBanner: false,
         navigatorKey: rootNavigatorKey,
         // docs/08 §108-E — بيخلي الزرار العايم للإشعارات يختفي مؤقتًا لما أي dialog/bottom-sheet
@@ -43,10 +50,16 @@ class BaytakTechnicianApp extends StatelessWidget {
         locale: const Locale('ar', 'EG'),
         builder: (context, child) {
           final auth = context.watch<AuthRepository>();
+          final flags = context.watch<FeatureFlags>();
           return Stack(
             children: [
               DesktopAppFrame(child: child ?? const SizedBox.shrink()),
-              if (auth.isAuthenticated && !auth.biometricUnlockPending)
+              if (auth.isAuthenticated &&
+                  !auth.biometricUnlockPending &&
+                  flags.isEnabled(
+                    'technician_floating_notification_alert',
+                    fallback: true,
+                  ))
                 // الغلاف Host مش تفصيلة — هو اللي بيوفّر `Overlay` للويدجت دي، لأن مكانها هنا
                 // (جنب `child` جوّه `MaterialApp.builder`) **بره الـNavigator** فمفيش Overlay
                 // فوقها. راجع FloatingNotificationAlertHost وdocs/08 §59.

@@ -17,6 +17,15 @@ class OnboardingRepository {
     return TechnicianMe.fromJson(data!);
   }
 
+  Future<TechnicianMe> updateProfile(String bio) async {
+    final data = await auth.authedRequest(
+      'PATCH',
+      '/technician/profile',
+      body: {'bio': bio},
+    );
+    return TechnicianMe.fromJson(data!);
+  }
+
   // "معاه مساعد؟" (docs/06 §3.7) — الفني بيحدد المساعد بنفسه بكوده (technician_code)، الإدارة
   // بعد كده توافق/ترفض من apps/admin. مفيش auto-matching (فجوة موثّقة صراحة في technicians/README.md).
   Future<Map<String, dynamic>> requestAssistant(

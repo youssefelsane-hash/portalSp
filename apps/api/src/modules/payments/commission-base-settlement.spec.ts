@@ -321,6 +321,25 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
     expect(result.technician + result.platform).toBe(result.total);
   });
 
+  it('خصم تموّله المنصة يُسوّى ذريًا ولا يقلل مستحق الفني أو يعطل الطلب', async () => {
+    // سعر الشغل الأصلي 120ج، ثم حافز دفع 30ج خفّض فاتورة العميل فقط إلى 90ج.
+    const orderId = await insertOrderWithWarranty('platform-funded-discount', 12_000, 0, 12_000);
+    await dataSource.query(
+      `UPDATE orders
+          SET total_amount_cents = 9000,
+              discount_amount_cents = 3000,
+              instapay_discount_cents = 3000
+        WHERE id = $1`,
+      [orderId],
+    );
+
+    const result = await settledOrder(orderId);
+
+    expect(result.technician).toBe(10_800);
+    expect(result.platform).toBe(-1_800);
+    expect(result.technician + result.platform).toBe(result.total);
+  });
+
   it('طلب قديم (commissionable_base_cents = NULL) بيتسوّى بالسلوك القديم — مفيش تغيير بأثر رجعي', async () => {
     const orderId = await insertOrderWithWarranty('legacy', 100_000, 20_000, null);
     const result = await settledOrder(orderId);

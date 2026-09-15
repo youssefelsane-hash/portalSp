@@ -17,9 +17,18 @@ import '../warranty/warranties_screen.dart';
 /// أربعة هو السقف العملي: خمسة بتبدأ تضغط النصوص العربية وتخليها تتقص على شاشات الموبايل
 /// الضيقة (اتقاس فعليًا، مش تقدير).
 enum CustomerTab {
-  home('الرئيسية', Icons.home_outlined, Icons.home_rounded, requiresAccount: false),
+  home(
+    'الرئيسية',
+    Icons.home_outlined,
+    Icons.home_rounded,
+    requiresAccount: false,
+  ),
   orders('طلباتي', Icons.receipt_long_outlined, Icons.receipt_long_rounded),
-  warranties('ضماناتي', Icons.verified_user_outlined, Icons.verified_user_rounded),
+  warranties(
+    'ضماناتي',
+    Icons.verified_user_outlined,
+    Icons.verified_user_rounded,
+  ),
   account('حسابي', Icons.person_outline_rounded, Icons.person_rounded);
 
   const CustomerTab(
@@ -87,7 +96,8 @@ class _CustomerShellState extends State<CustomerShell> {
   Widget _tabChild(CustomerTab tab) {
     if (!_visited.contains(tab)) return const SizedBox.shrink();
     // زائر فتح تبويب محتاج حساب — دعوة مفهومة بدل شاشة بتفشل بـ401.
-    if (tab.requiresAccount && !context.watch<AuthRepository>().isAuthenticated) {
+    if (tab.requiresAccount &&
+        !context.watch<AuthRepository>().isAuthenticated) {
       return _GuestTabInvitation(tab: tab);
     }
     switch (tab) {
@@ -114,9 +124,8 @@ class _CustomerShellState extends State<CustomerShell> {
         bottomNavigationBar: NavigationBar(
           selectedIndex: _current.index,
           onDestinationSelected: _select,
-          // ارتفاع أقل من الافتراضي (80) — الافتراضي بياخد مساحة كبيرة من شاشة الموبايل بلا
-          // داعي، والنصوص العربية القصيرة دي مش محتاجاه.
-          height: 68,
+          // مساحة مريحة مع مؤشر مختار واضح؛ الارتفاع لا يتغير بين التبويبات حتى لا تقفز الشاشة.
+          height: 72,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: [
             for (final tab in CustomerTab.values)
@@ -144,22 +153,24 @@ class _GuestTabInvitation extends StatelessWidget {
   final CustomerTab tab;
 
   ({IconData icon, String title, String body}) get _content => switch (tab) {
-        CustomerTab.orders => (
-            icon: Icons.receipt_long_outlined,
-            title: 'طلباتك هتظهر هنا',
-            body: 'أول ما تحجز أول شغلانة، هتلاقي هنا حالتها والفني والسعر — كل حاجة في مكان واحد.',
-          ),
-        CustomerTab.warranties => (
-            icon: Icons.verified_user_outlined,
-            title: 'ضمانات شغلك هتظهر هنا',
-            body: 'كل شغلانة بتخلص بيتسجّل ليها ضمان. لو ظهر أي عيب جوّه المدة، بتفتح مطالبة من هنا.',
-          ),
-        _ => (
-            icon: Icons.person_outline_rounded,
-            title: 'حسابك',
-            body: 'عناوينك، محفظتك، ونقاطك — كلها بتتحفظ هنا أول ما تعمل حساب.',
-          ),
-      };
+    CustomerTab.orders => (
+      icon: Icons.receipt_long_outlined,
+      title: 'طلباتك هتظهر هنا',
+      body:
+          'أول ما تحجز أول شغلانة، هتلاقي هنا حالتها والفني والسعر — كل حاجة في مكان واحد.',
+    ),
+    CustomerTab.warranties => (
+      icon: Icons.verified_user_outlined,
+      title: 'ضمانات شغلك هتظهر هنا',
+      body:
+          'كل شغلانة بتخلص بيتسجّل ليها ضمان. لو ظهر أي عيب جوّه المدة، بتفتح مطالبة من هنا.',
+    ),
+    _ => (
+      icon: Icons.person_outline_rounded,
+      title: 'حسابك',
+      body: 'عناوينك، محفظتك، ونقاطك — كلها بتتحفظ هنا أول ما تعمل حساب.',
+    ),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -180,13 +191,19 @@ class _GuestTabInvitation extends StatelessWidget {
                   shape: BoxShape.circle,
                   color: theme.colorScheme.primaryContainer,
                 ),
-                child: Icon(content.icon, size: 40, color: theme.colorScheme.onPrimaryContainer),
+                child: Icon(
+                  content.icon,
+                  size: 40,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
               ),
               const SizedBox(height: 20),
               Text(
                 content.title,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
               Text(

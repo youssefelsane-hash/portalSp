@@ -239,6 +239,10 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+    // الإشعارات بقت بتتولّد فعليًا لمسار الاسترداد بعد ما اتزرعت إعدادات أنواع الإشعارات
+    // (migration 0331) — قبل كده الصف ده مكانش بيتعمل أصلاً فالحذف كان بيعدّي. من غيرها الـ
+    // afterAll بيقع على FK والسويتة كلها بتتحسب فاشلة رغم إن كل الاختبارات عدّت.
+    await q(`DELETE FROM notifications WHERE user_id = $1`, [ids.customerUser]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

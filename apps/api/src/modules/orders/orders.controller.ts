@@ -54,6 +54,7 @@ import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
 import { CreateBookingMatchPreviewDto } from './dto/create-booking-match-preview.dto';
 import { BookingMatchPreviewService } from './booking-match-preview.service';
 import { resolveClientChannel } from './client-channel';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -69,6 +70,7 @@ export class OrdersController {
     private readonly addressesService: AddressesService,
     private readonly techniciansService: TechniciansService,
     private readonly paymentsService: PaymentsService,
+    private readonly catalogService: CatalogService,
     private readonly bookingMatchPreviews: BookingMatchPreviewService,
     private readonly postQuoteProviderSelection: PostQuoteProviderSelectionService,
     private readonly funnelTracker: FunnelTrackerService,
@@ -134,17 +136,24 @@ export class OrdersController {
   // بيختفوا من الشاشة فورًا بعد أي فعل (مش بس تسليم الكاش) لحد ما العميل يعمل refresh يدوي.
   // الحل: helper واحد بيجيب نفس الإثراء اللي getOne() بيعمله، يتستخدم بعد كل mutation.
   private async enrichedResponse(userId: string, order: Order): Promise<OrderResponseDto> {
-    const address = await this.addressesService.findOwnedOrThrow(userId, order.addressId);
-    const technicianContact =
+    const [address, technicianContact, customerNotices, service, collection] = await Promise.all([
+      this.addressesService.findOwnedOrThrow(userId, order.addressId),
       order.technicianId && CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
-        ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
-        : null;
-    // ADR-0071 — رسايل الإدارة بتتقرا هنا مرة واحدة، فـ`getOne()` وكل الـmutations اللي
-    // بتستخدم الـhelper ده بيرجّعوها زي بعض.
-    const customerNotices = await this.ordersService.listCustomerNotices(order.id);
-    const collection = await this.paymentsService.getCollectionBreakdownForOrder(order);
+        ? this.techniciansService.findContactInfoOrThrow(order.technicianId)
+        : Promise.resolve(null),
+      // ADR-0071 — رسايل الإدارة بتتقرا هنا مرة واحدة، فـ`getOne()` وكل الـmutations اللي
+      // بتستخدم الـhelper ده بيرجّعوها زي بعض.
+      this.ordersService.listCustomerNotices(order.id),
+      // قراءة للعرض تتضمن الخدمات المتوقفة أو المحذوفة soft-delete، لأن الطلب التاريخي لازم
+      // يفضل يعرض إرشاداته بعد الإغلاق أو حتى بعد خروج الخدمة من الكتالوج.
+      this.catalogService.findServiceForDisplay(order.serviceId),
+      this.paymentsService.getCollectionBreakdownForOrder(order),
+    ]);
     return {
-      ...toOrderResponseDto(order, address, technicianContact, { customerNotices }),
+      ...toOrderResponseDto(order, address, technicianContact, {
+        customerNotices,
+        safetyGuidanceAr: service?.safetyGuidanceAr ?? null,
+      }),
       amount_due_now_cents: collection.amountDueToTechnicianCents,
     };
   }

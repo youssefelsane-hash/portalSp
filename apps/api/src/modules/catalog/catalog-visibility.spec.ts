@@ -21,6 +21,7 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = {
     activeCategory: '',
+    emptyCategory: '',
     inactiveCategory: '',
     activeService: '',
     inactiveService: '',
@@ -43,6 +44,11 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
       [`فئة نشطة ${runId}`, `Active Cat ${runId}`, `active-cat-vis-${runId}`],
     );
     ids.activeCategory = activeCategory.id;
+    const [emptyCategory] = await q(
+      `INSERT INTO service_categories (name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,true) RETURNING id`,
+      [`فئة بلا خدمات ${runId}`, `Empty Cat ${runId}`, `empty-cat-vis-${runId}`],
+    );
+    ids.emptyCategory = emptyCategory.id;
     const [inactiveCategory] = await q(
       `INSERT INTO service_categories (name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,false) RETURNING id`,
       [`فئة معطّلة ${runId}`, `Inactive Cat ${runId}`, `inactive-cat-vis-${runId}`],
@@ -103,8 +109,9 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
         ids.inactiveService,
         ids.softDeletedService,
       ]);
-      await dataSource.query(`DELETE FROM service_categories WHERE id IN ($1,$2)`, [
+      await dataSource.query(`DELETE FROM service_categories WHERE id IN ($1,$2,$3)`, [
         ids.activeCategory,
+        ids.emptyCategory,
         ids.inactiveCategory,
       ]);
     } finally {
@@ -112,9 +119,9 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
     }
   });
 
-  it('findActiveCategories(): فئة نشطة تظهر، فئة معطّلة مستحيل تظهر', async () => {
+  it('findActiveCategories(): تظهر فقط الفئة النشطة التي تملك خدمة نشطة، وتخفي المعطلة والفارغة', async () => {
     const categories = await service.findActiveCategories();
-    const ourCategories = categories.filter((c) => [ids.activeCategory, ids.inactiveCategory].includes(c.id));
+    const ourCategories = categories.filter((c) => [ids.activeCategory, ids.emptyCategory, ids.inactiveCategory].includes(c.id));
     expect(ourCategories.map((c) => c.id)).toEqual([ids.activeCategory]);
   });
 

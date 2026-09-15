@@ -4,6 +4,8 @@ export interface SupportTicketResponseDto {
   id: string;
   ticket_number: string;
   user_id: string;
+  /** يظهر للإدارة فقط عند طلب مسارات /admin/support-tickets. */
+  owner_name?: string | null;
   subject: string;
   category: string;
   priority: string;
@@ -16,11 +18,15 @@ export interface SupportTicketResponseDto {
   created_at: string;
 }
 
-export function toSupportTicketResponseDto(ticket: SupportTicket): SupportTicketResponseDto {
+export function toSupportTicketResponseDto(
+  ticket: SupportTicket,
+  ownerName?: string | null,
+): SupportTicketResponseDto {
   return {
     id: ticket.id,
     ticket_number: ticket.ticketNumber,
     user_id: ticket.userId,
+    ...(ownerName === undefined ? {} : { owner_name: ownerName }),
     subject: ticket.subject,
     category: ticket.category,
     priority: ticket.priority,

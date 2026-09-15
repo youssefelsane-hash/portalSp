@@ -17,6 +17,19 @@
  *
  * **ما بيلمسش غير المحافظ اللي رصيدها مش مطابق لمجموع حركاتها**، وبيساويه بالمجموع — وده
  * التعريف الحرفي للثابت اللي `/admin/analytics/money/reconciliation` بيقيسه.
+ *
+ * ## ليه بيعيد بناء سلسلة الأرصدة كمان (تدقيق ماراثوني 2026-09-13)
+ *
+ * فحص المطابقة بيعدّ **تلات أنواع** مخالفات: فرق رصيد، حساب صف غلط، و**كسر السلسلة**
+ * (`balance_before` لصف ≠ `balance_after` للصف اللي قبله على نفس المحفظة). إصلاح الرصيد
+ * وحده بيقفل النوع الأول بس — وأول حركة جديدة على محفظة منحرفة بتاخد `balance_before` من
+ * الرصيد المنحرف، فتولّد **كسر سلسلة دائم** في الصف نفسه، والعدّاد يرجع أحمر تاني من غير أي
+ * عطل حقيقي. اتقاس فعلاً: أول تسوية على محفظة المنصة بعد الانحراف ولّدت `TXN-2026-019435`
+ * بفرق ١٢٤١٠ ج.م بالظبط = قيمة الانحراف نفسه.
+ *
+ * فالسكربت بيعيد حساب `balance_before/after` لكل صفوف المحافظ المتأثرة كمجموع تراكمي من صفر
+ * — نفس منطق `scripts/lib/live-harness.js` بالحرف. لوحة بتقيس ثابت وأداة بتصلّح تلته معناها
+ * إنذار كاذب دائم، والإنذار الكاذب الدائم = لوحة بتتجاهل.
  */
 'use strict';
 
@@ -25,6 +38,18 @@ const { DATABASE_URL } = require('./lib/live-harness');
 
 const CONFIRM = process.argv.includes('--confirm');
 const egp = (c) => `${(Number(c) / 100).toFixed(2)} ج.م`;
+
+// كسر السلسلة: `balance_before` لصف ≠ `balance_after` للصف اللي قبله على نفس المحفظة.
+const CHAIN_SQL = `
+  WITH ordered AS (
+    SELECT t.id, t.wallet_id, t.balance_before_cents,
+           LAG(t.balance_after_cents) OVER (PARTITION BY t.wallet_id ORDER BY t.created_at, t.id) AS previous_after
+      FROM wallet_transactions t
+  )
+  SELECT wallet_id, COUNT(*)::int AS breaks
+    FROM ordered
+   WHERE previous_after IS NOT NULL AND balance_before_cents <> previous_after
+   GROUP BY wallet_id`;
 
 // الاستعلام ده هو **نفس** الثابت اللي الفحص المالي في لوحة الأدمن بيقيسه بالحرف.
 const MISMATCH_SQL = `
@@ -55,12 +80,18 @@ async function main() {
   await db.connect();
   try {
     const { rows } = await db.query(MISMATCH_SQL);
-    if (rows.length === 0) {
-      console.log('🟢 مفيش أي محفظة رصيدها مخالف لمجموع حركاتها.');
+    const { rows: chainRows } = await db.query(CHAIN_SQL);
+    if (rows.length === 0 && chainRows.length === 0) {
+      console.log('🟢 مفيش أي محفظة رصيدها مخالف لمجموع حركاتها، ولا أي كسر في سلسلة الأرصدة.');
       return;
     }
+    if (chainRows.length) {
+      console.log(`فيه ${chainRows.length} محفظة فيها كسر في سلسلة الأرصدة:`);
+      for (const row of chainRows) console.log(`  ${row.wallet_id} — ${row.breaks} صف`);
+      console.log('');
+    }
 
-    console.log(`لقينا ${rows.length} محفظة رصيدها مش مطابق لمجموع حركاتها:\n`);
+    if (rows.length) console.log(`لقينا ${rows.length} محفظة رصيدها مش مطابق لمجموع حركاتها:\n`);
     for (const row of rows) {
       const actual = Number(row.balance_cents) + Number(row.reserved_balance_cents);
       const expected = Number(row.expected_ledger_cents);
@@ -79,6 +110,8 @@ async function main() {
 
     // `reserved` مابيتلمسش: هو فلوس محجوزة لصرف قيد التنفيذ، والثابت بيقول
     // `balance + reserved = مجموع الحركات` — فالتصحيح بيقع على `balance` وحده.
+    const affectedWallets = [...new Set([...rows.map((r) => r.id), ...chainRows.map((r) => r.wallet_id)])];
+
     const { rowCount } = await db.query(
       `UPDATE wallets w
           SET balance_cents = s.expected_ledger_cents - w.reserved_balance_cents
@@ -87,13 +120,38 @@ async function main() {
     );
     console.log(`✅ اتصلحت ${rowCount} محفظة.`);
 
-    const { rows: after } = await db.query(MISMATCH_SQL);
-    console.log(
-      after.length === 0
-        ? '🟢 الفحص بقى نضيف: مفيش أي مخالفة رصيد.'
-        : `🔴 لسه فيه ${after.length} مخالفة — محتاجة فحص يدوي.`,
+    // إعادة بناء السلسلة على المحافظ المتأثرة بس — نفس منطق
+    // `live-harness.deleteWalletTransactions()`: مجموع تراكمي من صفر بترتيب (created_at, id).
+    const { rowCount: rechained } = await db.query(
+      `UPDATE wallet_transactions t
+          SET balance_before_cents = c.before_cents, balance_after_cents = c.after_cents
+         FROM (
+           SELECT x.id,
+                  COALESCE(SUM(x.effect) OVER (
+                    PARTITION BY x.wallet_id ORDER BY x.created_at, x.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0)::bigint AS before_cents,
+                  SUM(x.effect) OVER (PARTITION BY x.wallet_id ORDER BY x.created_at, x.id)::bigint AS after_cents
+             FROM (
+               SELECT id, wallet_id, created_at,
+                      CASE WHEN direction = 'credit' THEN amount_cents ELSE -amount_cents END AS effect
+                 FROM wallet_transactions WHERE wallet_id = ANY($1::uuid[])
+             ) x
+         ) c
+        WHERE t.id = c.id
+          AND (t.balance_before_cents <> c.before_cents OR t.balance_after_cents <> c.after_cents)`,
+      [affectedWallets],
     );
-    process.exit(after.length === 0 ? 0 : 1);
+    console.log(`✅ اتعاد بناء سلسلة الأرصدة في ${rechained} صف حركة.`);
+
+    const { rows: after } = await db.query(MISMATCH_SQL);
+    const { rows: chainAfter } = await db.query(CHAIN_SQL);
+    const clean = after.length === 0 && chainAfter.length === 0;
+    console.log(
+      clean
+        ? '🟢 الفحص بقى نضيف: مفيش مخالفة رصيد ولا كسر سلسلة.'
+        : `🔴 لسه فيه ${after.length} مخالفة رصيد و${chainAfter.length} محفظة بكسر سلسلة — محتاجة فحص يدوي.`,
+    );
+    process.exit(clean ? 0 : 1);
   } finally {
     await db.end();
   }

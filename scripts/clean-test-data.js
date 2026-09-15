@@ -17,6 +17,7 @@ const { Client } = require('pg');
 // تكون مُصدَّرة في الشِل، وغير كده الأداة بتقع بـ`FATAL 28000` (فشل مصادقة) اللي مابيقولش
 // إن السبب إعداد ناقص — وده حصل فعلاً وقت مناداتها من سكربت تاني.
 const { DATABASE_URL } = require('./lib/live-harness');
+const { deleteOrdersById } = require('./lib/delete-orders-safely');
 
 const args = process.argv.slice(2);
 const flag = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -37,130 +38,12 @@ const param = serviceId ?? orderId ?? numberLike;
     await db.query('BEGIN');
     const { rows: targets } = await db.query(`SELECT id FROM orders WHERE ${where}`, [param]);
     if (targets.length === 0) { console.log('مفيش طلبات مطابقة.'); await db.query('ROLLBACK'); return; }
-    const ids = targets.map((r) => r.id);
 
-    // الجداول اللي بتشاور على orders — من الكتالوج نفسه، مش قايمة مكتوبة بالإيد.
-    const { rows: refs } = await db.query(`
-      SELECT c.conrelid::regclass::text AS table_name,
-             a.attname                  AS column_name,
-             c.confdeltype              AS on_delete
-        FROM pg_constraint c
-        JOIN unnest(c.conkey) k(attnum) ON true
-        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-       WHERE c.confrelid = 'orders'::regclass AND c.contype = 'f'`);
-
-    /**
-     * حذف صفوف جدول **مع أحفاده** — جدول بيشاور على `orders` ممكن يكون هو نفسه مشار إليه من
-     * جدول تالت. اتلقطت حيًا: `refunds.payment_id → payments.id`، فحذف `payments` قبل `refunds`
-     * بيفشل على `refunds_payment_id_fkey`. الحالة الخاصة القديمة (`chat_messages` تحت
-     * `chat_threads`) كانت نفس الفئة بالظبط، متعالجة بالإيد لجدول واحد بس؛ دي بتعمّمها من
-     * الكتالوج فمفيش جدول تالت جديد هيرجّع نفس الفشل تاني.
-     */
-    const deleteWithDependents = async (table, column, values, depth = 0) => {
-      if (depth > 3) return 0;
-      let removed = 0;
-      const { rows: children } = await db.query(`
-        SELECT c.conrelid::regclass::text AS table_name,
-               a.attname                  AS column_name,
-               c.confdeltype              AS on_delete
-          FROM pg_constraint c
-          JOIN unnest(c.conkey) k(attnum) ON true
-          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-         WHERE c.confrelid = $1::regclass AND c.contype = 'f'`, [table]);
-      for (const child of children) {
-        if (child.table_name === table) continue;
-        if (child.on_delete === 'c' || child.on_delete === 'n') continue;
-        const { rows: doomed } = await db.query(
-          `SELECT id FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
-          [values],
-        ).catch(() => ({ rows: null })); // جدول بلا عمود `id` — بيتحذف مباشرةً تحت
-        if (doomed && doomed.length) {
-          removed += await deleteWithDependents(child.table_name, 'id', doomed.map((d) => d.id), depth + 1);
-        } else {
-          const res = await db.query(
-            `DELETE FROM ${child.table_name} WHERE ${child.column_name} IN (SELECT id FROM ${table} WHERE ${column} = ANY($1::uuid[]))`,
-            [values],
-          );
-          if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${child.table_name}`);
-          removed += res.rowCount;
-        }
-      }
-      const res = await db.query(`DELETE FROM ${table} WHERE ${column} = ANY($1::uuid[])`, [values]);
-      if (res.rowCount) console.log(`  ${String(res.rowCount).padStart(5)} من ${table}`);
-      return removed + res.rowCount;
-    };
-
-    /**
-     * **كسر الدوائر قبل أي حذف** — `orders` بيشاور على جدول، والجدول بيشاور على `orders` تاني.
-     *
-     * اتلقطت حيًا: `orders.recurring_template_id → recurring_order_templates.id` و
-     * `recurring_order_templates.last_generated_order_id → orders.id`. الاتنين مع بعض دايرة:
-     * حذف القوالب بيفشل لأن الطلبات لسه بتشاور عليها، وحذف الطلبات بيفشل لأن القوالب بتشاور
-     * عليها. مفيش ترتيب حذف بيحل ده — لازم طرف من الدايرة يتفكّ الأول.
-     *
-     * الطرف اللي بيتفكّ هو العمود **القابل للـNULL** على `orders` (وجوده اختياري بالتعريف،
-     * فتفريغه مش بيغيّر معنى الصف قبل ما يتحذف أصلاً). والاكتشاف من الكتالوج مش بقايمة مكتوبة
-     * بالإيد، فأي دايرة جديدة تتحل لوحدها.
-     */
-    const { rows: cycles } = await db.query(`
-      SELECT a.attname AS column_name, c.confrelid::regclass::text AS target_table
-        FROM pg_constraint c
-        JOIN unnest(c.conkey) k(attnum) ON true
-        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-       WHERE c.conrelid = 'orders'::regclass
-         AND c.contype = 'f'
-         AND a.attnotnull = false
-         AND c.confrelid <> 'orders'::regclass
-         AND EXISTS (
-           SELECT 1 FROM pg_constraint back
-            WHERE back.conrelid = c.confrelid
-              AND back.contype = 'f'
-              AND back.confrelid = 'orders'::regclass
-         )`);
-    /**
-     * تفريغ عمود لوحده مش دايمًا كافي: `chk_orders_recurring_identity_pair` بيفرض إن
-     * `recurring_template_id` و`recurring_occurrence_at` يبقوا NULL **مع بعض**، فتفريغ واحد
-     * بس بيكسر القيد. فبنقرا قيود الـCHECK اللي بتذكر العمود، وبنفرّغ معاه كل عمود **قابل
-     * للـNULL** مذكور في نفس القيد — من الكتالوج برضه، مش بقايمة مكتوبة بالإيد.
-     */
-    const pairedNullableColumns = async (column) => {
-      const { rows } = await db.query(
-        `SELECT a.attname AS column_name
-           FROM pg_constraint c
-           JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-          WHERE c.conrelid = 'orders'::regclass
-            AND c.contype = 'c'
-            AND a.attnotnull = false
-            AND EXISTS (
-              SELECT 1 FROM pg_attribute self
-               WHERE self.attrelid = c.conrelid AND self.attnum = ANY(c.conkey) AND self.attname = $1
-            )`,
-        [column],
-      );
-      return [...new Set([column, ...rows.map((r) => r.column_name)])];
-    };
-
-    for (const cycle of cycles) {
-      const columns = await pairedNullableColumns(cycle.column_name);
-      const setClause = columns.map((c) => `${c} = NULL`).join(', ');
-      const res = await db.query(
-        `UPDATE orders SET ${setClause} WHERE id = ANY($1::uuid[]) AND ${cycle.column_name} IS NOT NULL`,
-        [ids],
-      );
-      if (res.rowCount) {
-        console.log(
-          `  ${String(res.rowCount).padStart(5)} × orders.${columns.join('+')} اتفرّغت (دايرة مع ${cycle.target_table})`,
-        );
-      }
-    }
-
-    let total = 0;
-    for (const r of refs) {
-      if (r.table_name === 'orders') continue;            // parent_order_id — بيتعامل معاه بالحذف نفسه
-      if (r.on_delete === 'c' || r.on_delete === 'n') continue; // CASCADE/SET NULL بيتصرفوا لوحدهم
-      total += await deleteWithDependents(r.table_name, r.column_name, ids);
-    }
-    const del = await db.query(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids]);
+    // المنطق نفسه في `lib/delete-orders-safely` عشان التدقيقات تقدر تنضّف وراها بنفس الطريقة
+    // بدل ما كل واحد يكتب DELETE بإيده ويقع على أول FK جديد (تدقيق §148، المرحلة ٩).
+    const { orders, related } = await deleteOrdersById(db, targets.map((r) => r.id), { log: (m) => console.log(m) });
+    const del = { rowCount: orders };
+    const total = related;
     await db.query('COMMIT');
     console.log(`✅ اتمسح ${del.rowCount} طلب + ${total} صف مرتبط.`);
   } catch (err) {

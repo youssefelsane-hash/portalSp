@@ -6,6 +6,7 @@ import '../../design/empty_state.dart';
 import '../onboarding/onboarding_repository.dart';
 import 'company_repository.dart';
 import 'models.dart';
+import '../orders/order.dart' show formatOrderDurationAr;
 import '../../design/confirm_dialog.dart';
 
 // شركتي/فريقي (docs/06 §3.8) — كانت فجوة موثّقة صراحة: كل الـAPI (إنشاء/فروع/أعضاء/نقل ملكية)
@@ -474,38 +475,47 @@ class _CompanyScreenState extends State<CompanyScreen> {
     return Column(
       children: [
         for (final order in orders)
-          Card(
-            child: ListTile(
-              title: Text(order.serviceNameAr),
-              subtitle: Text(
-                [
-                  order.orderNumber,
-                  if (order.technicianName != null) order.technicianName!,
-                  if (order.scheduledAt != null)
-                    _formatOrderDate(order.scheduledAt!),
-                ].join(' — '),
-              ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Chip(
-                    label: Text(
-                      orderStatusLabelsAr[order.orderStatus] ??
-                          order.orderStatus,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          Builder(
+            builder: (context) {
+              final duration = formatOrderDurationAr(
+                durationMinutes: order.durationMinutes,
+                estimatedDurationDays: order.estimatedDurationDays,
+              );
+              return Card(
+                child: ListTile(
+                  title: Text(order.serviceNameAr),
+                  subtitle: Text(
+                    [
+                      order.orderNumber,
+                      if (order.technicianName != null) order.technicianName!,
+                      if (order.scheduledAt != null)
+                        _formatOrderDate(order.scheduledAt!),
+                      if (duration != null) 'المدة المتوقعة: $duration',
+                    ].join(' — '),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _formatEgp(order.totalAmountCents),
-                    style: Theme.of(context).textTheme.bodySmall,
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Chip(
+                        label: Text(
+                          orderStatusLabelsAr[order.orderStatus] ??
+                              order.orderStatus,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatEgp(order.totalAmountCents),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
       ],
     );

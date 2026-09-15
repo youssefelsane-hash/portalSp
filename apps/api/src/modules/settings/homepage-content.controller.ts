@@ -38,6 +38,9 @@ export interface HomepageContentResponseDto {
    * مكان أرفع منه الصور"). بقت `homepage.tips` (setting, value_type='json') — نفس نمط
    * `homepage.trust_message` بالحرف، إدارة كاملة من `/homepage-content` في apps/admin. */
   tips: HomepageTipDto[];
+  /** قسم «ابدأ مشروعك» (تشطيب الشقق) ظاهر ولا لأ — زرار إخفاء/إظهار واحد عند الأدمن
+   * (docs/08 §146). العرض بس: المشاريع القايمة بتفضل شغّالة وصفحاتها بتفتح بالرابط. */
+  projects_enabled: boolean;
 }
 
 /**
@@ -55,6 +58,7 @@ export class HomepageContentController {
   async getHomepageContent(): Promise<HomepageContentResponseDto> {
     const trustMessage = await this.settingsService.getString('homepage.trust_message', '');
     const tips = await this.settingsService.getJson<HomepageTipDto[]>('homepage.tips', []);
+    const projectsEnabled = await this.settingsService.getBoolean('homepage.projects_enabled', true);
     const configuredSearch = await this.settingsService.getJson<unknown>('homepage.search_content', {});
     const configuredHeroImages = await this.settingsService.getJson<unknown[]>('homepage.hero_images', []);
     const heroImages = configuredHeroImages
@@ -80,6 +84,7 @@ export class HomepageContentController {
       hero_images: heroImages,
       search,
       tips,
+      projects_enabled: projectsEnabled,
     };
   }
 }

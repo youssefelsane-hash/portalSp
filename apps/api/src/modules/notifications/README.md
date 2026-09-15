@@ -20,6 +20,26 @@
   - **اتأكد حياً**: `in_app` لسه شغال زي ما هو (صفر رجعة، اتأكد بطلب حقيقي ولّد 3 إشعارات in_app متتالية بنجاح). مسار `complaint.filed → ops_manager` (بقناتين `in_app`+`email` عبر `notification_routing_rules`) اتأكد إنه لسه بيعدّي صح عبر `CompositeNotificationDispatcher` الجديد من غير أي كسر — شكوى حقيقية اتفتحت وولّدت الإشعارين المتوقعين بالضبط.
 - **`notify()`**: بيسجّل صف `notifications` دايماً حتى لو فشل الإرسال الفعلي — أي استثناء من البوابة بيتلقّف ويتسجّل كـ `delivery_status=failed` مع `failure_reason` واضح، ومبيفشلش العملية اللي استدعته (طلب اتقبل، مثلاً، لازم ينجح حتى لو الإشعار فشل).
 - **`notifyMultiChannel()`**: بيبعت نفس الحدث على أكتر من قناة، كل قناة صف مستقل بمصير مستقل.
+- **⚠️ نوع بلا صف في `notification_type_configs` = `in_app` بس، بلا push** — و`notify()` من غير
+  قناة صريحة بتعتمد على الجدول ده بالكامل. التدقيق الماراثوني (2026-09-13، docs/08 §148) لقى
+  **٥٢ نوع** في الكود بلا صف، منهم ٢٢ بيتبعتوا بـ`notify()` بلا قناة — يعني كانوا بيتسجّلوا في
+  التطبيق **ومايوصلوش الموبايل أبدًا**: `payment_instapay_confirmed` (العميل حوّل والأدمن أكّد)،
+  `payment_instapay_rejected`، `order_reassigned_to_you`، `installment_payment_failed`،
+  `preferred_crew_invited`، `recurring_order_awaiting_payment`، `rating_received`،
+  `payout_completed`… وكمان الشاشة `/admin/notification-types` مابتعرضش النوع اللي مالوش صف
+  (مفيش create عمدًا)، فمكانش ليهم أي مقبض إداري أصلاً.
+  الـmigration `0331` بتزرع الصفوف الناقصة، و`notification-type-config-coverage.spec.ts` بيمنع
+  رجوع الفجوة: بيمشي على الكود الحقيقي ويطابقه بالجدول، والاستثناء الوحيد `otp` (بيتبعت عبر
+  مزوّد SMS مباشرةً، مش عبر `notify()`).
+- **فجوة موثّقة صراحة — `insertDurableInAppNotification()` مالهاش push**: الدالة دي
+  (`orders/durable-in-app-notification.ts`) بتكتب صف `in_app` **جوّه نفس الـtransaction** بتاعة
+  التغيير، وده الصح للمتانة، لكنها مابتبعتش أي إشعار خارجي. مستهلكيها بنود بتطلب رد فعل من
+  الطرف التاني: `order_reschedule_requested` («الفني يقترح تغيير الموعد — افتح الطلب للموافقة أو
+  الرفض»)، `order_reschedule_approved` / `order_reschedule_rejected`، و`order_rescheduled`.
+  يعني العميل ممكن مايعرفش بطلب التأجيل غير لما يفتح التطبيق. **الحل الصح مش نداء push جوّه
+  الـtransaction** (نداء خارجي جوّه قفل DB ممنوع في المشروع ده) — هو نفس نمط الـoutbox المستخدم
+  في `project_notification_outbox`/`payment_notification_outbox`: صف outbox داخل نفس الـtransaction
+  ومعالج بيبعت بعد الـcommit. متسجّلة كقرار مؤجّل محتاج ADR، مش سهو.
 - **إشعارات المشروعات الدائمة (`migration 0198`)**: كل تغيير حساس في المشروع (إنشاء، إرسال/اعتماد
   عرض، تجهيز/بدء/تسليم/اعتماد/رفض مرحلة، تعليق، ربط طلب، إصدار ضمان، وتغيير حالة) بيكتب صف
   `project_notification_outbox` داخل **نفس transaction** بتاعة التغيير والتدقيق. المعالج بيبعت

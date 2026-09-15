@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import type { BrandingPayloadDto } from '@baytak/shared-types';
 import {
   Avatar,
   AvatarFallback,
@@ -61,6 +62,7 @@ import { NotificationBell } from '@/components/notification-bell';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { apiFetch } from '@/lib/api-client';
 
 type NavItem = { href: string; label: string; icon: LucideIcon; permission?: string };
 type NavGroup = { label: string; items: NavItem[] };
@@ -86,10 +88,14 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'العمليات',
     items: [
       { href: '/operations', label: 'مركز العمليات', icon: Activity, permission: 'operations.view' },
+      { href: '/operations/live-map', label: 'الخريطة الحية', icon: Map, permission: 'operations.view' },
       // ADR-0084 — مكان واحد لكل الشواذ اللي محتاجة **حكم بشري** (أفعال الفني المالية، النشو،
       // الكاش اللي ماوصلش، الشكاوى المفتوحة). مختلف عن مركز العمليات اللي جنبه: ده «حد اتحرّك
       // ومحتاج مراجعة»، وده «حاجة واقفة محتاجة تحريك».
       { href: '/review-center', label: 'مركز المراجعة', icon: ScanSearch, permission: 'operations.view' },
+      // ADR-0085 — الطبقة اللي فوق مركز المراجعة: الصف هنا **شخص** مش فعل، والمرجع **أقرانه**
+      // مش تقدير المراجع. صلاحية مستقلة لأن الشاشة بتعرض تحليل سلوكي شخصي بالاسم.
+      { href: '/risk-center', label: 'مركز المخاطر', icon: ShieldAlert, permission: 'risk_center.view' },
       { href: '/orders', label: 'الطلبات', icon: ClipboardList, permission: 'orders.view' },
       // بند 7 — الطلبات اللي سعرها لسه مش مستقر لها طابور مخصّص: في قايمة الطلبات العامة بتضيع
       // وسط طلبات مفيش عليها قرار مطلوب.
@@ -167,6 +173,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/employees', label: 'الموظفين', icon: UserCog, permission: 'employees.view' },
       { href: '/roles', label: 'الأدوار والصلاحيات', icon: Shield, permission: 'roles.manage' },
+      { href: '/notifications', label: 'مركز الإشعارات', icon: Bell, permission: 'notifications.view' },
       { href: '/notification-routing', label: 'توجيه الإشعارات', icon: Bell, permission: 'notifications.view' },
       { href: '/notification-type-configs', label: 'إعدادات أنواع الإشعارات', icon: BellRing, permission: 'notifications.view' },
       { href: '/cancellation-reasons', label: 'أسباب الإلغاء', icon: ListX, permission: 'cancellation_reasons.view' },
@@ -237,7 +244,6 @@ function useMainScrollMemory(pathname: string) {
 
   return mainRef;
 }
-
 /**
  * ملاحة الرجوع (docs/08 §63.ب6).
  *
@@ -271,6 +277,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const mainRef = useMainScrollMemory(pathname);
+  const [brandMarkUrl, setBrandMarkUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (alreadyMounted) return;
+    let cancelled = false;
+    apiFetch<BrandingPayloadDto>('/branding', null)
+      .then((branding) => {
+        if (!cancelled) setBrandMarkUrl(branding.logo_mark.url);
+      })
+      .catch(() => {
+        // البراندنج غير حرج: الشِل يفضل شغال بالـfallback المحلي لو الـAPI غير متاح.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [alreadyMounted]);
 
   // عمق التنقّل جوّه التطبيق — بيزيد مع كل مسار جديد يشوفه الشِل الدائم.
   const inAppDepth = useRef(0);
@@ -323,8 +345,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-72 shrink-0 flex-col border-s border-border/70 bg-card/85 shadow-[-18px_0_45px_-38px_oklch(0.2_0.05_255_/_55%)] backdrop-blur-xl">
         <div className="flex items-center gap-3 border-b border-border/60 px-4 py-4">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-info text-base font-bold text-primary-foreground shadow-md shadow-primary/20">
-            ص
+          <div className="flex size-10 items-center justify-center overflow-hidden rounded-xl bg-[#fff8f2] p-1.5 shadow-md shadow-primary/15 ring-1 ring-border/70">
+            {brandMarkUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- رابط branding ديناميكي وقد يكون data URI أو presigned URL
+              <img src={brandMarkUrl} alt="رمز OSTA" className="size-full object-contain" />
+            ) : (
+              <span className="text-base font-bold text-primary">O</span>
+            )}
           </div>
           <div>
             <span className="block font-semibold">أسطى</span>

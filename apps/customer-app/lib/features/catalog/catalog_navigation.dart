@@ -78,8 +78,13 @@ Future<void> navigateToServiceBooking(
     MaterialPageRoute(
       builder: (_) => ScheduleSelectionScreen(
         allowsDateRangeBooking: service.allowsDateRangeBooking,
+        serviceName: service.nameAr,
+        warrantyDays: service.warrantyDays,
         requiresPreciseTime: service.requiresStartTime,
         allowsSameDay: service.allowsEmergency,
+        // اقتراح المواعيد (ADR-0088) — العنوان لسه مااتختارش في المسار ده، فالشاشة بتجيب
+        // العنوان الافتراضي بنفسها. مفيش عنوان = مفيش اقتراح، والتقويم يفضل زي ما هو.
+        serviceId: service.id,
       ),
     ),
   );

@@ -7,6 +7,7 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
+import '_live_support.dart';
 
 Future<String> _latestOtpFor(String phoneNumber, File log) async {
   final lines = await log.readAsLines();
@@ -27,12 +28,14 @@ Future<String> _loginAs(String phoneNumber, File log) async {
 
 void main() {
   test('عميل حقيقي يحجز خدمة formula-priced، السعر الفعلي للطلب يطابق evaluate-price بالظبط', () async {
-    // ملحوظة تشغيل: عدّل مسار اللوج ده لملف log السيرفر الفعلي بتاع السيشن اللي بتشغّل الاختبار
-    // فيها (نفس القيد الموجود في order_creation_live_test.dart/addon_order_creation_live_test.dart
-    // — مسار ثابت لمجلد scratchpad الخاص بسيشن Claude Code معيّنة).
-    final serverLog = File(Platform.environment['API_SERVER_LOG'] ?? '/tmp/server.log');
+    // مسار اللوج بيتحدد وقت التشغيل؛ `--dart-define=API_LOG_PATH=...` بيتجاوزه صراحةً.
+    final serverLog = resolveApiLogFile() ??
+        (throw StateError('مالقيتش لوج الباك-إند — شغّل الـAPI ومخرجاته في apps/api/.dev-logs/api.out'));
 
-    final adminToken = await _loginAs('+201000000098', serverLog);
+    // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الـOTP بيرجّع `mfa_required` من غير
+    // توكن. التوقيع المحلي هو نفس الطريقة المعتمدة في اختبارات الأدمن الحية — تفاصيل في
+    // `_live_support.dart`.
+    final adminToken = await devAdminToken('+201000000098');
     final customerToken = await _loginAs('+201000000101', serverLog);
 
     // إنشاء خدمة formula حقيقية جديدة بمثال المحارة من docs/08 §1.8 بالحرف — مساحة×سعر_المتر
@@ -163,7 +166,7 @@ void main() {
     expect(rejected, isTrue, reason: 'طلب formula من غير field_values المطلوبة لازم يترفض، مش يتحجز مجانًا');
 
     // تنظيف
-    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'تنظيف بيانات اختبار حي'});
+    await apiRequest('POST', '/orders/$orderId/cancel', accessToken: customerToken, body: {'reason': 'تنظيف بيانات اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
     await apiRequest('DELETE', '/addresses/$addressId', accessToken: customerToken);
     await apiRequest('DELETE', '/admin/services/$serviceId', accessToken: adminToken);
   });

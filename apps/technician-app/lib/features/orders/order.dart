@@ -154,6 +154,8 @@ class Order {
   final int? requiredAssistants;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
+  final int? durationMinutes;
+  final int? estimatedDurationDays;
   // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — موجود بس لقائد الطلب على booking_mode='team'
   // (getOne بتحسبه). بيستبدل teamShortage/teamMembersNeeded القديمين بالكامل.
   final CrewStatus? crewStatus;
@@ -196,6 +198,8 @@ class Order {
     this.requiredAssistants,
     this.address,
     this.scheduledAt,
+    this.durationMinutes,
+    this.estimatedDurationDays,
     this.crewStatus,
     this.teamLeaderName,
     this.customerName,
@@ -232,6 +236,8 @@ class Order {
         ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
         : null,
     scheduledAt: json['scheduled_at'] as String?,
+    durationMinutes: (json['duration_minutes'] as num?)?.toInt(),
+    estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toInt(),
     crewStatus: json['crew_status'] != null
         ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>)
         : null,
@@ -241,6 +247,34 @@ class Order {
     serviceNameAr: json['service_name_ar'] as String?,
     isNewForTechnician: json['is_new_for_technician'] as bool? ?? false,
   );
+}
+
+String? formatOrderDurationAr({
+  int? durationMinutes,
+  int? estimatedDurationDays,
+}) {
+  final minutes = durationMinutes ?? 0;
+  final days = estimatedDurationDays ?? 0;
+  if (days > 0 && minutes >= 24 * 60) return _formatDurationDaysAr(days);
+  if (minutes > 0) return _formatDurationMinutesAr(minutes);
+  if (days > 0) return _formatDurationDaysAr(days);
+  return null;
+}
+
+String _formatDurationMinutesAr(int minutes) {
+  if (minutes < 60) return '$minutes دقيقة';
+  final hours = minutes / 60;
+  if (hours == 1) return 'ساعة واحدة';
+  if (hours == 2) return 'ساعتان';
+  if (hours == hours.roundToDouble()) return '${hours.toInt()} ساعات';
+  return '$minutes دقيقة';
+}
+
+String _formatDurationDaysAr(int days) {
+  if (days == 1) return 'يوم واحد';
+  if (days == 2) return 'يومان';
+  if (days <= 10) return '$days أيام';
+  return '$days يومًا';
 }
 
 // تسلسل دورة عمل الفني بعد القبول — مطابق لـ order-state-machine.ts بالظبط

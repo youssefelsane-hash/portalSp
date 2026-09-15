@@ -18,7 +18,16 @@ import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pri
 import { BookingModeFilter } from './dto/list-services.dto';
 
 export interface PriceEstimate {
+  /** سعر الشغل **بعد** زيادة المنطقة (`zoneAdjustedBaseCents`) وقبل مضاعف المستوى والقصّ. */
   base_price_cents: number;
+  /**
+   * زيادة مضاعف المنطقة لوحدها، بالقروش (docs/08 §145).
+   *
+   * لازم تتعلن صراحةً لأنها **داخلة جوّه `base_price_cents`** فوق — من غيرها كان اللي بيحسب
+   * وعاء العمولة بيستنتجها بالطرح، والطرح ده كان بيلقط قصّ الحد الأدنى/الأقصى بالغلط ويشيله
+   * من مستحق الفني.
+   */
+  zone_surge_cents: number;
   inspection_fee_cents: number;
   surge_multiplier: number;
   level_price_multiplier: number;
@@ -132,7 +141,8 @@ export class CatalogService {
   }
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
-    return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC' } });
+    // فاصل تعادل `createdAt` — من غيره الإضافات المتعادلة بتتنطّط بين التشغيلات (docs/08 §149).
+    return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC', createdAt: 'ASC' } });
   }
 
   // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: estimateDuration() تحت محتاجة
@@ -159,9 +169,8 @@ export class CatalogService {
   }
 
   async findActiveCategories(zoneId?: string): Promise<ServiceCategory[]> {
-    if (!zoneId) {
-      return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
-    }
+    // الفئة وعد للعميل إن فيها خدمة قابلة للحجز. إرجاع فئة فارغة (خصوصًا لزائر الويب بلا
+    // عنوان بعد) بيخليه يدخل خطوة بلا نتيجة؛ نفس فلتر التغطية الجغرافية ينطبق بلا منطقة أيضًا.
     const ids = await this.findVisibleCategoryIds(zoneId);
     if (ids.length === 0) return [];
     const categories = await this.categories.find({ where: { id: In(ids), isActive: true } });
@@ -376,7 +385,7 @@ export class CatalogService {
     }
   }
 
-  private async findVisibleCategoryIds(zoneId: string): Promise<string[]> {
+  private async findVisibleCategoryIds(zoneId?: string): Promise<string[]> {
     const rows = await this.categories.manager.query<{ id: string }[]>(
       `WITH RECURSIVE category_tree AS (
          SELECT category.id AS root_id, category.id, ARRAY[category.id] AS path
@@ -398,10 +407,10 @@ export class CatalogService {
               JOIN services service ON service.category_id = tree.id
              WHERE tree.root_id = root.id
                AND service.is_active = true AND service.deleted_at IS NULL
-               AND catalog_service_enabled_in_zone(service.id, $1)
+               AND ($1::uuid IS NULL OR catalog_service_enabled_in_zone(service.id, $1))
           )
         ORDER BY root.display_order ASC, root.name_ar ASC`,
-      [zoneId],
+      [zoneId ?? null],
     );
     return rows.map((row) => row.id);
   }
@@ -555,6 +564,7 @@ export class CatalogService {
     const emergencyBaseCents = estimatedTotalCents + inspectionFeeCents;
     return {
       base_price_cents: zoneAdjustedBaseCents,
+      zone_surge_cents: Math.max(zoneAdjustedBaseCents - result.priceCents, 0),
       inspection_fee_cents: inspectionFeeCents,
       surge_multiplier: surgeMultiplier,
       level_price_multiplier: levelMultiplier,

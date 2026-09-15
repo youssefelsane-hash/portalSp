@@ -8,9 +8,10 @@ import {
   confirmInstaPayTransfer,
   getInstaPayTransfer,
   payWithInstaPay,
+  previewInstaPay,
   type InstaPayReferenceDto,
 } from '@/lib/payments';
-import { getMyOrder, formatEgp } from '@/lib/orders';
+import { formatEgp } from '@/lib/orders';
 import { ApiError } from '@/lib/api-client';
 
 /**
@@ -105,13 +106,27 @@ export default function InstaPayTransferPage({ params }: { params: Promise<{ id:
     load();
   };
 
-  /** فحص صامت: بيوجّه لصفحة الطلب لو اتأكّد، وبيسكت لو لسه — **من غير ما يقلق العميل**. */
+  /**
+   * هل **التحويلة دي** اتبتّ فيها؟
+   *
+   * **بَقّة حقيقية اتصلحت (بلاغ مالك 2026-09-13، docs/08 §145)**: الصفحة كانت بتقرا
+   * `order.payment_status === 'paid'` كدليل على تأكيد التحويل. ده صح لدفعة الطلب الأصلية بس؛
+   * دلتا الزيادة بتتدفع على طلب حالته `paid` **قبل** التحويل أصلاً، فأول نبضة كانت بتعلن
+   * نجاح كاذب وتخرج من الصفحة والتحويلة لسه محدش راجعها.
+   *
+   * `has_open_transfer` بيوصف الدفعة نفسها: مفتوحة = تحت المراجعة، اتقفلت = اتبتّ فيها.
+   */
+  const transferStillOpen = useCallback(async () => {
+    const preview = await previewInstaPay(authedFetch, id);
+    return preview.has_open_transfer;
+  }, [authedFetch, id]);
+
+  /** فحص صامت: بيوجّه لصفحة الطلب لو اتبتّ في التحويلة، وبيسكت لو لسه. */
   const refreshPaymentStatus = useCallback(async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
     try {
-      const order = await getMyOrder(authedFetch, id);
-      if (order.payment_status === 'paid') {
+      if (!(await transferStillOpen())) {
         setCheckState('paid');
         router.replace(`/orders/${id}`);
       }
@@ -120,7 +135,7 @@ export default function InstaPayTransferPage({ params }: { params: Promise<{ id:
     } finally {
       checkingRef.current = false;
     }
-  }, [authedFetch, id, router]);
+  }, [transferStillOpen, id, router]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -151,20 +166,23 @@ export default function InstaPayTransferPage({ params }: { params: Promise<{ id:
     } catch {
       // مش بلوكر — الاستطلاع تحت لسه بيحاول يكتشف تأكيد الأدمن نفسه.
     }
+    // **وعد المراجعة بيظهر فورًا** (طلب مالك): «المفروض ييجي نفس الرسالة… إنت حولت هنراجع
+    // ونرد عليك خلال ٢٠ دقيقة». الانتظار على spinner قبل أي رسالة كان بيخلّي العميل حاسس إن
+    // مفيش حاجة اتسجّلت.
+    setCheckState('still_pending');
+
+    // بعد كده استطلاع خفيف: لو المالية أكّدت وهو لسه فاتح الصفحة، بتتنقل لوحدها.
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
       try {
-        const order = await getMyOrder(authedFetch, id);
-        if (order.payment_status === 'paid') {
-          setCheckState('paid');
-          router.replace(`/orders/${id}`);
-          return;
-        }
+        if (await transferStillOpen()) continue;
+        setCheckState('paid');
+        router.replace(`/orders/${id}`);
+        return;
       } catch {
         // نكمّل المحاولات — انقطاع مؤقت مش سبب نقول للعميل إن التحويل فشل.
       }
     }
-    setCheckState('still_pending');
   }
 
   if (authLoading || loading) {

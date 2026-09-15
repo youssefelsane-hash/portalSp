@@ -71,6 +71,10 @@ const INTENTIONAL = {
     'pricing_quantity', 'scheduled_end_at',
     // حالة مشتقّة: الواجهة بتشتق العرض من `order_status` مش من دول.
     'price_status', 'assessment_type',
+    // عدّاد تأجيلات العميل: الحد نفسه إعداد سيرفر (`orders.customer_reschedule_max_count`)
+    // والسيرفر بيرفض التجاوز برسالة صريحة («وصلت للحد الأقصى… تواصل مع الدعم»). عرض
+    // «باقي لك ٢» محتاج الحد كمان في العقد؛ اتقرر يفضل رقم داخلي لحد ما يتطلب صراحةً.
+    'customer_reschedule_count',
     // رسم الاستعجال **مابيتعرضش كبند مستقل** بقرار مالك (docs/08 بند 5/13) — داخل الإجمالي.
     'surge_amount_cents',
     // رسوم التقييم: اتشرحت للعميل عبر `customer_notices` (ADR-0071) بدل أرقام خام.

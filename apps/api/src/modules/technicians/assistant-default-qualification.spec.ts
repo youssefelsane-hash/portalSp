@@ -1,7 +1,10 @@
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { TechnicianServiceExclusionsService } from './technician-service-exclusions.service';
-import { technicianServiceQualificationCondition } from './technician-eligibility.sql';
+import {
+  assistantServiceQualificationCondition,
+  technicianServiceQualificationCondition,
+} from './technician-eligibility.sql';
 
 /** اختبار حي يثبت إن المساعد يمر بنفس دورة اعتماد التخصص، مع تطابق شاشة الأدمن والمطابقة. */
 describe('اعتماد تخصص المساعد — نفس جدار الفني بين الصنايع', () => {
@@ -34,6 +37,20 @@ describe('اعتماد تخصص المساعد — نفس جدار الفني ب
       `SELECT (${condition}) AS ok
          FROM technician_profiles tp, services s
         WHERE tp.id = $1 AND s.id = $2`,
+      [technicianId, serviceId],
+    );
+    return row.ok;
+  }
+
+  async function isQualifiedAsAssistant(technicianId: string, serviceId: string) {
+    const [row] = await q<{ ok: boolean }>(
+      `SELECT (${assistantServiceQualificationCondition({
+        technicianIdExpr: 'tp.id',
+        serviceIdExpr: 's.id',
+        categoryIdExpr: 's.category_id',
+      })}) AS ok
+       FROM technician_profiles tp, services s
+       WHERE tp.id = $1 AND s.id = $2`,
       [technicianId, serviceId],
     );
     return row.ok;
@@ -156,10 +173,12 @@ describe('اعتماد تخصص المساعد — نفس جدار الفني ب
     }
   }, 20000);
 
-  it('الحجب الإضافي يظل شغالًا داخل تخصص المساعد المعتمد', async () => {
+  it('حجب القيادة لا يمنع المساعد من الظهور داخل تخصصه كعضو طاقم', async () => {
     await exclusions.exclude(ids.adminUser, ids.assistantProfile, ids.serviceA, 'مش بيعرف يعملها');
     expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(false);
+    expect(await isQualifiedAsAssistant(ids.assistantProfile, ids.serviceA)).toBe(true);
     expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(false);
+    expect(await isQualifiedAsAssistant(ids.assistantProfile, ids.serviceB)).toBe(false);
 
     await exclusions.allow(ids.adminUser, ids.assistantProfile, ids.serviceA);
     expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(true);

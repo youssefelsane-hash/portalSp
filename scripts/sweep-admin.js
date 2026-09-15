@@ -145,9 +145,13 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
     // المتصفح بيطبع «Failed to load resource… 404» تلقائيًا لأي fetch فاشل — مش من كود الصفحة،
     // فلو الرد نفسه في قايمة المستثنى فوق، السطر ده ضجيج تابع ليه ولازم يتشال معاه.
     let suppressed4xx = 0;
+    // رسايل «إعداد بيئة ناقص» اللي الصفحة بتطبعها **عمدًا** عشان توجّه الأدمن — مش عطل،
+    // والزحف على بيئة تطوير بلا مفاتيح خارجية كان بيرصدها كمشكلة كل مرة.
+    const EXPECTED_CONSOLE = [/NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN/];
     const onC = (m) => {
       if (m.type() !== 'error') return;
       const text = m.text();
+      if (EXPECTED_CONSOLE.some((re) => re.test(text))) return;
       if (suppressed4xx > 0 && /Failed to load resource/i.test(text)) {
         suppressed4xx -= 1;
         return;
@@ -166,14 +170,28 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
         why: 'محفظة لسه ما اتعملتش (كسولة) — الصفحة بتعرض حالة فاضية مقصودة',
       },
     ];
+    // **401 اللي بعده نجاح لنفس الرابط = دورة تجديد التوكن العادية، مش عطل.**
+    // `authedFetch` في لوحة الأدمن بيتعامل مع 401 تلقائيًا: refresh مرة واحدة ثم إعادة نفس
+    // الطلب (auth-context.tsx). الزحف كان بيسجّل الـ401 الأولاني كمشكلة، فأي صفحة صادف إن
+    // التوكن خلص عندها بتترصد حمرا وهي شغالة تمام — وده بالظبط الضجيج اللي بيخلّي التقرير
+    // يتجاهل. بنأجّل الحكم لآخر الصفحة: لو نفس الـURL رجع 2xx بعد كده، الـ401 بيتشال.
+    const recovered = new Set();
     const onResp = (r) => {
       const status = r.status();
-      if (status < 400) return;
-      if (EXPECTED_4XX.some((e) => e.test(status, r.url()))) {
+      const url = r.url();
+      if (status < 400) {
+        recovered.add(url);
+        return;
+      }
+      if (EXPECTED_4XX.some((e) => e.test(status, url))) {
         suppressed4xx += 1;
         return;
       }
-      failed.push(`${status} ${r.request().method()} ${r.url().replace('http://localhost:3000','API').replace('http://localhost:3001','')}`.slice(0,110));
+      failed.push({
+        line: `${status} ${r.request().method()} ${url.replace('http://localhost:3000','API').replace('http://localhost:3001','')}`.slice(0,110),
+        url,
+        status,
+      });
     };
     page.on('console', onC); page.on('pageerror', onE); page.on('response', onResp);
     let status = 'ok';
@@ -187,7 +205,13 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
       if (len < 60) errors.push(`⚠️ شبه فاضية (${len} حرف)`);
     } catch (e) { status = 'FAIL ' + String(e).slice(0,110); }
     page.off('console', onC); page.off('pageerror', onE); page.off('response', onResp);
-    const e = [...new Set(errors)], f = [...new Set(failed)];
+    // 401 اتعافى بعده (refresh + إعادة محاولة ناجحة) مش عطل — وسطر الكونسول التابع له كمان.
+    const recoveredAuth = failed.filter((x) => x.status === 401 && recovered.has(x.url)).length;
+    const e = [...new Set(errors)].filter((line) => {
+      if (recoveredAuth === 0) return true;
+      return !/401 \(Unauthorized\)/.test(line);
+    });
+    const f = [...new Set(failed.filter((x) => !(x.status === 401 && recovered.has(x.url))).map((x) => x.line))];
     if (status !== '200' || e.length || f.length) {
       problems.push(path);
       console.log(`\n── ${path} [${status}]`);

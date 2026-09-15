@@ -1,6 +1,6 @@
 {
-    "name": "technician_app",
-    "short_name": "technician_app",
+    "name": "Osta",
+    "short_name": "Osta",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

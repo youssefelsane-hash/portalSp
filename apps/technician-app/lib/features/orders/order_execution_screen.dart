@@ -1655,6 +1655,10 @@ class _JobBriefCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1678,6 +1682,21 @@ class _JobBriefCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (duration != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(Icons.timer_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'المدة المتوقعة: $duration',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (order.problemDescription != null &&
                 order.problemDescription!.trim().isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -2036,7 +2055,8 @@ class _PhotoGallery extends StatelessWidget {
 class _QuoteItemDraft {
   String itemType;
 
-  _QuoteItemDraft([this.itemType = 'spare_part']);
+  // بلا معامل: كل صف جديد بيبدأ بـ«قطعة غيار» والمستخدم بيغيّره من الـdropdown.
+  _QuoteItemDraft() : itemType = 'spare_part';
 }
 
 const Map<String, String> _quoteItemTypeLabelsAr = {
@@ -2201,6 +2221,7 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
   final List<TextEditingController> _priceControllers = [
     TextEditingController(),
   ];
+  String? _validationError;
 
   @override
   void dispose() {
@@ -2253,17 +2274,23 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
       final description = _descriptionControllers[i].text.trim();
       final qty = double.tryParse(_qtyControllers[i].text.trim());
       final priceEgp = double.tryParse(_priceControllers[i].text.trim());
-
+      // **الحدود العليا مرآة للـDTO** (`QuoteItemDto`): الاسم ١٦٠، السبب ٢٠٠٠، الكمية ٩٩٩٩،
+      // وسعر الوحدة ١٠٠٬٠٠٠ ج.م. من غيرها الفني بيعدّي من هنا ويترفض من السيرفر — نفس فئة
+      // البَقّة الأصلية بالظبط، بس في الاتجاه التاني.
       if (name.isEmpty) {
         errors[i] = 'اكتب اسم البند';
+      } else if (name.length > 160) {
+        errors[i] = 'اسم البند طويل زيادة (الحد ١٦٠ حرف)';
       } else if (description.length < 10) {
         // نفس حد الباك-إند بالظبط (ADR-0084 §2) — لو الحدّين اختلفوا، الفني بيعدّي من هنا
         // ويترفض من هناك برسالة عامة.
         errors[i] = 'اكتب سبب البند — ١٠ حروف على الأقل، الإدارة بتراجعه';
-      } else if (qty == null || qty <= 0) {
-        errors[i] = 'اكتب كمية أكبر من صفر';
-      } else if (priceEgp == null || priceEgp < 0) {
-        errors[i] = 'اكتب سعر وحدة صحيح';
+      } else if (description.length > 2000) {
+        errors[i] = 'سبب البند طويل زيادة (الحد ٢٠٠٠ حرف)';
+      } else if (qty == null || qty <= 0 || qty > 9999) {
+        errors[i] = 'اكتب كمية بين ١ و٩٩٩٩';
+      } else if (priceEgp == null || priceEgp < 0 || priceEgp > 100000) {
+        errors[i] = 'اكتب سعر وحدة صحيح (حتى ١٠٠٬٠٠٠ ج.م)';
       } else {
         result.add(
           QuoteItemInput(
@@ -2343,16 +2370,20 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                         ),
                         TextField(
                           controller: _nameControllers[i],
+                          maxLength: 160,
                           decoration: const InputDecoration(
                             labelText: 'اسم البند',
                           ),
                         ),
                         TextField(
                           controller: _descriptionControllers[i],
-                          maxLines: 2,
+                          minLines: 2,
+                          maxLines: 4,
+                          // العدّاد بيخلّي الحد العلوي مرئي وقت الكتابة بدل ما يتقال بعد الرفض.
+                          maxLength: 2000,
                           decoration: const InputDecoration(
                             labelText: 'سبب البند (إجباري)',
-                            hintText: 'ليه محتاج البند ده؟ الإدارة بتراجع الكلام ده',
+                            helperText: 'وضّح للعميل والإدارة سبب إضافة البند — ١٠ حروف على الأقل',
                           ),
                         ),
                         Row(
@@ -2404,6 +2435,13 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                   icon: const Icon(Icons.add),
                   label: const Text('بند تاني'),
                 ),
+                if (_validationError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _validationError!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                  ),
+                ],
               ],
             ),
           ),

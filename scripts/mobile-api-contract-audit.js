@@ -207,7 +207,7 @@ function requiredFields(dtoName, dtoIndex, prefix = '', seen = new Set()) {
  * بيستخرج مفاتيح الـmap: `'key':` مع تحديد إذا كانت مشروطة (`if (...) 'key':`).
  * وبينزل جوه أي map متداخلة تحت مفتاح معيّن (زي `'items': [...map((d) => {...})]`).
  */
-function extractKeys(mapBody, prefix = '') {
+function extractKeys(mapBody, prefix = '', helpers = null) {
   const keys = [];
   const re = /(?:^|[,{[(]|\s)(if\s*\([^)]*\)\s*)?['"]([A-Za-z0-9_]+)['"]\s*:/g;
   let m;
@@ -224,7 +224,24 @@ function extractKeys(mapBody, prefix = '') {
     if (nestedOpen !== -1 && (commaIdx === -1 || nestedOpen < commaIdx || /=>\s*\{/.test(rest.slice(0, nestedOpen + 1)))) {
       const inner = balanced(rest, nestedOpen);
       if (inner && /['"][A-Za-z0-9_]+['"]\s*:/.test(inner)) {
-        nestedKeys = extractKeys(inner, `${prefix}${key}[].`);
+        nestedKeys = extractKeys(inner, `${prefix}${key}[].`, helpers);
+      }
+    }
+    // **متابعة دالة بتبني الحمولة** — `[for (final i in items) buildQuoteItemRequest(i)]`.
+    //
+    // شكل السلك اتنقل لدالة واحدة عن قصد (مكان واحد + عليه اختبار Dart)، فلو الأداة وقفت عند
+    // اسم الدالة كانت هتبلّغ عن كل حقول العنصر كأنها ناقصة — إنذار كاذب بيخلّي الأداة تتقفل
+    // بدل ما تتصدّق. متابعة مستوى واحد كفاية للشكل ده، وأي حاجة أعمق بتفضل «غير محلولة».
+    if (!nestedKeys.length && helpers && helpers.size) {
+      // بندوّر على **أي** دالة بناء حمولة معروفة جوّه قيمة المفتاح. البحث على المنطقة كلها مش
+      // على أولها: القيمة ساعات بتبقى `[for (final i in items) buildX(i)]`، والقراءة من أول
+      // حرف بتقف عند قوس `for (` وتفتكره اسم دالة.
+      const region = rest.slice(0, 400);
+      for (const [name, body] of helpers) {
+        if (new RegExp(`\\b${name}\\s*\\(`).test(region)) {
+          nestedKeys = extractKeys(body, `${prefix}${key}[].`, null);
+          break;
+        }
       }
     }
     keys.push({ key: `${prefix}${key}`, conditional });
@@ -242,6 +259,27 @@ function resolveIndirectItems(dartFiles, identHint) {
   return null;
 }
 
+/**
+ * دوال Dart اللي بترجّع `Map<String, dynamic>` literal — مفهرسة بالاسم عشان `extractKeys`
+ * تقدر تتبعها. ده بيخلّي «شكل السلك في دالة واحدة» (الأنضف) مايكسرش التدقيق.
+ */
+function collectPayloadHelpers(dartFiles) {
+  const helpers = new Map();
+  for (const { src } of dartFiles) {
+    const re = /Map<String,\s*dynamic>\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      const returnIdx = src.indexOf('return', m.index);
+      if (returnIdx === -1) continue;
+      const openIdx = src.indexOf('{', returnIdx);
+      if (openIdx === -1) continue;
+      const body = balanced(src, openIdx);
+      if (body && /['"][A-Za-z0-9_]+['"]\s*:/.test(body)) helpers.set(m[1], body);
+    }
+  }
+  return helpers;
+}
+
 function collectDartCalls() {
   const calls = [];
   const dartFiles = [];
@@ -250,6 +288,8 @@ function collectDartCalls() {
       dartFiles.push({ rel: path.relative(ROOT, file), src: stripComments(fs.readFileSync(file, 'utf8')) });
     }
   }
+
+  const payloadHelpers = collectPayloadHelpers(dartFiles);
 
   // `authedRequest('POST', '/path', body: {...})` / `apiRequest('POST', '/path', body: {...})`
   const callRe = /\b(?:authedRequest|apiRequest|authedRequestList|apiRequestList|authedRequestPage)\s*\(\s*['"](GET|POST|PATCH|PUT|DELETE)['"]\s*,\s*['"]([^'"]+)['"]/g;
@@ -271,7 +311,7 @@ function collectDartCalls() {
         const trimmed = afterBody.replace(/^\s*/, '');
         if (trimmed.startsWith('{')) {
           const inner = balanced(trimmed, 0);
-          keys = extractKeys(inner ?? '');
+          keys = extractKeys(inner ?? '', '', payloadHelpers);
         } else {
           unresolved = trimmed.slice(0, 60).split(/[,)\n]/)[0].trim();
         }

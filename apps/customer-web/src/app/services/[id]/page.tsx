@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { fetchService, fetchPricingFields, estimatePrice } from '@/lib/catalog';
-import { ServiceDto, PricingFieldDto, PriceEstimateDto } from '@/lib/api-types';
+import { ServiceDto, PricingFieldDto, PricingFieldValue, PriceEstimateDto } from '@/lib/api-types';
 import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
@@ -22,7 +22,15 @@ import {
 import { fetchApplicablePolicies } from '@/lib/installments';
 import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
-import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
+import {
+  fetchTechniciansForService,
+  fetchSuggestedDays,
+  fetchSuggestedTimes,
+  SuggestedDayDto,
+  SuggestedTimeDto,
+  TechnicianBookingListItemDto,
+  TECHNICIAN_LEVEL_LABELS_AR,
+} from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
@@ -78,6 +86,10 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
+function hasPricingFieldValue(value: PricingFieldValue | undefined): boolean {
+  return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== '';
+}
+
 export default function ServiceBookingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -85,7 +97,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   const [service, setService] = useState<ServiceDto | null>(null);
   const [pricingFields, setPricingFields] = useState<PricingFieldDto[] | null>(null);
-  const [fieldValues, setFieldValues] = useState<Record<string, string | number | boolean>>({});
+  const [fieldValues, setFieldValues] = useState<Record<string, PricingFieldValue>>({});
   const [estimate, setEstimate] = useState<PriceEstimateDto | null>(null);
   const [estimating, setEstimating] = useState(false);
 
@@ -94,6 +106,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
   const [availabilityAddressId, setAvailabilityAddressId] = useState<string | null>(null);
   const [serviceAvailabilityError, setServiceAvailabilityError] = useState<string | null>(null);
+
+  // اقتراح المواعيد (ADR-0088) — **مساعدة مش قيد**: العميل لسه يقدر يكتب أي يوم/ساعة بإيده.
+  // الفشل هنا بيتبلع عمدًا: الاقتراح ميزة فوق الفلو، ومينفعش غيابه يمنع الحجز أصلاً.
+  const [suggestedDays, setSuggestedDays] = useState<SuggestedDayDto[] | null>(null);
+  const [suggestedTimes, setSuggestedTimes] = useState<SuggestedTimeDto[] | null>(null);
 
   // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي أسطى يختار" افتراضي/أساسي، "اختار بنفسك"
   // ثانوي، وبيظهر بس لو الخدمة فعلاً بتسمح بأكتر من فني (نفس منطق showBookingModeSelector في
@@ -227,7 +244,29 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     // ADR-0050 §6 — الفورم الديناميكي مابقاش حكر على `formula`: خدمة «كشف ثم عرض سعر» بتنزل
     // بلا سعر ومحتاجة نفس «الفلتر» عشان الإدارة تقدر تسعّر (طلب مالك صريح).
     if (service?.pricing_model === 'formula' || service?.pricing_model === 'inspection_then_quote') {
-      fetchPricingFields(id).then(setPricingFields)
+      fetchPricingFields(id).then((fields) => {
+        setPricingFields(fields);
+        // نفس تهيئة الهاتف: القيم الافتراضية التي ضبطتها الإدارة تظهر من أول مرة، من غير ما
+        // تمسح أي اختيار كتبه العميل إذا أعاد تحميل بيانات الخدمة.
+        setFieldValues((current) => {
+          const defaults = Object.fromEntries(
+            fields.flatMap((field) => {
+              if (current[field.field_key] !== undefined) return [];
+              if (field.default_value !== null) {
+                const parsedNumber = Number(field.default_value);
+                const value = field.field_type === 'number' || field.field_type === 'slider'
+                  ? (Number.isFinite(parsedNumber) ? parsedNumber : field.default_value)
+                  : field.field_type === 'checkbox'
+                    ? field.default_value === 'true'
+                    : field.default_value;
+                return [[field.field_key, value] as const];
+              }
+              return field.field_type === 'checkbox' ? [[field.field_key, false] as const] : [];
+            }),
+          );
+          return Object.keys(defaults).length > 0 ? { ...defaults, ...current } : current;
+        });
+      })
         // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
         // والمستخدم مش عارف ليه (docs/08 §133).
         .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
@@ -290,7 +329,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
         return count >= (field.min_files ?? (field.is_required ? 1 : 0));
       }
-      return !field.is_required || (value !== undefined && value !== '');
+      return !field.is_required || hasPricingFieldValue(value);
     });
     // فلاج تحميل معياري لـfetch effect (نمط React الرسمي لمزامنة نتيجة API مع تغيّر dependencies) —
     // مش derived state بديل عن useMemo، فعلاً استدعاء شبكة async.
@@ -310,21 +349,82 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و
   // `inspection_then_quote` (مفيش سعر قبل المعاينة أصلاً).
 
+  // اقتراح الأيام (ADR-0088) — بيتنادى أول ما يبقى فيه عنوان مختار، قبل ما العميل يلمس التاريخ.
+  // المدة بتتبعت لو التسعير حسبها، عشان الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  useEffect(() => {
+    if (!selectedAddressId || !service?.allows_scheduling) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSuggestedDays(null);
+      return;
+    }
+    let active = true;
+    fetchSuggestedDays(authedFetch, {
+      serviceId: id,
+      addressId: selectedAddressId,
+      durationMinutes: estimate?.duration_minutes ?? null,
+    })
+      .then((res) => { if (active) setSuggestedDays(res.days); })
+      // الاقتراح ميزة فوق الفلو — فشله بيخفي الشيبس بس ومابيوقفش الحجز.
+      .catch(() => { if (active) setSuggestedDays(null); });
+    return () => { active = false; };
+  }, [authedFetch, id, selectedAddressId, service?.allows_scheduling, estimate?.duration_minutes]);
+
+  // اقتراح الساعات — بعد ما اليوم يتحدد، ولخدمات «ساعة وصول» بس.
+  useEffect(() => {
+    if (!selectedAddressId || !scheduledDate || service?.schedule_precision !== 'start_time') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSuggestedTimes(null);
+      return;
+    }
+    let active = true;
+    fetchSuggestedTimes(authedFetch, {
+      serviceId: id,
+      addressId: selectedAddressId,
+      day: scheduledDate,
+      durationMinutes: estimate?.duration_minutes ?? null,
+    })
+      .then((res) => { if (active) setSuggestedTimes(res.times); })
+      .catch(() => { if (active) setSuggestedTimes(null); });
+    return () => { active = false; };
+  }, [authedFetch, id, selectedAddressId, scheduledDate, service?.schedule_precision, estimate?.duration_minutes]);
+
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTechnicians(null);
       return;
     }
+    let active = true;
+    setTechnicians(null);
     fetchTechniciansForService(id, selectedAddressId, {
       bookingMode,
+      // The manual marketplace must evaluate availability for the same booking
+      // time as auto matching. Omitting this made future bookings look like ASAP.
+      scheduledAt: computeScheduledAt(scheduledDate),
       fieldValues: service?.pricing_model === 'formula' ? debouncedFieldValues : undefined,
-    }).then(setTechnicians)
+    }).then((items) => {
+      if (active) setTechnicians(items);
+    })
       // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
       // والمستخدم مش عارف ليه (docs/08 §133).
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+      .catch((err: unknown) => {
+        if (active) setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات');
+      });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [technicianChoiceMode, selectedAddressId, id, bookingMode, debouncedFieldValues]);
+  }, [
+    technicianChoiceMode,
+    selectedAddressId,
+    id,
+    bookingMode,
+    scheduledDate,
+    preciseTime,
+    service?.schedule_precision,
+    service?.pricing_model,
+    debouncedFieldValues,
+  ]);
 
   // **معاينة الطلب الكاملة** — بتتنادى في الخطوة التالتة بس، وبنفس مدخلات `POST /orders`
   // بالظبط (العنوان، الميعاد، المنفّذ المطلوب، كود الخصم، حقول التسعير). ده اللي بيضمن إن
@@ -418,6 +518,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     } finally {
       setPreviewLoading(false);
     }
+  }
+
+  function changeTechnicianChoiceMode(mode: 'auto' | 'manual') {
+    setTechnicianChoiceMode(mode);
+    setSelectedTechnicianId(null);
+    // A preview belongs to one explicit selection path. Never let an auto
+    // preview influence the manual marketplace (or the other way around).
+    setMatchPreview(null);
+    setMatchPreviewKey(null);
+    setPreviewError(null);
   }
 
   async function handleSubmit() {
@@ -600,7 +710,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
         return count >= (field.min_files ?? (field.is_required ? 1 : 0));
       }
-      return !field.is_required || (value !== undefined && value !== '');
+      return !field.is_required || hasPricingFieldValue(value);
     });
   const priceReady =
     service.pricing_model === 'inspection_then_quote' ||
@@ -733,27 +843,37 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     !submitted;
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
-      {service.icon_url && (
-        // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
-        <img
-          src={service.icon_url}
-          alt=""
-          loading="eager"
-          fetchPriority="high"
-          decoding="async"
-          className="mb-4 aspect-[3/1] w-full rounded-xl bg-surface-variant object-cover"
-        />
-      )}
-      <h1 className="text-2xl font-bold">{service.name_ar}</h1>
-      {service.short_description_ar && <p className="mt-1 text-muted">{service.short_description_ar}</p>}
-      {service.warranty_days > 0 && (
-        <p className="mt-2 text-sm text-success">ضمان {service.warranty_days} يوم على الشغل ده</p>
-      )}
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
+      <header className="overflow-hidden rounded-[28px] border border-border bg-surface shadow-[0_18px_45px_-32px_rgba(18,59,105,0.48)]">
+        {service.icon_url && (
+          // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
+          <img
+            src={service.icon_url}
+            alt=""
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
+            className="aspect-[4/1] w-full bg-surface-variant object-cover sm:aspect-[5/1]"
+          />
+        )}
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
+          <div>
+            <p className="text-sm font-medium text-accent">حجز خدمة</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{service.name_ar}</h1>
+            {service.short_description_ar && <p className="mt-2 max-w-2xl text-muted">{service.short_description_ar}</p>}
+          </div>
+          {service.warranty_days > 0 && (
+            <p className="inline-flex items-center gap-2 rounded-full bg-primary/5 px-3 py-2 text-sm font-medium text-primary">
+              <ShieldCheckIcon />
+              ضمان {service.warranty_days} يوم
+            </p>
+          )}
+        </div>
+      </header>
 
       {/* بند 2-7 — مؤشر الخطوات التلاتة. مفيش خطوة رابعة للمراجعة: المراجعة بتحصل في
           الخطوة التالتة نفسها جنب كارت الفني والسعر النهائي. */}
-      <ol className="mt-6 flex items-center gap-2 text-sm">
+      <ol className="mt-5 grid grid-cols-3 gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm sm:mt-6 sm:gap-3 sm:p-3">
         {[
           { n: 1 as const, label: 'الشغل والموعد' },
           { n: 2 as const, label: 'العنوان والفني' },
@@ -763,19 +883,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           // عنصر الـflex افتراضيًا `min-width: auto`، يعني مايقدرش يصغّر تحت عرض محتواه، فالنص
           // بيفرد العنصر بدل ما يتقص — وشريط الخطوات كان بيتعدّى ٢١ بكسل بره الشاشة عند ٣٩٠
           // بكسل (اتلقط بـ`scripts/sweep-customer.js`، والصفحة دي هي **صفحة الحجز نفسها**).
-          <li key={s.n} className="flex min-w-0 flex-1 items-center gap-2">
+          <li
+            key={s.n}
+            className={`flex min-w-0 items-center gap-2 rounded-xl px-2 py-2.5 transition-colors sm:px-3 ${
+              step === s.n ? 'bg-primary text-primary-foreground shadow-sm' : step > s.n ? 'bg-primary/6 text-primary' : 'text-muted'
+            }`}
+          >
             <span
               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
-                step === s.n
-                  ? 'bg-primary text-primary-foreground'
-                  : step > s.n
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-surface-variant text-muted'
+                step === s.n ? 'bg-white/18 text-primary-foreground' : step > s.n ? 'bg-primary text-primary-foreground' : 'bg-surface-variant text-muted'
               }`}
             >
-              {step > s.n ? '✓' : s.n}
+              {step > s.n ? <CheckIcon /> : s.n}
             </span>
-            <span className={`truncate transition-colors duration-200 ${step === s.n ? 'font-medium text-foreground' : 'text-muted'}`}>
+            <span className={`truncate text-xs transition-colors duration-200 sm:text-sm ${step === s.n ? 'font-semibold' : ''}`}>
               {s.label}
             </span>
           </li>
@@ -787,39 +908,110 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           يختار النهارده. */}
 
       {step === 1 && needsSchedule && (
-        <section className="motion-rise mt-6">
-          <h2 className="mb-3 font-semibold">الموعد</h2>
-          <div className="flex gap-2">
+        <section className="motion-rise booking-panel mt-6">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-accent">الخطوة 1 من 3</p>
+              <h2 className="mt-1 text-xl font-bold">اختار الموعد المناسب</h2>
+            </div>
+            <p className="text-sm text-muted">هنقترح أقرب وقت مناسب لك</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
             <button
+              type="button"
               onClick={() => setScheduleDayMode('specific')}
-              className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'specific' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+              className={`booking-option text-right ${scheduleDayMode === 'specific' ? 'booking-option-selected' : ''}`}
             >
-              اختار يوم محدد
+              <span className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="block font-semibold">اختار يوم محدد</span>
+                  <span className="mt-0.5 block text-xs opacity-70">حدد اليوم والساعة بنفسك</span>
+                </span>
+                {scheduleDayMode === 'specific' && <CheckIcon />}
+              </span>
             </button>
             {service.allows_date_range_booking && (
               <button
+                type="button"
                 onClick={() => setScheduleDayMode('flexible')}
-                className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'flexible' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+                className={`booking-option text-right ${scheduleDayMode === 'flexible' ? 'booking-option-selected' : ''}`}
               >
-                مرن — نطاق أيام
+                <span className="flex items-center justify-between gap-3">
+                  <span>
+                    <span className="block font-semibold">مرن في الموعد</span>
+                    <span className="mt-0.5 block text-xs opacity-70">هنختار أقرب فرصة داخل النطاق</span>
+                  </span>
+                  {scheduleDayMode === 'flexible' && <CheckIcon />}
+                </span>
               </button>
             )}
           </div>
 
           {scheduleDayMode === 'specific' ? (
-            <input
-              type="date"
-              value={scheduledDate}
-              onChange={(e) => {
-                setScheduledDate(e.target.value);
-                markBookingStarted();
-                if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
-              }}
-              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
-            />
+            <>
+              {/* اقتراح الأيام (ADR-0088) — ضغطة واحدة بتحط الموعد. مرتّبة بالأقرب من بين
+                  الأيام اللي فيها براح حقيقي، ومحدش بيتقفل عليه: مدخل التاريخ تحت زي ما هو. */}
+              {suggestedDays && suggestedDays.length > 0 && (
+                <div className="booking-suggestions mt-5">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">اقتراحات أسطى لك</p>
+                      <p className="mt-0.5 text-xs text-muted">مواعيد مبنية على التوافر الحقيقي للمتخصصين</p>
+                    </div>
+                    <span className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">3 اقتراحات</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {suggestedDays.map((suggestion) => {
+                      const isPicked = scheduledDate === suggestion.day;
+                      return (
+                        <button
+                          key={suggestion.day}
+                          type="button"
+                          onClick={() => {
+                            setScheduledDate(suggestion.day);
+                            markBookingStarted();
+                            setRequestRemoteQuote(false);
+                          }}
+                          className={`booking-suggestion text-right ${
+                            isPicked ? 'booking-suggestion-selected' : ''
+                          }`}
+                        >
+                          <span className="flex items-start justify-between gap-2">
+                            <span className="block font-semibold">{formatSuggestedDay(suggestion.day)}</span>
+                            {isPicked && <CheckIcon />}
+                          </span>
+                          <span className="mt-1 block text-xs text-muted">
+                            {suggestion.available_technicians} متخصص متاح
+                            {suggestion.is_earliest ? ' · أقرب فرصة' : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-xs text-muted">تقدر تتجاهل الاقتراحات وتختار أي يوم يناسبك.</p>
+                </div>
+              )}
+              <label className="booking-date-input mt-4">
+                <span>
+                  <span className="block text-sm font-semibold">أو اختار تاريخًا بنفسك</span>
+                  <span className="mt-0.5 block text-xs text-muted">يمكنك اختيار أي تاريخ متاح</span>
+                </span>
+                <input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => {
+                    setScheduledDate(e.target.value);
+                    markBookingStarted();
+                    if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
+                  }}
+                />
+              </label>
+            </>
           ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <input
+            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <label className="booking-date-input">
+                <span className="text-sm font-semibold">من</span>
+                <input
                 type="date"
                 value={scheduledDate}
                 onChange={(e) => {
@@ -827,16 +1019,18 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                   markBookingStarted();
                   if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
                 }}
-                className="rounded-lg border border-border bg-surface px-4 py-2"
-              />
-              <span className="text-sm text-muted">لحد</span>
-              <input
+                />
+              </label>
+              <span className="text-center text-sm font-medium text-muted">إلى</span>
+              <label className="booking-date-input">
+                <span className="text-sm font-semibold">إلى</span>
+                <input
                 type="date"
                 value={scheduledDateRangeEnd}
                 onChange={(e) => setScheduledDateRangeEnd(e.target.value)}
-                className="rounded-lg border border-border bg-surface px-4 py-2"
-              />
-              <p className="mt-1 w-full text-xs text-muted">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره</p>
+                />
+              </label>
+              <p className="text-xs text-muted sm:col-span-3">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره.</p>
             </div>
           )}
 
@@ -854,14 +1048,37 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           )}
 
           {needsPreciseTime && (
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <span>الساعة</span>
+            <div className="mt-6 border-t border-border pt-5">
+              {suggestedTimes && suggestedTimes.length > 0 && (
+                <div className="booking-suggestions mb-4">
+                  <p className="font-semibold">اقتراحات الساعة</p>
+                  <p className="mt-0.5 text-xs text-muted">اختيارات متاحة في اليوم الذي حددته</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {suggestedTimes.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => setPreciseTime(slot.time)}
+                          className={`booking-time-chip ${
+                            preciseTime === slot.time ? 'booking-time-chip-selected' : ''
+                          }`}
+                        >
+                          <span className="font-semibold" dir="ltr">{slot.time}</span>
+                          <span className="text-xs opacity-70">{slot.free_technicians} متاح</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <label className="booking-date-input">
+                <span>
+                  <span className="block text-sm font-semibold">أو حدّد ساعة أخرى</span>
+                  <span className="mt-0.5 block text-xs text-muted">سنؤكد توفرها قبل الحجز</span>
+                </span>
                 <input
                   type="time"
                   value={preciseTime}
                   onChange={(e) => setPreciseTime(e.target.value)}
-                  className="rounded-lg border border-border bg-surface px-3 py-2"
                 />
               </label>
             </div>
@@ -870,15 +1087,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
-        <section className="motion-rise mt-6">
-          <h2 className="mb-1 font-semibold">تفاصيل الشغل</h2>
+        <section className="motion-rise booking-panel mt-6">
+          <p className="text-sm font-medium text-accent">تفاصيل تساعدنا نطابقك صح</p>
+          <h2 className="mb-1 mt-1 text-xl font-bold">تفاصيل الشغل</h2>
           {/* نفس الجملة بالحرف اللي `JobDetailsScreen` في التطبيق بيقولها. الفكرة إن العميل
               يفهم **ليه** بنسأله قبل ما نعرض أي سعر: من غير التفاصيل دي، السعر اللي هيتعرض
               جنب كل فني في القايمة مش هيكون رقمه الحقيقي. */}
           <p className="mb-3 text-sm text-muted">
             دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة
           </p>
-          <div className="space-y-4">
+          <div className="motion-list space-y-3">
             {pricingFields
               .slice()
               .sort((a, b) => a.display_order - b.display_order)
@@ -896,8 +1114,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 2 && (
-      <section className="motion-rise mt-6">
-        <h2 className="mb-3 font-semibold">العنوان</h2>
+      <section className="motion-rise booking-panel mt-6">
+        <p className="text-sm font-medium text-accent">الخطوة 2 من 3</p>
+        <h2 className="mb-3 mt-1 text-xl font-bold">اختار عنوان التنفيذ</h2>
         {addresses === null ? (
           <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
         ) : (
@@ -984,25 +1203,23 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           `catalog_navigation.dart`: حجز اليوم بيروح لإنشاء الطلب مباشرة، وأول فني يقبل
           بياخده. سؤال العميل «مين يعمل الشغل؟» في الحالة دي بيوعده باختيار مش موجود. */}
       {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && bookingMode !== 'emergency' && (
-        <section className="motion-rise mt-6">
-          <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
+        <section className="motion-rise booking-panel mt-6">
+          <p className="text-sm font-medium text-accent">اختيار المنفّذ</p>
+          <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
-              onClick={() => {
-                setTechnicianChoiceMode('auto');
-                setSelectedTechnicianId(null);
-              }}
-              className={`flex-1 rounded-xl border p-3 text-right ${
-                technicianChoiceMode === 'auto' ? 'border-primary bg-primary/5' : 'border-border'
+              onClick={() => changeTechnicianChoiceMode('auto')}
+              className={`booking-option flex-1 ${
+                technicianChoiceMode === 'auto' ? 'booking-option-selected' : ''
               }`}
             >
               <p className="font-medium text-primary">خلي أسطى يختار</p>
               <p className="text-sm text-muted">أسرع فني متاح بالمنطقة، بأفضل تقييم</p>
             </button>
             <button
-              onClick={() => setTechnicianChoiceMode('manual')}
-              className={`flex-1 rounded-xl border p-3 text-right ${
-                technicianChoiceMode === 'manual' ? 'border-primary bg-primary/5' : 'border-border'
+              onClick={() => changeTechnicianChoiceMode('manual')}
+              className={`booking-option flex-1 ${
+                technicianChoiceMode === 'manual' ? 'booking-option-selected' : ''
               }`}
             >
               <p className="font-medium">اختار بنفسك</p>
@@ -1109,7 +1326,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
       {step === 3 && !effectiveRequestRemoteQuote && service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
-        <section className="motion-rise mt-6">
+        <section className="motion-rise booking-panel mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
             {(
@@ -1139,7 +1356,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 3 && (
-      <section className="motion-rise mt-6">
+      <section className="motion-rise booking-panel mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
           value={problemDescription}
@@ -1287,7 +1504,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       )}
 
       {step === 3 && !effectiveRequestRemoteQuote && (
-        <section className="motion-rise mt-6">
+        <section className="motion-rise booking-panel mt-6">
           <h2 className="mb-2 font-semibold">كود خصم (اختياري)</h2>
           <input
             value={promoCode}
@@ -1360,7 +1577,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           الترشيح جاي من السيرفر كمان — عشان تغيير `payments.recommended_method` من لوحة الأدمن
           يوصل للويب والتطبيق من غير نشر جديد لأي واحد فيهم. */}
       {step === 3 && !effectiveRequestRemoteQuote && prepaymentOptions.length > 0 && (
-        <section className="motion-rise mt-6">
+        <section className="motion-rise booking-panel mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex flex-wrap gap-2">
             {prepaymentOptions.map((channel) => (
@@ -1635,6 +1852,23 @@ function PriceRow({
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 shrink-0 fill-none stroke-current stroke-[2.5]">
+      <path d="m4 10 3.5 3.5L16 5.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ShieldCheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[1.9]">
+      <path d="M12 3.5 19 6v5.4c0 4.3-2.9 7.7-7 9.1-4.1-1.4-7-4.8-7-9.1V6l7-2.5Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m8.5 12 2.2 2.2 4.7-4.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function DynamicPricingField({
   field,
   value,
@@ -1642,8 +1876,8 @@ function DynamicPricingField({
   onUpload,
 }: {
   field: PricingFieldDto;
-  value: string | number | boolean | undefined;
-  onChange: (value: string | number | boolean) => void;
+  value: PricingFieldValue | undefined;
+  onChange: (value: PricingFieldValue) => void;
   onUpload: (file: File) => Promise<{ id: string; file_url: string }>;
 }) {
   const [uploading, setUploading] = useState(false);
@@ -1718,62 +1952,154 @@ function DynamicPricingField({
     );
   }
 
-  if (field.field_type === 'dropdown' && field.options) {
+  const options = field.options ?? [];
+
+  if (field.field_type === 'dropdown') {
+    if (options.length === 0) {
+      return (
+        <div className="booking-field booking-field-warning" role="status">
+          <p className="font-semibold">{label}</p>
+          <p className="mt-1 text-sm text-muted">لا توجد اختيارات مهيأة لهذا الحقل الآن. لن نطلب منك كتابة قيمة غير واضحة.</p>
+        </div>
+      );
+    }
     return (
-      <label className="block">
-        <span className="mb-1 block text-sm text-muted">{label}</span>
-        <select
-          value={(value as string) ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
-        >
-          <option value="" disabled>
-            اختر...
-          </option>
-          {field.options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label_ar}
-            </option>
-          ))}
-        </select>
-      </label>
+      <fieldset className="booking-field">
+        <legend className="booking-field-label">{label}</legend>
+        <p className="mb-3 text-sm text-muted">اختار إجابة واحدة</p>
+        <div className="booking-choice-grid">
+          {options.map((option) => {
+            const selected = value === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onChange(option.value)}
+                className={`booking-choice ${selected ? 'booking-choice-selected' : ''}`}
+              >
+                <span>{option.label_ar}</span>
+                {selected && <CheckIcon />}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+    );
+  }
+
+  if (field.field_type === 'multi_select') {
+    if (options.length === 0) {
+      return (
+        <div className="booking-field booking-field-warning" role="status">
+          <p className="font-semibold">{label}</p>
+          <p className="mt-1 text-sm text-muted">لا توجد اختيارات مهيأة لهذا الحقل الآن.</p>
+        </div>
+      );
+    }
+    const selectedValues = Array.isArray(value) ? value : [];
+    return (
+      <fieldset className="booking-field">
+        <legend className="booking-field-label">{label}</legend>
+        <p className="mb-3 text-sm text-muted">تقدر تختار أكثر من إجابة</p>
+        <div className="booking-choice-grid">
+          {options.map((option) => {
+            const selected = selectedValues.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onChange(selected ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value])}
+                className={`booking-choice ${selected ? 'booking-choice-selected' : ''}`}
+              >
+                <span>{option.label_ar}</span>
+                {selected && <CheckIcon />}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
     );
   }
 
   if (field.field_type === 'checkbox') {
+    const checked = value === true;
     return (
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        <span>{label}</span>
-      </label>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`booking-toggle ${checked ? 'booking-toggle-selected' : ''}`}
+      >
+        <span className={`booking-toggle-mark ${checked ? 'booking-toggle-mark-selected' : ''}`}>{checked && <CheckIcon />}</span>
+        <span className="flex-1 text-right">
+          <span className="block font-semibold">{label}</span>
+          <span className="mt-0.5 block text-sm font-normal text-muted">{checked ? 'تم الاختيار' : 'اضغط للاختيار'}</span>
+        </span>
+      </button>
     );
   }
 
-  // number/area/length/volume/slider — كلهم مدخل رقمي بوحدة مختلفة، date/time نصيّة بسيطة.
+  if (field.field_type === 'slider') {
+    const minimum = field.min_value ?? 0;
+    const maximum = Math.max(field.max_value ?? 100, minimum + 1);
+    const current = typeof value === 'number' ? Math.min(Math.max(value, minimum), maximum) : minimum;
+    return (
+      <div className="booking-field">
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor={`field-${field.id}`} className="booking-field-label">{label}</label>
+          <output className="rounded-full bg-primary/8 px-3 py-1 text-sm font-bold text-primary">{current}</output>
+        </div>
+        <input
+          id={`field-${field.id}`}
+          type="range"
+          min={minimum}
+          max={maximum}
+          value={current}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="booking-range mt-4 w-full"
+        />
+        <div className="mt-1 flex justify-between text-xs text-muted"><span>{minimum}</span><span>{maximum}</span></div>
+      </div>
+    );
+  }
+
+  // number/area/length/volume — حقول رقمية بوحدة مختلفة، date/time باختيار المتصفح المحلي.
   if (field.field_type === 'date' || field.field_type === 'time') {
     return (
-      <label className="block">
-        <span className="mb-1 block text-sm text-muted">{label}</span>
+      <label className="booking-field block">
+        <span className="booking-field-label">{label}</span>
         <input
           type={field.field_type}
           value={(value as string) ?? ''}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
+          className="booking-control mt-3"
         />
       </label>
     );
   }
 
+  if (!['number', 'area', 'length', 'volume'].includes(field.field_type)) {
+    return (
+      <div className="booking-field booking-field-warning" role="status">
+        <p className="font-semibold">{label}</p>
+        <p className="mt-1 text-sm text-muted">هذا النوع من البيانات غير متاح على الويب حاليًا. تواصل معنا لنكمل الطلب بشكل صحيح.</p>
+      </div>
+    );
+  }
+
   return (
-    <label className="block">
-      <span className="mb-1 block text-sm text-muted">{label}</span>
+    <label className="booking-field block">
+      <span className="booking-field-label">{label}</span>
       <input
         type="number"
         value={(value as number) ?? ''}
         min={field.min_value ?? undefined}
         max={field.max_value ?? undefined}
         onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-        className="w-full rounded-lg border border-border bg-surface px-4 py-2 outline-none focus:border-primary"
+        className="booking-control mt-3"
       />
     </label>
   );
@@ -1857,7 +2183,12 @@ function NewAddressForm({
             </option>
           ))}
         </select>
-        <select value={areaId} onChange={(e) => setAreaId(e.target.value)} disabled={!areas} className="rounded-lg border border-border bg-surface px-3 py-2">
+        <select
+          value={areaId}
+          onChange={(e) => setAreaId(e.target.value)}
+          disabled={!areas || areas.length === 0}
+          className="rounded-lg border border-border bg-surface px-3 py-2"
+        >
           <option value="">المنطقة</option>
           {areas?.map((a) => (
             <option key={a.id} value={a.id}>
@@ -1866,6 +2197,11 @@ function NewAddressForm({
           ))}
         </select>
       </div>
+      {/* مدينة من غير مناطق مُطلَقة كانت بتدّي قايمة فاضية بلا أي تفسير. الباك-إند بقى بيستبعدها
+          أصلاً، وده السطر الاحتياطي لو حصل سباق بين تحميل المدن وتعطيل آخر منطقة. */}
+      {areas !== null && areas.length === 0 && (
+        <p className="text-sm text-muted">مفيش مناطق متاحة في المدينة دي دلوقتي — اختار مدينة تانية.</p>
+      )}
       <input
         value={streetName}
         onChange={(e) => setStreetName(e.target.value)}
@@ -2024,4 +2360,17 @@ function CompanyCard({
       </div>
     </label>
   );
+}
+
+/**
+ * «الخميس ١٧ سبتمبر» من YYYY-MM-DD — بلا مكتبة تواريخ.
+ *
+ * الـstring بيتقسم بالإيد مش بـ`new Date(day)`: الأخيرة بتقرا التاريخ المجرّد كـUTC، فبتطلع
+ * اليوم اللي قبله لأي متصفح شرق جرينتش — وده بالظبط نفس فئة البَقّة اللي ADR-0059 §6 اتكتب
+ * عشانها في الباك-إند.
+ */
+function formatSuggestedDay(day: string): string {
+  const [year, month, dayOfMonth] = day.split('-').map(Number);
+  const date = new Date(year, month - 1, dayOfMonth);
+  return date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' });
 }

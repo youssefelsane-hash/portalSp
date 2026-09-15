@@ -198,7 +198,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       // ما اتقبلش) — وده مقصود وصح: كانت مختفية تمامًا من التطبيق رغم إن الفني له فيها مصلحة
       // قايمة (بلاغ المالك 2026-09-11). بس فتح شاشة التنفيذ تلقائيًا على طلب **خلص** أول ما
       // التطبيق يفتح مالهوش معنى — بتفضل ظاهرة في القايمة والفني يدوس عليها لو عايز.
-      final autoOpenable = activeOrders.where((o) => _kAutoOpenStatuses.contains(o.orderStatus)).toList();
+      final autoOpenable = activeOrders
+          .where((o) => _kAutoOpenStatuses.contains(o.orderStatus))
+          .toList();
       if (autoOpenable.length == 1 && mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute(
@@ -874,7 +876,10 @@ class _LocationCaptureBanner extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final icon = Icon(Icons.location_off_outlined, color: scheme.onErrorContainer);
+            final icon = Icon(
+              Icons.location_off_outlined,
+              color: scheme.onErrorContainer,
+            );
             if (constraints.maxWidth < 380) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,7 +892,10 @@ class _LocationCaptureBanner extends StatelessWidget {
                       Expanded(child: message),
                     ],
                   ),
-                  Align(alignment: AlignmentDirectional.centerStart, child: action),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: action,
+                  ),
                 ],
               );
             }
@@ -920,6 +928,10 @@ class _ActiveOrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       color: scheme.primaryContainer,
       child: InkWell(
@@ -956,6 +968,11 @@ class _ActiveOrderCard extends StatelessWidget {
                             order.orderStatus,
                       ].join(' · '),
                     ),
+                    if (duration != null)
+                      Text(
+                        'المدة المتوقعة: $duration',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     if (order.customerName != null ||
                         order.address != null) ...[
                       const SizedBox(height: 3),
@@ -1006,6 +1023,10 @@ class _EmergencyRequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1040,6 +1061,7 @@ class _EmergencyRequestCard extends StatelessWidget {
               '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
             ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
+            if (duration != null) Text('المدة المتوقعة: $duration'),
             if (order.problemDescription != null)
               Text(order.problemDescription!),
             const SizedBox(height: 8),
@@ -1094,6 +1116,10 @@ class _WorkOpportunityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final duration = formatOrderDurationAr(
+      durationMinutes: opportunity.durationMinutes,
+      estimatedDurationDays: opportunity.estimatedDurationDays,
+    );
     return Card(
       color: context.infoColor.withValues(alpha: 0.06),
       child: Padding(
@@ -1139,6 +1165,7 @@ class _WorkOpportunityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
+            if (duration != null) Text('المدة المتوقعة: $duration'),
             Text(opportunity.streetName),
             if (opportunity.problemDescription != null)
               Text(opportunity.problemDescription!),
@@ -1182,6 +1209,10 @@ class _CrewOpportunityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final roleLabel = crewRoleLabelsAr[invite.crewRole] ?? invite.crewRole;
+    final duration = formatOrderDurationAr(
+      durationMinutes: invite.durationMinutes,
+      estimatedDurationDays: invite.estimatedDurationDays,
+    );
     return Card(
       color: Colors.deepPurple.withValues(alpha: 0.06),
       child: Padding(
@@ -1229,6 +1260,7 @@ class _CrewOpportunityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
+            if (duration != null) Text('المدة المتوقعة: $duration'),
             Text(invite.streetName),
             if (invite.problemDescription != null)
               Text(invite.problemDescription!),
@@ -1329,6 +1361,10 @@ class _OverdueJobCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final red = Colors.red.shade700;
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       color: Colors.red.shade50,
       shape: RoundedRectangleBorder(
@@ -1345,6 +1381,7 @@ class _OverdueJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
+            if (duration != null) 'المدة المتوقعة: $duration',
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
@@ -1375,6 +1412,10 @@ class _UpcomingJobCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: ListTile(
         leading: Icon(
@@ -1405,6 +1446,7 @@ class _UpcomingJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
+            if (duration != null) 'المدة المتوقعة: $duration',
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
@@ -1432,6 +1474,10 @@ class _TeamAssignedJobCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: ListTile(
         leading: const Icon(Icons.groups_outlined),
@@ -1440,6 +1486,7 @@ class _TeamAssignedJobCard extends StatelessWidget {
           [
             if (order.teamLeaderName != null)
               'قائد الفريق: ${order.teamLeaderName}',
+            if (duration != null) 'المدة المتوقعة: $duration',
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
               earningPending: order.earningPending,
@@ -1674,6 +1721,10 @@ class _NearTermRequestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheduledAt = order.scheduledAt;
+    final duration = formatOrderDurationAr(
+      durationMinutes: order.durationMinutes,
+      estimatedDurationDays: order.estimatedDurationDays,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1713,6 +1764,7 @@ class _NearTermRequestCard extends StatelessWidget {
               '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
             ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
+            if (duration != null) Text('المدة المتوقعة: $duration'),
             if (order.problemDescription != null)
               Text(order.problemDescription!),
             const SizedBox(height: 6),

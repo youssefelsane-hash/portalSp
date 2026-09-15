@@ -47,9 +47,18 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
       dataSource.getRepository(OrderAssignment),
       dataSource.getRepository(Order),
       dataSource,
-      {} as never,
+      {
+        findByProfileIdOrThrow: (profileId: string) =>
+          dataSource.getRepository(TechnicianProfile).findOneByOrFail({ id: profileId }),
+        findByUserIdOrThrow: (userId: string) =>
+          dataSource.getRepository(TechnicianProfile).findOneByOrFail({ userId }),
+      } as never,
       new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never),
-      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never,
+      {
+        getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+        getString: jest.fn(async (_k: string, fb: string) => fb),
+        getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
+      } as never,
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
@@ -188,10 +197,16 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
     expect(candidates.some((c) => c.technician_id === ids.proTechProfile)).toBe(true);
   });
 
-  it('فردي (INDIVIDUAL) — الاتنين يترشّحوا (regression، صفر تأثير)', async () => {
+  it('فردي (INDIVIDUAL) — الشركة تدخل كمرشح واحد وتختار أفضل عضو فيها', async () => {
     const candidates = await findCandidates(BookingMode.INDIVIDUAL);
     expect(candidates.some((c) => c.technician_id === ids.newTechProfile)).toBe(true);
-    expect(candidates.some((c) => c.technician_id === ids.proTechProfile)).toBe(true);
+    const companyCandidates = candidates.filter((candidate) => candidate.provider_company_id === ids.company);
+    expect(companyCandidates).toHaveLength(1);
+    expect(companyCandidates[0]).toMatchObject({
+      is_commercial_company: true,
+      company_adjustment: '2',
+    });
+    expect([ids.proTechProfile, ...ids.companyMemberProfiles]).toContain(companyCandidates[0].technician_id);
   });
 
   it('شغل فريق كبير: الشركة المسجلة ذات 4 مؤهلين تسبق المحترف المستقل بزيادة معتدلة واحدة', async () => {
@@ -203,20 +218,96 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
     expect(companyCandidates[0]).toMatchObject({
       company_name: `شركة اعتماد ${runId}`,
       is_commercial_company: true,
-      company_adjustment: '3',
+      provider_company_id: ids.company,
+      company_adjustment: '5',
       company_available_staff_count: '4',
     });
     expect(independent).toBeDefined();
-    expect(Number(companyCandidates[0].rank_score)).toBe(Number(independent!.rank_score) + 3);
+    expect(Number(companyCandidates[0].rank_score)).toBe(Number(independent!.rank_score) + 5);
     expect(candidates.indexOf(companyCandidates[0])).toBeLessThan(candidates.indexOf(independent!));
   });
 
-  it('شغل فريق صغير: عضوية الشركة لا تمنح أي زيادة تلقائية', async () => {
+  it('شغل فريق صغير: الشركة تظل مرشحًا واحدًا بأفضلية الأوتو ماتشينج العادية', async () => {
     const candidates = await findCandidates(BookingMode.TEAM, 2);
-    const companyCandidate = candidates.find((candidate) => candidate.technician_id === ids.proTechProfile);
+    const companyCandidate = candidates.find((candidate) => candidate.provider_company_id === ids.company);
     const independent = candidates.find((candidate) => candidate.technician_id === ids.independentProProfile);
 
-    expect(companyCandidate?.company_adjustment).toBe('0');
-    expect(Number(companyCandidate!.rank_score)).toBe(Number(independent!.rank_score));
+    expect(companyCandidate?.company_adjustment).toBe('2');
+    expect(Number(companyCandidate!.rank_score)).toBe(Number(independent!.rank_score) + 2);
+  });
+
+  it('عضو حصري للشركة يظل مرشحًا من خلال شركته في الأوتو ماتشينج', async () => {
+    const companyMembers = [ids.proTechProfile, ...ids.companyMemberProfiles];
+    await dataSource.query(`UPDATE technician_profiles SET company_exclusive = true WHERE id = ANY($1::uuid[])`, [companyMembers]);
+    try {
+      const candidates = await findCandidates(BookingMode.INDIVIDUAL);
+      const companyCandidate = candidates.find((candidate) => candidate.provider_company_id === ids.company);
+      expect(companyCandidate).toBeDefined();
+      expect(companyMembers).toContain(companyCandidate!.technician_id);
+    } finally {
+      await dataSource.query(`UPDATE technician_profiles SET company_exclusive = false WHERE id = ANY($1::uuid[])`, [companyMembers]);
+    }
+  });
+
+  it('التأكيد التلقائي يثبت الشركة التي رشحها المحرك على الطلب وسجل العرض', async () => {
+    const [order] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO orders (commission_rate_applied, order_number, customer_id, service_id, address_id, service_zone_id,
+                           order_status, total_amount_cents, scheduled_at, booking_mode)
+       VALUES (20, $1, $2, $3, $4, $5, 'searching_technician', 10000, now() + interval '14 days', 'individual')
+       RETURNING id`,
+      [`CMP-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    try {
+      await expect(matchingService.autoConfirmScheduledOrder(order.id)).resolves.toEqual({ dispatched: 1 });
+
+      const [assigned] = await dataSource.query<{ assigned_company_id: string | null }[]>(
+        `SELECT assigned_company_id FROM orders WHERE id = $1`,
+        [order.id],
+      );
+      const [assignment] = await dataSource.query<{ provider_company_id: string | null; assignment_status: string }[]>(
+        `SELECT provider_company_id, assignment_status FROM order_assignments WHERE order_id = $1`,
+        [order.id],
+      );
+      expect(assigned.assigned_company_id).toBe(ids.company);
+      expect(assignment).toEqual({ provider_company_id: ids.company, assignment_status: 'accepted' });
+    } finally {
+      await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
+    }
+  });
+
+  it('قبول عضو عرض الشركة يثبت الشركة نفسها على الطلب', async () => {
+    const [order] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO orders (commission_rate_applied, order_number, customer_id, service_id, address_id, service_zone_id,
+                           order_status, total_amount_cents, scheduled_at, booking_mode)
+       VALUES (20, $1, $2, $3, $4, $5, 'searching_technician', 10000, now() + interval '2 hours', 'individual')
+       RETURNING id`,
+      [`CMP-ACCEPT-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    try {
+      const dispatched = await matchingService.dispatchNextRound(order.id);
+      expect(dispatched.dispatched).toBeGreaterThan(0);
+      const [offer] = await dataSource.query<{ technician_id: string; provider_company_id: string | null; user_id: string }[]>(
+        `SELECT assignment.technician_id, assignment.provider_company_id, profile.user_id
+         FROM order_assignments assignment
+         JOIN technician_profiles profile ON profile.id = assignment.technician_id
+         WHERE assignment.order_id = $1 AND assignment.provider_company_id = $2`,
+        [order.id, ids.company],
+      );
+      expect(offer.provider_company_id).toBe(ids.company);
+
+      await matchingService.accept(offer.user_id, order.id);
+
+      const [assigned] = await dataSource.query<{ assigned_company_id: string | null; order_status: string }[]>(
+        `SELECT assigned_company_id, order_status FROM orders WHERE id = $1`,
+        [order.id],
+      );
+      expect(assigned).toEqual({ assigned_company_id: ids.company, order_status: 'accepted' });
+    } finally {
+      await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
+    }
   });
 });

@@ -151,6 +151,17 @@ class PaymentsRepository {
     return InstaPayReference.fromJson(data!);
   }
 
+  /// **معاينة الدفع بـInstaPay جوّه الطلب** (ADR-0089) — قراءة بحتة، مابتفتحش أي دفعة.
+  ///
+  /// الفرق عن `getInstaPayTransfer` تحت: دي بتشتغل حتى لو **مفيش** تحويل مفتوح أصلاً — وده
+  /// حال كل طلب كاش. الغرض إن بيانات الحساب والمبلغ يفضلوا قدام العميل جوّه الطلب، من غير
+  /// ما نفتح دفعة معلّقة تقفل عليه مسار الكاش.
+  Future<InstaPayPreview?> previewInstaPay(String orderId) async {
+    final data = await auth.authedRequest('GET', '/orders/$orderId/instapay-preview');
+    if (data == null) return null;
+    return InstaPayPreview.fromJson(data);
+  }
+
   /// استئناف شاشة التحويل — **قراءة بحتة، مابتعملش دفعة جديدة**.
   ///
   /// العميل بيسيب تطبيقنا ويفتح تطبيق البنك ويرجع؛ ده الاستخدام الطبيعي لـInstaPay. المسار
@@ -218,6 +229,63 @@ class InstaPayReference {
         // قديمة بتقرا رد من سيرفر أقدم من الحقول دي.
         confirmTypicalMinutes: json['confirm_typical_minutes'] as int? ?? 20,
         confirmMaxMinutes: json['confirm_max_minutes'] as int? ?? 60,
+      );
+}
+
+/// **معاينة الدفع بـInstaPay جوّه الطلب** (ADR-0089).
+///
+/// نفس حقول `InstaPayReference` العرضية + علمين: هل فيه تحويل مفتوح بالفعل، والطلب لسه
+/// قابل للدفع أصلاً. مافيهاش `payment` لأن **مفيش دفعة اتفتحت** — دي قراءة بحتة.
+class InstaPayPreview {
+  final int amountCents;
+  final int cashAmountCents;
+  final int instapayDiscountCents;
+  final String? recipientAddress;
+  final String? recipientName;
+  final String instructionsAr;
+  final String? qrImageUrl;
+  final String referenceCode;
+  final int confirmTypicalMinutes;
+  final int confirmMaxMinutes;
+  final bool hasOpenTransfer;
+  final bool isPayable;
+  /// الشغل لسه ما خلصش — ده دفع مسبق، والسعر ممكن يزيد ببند إضافي بعدين (ADR-0091).
+  final bool isPrepayment;
+  /// زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز.
+  final bool isAdditionalCharge;
+
+  InstaPayPreview({
+    required this.amountCents,
+    this.cashAmountCents = 0,
+    this.instapayDiscountCents = 0,
+    required this.instructionsAr,
+    required this.referenceCode,
+    this.recipientAddress,
+    this.recipientName,
+    this.qrImageUrl,
+    this.confirmTypicalMinutes = 20,
+    this.confirmMaxMinutes = 60,
+    this.hasOpenTransfer = false,
+    this.isPayable = true,
+    this.isPrepayment = false,
+    this.isAdditionalCharge = false,
+  });
+
+  factory InstaPayPreview.fromJson(Map<String, dynamic> json) => InstaPayPreview(
+        amountCents: (json['amount_cents'] as num?)?.toInt() ?? 0,
+        cashAmountCents: (json['cash_amount_cents'] as num?)?.toInt() ?? (json['amount_cents'] as num?)?.toInt() ?? 0,
+        instapayDiscountCents: (json['instapay_discount_cents'] as num?)?.toInt() ?? 0,
+        instructionsAr: json['instructions_ar'] as String? ?? '',
+        referenceCode: json['reference_code'] as String? ?? '',
+        recipientAddress: json['recipient_address'] as String?,
+        recipientName: json['recipient_name'] as String?,
+        qrImageUrl: json['qr_image_url'] as String?,
+        confirmTypicalMinutes: (json['confirm_typical_minutes'] as num?)?.toInt() ?? 20,
+        confirmMaxMinutes: (json['confirm_max_minutes'] as num?)?.toInt() ?? 60,
+        hasOpenTransfer: json['has_open_transfer'] as bool? ?? false,
+        isPayable: json['is_payable'] as bool? ?? true,
+        isPrepayment: json['is_prepayment'] as bool? ?? false,
+        isAdditionalCharge: json['is_additional_charge'] as bool? ?? false,
       );
 }
 

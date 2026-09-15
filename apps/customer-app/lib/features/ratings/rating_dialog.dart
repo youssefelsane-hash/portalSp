@@ -39,6 +39,9 @@ class RatingResult {
 Future<RatingResult?> showRatingDialog(
   BuildContext context, {
   List<OrderMedia> afterPhotos = const [],
+  String title = 'قيّم الطلب',
+  String? subtitle,
+  String dismissLabel = 'إلغاء',
 }) async {
   int overall = 5;
   int? punctuality;
@@ -107,183 +110,195 @@ Future<RatingResult?> showRatingDialog(
     builder: (context) => _DisposeOnRouteExit(
       controller: controller,
       child: Directionality(
-      textDirection: TextDirection.rtl,
-      child: StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 24,
-          ),
-          title: const Text('قيّم الطلب'),
-          content: SizedBox(
-            width: 360,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'التقييم العام',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    children: List.generate(5, (index) {
-                      final starValue = index + 1;
-                      return SizedBox.square(
-                        dimension: 40,
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 40,
-                            height: 40,
-                          ),
-                          icon: Icon(
-                            starValue <= overall
-                                ? Icons.star
-                                : Icons.star_border,
-                            color: Colors.amber,
-                          ),
-                          onPressed: () => setState(() => overall = starValue),
-                        ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'تفاصيل إضافية (اختياري)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  starRow(
-                    'الالتزام بالمواعيد',
-                    punctuality,
-                    (v) => punctuality = v,
-                    setState,
-                  ),
-                  starRow('جودة الشغل', quality, (v) => quality = v, setState),
-                  starRow(
-                    'الاحترافية',
-                    professionalism,
-                    (v) => professionalism = v,
-                    setState,
-                  ),
-                  starRow(
-                    'عدالة السعر',
-                    priceFairness,
-                    (v) => priceFairness = v,
-                    setState,
-                  ),
-                  starRow(
-                    'النظافة',
-                    cleanliness,
-                    (v) => cleanliness = v,
-                    setState,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: controller,
-                    decoration: const InputDecoration(
-                      labelText: 'تعليق (اختياري)',
-                    ),
-                    maxLines: 3,
-                  ),
-                  if (afterPhotos.isNotEmpty) ...[
-                    const SizedBox(height: 8),
+        textDirection: TextDirection.rtl,
+        child: StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
+            ),
+            title: Text(title),
+            content: SizedBox(
+              width: 360,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (subtitle != null) ...[
+                      Text(subtitle, style: const TextStyle(fontSize: 14)),
+                      const SizedBox(height: 12),
+                    ],
                     const Text(
-                      'اختار صور تمثل الشغل النهائي (اختياري)',
+                      'التقييم العام',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 90,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: afterPhotos.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final photo = afterPhotos[index];
-                          final selected = selectedPhotoIds.contains(photo.id);
-                          return InkWell(
-                            onTap: () => setState(() {
-                              if (selected) {
-                                selectedPhotoIds.remove(photo.id);
-                              } else {
-                                selectedPhotoIds.add(photo.id);
-                              }
-                            }),
-                            child: Container(
-                              width: 90,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: selected
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                                image: DecorationImage(
-                                  image: NetworkImage(
-                                    _resolveMediaUrl(photo.fileUrl),
-                                  ),
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                              child: selected
-                                  ? Align(
-                                      alignment: Alignment.topLeft,
-                                      child: Icon(
-                                        Icons.check_circle,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                      ),
-                                    )
-                                  : null,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      children: List.generate(5, (index) {
+                        final starValue = index + 1;
+                        return SizedBox.square(
+                          dimension: 40,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 40,
+                              height: 40,
                             ),
-                          );
-                        },
-                      ),
+                            icon: Icon(
+                              starValue <= overall
+                                  ? Icons.star
+                                  : Icons.star_border,
+                              color: Colors.amber,
+                            ),
+                            onPressed: () =>
+                                setState(() => overall = starValue),
+                          ),
+                        );
+                      }),
                     ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'تفاصيل إضافية (اختياري)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    starRow(
+                      'الالتزام بالمواعيد',
+                      punctuality,
+                      (v) => punctuality = v,
+                      setState,
+                    ),
+                    starRow(
+                      'جودة الشغل',
+                      quality,
+                      (v) => quality = v,
+                      setState,
+                    ),
+                    starRow(
+                      'الاحترافية',
+                      professionalism,
+                      (v) => professionalism = v,
+                      setState,
+                    ),
+                    starRow(
+                      'عدالة السعر',
+                      priceFairness,
+                      (v) => priceFairness = v,
+                      setState,
+                    ),
+                    starRow(
+                      'النظافة',
+                      cleanliness,
+                      (v) => cleanliness = v,
+                      setState,
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: controller,
+                      decoration: const InputDecoration(
+                        labelText: 'تعليق (اختياري)',
+                      ),
+                      maxLines: 3,
+                    ),
+                    if (afterPhotos.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'اختار صور تمثل الشغل النهائي (اختياري)',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 90,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: afterPhotos.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            final photo = afterPhotos[index];
+                            final selected = selectedPhotoIds.contains(
+                              photo.id,
+                            );
+                            return InkWell(
+                              onTap: () => setState(() {
+                                if (selected) {
+                                  selectedPhotoIds.remove(photo.id);
+                                } else {
+                                  selectedPhotoIds.add(photo.id);
+                                }
+                              }),
+                              child: Container(
+                                width: 90,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: selected
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.transparent,
+                                    width: 2,
+                                  ),
+                                  image: DecorationImage(
+                                    image: NetworkImage(
+                                      _resolveMediaUrl(photo.fileUrl),
+                                    ),
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                child: selected
+                                    ? Align(
+                                        alignment: Alignment.topLeft,
+                                        child: Icon(
+                                          Icons.check_circle,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  // لازم نشيل الفوكس من حقل التعليق الأول — لو المستخدم كان لسه واقف
+                  // فيه (شريط تحديد النص/الكيبورد لسه شغال)، إقفال الـdialog فورًا
+                  // بيكسر فرضية Flutter الداخلية إن كل InheritedWidget dependents
+                  // اتشالت قبل ما الشجرة تتفكك (assertion: '_dependents.isEmpty')
+                  // وده اللي كان بيطلع شاشة حمرا ويعلّق الطلب. راجع docs/08 §108-C.
+                  FocusScope.of(context).unfocus();
+                  Navigator.of(context).pop();
+                },
+                child: Text(dismissLabel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  FocusScope.of(context).unfocus();
+                  Navigator.of(context).pop(
+                    RatingResult(
+                      overallRating: overall,
+                      punctualityRating: punctuality,
+                      qualityRating: quality,
+                      professionalismRating: professionalism,
+                      priceFairnessRating: priceFairness,
+                      cleanlinessRating: cleanliness,
+                      comment: controller.text.trim(),
+                      afterPhotoMediaIds: selectedPhotoIds.toList(),
+                    ),
+                  );
+                },
+                child: const Text('إرسال'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                // لازم نشيل الفوكس من حقل التعليق الأول — لو المستخدم كان لسه واقف
-                // فيه (شريط تحديد النص/الكيبورد لسه شغال)، إقفال الـdialog فورًا
-                // بيكسر فرضية Flutter الداخلية إن كل InheritedWidget dependents
-                // اتشالت قبل ما الشجرة تتفكك (assertion: '_dependents.isEmpty')
-                // وده اللي كان بيطلع شاشة حمرا ويعلّق الطلب. راجع docs/08 §108-C.
-                FocusScope.of(context).unfocus();
-                Navigator.of(context).pop();
-              },
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () {
-                FocusScope.of(context).unfocus();
-                Navigator.of(context).pop(
-                  RatingResult(
-                    overallRating: overall,
-                    punctualityRating: punctuality,
-                    qualityRating: quality,
-                    professionalismRating: professionalism,
-                    priceFairnessRating: priceFairness,
-                    cleanlinessRating: cleanliness,
-                    comment: controller.text.trim(),
-                    afterPhotoMediaIds: selectedPhotoIds.toList(),
-                  ),
-                );
-              },
-              child: const Text('إرسال'),
-            ),
-          ],
         ),
-      ),
       ),
     ),
   );
@@ -319,4 +334,3 @@ class _DisposeOnRouteExitState extends State<_DisposeOnRouteExit> {
   @override
   Widget build(BuildContext context) => widget.child;
 }
-

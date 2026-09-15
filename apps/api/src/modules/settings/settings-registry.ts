@@ -53,6 +53,19 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'booking.match_preview_candidate_limit': { type: 'number', default: 25, group: 'booking', description: 'أقصى عدد فنيين مرشّحين بيتحسبوا في معاينة المطابقة قبل الحجز (السقف الصلب 100)' },
   'booking.match_preview_ttl_seconds': { type: 'number', default: 300, group: 'booking', description: 'مدة صلاحية معاينة المطابقة بالثانية قبل ما تتحسب من جديد (السقف الصلب 1800)' },
 
+  // اقتراح المواعيد (ADR-0088، migration 0323) — كل رقم في الخوارزمية إعداد عشان يتظبط
+  // بالموسم والمدينة بدل ما يبقى طلب تطوير.
+  'booking.suggestion_lead_hours': { type: 'number', default: 48, group: 'booking', description: 'الاقتراحات بتبدأ بعد كام ساعة من دلوقتي (48 = بعد بكرة). العميل لسه يقدر يختار أقرب من كده بإيده.' },
+  'booking.suggestion_horizon_days': { type: 'number', default: 21, group: 'booking', description: 'أبعد يوم ممكن ندوّر فيه على اقتراح' },
+  'booking.suggestion_count': { type: 'number', default: 3, group: 'booking', description: 'عدد الأيام/الساعات المقترحة المعروضة' },
+  'booking.suggestion_day_start_hour': { type: 'number', default: 9, group: 'booking', description: 'أول ساعة في نافذة الاقتراح اليومي (توقيت مصر) — مابتمنعش اختيار ساعة برّاها يدويًا' },
+  'booking.suggestion_day_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة بداية في نافذة الاقتراح اليومي (توقيت مصر)' },
+  'booking.suggestion_roominess_ratio': { type: 'number', default: 0.7, group: 'booking', description: 'اليوم بيتعد «فيه براح» لو عدد الصنايعية المتاحين فيه ≥ النسبة دي × أحسن يوم في الأفق' },
+  'booking.suggestion_delay_penalty_per_day': { type: 'number', default: 0.04, group: 'booking', description: 'كام بتقل درجة اليوم عن كل يوم تأخير (٠.٠٤ = ٤٪). أعلى = بنفضّل الأقرب حتى لو أزحم، أقل = بنروح لأيام أبعد فيها صنايعية أكتر.' },
+  'booking.suggestion_min_day_spacing': { type: 'number', default: 2, group: 'booking', description: 'أقل مسافة بالأيام بين أي اقتراحين — بتمنع تلات أيام متلاصقة لما الطاقة متساوية.' },
+  'booking.suggestion_min_hour_spacing': { type: 'number', default: 3, group: 'booking', description: 'أقل مسافة بالساعات بين أي اقتراحين في نفس اليوم — بتفرد الاقتراحات على اليوم بدل تلات ساعات أول النافذة.' },
+  'booking.suggestion_cache_ttl_seconds': { type: 'number', default: 90, group: 'booking', description: 'مدة كاش طاقة أيام الاقتراح بالثواني. صفر = بلا كاش.' },
+
   // ── assistant_matching ────────────────────────────────────────────────
   'assistant_matching.batch_size': { type: 'number', default: 10, group: 'assistant_matching', description: 'عدد المساعدين المرشّحين اللي بيتبعتلهم عرض في كل بث' },
   'assistant_matching.pool_matching_enabled': { type: 'boolean', default: true, group: 'assistant_matching', description: 'مفتاح إيقاف عام لبث فرص المساعدة لمجمع المساعدين' },
@@ -84,6 +97,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'homepage.hero_images': { type: 'json', default: [], group: 'homepage', description: 'Ordered homepage hero image URLs (up to 4) shared by customer web and mobile' },
   'homepage.search_content': { type: 'json', default: {"title":"محتاج مساعدة في إيه؟","eyebrow":"أساعدك إزاي؟","description":"قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت","placeholder":"وصّف مشكلتك... زي \"المياه بتنزل من تحت الحوض\""}, group: 'homepage', description: 'Customer homepage search eyebrow, title, description, and input placeholder shared by web and mobile' },
   'homepage.tips': { type: 'json', default: [{"body":"شوف تقييمات الفنيين وعدد الشغلانات اللي خلّصوها قبل ما تأكّد الحجز — كل حاجة ظاهرة قدامك في بروفايله.","title":"إزاي تختار الفني المناسب لشغلانتك؟","image_url":null},{"body":"اسأل عن الضمان، ومدة التنفيذ المتوقعة، وهل السعر شامل قطع الغيار ولا لأ.","title":"أسئلة تسألها قبل أي شغلانة كهرباء","image_url":null},{"body":"الصيانة الدورية بتوفّرلك فلوس على المدى الطويل — اعرف إمتى تحتاج كل نوع.","title":"الفرق بين الصيانة الدورية والطارئة","image_url":null}], group: 'homepage', description: 'كروت "نصايح مفيدة" المعروضة أسفل الصفحة الرئيسية (customer-web/customer-app) — عنوان/نص/رابط صورة اختياري لكل كارت، قابلة للتعديل بالكامل من الأدمن' },
+  'homepage.projects_enabled': { type: 'boolean', default: true, group: 'homepage', description: 'إظهار قسم «ابدأ مشروعك» (تشطيب الشقق) في تطبيق العميل والموقع. إخفاؤه بيشيل المدخل من الصفحة الرئيسية بس — المشاريع القايمة بتفضل شغّالة.' },
   'homepage.trust_message': { type: 'string', default: 'ضمان حقيقي على كل شغلانة — لو في أي عيب بعد التسليم بنرجع نصلحه', group: 'homepage', description: 'رسالة الثقة/الضمان المعروضة في hero الصفحة الرئيسية (customer-web) — قابلة للتعديل بحرية من الأدمن' },
 
   // ── installments ──────────────────────────────────────────────────────
@@ -152,6 +166,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب' },
   'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
   'matching.broaden_to_busy_after_round': { type: 'number', default: 4, group: 'matching', description: 'رقم الجولة اللي بعدها يتوسّع البحث لفنيين مرتبطين لكن مشغولين حاليًا' },
+  'matching.company_auto_match_boost': { type: 'number', default: 2, group: 'matching', description: 'أفضلية الشركة التجارية المؤهلة ككيان في التوزيع التلقائي (0 يلغي الأفضلية فقط، لا ترشيح الشركة)' },
   'matching.company_large_job_boost': { type: 'number', default: 3, group: 'matching', description: 'زيادة معتدلة في ترتيب ممثل الشركة المسجلة للشغل الكبير عند كفاية طاقمها (0 = تعطيل)' },
   'matching.company_large_job_min_crew': { type: 'number', default: 4, group: 'matching', description: 'أقل إجمالي أفراد مطلوب في طلب فريق قبل تطبيق أفضلية الشركة المسجلة (افتراضي 4)' },
   'matching.daily_capacity_minutes': { type: 'number', default: 720, group: 'matching', description: 'أقصى دقايق شغل للفني في اليوم الواحد (720 = 12 ساعة). لو المحجوز في اليوم + الشغلانة الجديدة عدّى الرقم ده، الفني مايترشّحش لليوم ده.' },
@@ -252,16 +267,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)' },
   'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)' },
   'payments.instapay_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار InstaPay للعملاء عند اكتمال بيانات المستلم' },
+  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'هدية ثابتة بالجنيه عند تأكيد العميل الدفع عبر InstaPay. صفر = لا توجد هدية. الهدية تتحملها المنصة ولا تخصم من مستحق الفني.' },
   'payments.instapay.ipa_address': { type: 'string', default: '', group: 'payments', description: 'عنوان IPA أو رقم موبايل InstaPay المسجّل — بيتعرض للعميل كتعليمات تحويل. فاضي = InstaPay معطّلة (isConfigured=false)' },
   'payments.instapay.qr_image': { type: 'string', default: '', group: 'payments', description: 'صورة QR لاستقبال تحويلات InstaPay — إما "storage://<key>" لملف مرفوع من لوحة الأدمن، أو رابط https خارجي. فاضي = مفيش QR (العميل بيشوف تعليمات التحويل النصية بس)' },
   'payments.instapay.recipient_name': { type: 'string', default: '', group: 'payments', description: 'الاسم اللي بيتعرض للعميل مع عنوان IPA فوق (يتطمّن إنه بيحوّل للجهة الصح). فاضي = InstaPay معطّلة' },
-  // خصم الدفع الإلكتروني (ADR-0085، طلب مالك §141 بند ٥) — «هدية الدفع أونلاين».
-  // مقفول افتراضيًا عن قصد: بيصرف فلوس حقيقية، فتشغيله قرار صريح مش أثر جانبي لـmigration.
-  'payments.online_discount_enabled': { type: 'boolean', default: false, group: 'payments', description: 'تفعيل خصم الدفع الإلكتروني («هدية الدفع أونلاين»). مقفول افتراضيًا عن قصد — العرض بيصرف فلوس حقيقية.' },
-  'payments.online_discount_cents': { type: 'number', default: 3000, group: 'payments', description: 'قيمة خصم الدفع الإلكتروني بالقرش (٣٠ ج.م افتراضيًا).' },
-  'payments.online_discount_min_order_cents': { type: 'number', default: 0, group: 'payments', description: 'أقل إجمالي طلب يشتغل عليه خصم الدفع الإلكتروني بالقرش — بيمنع إن الخصم يبلع طلب صغير.' },
-  'payments.online_discount_methods': { type: 'string', default: 'instapay,card', group: 'payments', description: 'وسائل الدفع اللي عليها خصم الدفع الإلكتروني، مفصولة بفواصل (instapay,card,fawry_reference).' },
-  'payments.online_discount_label_ar': { type: 'string', default: 'وفّر {discount} ج.م لما تدفع دلوقتي', group: 'payments', description: 'نص وسم خصم الدفع الإلكتروني. {discount} بيتبدّل بالقيمة الفعلية وقت العرض، فتغيير المبلغ مايسيبش نص قديم بيكذب.' },
   'payments.wallet_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إتاحة الدفع من محفظة العميل' },
   'payments.webhook_processing_stale_minutes': { type: 'number', default: 5, group: 'payments', description: 'بعدها تعتبر محاولة webhook processing عالقة وقابلة للاسترداد' },
   'payments.webhook_recovery_base_delay_seconds': { type: 'number', default: 30, group: 'payments', description: 'أول مهلة لإعادة معالجة webhook فاشل؛ يتضاعف التأخير لكل محاولة' },

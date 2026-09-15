@@ -6,6 +6,7 @@ import { AdminWorkloadForecastService } from './admin-workload-forecast.service'
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { AdminReviewCenterService } from './admin-review-center.service';
+import { AdminLiveMapService } from './admin-live-map.service';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
 import { AdminOrderTraceService, OrderTrace } from './admin-order-trace.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
@@ -65,7 +66,38 @@ export class AdminOperationsController {
     private readonly coverageIntelligenceService: AdminCoverageIntelligenceService,
     private readonly orderTraceService: AdminOrderTraceService,
     private readonly reviewCenterService: AdminReviewCenterService,
+    private readonly liveMapService: AdminLiveMapService,
   ) {}
+
+  /** خريطة تشغيلية حية: آخر GPS موثوق للفني وعنوان كل طلب تشغيلي. */
+  @Get('live-map')
+  @RequirePermission('operations.view')
+  async getLiveMap() {
+    const snapshot = await this.liveMapService.getSnapshot();
+    return {
+      generated_at: snapshot.generatedAt,
+      technicians: snapshot.technicians.map((row) => ({
+        id: row.id,
+        full_name: row.fullName,
+        technician_code: row.technicianCode,
+        is_available: row.isAvailable,
+        is_on_duty: row.isOnDuty,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        location_updated_at: row.locationUpdatedAt,
+      })),
+      orders: snapshot.orders.map((row) => ({
+        id: row.id,
+        order_number: row.orderNumber,
+        service_name: row.serviceName,
+        status: row.status,
+        scheduled_at: row.scheduledAt,
+        technician_id: row.technicianId,
+        latitude: row.latitude,
+        longitude: row.longitude,
+      })),
+    };
+  }
 
   /**
    * **Live Dispatch Control** — كل الطلبات اللي لسه بتدوّر على فني، مجمّعة حسب الطلب.

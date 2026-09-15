@@ -29,12 +29,13 @@ export class OrderAcceptedNotificationListener {
       // order_assigned العادي لطلبات ASAP (صفر تغيير سلوكي ليه). الـworkflow بيتعمل قبل الإرسال
       // الأول عشان حتى إشعار القبول الأول يترتبط بيه (نفس نمط order_quote_pending_approval).
       const isScheduled = event.scheduledAt !== null;
+      const scheduledLabel = event.scheduledAt ? formatCairoDateTime(event.scheduledAt) : null;
       const technicianWorkflow = isScheduled
         ? await this.workflowService.create({
             userId: technician.userId,
             notificationType: 'order_assigned_scheduled',
             titleAr: 'طلب جديد اتأكّد — موعد مستقبلي',
-            bodyAr: 'قبلت طلب جديد بموعد محدد — جهّز نفسك للموعد ده.',
+            bodyAr: 'اتحدد لك طلب جديد بموعد مستقبلي — راجع التفاصيل وجهّز نفسك للموعد.',
             entityType: 'order',
             entityId: event.orderId,
             deepLink: `/technician/orders/${event.orderId}`,
@@ -47,7 +48,9 @@ export class OrderAcceptedNotificationListener {
           userId: customer.userId,
           notificationType: 'order_accepted',
           titleAr: 'فني قبل طلبك',
-          bodyAr: 'فني قبل طلبك وبيجهّز يتحرّك — تقدر تتابع الموقع لحظياً.',
+          bodyAr: scheduledLabel
+            ? `طلبك اتأكد للفني، والموعد المحدد ${scheduledLabel}. هنفكرك قبل الزيارة.`
+            : 'فني قبل طلبك وبيجهّز يتحرّك — تقدر تتابع الموقع لحظياً.',
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/orders/${event.orderId}`,
@@ -56,7 +59,9 @@ export class OrderAcceptedNotificationListener {
           userId: technician.userId,
           notificationType: isScheduled ? 'order_assigned_scheduled' : 'order_assigned',
           titleAr: isScheduled ? 'طلب جديد اتأكّد — موعد مستقبلي' : 'طلب جديد اتأكّد',
-          bodyAr: isScheduled ? 'قبلت طلب جديد بموعد محدد — جهّز نفسك للموعد ده.' : 'قبلت طلب جديد بنجاح — جهّز نفسك وتحرّك.',
+          bodyAr: isScheduled
+            ? `اتحدد لك طلب جديد يوم ${scheduledLabel} — راجع التفاصيل وجهّز نفسك للموعد.`
+            : 'قبلت طلب جديد بنجاح — جهّز نفسك وتحرّك.',
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,
@@ -67,4 +72,12 @@ export class OrderAcceptedNotificationListener {
       this.logger.error(`فشل إشعار قبول الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }
+}
+
+function formatCairoDateTime(value: Date): string {
+  return new Intl.DateTimeFormat('ar-EG', {
+    timeZone: 'Africa/Cairo',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(value);
 }

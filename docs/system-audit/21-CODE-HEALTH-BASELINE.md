@@ -17,6 +17,9 @@ cd apps/api && npx madge --circular dist            # دوائر وقت التش
 cd apps/api && npx eslint src --max-warnings 0
 cd apps/admin && npx eslint . --max-warnings 0
 cd apps/customer-web && npx eslint . --max-warnings 0
+export PATH="$PATH:/opt/flutter/bin"
+cd apps/customer-app   && flutter analyze          # التطبيقين برضه جزء من صحة الكود
+cd apps/technician-app && flutter analyze
 ```
 
 ---
@@ -27,14 +30,23 @@ cd apps/customer-web && npx eslint . --max-warnings 0
 |-------|-----------|-----------|
 | `eslint` (الثلاثة) | **صفر** | 🔴 **يتصلح فورًا** |
 | knip — **Unlisted dependencies** | **صفر** | 🔴 **يتصلح فورًا** — §3 |
-| knip — Unused exports / types | ~32 / ~81 | 🟡 مقبول — §4 |
+| knip — **Unused files** | **صفر** | 🔴 CLI في مكان غلط — §3-ب |
+| knip — Unused exports / types | ~62 / ~95 | 🟡 مقبول — §4 |
 | knip — Unused devDependencies | 1 (`madge`) | 🟢 إيجابي كاذب — §5 |
+| knip — Unlisted binaries | 1 (`psql`) | 🟢 أداة نظام، مش حزمة npm |
 | knip — Unused enum members | **صفر** | ✅ الاتنين اتوصّلوا — §6 |
 | madge على **المصدر** | 2 | 🟡 واحدة type-only — §7 |
 | madge على **`dist`** | **1** | 🟡 `forwardRef` مقصود — §7 |
+| `flutter analyze` (التطبيقين) | **صفر** | 🔴 يتصلح فورًا |
 
 > **لقطة 2026-09-05**: عدد الـexports/types غير المستخدمة زاد بـ١ و٣ بعد تقسيم
 > `OrdersService` لست شرايح — كل شريحة بتصدّر نوعها، وده **متوقّع ومقبول** (§4).
+>
+> **لقطة 2026-09-14 (ماراثون §148، المرحلة ١٢)**: الأرقام اتحدّثت للواقع — exports ~62
+> وtypes ~95 (كانت ~32/~81). النمو كله من نفس الفئة الموصوفة في §4 (أنواع بتوصف عقد الـAPI:
+> `Technician360*Row`، `*ResponseDto`، ثوابت إعدادات مصدَّرة للاختبارات). **والأهم**: البند
+> الأحمر الوحيد في الجدول — الاعتماديات غير المعلنة — كان **اترجع من صفر لـ٩** ومحدش واخد
+> باله، واتصلح تاني (§3).
 
 ---
 
@@ -66,9 +78,45 @@ cd apps/customer-web && npx eslint . --max-warnings 0
 اتأكد إن التصحيح صفر مخاطرة: **`package-lock.json` ما اتغيّرش ولا سطر** — النسخ كانت مثبّتة
 بالفعل، والإعلان بيثبّتها مش بينزّل جديد.
 
+### الانتكاسة (2026-09-14، ماراثون §148 المرحلة ١٢)
+
+الفئة دي رجعت من **صفر لـ٩** بين ٢٠٢٦-٠٩-٠٥ و٢٠٢٦-٠٩-١٤ — أدوات تدقيق جديدة اتكتبت
+واستوردت حزم محدش أعلنها:
+
+| الحزمة | مين بيستخدمها | معلَنة فين قبل الإصلاح | لو اختفت |
+|--------|----------------|------------------------|-----------|
+| `jsonwebtoken` | `lib/live-harness.js`, `concurrency-booking-safety`, `financial-idempotency-audit`, `operations-center.e2e.mjs` | **ولا مكان** (transitive غير مباشرة) | **كل التدقيقات الحية بتقع** — هي اللي بتوقّع التوكنات |
+| `ioredis` | `lib/live-harness.js`, `financial-idempotency-audit`, `first-order-offer-audit` | `apps/api` بس | تدقيقات انقطاع Redis بتقع |
+| `sharp` | `export-brand-png.js`, `export-brand-campaign.js` | **ولا مكان** (اختيارية جوّه Next) | تصدير أصول البراند بيقع |
+
+**`sharp` استحقّت وقفة — الإعلان الغلط كان هيكسر الإنتاج.** أول محاولة حطّتها في
+`devDependencies` مع الاتنين التانيين. `package-lock.json` أظهر النتيجة فورًا: **٢٩ صف قلب
+حالته**، وكل ملفات `@img/sharp-*` الأصلية (اللي بتحمّل نسخ libvips لكل منصّة) اتعلّمت
+`dev: true`. يعني أي تثبيت إنتاج بـ`npm ci --omit=dev` **مايثبّتش النسخ الأصلية** — وNext.js
+بيستخدم `sharp` لتحسين الصور في الإنتاج. الإعلان الصح `dependencies` مش `devDependencies`:
+بعده **صفر صف اتعلّم dev**، والقلب الوحيد `optional: true → required` — يعني `sharp` مابقاش
+ممكن يتخطّى بصمت لو تثبيته الاختياري فشل، وده **تحسين** مش تنازل.
+
+> **الدرس المضاف لـ§3**: بعد أي إعلان حزمة، قارن `package-lock.json` قبل/بعد على
+> `dev`/`optional` تحديدًا — مش على حجم الـdiff. الإعلان اللي «بيبان» بريء ممكن يشيل حزمة من
+> شجرة الإنتاج بالكامل.
+
 ---
 
-## 4. 🟡 الـexports غير المستخدمة (~109) — مقبولة عمدًا
+## 3-ب. 🔴 ملفات غير مستخدمة — CLI في مكان الغلط
+
+`scripts/lib/web-shot.js` ظهر كـ«ملف غير مستخدم». **مش كود ميت**: هو أداة سطر أوامر شغّالة
+(لقطة لأي صفحة في الويب — الرد على بلاغ بصري من المالك). knip مالقاهوش لأن `scripts/lib/`
+مخصّصة للمكتبات اللي الـCLIs بتستوردها، ونقاط الدخول المعرَّفة هي `scripts/*.js` — فملف
+بينفَّذ مباشرةً من جوّه `lib/` مالهوش أي مستورد وبيتحسب ميت.
+
+الإصلاح **إعادة تنظيم مش استثناء في الإعدادات**: اتنقل لـ`scripts/web-shot.js` جنب باقي
+الـCLIs (`clean-test-data.js`, `find-error.js`, …)، و`scripts/lib/` فضلت مكتبات بس.
+اتأكد إنه شغّال بعد النقل (لقطة حقيقية + كونسول نضيف + صفر رد ≥400).
+
+---
+
+## 4. 🟡 الـexports غير المستخدمة (~157) — مقبولة عمدًا
 
 معظمها **أنواع تصف عقد الـAPI** (`*ResponseDto`, `Technician360*Row`). مصدَّرة كتوثيق للشكل،
 حتى لو مفيش ملف تاني بيستوردها.

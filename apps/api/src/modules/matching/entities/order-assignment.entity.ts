@@ -21,6 +21,10 @@ export class OrderAssignment {
   @Column({ name: 'technician_id', type: 'uuid' })
   technicianId: string;
 
+  /** الشركة التي مثّلها العرض؛ العضو يقبل من التطبيق لكن الطلب قد يكون ترشّح للشركة ككيان. */
+  @Column({ name: 'provider_company_id', type: 'uuid', nullable: true })
+  providerCompanyId: string | null;
+
   @Column({ name: 'assignment_round', type: 'smallint' })
   assignmentRound: number;
 

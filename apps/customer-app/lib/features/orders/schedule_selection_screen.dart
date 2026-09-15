@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/auth_repository.dart';
+import '../addresses/addresses_repository.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
 // **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
@@ -43,22 +46,43 @@ DateTime _startOfDay(DateTime date) =>
 const int _maxFlexibleRangeDays = 14;
 
 class ScheduleSelectionScreen extends StatefulWidget {
+  /// اسم الخدمة ومدة ضمانها لقمة خطوة الحجز. البيانات نفسها جاية من الكتالوج، فالعرض هنا
+  /// لا يغيّر أي قاعدة تسعير أو مطابقة.
+  final String serviceName;
+  final int warrantyDays;
+
   // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — لو false، كارت "مرن" بيتخفي
   // بدل ما العميل يختاره ويترفض من الباك-إند بعدين (orders.service.ts).
   final bool allowsDateRangeBooking;
   // محتاجة وقت بداية دقيق (docs/08 §84 جزء ج) — لو true، كارت "الساعة" بيظهر بعد اختيار اليوم.
   final bool requiresPreciseTime;
+
   /// هل الخدمة بتتعمل في نفس اليوم؟ (`allows_emergency`، ADR-0048 §3).
   ///
   /// لو `false`، التقويم بيبدأ من **بكرة** — العميل مايختارش يوم الباك-إند هيرفضه بعدين. نفس
   /// فلسفة `allowsDateRangeBooking` فوق بالحرف.
   final bool allowsSameDay;
 
+  /// الخدمة والعنوان — مطلوبين **لاقتراح المواعيد بس** (ADR-0088).
+  ///
+  /// اختياريين عمدًا: الشاشة ليها مدخلين، وواحد منهم ممكن يكون لسه معندوش عنوان مختار. من
+  /// غيرهم الشاشة بتشتغل **بالظبط** زي ما كانت — الاقتراح بيختفي والتقويم اليدوي زي ما هو.
+  final String? serviceId;
+  final String? addressId;
+
+  /// مدة الشغلانة لو التسعير حسبها — بتخلّي الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  final int? durationMinutes;
+
   const ScheduleSelectionScreen({
     super.key,
     required this.allowsDateRangeBooking,
+    required this.serviceName,
+    required this.warrantyDays,
     this.requiresPreciseTime = false,
     this.allowsSameDay = true,
+    this.serviceId,
+    this.addressId,
+    this.durationMinutes,
   });
 
   @override
@@ -79,10 +103,124 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   TimeOfDay? _selectedTime;
   final _durationController = TextEditingController();
 
+  // اقتراح المواعيد (ADR-0088) — **مساعدة مش قيد**. فشل التحميل بيسيب القايمة فاضية بهدوء
+  // زي `_nearTermHours` بالظبط: مايصحّش اقتراح ناقص يمنع العميل من اختيار موعد بإيده.
+  List<Map<String, dynamic>> _suggestedDays = const [];
+  List<Map<String, dynamic>> _suggestedTimes = const [];
+
+  /// بيتقري مرة واحدة في `initState` — استخدام `context` بعد `await` بيكسر قاعدة
+  /// `use_build_context_synchronously` (والـWidget ممكن يكون اتشال أصلاً).
+  late final AuthRepository _auth;
+
   @override
   void initState() {
     super.initState();
+    _auth = context.read<AuthRepository>();
     _loadBookingPolicy();
+    _loadSuggestedDays();
+  }
+
+  /// العنوان المستخدم في الاقتراح — المبعوت من الشاشة اللي فتحتنا، وإلا العنوان الافتراضي.
+  ///
+  /// المدخل من الكتالوج بييجي **قبل** اختيار العنوان أصلاً، فمن غير الاحتياطي ده الاقتراح كان
+  /// هيختفي من المسار الرئيسي بالظبط — وهو المسار اللي المالك طلب الاقتراح فيه.
+  String? _resolvedAddressId;
+
+  bool get _canSuggest =>
+      widget.serviceId != null && _resolvedAddressId != null;
+
+  Future<void> _resolveAddressId() async {
+    if (widget.addressId != null) {
+      _resolvedAddressId = widget.addressId;
+      return;
+    }
+    if (widget.serviceId == null) return;
+    try {
+      final addresses = await AddressesRepository(_auth).list();
+      if (addresses.isEmpty) return;
+      final preferred = addresses.firstWhere(
+        (address) => address.isDefault,
+        orElse: () => addresses.first,
+      );
+      _resolvedAddressId = preferred.id;
+    } catch (error) {
+      debugPrint('تعذّر تحديد العنوان الافتراضي للاقتراح: $error');
+    }
+  }
+
+  Future<void> _loadSuggestedDays() async {
+    await _resolveAddressId();
+    if (!_canSuggest) return;
+    try {
+      final query = <String, String>{
+        'service_id': widget.serviceId!,
+        'address_id': _resolvedAddressId!,
+        if (widget.durationMinutes != null)
+          'duration_minutes': '${widget.durationMinutes}',
+      };
+      final qs = query.entries
+          .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
+      // **مسار محمي** (@Roles(CUSTOMER)) — لازم يمرّ بـauthedRequest. `apiRequest` العادي
+      // بيبعت بلا توكن وكان هيترفض 401 بصمت ويخفي الاقتراح دايمًا.
+      final data = await _auth.authedRequest('GET', '/booking-slots/days?$qs');
+      if (!mounted) return;
+      setState(() {
+        _suggestedDays = ((data?['days'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      });
+    } catch (error) {
+      debugPrint('فشل تحميل الأيام المقترحة: $error');
+    }
+  }
+
+  Future<void> _loadSuggestedTimes(DateTime day) async {
+    if (!_canSuggest || !widget.requiresPreciseTime) return;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final dayString = '${day.year}-${two(day.month)}-${two(day.day)}';
+    try {
+      final query = <String, String>{
+        'service_id': widget.serviceId!,
+        'address_id': _resolvedAddressId!,
+        'day': dayString,
+        if (widget.durationMinutes != null)
+          'duration_minutes': '${widget.durationMinutes}',
+      };
+      final qs = query.entries
+          .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
+      final data = await _auth.authedRequest('GET', '/booking-slots/times?$qs');
+      if (!mounted) return;
+      setState(() {
+        _suggestedTimes = ((data?['times'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+      });
+    } catch (error) {
+      debugPrint('فشل تحميل الساعات المقترحة: $error');
+    }
+  }
+
+  /// ضغطة على يوم مقترح = نفس مسار اختيار اليوم اليدوي بالحرف، بكل بواباته.
+  ///
+  /// **مهم**: تنبيه رسوم الاستعجال بيتنادى هنا برضه. لو الاقتراح كان بيعدّي من غيره كان هيبقى
+  /// باب خلفي لنفس اليوم بلا تحذير — نفس البَقّة اللي ADR-0048 اتكتب عشان يمنعها.
+  Future<void> _pickSuggestedDay(BuildContext context, String day) async {
+    final parts = day.split('-').map(int.parse).toList();
+    final date = DateTime(parts[0], parts[1], parts[2]);
+    if (_isToday(date) && !await _confirmSameDayUrgency(context)) return;
+    if (!context.mounted) return;
+    if (!widget.requiresPreciseTime) {
+      Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
+      return;
+    }
+    setState(() {
+      _selectedDate = _startOfDay(date);
+      _selectedRangeEnd = null;
+      _suggestedTimes = const [];
+    });
+    await _loadSuggestedTimes(date);
   }
 
   @override
@@ -201,7 +339,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     setState(() {
       _selectedDate = _startOfDay(date);
       _selectedRangeEnd = null;
+      _suggestedTimes = const [];
     });
+    await _loadSuggestedTimes(date);
   }
 
   Future<void> _pickFlexibleRange(BuildContext context) async {
@@ -285,7 +425,63 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 8),
+                _ScheduleHeader(
+                  serviceName: widget.serviceName,
+                  warrantyDays: widget.warrantyDays,
+                ),
+                const SizedBox(height: 18),
+                // اقتراح الأيام (ADR-0088) — فوق الكالندر عمدًا: ضغطة واحدة بتخلّص الشاشة،
+                // والكالندر تحته لأي حد عايز يختار بنفسه.
+                if (_suggestedDays.isNotEmpty) ...[
+                  const _SuggestionIntro(
+                    title: 'اقتراحات مناسبة ليك',
+                    subtitle:
+                        'اخترناها لأنها أقرب أيام فيها متخصصين متاحين في منطقتك.',
+                  ),
+                  const SizedBox(height: 10),
+                  ..._suggestedDays.map((suggestion) {
+                    final day = suggestion['day'] as String? ?? '';
+                    final available =
+                        (suggestion['available_technicians'] as num?)
+                            ?.toInt() ??
+                        0;
+                    final isEarliest = suggestion['is_earliest'] == true;
+                    final parts = day.split('-');
+                    final label = parts.length == 3
+                        ? _formatDate(
+                            DateTime(
+                              int.parse(parts[0]),
+                              int.parse(parts[1]),
+                              int.parse(parts[2]),
+                            ),
+                          )
+                        : day;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _ScheduleOptionCard(
+                        icon: Icons.bolt_outlined,
+                        title: label,
+                        subtitle: isEarliest
+                            ? '$available متخصص متاح · أقرب فرصة لك'
+                            : '$available متخصص متاح في منطقتك',
+                        selected:
+                            _selectedDate != null &&
+                            _formatDate(_selectedDate!) == label &&
+                            _selectedRangeEnd == null,
+                        onTap: () => _pickSuggestedDay(context, day),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 6),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'مش مناسبين؟ اختار اليوم أو الفترة اللي تناسبك بنفسك',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 _ScheduleOptionCard(
                   icon: Icons.calendar_month_outlined,
                   title: 'اختار يوم محدد',
@@ -311,6 +507,44 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 // خطوة الساعة (+عدد الساعات) — بتظهر بمجرد ما يختار العميل يوم، في نفس الشاشة دي
                 // مباشرة (docs/08 §84 جزء ج، طلب مالك صريح: "خلي حاجات الوقت كلها تظهر مع بعض").
                 if (widget.requiresPreciseTime && _selectedDate != null) ...[
+                  if (_suggestedTimes.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const _SuggestionIntro(
+                      title: 'ساعات مقترحة في اليوم ده',
+                      subtitle:
+                          'دي الساعات اللي فيها أكبر مساحة لفني يوصلك في الموعد.',
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _suggestedTimes.map((slot) {
+                        final time = slot['time'] as String? ?? '';
+                        final free =
+                            (slot['free_technicians'] as num?)?.toInt() ?? 0;
+                        final parts = time.split(':');
+                        final asTimeOfDay = parts.length == 2
+                            ? TimeOfDay(
+                                hour: int.parse(parts[0]),
+                                minute: int.parse(parts[1]),
+                              )
+                            : null;
+                        final isPicked =
+                            _selectedTime != null &&
+                            asTimeOfDay != null &&
+                            _selectedTime!.hour == asTimeOfDay.hour &&
+                            _selectedTime!.minute == asTimeOfDay.minute;
+                        return ChoiceChip(
+                          selected: isPicked,
+                          label: Text('$time · $free فني فاضي'),
+                          onSelected: asTimeOfDay == null
+                              ? null
+                              : (_) =>
+                                    setState(() => _selectedTime = asTimeOfDay),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _ScheduleOptionCard(
                     icon: Icons.schedule_outlined,
@@ -345,6 +579,147 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   }
 }
 
+class _SuggestionIntro extends StatelessWidget {
+  final String title;
+  final String subtitle;
+
+  const _SuggestionIntro({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.auto_awesome_outlined, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ملخص قصير في أول رحلة الحجز: يربط اختيار الموعد بالخدمة التي اختارها العميل، ويظهر
+/// الضمان الأساسي قبل التأكيد بدل أن يظل تفصيلاً مخفياً في خطوة الدفع الأخيرة.
+class _ScheduleHeader extends StatelessWidget {
+  const _ScheduleHeader({
+    required this.serviceName,
+    required this.warrantyDays,
+  });
+
+  final String serviceName;
+  final int warrantyDays;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.55),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.calendar_month_outlined, color: scheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'الخطوة 1 من 3 · الموعد',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  serviceName,
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (warrantyDays > 0) ...[
+                  const SizedBox(height: 9),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.verified_user_outlined,
+                          size: 16,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'ضمان $warrantyDays يوم على الخدمة',
+                          style: textTheme.labelMedium?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ScheduleOptionCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -366,6 +741,8 @@ class _ScheduleOptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
+      clipBehavior: Clip.antiAlias,
+      elevation: selected ? 1.5 : 0,
       color: selected
           ? scheme.primaryContainer
           : (highlighted ? scheme.primaryContainer : null),
@@ -397,7 +774,9 @@ class _ScheduleOptionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_left),
+              selected
+                  ? Icon(Icons.check_circle_rounded, color: scheme.primary)
+                  : const Icon(Icons.chevron_left),
             ],
           ),
         ),

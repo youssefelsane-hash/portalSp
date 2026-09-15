@@ -26,6 +26,8 @@ export interface WorkOpportunityListItem extends WorkOpportunityRow {
   problem_description: string | null;
   street_name: string;
   scheduled_at: string | null;
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
   /** بس لفرص crew_recruit — اسم قائد الطلب اللي بيتم التجنيد تحته (docs/08 §35). */
   team_leader_name?: string | null;
 }
@@ -126,7 +128,8 @@ export class TechnicianWorkOpportunitiesService {
    * acceptWorkOpportunity()). */
   async listForTechnician(technicianId: string): Promise<WorkOpportunityListItem[]> {
     return this.dataSource.query<WorkOpportunityListItem[]>(
-      `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name, o.scheduled_at
+      `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name,
+              o.scheduled_at, o.duration_minutes, o.estimated_duration_days
        FROM technician_work_opportunities wo
        JOIN orders o ON o.id = wo.order_id
        JOIN services s ON s.id = o.service_id
@@ -140,7 +143,8 @@ export class TechnicianWorkOpportunitiesService {
   /** فرص تجنيد الفريق (docs/08 §35) — الفني بيتعرضله ينضم كعضو تحت قائد موجود بالفعل. */
   async listCrewRecruitForTechnician(technicianId: string): Promise<WorkOpportunityListItem[]> {
     return this.dataSource.query<WorkOpportunityListItem[]>(
-      `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name, o.scheduled_at,
+      `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name,
+              o.scheduled_at, o.duration_minutes, o.estimated_duration_days,
               leader_u.full_name AS team_leader_name
        FROM technician_work_opportunities wo
        JOIN orders o ON o.id = wo.order_id

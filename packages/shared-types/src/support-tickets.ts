@@ -6,6 +6,8 @@ export interface SupportTicketResponseDto {
   id: string;
   ticket_number: string;
   user_id: string;
+  /** موجودة في ردود الإدارة فقط؛ لا نكشف بيانات صاحب التذكرة في واجهات المستخدم. */
+  owner_name?: string | null;
   subject: string;
   category: string;
   priority: SupportTicketPriority;

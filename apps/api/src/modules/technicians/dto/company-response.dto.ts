@@ -135,6 +135,8 @@ export interface CompanyOrderRow {
   technicianName: string | null;
   zoneNameAr: string | null;
   totalAmountCents: number;
+  durationMinutes: number | null;
+  estimatedDurationDays: number | null;
 }
 
 // صف ملخّص واحد — مش OrderResponseDto الكامل (تفاصيل التنفيذ الكاملة مش لازمة هنا، القائمة دي
@@ -150,6 +152,8 @@ export interface CompanyOrderSummaryResponseDto {
   technician_name: string | null;
   zone_name_ar: string | null;
   total_amount_cents: number;
+  duration_minutes: number | null;
+  estimated_duration_days: number | null;
 }
 
 export function toCompanyOrderSummaryResponseDto(row: CompanyOrderRow): CompanyOrderSummaryResponseDto {
@@ -164,5 +168,7 @@ export function toCompanyOrderSummaryResponseDto(row: CompanyOrderRow): CompanyO
     technician_name: row.technicianName,
     zone_name_ar: row.zoneNameAr,
     total_amount_cents: Number(row.totalAmountCents),
+    duration_minutes: row.durationMinutes,
+    estimated_duration_days: row.estimatedDurationDays,
   };
 }

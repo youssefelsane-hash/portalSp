@@ -5,6 +5,7 @@ import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { getRedisUrl } from '../../config/redis-url.util';
 import { RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
+import { ThrottledWorkerErrorLogger } from '../../common/utils/throttled-worker-error-logger';
 
 /**
  * بيعيد حساب الأعمدة المحسوبة على technician_profiles من مصدر الحقيقة الفعلي (orders, ratings)
@@ -39,6 +40,8 @@ import { RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE } from './technician-st
 )
 export class TechnicianStatsProcessor extends WorkerHost {
   private readonly logger = new Logger(TechnicianStatsProcessor.name);
+  // خنق الفيضان — الشرح الكامل في `ThrottledWorkerErrorLogger` (docs/08 §148).
+  private readonly workerErrors = new ThrottledWorkerErrorLogger(this.logger, 'technician-stats');
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {
     super();
@@ -50,7 +53,7 @@ export class TechnicianStatsProcessor extends WorkerHost {
   // نضيف بأمان بدل ما يوقع بصمت.
   @OnWorkerEvent('error')
   handleWorkerError(error: Error): void {
-    this.logger.warn(`Worker error (technician-stats): ${error.message}`);
+    this.workerErrors.record(error);
   }
 
   async process(job: Job<RecalculateStatsJobData>): Promise<void> {

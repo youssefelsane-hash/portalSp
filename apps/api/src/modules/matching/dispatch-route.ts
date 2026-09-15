@@ -26,6 +26,7 @@ export type DispatchRoute = 'rounds' | 'auto_confirm' | 'not_dispatchable';
 export type DispatchRouteReason =
   | 'emergency'
   | 'revisit_pinned'
+  | 'revisit_scheduled_far'
   | 'near_term'
   | 'scheduled_far'
   | 'same_day_workload'
@@ -69,9 +70,13 @@ export function resolveDispatchRoute(
     return { route: 'not_dispatchable', reason: 'not_searching', nearTermHours };
   }
   if (isEmergencyBookingMode(order)) return { route: 'rounds', reason: 'emergency', nearTermHours };
-  // ADR-0051 — إعادة زيارة مثبّتة مبتعدّيش على التأكيد التلقائي أبدًا: التثبيت الصح **عرض
-  // حصري** الفني يقبله بنفسه، مش تعيين قسري.
-  if (isRevisitPinActive(order)) return { route: 'rounds', reason: 'revisit_pinned', nearTermHours };
+  // إعادة الضمان القريبة تظل طلبًا يحتاج موافقة. أما الموعد البعيد الذي اختاره محرك التوافر
+  // للفني الأصلي فيتأكد تلقائيًا، فلا يصل له request معروف مسبقًا أنه سيتعارض مع جدوله.
+  if (isRevisitPinActive(order)) {
+    return isNearTerm(order.scheduledAt, nearTermHours, now)
+      ? { route: 'rounds', reason: 'revisit_pinned', nearTermHours }
+      : { route: 'auto_confirm', reason: 'revisit_scheduled_far', nearTermHours };
+  }
   if (isNearTerm(order.scheduledAt, nearTermHours, now)) {
     return { route: 'rounds', reason: 'near_term', nearTermHours };
   }
@@ -84,7 +89,9 @@ export function describeDispatchRoute(decision: DispatchRouteDecision): string {
     case 'emergency':
       return 'جولات عروض — طلب طوارئ، الفني لازم يقبل بنفسه';
     case 'revisit_pinned':
-      return 'جولات عروض — إعادة زيارة مثبّتة على الفني الأصلي، بتتعرض عليه ومابتتعيّنش قسرًا';
+      return 'جولات عروض — إعادة زيارة خلال المهلة القريبة، والفني الأصلي لازم يقبلها بنفسه';
+    case 'revisit_scheduled_far':
+      return `تأكيد تلقائي — إعادة الضمان حُجزت للفني الأصلي في أول موعد متاح أبعد من ${decision.nearTermHours} ساعة`;
     case 'near_term':
       return `جولات عروض — الموعد خلال ${decision.nearTermHours} ساعة، فالفني لازم يقبل بنفسه مش يتفاجأ بشغل اتعيّنله`;
     case 'scheduled_far':

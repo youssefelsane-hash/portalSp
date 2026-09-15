@@ -109,5 +109,5 @@ ADR-0055 قرار مالك صريح ومكتوب: «طالما أنا ما من�
 
 ## الهجرة
 
-`infra/migrations/0321_company_recruitment_policy_and_technician_lead.sql` — عمودين، الاتنين
+`infra/migrations/0343_company_recruitment_policy_and_technician_lead.sql` — عمودين، الاتنين
 `NOT NULL DEFAULT false`، فمفيش أي تغيير سلوك على البيانات القايمة.

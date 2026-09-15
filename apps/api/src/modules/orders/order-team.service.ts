@@ -9,6 +9,7 @@ import { TechnicianKind, TechnicianLevel, TechnicianProfile } from '../technicia
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import {
+  assistantServiceQualificationCondition,
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
   technicianCityCoverageCondition,
@@ -23,6 +24,12 @@ import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { orderCandidateLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from './order-state-machine';
+import {
+  assistantCandidateRankingJoinsSql,
+  candidateQualityScoreSql,
+  resolveCandidateQualityRankingSettings,
+} from '../matching/candidate-quality-ranking';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 
@@ -96,7 +103,7 @@ export async function assertCrewCandidateScope(
     `SELECT
        (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
        (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
-       (${technicianServiceQualificationCondition({
+       (${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
          technicianIdExpr: 'tp.id',
          serviceIdExpr: 'svc.id',
          categoryIdExpr: 'svc.category_id',
@@ -484,6 +491,9 @@ export class OrderTeamService {
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const leaderRank = TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel];
+    const ranking = role === 'assistant'
+      ? await resolveCandidateQualityRankingSettings(this.settingsService)
+      : null;
 
     const rows = await this.teamMembers.manager.query<Omit<RecruitCandidateRow, 'capacityTier'>[]>(
       `
@@ -507,6 +517,13 @@ export class OrderTeamService {
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = o.service_id
         AND ts.is_active = true AND ts.verification_status = 'approved'
       CROSS JOIN LATERAL (SELECT location FROM addresses WHERE id = o.address_id) a
+      ${role === 'assistant'
+        ? assistantCandidateRankingJoinsSql({
+            activeStatusesParam: '$5',
+            fairnessLookbackDaysParam: '$7',
+            fairnessDeclineWeightParam: '$8',
+          })
+        : ''}
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.current_location IS NOT NULL
         AND tp.id != $2
@@ -525,8 +542,9 @@ export class OrderTeamService {
           OR order_company.allows_external_recruitment IS TRUE
           OR tp.company_id = o.assigned_company_id
         )
-        -- ADR-0056 — نفس شرط اعتماد التخصص مفروض على الفني والمساعد، والحجب الإداري طبقة إضافية.
-        AND ${technicianServiceQualificationCondition({
+        -- ADR-0087 — الفني والمساعد ليهم شرط تخصص مختلف: حجب الخدمة معناه «مايقودش»، مش
+        -- «مايساعدش». التفريع هنا جاي من الفرع الرئيسي ومتحافظ عليه.
+        AND ${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
@@ -545,16 +563,34 @@ export class OrderTeamService {
       ORDER BY ${
         role === 'assistant'
           ? `"distanceKm" ASC NULLS LAST,
-             CASE tp.current_level
-               WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
-               WHEN 'verified' THEN 1 ELSE 0
-             END DESC,
-             tp.average_rating DESC`
+             ${candidateQualityScoreSql({
+               workloadWeightParam: '$6',
+               fairnessWeightParam: '$9',
+               reliabilityBaselineParam: '$10',
+               reliabilityWeightParam: '$11',
+               reliabilityMinRatingsParam: '$12',
+             })} DESC,
+             tp.id ASC`
           : '"isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC'
       }
       LIMIT 30
       `,
-      [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
+      role === 'assistant'
+        ? [
+            orderId,
+            leaderProfileId,
+            leaderRank,
+            leaderProfile.companyId,
+            ACTIVE_TECHNICIAN_ORDER_STATUSES,
+            ranking!.workloadWeight,
+            ranking!.fairnessLookbackDays,
+            ranking!.fairnessDeclineWeight,
+            ranking!.fairnessWeight,
+            ranking!.reliabilityBaselineRating,
+            ranking!.reliabilityWeight,
+            ranking!.reliabilityMinRatingsCount,
+          ]
+        : [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
     );
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
@@ -622,8 +658,15 @@ export class OrderTeamService {
     let opportunityEvent: WorkOpportunityOfferedEvent | null = null;
 
     const outcome = await this.orders.manager.transaction(async (manager) => {
-      // كل كاتب للطاقم يقفل الطلب أولاً، ثم الشخص المرشح. لذلك فحص الخانة والجدول لا يتحول
-      // إلى كتابة متأخرة إذا دخل قائد أو أدمن آخر في نفس اللحظة.
+      // **ترتيب القفل: الفني الأول ثم الطلب** (الشرح الكامل فوق `lockTechnician`).
+      //
+      // التعليق اللي كان هنا كان بيقول العكس بالحرف («كل كاتب للطاقم يقفل الطلب أولاً») —
+      // يعني كان في المشروع **اتفاقيتين متناقضتين** على نفس القفلين، وده جذر فئة البَقّة
+      // كلها: أي تزامن بين كاتب طاقم وكاتب قبول بيدي ABBA deadlock (docs/08 §148).
+      // الاتفاقية الموحّدة دلوقتي: الفني (المورد المشترك بين الطلبات) بيتقفل الأول دايمًا.
+      // ضمانة «فحص الخانة والجدول مايتحولش لكتابة متأخرة» محفوظة زي ما هي — الطلب لسه
+      // بيتقفل جوّه نفس المعاملة قبل أي فحص أو كتابة.
+      const candidateProfile = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const order = await manager
         .createQueryBuilder(Order, 'order')
         .setLock('pessimistic_write')
@@ -644,7 +687,6 @@ export class OrderTeamService {
         throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
       }
 
-      const candidateProfile = await this.assignmentGuard.lockTechnician(manager, technicianId);
       const lockedLeader = await manager.findOne(TechnicianProfile, { where: { id: leaderProfile.id } });
       if (!lockedLeader) {
         throw new ApiException(ErrorCode.VAL_001, 'بيانات قائد الطلب غير موجودة', HttpStatus.CONFLICT);
@@ -736,6 +778,10 @@ export class OrderTeamService {
           throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
         }
 
+        // **ترتيب القفل: الفني الأول ثم الطلب** — نفس ترتيب `MatchingService.accept()`. العكس
+        // كان بيدي deadlock حقيقي لما مسار التجنيد ومسار القبول يتزامنوا على نفس الزوج
+        // (docs/08 §148).
+        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
         const order = await manager
           .createQueryBuilder(Order, 'o')
           .setLock('pessimistic_write')
@@ -751,7 +797,6 @@ export class OrderTeamService {
         assertCrewMembershipMutable(order);
 
         const role = opportunity.crew_role;
-        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
         await this.assignmentGuard.assertScheduleAvailable(manager, lockedTechnician.id, order);
         if (role === 'assistant') {
           // المساعد نطاقه المدينة كلها، بينما حارس قيادة الطلب يقصد النطاق الدقيق. استخدام الحارس

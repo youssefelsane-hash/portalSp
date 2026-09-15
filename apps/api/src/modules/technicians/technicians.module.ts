@@ -22,6 +22,8 @@ import { AdminTechnicianLevelsController } from './admin-technician-levels.contr
 import { AdminTechniciansController } from './admin-technicians.controller';
 import { AdminTechniciansService } from './admin-technicians.service';
 import { PublicTechniciansController } from './public-technicians.controller';
+import { BookingSlotsController } from './booking-slots.controller';
+import { BookingSlotSuggestionService } from './booking-slot-suggestion.service';
 import { PublicTechnicianCompaniesController } from './public-technician-companies.controller';
 import { TechnicianCompaniesController } from './technician-companies.controller';
 import { TechnicianCompaniesService } from './technician-companies.service';
@@ -62,6 +64,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
 import { AdminTechnicianInternalNotesController } from './admin-technician-internal-notes.controller';
 import { TechnicianInternalNote } from './entities/technician-internal-note.entity';
 import { TechnicianInternalNotesService } from './technician-internal-notes.service';
+import { RedisCacheService } from '../../common/cache/redis-cache.service';
 
 @Module({
   imports: [
@@ -97,6 +100,7 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
   controllers: [
     TechniciansController,
     PublicTechniciansController,
+    BookingSlotsController,
     AdminTechniciansController,
     TechnicianCompaniesController,
     PublicTechnicianCompaniesController,
@@ -105,6 +109,9 @@ import { TechnicianInternalNotesService } from './technician-internal-notes.serv
     AdminTechnicianInternalNotesController,
   ],
   providers: [
+    // كاش طاقة أيام الاقتراح (docs/08 §146) — فشل Redis بيرجع للقاعدة بهدوء.
+    RedisCacheService,
+    BookingSlotSuggestionService,
     TechniciansService,
     TechnicianProfileListener,
     TechnicianDocumentsService,

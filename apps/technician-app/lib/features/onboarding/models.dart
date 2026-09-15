@@ -4,6 +4,8 @@
 class TechnicianMe {
   final String technicianCode;
   final String verificationStatus;
+  final String? bio;
+  final int yearsOfExperience;
   // ADR-0031 — آخر صورة شخصية رفعها الفني نفسه (بغض النظر عن حالة المراجعة) — بتظهر فورًا في
   // بروفايله هو، مختلفة عن الأفتار المعتمد اللي العميل بيشوفه (ده بس بعد موافقة الأدمن).
   final String? avatarUrl;
@@ -17,6 +19,7 @@ class TechnicianMe {
   final String technicianType;
   final String assistantLinkStatus;
   final String? assistantTechnicianId;
+
   /// هل الفني سجّل رقمه القومي؟ (ADR-0045، docs/08 §77-E1) — الرقم نفسه ما بيرجعش من
   /// السيرفر أبدًا للفني، بس الـboolean ده كافي عشان التطبيق يعرف يعرض الحقل ولا التأكيد.
   final bool nationalIdSet;
@@ -24,6 +27,8 @@ class TechnicianMe {
   TechnicianMe({
     required this.technicianCode,
     required this.verificationStatus,
+    required this.bio,
+    required this.yearsOfExperience,
     required this.avatarUrl,
     required this.isAvailable,
     required this.isOnDuty,
@@ -36,6 +41,8 @@ class TechnicianMe {
   factory TechnicianMe.fromJson(Map<String, dynamic> json) => TechnicianMe(
     technicianCode: json['technician_code'] as String,
     verificationStatus: json['verification_status'] as String,
+    bio: json['bio'] as String?,
+    yearsOfExperience: (json['years_of_experience'] as num?)?.toInt() ?? 0,
     avatarUrl: json['avatar_url'] as String?,
     isAvailable: json['is_available'] as bool,
     isOnDuty: json['is_on_duty'] as bool,

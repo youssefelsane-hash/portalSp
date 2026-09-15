@@ -47,6 +47,11 @@ export class CreateServiceDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(5000)
+  safety_guidance_ar?: string | null;
+
+  @IsOptional()
+  @IsString()
   icon_url?: string;
 
   @IsOptional()

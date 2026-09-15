@@ -50,7 +50,7 @@ export function SiteHeader() {
               loading="eager"
               fetchPriority="high"
               decoding="async"
-              className="h-9 w-auto"
+              className="h-12 w-auto sm:h-14"
               onError={() => setLogoUrl(null)}
             />
           ) : (

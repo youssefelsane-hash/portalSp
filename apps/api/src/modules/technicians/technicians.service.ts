@@ -95,6 +95,34 @@ export function dedupeTechnicianBookingItems(
 // (موجود=شركة، فاضي=فريق) — قرار سابق موثّق في technicians/README.md، مش اختراع جديد هنا.
 export type TechnicianType = 'individual' | 'individual_with_assistant' | 'team' | 'company';
 
+// النبذة تظهر علنًا للعميل، لذلك التحذير في التطبيق وحده لا يكفي: أي عميل API مباشر يجب أن
+// يمر بنفس الحماية. نمنع وسائل التواصل الفعلية ونترك للفني مساحة يكتب خبرته وخدماته المهنية.
+const TECHNICIAN_BIO_CONTACT_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/i, label: 'بريدًا إلكترونيًا' },
+  { pattern: /(?:https?:\/\/|www\.)\S+/i, label: 'رابطًا' },
+  { pattern: /(?:\+?\d[\d\s().-]{7,}\d)/, label: 'رقم هاتف' },
+  {
+    pattern: /(?:instagram|facebook|tiktok|whatsapp|واتساب|واتس\s*اب|فيسبوك|انستجرام|تيك\s*توك)\s*[:@-]/i,
+    label: 'وسيلة تواصل شخصية',
+  },
+];
+
+function normalizeArabicDigits(value: string): string {
+  return value.replace(/[٠-٩]/g, (digit) => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(digit)]);
+}
+
+function validatePublicTechnicianBio(value: string): void {
+  const normalized = normalizeArabicDigits(value);
+  const violation = TECHNICIAN_BIO_CONTACT_PATTERNS.find(({ pattern }) => pattern.test(normalized));
+  if (violation) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      `النبذة لا يمكن أن تحتوي على ${violation.label}. اكتب خبرتك والخدمات التي تجيدها فقط.`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
+
 @Injectable()
 export class TechniciansService {
   constructor(
@@ -156,7 +184,11 @@ export class TechniciansService {
 
   async updateProfile(userId: string, dto: UpdateTechnicianProfileDto): Promise<TechnicianProfile> {
     const profile = await this.findByUserIdOrThrow(userId);
-    if (dto.bio !== undefined) profile.bio = dto.bio;
+    if (dto.bio !== undefined) {
+      const bio = dto.bio.trim();
+      if (bio) validatePublicTechnicianBio(bio);
+      profile.bio = bio || null;
+    }
     await this.technicianProfiles.save(profile);
     return profile;
   }
@@ -464,8 +496,8 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        -- ADR-0055/0056 — المساعد بيظهر في القايمة والترتيب كمشارك كامل، لكن داخل خدماته أو
-        -- فئاته المعتمدة فقط. الحجب الإداري يظل طبقة إضافية ولا يحل محل اعتماد التخصص.
+        -- ADR-0087 — **مفيش استبعاد على أساس النوع**. المساعد المؤهّل وغير المحجوب عن الخدمة
+        -- بيظهر للعميل كمقدّم خدمة زيه زي الفني؛ الحجب جوّه شرط التأهيل تحت هو اللي بيمنع.
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
         -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
         -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
@@ -644,6 +676,7 @@ export class TechniciansService {
       JOIN services svc ON svc.id = $1
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tc.is_active = true
+        -- ADR-0087 — نفس قاعدة القايمة الأساسية: الحجب هو اللي بيمنع القيادة، مش النوع.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -802,7 +835,7 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        -- ADR-0055 — نفس قاعدة القايمة الأساسية: مفيش استبعاد على أساس الدور.
+        -- ADR-0087 — نفس قاعدة القايمة الأساسية: مفيش استبعاد على أساس الدور.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -960,7 +993,7 @@ export class TechniciansService {
         JOIN services svc ON svc.id = $1
         CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
         WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-          -- ADR-0055 — "فيه حد متاح اليوم ده؟" بتشمل المساعدين كمان، لأنهم بياخدوا شغل فعلاً.
+          -- ADR-0087 — «فيه حد متاح اليوم ده؟» بتشمل المساعدين، لأنهم بياخدوا شغل فعلاً.
           AND ${technicianServiceQualificationCondition({
             technicianIdExpr: 'tp.id',
             serviceIdExpr: 'svc.id',
@@ -1012,6 +1045,96 @@ export class TechniciansService {
       ],
     );
     return exists;
+  }
+
+  /**
+   * أول ساعة قابلة للتعيين لفني بعينه داخل أفق الحجز. إعادة الضمان تستخدمها بدل إضافة عدد
+   * ثابت من الأيام؛ ونفس شرط الأهلية/التعارض المستخدم في المطابقة هو الذي يحكم النتيجة هنا.
+   * الاستعلام يفحص الأفق كله مرة واحدة حتى لا يتحول أسبوع مزدحم إلى مئات الاستعلامات المتتالية.
+   */
+  async findFirstAvailableStartForTechnician(
+    technicianId: string,
+    serviceId: string,
+    zoneId: string,
+    addressId: string,
+    notBefore: Date,
+    maxDays = 90,
+    candidateLoad?: CandidateOperationalLoad,
+  ): Promise<Date | null> {
+    const [dailyCapacityMinutes, dayStartHour, dayEndHour] = await Promise.all([
+      resolveDailyCapacityMinutes(this.settingsService),
+      this.settingsService.getNumber('booking.suggestion_day_start_hour', 9),
+      this.settingsService.getNumber('booking.suggestion_day_end_hour', 19),
+    ]);
+    const startHour = Math.max(0, Math.min(23, Math.round(dayStartHour)));
+    const endHour = Math.max(startHour, Math.min(23, Math.round(dayEndHour)));
+    const horizonDays = Math.max(1, Math.min(365, Math.round(maxDays)));
+
+    const rows = await this.technicianProfiles.manager.query<{ starts_at: Date }[]>(
+      `
+      WITH candidate_starts AS (
+        SELECT ((day::date + make_interval(hours => hour_of_day)) AT TIME ZONE 'Africa/Cairo') AS starts_at
+        FROM generate_series(
+          ($5::timestamptz AT TIME ZONE 'Africa/Cairo')::date,
+          ($5::timestamptz AT TIME ZONE 'Africa/Cairo')::date + make_interval(days => $6::int),
+          interval '1 day'
+        ) day
+        CROSS JOIN generate_series($7::int, $8::int) hour_of_day
+      )
+      SELECT c.starts_at
+      FROM candidate_starts c
+      JOIN technician_profiles tp ON tp.id = $4
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1
+        AND ts.is_active = true AND ts.verification_status = 'approved'
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
+      CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+      WHERE c.starts_at > $5::timestamptz
+        AND tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        AND tp.current_location IS NOT NULL
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: 'c.starts_at',
+          excludeOrderIdParam: 'NULL',
+          activeStatusesParam: '$9',
+          engagedStatusesParam: '$10',
+          isEmergencyParam: '$11',
+          serviceDurationExpr: 'COALESCE($13::int, COALESCE(svc.estimated_duration_minutes, 60))',
+          candidateLoad: {
+            estimatedDurationDaysExpr: '$14::numeric',
+            durationMinutesExpr: '$13::int',
+            serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+          },
+          preciseDurationHoursExpr: '$13::numeric / 60.0',
+          dailyCapacityMinutesParam: '$12',
+        })}
+      ORDER BY c.starts_at ASC
+      LIMIT 1
+      `,
+      [
+        serviceId,
+        zoneId,
+        addressId,
+        technicianId,
+        notBefore,
+        horizonDays,
+        startHour,
+        endHour,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        dailyCapacityMinutes,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
+      ],
+    );
+    return rows[0]?.starts_at ? new Date(rows[0].starts_at) : null;
   }
 
   /**

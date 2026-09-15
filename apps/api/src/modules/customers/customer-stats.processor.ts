@@ -5,6 +5,7 @@ import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { getRedisUrl } from '../../config/redis-url.util';
 import { CUSTOMER_STATS_QUEUE, RecalculateCustomerStatsJobData } from './customer-stats.queue';
+import { ThrottledWorkerErrorLogger } from '../../common/utils/throttled-worker-error-logger';
 
 /**
  * بيعيد حساب الأعمدة المحسوبة على customer_profiles من مصدر الحقيقة الفعلي (orders, ratings) —
@@ -26,6 +27,8 @@ import { CUSTOMER_STATS_QUEUE, RecalculateCustomerStatsJobData } from './custome
 )
 export class CustomerStatsProcessor extends WorkerHost {
   private readonly logger = new Logger(CustomerStatsProcessor.name);
+  // خنق الفيضان — الشرح الكامل في `ThrottledWorkerErrorLogger` (docs/08 §148).
+  private readonly workerErrors = new ThrottledWorkerErrorLogger(this.logger, 'customer-stats');
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {
     super();
@@ -33,7 +36,7 @@ export class CustomerStatsProcessor extends WorkerHost {
 
   @OnWorkerEvent('error')
   handleWorkerError(error: Error): void {
-    this.logger.warn(`Worker error (customer-stats): ${error.message}`);
+    this.workerErrors.record(error);
   }
 
   async process(job: Job<RecalculateCustomerStatsJobData>): Promise<void> {

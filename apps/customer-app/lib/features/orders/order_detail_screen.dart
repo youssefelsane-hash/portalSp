@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/external_links.dart';
 import '../../core/api_exception.dart';
@@ -44,6 +47,11 @@ const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment',
 // المصدر الوحيد اللي بيقرّر البث بيروح لمين.
 const Set<String> _liveTrackingStatuses = {'technician_on_way'};
 
+const String _defaultSafetyGuidanceAr =
+    'حفاظًا على سلامتك وممتلكاتك وسلامة مقدم الخدمة، احتفظ بالمتعلقات الثمينة '
+    'والمستندات والأموال في مكان آمن، ووضّح نطاق العمل قبل البدء، ولا تترك الأطفال '
+    'أو أي شخص يحتاج للرعاية دون إشراف مناسب. إذا لاحظت أي تصرف غير مريح، تواصل مع الدعم فورًا.';
+
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
 
@@ -84,6 +92,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String? _cardIdempotencyKey;
   String? _fawryIdempotencyKey;
   String? _instapayIdempotencyKey;
+  /// معاينة الدفع بـInstaPay (ADR-0089) — بيانات الحساب والمبلغ من غير ما نفتح أي دفعة.
+  /// `null` = لسه بتتحمّل أو فشلت، والخانة بتختفي بهدوء (زي باقي المساعدات في الشاشة دي).
+  InstaPayPreview? _instapayPreview;
   // §24 — الشاشة كانت بتفضل عارضة الحالة القديمة لحد ما العميل يخرج ويرجع يدوي أو يعمل
   // pull-to-refresh، رغم إن الفني/الأدمن ممكن يغيّروا حالة الطلب وهي مفتوحة (on-way/arrived/
   // in-progress/completed/إلغاء أدمن). نفس آلية technician-app بالظبط — انضمام لغرفة الطلب
@@ -117,10 +128,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     super.dispose();
   }
 
+  /// **قراءة بحتة** — مابتفتحش دفعة، فتنادي بأمان مع كل تحميل للشاشة.
+  Future<void> _loadInstaPayPreview() async {
+    try {
+      final preview = await _paymentsRepository.previewInstaPay(widget.orderId);
+      if (mounted) setState(() => _instapayPreview = preview);
+    } catch (error) {
+      debugPrint('تعذّر تحميل معاينة InstaPay: $error');
+    }
+  }
+
   Future<void> _load() async {
     try {
       final order = await _repository.getOne(widget.orderId);
       if (mounted) setState(() => _order = order);
+      unawaited(_loadInstaPayPreview());
       if (order.orderStatus == 'awaiting_quote_approval') {
         await _loadQuoteItems();
       }
@@ -690,7 +712,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           title: const Text('طلب إعادة زيارة (ضمان)'),
           content: const Text(
             'هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل. الفني هيتواصل معاك، '
-            'والزيارة هتكون خلال 3 أيام إلى أسبوع علشان يتنسق الموعد بشكل مناسب.',
+            'والنظام هيحجز أول موعد فاضي في جدوله بعد مهلة التنسيق ويعرضه لك فورًا.',
           ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('تراجع')),
@@ -716,7 +738,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
         );
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة — الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع')));
+            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة واتحدد أول موعد متاح للفني')));
       }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
@@ -918,6 +940,63 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
+  Future<void> _showSafetyGuidance(Order order) {
+    final customGuidance = order.safetyGuidanceAr?.trim();
+    final guidance = customGuidance == null || customGuidance.isEmpty
+        ? _defaultSafetyGuidanceAr
+        : customGuidance;
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            4,
+            24,
+            24 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.health_and_safety_outlined,
+                      color: Theme.of(sheetContext).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'إرشادات السلامة والتعامل',
+                        style: Theme.of(sheetContext).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  guidance,
+                  style: Theme.of(sheetContext).textTheme.bodyLarge?.copyWith(height: 1.7),
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: const Text('فهمت'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = _order;
@@ -987,6 +1066,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.discountAmountCents > 0)
                                 Text(
                                   'الخصم المطبّق: -${_formatEgp(order.discountAmountCents)}',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
+                                ),
+                              // هدية الدفع أونلاين (ADR-0091) جوّه رقم الخصم فوق، فالعميل كان
+                              // بيشوف الرقم بلا سببه. نفس قاعدة سطر «فني Premium» تحت: أي رقم
+                              // بيتغيّر لوحده لازم يبان جنبه إيه اللي غيّره.
+                              if (order.instapayDiscountCents > 0)
+                                Text(
+                                  'منها ${_formatEgp(order.instapayDiscountCents)} — هدية الدفع عبر InstaPay',
                                   style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
                                 ),
                               // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
@@ -1062,7 +1149,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'إعادة زيارة لطلب سابق — مجانية بالكامل. الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع.',
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل، والموعد المعروض هو أول وقت متاح للفني الأصلي.',
                                   style: TextStyle(color: Theme.of(context).colorScheme.primary),
                                 ),
                               ],
@@ -1096,6 +1183,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ],
                             ],
                           ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          leading: Icon(
+                            Icons.health_and_safety_outlined,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          title: const Text('إرشادات السلامة والتعامل'),
+                          subtitle: const Text('اقرأها قبل الزيارة لحماية سلامتك وممتلكاتك'),
+                          trailing: const Icon(Icons.chevron_left),
+                          onTap: () => _showSafetyGuidance(order),
                         ),
                       ),
                       if (order.technicianPhone != null) ...[
@@ -1464,6 +1565,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
+                      // خانة InstaPay اطلاع دائم: تعرض الحساب والحافز من لحظة إنشاء الطلب،
+                      // لكن بدء التحويل لا يتاح إلا عندما يقرر الخادم أن هناك مبلغًا مستحقًا.
+                      if (_instapayPreview != null) ...[
+                        const SizedBox(height: 16),
+                        _InstaPayInlineCard(
+                          preview: _instapayPreview!,
+                          isCashOrder: order.paymentMethod == 'cash',
+                          onPay: _instapayPreview!.isPayable && !_paying ? _payWithInstaPay : null,
+                        ),
+                      ],
                       if (_payableOrderStatuses.contains(order.orderStatus) &&
                           (order.paymentStatus != 'paid' || (order.amountDueNowCents ?? 0) > 0)) ...[
                         const SizedBox(height: 16),
@@ -1506,12 +1617,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onPressed: _paying ? null : _payWithFawryReference,
                           icon: const Icon(Icons.storefront_outlined),
                           label: const Text('ادفع في أقرب فوري'),
-                        ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: _paying ? null : _payWithInstaPay,
-                          icon: const Icon(Icons.send_outlined),
-                          label: const Text('ادفع عبر InstaPay'),
                         ),
                         // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو العميل هيدفع كاش
                         // في إيد الفني (مش من خلال التطبيق)، بعد ما يسلّم يضغط هنا يأكّد.
@@ -1776,6 +1881,188 @@ class _AdminNoticeCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(notice.message, style: const TextStyle(height: 1.45)),
+        ],
+      ),
+    );
+  }
+}
+
+/// **خانة InstaPay الثابتة جوّه الطلب** (ADR-0089، طلب مالك 2026-09-13).
+///
+/// نظيرة `InstaPayInlineSection` في `apps/customer-web` بالحرف — نفس الحقول، نفس التنبيه،
+/// نفس القاعدة: **مابتفتحش دفعة**، بتعرض بس.
+class _InstaPayInlineCard extends StatefulWidget {
+  final InstaPayPreview preview;
+  final bool isCashOrder;
+  final VoidCallback? onPay;
+
+  const _InstaPayInlineCard({
+    required this.preview,
+    required this.isCashOrder,
+    required this.onPay,
+  });
+
+  @override
+  State<_InstaPayInlineCard> createState() => _InstaPayInlineCardState();
+}
+
+class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final preview = widget.preview;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.05),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.isCashOrder ? 'تحب تدفع أونلاين بدل الكاش؟' : 'ادفع بـInstaPay',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (preview.instapayDiscountCents > 0)
+                    Text(
+                      '${(preview.cashAmountCents / 100).toStringAsFixed(0)} ج.م.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        decoration: TextDecoration.lineThrough,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  Text(
+                    // طلب لسه مالوش سعر بيرجّع صفر — و«0 ج.م.» في خانة دفع بتقري "ببلاش".
+                    preview.amountCents > 0
+                        ? '${(preview.amountCents / 100).toStringAsFixed(0)} ج.م.'
+                        : 'لسه بيتحدد',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          if (preview.instapayDiscountCents > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'هدية InstaPay: وفّر ${(preview.instapayDiscountCents / 100).toStringAsFixed(0)} ج.م.',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ],
+          // ADR-0091 §6 — الزيادة بعد طلب مدفوع مالهاش حافز. السكوت عن السبب كان بيخلّي
+          // العميل يفتكر الخصم اتسحب منه، فالسطر ده بيقول القاعدة بدل ما يخبّيها.
+          if (preview.isAdditionalCharge) ...[
+            const SizedBox(height: 4),
+            Text(
+              'ده مبلغ الزيادة اللي وافقت عليها بس. الخصم بياخده الطلب مرة واحدة، وهو اتحسب على الدفعة الأولى.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ] else if (preview.isPrepayment) ...[
+            const SizedBox(height: 4),
+            Text(
+              preview.instapayDiscountCents > 0
+                  ? 'تقدر تحوّل دلوقتي على طول وتاخد الهدية — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.'
+                  : 'تقدر تحوّل دلوقتي على طول — ولو الشغل احتاج بند إضافي بعدين، هتدفع الفرق بس.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ] else if (widget.isCashOrder) ...[
+            const SizedBox(height: 4),
+            Text(
+              preview.instapayDiscountCents > 0
+                  ? 'الكاش بالسعر المعتاد؛ اختار InstaPay عشان تستفيد من الهدية.'
+                  : 'الطلب متسجّل كاش، وده مايمنعش إنك تحوّل أونلاين في أي وقت.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+          if (preview.recipientAddress != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border.all(color: theme.dividerColor),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('حوّل على الحساب ده', style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 4),
+                  // الرقم LTR في سطر لوحده — من غير كده الـbidi بيقلب خانات الرقم وسط
+                  // النص العربي (نفس قاعدة شاشة التحويل، docs/08 §137).
+                  SelectableText(
+                    preview.recipientAddress!,
+                    textDirection: TextDirection.ltr,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (preview.recipientName != null) ...[
+                    const SizedBox(height: 4),
+                    Text('باسم: ${preview.recipientName}', style: theme.textTheme.bodySmall),
+                  ],
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: preview.recipientAddress!));
+                      if (mounted) setState(() => _copied = true);
+                    },
+                    icon: Icon(_copied ? Icons.check : Icons.copy_outlined, size: 18),
+                    label: Text(_copied ? 'اتنسخ' : 'انسخ رقم الحساب'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          // **التنبيه الزمني** (طلب مالك حرفي): «ينبّهه إنه يحوّل الفلوس قبل الشغل ما يخلص
+          // بوقت كافي بحيث نلحق نعمل المراجعة قبل الصنايع ما يمشي». محايد عمدًا — الغرض
+          // إن العميل ما يتفاجئش، مش إننا نخوّفه من الدفع أونلاين.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              border: Border.all(color: theme.dividerColor),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'لو هتحوّل، ابعت التحويل قبل ما الشغل يخلص بوقت كافي — مراجعة التحويل بتاخد '
+              'حوالي ${preview.confirmTypicalMinutes} دقيقة (لحد ${preview.confirmMaxMinutes} '
+              'دقيقة في أوقات الزحمة)، وعايزين نخلّصها والفني لسه معاك.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: widget.onPay,
+              icon: const Icon(Icons.send_outlined),
+              label: Text(
+                // ADR-0091 §2 — «مش عايز أستنى لحد ما الفني يخلّص عشان أعرف أدفع» (طلب مالك).
+                // الحالة الوحيدة الفاضلة هنا إن الطلب لسه مالوش سعر، ووقتها السبب مكتوب صريح.
+                !preview.isPayable
+                    ? 'هتقدر تحوّل أول ما السعر يتحدد'
+                    : preview.hasOpenTransfer
+                        ? 'كمّل التحويل'
+                        : 'ابدأ التحويل بـInstaPay',
+              ),
+            ),
+          ),
         ],
       ),
     );

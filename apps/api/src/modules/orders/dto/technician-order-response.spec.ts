@@ -30,6 +30,7 @@ const fullOrder: OrderResponseDto = {
   surge_amount_cents: 3_000,
   level_premium_cents: 8_000,
   discount_amount_cents: 2_000,
+  instapay_discount_cents: 3_000,
   promo_code_id: null,
   total_amount_cents: 126_000,
   paid_amount_cents: 60_000,
@@ -43,6 +44,7 @@ const fullOrder: OrderResponseDto = {
   optional_warranty: { name_ar: 'ضمان سنة', coverage_months: 12 },
   deposit_amount_cents: 60_000,
   payment_status: 'partially_paid',
+  payment_method: 'cash',
   placed_at: null,
   cancelled_at: null,
   cancellation_reason_id: null,
@@ -86,6 +88,7 @@ const FORBIDDEN_FIELDS = [
   'surge_amount_cents',
   'level_premium_cents',
   'discount_amount_cents',
+  'instapay_discount_cents',
   'warranty_price_cents',
   'optional_warranty',
   'deposit_amount_cents',
@@ -187,5 +190,20 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
     expect(dto.service_name_ar).toBe('سباكة');
     expect(dto.order_status).toBe('in_progress');
     expect(dto.problem_description).toBe('حنفية بتنقّط');
+  });
+
+  it('فشل المعاينة المالية لا يخفي الطلب ولا يسرّب أو يختلق أي رقم مالي', () => {
+    const dto = toTechnicianOrderResponseDto(
+      { ...fullOrder, customer_name: 'أحمد', service_name_ar: 'سباكة' },
+      null,
+    ) as unknown as Record<string, unknown>;
+
+    expect(dto.order_number).toBe('ORD-1');
+    expect(dto.customer_name).toBe('أحمد');
+    expect(dto.service_name_ar).toBe('سباكة');
+    for (const field of FORBIDDEN_FIELDS) expect(dto[field]).toBeUndefined();
+    expect(dto.cash_to_collect_cents).toBeUndefined();
+    expect(dto.my_earning_cents).toBeUndefined();
+    expect(dto.has_online_payment).toBeUndefined();
   });
 });

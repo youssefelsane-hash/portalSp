@@ -305,6 +305,7 @@ export class AdminCatalogService {
       slug: dto.slug,
       shortDescriptionAr: dto.short_description_ar ?? null,
       fullDescriptionAr: dto.full_description_ar ?? null,
+      safetyGuidanceAr: dto.safety_guidance_ar?.trim() || null,
       iconUrl: dto.icon_url ?? null,
       featuredIconUrl: dto.featured_icon_url ?? null,
       featuredNameAr: dto.featured_name_ar ?? null,
@@ -333,7 +334,9 @@ export class AdminCatalogService {
       allowsRecurringBooking: dto.allows_recurring_booking ?? false,
       requiresTechnicianLead: dto.requires_technician_lead ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
-      requiresStartTimeOnly: dto.schedule_precision === 'start_time',
+      // الحجز بساعة وصول هو القاعدة للخدمات الجديدة. «يوم كامل» استثناء صريح فقط، حتى لا
+      // يختفي اختيار الساعة من رحلة الكتالوج إذا لم يرسل نموذج الإدارة الحقل.
+      requiresStartTimeOnly: dto.schedule_precision !== 'full_day',
       minTechnicianLevel: dto.min_technician_level,
       displayOrder: dto.display_order ?? 0,
       launchPhase: dto.launch_phase ?? 1,
@@ -485,6 +488,7 @@ export class AdminCatalogService {
     const oldValues = {
       base_price_cents: service.basePriceCents,
       is_active: service.isActive,
+      safety_guidance_ar: service.safetyGuidanceAr,
     };
 
     if (dto.category_id !== undefined) {
@@ -496,6 +500,7 @@ export class AdminCatalogService {
     if (dto.slug !== undefined) service.slug = dto.slug;
     if (dto.short_description_ar !== undefined) service.shortDescriptionAr = dto.short_description_ar;
     if (dto.full_description_ar !== undefined) service.fullDescriptionAr = dto.full_description_ar;
+    if (dto.safety_guidance_ar !== undefined) service.safetyGuidanceAr = dto.safety_guidance_ar?.trim() || null;
     if (dto.icon_url !== undefined) service.iconUrl = dto.icon_url;
     if (dto.featured_icon_url !== undefined) service.featuredIconUrl = dto.featured_icon_url;
     if (dto.featured_name_ar !== undefined) service.featuredNameAr = dto.featured_name_ar;
@@ -558,6 +563,7 @@ export class AdminCatalogService {
       newValues: {
         base_price_cents: service.basePriceCents,
         is_active: service.isActive,
+        safety_guidance_ar: service.safetyGuidanceAr,
       },
       meta,
     });
@@ -888,11 +894,22 @@ export class AdminCatalogService {
 
   // ── الإضافات الاختيارية ──────────────────────────────────────────────
 
+  /** `createdAt` فاصل تعادل — نفس سبب حقول التسعير بالحرف (docs/08 §149). */
   listAddons(serviceId: string): Promise<ServiceAddon[]> {
     return this.addons.find({
       where: { serviceId },
-      order: { displayOrder: 'ASC' },
+      order: { displayOrder: 'ASC', createdAt: 'ASC' },
     });
+  }
+
+  /** الإضافة الجديدة بلا ترتيب بتتحط في آخر الطابور مش على صفر (docs/08 §149). */
+  private async nextAddonDisplayOrder(serviceId: string): Promise<number> {
+    const row = await this.addons
+      .createQueryBuilder('addon')
+      .select('COALESCE(MAX(addon.display_order), 0)', 'max')
+      .where('addon.service_id = :serviceId', { serviceId })
+      .getRawOne<{ max: string }>();
+    return Number(row?.max ?? 0) + 1;
   }
 
   async createAddon(adminUserId: string, serviceId: string, dto: CreateServiceAddonDto, meta?: AuditActorMeta): Promise<ServiceAddon> {
@@ -904,7 +921,7 @@ export class AdminCatalogService {
       nameEn: dto.name_en ?? null,
       priceCents: dto.price_cents,
       durationMinutes: dto.duration_minutes ?? null,
-      displayOrder: dto.display_order ?? 0,
+      displayOrder: dto.display_order ?? (await this.nextAddonDisplayOrder(serviceId)),
     });
     await this.addons.save(addon);
 

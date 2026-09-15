@@ -407,6 +407,7 @@ parts_amount_cents          INTEGER       DEFAULT 0
 addons_amount_cents         INTEGER       DEFAULT 0
 surge_amount_cents          INTEGER       DEFAULT 0
 discount_amount_cents       INTEGER       DEFAULT 0
+instapay_discount_cents     INTEGER       DEFAULT 0          -- جزء خصم InstaPay فقط؛ يعاد عند رفض تحويل معلّق، ولا يلمس خصم الكوبون/العمارة
 tax_amount_cents            INTEGER       DEFAULT 0
 subtotal_cents              INTEGER       DEFAULT 0
 total_amount_cents          INTEGER       DEFAULT 0
@@ -518,13 +519,16 @@ caption VARCHAR(255) NULL, taken_at TIMESTAMPTZ, location GEOGRAPHY(POINT) NULL
 ### 6.6 `order_assignments` (محاولات التوزيع — مهم للتحليل)
 
 ```sql
-id, order_id FK, technician_id FK,
+id, order_id FK, technician_id FK, provider_company_id FK NULL,
 assignment_round SMALLINT,   -- الدفعة رقم كام
 distance_km NUMERIC(6,2), estimated_eta_minutes SMALLINT,
 assignment_status ENUM,      -- sent | viewed | accepted | rejected | timeout | cancelled
 rejection_reason_code VARCHAR(40) NULL,
 sent_at, responded_at, expires_at TIMESTAMPTZ
 ```
+
+`provider_company_id` يسجل أن المحرك رشّح **الشركة** كمقدم للخدمة ثم اختار هذا الفني من
+طاقمها؛ لا يُملأ لمجرد انتماء الفني لشركة أو عند اختيار فني فردي.
 
 ### 6.7 `cancellation_reasons`
 
@@ -653,7 +657,7 @@ CHECK (قيدا المحفظة إما كلاهما NULL أو كلاهما موج
 ### 8.1 `ratings`
 
 ```sql
-id, order_id FK UNIQUE, rated_by_user_id FK, rated_user_id FK,
+id, order_id FK, rated_by_user_id FK, rated_user_id FK,
 rating_type ENUM,                  -- customer_to_technician | technician_to_customer
 overall_rating SMALLINT,           -- 1..5
 punctuality_rating SMALLINT NULL,
@@ -664,7 +668,8 @@ comment TEXT NULL,
 tags TEXT[] NULL,                  -- ['ملتزم','نضيف','شرح كويس']
 is_published BOOLEAN DEFAULT true,
 is_flagged BOOLEAN DEFAULT false, flagged_reason TEXT NULL,
-moderated_by_user_id UUID NULL, created_at
+moderated_by_user_id UUID NULL, created_at,
+UNIQUE (order_id, rating_type)     -- تقييم واحد لكل اتجاه؛ الطرفان يقيّمان باستقلال
 ```
 
 ### 8.2 `complaints`

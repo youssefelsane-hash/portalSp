@@ -62,6 +62,8 @@ export interface HomepageContentDto {
     placeholder: string;
   };
   tips: HomepageTipDto[];
+  /** قسم «ابدأ مشروعك» (تشطيب الشقق) ظاهر ولا لأ — زرار إخفاء/إظهار عند الأدمن (docs/08 §146). */
+  projects_enabled: boolean;
   // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت مُدارة من الأدمن. الباك-إند بيضمن
   // إنها مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل).
   hero_eyebrow: string;
@@ -157,6 +159,10 @@ export interface PricingFieldOptionDto {
   label_ar: string;
 }
 
+// الـAPI يقبل array لحقول multi_select ثم يطبعها كسلسلة موحّدة داخل محرك التسعير. وجود النوع
+// هنا يمنع الويب من اختزال اختيار العميل إلى نص حر أو فقده قبل إنشاء الطلب.
+export type PricingFieldValue = string | number | boolean | string[];
+
 export interface PricingFieldDto {
   id: string;
   field_key: string;
@@ -170,6 +176,7 @@ export interface PricingFieldDto {
   max_value: number | null;
   min_files: number | null;
   max_files: number | null;
+  default_value: string | null;
 }
 
 export interface PriceEstimateDto {

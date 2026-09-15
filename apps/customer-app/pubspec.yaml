@@ -50,10 +50,15 @@ dependencies:
   local_auth: ^2.3.0
   mobile_scanner: ^7.4.0
   flutter_svg: ^2.3.0
+  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # لتوقيع توكن أدمن تطويري محليًا في `test_live/_live_support.dart` (HS256) بعد ما
+  # MFA بقى إجباري لحسابات الأدمن — الحزمة موجودة أصلاً في pubspec.lock كـtransitive.
+  crypto: ^3.0.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

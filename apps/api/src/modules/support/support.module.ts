@@ -16,10 +16,11 @@ import { Complaint } from './entities/complaint.entity';
 import { ComplaintAttachment } from './entities/complaint-attachment.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { SupportTicket } from './entities/support-ticket.entity';
+import { User } from '../auth/entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Complaint, ComplaintMessage, ComplaintAttachment, SupportTicket, Order]),
+    TypeOrmModule.forFeature([Complaint, ComplaintMessage, ComplaintAttachment, SupportTicket, Order, User]),
     CustomersModule,
     TechniciansModule,
     PaymentsModule,

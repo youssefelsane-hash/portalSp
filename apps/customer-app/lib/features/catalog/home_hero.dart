@@ -70,9 +70,11 @@ class HomeHero extends StatelessWidget {
                       ? scrollController!.offset.clamp(0.0, 240.0)
                       : 0.0;
                   return Transform.translate(
-                    offset: Offset(0, reduceMotion ? 0 : -offset * 0.1),
+                    // حركة أهدأ من المحتوى لكن أوضح من السابق؛ تكشف امتداد الصورة أثناء
+                    // السحب من غير ما تخرج الصورة من حدود الـhero.
+                    offset: Offset(0, reduceMotion ? 0 : -offset * 0.18),
                     child: Transform.scale(
-                      scale: effectiveImages.isEmpty ? 1 : 1.14,
+                      scale: effectiveImages.isEmpty ? 1 : 1.18,
                       child: child,
                     ),
                   );
@@ -106,8 +108,8 @@ class HomeHero extends StatelessWidget {
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.72),
-                    Colors.black.withValues(alpha: 0.28),
+                    Colors.black.withValues(alpha: 0.64),
+                    Colors.black.withValues(alpha: 0.22),
                     Colors.transparent,
                   ],
                   stops: const [0, 0.6, 1],
@@ -179,7 +181,7 @@ class HomeHero extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Icon(
-                          Icons.verified_outlined,
+                          Icons.verified_user_outlined,
                           color: Colors.white,
                           size: 16,
                         ),
@@ -364,7 +366,10 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
                 SizedBox.square(
                   dimension: 36,
                   child: Material(
-                    color: AppColors.primary,
+                    // لمسة العلامة المسموحة على الشاشة دي (ADR-0093 §2): سهم البحث سمّاه
+                    // المالك بالاسم كمكان مناسب للنحاسي. حلقة التركيز والمؤشّر تحت فضلوا
+                    // كحلي لأنهم حالة تفاعل مش علامة.
+                    color: AppColors.accent,
                     shape: const CircleBorder(),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(

@@ -1,4 +1,5 @@
 import { apiFetchList } from './api-client';
+import type { PricingFieldValue } from './api-types';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
@@ -19,7 +20,7 @@ export interface CreateOrderBody {
   // ADR-0060 — `duration_hours`/`pricing_quantity`/`period_start`/`period_end` اتشالوا:
   // كل مدخلات التسعير بقت جوّه `field_values` (فورم الخدمة الديناميكي). الباك-إند بيرفضهم صراحةً.
   promo_code?: string;
-  field_values?: Record<string, string | number | boolean>;
+  field_values?: Record<string, PricingFieldValue>;
   /** الدفع قبل التوزيع فقط. `payment_method` القديم ما زال مقبولاً من الـAPI مؤقتًا. */
   prepayment_method?: 'card' | 'instapay';
   /**
@@ -114,7 +115,7 @@ export interface CreateMatchPreviewBody {
   requested_technician_company_id?: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   scheduled_at?: string;
-  field_values?: Record<string, string | number | boolean>;
+  field_values?: Record<string, PricingFieldValue>;
   promo_code?: string;
   addon_ids?: string[];
   warranty_plan_id?: string;
@@ -198,6 +199,11 @@ export interface OrderResponseDto {
   inspection_fee_cents: number;
   surge_amount_cents: number;
   discount_amount_cents: number;
+  /**
+   * الجزء اللي جه من حافز الدفع أونلاين بإنستاباي (ADR-0091) — **جزء من**
+   * `discount_amount_cents` مش زيادة عليه. منفصل عشان السبب يتكتب للعميل بدل رقم بلا تفسير.
+   */
+  instapay_discount_cents: number;
   // تكافؤ مع تطبيق العميل — الحقول دي راجعة في نفس الرد وكانت مقروءة في التطبيق بس
   // (اتلقطت بـ`scripts/check-contract-drift.js`).
   level_premium_cents: number;
@@ -210,6 +216,8 @@ export interface OrderResponseDto {
   total_amount_cents: number;
   amount_due_now_cents?: number;
   payment_status: string;
+  /** طريقة الدفع المسجّلة على الطلب (ADR-0089) — بتحدد نبرة خانة InstaPay جوّه الطلب. */
+  payment_method: string | null;
   placed_at: string | null;
   cancelled_at: string | null;
   cancellation_reason_id: string | null;
@@ -326,7 +334,7 @@ export interface PreviewOrderBody {
   address_id: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   scheduled_at?: string;
-  field_values?: Record<string, string | number | boolean>;
+  field_values?: Record<string, PricingFieldValue>;
   addon_ids?: string[];
   promo_code?: string;
   building_code?: string;

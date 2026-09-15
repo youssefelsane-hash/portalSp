@@ -11,7 +11,9 @@ import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { CustomersModule } from '../customers/customers.module';
 import { Order } from '../orders/entities/order.entity';
+import { WarrantyClaim } from '../projects/entities/warranty-entities';
 import { SettingsModule } from '../settings/settings.module';
+import { SupportTicket } from '../support/entities/support-ticket.entity';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { AdminNotificationRoutingController } from './admin-notification-routing.controller';
 import { AdminNotificationTypeConfigsController } from './admin-notification-type-configs.controller';
@@ -35,6 +37,7 @@ import { OrderCrewShortageEscalatedRoutingListener } from './listeners/order-cre
 import { OrderCrewShortageLeaderReminderListener } from './listeners/order-crew-shortage-leader-reminder.listener';
 import { PaymentInstaPayRejectedNotificationListener } from './listeners/payment-instapay-rejected-notification.listener';
 import { PaymentInstaPayConfirmedNotificationListener } from './listeners/payment-instapay-confirmed-notification.listener';
+import { OrderPrepaidMidFlightNotificationListener } from './listeners/order-prepaid-mid-flight-notification.listener';
 import { PaymentInstaPayTransferReportedRoutingListener } from './listeners/payment-instapay-transfer-reported-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
@@ -72,6 +75,8 @@ import { TechnicianAdminActionNotificationListener } from './listeners/technicia
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { WarrantyClaimNotificationListener } from './listeners/warranty-claim-notification.listener';
+import { WarrantyClaimOpenedRoutingListener } from './listeners/warranty-claim-opened-routing.listener';
+import { SupportTicketCreatedRoutingListener } from './listeners/support-ticket-created-routing.listener';
 import { NotificationRoutingService } from './notification-routing.service';
 import { NotificationTypeConfigService } from './notification-type-config.service';
 import { NotificationWorkflowReminderService } from './notification-workflow-reminder.service';
@@ -93,6 +98,8 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
       NotificationWorkflow,
       User,
       Order,
+      SupportTicket,
+      WarrantyClaim,
     ]),
     CustomersModule,
     TechniciansModule,
@@ -114,6 +121,8 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
     { provide: NOTIFICATION_DISPATCHER, useClass: CompositeNotificationDispatcher },
     WelcomeNotificationListener,
     WarrantyClaimNotificationListener,
+    WarrantyClaimOpenedRoutingListener,
+    SupportTicketCreatedRoutingListener,
     RefundNotificationListener,
     OrderCreatedNotificationListener,
     OrderAcceptedNotificationListener,
@@ -162,6 +171,7 @@ import { RecurringNotificationOutboxProcessor } from './recurring-notification-o
     OrderCrewShortageLeaderReminderListener,
     PaymentInstaPayRejectedNotificationListener,
     PaymentInstaPayConfirmedNotificationListener,
+    OrderPrepaidMidFlightNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
     ProjectNotificationOutboxProcessor,
     PaymentNotificationOutboxProcessor,
