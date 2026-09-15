@@ -141,7 +141,8 @@ export class CatalogService {
   }
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
-    return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC' } });
+    // فاصل تعادل `createdAt` — من غيره الإضافات المتعادلة بتتنطّط بين التشغيلات (docs/08 §149).
+    return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC', createdAt: 'ASC' } });
   }
 
   // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: estimateDuration() تحت محتاجة
