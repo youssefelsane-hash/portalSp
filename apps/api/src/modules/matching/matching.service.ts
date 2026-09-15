@@ -399,6 +399,9 @@ export class MatchingService {
             serviceIdExpr: 's.id',
             categoryIdExpr: 's.category_id',
             directServiceAlias: 'member_service',
+            // ADR-0086 — «الترشيح الداخلي جوّه الشركة بيتم على حسب برضه قواعدنا» (طلب مالك
+            // §141 بند ٣). نفس الشرط بالحرف اللي على المسار العام تحت، مش قاعدة موازية.
+            technicianLeadRule: { technicianAlias: 'member', serviceRequiresLeadExpr: 's.requires_technician_lead' },
           })}
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'member.id',
@@ -455,6 +458,10 @@ export class MatchingService {
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
           directServiceAlias: 'ts',
+          // ADR-0086 — الشخص هنا بيبقى **قائد** الطلب، فلو الخدمة بتشترط فني كامل المساعد
+          // ماينفعش يترشّح. الخدمات اللي `requires_technician_lead = false` (الافتراضي) بتعدّي
+          // زي ما هي، فقاعدة ADR-0055 سارية بالحرف زي زمان.
+          technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 's.requires_technician_lead' },
         })}
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى

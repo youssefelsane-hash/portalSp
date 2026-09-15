@@ -475,6 +475,8 @@ export class TechniciansService {
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
           directServiceAlias: 'ts',
+          // ADR-0086 — القوايم دي بتختار **قائد** الطلب، فالاشتراط بيسري عليها.
+          technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 'svc.requires_technician_lead' },
         })}
         -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19، سيناريو "يوسف") — القايمة دي كانت بترشّح
         -- فني للعرض/الاختيار اليدوي حتى لو معندوش current_location خالص (لسه مفتحش تطبيق الفني
@@ -647,6 +649,8 @@ export class TechniciansService {
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
           directServiceAlias: 'ts',
+          // ADR-0086 — القوايم دي بتختار **قائد** الطلب، فالاشتراط بيسري عليها.
+          technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 'svc.requires_technician_lead' },
         })}
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
@@ -804,6 +808,8 @@ export class TechniciansService {
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
           directServiceAlias: 'ts',
+          // ADR-0086 — القوايم دي بتختار **قائد** الطلب، فالاشتراط بيسري عليها.
+          technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 'svc.requires_technician_lead' },
         })}
         AND tp.current_location IS NOT NULL
         -- ADR-0080 — نفس قاعدة قايمة الأفراد فوق: الحصري للشركة مايظهرش حتى كـ«متعارض جدوليًا».
@@ -960,6 +966,8 @@ export class TechniciansService {
             serviceIdExpr: 'svc.id',
             categoryIdExpr: 'svc.category_id',
             directServiceAlias: 'ts',
+            // ADR-0086 — «فيه حد متاح اليوم ده؟» سؤال عن قائد محتمل، فالاشتراط بيسري.
+            technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 'svc.requires_technician_lead' },
           })}
           AND tp.current_location IS NOT NULL
           -- ADR-0080 — «فيه حد متاح اليوم ده؟» سؤال عن الأفراد، فالحصري للشركة مايتحسبش.

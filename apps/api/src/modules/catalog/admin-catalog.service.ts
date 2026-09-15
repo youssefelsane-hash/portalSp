@@ -331,6 +331,7 @@ export class AdminCatalogService {
       depositPercentage: dto.deposit_percentage !== undefined ? String(dto.deposit_percentage) : null,
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       allowsRecurringBooking: dto.allows_recurring_booking ?? false,
+      requiresTechnicianLead: dto.requires_technician_lead ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
       requiresStartTimeOnly: dto.schedule_precision === 'start_time',
       minTechnicianLevel: dto.min_technician_level,
@@ -530,6 +531,7 @@ export class AdminCatalogService {
     }
     if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
     if (dto.allows_recurring_booking !== undefined) service.allowsRecurringBooking = dto.allows_recurring_booking;
+    if (dto.requires_technician_lead !== undefined) service.requiresTechnicianLead = dto.requires_technician_lead;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
     // ADR-0060 §4 — وضع واحد بالظبط بالبناء: مفيش تركيبة غلط ممكن تتبعت أصلاً، فمفيش تحقق تبادل.
     if (dto.schedule_precision !== undefined) service.requiresStartTimeOnly = dto.schedule_precision === 'start_time';

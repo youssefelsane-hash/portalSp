@@ -602,6 +602,23 @@ export function technicianServiceQualificationCondition(opts: {
    * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
    */
   directServiceAlias?: string;
+  /**
+   * **اشتراط أن يكون القائد فنيًا كاملاً** (ADR-0086، طلب مالك §141 بند ٣: «الطلب مسموح له فقط
+   * إن هو يروح لفنيين فقط، بيروح لأحسن فني»).
+   *
+   * اختياري عن قصد، وبيتبعت **بس من المسارات اللي الشخص فيها بيبقى قائد الطلب** (التوزيع،
+   * قايمة اختيار العميل، فحص «فيه حد متاح؟»). مسارات المساعدين والتجنيد بدور صريح مابتبعتوش
+   * — حقنه هناك كان هيمنع المساعدين من إنهم يبقوا مساعدين، وهي نفس الغلطة اللي
+   * `technicianKindCondition()` بيحذّر منها بالنص.
+   *
+   * لو مااتبعتش، الشرط الناتج **مطابق حرفيًا** للسلوك القديم — فمفيش أي مسار بيتغيّر بالسكوت.
+   */
+  technicianLeadRule?: {
+    /** alias صف الفني عشان نقرا منه `technician_kind` — مثلاً `tp` أو `member`. */
+    technicianAlias: string;
+    /** تعبير بوليان بيقول إن الخدمة بتشترط قائدًا فنيًا — مثلاً `svc.requires_technician_lead`. */
+    serviceRequiresLeadExpr: string;
+  };
 }): string {
   // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
   const notExcluded = `NOT EXISTS (
@@ -609,6 +626,17 @@ export function technicianServiceQualificationCondition(opts: {
           WHERE tes.technician_id = ${opts.technicianIdExpr}
             AND tes.service_id = ${opts.serviceIdExpr}
         )`;
+
+  // ADR-0086 — الشرط بيتحقن **بس** لما الكولر يطلبه صراحةً. الخدمة اللي
+  // `requires_technician_lead = false` (الافتراضي لكل الخدمات القايمة) بتعدّي زي ما هي بالظبط،
+  // فقاعدة ADR-0055 («المساعد المؤهّل زيه زي الفني») تفضل سارية بالحرف من غير أي تغيير.
+  const leadRule = opts.technicianLeadRule
+    ? `
+        AND (
+          ${opts.technicianLeadRule.serviceRequiresLeadExpr} IS NOT TRUE
+          OR ${opts.technicianLeadRule.technicianAlias}.technician_kind = 'technician'
+        )`
+    : '';
 
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
@@ -630,7 +658,7 @@ export function technicianServiceQualificationCondition(opts: {
           )
         )
         -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
-        AND ${notExcluded}`;
+        AND ${notExcluded}${leadRule}`;
 }
 
 /**

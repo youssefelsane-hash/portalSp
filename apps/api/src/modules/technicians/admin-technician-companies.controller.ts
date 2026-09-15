@@ -7,6 +7,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { SetCompanyPriceMultiplierDto } from './dto/set-company-price-multiplier.dto';
+import { SetCompanyRecruitmentPolicyDto } from './dto/set-company-recruitment-policy.dto';
 import {
   toBranchResponseDto,
   toCompanyResponseDto,
@@ -76,6 +77,30 @@ export class AdminTechnicianCompaniesController {
       admin.sub,
       id,
       dto.price_multiplier,
+      dto.note ?? null,
+      audit,
+    );
+    return toCompanyResponseDto(company);
+  }
+
+  /**
+   * **سياسة تجنيد الشركة** (ADR-0086، طلب مالك §141 بند ٨): تقدر تجنّد من مجمع المنصة كله
+   * لطلباتها، ولا مقفولة على طاقمها؟
+   *
+   * `technician_companies.manage` مش `orders.adjust_price`: ده قرار حدود تشغيلية مش تسعير.
+   */
+  @Patch(':id/recruitment-policy')
+  @RequirePermission('technician_companies.manage')
+  async setRecruitmentPolicy(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCompanyRecruitmentPolicyDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const company = await this.companiesService.setRecruitmentPolicy(
+      admin.sub,
+      id,
+      dto.allows_external_recruitment,
       dto.note ?? null,
       audit,
     );

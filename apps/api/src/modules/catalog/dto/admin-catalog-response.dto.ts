@@ -78,6 +78,8 @@ export interface AdminServiceResponseDto {
   deposit_percentage: number | null;
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
+  /** ADR-0086 — قائد الطلب لازم يكون فني كامل (المساعد ماياخدش الطلب كقائد). */
+  requires_technician_lead: boolean;
   show_unavailable_providers: boolean;
   // ADR-0063/0066 — سياسة تحديد السعر والمعاينة (migration 0247). كانت في الداتابيز والكيان
   // وما وصلتش الرد، فواجهة الأدمن ماكانتش تقدر تعرضها ولا تعدّلها.
@@ -143,6 +145,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
     allows_date_range_booking: service.allowsDateRangeBooking,
     allows_recurring_booking: service.allowsRecurringBooking,
+    requires_technician_lead: service.requiresTechnicianLead,
     show_unavailable_providers: service.showUnavailableProviders,
     price_certainty_mode: service.priceCertaintyMode,
     assessment_route_policy: service.assessmentRoutePolicy,
