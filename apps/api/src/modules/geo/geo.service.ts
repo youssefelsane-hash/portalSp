@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -8,6 +8,8 @@ import { ServiceZone } from './entities/service-zone.entity';
 
 @Injectable()
 export class GeoService {
+  private readonly logger = new Logger(GeoService.name);
+
   constructor(
     @InjectRepository(City) private readonly cities: Repository<City>,
     @InjectRepository(Area) private readonly areas: Repository<Area>,
@@ -78,7 +80,30 @@ export class GeoService {
     );
     const cityHasAnyBoundary = Number(count) > 0;
     if (!cityHasAnyBoundary) {
-      return this.findZoneForCity(cityId);
+      // **الرجوع ده بقى مسموع بدل ما يكون صامت** (بلاغ المالك ١٠ في §141: «غيّرت العنوان
+      // لمنطقة سعرها أعلى والسعر مااتغيّرش»).
+      //
+      // السبب مش بَقّة في التسعير — التسعير شغّال. السبب إن النطاق **بلا مضلّع مرسوم مستحيل
+      // يتطابق مع عنوان**، فكل عناوين المدينة بترسّى على أقدم نطاق نشط وبالتالي على سعره.
+      // الأدمن بيدخل يحطّ تسعير لنطاق تاني، الحفظ بينجح، والنتيجة صفر — بلا أي إشارة.
+      //
+      // التحذير بيتسجّل **بس لما يكون فيه أكتر من نطاق نشط**: مدينة بنطاق واحد مالهاش أي
+      // غموض (كل العناوين نطاقها واحد فعلاً)، فالتحذير هناك ضوضاء. `diagnoseZoneCoverage()`
+      // تحت بيعرض نفس الحالة للأدمن في اللوحة.
+      const zone = await this.findZoneForCity(cityId);
+      const [{ active_zones: activeZones }] = await this.dataSource.query<{ active_zones: number }[]>(
+        `SELECT COUNT(*)::int AS active_zones FROM service_zones
+         WHERE city_id = $1 AND is_active = true AND deleted_at IS NULL`,
+        [cityId],
+      );
+      if (Number(activeZones) > 1) {
+        this.logger.warn(
+          `تسعير المناطق معطّل فعليًا في المدينة ${cityId}: ${activeZones} نطاق نشط ومفيش ولا واحد ` +
+            `عنده حدود مرسومة، فكل العناوين بترسّى على النطاق «${zone?.nameAr ?? '—'}» وبسعره. ` +
+            `ارسم حدود النطاقات من لوحة الأدمن عشان العنوان يحدد النطاق فعلاً.`,
+        );
+      }
+      return zone;
     }
 
     const rows = await this.dataSource.query<{ id: string }[]>(
@@ -95,5 +120,43 @@ export class GeoService {
 
     if (rows.length === 0) return null;
     return this.serviceZones.findOne({ where: { id: rows[0].id } });
+  }
+
+  /**
+   * **تشخيص تغطية النطاقات لكل مدينة** — عشان الأدمن يشوف بعينه إن تسعير المناطق شغّال ولا لأ.
+   *
+   * الحالة اللي بيمسكها (بلاغ المالك ١٠ في §141): مدينة فيها أكتر من نطاق نشط وسعر مختلف لكل
+   * واحد، بس **مفيش حدود مرسومة** — فالعنوان مالوش أي أثر على السعر. ده أسوأ من ميزة ناقصة:
+   * الأدمن ضابط تسعير وفاكره شغّال.
+   *
+   * مافيهوش أي رأي عن الصح والغلط: بيرجّع الأرقام والحالة، والواجهة هي اللي بتعرضها.
+   */
+  async diagnoseZoneCoverage(cityId?: string): Promise<
+    {
+      city_id: string;
+      city_name_ar: string;
+      active_zone_count: number;
+      zones_with_boundary_count: number;
+      /** `true` لما تسعير المناطق في المدينة دي مالوش أي أثر فعلي. */
+      zone_pricing_inert: boolean;
+    }[]
+  > {
+    return this.dataSource.query(
+      `
+      SELECT c.id AS city_id,
+             c.name_ar AS city_name_ar,
+             COUNT(z.id)::int AS active_zone_count,
+             COUNT(z.boundary)::int AS zones_with_boundary_count,
+             (COUNT(z.id) > 1 AND COUNT(z.boundary) = 0) AS zone_pricing_inert
+      FROM cities c
+      LEFT JOIN service_zones z
+        ON z.city_id = c.id AND z.is_active = true AND z.deleted_at IS NULL
+      WHERE c.is_active = true
+        AND ($1::uuid IS NULL OR c.id = $1)
+      GROUP BY c.id, c.name_ar
+      ORDER BY (COUNT(z.id) > 1 AND COUNT(z.boundary) = 0) DESC, c.name_ar ASC
+      `,
+      [cityId ?? null],
+    );
   }
 }

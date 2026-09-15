@@ -17,6 +17,11 @@ describe('AdminOperationsOverviewService.getOverview() (docs/08 §36.2)', () => 
 
   let dataSource: DataSource;
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
+  // رقم الطلب كان `TESTOPS-${label}`.slice(0, 24) — **بلا `runId` خالص**، فأي صف فاضل من تشغيل
+  // سابق بيصطدم في `orders_order_number_key`. النجاح قبل كده كان صدفة (قاعدة نضيفة).
+  let orderSeq = 0;
+  /** معرّفات الطلبات اللي الاختبار عملها — التنظيف بيمشي عليها بالاسم بدل `LIKE` على البادئة. */
+  const orderIds: string[] = [];
   const ids = {
     country: '',
     city: '',
@@ -74,7 +79,7 @@ describe('AdminOperationsOverviewService.getOverview() (docs/08 §36.2)', () => 
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, scheduled_at, crew_shortage_escalated_at)
        VALUES (20,$1,$2,$3,$4,$5,$6,$7,'pending',30000,0,$8,$9) RETURNING id`,
       [
-        `TESTOPS-${opts.label}`.slice(0, 24),
+        `OPS-${runId}-${(orderSeq += 1)}`.slice(0, 24),
         ids.customerProfile,
         opts.technicianId,
         opts.serviceId,
@@ -85,6 +90,7 @@ describe('AdminOperationsOverviewService.getOverview() (docs/08 §36.2)', () => 
         opts.crewShortageEscalated ? new Date() : null,
       ],
     );
+    orderIds.push(order.id as string);
     return order.id as string;
   }
 
@@ -153,7 +159,14 @@ describe('AdminOperationsOverviewService.getOverview() (docs/08 §36.2)', () => 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
-      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTOPS-%`]);
+      // **التوابع الأول**: إنشاء الطلب بيولّد خيط محادثة، والحذف المباشر بيقع على
+      // `chat_threads_order_id_fkey`. والحذف بقى بالمعرّفات بدل `LIKE 'TESTOPS-%'` — البادئة
+      // اتغيّرت وقت إصلاح تصادم أرقام الطلبات، فالتنظيف القديم كان هيسيب كل صفوفه وراه بصمت.
+      if (orderIds.length) {
+        await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`, [orderIds]);
+        await q(`DELETE FROM chat_threads WHERE order_id = ANY($1::uuid[])`, [orderIds]);
+        await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
+      }
       await q(`DELETE FROM technician_categories WHERE technician_id = ANY($1::uuid[])`, [technicianProfiles]);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = ANY($1::uuid[])`, [technicianProfiles]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianProfiles]);
