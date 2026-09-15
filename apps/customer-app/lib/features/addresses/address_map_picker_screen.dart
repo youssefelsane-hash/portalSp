@@ -74,9 +74,22 @@ class _AddressMapPickerScreenState extends State<AddressMapPickerScreen> {
         appBar: AppBar(
           title: const Text('حدد موقعك على الخريطة'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(_picked),
-              child: const Text('تأكيد الموقع', style: TextStyle(color: Colors.white)),
+            // **بَقّة حقيقية اتلقطت (بلاغ المالك 2026-09-15)**: «الكلمة مش ظاهرة للعميل، ولكن
+            // مكان الزرار بيدوس وبيشتغل».
+            //
+            // السبب: النص كان `Colors.white` **ثابت**، والـ`AppBarTheme` في الوضع الفاتح
+            // خلفيته `Colors.white` كمان (app_theme.dart) — أبيض على أبيض. الزرار كان موجود
+            // وشغّال وبس غير مقروء، وده أسوأ من غيابه: العميل بيفتكر إن مفيش تأكيد أصلاً.
+            //
+            // الإصلاح مش تغيير اللون بس — الزرار بقى `FilledButton` بألوان الثيم، فهو الفعل
+            // الأساسي في الشاشة ومقروء في الوضعين (فاتح وغامق) من غير أي لون ثابت.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(_picked),
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text('تأكيد الموقع'),
+              ),
             ),
           ],
         ),
