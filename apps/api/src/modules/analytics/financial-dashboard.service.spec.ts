@@ -212,7 +212,17 @@ describe('FinancialDashboardService — لوحة المال وفحص التسو�
       // مسقّفة عند ١٠٠، فلو الرقم اتحسب منها كان هيقول أقل من الحقيقة.
       expect(snapshot.unreconciled_count).toBe(report.total_issues);
       expect(report.total_issues).toBeGreaterThanOrEqual(report.issues.length);
-      expect(report.issues_truncated).toBe(report.total_issues > report.issues.length);
+      // **كل عيّنة بتتقاس بإجماليها هي** — مش بالإجمالي المشترك. `issues_truncated` موثّق صراحةً
+      // في الخدمة إنه بيخص عيّنة **دفتر القيود** بس، و`total_issues` بيضم فوقه المخالفات
+      // التشغيلية (طلب مقفول بلا تسوية… إلخ) على مستوى النظام كله. المقارنة القديمة كانت بتخلط
+      // الاتنين، فكانت بتعدّي بالصدفة لما النظام مافيهوش أي مخالفة تشغيلية — وتفشل أول ما suite
+      // تانية في نفس الجولة تسيب طلب `completed` غير مدفوع وراها. ده مش تهاون: الثابت الحقيقي
+      // اللي الاختبار موجود عشانه (العدد الكامل مش طول العيّنة) لسه متشدّد عليه فوق وتحت.
+      expect(report.issues_truncated).toBe(report.ledger_issues_total > report.issues.length);
+      expect(report.operational_issues_truncated).toBe(
+        report.operational_issues_total > report.operational_issues.length,
+      );
+      expect(report.total_issues).toBe(report.ledger_issues_total + report.operational_issues_total);
       expect(report.is_balanced).toBe(report.total_issues === 0);
     });
   });

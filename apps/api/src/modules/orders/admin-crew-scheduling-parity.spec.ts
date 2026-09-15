@@ -30,6 +30,13 @@ describe('AdminOrdersService — تكافؤ السكدول بين التعيين
   let adminOrdersService: AdminOrdersService;
   let orderTeamService: OrderTeamService;
   const runId = Date.now().toString(36);
+  // عدّاد بدل ما الكود يتبني من `label`: `PARITY${label}${runId}`.slice(0, 20) كان بيقصّ `runId`
+  // لما الـlabel طويل («busy-assistant»/«free-assistant»)، فالاتنين بيطلعوا بنفس الكود ويصطدموا
+  // في `technician_profiles_technician_code_key`. الطول ثابت وقصير هنا فالقصّ مستحيل.
+  let technicianSeq = 0;
+  // نفس السبب بالظبط لأرقام الطلبات: `PARITY-${label}-${runId}`.slice(0, 24) كان بيقصّ `runId`
+  // فطلبين بـlabels مختلفة يطلعوا بنفس الرقم ويصطدموا في `orders_order_number_key`.
+  let orderSeq = 0;
   const ids: Record<string, string> = {};
   const users: string[] = [];
   let phoneCounter = 0;
@@ -54,7 +61,7 @@ describe('AdminOrdersService — تكافؤ السكدول بين التعيين
          (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status,
           technician_kind, current_location)
        VALUES ($1,$2,'x',3,'new','approved',$3, ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
-      [user.id, `PARITY${label}${runId}`.slice(0, 20), kind],
+      [user.id, `PRT${runId}${(technicianSeq += 1)}`.slice(0, 20), kind],
     );
     const profileId = profile.id as string;
     await q(`INSERT INTO technician_categories (technician_id, category_id, verification_status, is_active) VALUES ($1,$2,'approved',true)`, [
@@ -81,7 +88,7 @@ describe('AdminOrdersService — تكافؤ السكدول بين التعيين
          (date_trunc('day', now() AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo') + ($8::int || ' hours')::interval)
        RETURNING id`,
       [
-        `PARITY-${label}-${runId}`.slice(0, 24),
+        `PRT-${runId}-${(orderSeq += 1)}`.slice(0, 24),
         ids.customerProfile,
         opts.technicianId,
         ids.service,

@@ -111,16 +111,45 @@ describe('configureHttpLayer — الثقة في الـproxy', () => {
   });
 });
 
+/**
+ * الثابت اللي الاختبارات دي بتحرسه: **مايتسربش أي شيء من class-validator نفسه** — لا اسم قيد
+ * (`isUuid`) ولا نصه الإنجليزي. اسم الحقل نفسه مش من دول: ده حقل في جسم الطلب، العميل هو اللي
+ * بعته، وموثّق في `docs/02-data-dictionary.md`.
+ *
+ * الاختبارات دي كانت بتتوقع كلمة «الحقل» المبهمة لكل حالة. اتغيّرت عمدًا بعد بلاغ المالك
+ * 2026-09-13 (§140/§141): رسالة زي «الحقل يحتوي اختيارًا غير مسموح» بتسدّ الباب تمامًا —
+ * لا العميل ولا الدعم ولا المطوّر يعرف منها الحقل. النسخة الجديدة بتسمّي الحقل: بالعربي لو له
+ * ترجمة، وباسمه الخام بين «» لو مالوش.
+ */
 describe('validationErrorsToArabic', () => {
-  it.each([
-    ['isUuid', 'الحقل غير صحيح أو الرابط قديم'],
-    ['maxLength', 'الحقل أطول من الحد المسموح'],
-    ['isEnum', 'الحقل يحتوي اختيارًا غير مسموح'],
-    ['isDateString', 'الحقل لازم يكون تاريخًا صحيحًا'],
-    ['isPositive', 'الحقل لازم يكون رقمًا أكبر من صفر'],
-    ['whitelistValidation', 'الحقل غير مسموح'],
-  ])('translates %s without leaking validator internals', (constraint, expected) => {
-    expect(validationErrorsToArabic([{ property: 'internal_field', constraints: { [constraint]: 'English framework text' } }])).toBe(expected);
+  const constraintCases: [string, string][] = [
+    ['isUuid', 'غير صحيح أو الرابط قديم'],
+    ['maxLength', 'أطول من الحد المسموح'],
+    ['isEnum', 'يحتوي اختيارًا غير مسموح'],
+    ['isDateString', 'لازم يكون تاريخًا صحيحًا'],
+    ['isPositive', 'لازم يكون رقمًا أكبر من صفر'],
+    ['whitelistValidation', 'غير مسموح'],
+    ['isLength', 'لازم يكون في الحدود المسموحة'],
+  ];
+
+  it.each(constraintCases)('بيترجم %s من غير ما يسرّب أي شيء من الـvalidator', (constraint, tail) => {
+    const message = validationErrorsToArabic([
+      { property: 'internal_field', constraints: { [constraint]: 'English framework text' } },
+    ]);
+    expect(message).toContain(tail);
+    expect(message).not.toContain(constraint);
+    expect(message).not.toContain('English framework text');
+    expect(message).not.toBe('البيانات المرسلة غير صحيحة');
+  });
+
+  it('الحقل اللي له ترجمة عربية بيظهر بيها', () => {
+    expect(validationErrorsToArabic([{ property: 'description', constraints: { isLength: 'x' } }])).toContain('سبب البند');
+  });
+
+  it('والحقل اللي مالوش ترجمة بيظهر باسمه الخام — عشان الرسالة تفضل قابلة للتشخيص', () => {
+    expect(validationErrorsToArabic([{ property: 'selection_mode', constraints: { isIn: 'x' } }])).toContain(
+      '«selection_mode»',
+    );
   });
 });
 

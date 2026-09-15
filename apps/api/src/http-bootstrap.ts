@@ -71,7 +71,11 @@ export function validationErrorsToArabic(errors: ValidationError[]): string {
   if (!error) return 'البيانات المرسلة غير صحيحة';
 
   const constraint = Object.keys(error.constraints ?? {})[0] ?? '';
-  const label = FIELD_LABELS_AR[error.property] ?? 'الحقل';
+  // **الاسم الخام بيتعرض لو مفيش ترجمة** بدل كلمة «الحقل» المبهمة. الخريطة فوق مستحيل تغطّي كل
+  // حقل في ٢٠ موديول، والفرق عملي: «الحقل يحتوي اختيارًا غير مسموح» مالهاش أي دلالة، بينما
+  // «scheduled_at يحتوي اختيارًا غير مسموح» بتقول للمطوّر وللدعم فين المشكلة بالظبط. الأسماء
+  // دي أسماء حقول الـAPI العامة (موثّقة في docs/02) — مش تفاصيل داخلية بتتسرّب.
+  const label = FIELD_LABELS_AR[error.property] ?? (error.property ? `«${error.property}»` : 'الحقل');
   const messages: Record<string, string> = {
     whitelistValidation: `${label} غير مسموح`,
     isUuid: `${label} غير صحيح أو الرابط قديم`,
