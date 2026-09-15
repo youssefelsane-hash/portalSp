@@ -146,8 +146,8 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     ids.category = category.id;
     // إجمالي 1000ج (100000 قرش)، إيداع 30% = 30000 قرش بالظبط.
     const [serviceDeposit] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, unit_name_ar, commission_percentage, warranty_days, deposit_required, deposit_percentage)
-       VALUES ($1,$2,$3,'formula',100000,'قطعة',20,0,true,30) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, unit_name_ar, commission_percentage, warranty_days, deposit_required, deposit_percentage, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',100000,'قطعة',20,0,true,30, false) RETURNING id`,
       [ids.category, `خدمة إيداع ${runId}`, `test-service-deposit-${runId}`],
     );
     ids.serviceDeposit = serviceDeposit.id;
@@ -172,8 +172,8 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       ],
     );
     const [serviceNoDeposit] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'formula',100000,20,0) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',100000,20,0, false) RETURNING id`,
       [ids.category, `خدمة عادية إيداع ${runId}`, `test-service-no-deposit-${runId}`],
     );
     ids.serviceNoDeposit = serviceNoDeposit.id;

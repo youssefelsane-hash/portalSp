@@ -151,8 +151,8 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
     ]);
     ids.category = category.id;
     const [service] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'formula',30000,20,0) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',30000,20,0, false) RETURNING id`,
       [ids.category, `خدمة اقتران قياسي ${runId}`, `test-service-sdp-${runId}`],
     );
     ids.service = service.id;

@@ -138,8 +138,8 @@ describe('OrdersService.create() — اشتقاق الاستعجال من الت
     ]);
     ids.category = category.id;
     const [service] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'formula',30000,20,0,true) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',30000,20,0,true, false) RETURNING id`,
       [ids.category, `خدمة طوارئ ${runId}`, `test-service-emg-${runId}`],
     );
     ids.service = service.id;
