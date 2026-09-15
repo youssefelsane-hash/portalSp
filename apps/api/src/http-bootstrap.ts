@@ -22,6 +22,39 @@ export interface HttpLayerOptions {
 }
 
 /**
+ * **أسماء الحقول اللي المستخدم بيشوفها** — العربي هنا هو نص الواجهة نفسه مش ترجمة حرفية
+ * لاسم الـAPI.
+ *
+ * ليه اتضافت (بلاغ مالك 2026-09-13): الفني كان بيحاول يضيف قطعة غيار فيترفض بـ«البيانات
+ * المرسلة غير صحيحة» وخلاص. الرسالة دي مابتقولش **أي حقل** فيه المشكلة، فلا الفني يعرف
+ * يصلّح ولا اللي بيشخّص يعرف يبدأ منين. القرار القديم («أسماء API مش لغة منتج») صح، بس
+ * تطبيقه كان بيدي رسالة مسدودة — فالحل إننا نسمّي الحقل **بلغة المنتج** بدل ما نسكت عنه.
+ *
+ * الحقول اللي مش في القايمة بترجع لـ«الحقل» العام زي الأول بالظبط — مفيش تسريب لأي اسم داخلي.
+ */
+const FIELD_LABELS_AR: Record<string, string> = {
+  description: 'سبب البند',
+  diagnosis: 'التشخيص',
+  reason: 'السبب',
+  admin_notes: 'ملاحظات الإدارة',
+  name_ar: 'اسم البند',
+  quantity: 'الكمية',
+  unit_price_cents: 'سعر الوحدة',
+  quoted_amount_cents: 'السعر',
+  new_amount_cents: 'السعر الجديد',
+  amount_cents: 'المبلغ',
+  phone_number: 'رقم الموبايل',
+  otp_code: 'كود التحقق',
+  full_name: 'الاسم',
+  scope_included: 'الشغل الشامل',
+  scope_excluded: 'الشغل غير الشامل',
+  role_label: 'الدور',
+  problem_description: 'وصف المشكلة',
+  title: 'العنوان',
+  new_scheduled_at: 'الموعد الجديد',
+};
+
+/**
  * ترجمة أخطاء class-validator عند الباب بدل ما تتسرّب أسماء validators أو حقول تقنية للعميل.
  * الرسائل اليدوية داخل الخدمات تظل كما هي؛ هذه الدالة فقط لما الإطار هو صاحب الخطأ.
  */
@@ -38,9 +71,7 @@ export function validationErrorsToArabic(errors: ValidationError[]): string {
   if (!error) return 'البيانات المرسلة غير صحيحة';
 
   const constraint = Object.keys(error.constraints ?? {})[0] ?? '';
-  // أسماء API لا ينبغي أن تصبح جزءًا من لغة المنتج. نذكر «الحقل» بشكل بسيط لأن الواجهة أصلًا
-  // تعرف اسم المدخل المعروض للمستخدم، بينما الاسم الداخلي قد يتغير.
-  const label = 'الحقل';
+  const label = FIELD_LABELS_AR[error.property] ?? 'الحقل';
   const messages: Record<string, string> = {
     whitelistValidation: `${label} غير مسموح`,
     isUuid: `${label} غير صحيح أو الرابط قديم`,
@@ -58,6 +89,18 @@ export function validationErrorsToArabic(errors: ValidationError[]): string {
     max: `${label} أكبر من الحد المسموح`,
     arrayMaxSize: `${label} يحتوي عناصر أكثر من المسموح`,
     arrayMinSize: `${label} يحتاج عناصر إضافية`,
+    // `isLength` كان **ناقص بالكامل** رغم إن `@Length()` مستخدمة في ٩٥ مكان في الـDTOs —
+    // يعني كل مخالفة طول في الـAPI كلها كانت بتطلع «البيانات المرسلة غير صحيحة» العامة.
+    // ده بالظبط اللي خلّى بلاغ «الفني مش قادر يضيف قطعة غيار» مستحيل يتشخّص من الرسالة.
+    isLength: `${label} لازم يكون في الحدود المسموحة (مش قصير ولا طويل أوي)`,
+    isNotEmptyObject: `${label} مطلوب`,
+    isDefined: `${label} مطلوب`,
+    isIn: `${label} يحتوي اختيارًا غير مسموح`,
+    isEmail: `${label} لازم يكون بريدًا صحيحًا`,
+    isPhoneNumber: `${label} لازم يكون رقم موبايل صحيح`,
+    isUrl: `${label} لازم يكون رابطًا صحيحًا`,
+    matches: `${label} مكتوب بصيغة غير مقبولة`,
+    isArray: `${label} لازم يكون قائمة`,
   };
   return messages[constraint] ?? 'البيانات المرسلة غير صحيحة';
 }

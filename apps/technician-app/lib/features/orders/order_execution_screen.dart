@@ -517,11 +517,16 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   Future<void> _submitInitialQuote() async {
     final result = await showDialog<_PriceEntryResult>(
       context: context,
+      // التشخيص بقى **إجباري** في عقد الباك-إند (ADR-0084 §2): العرض ده بيتراجع إداريًا،
+      // وعرض سعر بلا تشخيص مكتوب مالوش أي قيمة مراجعة. كان `requireReason: false` فالحقل
+      // كان بيتبعت `null` والسيرفر بيرفض الطلب كله برسالة عامة (بلاغ مالك 2026-09-13).
       builder: (context) => const _PriceEntryDialog(
         titleAr: 'إرسال سعر بعد المعاينة',
         helperAr:
             'اكتب سعر الشغل فقط. رسم المعاينة المدفوع بيتضاف تلقائيًا في إجمالي العميل.',
-        requireReason: false,
+        requireReason: true,
+        reasonLabelAr: 'التشخيص (إجباري)',
+        reasonHintAr: 'اكتب إيه اللي لقيته بالظبط وإيه اللي محتاج يتعمل',
       ),
     );
     if (result == null) return;
@@ -534,8 +539,11 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       _order = await _repository.submitInitialQuote(
         _order.id,
         quotedAmountCents: result.amountCents,
+        // `requireReason: true` فوق بيضمن إن `note` مش فاضي — والـ`?? ''` هنا عشان النوع بس،
+        // مش سلوك: لو وصل فاضي يوماً ما، السيرفر هيرفض برسالة بتسمّي «التشخيص» (بعد إصلاح
+        // خريطة الرسايل)، مش برسالة عامة.
+        diagnosis: result.note ?? '',
         note: result.note,
-        diagnosis: result.note,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -594,27 +602,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   // كانت فجوة موثّقة صراحة (S7): مفيش UI لمسار عرض السعر أثناء التنفيذ — الباك-إند
   // (order-items.service.ts) والـ endpoint جاهزين ومختبرين حي، هنا أول استهلاك فعلي من التطبيق.
   Future<void> _proposeQuoteItems() async {
-    final drafts = await showDialog<List<_QuoteItemDraft>>(
+    final items = await showDialog<List<QuoteItemInput>>(
       context: context,
       builder: (context) => const _ProposeQuoteDialog(),
     );
-    if (drafts == null || drafts.isEmpty) return;
+    if (items == null || items.isEmpty) return;
 
     setState(() {
       _acting = true;
       _error = null;
     });
     try {
-      final items = drafts
-          .map(
-            (d) => {
-              'item_type': d.itemType,
-              'name_ar': d.nameAr,
-              'quantity': d.quantity,
-              'unit_price_cents': d.unitPriceCents,
-            },
-          )
-          .toList();
       _order = await _repository.proposeQuoteItems(_order.id, items);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2030,18 +2028,15 @@ class _PhotoGallery extends StatelessWidget {
   }
 }
 
+/// حالة الصف الواحد في حوار اقتراح البنود — **النوع ده مش حمولة العقد**.
+///
+/// الاسم/السبب/الكمية/السعر كلهم عايشين في `TextEditingController`s، فمابيتخزنوش هنا. اللي
+/// متبقّي هو النوع بس لأنه `DropdownButton` مش حقل نص. حمولة العقد نوعها `QuoteItemInput`
+/// (models.dart) وبتتبني في `_submit()` بعد التحقق.
 class _QuoteItemDraft {
   String itemType;
-  String nameAr;
-  double quantity;
-  int unitPriceCents;
 
-  _QuoteItemDraft({
-    this.itemType = 'spare_part',
-    this.nameAr = '',
-    this.quantity = 1,
-    this.unitPriceCents = 0,
-  });
+  _QuoteItemDraft([this.itemType = 'spare_part']);
 }
 
 const Map<String, String> _quoteItemTypeLabelsAr = {
@@ -2068,11 +2063,16 @@ class _PriceEntryDialog extends StatefulWidget {
     required this.titleAr,
     required this.helperAr,
     required this.requireReason,
+    this.reasonLabelAr,
+    this.reasonHintAr,
   });
 
   final String titleAr;
   final String helperAr;
   final bool requireReason;
+  /// عنوان خانة السبب — بيتغيّر حسب السياق (تشخيص معاينة / سبب تعديل).
+  final String? reasonLabelAr;
+  final String? reasonHintAr;
 
   @override
   State<_PriceEntryDialog> createState() => _PriceEntryDialogState();
@@ -2105,8 +2105,12 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
       return;
     }
     final note = _noteController.text.trim();
-    if (widget.requireReason && note.length < 3) {
-      setState(() => _error = 'اكتب سبب التعديل — العميل والإدارة هيشوفوه');
+    // **١٠ حروف مش ٣**: العقد في الباك-إند بيفرض ١٠ (ADR-0084 §2). الحد الأقل هنا كان بيسمح
+    // بنص بيعدّي من الحوار وبيترفض من السيرفر برسالة عامة — أسوأ من المنع من الأول.
+    if (widget.requireReason && note.length < 10) {
+      setState(
+        () => _error = 'اكتب ١٠ حروف على الأقل — العميل والإدارة هيشوفوا الكلام ده',
+      );
       return;
     }
     _close(
@@ -2150,9 +2154,12 @@ class _PriceEntryDialogState extends State<_PriceEntryDialog> {
               controller: _noteController,
               maxLines: 2,
               decoration: InputDecoration(
-                labelText: widget.requireReason
-                    ? 'سبب التعديل (إجباري)'
-                    : 'إيه اللي شامله السعر؟ (اختياري)',
+                labelText:
+                    widget.reasonLabelAr ??
+                    (widget.requireReason
+                        ? 'سبب التعديل (إجباري)'
+                        : 'إيه اللي شامله السعر؟ (اختياري)'),
+                hintText: widget.reasonHintAr,
               ),
             ),
             if (_error != null) ...[
@@ -2185,6 +2192,9 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
   final List<TextEditingController> _nameControllers = [
     TextEditingController(),
   ];
+  final List<TextEditingController> _descriptionControllers = [
+    TextEditingController(),
+  ];
   final List<TextEditingController> _qtyControllers = [
     TextEditingController(text: '1'),
   ];
@@ -2196,6 +2206,7 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
   void dispose() {
     for (final c in [
       ..._nameControllers,
+      ..._descriptionControllers,
       ..._qtyControllers,
       ..._priceControllers,
     ]) {
@@ -2208,6 +2219,7 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
     setState(() {
       _drafts.add(_QuoteItemDraft());
       _nameControllers.add(TextEditingController());
+      _descriptionControllers.add(TextEditingController());
       _qtyControllers.add(TextEditingController(text: '1'));
       _priceControllers.add(TextEditingController());
     });
@@ -2217,33 +2229,63 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
     setState(() {
       _drafts.removeAt(index);
       _nameControllers.removeAt(index).dispose();
+      _descriptionControllers.removeAt(index).dispose();
       _qtyControllers.removeAt(index).dispose();
       _priceControllers.removeAt(index).dispose();
     });
   }
 
+  /// خطأ تحقق لكل صف — بيتعرض جنب الصف نفسه بدل رسالة عامة فوق الحوار.
+  final Map<int, String> _rowErrors = {};
+
   void _submit() {
-    final result = <_QuoteItemDraft>[];
+    // **الصف الناقص بيوقف الإرسال، مابيتشالش بصمت.** قبل كده أي صف فيه بيانات ناقصة كان
+    // بيتعمله `continue` — الفني يملا بند غلط، الحوار يقفل، والبند يختفي بلا أي رسالة. ولو كل
+    // الصفوف ناقصة كانت بتتبعت قايمة فاضية فالسيرفر يرفض الطلب كله برسالة عامة.
+    final errors = <int, String>{};
+    // النوع `QuoteItemInput` (models.dart) مش `_QuoteItemDraft`: الحوار بيطلّع **حمولة العقد**،
+    // و`_QuoteItemDraft` فوق هو حالة الصف وهو بيتكتب بس. الفرق ده هو اللي بيخلّي المترجم يمسك
+    // أي حقل إجباري ناقص بدل ما الفني يكتشفه كرسالة «البيانات المرسلة غير صحيحة».
+    final result = <QuoteItemInput>[];
+
     for (var i = 0; i < _drafts.length; i++) {
       final name = _nameControllers[i].text.trim();
+      final description = _descriptionControllers[i].text.trim();
       final qty = double.tryParse(_qtyControllers[i].text.trim());
       final priceEgp = double.tryParse(_priceControllers[i].text.trim());
-      if (name.isEmpty ||
-          qty == null ||
-          qty <= 0 ||
-          priceEgp == null ||
-          priceEgp < 0) {
-        continue;
+
+      if (name.isEmpty) {
+        errors[i] = 'اكتب اسم البند';
+      } else if (description.length < 10) {
+        // نفس حد الباك-إند بالظبط (ADR-0084 §2) — لو الحدّين اختلفوا، الفني بيعدّي من هنا
+        // ويترفض من هناك برسالة عامة.
+        errors[i] = 'اكتب سبب البند — ١٠ حروف على الأقل، الإدارة بتراجعه';
+      } else if (qty == null || qty <= 0) {
+        errors[i] = 'اكتب كمية أكبر من صفر';
+      } else if (priceEgp == null || priceEgp < 0) {
+        errors[i] = 'اكتب سعر وحدة صحيح';
+      } else {
+        result.add(
+          QuoteItemInput(
+            itemType: _drafts[i].itemType,
+            nameAr: name,
+            description: description,
+            quantity: qty,
+            unitPriceCents: (priceEgp * 100).round(),
+          ),
+        );
       }
-      result.add(
-        _QuoteItemDraft(
-          itemType: _drafts[i].itemType,
-          nameAr: name,
-          quantity: qty,
-          unitPriceCents: (priceEgp * 100).round(),
-        ),
-      );
     }
+
+    if (errors.isNotEmpty) {
+      setState(() {
+        _rowErrors
+          ..clear()
+          ..addAll(errors);
+      });
+      return;
+    }
+
     // راجع docs/08 §108-C — شيل الفوكس من أي حقل مفتوح قبل الإقفال عشان نتجنب
     // Flutter assertion '_dependents.isEmpty' (شاشة حمرا + الطلب بيعلّق).
     FocusScope.of(context).unfocus();
@@ -2305,6 +2347,14 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                             labelText: 'اسم البند',
                           ),
                         ),
+                        TextField(
+                          controller: _descriptionControllers[i],
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: 'سبب البند (إجباري)',
+                            hintText: 'ليه محتاج البند ده؟ الإدارة بتراجع الكلام ده',
+                          ),
+                        ),
                         Row(
                           children: [
                             Expanded(
@@ -2334,6 +2384,17 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
                             ),
                           ],
                         ),
+                        if (_rowErrors[i] != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              _rowErrors[i]!,
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                         if (i < _drafts.length - 1) const Divider(),
                       ],
                     ),
