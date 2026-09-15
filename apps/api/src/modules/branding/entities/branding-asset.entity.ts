@@ -8,6 +8,8 @@ export enum BrandingAssetType {
   PRIMARY_LOGO = 'primary_logo',
   LOGO_MARK = 'logo_mark',
   SPLASH = 'splash',
+  /** بانر مستطيل جوّه الشاشة الرئيسية (ADR-0095) — بيختفي بالكامل لحد ما الأدمن يرفع صورة. */
+  HOME_BANNER = 'home_banner',
 }
 
 /**

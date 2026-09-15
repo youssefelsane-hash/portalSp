@@ -34,6 +34,7 @@ export class BookingSlotsController {
       days: result.days.map((day) => ({
         day: day.day,
         available_technicians: day.availableTechnicians,
+        idle_technicians: day.idleTechnicians,
         is_earliest: day.isEarliest,
       })),
       lead_hours: result.leadHours,

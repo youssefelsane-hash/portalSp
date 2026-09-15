@@ -10,6 +10,7 @@ import '../../design/app_theme.dart';
 import '../../design/cached_remote_image.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
+import '../../design/network_image_box.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../addresses/models.dart';
@@ -97,6 +98,8 @@ class _HomeScreenState extends State<HomeScreen> {
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
   BrandingLogo? _heroBackground;
+  /// بانر الشاشة الرئيسية (ADR-0095). `null` أو `isDefault` ⇒ القسم مابيترسمش أصلاً.
+  BrandingLogo? _homeBanner;
   ImageProvider<Object>? _legacyHeroImageProvider;
   int _activeSlide = 0;
   Timer? _slideTimer;
@@ -136,6 +139,20 @@ class _HomeScreenState extends State<HomeScreen> {
     _brandingRepository
         .fetchHeroBackground()
         .then(_applyLegacyHeroBackground)
+        .catchError((_) {});
+    // بانر الشاشة الرئيسية — تحميل مستقل زي باقي المحتوى الاختياري: فشله بيخفي البانر بس
+    // ومابيلمسش أي حاجة تانية في الشاشة.
+    _brandingRepository
+        .fetchHomeBanner()
+        .then((banner) {
+          if (!mounted) return;
+          setState(() => _homeBanner = banner);
+          if (banner != null && !banner.isDefault && banner.url.isNotEmpty) {
+            // نفس الحماية اللي على صور الـhero بالظبط: التحميل المسبق بيمنع «الفراغ الأبيض
+            // بعدين الصورة تنطّ» أول ما القسم يوصل للشاشة.
+            unawaited(_precacheHeroImage(cachedRemoteImageProvider(banner.url)));
+          }
+        })
         .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
@@ -568,6 +585,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                         },
                       ),
+                    _buildHomeBannerSection(context),
                     _buildTipsSection(context),
                     _buildSupportSection(context),
                   ],
@@ -602,6 +620,35 @@ class _HomeScreenState extends State<HomeScreen> {
   // raster حقيقية) بدل النص الثابت "أسطى" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على
   // الأبليكيشن" — التطبيق أصلاً مكانش بيستهلك /branding خالص). errorBuilder يرجع للنص لو تحميل
   // الصورة فشل لأي سبب (شبكة، رابط اترفض)، مش بيوقف التطبيق أبدًا.
+
+  /// **بانر الشاشة الرئيسية** (ADR-0095، docs/08 §150 بند ٣).
+  ///
+  /// طلب المالك: «تضيفلي مكان أحط فيه الصورة، تكون ظاهرة بالهيئة المستطيلة الجميلة دي».
+  ///
+  /// بيختفي بالكامل طالما الأدمن مارفعش صورة (`isDefault`) — نفس فلسفة رسالة الثقة وقسم
+  /// النصايح: قسم فاضي أسوأ من مفيش قسم.
+  ///
+  /// **الحماية اللي المالك طلبها بالاسم** («نفس الحماية اللي على الصور التانية») جاية من
+  /// `NetworkImageBox` نفسها، مش متكتبة هنا من جديد: `frameBuilder` بدل `loadingBuilder`
+  /// (مفيش وميض مع كل إعادة بناء)، `gaplessPlayback` (مفيش فراغ أبيض لما الرابط يتغيّر)،
+  /// `cacheWidth` (فك ترميز بحجم العرض مش بحجم الملف)، وعنصر نائب بدل أيقونة الصورة المكسورة
+  /// لو التحميل فشل. ونسبة العرض ثابتة فالمساحة محجوزة من أول رسمة ⇒ مفيش قفزة في التخطيط.
+  Widget _buildHomeBannerSection(BuildContext context) {
+    final banner = _homeBanner;
+    if (banner == null || banner.isDefault || banner.url.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: NetworkImageBox(
+        imageUrl: banner.url,
+        // ٣:١ — نفس نسبة الأصل الافتراضي في `branding-defaults.ts`، فاللي الأدمن بيشوفه في
+        // المعاينة هو اللي العميل بيشوفه.
+        aspectRatio: 3 / 1,
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
+      ),
+    );
+  }
 
   // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
   // خالص لو الأدمن مسحها كلها (نفس فلسفة رسالة الثقة/بيانات الدعم — بيختفي بهدوء بدل قسم فاضي).

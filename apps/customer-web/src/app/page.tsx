@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
-import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
+import { fetchHeroBackground, fetchHomeBanner, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
 import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
 import { CategoryTile } from '@/components/catalog/category-tile';
 import { useCatalogZone } from '@/lib/catalog-zone';
@@ -68,6 +68,8 @@ export default function HomePage() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [heroImages, setHeroImages] = useState<string[]>([]);
   const [heroBackgroundUrl, setHeroBackgroundUrl] = useState<string | null>(null);
+  // بانر الشاشة الرئيسية (ADR-0095) — `null` يعني الأدمن مارفعش صورة، فالقسم مابيترسمش خالص.
+  const [homeBannerUrl, setHomeBannerUrl] = useState<string | null>(null);
   // كل نداء من التنين بيرفع بِتّه — التدرّج الاحتياطي مابيتعرضش غير لما **الاتنين** يخلصوا،
   // وإلا بيرجع الوميض من الشباك تاني (صورة splash موجودة بس ردّها وصل متأخر شوية).
   const [heroSettled, setHeroSettled] = useState({ content: false, branding: false });
@@ -98,6 +100,11 @@ export default function HomePage() {
       .then((asset) => setHeroBackgroundUrl(asset.is_default ? null : asset.url))
       .catch(() => {})
       .finally(() => setHeroSettled((s) => ({ ...s, branding: true })));
+    // مستقل عن `heroSettled` عمدًا: البانر جوّه المحتوى ومالوش علاقة بوميض الـhero، فربطه
+    // بيهم كان هيأخّر ظهور الشاشة كلها على نداء إضافي.
+    fetchHomeBanner()
+      .then((asset) => setHomeBannerUrl(asset.is_default ? null : asset.url))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -425,6 +432,26 @@ export default function HomePage() {
               </Link>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* **بانر الشاشة الرئيسية** (ADR-0095، docs/08 §150 بند ٣) — «تضيفلي مكان أحط فيه
+          الصورة، تكون ظاهرة بالهيئة المستطيلة الجميلة دي».
+
+          نفس حماية باقي صور الصفحة: `aspect-[3/1]` بيحجز المساحة من أول رسمة فمفيش قفزة
+          تخطيط، و`loading="lazy"` لأن البانر تحت الطية، و`onError` بيخفي الخانة كلها بدل
+          أيقونة صورة مكسورة. وبيختفي تمامًا لو الأدمن مارفعش صورة. */}
+      {homeBannerUrl && (
+        <section className="mt-14" aria-label="بانر">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={homeBannerUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="aspect-[3/1] w-full rounded-2xl object-cover"
+            onError={() => setHomeBannerUrl(null)}
+          />
         </section>
       )}
 

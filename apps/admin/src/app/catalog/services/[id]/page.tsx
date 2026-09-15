@@ -578,8 +578,11 @@ export default function ServiceDetailPage() {
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
+      // الفواصل المقبولة: فاصلة لاتينية، فاصلة عربية (،)، وسطر جديد — الأدمن بيكتب عربي
+      // فالفاصلة العربية هي اللي بتطلع من الكيبورد، وكانت بتعدّي كجزء من الكلمة نفسها
+      // فتبقى كلمة بحث مالهاش أي مطابقة (docs/08 §150 بند ٥).
       search_keywords: (form.get('search_keywords') as string)
-        .split(',')
+        .split(/[,،\n]/)
         .map((k) => k.trim())
         .filter((k) => k.length > 0),
     };
@@ -827,16 +830,21 @@ export default function ServiceDetailPage() {
                 </p>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>
-                <Input
+                <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة أو بسطر جديد)</Label>
+                {/* كان `Input` بسطر واحد وسقف ٣٠ كلمة (docs/08 §150 بند ٥). السقف بقى ٣٠٠،
+                    وخانة سطر واحد فيها ٣٠٠ كلمة مستحيل تتقرا أو تتراجع — فبقت Textarea
+                    والفاصل بقى فاصلة **أو** سطر جديد عشان اللصق من ملف يشتغل زي ما هو. */}
+                <Textarea
                   id="svc_search_keywords"
                   name="search_keywords"
-                  defaultValue={service.search_keywords.join(', ')}
-                  placeholder="مثال: سخان مياه, تسريب حوض, صرف مسدود"
+                  rows={4}
+                  defaultValue={service.search_keywords.join('، ')}
+                  placeholder={'مثال: سخان مياه، تسريب حوض، صرف مسدود\nسخان، سخانات، الماتور'}
                 />
                 <p className="text-sm text-muted-foreground">
                   دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) — البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط
-                  لها كلماتها يدويًا هنا.
+                  لها كلماتها يدويًا هنا. تقدر تحط لحد ٣٠٠ كلمة؛ المكرّر والفاضي بيتشالوا لوحدهم.
+                  حاليًا: {service.search_keywords.length} كلمة.
                 </p>
               </div>
             </div>

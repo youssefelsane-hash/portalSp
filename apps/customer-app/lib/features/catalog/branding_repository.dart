@@ -51,4 +51,16 @@ class BrandingRepository {
     if (json == null) return null;
     return BrandingLogo.fromJson(json);
   }
+
+  /// بانر الشاشة الرئيسية (ADR-0095، docs/08 §150 بند ٣) — **مستقل عن خلفية الـhero فوق**:
+  /// ده صورة مستطيلة جوّه محتوى الصفحة، مش خلفية وراء نص.
+  ///
+  /// `isDefault = true` معناها الأدمن مارفعش صورة لسه ⇒ **الخانة كلها بتختفي**. مفيش عنصر
+  /// نائب بيتعرض للعميل، لأن مفيش محتوى إعلاني عام صح نعرضه بدل صورة المالك.
+  Future<BrandingLogo?> fetchHomeBanner() async {
+    final data = await _branding();
+    final json = data?['home_banner'] as Map<String, dynamic>?;
+    if (json == null) return null;
+    return BrandingLogo.fromJson(json);
+  }
 }
