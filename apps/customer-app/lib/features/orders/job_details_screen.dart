@@ -207,9 +207,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children:
-                              (List.of(_pricingFields)..sort(
-                                    (a, b) => a.fieldKey.compareTo(b.fieldKey),
-                                  ))
+                              (List.of(_pricingFields)..sort(comparePricingFields))
                                   .map(
                                     (field) => buildPricingFieldWidget(
                                       context,

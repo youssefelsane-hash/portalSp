@@ -52,4 +52,25 @@ void main() {
     // الاستجابة القديمة بلا `schedule_precision` لا يجب أن تخفي خطوة الساعة من الحجز.
     expect(service.requiresStartTime, true);
   });
+
+  test('حقول التسعير تترتب بالرقم الذي حدده الأدمن وليس باسم الحقل', () {
+    PricingField field(String key, int order) => PricingField.fromJson({
+      'id': key,
+      'field_key': key,
+      'display_order': order,
+      'label_ar': key,
+      'field_type': 'text',
+      'is_required': false,
+      'unit_ar': null,
+      'options': null,
+      'min_value': null,
+      'max_value': null,
+      'min_files': null,
+      'max_files': null,
+    });
+
+    final fields = [field('field_10', 10), field('field_1', 1)]
+      ..sort(comparePricingFields);
+    expect(fields.map((item) => item.fieldKey), ['field_1', 'field_10']);
+  });
 }

@@ -262,6 +262,7 @@ class PricingFieldOption {
 class PricingField {
   final String id;
   final String fieldKey;
+  final int displayOrder;
   final String labelAr;
   final String fieldType;
   final bool isRequired;
@@ -275,6 +276,7 @@ class PricingField {
   PricingField({
     required this.id,
     required this.fieldKey,
+    required this.displayOrder,
     required this.labelAr,
     required this.fieldType,
     required this.isRequired,
@@ -291,6 +293,7 @@ class PricingField {
   factory PricingField.fromJson(Map<String, dynamic> json) => PricingField(
     id: json['id'] as String,
     fieldKey: json['field_key'] as String,
+    displayOrder: (json['display_order'] as num?)?.toInt() ?? 0,
     labelAr: json['label_ar'] as String,
     fieldType: json['field_type'] as String,
     isRequired: json['is_required'] as bool,
@@ -303,6 +306,15 @@ class PricingField {
     minFiles: json['min_files'] as int?,
     maxFiles: json['max_files'] as int?,
   );
+}
+
+/// ترتيب واحد للحقول في كل شاشات حجز العميل. الرقم الأصغر يظهر أولًا، والـfield key
+/// مجرد فاصل ثابت عند تساوي رقمين، وليس مصدر الترتيب الأساسي.
+int comparePricingFields(PricingField a, PricingField b) {
+  final byDisplayOrder = a.displayOrder.compareTo(b.displayOrder);
+  return byDisplayOrder != 0
+      ? byDisplayOrder
+      : a.fieldKey.compareTo(b.fieldKey);
 }
 
 // محرك الإنتاجية (docs/06 §3.1-§3.6) — مطابق لـ apps/api/src/modules/catalog/dto/standard-data-response.dto.ts.

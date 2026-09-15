@@ -1485,7 +1485,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       ];
     }
     final sortedFields = [..._pricingFields]
-      ..sort((a, b) => a.fieldKey.compareTo(b.fieldKey));
+      ..sort(comparePricingFields);
     return [
       const SizedBox(height: 16),
       Text(
