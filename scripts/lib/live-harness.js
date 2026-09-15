@@ -581,7 +581,13 @@ class LiveHarness {
           stdio: 'pipe',
         });
       } catch (err) {
-        console.log(`تنبيه: تنظيف طلبات الخدمة ${serviceId} فشل — ${String(err).slice(0, 160)}`);
+        // **السبب الحقيقي بيتطبع، مش سطر «Command failed» بس.** `execFileSync` بيحط رسالة
+        // العملية في `stderr` وبيسيب `err.message` سطرًا عامًا — فالتحذير القديم كان طريق
+        // مسدود بالظبط زي رسالة تحقق بلا اسم حقل: بتعرف إن فيه فشل ومتعرفش ليه.
+        const detail = (err.stderr?.toString() || err.stdout?.toString() || '').trim();
+        console.log(
+          `تنبيه: تنظيف طلبات الخدمة ${serviceId} فشل — ${detail || String(err).slice(0, 200)}`,
+        );
       }
     }
     const techs = await this.q(
