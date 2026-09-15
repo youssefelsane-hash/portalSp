@@ -20,6 +20,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
+import { CandidateOperationalLoad } from '../technicians/technician-day-capacity.sql';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { buildPricingContext } from '../pricing/pricing-context';
@@ -587,10 +588,29 @@ export class OrderCreationService {
       ) {
         throw new ApiException(ErrorCode.VAL_001, 'معاينة الحجز لا تخص هذه الخدمة أو العنوان', HttpStatus.CONFLICT);
       }
-      if (dto.request_remote_quote || dto.original_order_id || dto.repeat_frequency || dto.schedule_slot_id) {
+      // **المنع هنا مقصور على اللي بيتناقض فعلاً مع «منفّذ مثبّت»** (بلاغ المالك ١ في §141).
+      //
+      // القاعدة مكتوبة أصلاً فوق `FINGERPRINT_FIELDS` في `booking-match-context.ts`: حقل يدخل
+      // الحساب **لو وبس لو** بيغيّر السعر أو المرشّح. المنع القديم كان بيضم حقلين مابيعملوش
+      // لا ده ولا ده، فكان بيقفل العميل تمامًا:
+      //
+      //  - `repeat_frequency`: مش في البصمة خالص. التكرار بيعمل **قالب** بيولّد طلبات جديدة
+      //    بعدين، ومابيغيّرش لا سعر الطلب ده ولا منفّذه. العميل اللي عدّى على المطابقة
+      //    التلقائية وبعدين اختار «أسبوعي» كان بيترفض بلا أي سبب حقيقي — وده البلاغ بالحرف.
+      //    وزيادة: المنفّذ المثبّت بينتقل للقالب (تحت) فالعميل بياخد **نفس الفني كل أسبوع**،
+      //    وهو اللي بيطلبه أصلاً لما يكرّر.
+      //  - `schedule_slot_id`: في البصمة، فأي اختلاف بين التذكرة والإنشاء بيمسكه فحص الهاش
+      //    تحت برسالة **بتسمّي الحقول اللي اتغيّرت**. وفوق كده فيه فحص صريح تحت (سطر ~812)
+      //    إن فني السلوت لازم يطابق الفني المطلوب. يعني الحالة الخطر متغطية مرتين بدقة،
+      //    والمنع الشامل كان بيرفض كمان الحالة السليمة (معاينة اتعملت بنفس السلوت).
+      //
+      // الباقي بيفضل ممنوع لأنه تناقض حقيقي: `request_remote_quote` معناه **مفيش منفّذ**
+      // وقت الحجز (الإدارة بتسعّر وتوزّع بعدين)، و`original_order_id` إعادة زيارة تحت الضمان
+      // ليها قواعد منفّذ وتسعير خاصة بيها.
+      if (dto.request_remote_quote || dto.original_order_id) {
         throw new ApiException(
           ErrorCode.VAL_001,
-          'معاينة المنفّذ لا تُجمع مع تقييم الصور أو إعادة الزيارة أو التكرار أو السلوت',
+          'معاينة المنفّذ لا تُجمع مع تقييم الصور أو إعادة الزيارة تحت الضمان',
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -838,10 +858,28 @@ export class OrderCreationService {
       if (rangeDays < 0 || rangeDays > 14) {
         throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن لازم يكون بين يوم و14 يوم', HttpStatus.BAD_REQUEST);
       }
+      // **حمل الشغلانة الحقيقي بيدخل البحث** (بلاغ المالك ٢ في §141).
+      //
+      // البحث ده كان بيسأل «فيه حد متاح اليوم ده؟» عن **شغلانة يوم واحد افتراضية**، مهما كانت
+      // الشغلانة الحقيقية يومين أو تلاتة. النتيجة اللي المالك وصفها بالحرف: «تخلي العميل يختار
+      // اليوم اللي إنت قلت عليه إنه فاضي، ويحط شغلانة كبيرة، فتطلع الناس كلها مش متاحة».
+      //
+      // ده كان **آخر مكان** فاضل بيسأل السؤال ناقص: `order-reschedule` (مرتين) و«متاح تاني
+      // إمتى؟» في `technicians.service` كلهم بيبعتوا الحمل من وقت ADR-0064 §3، والمكان ده
+      // اتنسي. دلوقتي التلاتة بيسألوا نفس السؤال بالظبط فبيدّوا نفس الإجابة.
+      const rangeCandidateLoad = await this.estimateCandidateLoad(service, zone.id, dto);
       for (let offset = 0; offset <= rangeDays; offset += 1) {
         const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
-         
-        const eligible = await this.techniciansService.hasEligibleTechnicianForDate(service.id, zone.id, address.id, candidateDay);
+
+        const eligible = await this.techniciansService.hasEligibleTechnicianForDate(
+          service.id,
+          zone.id,
+          address.id,
+          candidateDay,
+          undefined,
+          undefined,
+          rangeCandidateLoad,
+        );
         if (eligible) {
           resolvedScheduledAtIso = candidateDay.toISOString();
           break;
@@ -1484,7 +1522,11 @@ export class OrderCreationService {
       // للمقارنة بـminimum_monthly_orders من واجهة الأدمن، تفصيل منفصل تمامًا عن الخصم نفسه).
       if (building) {
         const discountCents = Math.round((order.totalAmountCents * Number(building.discountPercentage)) / 100);
-        order.discountAmountCents = discountCents;
+        // **تراكمي مش إسناد** (ADR-0085): الإسناد كان بيدوس على خصم كود الخصم فوق، فطلب عليه
+        // الاتنين كان `total_amount_cents` فيه مخصوم صح (طرح مرتين) بس `discount_amount_cents`
+        // بيقول رقم واحد منهم بس — والحقل ده بيتقري في تقارير المال وفي شاشة العميل («الخصم
+        // المطبّق»)، يعني رقم غلط معروض. لازم يتصلح قبل ما نضيف مصدر خصم تالت تحت.
+        order.discountAmountCents += discountCents;
         order.totalAmountCents -= discountCents;
         await manager.save(order);
       }
@@ -2019,6 +2061,52 @@ export class OrderCreationService {
    * يمنع المصدرين التشغيليين من التنافس على نفس الطلب. قرار الإداري يحدد مصدر الخدمة،
    * وليس تطبيق قديم أو عميل يرسل payload مختلفاً.
    */
+  /**
+   * **مدة الشغلانة وعدد أيامها قبل ما اليوم نفسه يتحدد** — مدخل بحث «أقرب يوم متاح» في النطاق المرن.
+   *
+   * ليه ينفع يتحسب بدري كده: المدة والأيام مخرجات المعادلة (أو البيانات القياسية)، ومابيعتمدوش
+   * على اليوم المختار خالص. اللي بيعتمد على اليوم هو **الاستعجال ورسومه** بس — وعشان كده
+   * بيتبعت `isEmergency: false` هنا صراحةً: تقدير محايد للحمل، مش تسعير. التسعير الحقيقي
+   * بيتحسب بعد ما اليوم يتحدد زي ما هو بالظبط، فمفيش أي أثر على السعر النهائي.
+   *
+   * الفشل بيرجّع حمل فاضي بدل ما يكسر الحجز: ده تحسين لجودة الاقتراح، والطلب لازم يعدّي حتى لو
+   * التقدير مانفعش (نفس قاعدة «أي فشل مساعد يتلقّط ويرجّع بأمان» في CLAUDE.md).
+   */
+  private async estimateCandidateLoad(
+    service: Service,
+    zoneId: string,
+    dto: CreateOrderDto,
+  ): Promise<CandidateOperationalLoad | undefined> {
+    try {
+      // مسار البيانات القياسية أولاً — نفس أولوية `durationEstimate ?? estimate` المستخدمة
+      // تحت وقت بناء الطلب، عشان البحث والتخزين يتفقوا على نفس الرقم.
+      const standard = await this.resolveStandardDurationEstimate(service, dto);
+      if (standard) {
+        // `DurationEstimate` بيدّي أيام بس (مفيش دقايق فيه) — والـSQL بيرجع لمدة الخدمة
+        // الافتراضية لما الدقايق تبقى null، وده المطلوب هنا بالظبط.
+        return { durationMinutes: null, estimatedDurationDays: standard.estimated_days ?? null };
+      }
+      const estimate = await this.catalogService.estimate(
+        service.id,
+        zoneId,
+        undefined,
+        false,
+        dto.field_values,
+      );
+      return {
+        durationMinutes: estimate.duration_minutes != null ? Math.ceil(estimate.duration_minutes) : null,
+        estimatedDurationDays: estimate.estimated_duration_days ?? null,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `تقدير حمل الشغلانة للنطاق المرن فشل للخدمة ${service.id} — البحث هيكمل بلا حمل: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  }
+
   private async resolveStandardDurationEstimate(
     service: Service,
     dto: StandardDurationInput,

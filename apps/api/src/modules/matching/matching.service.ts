@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
+import { isCompanyScopedOrder } from './company-scoped-order';
 import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -411,6 +412,9 @@ export class MatchingService {
             serviceIdExpr: 's.id',
             categoryIdExpr: 's.category_id',
             directServiceAlias: 'member_service',
+            // ADR-0086 — «الترشيح الداخلي جوّه الشركة بيتم على حسب برضه قواعدنا» (طلب مالك
+            // §141 بند ٣). نفس الشرط بالحرف اللي على المسار العام تحت، مش قاعدة موازية.
+            technicianLeadRule: { technicianAlias: 'member', serviceRequiresLeadExpr: 's.requires_technician_lead' },
           })}
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'member.id',
@@ -468,6 +472,10 @@ export class MatchingService {
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
           directServiceAlias: 'ts',
+          // ADR-0086 — الشخص هنا بيبقى **قائد** الطلب، فلو الخدمة بتشترط فني كامل المساعد
+          // ماينفعش يترشّح. الخدمات اللي `requires_technician_lead = false` (الافتراضي) بتعدّي
+          // زي ما هي، فقاعدة ADR-0055 سارية بالحرف زي زمان.
+          technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 's.requires_technician_lead' },
         })}
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
@@ -1007,7 +1015,18 @@ export class MatchingService {
           manager,
         );
       }
-      if (!pinnedOnlyCandidates && candidates.length === 0) {
+      // **طلب الشركة مابيخرجش من الشركة** (توضيح المالك 2026-09-15: «طالما الشركة كسبت، خلاص
+      // كده إحنا ركنا بقى الناس اللي برا الشركة كلهم»).
+      //
+      // التوسيع للمنصة كلها هنا كان بيدّي شغلانة **شركة** لفني من برّه — والعميل شايف اسم
+      // الشركة، والسعر اتحسب بمعامل الشركة (ADR-0042) مش بمستوى الفرد. يعني مش بس مخالف
+      // لتوقّع العميل، ده كمان سعر مالوش أساس على المنفّذ اللي نفّذ فعلاً.
+      //
+      // والبديل مش «الطلب يضيع»: لو مفيش حد متاح في الشركة، الطلب بيفضل `SEARCHING_TECHNICIAN`
+      // و`MatchingRecoveryService.sweep()` (كل دقيقة) بتعيد المحاولة تلقائيًا — فأول ما عضو
+      // في الشركة يفضى، الطلب بيروح له من غير أي تدخل.
+      const companyScoped = isCompanyScopedOrder(order);
+      if (!pinnedOnlyCandidates && candidates.length === 0 && !companyScoped) {
         candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency, null, false, undefined, manager);
       }
       // ADR-0017 بند 10 — Fallback توسيع النطاق: لو نضبت قايمة الفنيين "المثاليين" (مؤهلين
@@ -1021,7 +1040,17 @@ export class MatchingService {
           BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK,
         );
         if (nextRound >= broadenAfterRound) {
-          candidates = await this.findEligibleTechnicians(order, batchSize, null, false, null, true, undefined, manager);
+          // نفس القاعدة فوق: التوسيع للمشغولين بيفضل **جوّه الشركة** لو الطلب طلب شركة.
+          candidates = await this.findEligibleTechnicians(
+            order,
+            batchSize,
+            null,
+            false,
+            companyScoped ? order.requestedTechnicianCompanyId : null,
+            true,
+            undefined,
+            manager,
+          );
         }
       }
       // قرار عمل صريح من المالك (2026-08-19) — مفيش إلغاء تلقائي خالص لمجرد مفيش فني اتلاقاله

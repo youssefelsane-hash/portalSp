@@ -18,6 +18,19 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+
+/**
+ * تشخيص تغطية نطاقات المدينة (`GET /admin/service-zones/coverage-diagnostics`).
+ * `zone_pricing_inert` معناها: فيه أكتر من نطاق نشط ومفيش ولا واحد عنده حدود مرسومة، فكل
+ * العناوين بترسّى على نطاق واحد — وبالتالي تسعير المناطق **بلا أثر فعلي**.
+ */
+interface ZoneCoverageDiagnostic {
+  city_id: string;
+  city_name_ar: string;
+  active_zone_count: number;
+  zones_with_boundary_count: number;
+  zone_pricing_inert: boolean;
+}
 import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
@@ -35,6 +48,7 @@ export default function GeoPage() {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [areas, setAreas] = useState<AdminAreaResponseDto[] | null>(null);
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [zoneDiagnostic, setZoneDiagnostic] = useState<ZoneCoverageDiagnostic | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showNewCity, setShowNewCity] = useState(false);
@@ -73,9 +87,16 @@ export default function GeoPage() {
     authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
       .then(setZones)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل نطاقات الخدمة'));
+    // **تشخيص «تسعير المناطق شغّال؟»** (بلاغ المالك ١٠ في §141) — نطاق بلا حدود مرسومة مستحيل
+    // يتطابق مع عنوان، فالتسعير اللي الأدمن ضابطه عليه بيبقى بلا أثر. فشل التشخيص مايكسرش
+    // الصفحة: ده تحذير مساعد مش بيانات أساسية.
+    authedFetch<ZoneCoverageDiagnostic[]>(`/admin/service-zones/coverage-diagnostics?city_id=${cityId}`)
+      .then((rows) => setZoneDiagnostic(rows[0] ?? null))
+      .catch(() => setZoneDiagnostic(null));
   }
 
   function selectCity(cityId: string) {
+    setZoneDiagnostic(null);
     setSelectedCityId(cityId);
     setCatalogZone(null);
     setCatalogAvailability(null);
@@ -286,6 +307,26 @@ export default function GeoPage() {
     <AppShell>
       <PageHeader title="المدن والمناطق ونطاقات الخدمة" />
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      {/* **تحذير «تسعير المناطق مش شغّال»** (بلاغ المالك ١٠ في §141: «غيّرت العنوان لمنطقة
+          سعرها أعلى والسعر مااتغيّرش»). السبب مش التسعير — النطاق بلا مضلّع مرسوم مستحيل
+          يتطابق مع عنوان، فكل العناوين بترسّى على أقدم نطاق نشط وبسعره. الأدمن كان بيضبط
+          تسعير وبيتحفظ ومالوش أي أثر، بلا أي إشارة. */}
+      {zoneDiagnostic?.zone_pricing_inert && (
+        <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+          <p className="font-semibold text-amber-700 dark:text-amber-400">
+            تسعير المناطق في «{zoneDiagnostic.city_name_ar}» مش شغّال فعليًا
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            فيه {zoneDiagnostic.active_zone_count} نطاق نشط ومفيش ولا واحد فيهم حدوده مرسومة على
+            الخريطة. النطاق بلا حدود مستحيل يتطابق مع عنوان العميل، فكل العناوين في المدينة دي
+            بترسّى على أقدم نطاق وبسعره — أي تسعير مختلف بتحطّه على نطاق تاني مالوش أي أثر.
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            الحل: ارسم حدود كل نطاق من زرار «الحدود» جنبه تحت.
+          </p>
+        </div>
+      )}
 
       <Card className="mb-6">
         <CardHeader className="flex-row items-center justify-between">

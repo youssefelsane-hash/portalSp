@@ -150,8 +150,8 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     ]);
     ids.category = category.id;
     const [service] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'formula',100000,20,14,false) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',100000,20,14,false, false) RETURNING id`,
       [ids.category, `خدمة المسار الذهبي ${runId}`, `test-service-gp-${runId}`],
     );
     ids.service = service.id;

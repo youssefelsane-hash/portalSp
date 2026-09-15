@@ -70,6 +70,62 @@ async function deleteOrdersById(db, ids, { log = () => {} } = {}) {
       JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
      WHERE c.confrelid = 'orders'::regclass AND c.contype = 'f'`);
 
+  /**
+   * **كسر الدوائر قبل أي حذف** — `orders` بيشاور على جدول، والجدول بيشاور على `orders` تاني.
+   *
+   * اتلقطت حيًا: `orders.recurring_template_id → recurring_order_templates.id` و
+   * `recurring_order_templates.last_generated_order_id → orders.id`. الاتنين مع بعض دايرة:
+   * حذف القوالب بيفشل لأن الطلبات لسه بتشاور عليها، وحذف الطلبات بيفشل لأن القوالب بتشاور
+   * عليها. **مفيش ترتيب حذف بيحل ده** — لازم طرف من الدايرة يتفكّ الأول.
+   *
+   * الطرف اللي بيتفكّ هو العمود **القابل للـNULL** على `orders` (وجوده اختياري بالتعريف،
+   * فتفريغه مش بيغيّر معنى الصف قبل ما يتحذف أصلاً)، والاكتشاف من الكتالوج مش بقايمة مكتوبة
+   * بالإيد — فأي دايرة جديدة تتحل لوحدها.
+   *
+   * وتفريغ عمود لوحده مش دايمًا كافي: `chk_orders_recurring_identity_pair` بيفرض إن
+   * `recurring_template_id` و`recurring_occurrence_at` يبقوا NULL **مع بعض**. فبنقرا قيود
+   * الـCHECK اللي بتذكر العمود وبنفرّغ معاه كل عمود قابل للـNULL في نفس القيد.
+   */
+  const { rows: cycles } = await db.query(`
+    SELECT a.attname AS column_name, c.confrelid::regclass::text AS target_table
+      FROM pg_constraint c
+      JOIN unnest(c.conkey) k(attnum) ON true
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+     WHERE c.conrelid = 'orders'::regclass
+       AND c.contype = 'f'
+       AND a.attnotnull = false
+       AND c.confrelid <> 'orders'::regclass
+       AND EXISTS (
+         SELECT 1 FROM pg_constraint back
+          WHERE back.conrelid = c.confrelid
+            AND back.contype = 'f'
+            AND back.confrelid = 'orders'::regclass
+       )`);
+  for (const cycle of cycles) {
+    const { rows: paired } = await db.query(
+      `SELECT a.attname AS column_name
+         FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+        WHERE c.conrelid = 'orders'::regclass
+          AND c.contype = 'c'
+          AND a.attnotnull = false
+          AND EXISTS (
+            SELECT 1 FROM pg_attribute self
+             WHERE self.attrelid = c.conrelid AND self.attnum = ANY(c.conkey) AND self.attname = $1
+          )`,
+      [cycle.column_name],
+    );
+    const columns = [...new Set([cycle.column_name, ...paired.map((r) => r.column_name)])];
+    const res = await db.query(
+      `UPDATE orders SET ${columns.map((c) => `${c} = NULL`).join(', ')}
+        WHERE id = ANY($1::uuid[]) AND ${cycle.column_name} IS NOT NULL`,
+      [ids],
+    );
+    if (res.rowCount) {
+      log(`  ${String(res.rowCount).padStart(5)} × orders.${columns.join('+')} اتفرّغت (دايرة مع ${cycle.target_table})`);
+    }
+  }
+
   let related = 0;
   for (const r of refs) {
     if (r.table_name === 'orders') continue; // parent_order_id — بيتعامل معاه بالحذف نفسه

@@ -510,6 +510,10 @@ export class OrderTeamService {
       JOIN users u ON u.id = tp.user_id
       JOIN orders o ON o.id = $1
       JOIN services svc ON svc.id = o.service_id
+      -- ADR-0086 — سياسة تجنيد الشركة. الربط على **طلب الشركة** (assigned_company_id) مش على
+      -- انتماء القائد: الفني اللي في شركة ولما ييجي له طلب خاص بيه بيتعامل كمستقل تمامًا
+      -- (بند ٩، MatchingService.resolveAssignedCompanyId).
+      LEFT JOIN technician_companies order_company ON order_company.id = o.assigned_company_id
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = o.service_id
         AND ts.is_active = true AND ts.verification_status = 'approved'
       CROSS JOIN LATERAL (SELECT location FROM addresses WHERE id = o.address_id) a
@@ -528,6 +532,18 @@ export class OrderTeamService {
         -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
         -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
+        -- **الشركة المقفولة بتجنّد من طاقمها بس** (ADR-0086، طلب مالك §141 بند ٨: «هل الشركة
+        -- دي يحق لها تدعو من الفنيين اللي على المنصة كمان، ولا هم community مقفولة على نفسها»).
+        --
+        -- الشرط بيتفعّل بس لما الطلب **طلب شركة** وسياستها مقفولة. الطلب الفردي (حتى لو قائده
+        -- عضو في شركة) بيعدّي زي ما هو بالظبط — ودي نقطة بند ٩ بالحرف.
+        AND (
+          o.assigned_company_id IS NULL
+          OR order_company.allows_external_recruitment IS TRUE
+          OR tp.company_id = o.assigned_company_id
+        )
+        -- ADR-0087 — الفني والمساعد ليهم شرط تخصص مختلف: حجب الخدمة معناه «مايقودش»، مش
+        -- «مايساعدش». التفريع هنا جاي من الفرع الرئيسي ومتحافظ عليه.
         AND ${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',

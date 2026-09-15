@@ -216,4 +216,10 @@ export interface PaymentChannelDto {
    */
   is_recommended?: boolean;
   recommended_label_ar?: string | null;
+  /**
+   * **خصم الدفع الإلكتروني** بالقرش (ADR-0085، طلب مالك §141 بند ٥). صفر = مفيش خصم.
+   * نفس الرقم اللي الباك-إند بيخصمه وقت الإنشاء — الواجهة بتعرضه مش بتحسبه.
+   */
+  discount_cents?: number;
+  discount_label_ar?: string | null;
 }

@@ -601,6 +601,24 @@ interface TechnicianServiceQualificationOptions {
    * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
    */
   directServiceAlias?: string;
+  /**
+   * **اشتراط أن يكون القائد فنيًا كاملاً** (ADR-0086، طلب مالك §141 بند ٣: «الطلب مسموح له فقط
+   * إن هو يروح لفنيين فقط، بيروح لأحسن فني»).
+   *
+   * اختياري عن قصد، وبيتبعت **بس من المسارات اللي الشخص فيها بيبقى قائد الطلب** (التوزيع،
+   * قايمة اختيار العميل، فحص «فيه حد متاح؟»). مسار المساعدة
+   * (`assistantServiceQualificationCondition`) مابياخدهوش أصلاً — حقنه هناك كان هيمنع
+   * المساعدين من إنهم يبقوا مساعدين، وهي نفس الغلطة اللي `technicianKindCondition()` بيحذّر
+   * منها بالنص.
+   *
+   * لو مااتبعتش، الشرط الناتج **مطابق حرفيًا** للسلوك القديم — فمفيش أي مسار بيتغيّر بالسكوت.
+   */
+  technicianLeadRule?: {
+    /** alias صف الفني عشان نقرا منه `technician_kind` — مثلاً `tp` أو `member`. */
+    technicianAlias: string;
+    /** تعبير بوليان بيقول إن الخدمة بتشترط قائدًا فنيًا — مثلاً `svc.requires_technician_lead`. */
+    serviceRequiresLeadExpr: string;
+  };
 }
 
 function approvedSpecialtyCondition(opts: TechnicianServiceQualificationOptions): string {
@@ -629,20 +647,34 @@ function approvedSpecialtyCondition(opts: TechnicianServiceQualificationOptions)
  * أهلية الشخص لقيادة الطلب مباشرة — **لأي `technician_kind`** (ADR-0087). اعتماد الخدمة/الفئة
  * مطلوب، وحجب الخدمة هو **المفتاح الوحيد** اللي بيمنع وصول الطلب له كقائد، سواء من اختيار
  * العميل أو المطابقة أو التعيين الإداري.
+ *
+ * ADR-0086 — واستثناء واحد فوق كده: الخدمة اللي `requires_technician_lead = true` قيادتها
+ * مقصورة على `technician_kind = 'technician'`. الشرط بيتحقن **بس** لما الكولر يبعت
+ * `technicianLeadRule`، والخدمة اللي العمود فيها `false` (الافتراضي لكل الخدمات القايمة) بتعدّي
+ * زي ما هي بالظبط — فقاعدة ADR-0055/0087 تفضل سارية بالحرف من غير أي تغيير صامت.
  */
 export function technicianServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
+  const leadRule = opts.technicianLeadRule
+    ? `
+        AND (
+          ${opts.technicianLeadRule.serviceRequiresLeadExpr} IS NOT TRUE
+          OR ${opts.technicianLeadRule.technicianAlias}.technician_kind = 'technician'
+        )`
+    : '';
   return `${approvedSpecialtyCondition(opts)}
         AND NOT EXISTS (
           SELECT 1 FROM technician_excluded_services tes
           WHERE tes.technician_id = ${opts.technicianIdExpr}
             AND tes.service_id = ${opts.serviceIdExpr}
-        )`;
+        )${leadRule}`;
 }
 
 /**
  * أهلية المشاركة في طاقم داخل التخصص. الصف في `technician_excluded_services` معناه بالحرف
  * **«مايقودش الخدمة دي»** — مش «مايقربش منها» — فهو مابيمسّش اعتماد الفئة اللي بيسمح له يساعد
  * قائد مؤهل (ADR-0087). إلغاء اعتماد الفئة/الخدمة نفسها هو اللي بيمنعه تمامًا.
+ *
+ * ومابياخدش `technicianLeadRule` عن قصد: الاشتراط ده عن **القيادة**، والمساعد بيساعد.
  */
 export function assistantServiceQualificationCondition(opts: TechnicianServiceQualificationOptions): string {
   return approvedSpecialtyCondition(opts);

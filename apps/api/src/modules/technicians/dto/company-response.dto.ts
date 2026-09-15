@@ -12,6 +12,8 @@ export interface CompanyResponseDto {
   is_trust_verified: boolean;
   /** ADR-0042 — مضاعف سعر الشغل لحجوزات الشركة دي (1 = السعر الأساسي). */
   price_multiplier: number;
+  /** ADR-0086 — هل الشركة تقدر تجنّد من مجمع المنصة كله لطلباتها؟ */
+  allows_external_recruitment: boolean;
   trust_verified_at: string | null;
   trust_verified_note: string | null;
   created_at: string;
@@ -27,6 +29,7 @@ export function toCompanyResponseDto(company: TechnicianCompany): CompanyRespons
     is_trust_verified: company.isTrustVerified,
     // ADR-0042 — الأدمن لازم يشوف المعامل الحالي عشان يقرر يغيّره.
     price_multiplier: Number(company.priceMultiplier),
+    allows_external_recruitment: company.allowsExternalRecruitment,
     trust_verified_at: company.trustVerifiedAt?.toISOString() ?? null,
     trust_verified_note: company.trustVerifiedNote,
     created_at: company.createdAt.toISOString(),

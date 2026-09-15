@@ -287,6 +287,47 @@ export class TechnicianCompaniesService {
    * التوثيق فوق بالحرف. كل تغيير بيتسجّل بقيمته القديمة والجديدة عشان يبقى فيه إجابة مكتوبة
    * لما حد يسأل بعدين "ليه سعر الشركة دي أعلى؟".
    */
+  /**
+   * **سياسة تجنيد الشركة** (ADR-0086، طلب مالك §141 بند ٨).
+   *
+   * الصلاحية `technician_companies.manage` مش `orders.adjust_price`: ده قرار **تشغيلي** عن
+   * حدود الشركة، مش قرار تسعير.
+   */
+  async setRecruitmentPolicy(
+    adminUserId: string,
+    companyId: string,
+    allowsExternalRecruitment: boolean,
+    note: string | null,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianCompany> {
+    const company = await this.companies.findOne({ where: { id: companyId } });
+    if (!company) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة مش موجودة', HttpStatus.NOT_FOUND);
+    }
+    const previous = company.allowsExternalRecruitment;
+    if (previous === allowsExternalRecruitment) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة أصلاً على نفس السياسة دي', HttpStatus.CONFLICT);
+    }
+
+    company.allowsExternalRecruitment = allowsExternalRecruitment;
+    await this.companies.save(company);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: allowsExternalRecruitment
+        ? 'technician_company.external_recruitment_enabled'
+        : 'technician_company.external_recruitment_disabled',
+      entityType: 'technician_company',
+      entityId: company.id,
+      oldValues: { allows_external_recruitment: previous },
+      newValues: { allows_external_recruitment: allowsExternalRecruitment, note },
+      meta,
+    });
+
+    return company;
+  }
+
   async setPriceMultiplier(
     adminUserId: string,
     companyId: string,

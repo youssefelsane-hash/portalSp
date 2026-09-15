@@ -82,7 +82,10 @@ export class BookingMatchPreviewService {
     }
     // ADR-0080 — العميل بيختار **منفّذ**: فني فرد أو شركة. اختيار الشركة بيشغّل توزيع تلقائي
     // **جوّه الشركة** محكوم بنطاق كل عضو (منطقته وفئاته)، فشغل البواب مستحيل يوصل للحداد.
-    const selectedCompanyId = dto.requested_technician_company_id ?? null;
+    // `let` مش `const`: الوضع التلقائي ممكن يثبّت شركة تحت (طلب مالك §141 بند ٣)، وساعتها كل
+    // المسار اللي بعده — التسعير بمعامل الشركة، عرض الشركة كمنفّذ، البصمة — هو **نفس** مسار
+    // «العميل اختار شركة» بالحرف. صفر فرع جديد.
+    let selectedCompanyId = dto.requested_technician_company_id ?? null;
     if (dto.selection_mode === "manual" && !dto.technician_id && !selectedCompanyId) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -178,7 +181,31 @@ export class BookingMatchPreviewService {
       break;
     }
 
-    if (!chosen || !finalPricing) {
+    // ══ الشركات في الترشيح التلقائي (طلب مالك §141 بند ٣) ══════════════════════
+    //
+    // > «عايز الشركات تطلع في الـauto matching، عايز الشركة تطلع زيها زي الفنيين بالضبط.»
+    //
+    // **القاعدة في جملة واحدة**: الشركة بتكسب لو وبس لو هي على **رأس نفس القايمة اللي العميل
+    // كان هيشوفها بنفسه** في الاختيار اليدوي (`listForServiceBooking`). القايمة دي بترتّب
+    // الأفراد والشركات بنفس الصيغة البايزية بالظبط — والتعليق جواها صريح: «الشركة عندها
+    // average_rating وtotal_ratings مجمّعين من أعضائها، فالمقياس ينطبق عليها من غير أي اختراع».
+    //
+    // يعني مفيش نظام ترتيب جديد اتخترع هنا، ومفيش تغيير في **اختيار الفرد** (التوزيع لسه هو
+    // اللي بيحدد أنسب فني). اللي اتضاف سؤال واحد: «هل فيه شركة أحسن من أحسن فرد؟» — والإجابة
+    // بتيجي من القايمة اللي العميل نفسه بيقرا منها، وده أقوى تبرير ممكن لـ«اختاروا لي الأنسب».
+    let autoCompanyDistanceKm: number | null = null;
+    if (dto.selection_mode === 'auto' && !selectedCompanyId && !dto.technician_id) {
+      const topCompany = await this.topRankedCompanyIfBest(pricingInput, previewLoad);
+      if (topCompany) {
+        // التسعير بيتعاد **بمعامل الشركة** (ADR-0042) — سعر محسوب بمستوى فرد مالوش أي معنى هنا.
+        selectedCompanyId = topCompany.companyId;
+        autoCompanyDistanceKm = topCompany.distanceKm;
+        chosen = null;
+        finalPricing = await this.ordersService.previewPrice(userId, { ...pricingInput });
+      }
+    }
+
+    if ((!chosen && !selectedCompanyId) || !finalPricing) {
       throw new ApiException(
         ErrorCode.ORDR_001,
         selectedCompanyId
@@ -207,10 +234,10 @@ export class BookingMatchPreviewService {
       : null;
     let technician: Awaited<ReturnType<TechniciansService['getPublicProfile']>> | null = null;
     try {
-      if (!selectedCompany) technician = await this.techniciansService.getPublicProfile(chosen.technician_id);
+      if (!selectedCompany && chosen) technician = await this.techniciansService.getPublicProfile(chosen.technician_id);
     } catch (err) {
       this.logger.error(
-        `تخطّي الفني ${chosen.technician_id} في معاينة المطابقة — تعذّر قراءة ملفه: ${
+        `تخطّي الفني ${chosen?.technician_id} في معاينة المطابقة — تعذّر قراءة ملفه: ${
           err instanceof Error ? err.message : String(err)
         }`,
         err instanceof Error ? err.stack : undefined,
@@ -236,10 +263,10 @@ export class BookingMatchPreviewService {
     const expiresAt = new Date(Date.now() + ttlSeconds * 1_000);
     // معرّف المنفّذ المثبّت — شركة أو فني، **واحد بالظبط**، ونفس القيمة اللي `create()` هتعيد
     // حساب البصمة بيها (`matchPreviewProviderId`)، وإلا كل حجز بشركة هيترفض بـ«التفاصيل اتغيّرت».
-    const providerId = selectedCompanyId ?? chosen.technician_id;
+    const providerId = selectedCompanyId ?? chosen!.technician_id;
     const exactInput: PreviewOrderDto = selectedCompanyId
       ? { ...pricingInput }
-      : { ...pricingInput, requested_technician_id: chosen.technician_id };
+      : { ...pricingInput, requested_technician_id: chosen!.technician_id };
     const contextHash = bookingMatchContextHash(
       exactInput,
       dto.selection_mode,
@@ -312,7 +339,9 @@ export class BookingMatchPreviewService {
             average_rating: 0,
             total_ratings_count: 0,
             completed_orders_count: 0,
-            distance_km: Number(chosen.distance_km),
+            // الشركة المثبّتة يدويًا: المسافة من العضو المؤهّل. والمختارة تلقائيًا: أقرب عضو
+            // فيها زي ما اتعرض في القايمة المرتّبة.
+            distance_km: chosen ? Number(chosen.distance_km) : (autoCompanyDistanceKm ?? 0),
           }
         : {
             id: technician!.profile.id,
@@ -326,10 +355,54 @@ export class BookingMatchPreviewService {
             average_rating: Number(technician!.profile.averageRating),
             total_ratings_count: technician!.profile.totalRatingsCount,
             completed_orders_count: technician!.profile.completedOrdersCount,
-            distance_km: Number(chosen.distance_km),
+            distance_km: Number(chosen!.distance_km),
           },
       pricing: finalPricing,
     };
+  }
+
+  /**
+   * **أحسن شركة — لو هي أحسن من أي فرد** (طلب مالك §141 بند ٣).
+   *
+   * بيقرا **نفس القايمة اللي العميل بيشوفها** في الاختيار اليدوي
+   * (`TechniciansService.listForServiceBooking`)، وهي أصلاً بترتّب الأفراد والشركات مع بعض
+   * بنفس الصيغة البايزية. لو أول صف فيها شركة ⇒ الشركة هي الأنسب فعلاً، وبنثبّتها. لو أول صف
+   * فرد ⇒ بنرجّع `null` والتوزيع بيفضل هو صاحب القرار زي ما هو بالظبط.
+   *
+   * ليه مانعملش مقارنة نقاط بإيدينا: الفرد بيترتّب في التوزيع بنتيجة مختلفة (عدالة + موثوقية +
+   * أوزان مسافة)، فمقارنتها برقم الشركة كانت هتبقى مقارنة بين مقياسين — عشوائية بشكل مقنّع.
+   * القراءة من قايمة واحدة مرتّبة بمقياس واحد بتشيل السؤال ده من أصله.
+   *
+   * الفشل بيرجّع `null` بدل ما يكسر الحجز: ده **تحسين ترشيح**، والحجز لازم يعدّي من غيره.
+   */
+  private async topRankedCompanyIfBest(
+    pricingInput: PreviewOrderDto,
+    previewLoad: CandidateOperationalLoad,
+  ): Promise<{ companyId: string; distanceKm: number | null } | null> {
+    try {
+      const { items } = await this.techniciansService.listForServiceBooking(
+        pricingInput.service_id,
+        pricingInput.address_id,
+        undefined,
+        pricingInput.scheduled_at ? new Date(pricingInput.scheduled_at) : null,
+        false,
+        true,
+        previewLoad,
+      );
+      // المتاح بس — المتعارض جدوليًا بيتحط آخر القايمة عمدًا ومش صالح لترشيح تلقائي.
+      const available = items.filter((item) => item.availabilityStatus === 'available');
+      const top = available[0];
+      // `distanceKm` بتاع الشركة = أقرب عضو فيها (MIN في الاستعلام) — وده اللي بيتعرض للعميل،
+      // فبناخده معانا بدل ما نقرا مسافة عضو بعينه لسه مش متحدد.
+      return top?.isCompany ? { companyId: top.technicianId, distanceKm: top.distanceKm } : null;
+    } catch (err) {
+      this.logger.warn(
+        `تخطّي ترشيح الشركات في المطابقة التلقائية — تعذّر قراءة القايمة المرتّبة: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
   }
 
   private toPricingInput(dto: CreateBookingMatchPreviewDto): PreviewOrderDto {

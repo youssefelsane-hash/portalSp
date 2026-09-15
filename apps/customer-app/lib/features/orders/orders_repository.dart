@@ -18,6 +18,11 @@ class PaymentChannelAvailability {
   final bool isRecommended;
   final String? recommendedLabelAr;
 
+  /// **خصم الدفع الإلكتروني** بالقرش (ADR-0085) — صفر = مفيش خصم على الوسيلة دي.
+  /// نفس الرقم اللي الباك-إند هيخصمه فعلاً وقت إنشاء الطلب، مش حساب موازي في التطبيق.
+  final int discountCents;
+  final String? discountLabelAr;
+
   PaymentChannelAvailability.fromJson(Map<String, dynamic> json)
     : method = json['method'] as String,
       enabled = json['is_enabled'] as bool? ?? true,
@@ -27,7 +32,9 @@ class PaymentChannelAvailability {
       available = json['is_available'] as bool? ?? false,
       unavailableReason = json['unavailable_reason'] as String?,
       isRecommended = json['is_recommended'] as bool? ?? false,
-      recommendedLabelAr = json['recommended_label_ar'] as String?;
+      recommendedLabelAr = json['recommended_label_ar'] as String?,
+      discountCents = (json['discount_cents'] as num?)?.toInt() ?? 0,
+      discountLabelAr = json['discount_label_ar'] as String?;
 }
 
 class OptionalWarrantyPlan {

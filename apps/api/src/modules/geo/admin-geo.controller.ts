@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminGeoService } from './admin-geo.service';
+import { GeoService } from './geo.service';
 import {
   toAdminAreaResponseDto,
   toAdminCityResponseDto,
@@ -24,7 +25,10 @@ import { UpdateServiceZoneDto } from './dto/update-service-zone.dto';
 @Controller('admin')
 @Roles(UserType.ADMIN)
 export class AdminGeoController {
-  constructor(private readonly adminGeoService: AdminGeoService) {}
+  constructor(
+    private readonly adminGeoService: AdminGeoService,
+    private readonly geoService: GeoService,
+  ) {}
 
   @Get('countries')
   @RequirePermission('geo.view')
@@ -98,6 +102,20 @@ export class AdminGeoController {
   @RequirePermission('geo.view')
   async listServiceZones(@Query('city_id') cityId?: string) {
     return (await this.adminGeoService.listServiceZones(cityId)).map(toAdminServiceZoneResponseDto);
+  }
+
+  /**
+   * **تشخيص «تسعير المناطق شغّال ولا لأ؟»** (بلاغ المالك ١٠ في §141).
+   *
+   * نطاق بلا مضلّع مرسوم **مستحيل يتطابق مع عنوان** — فمدينة فيها أكتر من نطاق نشط ومفيش ولا
+   * واحد فيهم مرسوم، كل عناوينها بترسّى على أقدم نطاق وبسعره. الأدمن بيضبط تسعير لنطاق تاني،
+   * الحفظ بينجح، والنتيجة صفر. الـendpoint ده بيخلّي الحالة دي **مرئية** بدل ما تتكتشف من
+   * شكوى عميل.
+   */
+  @Get('service-zones/coverage-diagnostics')
+  @RequirePermission('geo.view')
+  async zoneCoverageDiagnostics(@Query('city_id') cityId?: string) {
+    return this.geoService.diagnoseZoneCoverage(cityId);
   }
 
   @Post('service-zones')

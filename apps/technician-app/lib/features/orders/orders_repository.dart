@@ -1,6 +1,7 @@
 import '../../core/auth_repository.dart';
 import 'models.dart';
 import 'order.dart';
+import 'quote_item_request.dart';
 
 class OrdersRepository {
   final AuthRepository authRepository;
@@ -252,11 +253,13 @@ class OrdersRepository {
 
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
   // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
-  Future<Order> proposeQuoteItems(String orderId, List<Map<String, dynamic>> items) async {
+  /// شكل السلك متعرّف في `buildQuoteItemRequest` (مكان واحد، وعليه اختبار Dart)، والنوع
+  /// `QuoteItemInput` بيضمن إن كل حقل إجباري موجود **وقت الترجمة**.
+  Future<Order> proposeQuoteItems(String orderId, List<QuoteItemInput> items) async {
     final data = await authRepository.authedRequest(
       'POST',
       '/technician/orders/$orderId/quote-items',
-      body: {'items': items},
+      body: {'items': [for (final item in items) buildQuoteItemRequest(item)]},
     );
     final orderJson = data!['order'] as Map<String, dynamic>;
     return Order.fromJson(orderJson);
@@ -266,19 +269,22 @@ class OrdersRepository {
   ///
   /// مختلف عن [proposeQuoteItems] فوق: ده بيأسس سعر الشغل الأساسي لطلب لسه بلا سعر،
   /// مش بيضيف بنود فوق سعر شغّال.
+  /// `diagnosis` **إجباري** (`SubmitInitialQuoteDto`) — كان `String?` بيتبعت بشرط
+  /// `isNotEmpty`، يعني لو الفني ساب الخانة فاضية الحقل كان بيختفي من الحمولة والسيرفر
+  /// يرفض الطلب كله برسالة عامة. النوع بقى إجباري عشان الغلط ده يتمسك وقت الترجمة.
   Future<Order> submitInitialQuote(
     String orderId, {
     required int quotedAmountCents,
+    required String diagnosis,
     String? note,
-    String? diagnosis,
   }) async {
     final data = await authRepository.authedRequest(
       'POST',
       '/technician/orders/$orderId/submit-initial-quote',
       body: {
         'quoted_amount_cents': quotedAmountCents,
+        'diagnosis': diagnosis,
         if (note != null && note.isNotEmpty) 'note': note,
-        if (diagnosis != null && diagnosis.isNotEmpty) 'diagnosis': diagnosis,
       },
     );
     return Order.fromJson(data!);

@@ -167,8 +167,8 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       // `allows_emergency=true` لازمة بعد ADR-0048: بوابة نفس اليوم (`canAcceptSameDay`) بتترمي
       // **قبل** التسعير، فلو الخدمة قافلة نفس اليوم كان الاختبار تحت هيعدّي على البوابة الغلط
       // ويبطل يختبر `suitable_for_emergency` أصلاً.
-      `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,min_price_cents,max_price_cents,allows_emergency)
-       VALUES ($1,$2,$3,'formula',0,20000,900000,true) RETURNING id`,
+      `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,min_price_cents,max_price_cents,allows_emergency, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',0,20000,900000,true, false) RETURNING id`,
       [ids.category, `خدمة سلسلة ${runId}`, `chain-svc-${runId}`],
     );
     ids.serviceFormula = svc.id;

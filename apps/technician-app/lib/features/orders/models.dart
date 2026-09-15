@@ -346,3 +346,32 @@ class OrderRescheduleRequest {
         createdAt: DateTime.parse(json['created_at'] as String),
       );
 }
+
+/// **بند عرض سعر إضافي — النوع اللي بيمنع تكرار بلاغ 2026-09-13.**
+///
+/// قبل كده `OrdersRepository.proposeQuoteItems()` كانت بتاخد `List<Map<String, dynamic>>`،
+/// يعني شكل الحمولة كان متفق عليه **بالاتفاق الشفهي** بين الشاشة والـrepository ومحدش
+/// بيتحقق منه. لما `description` بقى إجباري في الباك-إند (ADR-0084 §2)، الشاشة فضلت بتبعت
+/// نفس الأربع مفاتيح القديمة، والمترجم عدّاها لأن `Map<String, dynamic>` بيقبل أي حاجة —
+/// فكل محاولة إضافة قطعة غيار من فني حقيقي بقت بترجع «البيانات المرسلة غير صحيحة».
+///
+/// دلوقتي أي حقل إجباري في العقد بيبقى `required` هنا، والمترجم هو اللي بيرفض — مش المستخدم
+/// اللي يكتشف. التحقق الآلي المقابل: `scripts/mobile-api-contract-audit.js`.
+class QuoteItemInput {
+  final String itemType;
+  final String nameAr;
+
+  /// سبب البند — إجباري في العقد بحد أدنى ١٠ حروف (`QuoteItemDto.description`).
+  /// ده النص اللي الأدمن بيراجع بيه الفني في مركز المراجعة، فبلاش يبقى فاضي.
+  final String description;
+  final double quantity;
+  final int unitPriceCents;
+
+  const QuoteItemInput({
+    required this.itemType,
+    required this.nameAr,
+    required this.description,
+    required this.quantity,
+    required this.unitPriceCents,
+  });
+}

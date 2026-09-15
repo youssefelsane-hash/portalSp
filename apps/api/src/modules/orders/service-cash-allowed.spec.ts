@@ -136,16 +136,16 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
     ]);
     ids.category = category.id;
     const [serviceCashDisabled] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, cash_allowed)
-       VALUES ($1,$2,$3,'formula',50000,20,0,false) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, cash_allowed, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',50000,20,0,false, false) RETURNING id`,
       [ids.category, `خدمة بلا كاش ${runId}`, `test-service-no-cash-${runId}`],
     );
     ids.serviceCashDisabled = serviceCashDisabled.id;
     // الافتراضي (cash_allowed مش متبعت أصلاً في الـINSERT، NOT NULL DEFAULT true بيمسكها) — نفس
     // أي خدمة موجودة قبل الـmigration ده بالظبط.
     const [serviceCashEnabled] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
-       VALUES ($1,$2,$3,'formula',50000,20,0) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, requires_start_time_only)
+       VALUES ($1,$2,$3,'formula',50000,20,0, false) RETURNING id`,
       [ids.category, `خدمة عادية ${runId}`, `test-service-default-cash-${runId}`],
     );
     ids.serviceCashEnabled = serviceCashEnabled.id;

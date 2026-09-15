@@ -246,6 +246,19 @@ export class Service {
   @Column({ name: 'allows_recurring_booking', type: 'boolean', default: false })
   allowsRecurringBooking: boolean;
 
+  /**
+   * **قائد الطلب لازم يكون فني كامل** (ADR-0086، طلب مالك §141 بند ٣: «الطلب مسموح له فقط إن
+   * هو يروح لفنيين فقط، بيروح لأحسن فني»).
+   *
+   * `false` افتراضيًا عشان ADR-0055 يفضل ساري بالحرف على كل الخدمات الحالية (المساعد المؤهّل
+   * بياخد الطلب كقائد). الأدمن بيشغّله على الخدمات اللي فعلاً محتاجة فني كامل بس.
+   *
+   * بيتطبّق في `technicianAvailabilityCondition` المشتركة، فبيسري على التوزيع التلقائي
+   * والترشيح الداخلي جوّه الشركة بنفس الحرف — مش محرك تاني.
+   */
+  @Column({ name: 'requires_technician_lead', type: 'boolean', default: false })
+  requiresTechnicianLead: boolean;
+
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — نفس نمط cash_allowed
   // بالحرف. الافتراضي false عمدًا (سلوك جديد كليًا، صفر خدمة موجودة بتعرض مرشّحين متعارضين
   // النهاردة). صفر قراءة له في أي استعلام لسه (Slice B/C من ADR-0030).
