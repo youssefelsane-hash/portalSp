@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
 import { SettingsService } from './settings.service';
+import { bookingWindowMessageAr, resolveBookingWindowSetting } from '../orders/booking-window';
 
 /** كارت "نصايح مفيدة" الواحد — طلب مالك صريح 2026-08-23: الأدمن يقدر يحط لينك صورة جاهزة (مش
  * رفع ملف حقيقي، فجوة موثّقة بديلة أبسط) بدل الـplaceholder اللوني الثابت. `image_url: null` =
@@ -49,9 +50,33 @@ export interface HomepageContentResponseDto {
  * /admin/settings/:key الموجود بالفعل — صفر endpoint إضافي مطلوب (`homepage-content` (admin)
  * page بتستخدمه مباشرة).
  */
+/**
+ * نافذة اختيار الموعد (ADR-0097) — `@Public()` زي باقي محتوى الإعدادات هنا.
+ *
+ * الواجهات بتقرا الرقمين من هنا بدل ما تكتبهم في كودها: لو الأدمن غيّر النافذة، التطبيق
+ * والموقع بيتغيّروا من غير نشر، والأهم إن المنتقي مستحيل يسمح بوقت السيرفر بيرفضه.
+ */
+export interface BookingWindowResponseDto {
+  start_hour: number;
+  end_hour: number;
+  /** نص جاهز للعرض — مصدر واحد للصياغة بدل ما كل واجهة تركّبها. */
+  message_ar: string;
+}
+
 @Controller('settings')
 export class HomepageContentController {
   constructor(private readonly settingsService: SettingsService) {}
+
+  @Public()
+  @Get('booking-window')
+  async getBookingWindow(): Promise<BookingWindowResponseDto> {
+    const window = await resolveBookingWindowSetting(this.settingsService);
+    return {
+      start_hour: window.startHour,
+      end_hour: window.endHour,
+      message_ar: bookingWindowMessageAr(window),
+    };
+  }
 
   @Public()
   @Get('homepage-content')

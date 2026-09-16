@@ -13,6 +13,7 @@ import {
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { resolveDailyCapacityMinutes, technicianDayLoadSubquery } from './technician-day-capacity.sql';
+import { BookingWindow, resolveBookingWindowSetting } from '../orders/booking-window';
 
 /**
  * **اقتراح مواعيد للعميل** (ADR-0088، docs/08 §141).
@@ -115,6 +116,7 @@ export class BookingSlotSuggestionService {
     const [
       leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
       delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds, sequencingWeight,
+      bookingWindow,
     ] = await Promise.all([
       this.settingsService.getNumber('booking.suggestion_lead_hours', 48),
       this.settingsService.getNumber('booking.suggestion_horizon_days', 21),
@@ -127,9 +129,20 @@ export class BookingSlotSuggestionService {
       this.settingsService.getNumber('booking.suggestion_min_hour_spacing', 3),
       this.settingsService.getNumber('booking.suggestion_cache_ttl_seconds', 90),
       this.settingsService.getNumber('booking.suggestion_sequencing_weight', 0.5),
+      resolveBookingWindowSetting(this.settingsService),
     ]);
+    // **نافذة الاقتراح محصورة جوّه نافذة الحجز** (ADR-0097). اقتراح ساعة العميل مش هيعرف
+    // يحجزها هو بالظبط نفس فئة البَقّة اللي ADR-0096 اتكتب عشانها — وعد بحاجة القايمة اللي
+    // بعدها مابتحترمهاش. فالحصر هنا مش تجميل، هو نفس قاعدة «الاقتراح لازم يكون قابل للحجز».
+    const windowedStartHour = Math.max(dayStartHour, bookingWindow.startHour);
+    const windowedEndHour = Math.min(dayEndHour, bookingWindow.endHour);
     return {
-      leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
+      leadHours, horizonDays, count, roominessRatio,
+      dayStartHour: windowedStartHour,
+      // لو الإعدادين اتقاطعوا لدرجة إن النافذة اتقلبت، بنرجع لنافذة الحجز نفسها بدل ما نرجّع
+      // صفر ساعات (الاقتراح بيختفي بلا سبب ظاهر للأدمن).
+      dayEndHour: windowedStartHour <= windowedEndHour ? windowedEndHour : bookingWindow.endHour,
+      bookingWindow,
       delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds,
       // القيمة بتتحصر في [0,1] هنا مش عند القراءة: إعداد غلط (سالب أو أكبر من ١) كان هيقلب
       // إشارة الدرجة ويطلّع ترتيب مالوش أي معنى بدل ما يتجاهل بهدوء.
@@ -224,7 +237,7 @@ export class BookingSlotSuggestionService {
     addressId: string;
     durationMinutes?: number | null;
     estimatedDurationDays?: number | null;
-  }): Promise<{ days: SuggestedDay[]; leadHours: number; horizonDays: number }> {
+  }): Promise<{ days: SuggestedDay[]; leadHours: number; horizonDays: number; bookingWindow: BookingWindow }> {
     const zoneId = await this.resolveZone(opts.customerUserId, opts.addressId);
     const cfg = await this.config();
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
@@ -332,7 +345,7 @@ export class BookingSlotSuggestionService {
     });
 
     if (withCapacity.length === 0) {
-      return { days: [], leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
+      return { days: [], leadHours: cfg.leadHours, horizonDays: cfg.horizonDays, bookingWindow: cfg.bookingWindow };
     }
 
     const best = Math.max(...withCapacity.map((row) => row.availableTechnicians));
@@ -367,7 +380,7 @@ export class BookingSlotSuggestionService {
       .sort((left, right) => left.day.localeCompare(right.day))
       .map((row, index) => ({ ...row, isEarliest: index === 0 }));
 
-    return { days, leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
+    return { days, leadHours: cfg.leadHours, horizonDays: cfg.horizonDays, bookingWindow: cfg.bookingWindow };
   }
 
   /**

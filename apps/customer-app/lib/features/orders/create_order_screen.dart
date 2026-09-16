@@ -9,6 +9,7 @@ import '../../core/work_scope_label.dart';
 import '../../design/app_motion.dart';
 import 'assessment_route.dart';
 import 'booking_scheduled_at.dart';
+import 'booking_window.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -304,6 +305,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // _requestedAt (اللي بيحمل اليوم بس من ScheduleSelectionScreen)، بيتدمجوا وقت الإرسال
   // (_combinedPreciseScheduledAt). المدة بقت ناتج معادلة، مش رقم بيدخّله العميل.
   TimeOfDay? _preciseTime;
+  /// نافذة اختيار الموعد (ADR-0097) — بتتحمّل مع باقي بيانات الحجز، والافتراضي مطابق للسيرفر.
+  BookingWindow _bookingWindow = BookingWindow.fallback;
   DurationEstimate? _durationEstimate;
   bool _estimatingDuration = false;
   String? _durationError;
@@ -358,6 +361,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     if (_selectedAddress != null) _refreshPreview();
     _loadCheckoutOptions();
+    // نافذة اختيار الموعد (ADR-0097) — تحميل مستقل: فشله بيسيب الافتراضي شغّال والسيرفر
+    // بيفضل هو الحارس، فمابيعطّلش الشاشة.
+    BookingWindow.fetch().then((window) {
+      if (mounted) setState(() => _bookingWindow = window);
+    });
   }
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
@@ -706,9 +714,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _pickPreciseTime() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0),
+      initialTime: _preciseTime ?? _bookingWindow.start,
     );
-    if (picked != null && mounted) setState(() => _preciseTime = picked);
+    if (picked == null || !mounted) return;
+    // **المدخل التاني لنفس القاعدة** (ADR-0097): العميل يقدر يغيّر الساعة من شاشة التأكيد
+    // كمان، فالحارس لازم يبقى في المكانين — وإلا فيه طريق بيوصل لوقت السيرفر بيرفضه.
+    if (!_bookingWindow.allows(picked)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_bookingWindow.rejectionAr)),
+      );
+      return;
+    }
+    setState(() => _preciseTime = picked);
   }
 
   // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ

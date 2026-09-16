@@ -91,6 +91,10 @@ interface EligibilityRow {
   not_already_offered: boolean;
   matches_requested_technician: boolean;
   matches_preferred_company: boolean;
+  /** ADR-0086 — الخدمة مشترطة قائدًا فنيًا كامل والشخص ده مساعد. */
+  technician_lead_ok: boolean;
+  /** ADR-0080 — «حصري للشركة» مايظهرش في التوزيع العام. */
+  individually_visible: boolean;
   availability_ok: boolean;
   decision_limit_ok: boolean;
   team_leader_ok: boolean;
@@ -146,11 +150,43 @@ export class MatchingExplainabilityService {
           SELECT 1 FROM technician_zones tz WHERE tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
         ) AS zone_eligible,
         (tp.current_location IS NOT NULL) AS has_location,
-        NOT EXISTS (
-          SELECT 1 FROM order_assignments oa WHERE oa.order_id = $4 AND oa.technician_id = tp.id
+        (
+          NOT EXISTS (
+            SELECT 1 FROM order_assignments oa WHERE oa.order_id = $4 AND oa.technician_id = tp.id
+          )
+          -- **الجدول التاني كان ناقص هنا** (docs/08 §151): المحرك بيستبعد كمان أي حد عليه صف
+          -- عرض حي لنفس الطلب (technician_work_opportunities، context='assignment')، وهو جدول
+          -- مستقل تمامًا عن order_assignments. من غيره المفتّش كان بيقول «مااتبعتلوش الفرصة»
+          -- لواحد المحرك شايفه اتبعتله فعلاً — نفس فئة التناقض اللي §36.6 و§107 اتصلحوا عشانها.
+          AND NOT EXISTS (
+            SELECT 1 FROM technician_work_opportunities two
+            WHERE two.order_id = $4 AND two.technician_id = tp.id
+              AND two.context = 'assignment' AND two.deleted_at IS NULL
+          )
         ) AS not_already_offered,
         ($7::uuid IS NULL OR tp.id = $7) AS matches_requested_technician,
         ($8::uuid IS NULL OR tp.company_id = $8) AS matches_preferred_company,
+        -- ADR-0086 — الخدمة اللي requires_technician_lead = true قيادتها مقصورة على
+        -- technician_kind = 'technician'. الشرط ده مفروض في findEligibleTechnicians (بيتحقن
+        -- في شرط التأهيل بـtechnicianLeadRule) وكان **غايب من المفتّش تمامًا**، فالمفتّش كان
+        -- بيقول «مؤهّل بالكامل» لمساعد المحرك بيرفضه. معمول كـcheck مستقل مش مدموج في
+        -- category_eligible عشان السبب المعروض يقول اللي حصل فعلاً.
+        (s.requires_technician_lead IS NOT TRUE OR tp.technician_kind = 'technician') AS technician_lead_ok,
+        -- ADR-0080 — الفني «الحصري للشركة» مايوصلوش أي توزيع عام. نفس تعبير المحرك بالحرف،
+        -- بما فيه الاستثناء: العضو الحصري مسموح كـ**ممثل لشركته التجارية** لما المحرك هو اللي
+        -- بيختار المنفّذ (مفيش فني محدد مطلوب). كان غايب، فالحصري كان بيبان «مؤهّل» لطلب عام.
+        (
+          tp.company_exclusive = false
+          OR $8::uuid IS NOT NULL
+          OR (
+            $7::uuid IS NULL
+            AND EXISTS (
+              SELECT 1 FROM technician_companies tc
+              WHERE tc.id = tp.company_id AND tc.is_active = true AND tc.deleted_at IS NULL
+                AND NULLIF(BTRIM(tc.commercial_registration_number), '') IS NOT NULL
+            )
+          )
+        ) AS individually_visible,
         EXISTS (
           SELECT 1 FROM technician_profiles tp2
           WHERE tp2.id = tp.id
@@ -237,7 +273,27 @@ export class MatchingExplainabilityService {
           ? 'يطابق الفني المحدد للطلب، أو الطلب مفتوح لأي فني'
           : 'الطلب مقيّد بفني آخر؛ أزل اختيار الفني المحدد لتشغيل المطابقة على الجميع',
       },
-      { key: 'matches_preferred_company', passed: row.matches_preferred_company, labelAr: 'يطابق الشركة/الفريق المطلوب (اعتماد، لو مطلوب)' },
+      {
+        key: 'matches_preferred_company',
+        passed: row.matches_preferred_company,
+        labelAr: row.matches_preferred_company
+          ? 'يطابق الشركة المطلوبة للطلب، أو الطلب مش مقيّد بشركة'
+          : 'العميل اختار شركة تانية — الطلب ده بيتوزّع جوّه شركته بس (ADR-0080)',
+      },
+      {
+        key: 'technician_lead_ok',
+        passed: row.technician_lead_ok,
+        labelAr: row.technician_lead_ok
+          ? 'مؤهّل يقود الخدمة دي (الخدمة مش مشترطة فني كامل، أو هو فني كامل)'
+          : 'الخدمة دي مضبوطة إنها تتقاد بفني كامل بس، والشخص ده مساعد — يقدر ينضم للطاقم مش يقوده',
+      },
+      {
+        key: 'individually_visible',
+        passed: row.individually_visible,
+        labelAr: row.individually_visible
+          ? 'ظاهر في التوزيع العام (مش حصري لشركته، أو الطلب بتاع شركته)'
+          : 'متعلّم «حصري للشركة» — مايوصلوش أي توزيع عام، بيوصله بس لما العميل يختار شركته',
+      },
       { key: 'availability_ok', passed: row.availability_ok, labelAr: 'متاح وقت الطلب (بلا تعارض جدول/حظر يوم)' },
       { key: 'decision_limit_ok', passed: row.decision_limit_ok, labelAr: 'حد قرار مستوى الفني يكفي قيمة الطلب' },
       {
@@ -375,7 +431,14 @@ export class MatchingExplainabilityService {
             serviceIdExpr: 's.id',
             categoryIdExpr: 's.category_id',
             directServiceAlias: 'ts',
+            // ADR-0086 — نفس اشتراط القيادة اللي المحرك بيطبّقه في نفس المرحلة دي بالظبط.
+            // من غيره «المؤهّلين للخدمة» بيطلع أكبر من الحقيقة لأي خدمة مشترطة فني كامل،
+            // فالأدمن يفضل يدوّر على سبب نقص المرشّحين في مرحلة غلط.
+            technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 's.requires_technician_lead' },
           })}
+          -- ADR-0080 — الحصري للشركة مش جزء من المجمّع العام أصلاً. بيتعدّ بس لما الطلب نفسه
+          -- مقيّد بشركته ($9)، وهو نفس استثناء المحرك بالحرف.
+          AND (tp.company_exclusive = false OR $9::uuid IS NOT NULL)
       ),
       zone_pool AS (
         SELECT p.id FROM pool p
@@ -435,6 +498,9 @@ export class MatchingExplainabilityService {
         serviceDurationMinutes,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        // $9 — نطاق الشركة، نفس معناه في المحرك: لو الطلب مقيّد بشركة، أعضاؤها الحصريون
+        // بيدخلوا المجمّع؛ غير كده بيتشالوا.
+        order.requestedTechnicianCompanyId,
       ],
     );
 

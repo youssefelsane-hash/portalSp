@@ -36,7 +36,14 @@ import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { formatWorkDuration } from '@/lib/work-scope';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
-import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';/**
+import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';
+import {
+  BookingWindowDto,
+  FALLBACK_BOOKING_WINDOW,
+  cairoWallClockToIso,
+  fetchBookingWindow,
+  isTimeWithinWindow,
+} from '@/lib/booking-window';/**
  * أسماء وسائل الدفع المقدّم المعروضة للعميل. **الترتيب مش هنا** — السيرفر بيرجّع القايمة
  * مرتّبة (`payment-channels.controller.ts`)، فالواجهة بتعرضها زي ما جت. لو الترتيب اتكرر هنا،
  * أول تغيير في `payments.recommended_method` هيخلّي الويب والتطبيق يقولوا حاجتين مختلفتين.
@@ -162,6 +169,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // ADR-0060 §4 — دقة الموعد وضعين بس. `start_time` بيطلب ساعة وصول فوق التاريخ، و`full_day`
   // بيطلب التاريخ بس. المدة والكمية والفترة **مابقوش مدخلات جدولة** — بقوا حقول في فورم الخدمة.
   const [preciseTime, setPreciseTime] = useState('');
+  // نافذة اختيار الموعد (ADR-0097) — بتيجي من السيرفر، والافتراضي شغّال لو النداء فشل.
+  const [bookingWindow, setBookingWindow] = useState<BookingWindowDto>(FALLBACK_BOOKING_WINDOW);
+  const [timeError, setTimeError] = useState<string | null>(null);
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
@@ -180,6 +190,18 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     // التخزين الخارجي يُقرأ بعد أول رندر؛ تأجيل التحديث يمنع render متداخلًا أثناء hydration.
     const timer = window.setTimeout(() => setPromoCode((current) => current || linked.code), 0);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  // نافذة اختيار الموعد (ADR-0097) — تحميل مستقل: فشله بيسيب الافتراضي شغّال والسيرفر بيفضل
+  // هو الحارس، فمابيعطّلش صفحة الحجز.
+  useEffect(() => {
+    let active = true;
+    void fetchBookingWindow().then((window) => {
+      if (active) setBookingWindow(window);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[] | null>(null);
@@ -486,7 +508,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   function computeScheduledAt(dateStr: string): string | undefined {
     if (!dateStr) return undefined;
     if (service?.schedule_precision === 'start_time' && preciseTime) {
-      return `${dateStr}T${preciseTime}:00.000Z`;
+      // **الوقت اللي العميل اختاره بتوقيت القاهرة، مش UTC** — السطر ده كان بيلزق `Z` على
+      // الساعة المحلية فالفني يشوف موعد متأخر بفرق الإزاحة (٣ ساعات صيفًا). التفاصيل في
+      // `lib/booking-window.ts`.
+      return cairoWallClockToIso(dateStr, preciseTime);
     }
     return `${dateStr}T00:00:00.000Z`;
   }
@@ -1078,9 +1103,22 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 <input
                   type="time"
                   value={preciseTime}
-                  onChange={(e) => setPreciseTime(e.target.value)}
+                  // `min`/`max` بيقلّلوا الغلط في المنتقي، بس متصفحات كتير بتسمح بالكتابة
+                  // اليدوية برّاهم — فالفحص تحت هو الحارس الفعلي (ADR-0097).
+                  min={`${String(bookingWindow.start_hour).padStart(2, '0')}:00`}
+                  max={`${String(bookingWindow.end_hour).padStart(2, '0')}:00`}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next && !isTimeWithinWindow(next, bookingWindow)) {
+                      setTimeError(bookingWindow.message_ar);
+                      return;
+                    }
+                    setTimeError(null);
+                    setPreciseTime(next);
+                  }}
                 />
               </label>
+              {timeError && <p className="mt-1 text-sm text-destructive">{timeError}</p>}
             </div>
           )}
         </section>

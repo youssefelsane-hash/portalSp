@@ -65,6 +65,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'booking.suggestion_min_day_spacing': { type: 'number', default: 2, group: 'booking', description: 'أقل مسافة بالأيام بين أي اقتراحين — بتمنع تلات أيام متلاصقة لما الطاقة متساوية.' },
   'booking.suggestion_min_hour_spacing': { type: 'number', default: 3, group: 'booking', description: 'أقل مسافة بالساعات بين أي اقتراحين في نفس اليوم — بتفرد الاقتراحات على اليوم بدل تلات ساعات أول النافذة.' },
   'booking.suggestion_cache_ttl_seconds': { type: 'number', default: 90, group: 'booking', description: 'مدة كاش طاقة أيام الاقتراح بالثواني. صفر = بلا كاش.' },
+  'booking.selectable_start_hour': { type: 'number', default: 5, group: 'booking', description: 'أول ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة). الشغل نفسه بيكمّل بعد النافذة عادي — القيد على البداية بس.' },
+  'booking.selectable_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة، شاملة: ١٩ يعني ٧:٠٠ م مقبولة و٧:٣٠ لأ).' },
   'booking.suggestion_sequencing_weight': { type: 'number', default: 0.5, group: 'booking', description: 'وزن «التسلسل» في ترتيب الأيام المقترحة (٠ لـ١). بيفضّل الأيام اللي فيها فنيين يومهم لسه ما بدأش على الأيام اللي فيها عدد أكبر بس نصهم مشغول — عشان الشغل يتوزّع بالترتيب بدل ما يترصّ على نفس الناس. صفر = الوفرة وحدها (السلوك القديم).' },
 
   // ── assistant_matching ────────────────────────────────────────────────
