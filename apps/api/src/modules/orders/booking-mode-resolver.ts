@@ -10,7 +10,7 @@ import { BookingMode } from './entities/order.entity';
  */
 
 /** منطقة العمل الوحيدة للمشروع — نفس القيمة الحرفية المستخدمة في كل حسابات "اليوم" في النظام. */
-const PLATFORM_TIMEZONE = 'Africa/Cairo';
+export const PLATFORM_TIMEZONE = 'Africa/Cairo';
 
 /**
  * تاريخ اليوم بتوقيت المنصة بصيغة `YYYY-MM-DD`.

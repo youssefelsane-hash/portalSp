@@ -119,6 +119,24 @@ const PREPAYABLE_ORDER_STATUSES = new Set([
   OrderStatus.AWAITING_TECHNICIAN_SELECTION,
   OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
 ]);
+/**
+ * **الطلب اتقفل** — خلص أو اتلغى أو اترد، ومفيش أي دفع ممكن بعد كده (بلاغ مالك 2026-09-15،
+ * docs/08 §150 بند ٤: «طالما الطلب اتقفل ما يظهروش أصلاً الجزء بتاعه لسه خالص»).
+ *
+ * الحالات دي كلها مرفوضة في `assertPayable()` أصلاً، فالعَلَم ده مابيخفيش أي مستحق حقيقي —
+ * هو بيقول للواجهة «مفيش قصة دفع هنا خالص» بدل ما تعرض خانة دفع معطّلة برسالة انتظار على
+ * طلب مقفول.
+ *
+ * `DISPUTED` **مش هنا عمدًا**: النزاع طلب مفتوح لسه بيتحل، وإخفاء الدفع فيه بيشيل مخرج حقيقي.
+ */
+const CLOSED_ORDER_STATUSES = new Set([
+  OrderStatus.COMPLETED,
+  OrderStatus.CANCELLED_BY_CUSTOMER,
+  OrderStatus.CANCELLED_BY_TECHNICIAN,
+  OrderStatus.CANCELLED_BY_SYSTEM,
+  OrderStatus.EXPIRED,
+  OrderStatus.REFUNDED,
+]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
@@ -1998,6 +2016,13 @@ export class PaymentsService {
     isPrepayment: boolean;
     /** دي زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز (ADR-0091 §6). */
     isAdditionalCharge: boolean;
+    /**
+     * الطلب اتقفل — **الواجهة بتخفي خانة الدفع بالكامل**، مش بتعطّلها (docs/08 §150 بند ٤).
+     *
+     * القرار هنا مش في الواجهات عمدًا: الويب والتطبيق الاتنين بيعرضوا نفس الخانة، وأي شرط
+     * متكتب في كل واحدة لوحدها بينحرف. الحقيقة الواحدة بتتحسب هنا وبتترسل.
+     */
+    isClosed: boolean;
   }> {
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     // **مابنرميش لو مش قابل للدفع** — بنقول للواجهة وبس. الخانة دي بتتعرض جوّه صفحة الطلب،
@@ -2057,6 +2082,7 @@ export class PaymentsService {
       isPayable,
       isPrepayment,
       isAdditionalCharge,
+      isClosed: CLOSED_ORDER_STATUSES.has(order.orderStatus),
     };
   }
 

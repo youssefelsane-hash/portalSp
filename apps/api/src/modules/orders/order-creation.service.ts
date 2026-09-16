@@ -52,6 +52,12 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import {
+  bookingWindowApplies,
+  bookingWindowMessageAr,
+  isWithinBookingWindow,
+  resolveBookingWindowSetting,
+} from './booking-window';
 import { bookingDateWindowViolation, MAX_ADVANCE_BOOKING_DAYS_FALLBACK } from './booking-date-window';
 import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -914,6 +920,29 @@ export class OrderCreationService {
         'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
         HttpStatus.BAD_REQUEST,
       );
+    }
+    // **نافذة اختيار الموعد** (طلب مالك 2026-09-15، docs/08 §151، ADR-0097) — البداية اللي
+    // العميل اختارها لازم تكون جوّه الفترة المسموحة (٥ص–٧م افتراضيًا).
+    //
+    // مكانها هنا بالذات: **بعد** حل النطاق المرن (`resolvedScheduledAtIso` بقى نهائي) و**قبل**
+    // التسعير، فمفيش رسوم بتتحسب لطلب هيترفض بعدها.
+    //
+    // مستثنى عمدًا:
+    //  - الطلب المستعجل (`urgent`) — العميل بيقول «دلوقتي»، مش بيختار ساعة أصلاً.
+    //  - الحجز على سلوت فني معلَن (`scheduleSlot`) — ده وقت **الفني** التزم بيه بنفسه، والقاعدة
+    //    دي عن اختيار العميل الحر.
+    //  - التكرار المتولّد (`recurringIdentity`) — الموعد اتقبل وقت إنشاء الخطة، ورفضه هنا كان
+    //    هيكسر خطة شغّالة بأثر رجعي.
+    if (!urgent && !scheduleSlot && !recurringIdentity && resolvedScheduledAtIso) {
+      const chosenAt = new Date(resolvedScheduledAtIso);
+      // `bookingWindowApplies` بتستبعد «اليوم المجرّد» (`T00:00:00.000Z`) والخدمات اللي
+      // مابتطلبش ساعة بداية — في الحالتين مفيش ساعة اختارها العميل عشان نحكم عليها.
+      if (bookingWindowApplies({ scheduledAt: chosenAt, serviceRequiresStartTime: service.requiresStartTimeOnly })) {
+        const bookingWindow = await resolveBookingWindowSetting(this.settingsService);
+        if (!isWithinBookingWindow(chosenAt, bookingWindow)) {
+          throw new ApiException(ErrorCode.VAL_001, bookingWindowMessageAr(bookingWindow), HttpStatus.BAD_REQUEST);
+        }
+      }
     }
     if (urgent && !canAcceptSameDay(service)) {
       // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل

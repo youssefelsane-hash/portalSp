@@ -12,7 +12,8 @@ import {
   technicianIndividualVisibilityCondition,
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
-import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
+import { resolveDailyCapacityMinutes, technicianDayLoadSubquery } from './technician-day-capacity.sql';
+import { BookingWindow, resolveBookingWindowSetting } from '../orders/booking-window';
 
 /**
  * **اقتراح مواعيد للعميل** (ADR-0088، docs/08 §141).
@@ -38,8 +39,24 @@ export interface SuggestedDay {
   /** تاريخ اليوم بصيغة YYYY-MM-DD بتوقيت مصر. */
   day: string;
   availableTechnicians: number;
+  /**
+   * عدد الفنيين المؤهّلين اللي **يومهم فاضي بالكامل** (صفر دقيقة محجوزة) — إشارة التسلسل
+   * (ADR-0096، docs/08 §150 بند ١).
+   *
+   * الفرق عن `availableTechnicians` جوهري: ده بيعدّ اللي **تحت السقف اليومي** (يعني ممكن
+   * يكون عنده شغل ولسه بيقبل)، وده بيعدّ اللي **ما بدأش يومه أصلاً**. من غير التفرقة دي،
+   * الاقتراح بيفضل يرمي الشغل على نفس اليوم المزنوق طالما لسه فيه فسحة فيه.
+   */
+  idleTechnicians: number;
   /** أول يوم مقترح بعد مهلة الحجز — «أقرب فرصة». */
   isEarliest: boolean;
+}
+
+/** صف طاقة يوم واحد كما بيتخزّن في الكاش — الشكل ده بيتقري من Redis فتغييره لازم يتعامل معاه. */
+interface DayCapacityRow {
+  day: string;
+  availableTechnicians: number;
+  idleTechnicians: number;
 }
 
 export interface SuggestedTime {
@@ -74,14 +91,18 @@ export class BookingSlotSuggestionService {
   private async cachedDayCapacity(
     key: string,
     ttlSeconds: number,
-    compute: () => Promise<{ day: string; availableTechnicians: number }[]>,
-  ): Promise<{ day: string; availableTechnicians: number }[]> {
+    compute: () => Promise<DayCapacityRow[]>,
+  ): Promise<DayCapacityRow[]> {
     if (ttlSeconds <= 0) return compute();
     const cached = await this.cache.get(key);
     if (cached) {
       try {
         const parsed: unknown = JSON.parse(cached);
-        if (Array.isArray(parsed)) return parsed as { day: string; availableTechnicians: number }[];
+        // صفوف قديمة في الكاش (قبل ما `idleTechnicians` تتضاف) بتتجاهل بدل ما تتقري كصفر —
+        // صفر هنا معناه «مفيش حد فاضي» وهي معلومة غلط بتقلب الترتيب.
+        if (Array.isArray(parsed) && parsed.every((row) => typeof (row as DayCapacityRow)?.idleTechnicians === 'number')) {
+          return parsed as DayCapacityRow[];
+        }
       } catch {
         // صف كاش تالف — نتجاهله ونحسب من القاعدة. مش سبب لتعطيل الاقتراح.
       }
@@ -94,7 +115,8 @@ export class BookingSlotSuggestionService {
   private async config() {
     const [
       leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
-      delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds,
+      delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds, sequencingWeight,
+      bookingWindow,
     ] = await Promise.all([
       this.settingsService.getNumber('booking.suggestion_lead_hours', 48),
       this.settingsService.getNumber('booking.suggestion_horizon_days', 21),
@@ -106,10 +128,25 @@ export class BookingSlotSuggestionService {
       this.settingsService.getNumber('booking.suggestion_min_day_spacing', 2),
       this.settingsService.getNumber('booking.suggestion_min_hour_spacing', 3),
       this.settingsService.getNumber('booking.suggestion_cache_ttl_seconds', 90),
+      this.settingsService.getNumber('booking.suggestion_sequencing_weight', 0.5),
+      resolveBookingWindowSetting(this.settingsService),
     ]);
+    // **نافذة الاقتراح محصورة جوّه نافذة الحجز** (ADR-0097). اقتراح ساعة العميل مش هيعرف
+    // يحجزها هو بالظبط نفس فئة البَقّة اللي ADR-0096 اتكتب عشانها — وعد بحاجة القايمة اللي
+    // بعدها مابتحترمهاش. فالحصر هنا مش تجميل، هو نفس قاعدة «الاقتراح لازم يكون قابل للحجز».
+    const windowedStartHour = Math.max(dayStartHour, bookingWindow.startHour);
+    const windowedEndHour = Math.min(dayEndHour, bookingWindow.endHour);
     return {
-      leadHours, horizonDays, count, dayStartHour, dayEndHour, roominessRatio,
+      leadHours, horizonDays, count, roominessRatio,
+      dayStartHour: windowedStartHour,
+      // لو الإعدادين اتقاطعوا لدرجة إن النافذة اتقلبت، بنرجع لنافذة الحجز نفسها بدل ما نرجّع
+      // صفر ساعات (الاقتراح بيختفي بلا سبب ظاهر للأدمن).
+      dayEndHour: windowedStartHour <= windowedEndHour ? windowedEndHour : bookingWindow.endHour,
+      bookingWindow,
       delayPenaltyPerDay, minDaySpacing, minHourSpacing, cacheTtlSeconds,
+      // القيمة بتتحصر في [0,1] هنا مش عند القراءة: إعداد غلط (سالب أو أكبر من ١) كان هيقلب
+      // إشارة الدرجة ويطلّع ترتيب مالوش أي معنى بدل ما يتجاهل بهدوء.
+      sequencingWeight: Math.min(1, Math.max(0, sequencingWeight)),
     };
   }
 
@@ -200,7 +237,7 @@ export class BookingSlotSuggestionService {
     addressId: string;
     durationMinutes?: number | null;
     estimatedDurationDays?: number | null;
-  }): Promise<{ days: SuggestedDay[]; leadHours: number; horizonDays: number }> {
+  }): Promise<{ days: SuggestedDay[]; leadHours: number; horizonDays: number; bookingWindow: BookingWindow }> {
     const zoneId = await this.resolveZone(opts.customerUserId, opts.addressId);
     const cfg = await this.config();
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
@@ -215,7 +252,7 @@ export class BookingSlotSuggestionService {
     ].join(':');
 
     const withCapacity = await this.cachedDayCapacity(cacheKey, cfg.cacheTtlSeconds, async () => {
-    const rows = await this.dataSource.query<{ day: string; available_technicians: string }[]>(
+    const rows = await this.dataSource.query<{ day: string; available_technicians: string; idle_technicians: string }[]>(
       `
       WITH bounds AS (
         SELECT ((now() AT TIME ZONE 'Africa/Cairo') + make_interval(hours => $4::int))::date AS first_day
@@ -226,10 +263,13 @@ export class BookingSlotSuggestionService {
           FROM bounds b,
                generate_series(b.first_day, b.first_day + make_interval(days => $5::int), interval '1 day') gs
       )
-      SELECT d.day::text AS day, c.cnt::text AS available_technicians
+      SELECT d.day::text AS day,
+             COUNT(*)::text AS available_technicians,
+             -- إشارة التسلسل (ADR-0096): مين **ما بدأش يومه** خالص، مش مين لسه تحت السقف.
+             COUNT(*) FILTER (WHERE COALESCE(dl.busy_minutes, 0) = 0)::text AS idle_technicians
         FROM days d
         CROSS JOIN LATERAL (
-          SELECT COUNT(*) AS cnt
+          SELECT tp.id
             FROM technician_profiles tp
             LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1
               AND ts.is_active = true AND ts.verification_status = 'approved'
@@ -263,7 +303,21 @@ export class BookingSlotSuggestionService {
                preciseDurationHoursExpr: '$10::numeric / 60.0',
                dailyCapacityMinutesParam: '$3',
              })}
-        ) c
+        ) elig
+        -- حمل اليوم للفني المؤهّل، بنفس الدالة اللي التوزيع والتصنيف بيقروا بيها
+        -- (technicianDayLoadSubquery) — مش استعلام تاني يقدر ينحرف عنها.
+        LEFT JOIN LATERAL (
+          SELECT lo.busy_minutes
+            FROM ${technicianDayLoadSubquery({
+              technicianIdExpr: 'elig.id',
+              activeStatusesParam: '$6',
+              excludeOrderIdParam: '$9',
+              dailyCapacityParam: '$3',
+            })} lo
+           WHERE lo.busy_day = d.day
+           LIMIT 1
+        ) dl ON true
+       GROUP BY d.day
        ORDER BY d.day
       `,
       [
@@ -282,32 +336,51 @@ export class BookingSlotSuggestionService {
     );
 
       return rows
-        .map((row) => ({ day: row.day, availableTechnicians: Number(row.available_technicians) }))
+        .map((row) => ({
+          day: row.day,
+          availableTechnicians: Number(row.available_technicians),
+          idleTechnicians: Number(row.idle_technicians),
+        }))
         .filter((row) => row.availableTechnicians > 0);
     });
 
     if (withCapacity.length === 0) {
-      return { days: [], leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
+      return { days: [], leadHours: cfg.leadHours, horizonDays: cfg.horizonDays, bookingWindow: cfg.bookingWindow };
     }
 
     const best = Math.max(...withCapacity.map((row) => row.availableTechnicians));
+    const bestIdle = Math.max(...withCapacity.map((row) => row.idleTechnicians));
     const firstDay = withCapacity[0].day;
     const dayIndexOf = (day: string) =>
       Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${firstDay}T00:00:00Z`)) / 86_400_000);
+
+    // **وزن التسلسل** (ADR-0096، بلاغ المالك §150 بند ١: «تكون بسيكوانس بالترتيب… مش واحد
+    // قاعد يوم والتاني محجوز خمسة»).
+    //
+    // «الوفرة» لوحدها بتجاوب «فيه كام حد لسه بيقبل شغل؟» — وهي إجابة بتخلّي الاقتراح يرصّ
+    // الشغل على نفس اليوم طالما لسه فيه فسحة. «التسلسل» بيجاوب «فيه حد يومه لسه ما بدأش؟» —
+    // وهي اللي بتوزّع الشغل على الناس وتخلّي التقويم يتملي بالترتيب.
+    //
+    // صفر = السلوك القديم بالحرف. ١ = الوفرة بتتجاهل تمامًا. الافتراضي بينهم لأن الاتنين
+    // معلومة حقيقية: يوم فيه فاضي واحد بس وزحمة عامة مش أحسن من يوم فيه تلاتة نص فاضيين.
+    const sequencingOf = (row: DayCapacityRow) => (bestIdle > 0 ? row.idleTechnicians / bestIdle : 0);
+    const abundanceOf = (row: DayCapacityRow) => row.availableTechnicians / best;
 
     const days = this.pickSpread(withCapacity, {
       count: Math.max(1, Math.round(cfg.count)),
       minSpacing: Math.max(1, Math.round(cfg.minDaySpacing)),
       positionOf: (row) => dayIndexOf(row.day),
-      // الوفرة نسبةً لأحسن يوم في الأفق، ناقص غرامة تأخير عن أول يوم متاح.
+      // وفرة + تسلسل، ناقص غرامة تأخير عن أول يوم متاح.
       scoreOf: (row) =>
-        row.availableTechnicians / best - cfg.delayPenaltyPerDay * dayIndexOf(row.day),
+        (1 - cfg.sequencingWeight) * abundanceOf(row) +
+        cfg.sequencingWeight * sequencingOf(row) -
+        cfg.delayPenaltyPerDay * dayIndexOf(row.day),
     })
       // العرض بترتيب التاريخ عشان القايمة تتقرا طبيعي، بعد ما الاختيار اتعمل بالدرجة.
       .sort((left, right) => left.day.localeCompare(right.day))
       .map((row, index) => ({ ...row, isEarliest: index === 0 }));
 
-    return { days, leadHours: cfg.leadHours, horizonDays: cfg.horizonDays };
+    return { days, leadHours: cfg.leadHours, horizonDays: cfg.horizonDays, bookingWindow: cfg.bookingWindow };
   }
 
   /**
@@ -350,6 +423,35 @@ export class BookingSlotSuggestionService {
              directServiceAlias: 'ts',
            })}
            AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })}
+           -- **بوابة الحجز الحقيقية، مش التداخل الساعي وبس** (بلاغ مالك 2026-09-15،
+           -- docs/08 §150 بند ١، ADR-0096).
+           --
+           -- الاستعلام ده كان بيعدّ الأهلية الأساسية (خدمة + نطاق) وبعدين يشيل المتقاطع مع
+           -- الساعة — من غير شرط الإتاحة. يعني فني **عدّى سقفه اليومي** (مش قابل للحجز خالص)
+           -- كان بيتعدّ «فاضي الساعة ٢»، والعميل يشوف «اتنين من ستة فاضيين» وبعدين القايمة
+           -- اللي بعدها مافيهاش الرقم ده ولا الأسماء دي.
+           --
+           -- الشرط ده هو نفسه اللي اقتراح الأيام وقايمة اختيار الفني والتوزيع بيقروه، ففلتر
+           -- الساعة تحت بقى **مجموعة جزئية منه** — مستحيل يوعد بأكتر مما الحجز بيسمح به.
+           ${technicianAvailabilityCondition({
+             technicianIdExpr: 'tp.id',
+             // الأقواس الخارجية **ضرورية**: الشرط بيلحق `::timestamptz` بالتعبير، ومن غيرها
+             // الكاست بيتطبّق على اسم المنطقة الزمنية نفسه (اتلقط حيًا: «invalid input syntax
+             // for type timestamp with time zone: Africa/Cairo»).
+             scheduledAtParam: "(($3::text || ' 00:00')::timestamp AT TIME ZONE 'Africa/Cairo')",
+             excludeOrderIdParam: 'NULL',
+             activeStatusesParam: '$6',
+             engagedStatusesParam: '$8',
+             isEmergencyParam: 'false',
+             serviceDurationExpr: 'COALESCE($7::int, COALESCE(svc.estimated_duration_minutes, 60))',
+             candidateLoad: {
+               estimatedDurationDaysExpr: 'NULL::numeric',
+               durationMinutesExpr: '$7::int',
+               serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+             },
+             preciseDurationHoursExpr: '$7::numeric / 60.0',
+             dailyCapacityMinutesParam: '$9',
+           })}
       )
       SELECT lpad(h.hour_of_day::text, 2, '0') || ':00' AS hour,
              COUNT(*) FILTER (WHERE NOT busy.is_busy)::text AS free_technicians
@@ -395,6 +497,9 @@ export class BookingSlotSuggestionService {
         Math.min(23, Math.round(cfg.dayEndHour)),
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         Math.max(30, Math.round(opts.durationMinutes ?? 60)),
+        // ($8, $9) بوابة الحجز الحقيقية جوّه `eligible` — نفس مدخلات `suggestDays` بالحرف.
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        await resolveDailyCapacityMinutes(this.settingsService),
       ],
     );
 

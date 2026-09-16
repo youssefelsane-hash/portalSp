@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_repository.dart';
+import 'booking_window.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
 // **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
@@ -107,6 +108,8 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // زي `_nearTermHours` بالظبط: مايصحّش اقتراح ناقص يمنع العميل من اختيار موعد بإيده.
   List<Map<String, dynamic>> _suggestedDays = const [];
   List<Map<String, dynamic>> _suggestedTimes = const [];
+  /// نافذة اختيار الموعد (ADR-0097) — بتيجي مع اقتراح الأيام، وبتفضل الافتراضي لو النداء فشل.
+  BookingWindow _bookingWindow = BookingWindow.fallback;
 
   /// بيتقري مرة واحدة في `initState` — استخدام `context` بعد `await` بيكسر قاعدة
   /// `use_build_context_synchronously` (والـWidget ممكن يكون اتشال أصلاً).
@@ -169,6 +172,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         _suggestedDays = ((data?['days'] as List?) ?? const [])
             .whereType<Map<String, dynamic>>()
             .toList();
+        _bookingWindow = BookingWindow.fromJson(
+          data?['booking_window'] as Map<String, dynamic>?,
+        );
       });
     } catch (error) {
       debugPrint('فشل تحميل الأيام المقترحة: $error');
@@ -378,12 +384,25 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     });
   }
 
-  Future<void> _pickTime(BuildContext context) async {
+  // بلا بارامتر `context` عمدًا: بعد الـawait الاستخدام لازم يكون على `State.context` المحروس
+  // بـ`mounted`، والبارامتر بيخلّي التحليل يعتبره سياق غريب (use_build_context_synchronously).
+  Future<void> _pickTime() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: _selectedTime ?? const TimeOfDay(hour: 10, minute: 0),
+      // البداية المقترحة لازم تكون هي نفسها جوّه النافذة — لو النافذة بتبدأ ١١ مثلاً،
+      // فتح المنتقي على ١٠ كان بيدّي أول اختيار مرفوض.
+      initialTime: _selectedTime ?? _bookingWindow.start,
     );
-    if (picked != null && mounted) setState(() => _selectedTime = picked);
+    if (picked == null || !mounted) return;
+    // **الرفض هنا بنفس قاعدة السيرفر بالحرف** (ADR-0097) — والرسالة بتقول الحدود بدل ما
+    // تقول «غلط». من غير الفحص ده العميل كان بيكمّل كل الخطوات وياخد الرفض في آخر لحظة.
+    if (!_bookingWindow.allows(picked)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_bookingWindow.rejectionAr)),
+      );
+      return;
+    }
+    setState(() => _selectedTime = picked);
   }
 
   String _formatDate(DateTime date) {
@@ -553,7 +572,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                         ? _selectedTime!.format(context)
                         : 'حدد وقت البداية',
                     selected: _selectedTime != null,
-                    onTap: () => _pickTime(context),
+                    onTap: () => _pickTime(),
                   ),
                   const SizedBox(height: 20),
                   FilledButton(

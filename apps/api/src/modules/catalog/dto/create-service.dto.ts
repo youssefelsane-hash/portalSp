@@ -15,6 +15,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { AssessmentFeeCreditMode, AssessmentRoutePolicy, PriceCertaintyMode, PricingModel } from '../entities/service.entity';
 import { SCHEDULE_PRECISIONS, SchedulePrecision } from '../schedule-precision';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
@@ -222,11 +223,33 @@ export class CreateServiceDto {
 
   // بحث بلغة طبيعية بلا AI (docs/16 §7، migration 0129) — مرادفات/كلمات عامية العميل ممكن
   // يكتبها بدل الاسم الرسمي (مثلاً "سخان مياه" لخدمة "صيانة سخانات"). GIN index على العمود ده.
+  //
+  // **السقف اترفع من ٣٠ لـ٣٠٠** (بلاغ مالك 2026-09-15، docs/08 §150 بند ٥: «الكلمات المسموحة
+  // قليلة شوي، عايزين نخلي الفيلد ده ياخد كلمات كتيرة»). ٣٠ كان بيتملي من خدمة واحدة عادية:
+  // البحث حرفي بلا أي اشتقاق (`ILIKE`)، فكل صياغة عامية محتاجة صفّها — مفرد/جمع، بالألف
+  // ومن غيرها، اسم القطعة واسم العطل. السقف نفسه لازم يفضل موجود عشان مايبقاش باب لإدخال
+  // بلا حدود يبوّظ الاستعلام، بس على رقم بيوسّع الاستخدام الحقيقي مش بيقيّده.
+  //
+  // مفيش أي قيد في القاعدة على العمود (`text[]`)، ولا على الاستعلام (GIN index) — السقف ده
+  // هو الحد الوحيد، فرفعه مش محتاج migration.
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(30)
+  @ArrayMaxSize(300)
   @IsString({ each: true })
-  @MaxLength(60, { each: true })
+  @MaxLength(80, { each: true })
+  // التطبيع هنا مش تجميل: الأدمن بيكتب سطر واحد مفصول بفواصل، فمسافات وتكرار وخانات فاضية
+  // بتوصل زي ما هي وتاكل من السقف بلا أي فايدة بحثية.
+  @Transform(({ value }) =>
+    Array.isArray(value)
+      ? [
+          ...new Set(
+            (value as unknown[])
+              .map((item) => (typeof item === 'string' ? item.trim().replace(/\s+/g, ' ') : item))
+              .filter((item) => typeof item !== 'string' || item.length > 0),
+          ),
+        ]
+      : value,
+  )
   search_keywords?: string[];
 
   // ===== ADR-0063/0066 — سياسة تحديد السعر والمعاينة (migration 0247) =====

@@ -113,6 +113,12 @@ const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
 // الشركة تدخل الأوتو ماتشينج ككيان مستقل؛ الزيادة قابلة للضبط ومتعمدة أن تكون أقل من فرق
 // مستويات الفنيين حتى تفضل الجودة والتوفر والقرب هي الأساس.
 const COMPANY_AUTO_MATCH_BOOST_FALLBACK = 2;
+/**
+ * كام عضو شركة بنفحص قدرتهم الاستيعابية قبل ما نقرر إن الطلب محتاج عرض (ADR-0094، docs/08 §150
+ * بند ٢). حارس أداء بحت مش قرار عمل، فهو ثابت مش إعداد: كل عضو زيادة = استعلام تصنيف إضافي،
+ * وشركة أكبر من كده عمليًا معناها إن أول عشرة مش فاضيين ⇒ الطلب فعلاً يستاهل عرض.
+ */
+const COMPANY_MEMBER_SCAN_LIMIT = 10;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -1412,6 +1418,30 @@ export class MatchingService {
     return { dispatched: 1 };
   }
 
+  /**
+   * أول عضو في الشركة **قدرته الاستيعابية خفيفة** بترتيب الكفاءة/القرب نفسه (ADR-0094).
+   *
+   * الترتيب مابيتغيّرش ومفيش مقياس جديد بيتخترع — نفس القايمة اللي `findEligibleTechnicians()`
+   * بترجّعها، بنمشي عليها بالترتيب وناخد أول واحد `classifyCandidate()` بتقول عليه `LIGHT`.
+   * يعني الشركة بتدّي أحسن حد **متاح فعلاً** بدل أحسن حد على الورق.
+   *
+   * استعلام تصنيف لكل عضو مقصود إنه محدود بـ`COMPANY_MEMBER_SCAN_LIMIT`: ده بيجري مرة واحدة
+   * لكل طلب شركة وقت التوزيع، مش في مسار قراءة متكرر.
+   */
+  private async firstLightCompanyMember(
+    order: Order,
+    members: EligibleTechnicianRow[],
+    manager?: EntityManager,
+  ): Promise<EligibleTechnicianRow | undefined> {
+    if (members.length === 0) return undefined;
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+    for (const member of members) {
+      const tier = await this.classifyCandidate(order, member.technician_id, dailyCapacityMinutes, manager);
+      if (tier === 'LIGHT') return member;
+    }
+    return undefined;
+  }
+
   private async firstScheduledCandidate(order: Order, manager?: EntityManager): Promise<EligibleTechnicianRow | undefined> {
     if (order.requestedTechnicianId) {
       const selected = await this.findEligibleTechnicians(
@@ -1427,9 +1457,23 @@ export class MatchingService {
       if (selected.length || orderHasLockedProvider(order)) return selected[0];
     }
     if (order.requestedTechnicianCompanyId) {
+      // **العميل اختار شركة، مش شخص** — فالمرشّح مش لازم يكون الأعلى ترتيبًا، لازم يكون أول
+      // واحد **فاضي فعلاً** في ترتيب الكفاءة (بلاغ مالك 2026-09-15، docs/08 §150 بند ٢،
+      // ADR-0094).
+      //
+      // القراءة القديمة كانت `members[0]` وبس، وبعدين `classifyCandidate()` بتتفحصه لوحده.
+      // فلو الأعلى ترتيبًا عنده شغل تاني في نفس اليوم (لسه مؤهّل لكنه مش `LIGHT`)، الطلب كله
+      // كان بيروح لجولات العروض — **حتى لو عضو تاني في نفس الشركة فاضي تمامًا**. وده نص
+      // البلاغ بالحرف: «بيروح كريكويست، حتى لو فني فاضي». اتكرّر حيًا بضابط تجربة في
+      // `scripts/repro-company-busy-top-member.js`.
+      //
+      // الفرق عن مسار الفني المستقل **مقصود ومحدود**: هناك العميل قفل على شخص بعينه فمفيش
+      // بديل يتشاف أصلاً، وتحويله لعرض هو الصح (ADR-0020). هنا الشركة هي اللي اتقفلت،
+      // والاختيار جوّاها تلقائي أصلاً — «نخش بقى عادي جوّه الشركة، بنختار أي شخص بالأوتوماتيك
+      // اللي هو أعلى شخص كفاءة وأقرب شخص» (توضيح المالك، ADR-0086).
       const members = await this.findEligibleTechnicians(
         order,
-        1,
+        COMPANY_MEMBER_SCAN_LIMIT,
         null,
         false,
         order.requestedTechnicianCompanyId,
@@ -1437,7 +1481,9 @@ export class MatchingService {
         undefined,
         manager,
       );
-      return members[0];
+      // مفيش عضو فاضي ⇒ بنرجّع الأعلى ترتيبًا زي الأول بالظبط، فالسلوك بيرجع لجولات العروض
+      // بدل ما الطلب يتعلّق — الحارس اللي كان موجود مابيتشالش، بيتنادى عليه بعد ما نبحث.
+      return (await this.firstLightCompanyMember(order, members, manager)) ?? members[0];
     }
     return (await this.findEligibleTechnicians(order, 1, null, false, null, false, undefined, manager))[0];
   }

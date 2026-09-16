@@ -57,6 +57,21 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { Building } from '../buildings/entities/building.entity';
 
 /**
+ * موعد بعد N يوم **الساعة ١٢ ظهرًا بتوقيت القاهرة**.
+ *
+ * كان `new Date(Date.now() + N days)` — يعني بيحتفظ بساعة تشغيل الاختبار. والسويت كانت بتعدّي
+ * بالنهار وتفشل بالليل بعد ما نافذة اختيار الموعد اتضافت (ADR-0097): عميل حقيقي مايقدرش يختار
+ * ١٢:٣٠ بالليل أصلاً، فالثابت القديم كان بيبني حالة مستحيلة. الساعة ثابتة دلوقتي فالسويت
+ * حتمية، وموضوعها (انتماء العمارة) مالوش علاقة بالوقت.
+ */
+function scheduledInDays(days: number): string {
+  const day = new Date(Date.now() + days * 86_400_000);
+  const dayString = day.toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+  return new Date(`${dayString}T12:00:00+03:00`).toISOString();
+}
+
+
+/**
  * انتماء العمارة يستمر مع الطلبات المتكررة (docs/08 §125، طلب مالك صريح 2026-09-03).
  *
  * حي ضد Postgres حقيقي عبر OrdersService.create() + RecurringOrdersService.sweep() الحقيقيتين
@@ -370,7 +385,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
   }
 
   it('1) و 2) الطلب الأصلي بكود عمارة → القالب المتكرر يحتفظ بنفس العمارة، والنوبة الجاية بترثها', async () => {
-    const scheduledAt = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const scheduledAt = scheduledInDays(10);
     const order1 = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,
@@ -413,7 +428,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
   });
 
   it('3) تغيير نسبة خصم العمارة ينعكس على الـoccurrence الجديدة (مش snapshot قديم)', async () => {
-    const scheduledAt = new Date(Date.now() + 11 * 86_400_000).toISOString();
+    const scheduledAt = scheduledInDays(11);
     const order1 = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,
@@ -447,7 +462,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
   });
 
   it('4) لو العمارة اتقفلت (is_active=false) بين النوبتين، النوبة الجديدة بتتولّد بالسعر الكامل من غير خصم — بأمان', async () => {
-    const scheduledAt = new Date(Date.now() + 12 * 86_400_000).toISOString();
+    const scheduledAt = scheduledInDays(12);
     const order1 = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,
@@ -509,7 +524,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
       ordersService.create(ids.customerUser, {
         service_id: ids.service,
         address_id: ids.address,
-        scheduled_at: new Date(Date.now() + 13 * 86_400_000).toISOString(),
+        scheduled_at: scheduledInDays(13),
         building_code: 'NOPE-NOT-REAL',
         repeat_frequency: 'weekly',
       } as never),
@@ -527,7 +542,7 @@ describe('Recurring Orders × Buildings — انتماء العمارة يستم
   });
 
   it('مفيش double discount: خصم النوبة الأولى والتانية بنفس النسبة بالظبط، مش متراكم', async () => {
-    const scheduledAt = new Date(Date.now() + 14 * 86_400_000).toISOString();
+    const scheduledAt = scheduledInDays(14);
     const order1 = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,

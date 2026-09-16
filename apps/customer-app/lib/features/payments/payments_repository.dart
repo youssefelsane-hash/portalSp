@@ -254,6 +254,10 @@ class InstaPayPreview {
   /// زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز.
   final bool isAdditionalCharge;
 
+  /// الطلب اتقفل — خانة الدفع بتختفي بالكامل (docs/08 §150 بند ٤). الافتراضي `false` عشان
+  /// نسخة تطبيق قديمة قدام سيرفر جديد تفضل زي ما هي بالظبط.
+  final bool isClosed;
+
   InstaPayPreview({
     required this.amountCents,
     this.cashAmountCents = 0,
@@ -269,6 +273,7 @@ class InstaPayPreview {
     this.isPayable = true,
     this.isPrepayment = false,
     this.isAdditionalCharge = false,
+    this.isClosed = false,
   });
 
   factory InstaPayPreview.fromJson(Map<String, dynamic> json) => InstaPayPreview(
@@ -286,6 +291,7 @@ class InstaPayPreview {
         isPayable: json['is_payable'] as bool? ?? true,
         isPrepayment: json['is_prepayment'] as bool? ?? false,
         isAdditionalCharge: json['is_additional_charge'] as bool? ?? false,
+        isClosed: json['is_closed'] as bool? ?? false,
       );
 }
 

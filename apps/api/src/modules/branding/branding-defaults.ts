@@ -48,4 +48,13 @@ export const DEFAULT_BRANDING_ASSETS: Record<BrandingAssetType, DefaultBrandingA
     width_px: 240,
     height_px: 80,
   },
+  // ADR-0095 — البانر **مالوش محتوى افتراضي حقيقي**: هو خانة إعلانية يملاها الأدمن، ومفيش
+  // رسالة عامة صح نعرضها بدالها. الواجهات بتخفي القسم كله طالما `is_default = true`، فالعنصر
+  // النائب ده مابيتعرضش لأي عميل — موجود بس عشان `GET /branding` يفضل عقده ثابت ومايرجّعش null
+  // (نفس قاعدة ADR-0014). النسبة ٣:١ هي نسبة العرض المستهدفة، فالخانة تحجز مكانها بلا قفزة.
+  [BrandingAssetType.HOME_BANNER]: {
+    url: placeholderSvgDataUri('', '#E9EEF5', '#E9EEF5'),
+    width_px: 1200,
+    height_px: 400,
+  },
 };

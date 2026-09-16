@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { PreviewOrderDto } from "./dto/preview-order.dto";
 import type { CreateOrderDto } from "./dto/create-order.dto";
 import { BookingMatchSelectionMode } from "./entities/booking-match-preview.entity";
+import { platformDayOf } from "./booking-mode-resolver";
 
 /**
  * **الحقول اللي البصمة بتتحسب منها — قائمة واحدة صريحة، مش spread.**
@@ -48,16 +49,33 @@ const DATE_FIELDS = new Set<string>([
 ]);
 
 /**
- * التواريخ بتتقارن **كلحظة**، مش كنص.
+ * التواريخ بتتقارن **كيوم منصّة، مش كلحظة**.
  *
- * `@IsDateString()` بيقبل صيغ كتير لنفس اللحظة (`…T11:00:18Z` و`…T11:00:18.000Z` و
- * `…T14:00:18+03:00`)، والبصمة كانت بتتحسب على النص الخام — فاختلاف صيغة بين نداءين من نفس
- * التطبيق كان كفاية يبوّظ الحجز. القيمة اللي متقراش كتاريخ بتعدّي زي ما هي (التحقق مسؤول عنها).
+ * السبب الأول (اللي الدالة اتكتبت عشانه): `@IsDateString()` بيقبل صيغ كتير لنفس اللحظة
+ * (`…T11:00:18Z` و`…T11:00:18.000Z` و`…T14:00:18+03:00`)، والبصمة كانت بتتحسب على النص الخام —
+ * فاختلاف صيغة بين نداءين من نفس التطبيق كان كفاية يبوّظ الحجز.
+ *
+ * **والسبب التاني (بلاغ مالك 2026-09-15، docs/08 §150 بند ١ — اتكرّر حيًا)**: ساعة اليوم
+ * مابتغيّرش لا السعر ولا المرشّح، فمالهاش مكان في البصمة أصلاً حسب قاعدة الملف ده نفسه فوق:
+ *
+ *   - **السعر**: `isSameDayUrgent()` بيقارن `platformDayOf()` — رسوم الاستعجال قرار **يوم**.
+ *     ومفيش أي تسعير بساعة اليوم في المحرك كله (اتفحص: صفر `EXTRACT(HOUR …)` في التسعير).
+ *   - **المرشّح**: `technicianAvailabilityCondition()` بيحسب التعارض بسقف طاقة **يومي**
+ *     (ADR-0018 §2 + ADR-0077). الدقة بالساعة الوحيدة هي `technician_schedule_slots`،
+ *     وهي داخلة البصمة بمعرّفها المستقل (`schedule_slot_id`).
+ *
+ * والنتيجة العملية للمقارنة باللحظة كانت بَقّة بتضرب **كل** خدمة `requires_start_time_only`
+ * (وهي القيمة الافتراضية لكل خدمة): شاشة اختيار الفني بتعمل التذكرة باليوم (منتصف الليل)
+ * وشاشة التأكيد بتبعت اليوم + الساعة، فالعميل ياخد «غيّرت في تفاصيل الحجز… (الموعد)» وهو
+ * ماغيّرش أي حاجة. تصليح الواجهة لوحده مايمنعش رجوعها من مدخل تالت — التطبيع هنا بيمنعها بنيويًا.
+ *
+ * تغيير **اليوم** لسه بيكسر البصمة زي ما كان بالظبط: ده تغيير حقيقي في السعر والمرشّح.
+ * القيمة اللي متقراش كتاريخ بتعدّي زي ما هي (التحقق مسؤول عنها).
  */
 function normalizeDate(value: unknown): unknown {
   if (typeof value !== "string") return value;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+  return Number.isNaN(parsed.getTime()) ? value : platformDayOf(parsed);
 }
 
 function canonicalize(value: unknown): unknown {

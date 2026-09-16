@@ -161,6 +161,7 @@ export class PaymentsController {
       is_payable: preview.isPayable,
       is_prepayment: preview.isPrepayment,
       is_additional_charge: preview.isAdditionalCharge,
+      is_closed: preview.isClosed,
     };
   }
 

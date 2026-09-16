@@ -94,6 +94,8 @@ export interface InstaPayPreviewDto {
   is_prepayment: boolean;
   /** زيادة على طلب مدفوع بالفعل — بتتدفع لوحدها وبلا حافز. */
   is_additional_charge: boolean;
+  /** الطلب اتقفل — خانة الدفع كلها بتختفي، مش بتتعطّل (docs/08 §150 بند ٤). */
+  is_closed: boolean;
 }
 
 export const previewInstaPay = (authedFetch: AuthedFetch, orderId: string) =>

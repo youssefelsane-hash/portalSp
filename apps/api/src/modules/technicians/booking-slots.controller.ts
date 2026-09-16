@@ -34,10 +34,17 @@ export class BookingSlotsController {
       days: result.days.map((day) => ({
         day: day.day,
         available_technicians: day.availableTechnicians,
+        idle_technicians: day.idleTechnicians,
         is_earliest: day.isEarliest,
       })),
       lead_hours: result.leadHours,
       horizon_days: result.horizonDays,
+      // نافذة اختيار الموعد (ADR-0097) — بتترجع مع الاقتراح عشان التطبيق يقفل منتقي الوقت
+      // على **نفس** الرقم اللي السيرفر بيرفض بيه، بدل ما كل واجهة تكتب ٥ و١٩ في كودها.
+      booking_window: {
+        start_hour: result.bookingWindow.startHour,
+        end_hour: result.bookingWindow.endHour,
+      },
     };
   }
 

@@ -7,6 +7,7 @@ import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
+import '../orders/booking_scheduled_at.dart';
 import '../orders/create_order_screen.dart';
 import 'models.dart';
 import 'technician_marketplace_screen.dart';
@@ -122,8 +123,13 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         addressId: address.id,
         selectionMode: 'auto',
         bookingMode: widget.bookingMode,
-        // نفس المدخلات اللي هتتبعت في الإنشاء — البصمة لازم تطابق.
-        scheduledAt: widget.requestedAt?.toUtc().toIso8601String(),
+        // نفس المدخلات اللي هتتبعت في الإنشاء — البصمة لازم تطابق، والساعة جزء منها
+        // لخدمات `requires_start_time_only` (docs/08 §150 بند ١).
+        scheduledAt: bookingScheduledAtIso(
+          requiresStartTime: widget.service.requiresStartTime,
+          day: widget.requestedAt,
+          preciseTime: widget.requestedPreciseTime,
+        ),
         fieldValues: widget.fieldValues,
       );
       if (!mounted) return;
@@ -215,9 +221,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         bookingMode: widget.bookingMode,
         technicianId: isCompany ? null : id,
         technicianCompanyId: isCompany ? id : null,
-        scheduledAt: (effectiveRequestedAt ?? widget.requestedAt)
-            ?.toUtc()
-            .toIso8601String(),
+        scheduledAt: bookingScheduledAtIso(
+          requiresStartTime: widget.service.requiresStartTime,
+          day: effectiveRequestedAt ?? widget.requestedAt,
+          preciseTime: widget.requestedPreciseTime,
+        ),
         fieldValues: widget.fieldValues,
       );
       if (!mounted) return;

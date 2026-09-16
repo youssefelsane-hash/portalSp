@@ -121,7 +121,22 @@ describe("bookingMatchContextHash", () => {
     expect(otherOffset).toBe(withMillis);
   });
 
-  it("لحظة مختلفة فعلاً بتغيّر البصمة", () => {
+  /**
+   * **الحالة دي اتقلبت عمدًا** (بلاغ مالك 2026-09-15، docs/08 §150 بند ١، ADR-0096).
+   *
+   * كانت بتتأكّد إن «لحظة مختلفة بتغيّر البصمة». والسلوك ده كان **غلط** بمقياس قاعدة الملف
+   * نفسه («حقل يدخل البصمة لو وبس لو بيغيّر السعر أو المرشّح»): ساعة اليوم مابتغيّرش أي
+   * واحد فيهم — رسوم الاستعجال قرار **يوم** (`isSameDayUrgent` بيقارن `platformDayOf`)،
+   * والتعارض بيتحسب بسقف طاقة **يومي** (ADR-0018 §2 + ADR-0077).
+   *
+   * والنتيجة العملية كانت بَقّة بتضرب كل خدمة `requires_start_time_only` (وهي الافتراضي):
+   * تذكرة على منتصف الليل + إنشاء على الساعة المختارة ⇒ «غيّرت في تفاصيل الحجز… (الموعد)»
+   * والعميل ماغيّرش أي حاجة. اتكرّرت حيًا واتصلحت بالتطبيع لليوم.
+   *
+   * الحارس الحقيقي (تغيير **اليوم**) متغطّي تحت وفي
+   * `booking-fingerprint-day-granularity.spec.ts`.
+   */
+  it("ساعة مختلفة في نفس اليوم مابتغيّرش البصمة — بس يوم مختلف بيغيّرها", () => {
     const base = {
       service_id: "10000000-0000-4000-8000-000000000001",
       address_id: "10000000-0000-4000-8000-000000000002",
@@ -130,8 +145,13 @@ describe("bookingMatchContextHash", () => {
 
     expect(
       bookingMatchContextHash({ ...base, scheduled_at: "2026-09-06T12:00:18Z" }, "auto", tech),
-    ).not.toBe(
+    ).toBe(
       bookingMatchContextHash({ ...base, scheduled_at: "2026-09-06T11:00:18Z" }, "auto", tech),
+    );
+    expect(
+      bookingMatchContextHash({ ...base, scheduled_at: "2026-09-06T12:00:18Z" }, "auto", tech),
+    ).not.toBe(
+      bookingMatchContextHash({ ...base, scheduled_at: "2026-09-07T12:00:18Z" }, "auto", tech),
     );
   });
 

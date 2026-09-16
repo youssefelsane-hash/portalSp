@@ -8,6 +8,8 @@ import '../../core/api_exception.dart';
 import '../../core/work_scope_label.dart';
 import '../../design/app_motion.dart';
 import 'assessment_route.dart';
+import 'booking_scheduled_at.dart';
+import 'booking_window.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -303,6 +305,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // _requestedAt (اللي بيحمل اليوم بس من ScheduleSelectionScreen)، بيتدمجوا وقت الإرسال
   // (_combinedPreciseScheduledAt). المدة بقت ناتج معادلة، مش رقم بيدخّله العميل.
   TimeOfDay? _preciseTime;
+  /// نافذة اختيار الموعد (ADR-0097) — بتتحمّل مع باقي بيانات الحجز، والافتراضي مطابق للسيرفر.
+  BookingWindow _bookingWindow = BookingWindow.fallback;
   DurationEstimate? _durationEstimate;
   bool _estimatingDuration = false;
   String? _durationError;
@@ -357,6 +361,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     if (_selectedAddress != null) _refreshPreview();
     _loadCheckoutOptions();
+    // نافذة اختيار الموعد (ADR-0097) — تحميل مستقل: فشله بيسيب الافتراضي شغّال والسيرفر
+    // بيفضل هو الحارس، فمابيعطّلش الشاشة.
+    BookingWindow.fetch().then((window) {
+      if (mounted) setState(() => _bookingWindow = window);
+    });
   }
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
@@ -694,12 +703,29 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     return DateTime(day.year, day.month, day.day, time.hour, time.minute);
   }
 
+  /// القيمة اللي بتتبعت فعلاً في `scheduled_at` — **نفس الدالة** اللي شاشة اختيار الفني
+  /// بتعمل بيها التذكرة (docs/08 §150 بند ١). أي حساب محلي تاني هنا بيرجّع نفس البَقّة.
+  String? _scheduledAtToSend() => bookingScheduledAtIso(
+    requiresStartTime: widget.service.requiresStartTime,
+    day: _requestedAt,
+    preciseTime: _preciseTime,
+  );
+
   Future<void> _pickPreciseTime() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0),
+      initialTime: _preciseTime ?? _bookingWindow.start,
     );
-    if (picked != null && mounted) setState(() => _preciseTime = picked);
+    if (picked == null || !mounted) return;
+    // **المدخل التاني لنفس القاعدة** (ADR-0097): العميل يقدر يغيّر الساعة من شاشة التأكيد
+    // كمان، فالحارس لازم يبقى في المكانين — وإلا فيه طريق بيوصل لوقت السيرفر بيرفضه.
+    if (!_bookingWindow.allows(picked)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_bookingWindow.rejectionAr)),
+      );
+      return;
+    }
+    setState(() => _preciseTime = picked);
   }
 
   // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ
@@ -931,13 +957,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             technicianId: technicianId,
             technicianCompanyId: companyId,
             bookingMode: widget.bookingMode,
-            scheduledAt: widget.scheduleSlotId != null
+            scheduledAt: widget.scheduleSlotId != null ? null : _scheduledAtToSend(),
+            // النطاق المرن جزء من البصمة (`scheduled_end_at`) — غيابه هنا كان بيخلّي إعادة
+            // الإصدار تطلع بصمة مختلفة عن الإنشاء، فنفس رسالة «تفاصيل الحجز اتغيّرت» بترجع
+            // من باب تاني على الحجوزات بنطاق أيام.
+            scheduledEndAt: widget.scheduleSlotId != null
                 ? null
-                : (widget.service.requiresStartTime
-                          ? _combinedPreciseScheduledAt()
-                          : _requestedAt)
-                      ?.toUtc()
-                      .toIso8601String(),
+                : _requestedAtRangeEnd?.toUtc().toIso8601String(),
             fieldValues: _showsDynamicForm ? _fieldValues : null,
             promoCode: _effectiveRemoteQuote ? null : _promoCodeToSend,
             buildingCode: _effectiveRemoteQuote ? null : _buildingCodeToSend,
@@ -950,9 +976,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           );
       return refreshed.matchPreviewId;
     } on ApiException {
-      // إعادة الإصدار فشلت (الفني بقى مشغول مثلاً) — بنكمّل بالتذكرة القديمة عشان الباك-إند
-      // هو اللي يقول السبب برسالته الصريحة، بدل ما نبلع الخطأ هنا ونخفي إيه اللي حصل.
-      return previewId;
+      // **الفشل هنا هو السبب الحقيقي — بيترمى زي ما هو، مابيتبلعش.**
+      //
+      // الكود القديم كان بيرجّع التذكرة القديمة و«يسيب الباك-إند يقول السبب». وده كان غلط
+      // بنيويًا: الباك-إند وقتها بيقارن بصمة تذكرة قديمة، فبيقول «غيّرت في تفاصيل الحجز
+      // (الموعد)» — رسالة مالهاش أي علاقة بالسبب، والعميل ماغيّرش أي حاجة. ده بالظبط اللي
+      // المالك شافه مع الفني «منون» (docs/08 §150 بند ١): الفني كان مشغول، ورسالة «الفني مش
+      // متاح» اتبلعت هنا واتبدلت برسالة عن الموعد.
+      //
+      // السبب الحقيقي (الفني مشغول/السعر اتغيّر/الخدمة اتقفلت) بييجي من نداء إعادة الإصدار
+      // نفسه، فهو اللي بيوصل للعميل.
+      rethrow;
     }
   }
 
@@ -1038,13 +1072,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         scheduleSlotId: binding.scheduleSlotId,
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
         // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
-        scheduledAt: effectiveSlotId != null
-            ? null
-            : (widget.service.requiresStartTime
-                      ? _combinedPreciseScheduledAt()
-                      : _requestedAt)
-                  ?.toUtc()
-                  .toIso8601String(),
+        scheduledAt: effectiveSlotId != null ? null : _scheduledAtToSend(),
         // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد.
         scheduledAtRangeEnd: effectiveSlotId == null
             ? _requestedAtRangeEnd?.toUtc().toIso8601String()

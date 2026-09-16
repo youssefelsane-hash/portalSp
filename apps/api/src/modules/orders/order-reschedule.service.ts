@@ -4,6 +4,12 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ORDER_RESCHEDULED_EVENT, OrderRescheduledEvent } from '../../common/events/order-rescheduled.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import {
+  bookingWindowApplies,
+  bookingWindowMessageAr,
+  isWithinBookingWindow,
+  resolveBookingWindowSetting,
+} from './booking-window';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -121,6 +127,28 @@ export class OrderRescheduleService {
 
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.queries.findOneOwnedOrThrow(userId, orderId);
+    // نفس نافذة اختيار الموعد بتاعة الإنشاء (ADR-0097) — الحارس هنا **مسار العميل بس**.
+    // `rescheduleByAdmin` تحت مالهوش القيد ده عمدًا: الأدمن بيتعامل مع حالات استثنائية حقيقية
+    // (فني اتأخر، عميل اتصل بالدعم)، ومنعه كان هيخلّي الحالة دي بلا أي مخرج.
+    // والسلوت المعلَن (`new_slot_id`) مستثنى لأنه وقت الفني نفسه، زي الإنشاء بالظبط.
+    if (!dto.new_slot_id && dto.new_scheduled_at) {
+      const chosenAt = new Date(dto.new_scheduled_at);
+      const [service] = await this.dataSource.query<{ requires_start_time_only: boolean }[]>(
+        `SELECT requires_start_time_only FROM services WHERE id = $1`,
+        [order.serviceId],
+      );
+      if (
+        bookingWindowApplies({
+          scheduledAt: chosenAt,
+          serviceRequiresStartTime: service?.requires_start_time_only ?? false,
+        })
+      ) {
+        const bookingWindow = await resolveBookingWindowSetting(this.settingsService);
+        if (!isWithinBookingWindow(chosenAt, bookingWindow)) {
+          throw new ApiException(ErrorCode.VAL_001, bookingWindowMessageAr(bookingWindow), HttpStatus.BAD_REQUEST);
+        }
+      }
+    }
     const configuredLimit = await this.settingsService.getNumber('orders.customer_reschedule_max_count', 3);
     const customerRescheduleLimit = Math.max(0, Math.min(20, Math.floor(configuredLimit)));
     const reasonSuffix = this.customerReasonSuffix(dto);

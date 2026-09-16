@@ -1567,7 +1567,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ],
                       // خانة InstaPay اطلاع دائم: تعرض الحساب والحافز من لحظة إنشاء الطلب،
                       // لكن بدء التحويل لا يتاح إلا عندما يقرر الخادم أن هناك مبلغًا مستحقًا.
-                      if (_instapayPreview != null) ...[
+                      //
+                      // **و«دائم» بتنتهي عند قفل الطلب** (بلاغ مالك 2026-09-15، docs/08 §150
+                      // بند ٤): طلب مقفول كان لسه بيعرض «تحب تدفع أونلاين بدل الكاش؟ / لسه
+                      // بيتحدد» وزرار معطّل بيقول «هتقدر تحوّل أول ما السعر يتحدد» — وعد
+                      // بحاجة مش هتحصل على طلب خلاص. الشرط جاي من السيرفر (`isClosed`) عشان
+                      // الويب والتطبيق يقولوا نفس الحاجة بنيويًا.
+                      if (_instapayPreview != null && !_instapayPreview!.isClosed) ...[
                         const SizedBox(height: 16),
                         _InstaPayInlineCard(
                           preview: _instapayPreview!,
