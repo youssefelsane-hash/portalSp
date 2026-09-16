@@ -257,6 +257,30 @@ export interface CapacityConflictOpts extends DayLoadOpts {
   scheduledAtParam: string;
   /** مصدر أعمدة الطلب المرشّح — القاعدة نفسها بتتطبّق عليه هنا، مش في الكولر. */
   candidateLoad: CandidateLoadSource;
+  /**
+   * **مصدر بديل لحمل أيام الشخص** — علاقة SQL بترجّع `(busy_day, busy_minutes)`، بنفس عقد
+   * {@link technicianDayLoadSubquery} بالحرف.
+   *
+   * **القاعدة مابتتغيّرش، المصدر بس هو اللي بيتحقن** — نفس فلسفة {@link CandidateLoadSource}
+   * بالظبط. الافتراضي هو `technicianDayLoadSubquery(opts)` نفسها، فأي كولر مابيبعتهاش سلوكه
+   * **مطابق حرفيًا** لقبل إضافتها.
+   *
+   * ### ليه موجودة (قياس حي 2026-09-16، docs/08 §155، ADR-0100)
+   *
+   * `technicianDayLoadSubquery` **مترابط** (correlated) بمعرّف الشخص، فجوّه الـ`EXISTS` تحت
+   * بيتنفّذ **مرة لكل يوم مرشّح**. طول ما المدى يوم واحد ده مش مهم. أول ما المدى بقى حقيقي
+   * (٥ أيام لشغل ٥ أيام) التكلفة اتفرقعت:
+   *
+   *   ٤٠ فني، اقتراح أفق ٢١ يوم، بلا كاش:
+   *     مدى يوم واحد  =  ٢٦٤ms
+   *     مدى ٥ أيام    = ٤٦٣٥ms   ← ١٧ ضعف
+   *     مدى ١٠ أيام   = ٤٧٢٣ms
+   *
+   * اللي بيحصل هو بالظبط انفجار (أيام مرشّحة × فنيين × أيام المدى). الكولر اللي عنده الحمل
+   * محسوب **مرة واحدة** لكل (فني، يوم) في CTE بيبعته هنا، فالـ`EXISTS` بيبقى JOIN على جدول
+   * جاهز بدل استعلام جديد لكل يوم.
+   */
+  dayLoadRelation?: string;
 }
 
 /**
@@ -283,7 +307,7 @@ export function dailyCapacityExceededExpr(opts: CapacityConflictOpts): string {
       (${candidateStartDay} + (GREATEST(${candidateSpanDaysExpr}, 1) - 1))::timestamp,
       interval '1 day'
     ) AS cd(candidate_day)
-    LEFT JOIN ${technicianDayLoadSubquery(opts)} dl ON dl.busy_day = cd.candidate_day::date
+    LEFT JOIN ${opts.dayLoadRelation ?? technicianDayLoadSubquery(opts)} dl ON dl.busy_day = cd.candidate_day::date
     WHERE COALESCE(dl.busy_minutes, 0)
         + CASE
             WHEN ${candidateLoad.durationMinutesExpr} IS NOT NULL THEN LEAST(

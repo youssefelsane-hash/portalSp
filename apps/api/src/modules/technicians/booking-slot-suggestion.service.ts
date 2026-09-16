@@ -360,6 +360,21 @@ export class BookingSlotSuggestionService {
                },
                preciseDurationHoursExpr: '$10::numeric / 60.0',
                dailyCapacityMinutesParam: '$3',
+               // **الحمل بيتقرا من `day_load` الجاهز، مش باستعلام جديد لكل يوم** (ADR-0100).
+               //
+               // `technicianDayLoadSubquery` مترابطة بمعرّف الفني، فجوّه فحص السقف كانت
+               // بتتنفّذ **مرة لكل يوم في مدى الشغل** — ولمّا المدى بقى حقيقي انفجرت التكلفة:
+               // ٢٦٤ms لمدى يوم ⇒ ٤٦٣٥ms لمدى ٥ أيام على ٤٠ فني (مقاس، مش تقدير). و`day_load`
+               // فوق أصلاً بتحسب نفس الأرقام **مرة واحدة** لكل (فني، يوم)، فكانت بتتحسب
+               // مرتين — مرة للعدّ ومرة (متكررة) للفحص.
+               //
+               // القاعدة نفسها مالمسناهاش: `dailyCapacityExceededExpr` هي هي، والمتغيّر هو
+               // **من فين بتقرا الأرقام** بس.
+               dayLoadRelation: `(
+                 SELECT ready.busy_day, ready.busy_minutes
+                   FROM day_load ready
+                  WHERE ready.technician_id = pool.id
+               )`,
              })}
         ) elig
         LEFT JOIN day_load dl ON dl.technician_id = elig.id AND dl.busy_day = d.day
@@ -442,9 +457,20 @@ export class BookingSlotSuggestionService {
     addressId: string;
     day: string;
     durationMinutes?: number | null;
+    estimatedDurationDays?: number | null;
   }): Promise<{ times: SuggestedTime[] }> {
     const zoneId = await this.resolveZone(opts.customerUserId, opts.addressId);
     const cfg = await this.config();
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+    // **نافذة الساعة ≠ حمل الشغلانة** (ADR-0100 §5). الاتنين كانوا رقم واحد (`$7`)، وده كان
+    // بيكسر الاتجاهين لشغل ممتد: نافذة تقاطع بـ٦٠ ساعة من ناحية، ومدى مرشّح بيوم واحد من ناحية.
+    //
+    //  - `slotWindowMinutes` = «لو بدأ الساعة دي، بياخد قد إيه من اليوم ده» — بيتحصر على السقف
+    //    اليومي، وهو اللي بيتقارن بتقاطع الطلبات القائمة.
+    //  - `jobMinutes`/`jobDays` = حمل الشغلانة **كامل**، وهو اللي `candidateSpanDaysFromSource()`
+    //    بتشتق منه المدى الحقيقي فتتفحص كل أيام الشغل مش يوم البداية بس.
+    const jobMinutes = opts.durationMinutes ?? null;
+    const slotWindowMinutes = Math.max(30, Math.min(jobMinutes ?? 60, Math.round(dailyCapacityMinutes)));
 
     const rows = await this.dataSource.query<{ hour: string; free_technicians: string }[]>(
       `
@@ -489,13 +515,16 @@ export class BookingSlotSuggestionService {
              activeStatusesParam: '$6',
              engagedStatusesParam: '$8',
              isEmergencyParam: 'false',
-             serviceDurationExpr: 'COALESCE($7::int, COALESCE(svc.estimated_duration_minutes, 60))',
+             serviceDurationExpr: 'COALESCE($10::int, COALESCE(svc.estimated_duration_minutes, 60))',
+             // نفس مصدر الحمل بتاع `suggestDays` بالحرف — الشغلانة الممتدة بيتفحص مداها كله
+             // (ADR-0100 §5). `NULL::numeric` المكتوبة نصًا هنا قبل كده كانت بتثبّت المدى على
+             // يوم واحد مهما كانت مدة الشغل.
              candidateLoad: {
-               estimatedDurationDaysExpr: 'NULL::numeric',
-               durationMinutesExpr: '$7::int',
+               estimatedDurationDaysExpr: '$11::numeric',
+               durationMinutesExpr: '$10::int',
                serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
              },
-             preciseDurationHoursExpr: '$7::numeric / 60.0',
+             preciseDurationHoursExpr: '$10::numeric / 60.0',
              dailyCapacityMinutesParam: '$9',
            })}
       )
@@ -542,10 +571,13 @@ export class BookingSlotSuggestionService {
         Math.max(0, Math.round(cfg.dayStartHour)),
         Math.min(23, Math.round(cfg.dayEndHour)),
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
-        Math.max(30, Math.round(opts.durationMinutes ?? 60)),
+        slotWindowMinutes,
         // ($8, $9) بوابة الحجز الحقيقية جوّه `eligible` — نفس مدخلات `suggestDays` بالحرف.
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
-        await resolveDailyCapacityMinutes(this.settingsService),
+        dailyCapacityMinutes,
+        // ($10, $11) حمل الشغلانة كامل — منفصل عن نافذة الساعة ($7) عن قصد.
+        jobMinutes,
+        opts.estimatedDurationDays ?? null,
       ],
     );
 

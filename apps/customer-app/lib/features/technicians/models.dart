@@ -55,6 +55,9 @@ class ScheduleSlot {
 // اختيار الفني قبل الحجز (docs/08 §3) — مطابق لـ
 // apps/api/src/modules/technicians/dto/technician-booking-list-response.dto.ts. قايمة فنيين
 // مؤهّلين للخدمة في منطقة العميل، مرتبة (تقييم ثم قرب ثم طلبات مكتملة) من الباك-إند.
+/// **بديل احتياطي بس** — المصدر الحقيقي بقى `technician_level_config.display_name_ar` من
+/// السيرفر (docs/08 §153). الخريطة دي بتشتغل لو السيرفر مارجّعش الاسم (نسخة قديمة، أو صف
+/// تشخيصي مش بيجيب العمود). ممنوع تتوسّع — أي تسمية جديدة مكانها اللوحة مش الكود.
 const Map<String, String> technicianLevelLabelsAr = {
   'new': 'جديد',
   'verified': 'موثّق',
@@ -63,6 +66,44 @@ const Map<String, String> technicianLevelLabelsAr = {
   'team_leader': 'قائد فريق',
 };
 
+/// **الالتزام بالمواعيد** (ADR-0099) — بديل ETA اللحظي للطلبات المجدولة.
+///
+/// `sampleCount` جزء أصيل من المعنى مش تفصيلة: «١٠٠٪ من ٣ زيارات» و«١٠٠٪ من ٥٠» مش نفس
+/// الحاجة، والكارت بيعرض العدد عشان الرقم يبقى مفهوم مش مجرد نسبة.
+class TechnicianPunctuality {
+  final int onTimeRate;
+  final int sampleCount;
+
+  /// متوسط التأخير على الزيارات المتأخرة وحدها. `null` = مفيش تأخير مسجّل خالص.
+  final int? averageLateMinutes;
+
+  const TechnicianPunctuality({
+    required this.onTimeRate,
+    required this.sampleCount,
+    required this.averageLateMinutes,
+  });
+
+  static TechnicianPunctuality? fromJson(Map<String, dynamic>? json) {
+    if (json == null) return null;
+    final rate = (json['on_time_rate'] as num?)?.toInt();
+    if (rate == null) return null;
+    return TechnicianPunctuality(
+      onTimeRate: rate,
+      sampleCount: (json['sample_count'] as num?)?.toInt() ?? 0,
+      averageLateMinutes: (json['average_late_minutes'] as num?)?.toInt(),
+    );
+  }
+
+  /// نص جاهز للعرض — مصدر واحد للصياغة بدل ما كل كارت يركّبها.
+  String get labelAr => 'بيوصل في معاده $onTimeRate% من $sampleCount زيارة';
+
+  /// سطر تانٍ بيظهر بس لما يكون فيه تأخير فعلي مسجّل.
+  String? get latenessLabelAr =>
+      averageLateMinutes != null && averageLateMinutes! > 0
+      ? 'متوسط التأخير لما يحصل: $averageLateMinutes د'
+      : null;
+}
+
 class TechnicianBookingListItem {
   final String id;
   final String fullName;
@@ -70,11 +111,22 @@ class TechnicianBookingListItem {
   final String? bio;
   final double averageRating;
   final int totalRatingsCount;
-  final int completedOrdersCount;
+  /// طلبات الفني **في الخدمة دي وحدها**.
+  final int serviceCompletedCount;
+  /// إجمالي شغله على المنصّة كلها.
+  final int totalCompletedCount;
   final double? distanceKm;
   // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح والسعر النهائي المحسوب
   // فعليًا بيه قبل ما يختاره. final_price_cents/level_price_multiplier = null لخدمات formula.
   final String technicianLevel;
+
+  /// اسم المستوى **من الأدمن** — الخريطة الثابتة في التطبيق كانت بتقول «مميز» والسيرفر
+  /// بيقول «بريميوم»، قيمتين لنفس الحاجة (docs/08 §153). `null` للشركات.
+  final String? technicianLevelLabelAr;
+
+  /// الاسم المعروض فعلاً: اللي الأدمن ضابطه، ولو مش متاح بنرجع للخريطة المحلية.
+  String? get levelLabelAr =>
+      technicianLevelLabelAr ?? technicianLevelLabelsAr[technicianLevel];
   final int? finalPriceCents;
   final double? levelPriceMultiplier;
   // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — **مِنحة إدارية**، مش نتيجة تلقائية لاعتماد
@@ -82,8 +134,19 @@ class TechnicianBookingListItem {
   // onTimeRatePercent/avgArrivalMinutes بيرجعوا null لو مفيش طلبات كفاية لحساب متوسط منها
   // (مش صفر مضلّل).
   final bool isVerified;
-  final int? onTimeRatePercent;
-  final int? avgArrivalMinutes;
+
+  /// **مؤشر الوصول — السيرفر هو اللي بيقرر مين المعروض** (ADR-0099، docs/08 §153).
+  ///
+  /// `expected_arrival` للطلب الفوري/القريب، و`punctuality` للطلب المجدول. القيمة اللي مش
+  /// بتاعة الوضع الحالي بترجع `null` **من السيرفر** — فمستحيل الكارت يعرض «وصول متوقع»
+  /// لشغل بعد أسبوع، لأن الرقم أصلاً مش بيوصل.
+  final String arrivalMetricMode;
+
+  /// متوسط مدة الانتقال في نفس النطاق (دقايق) — للطلب القريب بس، و`null` لو مفيش رقم صالح.
+  final int? expectedArrivalMinutes;
+
+  /// الالتزام بالمواعيد — للطلب المجدول بس، و`null` لو العيّنة أصغر من إنها تتعرض.
+  final TechnicianPunctuality? punctuality;
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — id هنا يبقى معرّف الشركة لو isCompany.
   final bool isCompany;
   final int? staffCount;
@@ -107,14 +170,17 @@ class TechnicianBookingListItem {
     required this.bio,
     required this.averageRating,
     required this.totalRatingsCount,
-    required this.completedOrdersCount,
+    required this.serviceCompletedCount,
+    required this.totalCompletedCount,
     required this.distanceKm,
     required this.technicianLevel,
+    this.technicianLevelLabelAr,
     required this.finalPriceCents,
     required this.levelPriceMultiplier,
     required this.isVerified,
-    required this.onTimeRatePercent,
-    required this.avgArrivalMinutes,
+    required this.arrivalMetricMode,
+    required this.expectedArrivalMinutes,
+    required this.punctuality,
     required this.isCompany,
     required this.staffCount,
     required this.branchCount,
@@ -131,14 +197,21 @@ class TechnicianBookingListItem {
         bio: json['bio'] as String?,
         averageRating: (json['average_rating'] as num).toDouble(),
         totalRatingsCount: json['total_ratings_count'] as int,
-        completedOrdersCount: json['completed_orders_count'] as int,
+        // **نطاقين مختلفين، اسمين مختلفين** (docs/08 §153): ده عدّاد الخدمة دي وحدها،
+        // والإجمالي حقل تاني. خلطهم كان بيطلّع «0 طلب مكتمل» جنب «4.4 (5)».
+        serviceCompletedCount: json['service_completed_count'] as int? ?? 0,
+        totalCompletedCount: json['total_completed_count'] as int? ?? 0,
         distanceKm: (json['distance_km'] as num?)?.toDouble(),
         technicianLevel: json['technician_level'] as String? ?? 'new',
+        technicianLevelLabelAr: json['technician_level_label_ar'] as String?,
         finalPriceCents: json['final_price_cents'] as int?,
         levelPriceMultiplier: (json['level_price_multiplier'] as num?)?.toDouble(),
         isVerified: json['is_verified'] as bool? ?? false,
-        onTimeRatePercent: json['on_time_rate'] as int?,
-        avgArrivalMinutes: json['avg_arrival_minutes'] as int?,
+        arrivalMetricMode: json['arrival_metric_mode'] as String? ?? 'punctuality',
+        expectedArrivalMinutes: json['expected_arrival_minutes'] as int?,
+        punctuality: TechnicianPunctuality.fromJson(
+          json['punctuality'] as Map<String, dynamic>?,
+        ),
         isCompany: json['is_company'] as bool? ?? false,
         staffCount: json['staff_count'] as int?,
         branchCount: json['branch_count'] as int?,

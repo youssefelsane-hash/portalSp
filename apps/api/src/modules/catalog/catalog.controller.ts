@@ -14,6 +14,11 @@ import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 import { PricingModel } from './entities/service.entity';
 import { toStandardDataResponseDto } from './dto/standard-data-response.dto';
+import { SettingsService } from '../settings/settings.service';
+import {
+  MIN_PUNCTUALITY_SAMPLE_FALLBACK,
+  resolveArrivalMetric,
+} from '../technicians/technician-arrival-metrics';
 
 @Controller()
 export class CatalogController {
@@ -21,6 +26,8 @@ export class CatalogController {
     private readonly catalogService: CatalogService,
     private readonly techniciansService: TechniciansService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    // ADR-0099 — قرار «مؤشر الوصول» بيقرا عتبة الشغل القريب وحد العيّنة من الإعدادات.
+    private readonly settingsService: SettingsService,
   ) {}
 
   @Public()
@@ -240,6 +247,18 @@ export class CatalogController {
       sorted.sort((a, b) => b.item.averageRating - a.item.averageRating);
     }
 
-    return sorted.map(({ item, estimate }) => toTechnicianBookingListItemResponseDto(item, estimate));
+    // **مؤشر الوصول بيتحدد هنا مرة واحدة** (ADR-0099): فوري/قريب ⇒ مدة وصول، مجدول ⇒ التزام
+    // بالمواعيد. القرار في السيرفر عشان التطبيق والويب والأدمن يقولوا نفس الحاجة بنيويًا.
+    const arrivalDecision = await resolveArrivalMetric(this.settingsService, query.scheduled_at ?? null);
+    const minPunctualitySample = await this.settingsService.getNumber(
+      'matching.min_punctuality_sample',
+      MIN_PUNCTUALITY_SAMPLE_FALLBACK,
+    );
+    return sorted.map(({ item, estimate }) =>
+      toTechnicianBookingListItemResponseDto(item, estimate, {
+        mode: arrivalDecision.mode,
+        minPunctualitySample,
+      }),
+    );
   }
 }

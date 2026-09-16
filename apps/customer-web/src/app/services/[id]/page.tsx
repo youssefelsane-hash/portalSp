@@ -384,12 +384,22 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       serviceId: id,
       addressId: selectedAddressId,
       durationMinutes: estimate?.duration_minutes ?? null,
+      estimatedDurationDays: estimate?.estimated_duration_days ?? null,
     })
       .then((res) => { if (active) setSuggestedDays(res.days); })
       // الاقتراح ميزة فوق الفلو — فشله بيخفي الشيبس بس ومابيوقفش الحجز.
       .catch(() => { if (active) setSuggestedDays(null); });
     return () => { active = false; };
-  }, [authedFetch, id, selectedAddressId, service?.allows_scheduling, estimate?.duration_minutes]);
+    // **الإبطال** (ADR-0100): المدة والأيام في قايمة التبعيات، فأي تغيير في مدخلات الشغل بيعيد
+    // حساب الاقتراحات بدل ما يسيب اقتراح محسوب على مدة قديمة.
+  }, [
+    authedFetch,
+    id,
+    selectedAddressId,
+    service?.allows_scheduling,
+    estimate?.duration_minutes,
+    estimate?.estimated_duration_days,
+  ]);
 
   // اقتراح الساعات — بعد ما اليوم يتحدد، ولخدمات «ساعة وصول» بس.
   useEffect(() => {
@@ -404,11 +414,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       addressId: selectedAddressId,
       day: scheduledDate,
       durationMinutes: estimate?.duration_minutes ?? null,
+      estimatedDurationDays: estimate?.estimated_duration_days ?? null,
     })
       .then((res) => { if (active) setSuggestedTimes(res.times); })
       .catch(() => { if (active) setSuggestedTimes(null); });
     return () => { active = false; };
-  }, [authedFetch, id, selectedAddressId, scheduledDate, service?.schedule_precision, estimate?.duration_minutes]);
+  }, [
+    authedFetch,
+    id,
+    selectedAddressId,
+    scheduledDate,
+    service?.schedule_precision,
+    estimate?.duration_minutes,
+    estimate?.estimated_duration_days,
+  ]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -2334,7 +2353,8 @@ function IndividualCard({
           <p className="font-medium">{t.full_name}</p>
           {t.is_verified && <TrustBadge />}
           <span className="rounded-full bg-surface-variant px-2 py-0.5 text-xs">
-            {TECHNICIAN_LEVEL_LABELS_AR[t.technician_level] ?? t.technician_level}
+            {/* اسم المستوى من الأدمن (docs/08 §153) — الخريطة المحلية احتياطي بس. */}
+            {t.technician_level_label_ar ?? TECHNICIAN_LEVEL_LABELS_AR[t.technician_level] ?? t.technician_level}
           </span>
         </div>
         {conflicted && (
@@ -2356,7 +2376,19 @@ function IndividualCard({
           {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}
           {t.distance_km !== null ? ` · ${t.distance_km} كم` : ''}
         </p>
-        {t.on_time_rate !== null && <p className="text-xs text-muted">الالتزام بالمواعيد: {t.on_time_rate}%</p>}
+        {/* نفس منطق التطبيق بالحرف (ADR-0099): المؤشر بيتبدّل بأفق الطلب، والسيرفر هو اللي
+            بيقرر — فمفيش شرط متكرر هنا، بس عرض للي وصل فعلاً. */}
+        {t.expected_arrival_minutes !== null && (
+          <p className="text-xs text-muted">متوسط وصوله للمنطقة دي: {t.expected_arrival_minutes} د</p>
+        )}
+        {t.punctuality !== null && (
+          <p className="text-xs text-muted">
+            بيوصل في معاده {t.punctuality.on_time_rate}% من {t.punctuality.sample_count} زيارة
+            {t.punctuality.average_late_minutes !== null && t.punctuality.average_late_minutes > 0
+              ? ` · متوسط التأخير لما يحصل: ${t.punctuality.average_late_minutes} د`
+              : ''}
+          </p>
+        )}
       </div>
       {t.final_price_cents !== null && (
         <span className="shrink-0 font-semibold text-primary">{formatEgp(t.final_price_cents)}</span>
@@ -2393,7 +2425,9 @@ function CompanyCard({
           <CompanyTag label={t.is_commercial_company ? 'شركة مسجّلة' : 'فريق عمل'} emphasized />
           <CompanyTag label={`${t.staff_count ?? 0} فني`} />
           {(t.branch_count ?? 0) > 0 && <CompanyTag label={`${t.branch_count} فرع`} />}
-          {t.completed_orders_count > 0 && <CompanyTag label={`${t.completed_orders_count} طلب مكتمل`} />}
+          {t.service_completed_count > 0 && (
+            <CompanyTag label={`${t.service_completed_count} طلب في الخدمة دي`} />
+          )}
           {t.total_ratings_count > 0 && <CompanyTag label={`⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})`} />}
           {t.distance_km !== null && <CompanyTag label={`${t.distance_km} كم`} />}
         </div>

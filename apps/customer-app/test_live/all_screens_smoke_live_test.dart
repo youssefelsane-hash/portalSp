@@ -24,6 +24,7 @@ import 'package:customer_app/features/account/account_screen.dart';
 import 'package:customer_app/features/addresses/addresses_screen.dart';
 import 'package:customer_app/features/addresses/address_form_screen.dart';
 import 'package:customer_app/features/addresses/addresses_repository.dart';
+import 'package:customer_app/features/addresses/models.dart';
 import 'package:customer_app/features/auth/login_screen.dart';
 import 'package:customer_app/features/catalog/categories_screen.dart';
 import 'package:customer_app/features/catalog/home_screen.dart';
@@ -132,6 +133,9 @@ late String orderId;
 late String orderNumber;
 late CatalogService service;
 late ServiceCategory category;
+
+/// عنوان العميل المُنشأ للمسح — `JobDetailsScreen` بقت بتاخده جاهزًا (ADR-0100).
+late Address customerAddress;
 
 Future<void> _pumpScreen(WidgetTester tester, Widget screen, Size size) async {
   tester.view.physicalSize = size;
@@ -247,6 +251,10 @@ void main() {
       },
     );
 
+    // ADR-0100 — `JobDetailsScreen` بقت بتاخد عنوان الطلب جاهزًا (العنوان بقى قبلها في الرحلة)،
+    // فالمسح محتاج كائن `Address` حقيقي مش الـmap الخام.
+    customerAddress = Address.fromJson(address!);
+
     // خدمة **بلا حقول تسعير إجبارية**: أول خدمة في الكتالوج ممكن تكون formula محتاجة
     // «المساحة» فإنشاء الطلب بيترفض ويقع الـsetUpAll كله (§148).
     final pickedServiceId = await pickBookableServiceId();
@@ -269,7 +277,7 @@ void main() {
       accessToken: token,
       body: {
         'service_id': service.id,
-        'address_id': address!['id'],
+        'address_id': address['id'],
         'problem_description': 'مسح الشاشات — طلب اختبار',
       },
     );
@@ -285,7 +293,8 @@ void main() {
     'نتائج البحث': () => const SearchResultsScreen(initialQuery: 'كهرباء'),
     'طلباتي': () => const OrdersScreen(),
     'تفاصيل الطلب': () => OrderDetailScreen(orderId: orderId),
-    'تفاصيل الشغلانة قبل الحجز': () => JobDetailsScreen(service: service),
+    'تفاصيل الشغلانة قبل الحجز': () =>
+        JobDetailsScreen(service: service, initialAddress: customerAddress),
     'اختيار الموعد': () => const ScheduleSelectionScreen(
       allowsDateRangeBooking: true,
       serviceName: 'خدمة اختبار',

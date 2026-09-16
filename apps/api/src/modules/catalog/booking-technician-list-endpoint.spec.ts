@@ -200,7 +200,13 @@ describe('GET /services/:id/technicians — الحجز الممتد بيخفي �
       geoService,
       settingsStub,
     );
-    controller = new CatalogController(catalogService, techniciansService, { getUrl: async (key: string) => key } as never);
+    controller = new CatalogController(
+      catalogService,
+      techniciansService,
+      { getUrl: async (key: string) => key } as never,
+      // ADR-0099 — قرار مؤشر الوصول بيقرا عتبتين من الإعدادات؛ الـstub بيرجّع الافتراضيات.
+      settingsStub,
+    );
   });
 
   afterAll(async () => {
