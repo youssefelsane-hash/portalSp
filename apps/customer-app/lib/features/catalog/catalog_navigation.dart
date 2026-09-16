@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../core/funnel_tracker.dart';
+import '../addresses/addresses_repository.dart';
+import '../addresses/addresses_screen.dart';
+import '../addresses/models.dart';
 import '../orders/assessment_route.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
@@ -67,6 +70,19 @@ Future<void> navigateToServiceBooking(
   // النقطة دي بالذات لأنها مكان التقاء **كل** مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية).
   _recordServiceIntent(context, service.id);
 
+  // **العنوان الأول — بس للعميل اللي مالوش عنوان محفوظ** (طلب مالك 2026-09-16، docs/08 §152،
+  // ADR-0098).
+  //
+  // اقتراح الأيام والساعات كله مبني على **نطاق العنوان** (طاقة الفنيين المؤهّلين في النطاق ده
+  // في اليوم ده). فالعميل اللي لسه مالوش عنوان كان بيشوف تقويم فاضي بلا أي اقتراح
+  // (`_canSuggest` بترجع false)، يختار يوم بالتخمين، وبعدين يتسأل على العنوان — وساعتها بس
+  // يكتشف لو الخدمة مش متاحة في منطقته أصلاً. يعني أسوأ تجربة بتحصل لأول مرة بالظبط.
+  //
+  // **مفيش أي خطوة زيادة على العميل القديم**: اللي عنده عنوان محفوظ بيعدّي على طول زي ما كان،
+  // والعنوان بيتمرر للشاشات اللي بعدها فمابيتسألش عليه تاني.
+  final Address? preselectedAddress = await _ensureAddressBeforeScheduling(context);
+  if (!context.mounted) return;
+
   // **سؤال «إزاي حابب تحجز الخدمة دي؟» اتشال نهائيًا (ADR-0048، طلب مالك صريح، docs/08 §85)**:
   // «بدل ما أسأل الكاستمر عايز شغلنا طوارئ ولا فوري ولا فردي، نشيل دول خالص ونحط قواعد على
   // السيستم، والسيستم هو اللي بيحدد بناءً على التاريخ».
@@ -85,6 +101,7 @@ Future<void> navigateToServiceBooking(
         // اقتراح المواعيد (ADR-0088) — العنوان لسه مااتختارش في المسار ده، فالشاشة بتجيب
         // العنوان الافتراضي بنفسها. مفيش عنوان = مفيش اقتراح، والتقويم يفضل زي ما هو.
         serviceId: service.id,
+        addressId: preselectedAddress?.id,
       ),
     ),
   );
@@ -148,6 +165,7 @@ Future<void> navigateToServiceBooking(
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
+              initialAddress: preselectedAddress,
             )
           : TechnicianSelectionScreen(
               service: service,
@@ -155,8 +173,31 @@ Future<void> navigateToServiceBooking(
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
+              initialAddress: preselectedAddress,
             ),
     ),
+  );
+}
+
+/// **بيضمن إن فيه عنوان قبل شاشة الميعاد — من غير ما يضيف خطوة على حد عنده عنوان** (ADR-0098).
+///
+/// بترجّع:
+///  - `null` لو العميل عنده عناوين محفوظة (الشاشة اللي بعدها بتحل الافتراضي بنفسها زي ما كانت)،
+///    أو لو النداء فشل — الفشل مايوقفش الحجز، أسوأ حالاته إن الاقتراح مايظهرش زي الأول بالظبط.
+///  - العنوان اللي العميل أضافه/اختاره لو مكانش عنده أي عنوان.
+///
+/// ولو العميل قفل شاشة العنوان من غير ما يضيف حاجة، بنكمّل بـ`null` بدل ما نلغي الحجز — هو
+/// لسه يقدر يضيف العنوان في الخطوة اللي بعدها زي ما كان دايمًا.
+Future<Address?> _ensureAddressBeforeScheduling(BuildContext context) async {
+  try {
+    final addresses = await AddressesRepository(context.read<AuthRepository>()).list();
+    if (addresses.isNotEmpty) return null;
+  } catch (_) {
+    return null;
+  }
+  if (!context.mounted) return null;
+  return Navigator.of(context).push<Address>(
+    MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
   );
 }
 

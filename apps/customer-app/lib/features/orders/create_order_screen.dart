@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../../core/arabic_time.dart';
 import '../../core/work_scope_label.dart';
 import '../../design/app_motion.dart';
 import 'assessment_route.dart';
@@ -1657,7 +1658,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       leading: const Icon(Icons.schedule_outlined),
                       title: Text(
                         _preciseTime != null
-                            ? 'الساعة ${_preciseTime!.format(context)}'
+                            ? 'الساعة ${formatArabicTime(_preciseTime!)}'
                             : 'حدد وقت البداية',
                       ),
                       trailing: const Icon(Icons.chevron_left),

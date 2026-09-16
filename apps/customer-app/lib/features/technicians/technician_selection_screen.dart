@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/arabic_time.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
@@ -467,9 +468,11 @@ class _AutoMatchPreviewSheet extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
+              // الوقت بيعدّي على `formatArabicTime` (بلا `AM/PM` ومعزول اتجاهيًا) — ده اللي
+              // كان بيقلب الجملة على الشاشة (docs/08 §152). الشرح الكامل في `core/arabic_time.dart`.
               'السعر ده محجوز لك مع الأسطى ده لحد '
-              '${TimeOfDay.fromDateTime(preview.expiresAt.toLocal()).format(context)}. '
-              'لو غيّرت أي تفصيلة هنرشّح من جديد.',
+              '${formatArabicTimeOfDay(preview.expiresAt)} — '
+              'ولو غيّرت أي تفصيلة هنرشّح لك من جديد.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
