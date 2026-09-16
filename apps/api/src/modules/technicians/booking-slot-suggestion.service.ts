@@ -88,12 +88,47 @@ export class BookingSlotSuggestionService {
    * نفس الخدمة في نفس المنطقة بيتشاركوا نفس الحساب. وأي فشل في Redis بيرجع للقاعدة بهدوء
    * (`RedisCacheService` بيبلع الاستثناء ويرجّع null).
    */
+  /**
+   * **حساب واحد لكل مفتاح في اللحظة الواحدة** (قياس حمل 2026-09-16، docs/08 §152).
+   *
+   * الكاش بيغطّي الطلب التاني وما بعده، لكنه **مابيغطّيش الطلبات المتوازية على مفتاح بارد**:
+   * كلهم بيلاقوا الكاش فاضي في نفس اللحظة، فكلهم بيحسبوا. مقاس حيًا على ٤٠ فني:
+   *
+   *   ٢٠ نداء متوازي على مفتاح **بارد** = ٢٣٠٩ms   ← كل واحد بيحسب لوحده
+   *   ٢٠ نداء متوازي على مفتاح **ساخن** =   ٩١ms
+   *
+   * وده بالظبط شكل «جزء صغير يبقى أبطأ من باقي السيستم ويسبب lag تحت الضغط»: الحساب ده أغلى
+   * استعلام في مسار الحجز، فتكراره N مرة بيستهلك اتصالات القاعدة ويأخّر كل حاجة تانية معاه.
+   *
+   * الخريطة دي بتخلّي أول طلب يحسب والباقي **يستنى نفس الوعد**. مفتاح الخريطة هو نفس مفتاح
+   * الكاش، والصف بيتشال في `finally` فأي فشل مايسيبش وعد ميت محفوظ للأبد.
+   *
+   * **مقصود إنها في الذاكرة (لكل نسخة) مش قفل موزّع**: نسخ الـAPI المتعددة أسوأ حالاتها حساب
+   * واحد لكل نسخة بدل واحد للكل — تحسّن بنفس الترتيب تقريبًا، بلا أي تعقيد قفل موزّع في مسار
+   * **استشاري** بحت (الحجز الحقيقي بيعيد التحقق تحت قفل على أي حال).
+   */
+  private readonly inFlightDayCapacity = new Map<string, Promise<DayCapacityRow[]>>();
+
   private async cachedDayCapacity(
     key: string,
     ttlSeconds: number,
     compute: () => Promise<DayCapacityRow[]>,
   ): Promise<DayCapacityRow[]> {
     if (ttlSeconds <= 0) return compute();
+    const inFlight = this.inFlightDayCapacity.get(key);
+    if (inFlight) return inFlight;
+    const pending = this.cachedDayCapacityUncoalesced(key, ttlSeconds, compute).finally(() => {
+      this.inFlightDayCapacity.delete(key);
+    });
+    this.inFlightDayCapacity.set(key, pending);
+    return pending;
+  }
+
+  private async cachedDayCapacityUncoalesced(
+    key: string,
+    ttlSeconds: number,
+    compute: () => Promise<DayCapacityRow[]>,
+  ): Promise<DayCapacityRow[]> {
     const cached = await this.cache.get(key);
     if (cached) {
       try {
@@ -262,6 +297,42 @@ export class BookingSlotSuggestionService {
                (gs::date::timestamp AT TIME ZONE 'Africa/Cairo') AS day_start
           FROM bounds b,
                generate_series(b.first_day, b.first_day + make_interval(days => $5::int), interval '1 day') gs
+      ),
+      -- **المجمّع بيتحسب مرة واحدة، مش مرة لكل يوم** (قياس أداء 2026-09-16، docs/08 §152).
+      --
+      -- شروط الخدمة/النطاق/الموقع/الحصرية **مالهاش علاقة باليوم**، فكانت بتتنفّذ ٢٢ مرة على
+      -- الفاضي جوّه الـLATERAL. اللي بيتغيّر باليوم هو شرط الإتاحة وحده، وهو الوحيد اللي فضل
+      -- جوّه الـLATERAL تحت.
+      pool AS (
+        SELECT tp.id, svc.estimated_duration_minutes AS service_minutes
+          FROM technician_profiles tp
+          LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1
+            AND ts.is_active = true AND ts.verification_status = 'approved'
+          JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+          JOIN services svc ON svc.id = $1
+         WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+           AND tp.current_location IS NOT NULL
+           AND ${technicianServiceQualificationCondition({
+             technicianIdExpr: 'tp.id',
+             serviceIdExpr: 'svc.id',
+             categoryIdExpr: 'svc.category_id',
+             directServiceAlias: 'ts',
+           })}
+           -- ADR-0080 — الاقتراح سؤال عن الطاقة المتاحة للأفراد، فالحصري للشركة مايتحسبش.
+           AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })}
+      ),
+      -- وحمل الأيام كمان مرة واحدة للمجمّع كله، بدل استعلام مترابط لكل (يوم × فني).
+      -- الدالة دي بترجّع صف لكل يوم مشغول أصلاً، فالفلترة باليوم بقت JOIN عادي تحت.
+      -- ده كان **١١٨ms من ٣٩٦** على ٤٠ فني (٤٢٪) قبل التغيير — مقاس، مش تقدير.
+      day_load AS (
+        SELECT p.id AS technician_id, lo.busy_day, lo.busy_minutes
+          FROM pool p
+          CROSS JOIN LATERAL ${technicianDayLoadSubquery({
+            technicianIdExpr: 'p.id',
+            activeStatusesParam: '$6',
+            excludeOrderIdParam: '$9',
+            dailyCapacityParam: '$3',
+          })} lo
       )
       SELECT d.day::text AS day,
              COUNT(*)::text AS available_technicians,
@@ -269,24 +340,11 @@ export class BookingSlotSuggestionService {
              COUNT(*) FILTER (WHERE COALESCE(dl.busy_minutes, 0) = 0)::text AS idle_technicians
         FROM days d
         CROSS JOIN LATERAL (
-          SELECT tp.id
-            FROM technician_profiles tp
-            LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1
-              AND ts.is_active = true AND ts.verification_status = 'approved'
-            JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
-            JOIN services svc ON svc.id = $1
-           WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-             AND tp.current_location IS NOT NULL
-             AND ${technicianServiceQualificationCondition({
-               technicianIdExpr: 'tp.id',
-               serviceIdExpr: 'svc.id',
-               categoryIdExpr: 'svc.category_id',
-               directServiceAlias: 'ts',
-             })}
-             -- ADR-0080 — الاقتراح سؤال عن الطاقة المتاحة للأفراد، فالحصري للشركة مايتحسبش.
-             AND ${technicianIndividualVisibilityCondition({ technicianAlias: 'tp' })}
+          SELECT pool.id, pool.service_minutes
+            FROM pool
+           WHERE true
              ${technicianAvailabilityCondition({
-               technicianIdExpr: 'tp.id',
+               technicianIdExpr: 'pool.id',
                // اليوم المرشّح بيتحقن كتعبير من الـLATERAL بدل parameter ثابت — ده اللي بيخلّي
                // الأفق كله استعلام واحد بدل نداء لكل يوم.
                scheduledAtParam: 'd.day_start',
@@ -294,29 +352,17 @@ export class BookingSlotSuggestionService {
                activeStatusesParam: '$6',
                engagedStatusesParam: '$7',
                isEmergencyParam: '$8',
-               serviceDurationExpr: 'COALESCE($10::int, COALESCE(svc.estimated_duration_minutes, 60))',
+               serviceDurationExpr: 'COALESCE($10::int, COALESCE(pool.service_minutes, 60))',
                candidateLoad: {
                  estimatedDurationDaysExpr: '$11::numeric',
                  durationMinutesExpr: '$10::int',
-                 serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+                 serviceDefaultMinutesExpr: 'pool.service_minutes',
                },
                preciseDurationHoursExpr: '$10::numeric / 60.0',
                dailyCapacityMinutesParam: '$3',
              })}
         ) elig
-        -- حمل اليوم للفني المؤهّل، بنفس الدالة اللي التوزيع والتصنيف بيقروا بيها
-        -- (technicianDayLoadSubquery) — مش استعلام تاني يقدر ينحرف عنها.
-        LEFT JOIN LATERAL (
-          SELECT lo.busy_minutes
-            FROM ${technicianDayLoadSubquery({
-              technicianIdExpr: 'elig.id',
-              activeStatusesParam: '$6',
-              excludeOrderIdParam: '$9',
-              dailyCapacityParam: '$3',
-            })} lo
-           WHERE lo.busy_day = d.day
-           LIMIT 1
-        ) dl ON true
+        LEFT JOIN day_load dl ON dl.technician_id = elig.id AND dl.busy_day = d.day
        GROUP BY d.day
        ORDER BY d.day
       `,

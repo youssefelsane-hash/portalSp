@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/arabic_time.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_repository.dart';
 import 'booking_window.dart';
@@ -569,7 +570,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                     icon: Icons.schedule_outlined,
                     title: 'الساعة',
                     subtitle: _selectedTime != null
-                        ? _selectedTime!.format(context)
+                        ? formatArabicTime(_selectedTime!)
                         : 'حدد وقت البداية',
                     selected: _selectedTime != null,
                     onTap: () => _pickTime(),

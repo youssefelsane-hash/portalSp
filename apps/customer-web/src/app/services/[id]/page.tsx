@@ -1297,13 +1297,19 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                       {formatEgp(activePreview.pricing.total_amount_cents)}
                     </span>
                   </div>
+                  {/* الوقت معزول اتجاهيًا (`dir="auto"` على عنصر مستقل) ونفس صياغة التطبيق
+                      بالحرف. النقطة اللي كانت بعد الوقت مباشرةً كانت بتتسحب مع المقطع الرقمي
+                      في الـbidi فتقطّع الجملة — الشرطة بدلها محايدة بصريًا وآمنة
+                      (docs/08 §152، نفس البَقّة اللي اتلقطت في التطبيق). */}
                   <p className="mt-2 text-xs text-muted">
                     السعر ده محجوز لك مع الأسطى ده لحد{' '}
-                    {new Date(activePreview.expires_at).toLocaleTimeString('ar-EG', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                    . لو غيّرت أي تفصيلة هنرشّح من جديد.
+                    <bdi>
+                      {new Date(activePreview.expires_at).toLocaleTimeString('ar-EG', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </bdi>{' '}
+                    — ولو غيّرت أي تفصيلة هنرشّح لك من جديد.
                   </p>
                   <button
                     onClick={() => requestMatchPreview('auto')}
@@ -2391,7 +2397,9 @@ function CompanyCard({
           {t.total_ratings_count > 0 && <CompanyTag label={`⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})`} />}
           {t.distance_km !== null && <CompanyTag label={`${t.distance_km} كم`} />}
         </div>
-        <p className="mt-2 text-xs text-muted">فريق كامل بيقدر يغطّي الشغل الكبير، ومسؤولية الشغل على الشركة نفسها.</p>
+        {/* نفس نص التطبيق بالحرف (docs/08 §152) — «الشغل الكبير» كان بيضيّق عرض الشركة
+            غلط، و«مسؤولية الشغل» كلام تعاقدي مالوش مكان في كارت اختيار. */}
+        <p className="mt-2 text-xs text-muted">فريق كامل من المتخصصين، بيغطّي كل أنواع الشغل.</p>
         {t.final_price_cents !== null && (
           <p className="mt-2 text-lg font-bold text-primary">{formatEgp(t.final_price_cents)}</p>
         )}

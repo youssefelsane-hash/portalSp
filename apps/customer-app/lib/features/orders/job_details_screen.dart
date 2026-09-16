@@ -26,6 +26,10 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAtRangeEnd;
   // دقة الوقت (docs/08 §84 جزء ج) — مليانين لو الخدمة requiresPreciseSchedule/requiresStartTimeOnly.
   final TimeOfDay? requestedPreciseTime;
+
+  /// العنوان اللي اتحدد **قبل** شاشة الميعاد للعميل اللي مالوش عنوان محفوظ (ADR-0098) —
+  /// بيمنع إننا نسأل على العنوان تاني في نفس الرحلة. `null` = السلوك القديم بالحرف.
+  final Address? initialAddress;
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
   // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
   // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
@@ -38,6 +42,7 @@ class JobDetailsScreen extends StatefulWidget {
     this.requestedAt,
     this.requestedAtRangeEnd,
     this.requestedPreciseTime,
+    this.initialAddress,
   });
 
   @override
@@ -56,6 +61,11 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   void initState() {
     super.initState();
     _loadPricingFields();
+    // العنوان اتحدد قبل شاشة الميعاد (ADR-0098) — مفيش داعي نسأل عليه تاني في نفس الرحلة.
+    if (widget.initialAddress != null) {
+      _selectedAddress = widget.initialAddress;
+      return;
+    }
     // بَقّة حقيقية اتلقطت بالتشغيل الحي (Xvfb+fluxbox، 2026-08-19): نداء Navigator.push هنا
     // مباشرة جوّه initState بيحصل وهو الـNavigator لسه في نص انيميشن الدخول لـJobDetailsScreen
     // نفسها (لسه locked) — بيرمي 'navigator._debugLocked' assertion جوّه microtask، والشاشة
