@@ -7,7 +7,8 @@ type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 // الحقول دي (is_company وتوابعها) كانت موجودة في رد الباك-إند من زمان ومستخدمة في
 // apps/customer-app's technician_marketplace_screen.dart (بادجات "شركة"/"فريق"، توثيق، إلخ) —
 // غايبة من الـDTO هنا خالص (مش بس من العرض)، فجوة توازي حقيقية (docs/08 §83 جزء ج).
-// avg_arrival_minutes عمدًا مش مضاف — نفس قرار جزء أ (docs/08 §83)، لو المالك عايزه هنا هيتضاف وقتها.
+// **مؤشر الوصول بقى مفهومين حسب أفق الطلب** (ADR-0099، docs/08 §153) — والسيرفر هو اللي
+// بيقرر، فالحقل اللي مش بتاع الوضع الحالي بيرجع null ومفيش أي شرط بيتكرر هنا.
 export interface TechnicianBookingListItemDto {
   id: string;
   full_name: string;
@@ -15,14 +16,27 @@ export interface TechnicianBookingListItemDto {
   bio: string | null;
   average_rating: number;
   total_ratings_count: number;
-  completed_orders_count: number;
+  /** طلبات الفني في الخدمة دي وحدها — مش إجماليه (docs/08 §153). */
+  service_completed_count: number;
+  /** إجمالي شغله على المنصّة كلها. */
+  total_completed_count: number;
   distance_km: number | null;
   technician_level: string;
+  /** اسم المستوى زي ما الأدمن ضابطه — بدل خريطة ثابتة في كود الواجهة. */
+  technician_level_label_ar: string | null;
   pricing_tier: string;
   final_price_cents: number | null;
   level_price_multiplier: number | null;
   is_verified: boolean;
-  on_time_rate: number | null;
+  arrival_metric_mode: 'expected_arrival' | 'punctuality';
+  /** الطلب قريب: متوسط الوصول لنفس المنطقة. null = مفيش رقم يستاهل العرض. */
+  expected_arrival_minutes: number | null;
+  /** الطلب مجدول: الالتزام بالمواعيد. null = العيّنة أصغر من إنها تتعرض. */
+  punctuality: {
+    on_time_rate: number;
+    sample_count: number;
+    average_late_minutes: number | null;
+  } | null;
   is_company: boolean;
   staff_count: number | null;
   branch_count: number | null;
@@ -37,7 +51,10 @@ export interface TechnicianBookingListItemDto {
 // اختيار الفني قبل الحجز (docs/08 §3، Script 3 §32-35) — @Public() في الباك-إند، محتاج address_id
 // عشان يحسب المسافة/يفلتر على المنطقة. مطابق لـapps/customer-app's TechniciansRepository.listForService
 // بالحرف — نفس الـendpoint، نفس المرشّحات.
-// مطابق لـ apps/customer-app's technicianLevelLabelsAr بالحرف (models.dart).
+// **بديل احتياطي بس** — المصدر الحقيقي بقى `technician_level_config.display_name_ar` من
+// السيرفر (`technician_level_label_ar`، docs/08 §153). الخريطة دي بتشتغل للسطوح اللي لسه
+// مابتستقبلش الحقل (بروفايل عام، قايمة الفنيين العامة). ممنوع تتوسّع — أي تسمية جديدة مكانها
+// اللوحة مش الكود.
 export const TECHNICIAN_LEVEL_LABELS_AR: Record<string, string> = {
   new: 'جديد',
   verified: 'موثّق',

@@ -50,6 +50,8 @@ export interface TechnicianBookingListItem {
   distanceKm: number | null;
   // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح قبل ما يختاره.
   currentLevel: TechnicianLevel;
+  /** اسم المستوى المعروض زي ما الأدمن ضابطه (`technician_level_config.display_name_ar`). */
+  currentLevelLabelAr: string | null;
   // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — مستقلة عن currentLevel، بتتبعت لـestimate()
   // عشان final_price_cents هنا يطابق تمامًا اللي هيتحسب فعليًا وقت الحجز الفعلي.
   pricingTier: TechnicianPricingTier;
@@ -58,7 +60,14 @@ export interface TechnicianBookingListItem {
   // `verification_status`. كانت `true` ثابتة هنا لكل صف، يعني أي حد يخلّص أوراقه ياخد العلامة.
   isVerified: boolean;
   onTimeRatePercent: number | null;
+  /** عدد الزيارات اللي نسبة الالتزام اتحسبت منها — نسبة من زيارة واحدة مالهاش نفس المعنى. */
+  onTimeSampleCount: number;
+  /** متوسط التأخير بالدقايق على **الزيارات المتأخرة وحدها** (ADR-0099). */
+  avgLateMinutes: number | null;
+  /** متوسط مدة الانتقال **في نطاق الطلب** (بيرجع للمتوسط العام لو مفيش تاريخ في النطاق). */
   avgArrivalMinutes: number | null;
+  /** إجمالي شغل الفني على المنصّة — مقابل `serviceCompletedCount` اللي للخدمة دي وحدها. */
+  totalCompletedCount: number;
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — false دايمًا لصفوف الفنيين الأفراد.
   // للشركات: technicianId = technician_companies.id، وcurrentLevel مالوش معنى حقيقي (بيتحط
   // TEAM_LEADER كتمثيل بس، مش مخزّن ولا بيتفحص).
@@ -447,10 +456,14 @@ export class TechniciansService {
       service_completed_count: number;
       distance_km: string | null;
       current_level: TechnicianLevel;
+      level_label_ar: string | null;
       pricing_tier: TechnicianPricingTier;
       is_trust_verified: boolean;
       on_time_rate: string | null;
+      on_time_sample_count: string | null;
+      avg_late_minutes: string | null;
       avg_arrival_minutes: string | null;
+      total_completed_count: number | null;
       company_id: string | null;
       company_name: string | null;
       commercial_registration_number: string | null;
@@ -460,6 +473,10 @@ export class TechniciansService {
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
+             -- **اسم المستوى من الأدمن، مش مكتوب في التطبيق** (docs/08 §153): التطبيق كان
+             -- عنده خريطة ثابتة بتقول «مميز» والأدمن ضابط «بريميوم» في نفس الوقت — قيمتين
+             -- لنفس الحاجة، وأي تعديل من اللوحة مكانش بيوصل للعميل.
+             tlc.display_name_ar AS level_label_ar,
              tp.is_trust_verified,
              company.id AS company_id, company.name AS company_name,
              company.commercial_registration_number,
@@ -477,11 +494,41 @@ export class TechniciansService {
               WHERE o.technician_id = tp.id AND o.scheduled_at IS NOT NULL
                 AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
              ) AS on_time_rate,
-             (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.technician_departed_at)) / 60))
+             -- **حجم العيّنة جزء من العقد** (ADR-0099): مية بالمية من زيارة واحدة مش زي مية
+             -- بالمية من خمسين، والواجهة لازم تقدر تفرّق بدل ما تعرض رقم مضلّل.
+             (SELECT COUNT(*)
               FROM orders o
-              WHERE o.technician_id = tp.id AND o.technician_departed_at IS NOT NULL
+              WHERE o.technician_id = tp.id AND o.scheduled_at IS NOT NULL
                 AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
-             ) AS avg_arrival_minutes
+             ) AS on_time_sample_count,
+             -- «متوسط تأخيره كام» بنص المالك — على **الزيارات المتأخرة وحدها**. المتوسط على
+             -- الكل بيتخفّف بالزيارات اللي في معادها فيطلع رقم صغير مطمئن بالغلط.
+             (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.scheduled_at)) / 60))
+              FROM orders o
+              WHERE o.technician_id = tp.id AND o.scheduled_at IS NOT NULL
+                AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+                AND o.technician_arrived_at > o.scheduled_at + interval '15 minutes'
+             ) AS avg_late_minutes,
+             -- **متوسط مدة الوصول لنفس المنطقة** (طلب المالك بالحرف)، وبيرجع للمتوسط العام لو
+             -- لسه مفيش تاريخ في النطاق ده. الرقم ده تاريخي مش تنبؤ لحظي — الاسم والعرض
+             -- بيقولوا كده صراحةً دلوقتي (ADR-0099).
+             COALESCE(
+               (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.technician_departed_at)) / 60))
+                FROM orders o
+                WHERE o.technician_id = tp.id AND o.technician_departed_at IS NOT NULL
+                  AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+                  AND o.service_zone_id = $2
+               ),
+               (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.technician_departed_at)) / 60))
+                FROM orders o
+                WHERE o.technician_id = tp.id AND o.technician_departed_at IS NOT NULL
+                  AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+               )
+             ) AS avg_arrival_minutes,
+             -- إجمالي شغل الفني على المنصّة كلها — مقابل service_completed_count اللي فوق
+             -- وهو **للخدمة دي وحدها**. الاتنين كانوا بيتعرضوا كرقم واحد اسمه «طلب مكتمل»،
+             -- فطلع «0 طلب مكتمل» جنب «4.4 (5)» — تناقض ظاهري مصدره خلط نطاقين.
+             tp.completed_orders_count AS total_completed_count
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة OR فئة الخدمة
@@ -583,12 +630,16 @@ export class TechniciansService {
       serviceCompletedCount: row.service_completed_count,
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       currentLevel: row.current_level,
+      currentLevelLabelAr: row.level_label_ar,
       pricingTier: row.pricing_tier,
       // ADR-0039 — مِنحة إدارية، مش مشتقة من verification_status. الفلتر فوق بيضمن إن الفني
       // مؤهّل تشغيليًا (وده شرط ظهوره أصلاً)، والعمود ده بيقول إن الأدمن اختاره يستاهل العلامة.
       isVerified: row.is_trust_verified,
       onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
+      onTimeSampleCount: row.on_time_sample_count !== null ? Number(row.on_time_sample_count) : 0,
+      avgLateMinutes: row.avg_late_minutes !== null ? Number(row.avg_late_minutes) : null,
       avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
+      totalCompletedCount: row.total_completed_count ?? 0,
       isCompany: false,
       staffCount: null,
       branchCount: null,
@@ -733,13 +784,18 @@ export class TechniciansService {
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       // تمثيلي بس (مفيش فني محدد بعد) — أعلى مستوى عشان مايتفسّرش غلط كـ"تحت محترف".
       currentLevel: TechnicianLevel.TEAM_LEADER,
+      // الشركة مالهاش مستوى حقيقي (ADR-0042) — الكارت بيعرض «شركة مسجّلة/فريق عمل» بدلاً منه.
+      currentLevelLabelAr: null,
       // تمثيلي بس زي currentLevel فوق — estimate() أصلاً مبيتحسبش للشركات (isCompany:true بترجع
       // estimate:null في catalog.controller.ts)، فالقيمة دي مالهاش أي أثر على السعر المعروض.
       pricingTier: TechnicianPricingTier.STANDARD,
       // ADR-0039 — نفس المِنحة الإدارية بالظبط، بس من technician_companies.
       isVerified: row.is_trust_verified,
       onTimeRatePercent: null,
+      onTimeSampleCount: 0,
+      avgLateMinutes: null,
       avgArrivalMinutes: null,
+      totalCompletedCount: 0,
       isCompany: true,
       // ADR-0042 — بيتبعت لـestimate() بدل مضاعف المستوى.
       companyPriceMultiplier: Number(row.price_multiplier ?? 1),
@@ -937,10 +993,16 @@ export class TechniciansService {
           serviceCompletedCount: 0,
           distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
           currentLevel: row.current_level,
+          // استعلام الصفوف المتعارضة مابيجيبش اسم المستوى (تشخيصي، مش كارت كامل) — الواجهة
+          // بترجع لاسم المستوى الخام لو الحقل فاضي.
+          currentLevelLabelAr: null,
           pricingTier: row.pricing_tier,
           isVerified: row.is_trust_verified,
           onTimeRatePercent: null,
+          onTimeSampleCount: 0,
+          avgLateMinutes: null,
           avgArrivalMinutes: null,
+          totalCompletedCount: 0,
           isCompany: false,
           staffCount: null,
           branchCount: null,

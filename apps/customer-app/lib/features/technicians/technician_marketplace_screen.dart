@@ -335,11 +335,9 @@ class _TechnicianMarketplaceScreenState
                                 padding: EdgeInsetsDirectional.only(start: 4),
                                 child: TrustBadge(),
                               ),
+                            // اسم المستوى من الأدمن (docs/08 §153) — مش خريطة ثابتة في التطبيق.
                             Chip(
-                              label: Text(
-                                technicianLevelLabelsAr[t.technicianLevel] ??
-                                    t.technicianLevel,
-                              ),
+                              label: Text(t.levelLabelAr ?? t.technicianLevel),
                               visualDensity: VisualDensity.compact,
                               materialTapTargetSize:
                                   MaterialTapTargetSize.shrinkWrap,
@@ -393,47 +391,87 @@ class _TechnicianMarketplaceScreenState
                               ),
                             ] else
                               const Text('لسه من غير تقييم  '),
-                            Text('· ${t.completedOrdersCount} طلب مكتمل'),
+                            // **النطاق بيتقال صراحةً** (docs/08 §153): العدّاد ده للخدمة دي
+                            // وحدها، والتقييم جنبه عام على المنصّة. غياب التفرقة كان بيطلّع
+                            // «0 طلب مكتمل» جنب «4.4 (5)» — بيقرا كتناقض وهو نطاقين مختلفين.
+                            //
+                            // و«صفر» بقى جملة مفيدة بدل رقم: العميل بيفهم إنها أول شغلانة في
+                            // الخدمة دي، ولو للفني شغل تاني على المنصّة بيشوفه معاها.
+                            Text(
+                              t.serviceCompletedCount > 0
+                                  ? '· ${t.serviceCompletedCount} طلب في الخدمة دي'
+                                  : t.totalCompletedCount > 0
+                                        ? '· أول طلب في الخدمة دي · ${t.totalCompletedCount} طلب على المنصّة'
+                                        : '· أول طلب له على المنصّة',
+                            ),
                           ],
                         ),
-                        if (t.distanceKm != null || t.avgArrivalMinutes != null)
+                        // **المسافة بتفضل دايمًا** — هي عامل كفاءة وتكلفة انتقال حقيقي
+                        // (ADR-0062)، مش مجرد مدخل لحساب وقت وصول.
+                        if (t.distanceKm != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: Wrap(
                               spacing: 4,
                               children: [
-                                if (t.distanceKm != null) ...[
-                                  const Icon(
-                                    Icons.place_outlined,
-                                    size: 14,
-                                    color: Colors.grey,
-                                  ),
-                                  Text(
-                                    '${t.distanceKm!.toStringAsFixed(1)} كم',
-                                  ),
-                                ],
-                                if (t.avgArrivalMinutes != null) ...[
-                                  const Icon(
-                                    Icons.timer_outlined,
-                                    size: 14,
-                                    color: Colors.grey,
-                                  ),
-                                  Text('وصول متوقع ~${t.avgArrivalMinutes} د'),
-                                ],
+                                const Icon(
+                                  Icons.place_outlined,
+                                  size: 14,
+                                  color: Colors.grey,
+                                ),
+                                Text('${t.distanceKm!.toStringAsFixed(1)} كم'),
                               ],
                             ),
                           ),
-                        if (t.onTimeRatePercent != null)
+                        // **المؤشر الزمني بيتغيّر بأفق الطلب** (ADR-0099، docs/08 §153):
+                        //  - طلب قريب/فوري ⇒ مدة الوصول ليها معنى فعلي.
+                        //  - طلب مجدول ⇒ «هيلحق معاده؟» هو السؤال، مش «هيوصل بعد كام دقيقة».
+                        // القرار جاي من السيرفر، والقيمة اللي مش بتاعة الوضع الحالي أصلاً
+                        // مابتوصلش — فمفيش أي شرط متكرر هنا.
+                        if (t.expectedArrivalMinutes != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              'التزام بالمواعيد: ${t.onTimeRatePercent}%',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
+                            child: Wrap(
+                              spacing: 4,
+                              children: [
+                                const Icon(
+                                  Icons.timer_outlined,
+                                  size: 14,
+                                  color: Colors.grey,
+                                ),
+                                Text(
+                                  'متوسط وصوله للمنطقة دي: ${t.expectedArrivalMinutes} د',
+                                ),
+                              ],
                             ),
                           ),
+                        if (t.punctuality != null) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Wrap(
+                              spacing: 4,
+                              children: [
+                                const Icon(
+                                  Icons.verified_outlined,
+                                  size: 14,
+                                  color: Colors.grey,
+                                ),
+                                Text(t.punctuality!.labelAr),
+                              ],
+                            ),
+                          ),
+                          if (t.punctuality!.latenessLabelAr != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                t.punctuality!.latenessLabelAr!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                        ],
                       ],
                     ),
                   ),
@@ -578,10 +616,12 @@ class _TechnicianMarketplaceScreenState
                         icon: Icons.store_outlined,
                         label: '${c.branchCount} فرع',
                       ),
-                    if (c.completedOrdersCount > 0)
+                    // الشركة: عدّاد الخدمة دي برضه (نفس الحقل) — والنص بيقول النطاق صراحةً
+                    // زي كارت الفني (docs/08 §153).
+                    if (c.serviceCompletedCount > 0)
                       _CompanyTag(
                         icon: Icons.task_alt,
-                        label: '${c.completedOrdersCount} طلب مكتمل',
+                        label: '${c.serviceCompletedCount} طلب في الخدمة دي',
                       ),
                     if (c.totalRatingsCount > 0)
                       _CompanyTag(
@@ -780,17 +820,24 @@ class TrustBadge extends StatelessWidget {
 
 ///
 /// مقصودة تكون هادية وصغيرة: الهدف تفسير الفرق مش الإعلان. علامة الشيك بتدّي إحساس
-/// "محترف معتمد" اللي المالك طلبه بالحرف.
-/// شارة سعر أعلى من الأساسي (docs/08 §65.1).
+/// شارة **سعر أعلى من الأساسي** (docs/08 §65.1، ومعدّلة في §153).
 ///
-/// طلب المالك: «إحنا مش عايزين علامة صح… نحط كلمة Premium وجنبها أي لوجو خفيف قوي يدل إن
-/// premium دي هي رمز الفلوس… عايزين نشيل علامة الصح، لأن فعليًا علامة الصح المفروض دي توثيق
-/// من الموقع وهي موجودة فعليًا والموقع بيديها لبعض الناس، فمش عايزين نخلي فيه حاجتين علامة صح
-/// في نفس الوقت».
+/// طلب المالك الأصلي (§65.1): «إحنا مش عايزين علامة صح… نحط كلمة Premium وجنبها أي لوجو خفيف
+/// قوي يدل إن premium دي هي رمز الفلوس… عايزين نشيل علامة الصح، لأن علامة الصح المفروض دي
+/// توثيق من الموقع… فمش عايزين نخلي فيه حاجتين علامة صح في نفس الوقت».
 ///
-/// القاعدة الحاكمة دلوقتي: **`Icons.verified` محجوزة حصريًا لعلامة التوثيق اللي الأدمن بيمنحها**
-/// (ADR-0039). أي إشارة تانية — زي السعر الأعلى ده — ممنوع تستخدم علامة صح، عشان العميل ما
-/// يخلطش بين «موثّق من المنصة» و«سعره أعلى».
+/// ### ليه النص اتغيّر من `Premium` (بلاغ مالك 2026-09-16)
+///
+/// المنصّة عندها **مستوى فني** اسمه `premium` كمان، فالفني اللي مستواه بريميوم كان بياخد
+/// الاتنين على نفس الكارت: شريحة المستوى «بريميوم» + شارة «Premium». نفس الكلمة مرتين
+/// بلغتين، وهي بالظبط اللي المالك وصفها بـ«عربي على إنجليزي… شكله مش نظيف».
+///
+/// والحل اللي بيحترم سبب §65.1 بدل حرفه: **الشارة بتقول اللي هي عنه فعلاً — السعر**. هدف
+/// المالك من الكلمة كان «رمز الفلوس»، والنص الصريح بيوصّل ده أقوى من كلمة إنجليزية بتتلبّس
+/// باسم مستوى. الأيقونة (ألماظة) والشكل زي ما هما.
+///
+/// القاعدة الحاكمة اللي **ما اتغيّرتش**: `Icons.verified` محجوزة حصريًا لعلامة التوثيق اللي
+/// الأدمن بيمنحها (ADR-0039). أي إشارة تانية ممنوع تستخدم علامة صح.
 class _PremiumBadge extends StatelessWidget {
   const _PremiumBadge();
 
@@ -815,7 +862,7 @@ class _PremiumBadge extends StatelessWidget {
             ),
             const SizedBox(width: 3),
             Text(
-              'Premium',
+              'سعر أعلى',
               style: TextStyle(
                 fontSize: 11,
                 color: scheme.onTertiaryContainer,
