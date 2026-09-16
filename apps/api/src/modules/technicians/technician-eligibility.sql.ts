@@ -126,6 +126,12 @@ export function technicianAvailabilityCondition(opts: {
    */
   candidateLoad?: CandidateLoadSource;
   /**
+   * مصدر بديل جاهز لحمل أيام الشخص — بيتمرّر كما هو لـ`dailyCapacityExceededExpr`
+   * (ADR-0100). الكولر اللي حاسب الحمل مرة واحدة في CTE بيمنع انفجار (يوم × فني × مدى).
+   * غيابها = السلوك القديم بالحرف.
+   */
+  dayLoadRelation?: string;
+  /**
    * ADR-0017 بند 10 — Fallback توسيع النطاق لما تنضب قايمة الفنيين "المثاليين". لو `true`، بيتجاهل
    * شروط (1) و(2) (تعارض الطلب النشط) تمامًا — الفني ممكن يترشّح حتى لو مشغول بطلب تاني — لكن
    * شرط (3) (استثناء `blocked` الصريح) وباقي شروط الأهلية الأساسية (خدمة/منطقة/اعتماد) بره
@@ -196,6 +202,8 @@ function activeOrderConflictExistsExpr(opts: {
   dailyCapacityMinutesParam: string;
   /** مصدر أعمدة الحمل التشغيلي للطلب المرشّح (ADR-0061 §2). */
   candidateLoad?: CandidateLoadSource;
+  /** مصدر حمل الأيام الجاهز (ADR-0100) — بيتمرّر كما هو، والقاعدة مابتتغيّرش. */
+  dayLoadRelation?: string;
 }): string {
   const {
     technicianIdExpr,
@@ -208,6 +216,7 @@ function activeOrderConflictExistsExpr(opts: {
     preciseDurationHoursExpr = 'NULL',
     dailyCapacityMinutesParam,
     candidateLoad,
+    dayLoadRelation,
   } = opts;
   const candidateLoadSource: CandidateLoadSource = candidateLoad ?? {
     estimatedDurationDaysExpr: 'NULL',
@@ -250,6 +259,7 @@ function activeOrderConflictExistsExpr(opts: {
         dailyCapacityParam: dailyCapacityMinutesParam,
         scheduledAtParam,
         candidateLoad: candidateLoadSource,
+        dayLoadRelation,
       })}
       -- الـparameters دي بقت غير مستخدمة في القاعدة (ADR-0070 شال قاعدة ENGAGED)، بس بتفضل
       -- مربوطة بتعبير دايمًا صحيح: كل الكولرز بيبعتوا مصفوفة قيم بترتيب ثابت، وشيلها كان
@@ -326,6 +336,8 @@ export function technicianScheduleConflictCondition(opts: {
   dailyCapacityMinutesParam: string;
   /** مصدر أعمدة الحمل التشغيلي للطلب المرشّح (ADR-0061 §2). */
   candidateLoad?: CandidateLoadSource;
+  /** مصدر حمل الأيام الجاهز (ADR-0100). */
+  dayLoadRelation?: string;
 }): string {
   return `
     AND (${activeOrderConflictExistsExpr(opts)})

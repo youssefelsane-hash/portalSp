@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/arabic_time.dart';
 import '../../core/auth_repository.dart';
-import '../addresses/addresses_repository.dart';
 import 'booking_window.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
@@ -67,13 +66,25 @@ class ScheduleSelectionScreen extends StatefulWidget {
 
   /// الخدمة والعنوان — مطلوبين **لاقتراح المواعيد بس** (ADR-0088).
   ///
-  /// اختياريين عمدًا: الشاشة ليها مدخلين، وواحد منهم ممكن يكون لسه معندوش عنوان مختار. من
-  /// غيرهم الشاشة بتشتغل **بالظبط** زي ما كانت — الاقتراح بيختفي والتقويم اليدوي زي ما هو.
+  /// اختياريين عمدًا: الشاشة ليها مدخلين، وواحد منهم (`create_order_screen` وهو بيغيّر الموعد)
+  /// مش دايمًا عنده الاتنين. من غيرهم الشاشة بتشتغل **بالظبط** زي ما كانت — الاقتراح بيختفي
+  /// والتقويم اليدوي زي ما هو.
   final String? serviceId;
+
+  /// **عنوان الطلب ده بالتحديد** — مش العنوان الافتراضي (ADR-0100).
+  ///
+  /// الرجوع للعنوان الافتراضي اتشال من هنا: كان بيخلّي عميل عنده عنوانين ياخد اقتراح محسوب على
+  /// طاقة نطاق **مش** نطاق طلبه، وبعدين يختار العنوان التاني فعلاً — فالوعد اللي الاقتراح قدّمه
+  /// مكانش له أي علاقة بالطلب. المسار الرئيسي بقى بيحدد العنوان قبل الشاشة دي دايمًا.
   final String? addressId;
 
-  /// مدة الشغلانة لو التسعير حسبها — بتخلّي الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  /// مدة الشغلانة كما طلّعها محرك التسعير — بتخلّي الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
+  ///
+  /// منها بيتشتق **مدى الشغل** في الباك-إند، فشغل ٥ أيام بيتفحص أيامه الخمسة كلها مش يوم بدايته.
   final int? durationMinutes;
+
+  /// عدد الأيام المتوقع — للخدمات اللي بتتقاس باليوم (مفيش دقايق). نفس الدور بالظبط.
+  final int? estimatedDurationDays;
 
   const ScheduleSelectionScreen({
     super.key,
@@ -85,6 +96,7 @@ class ScheduleSelectionScreen extends StatefulWidget {
     this.serviceId,
     this.addressId,
     this.durationMinutes,
+    this.estimatedDurationDays,
   });
 
   @override
@@ -109,6 +121,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // زي `_nearTermHours` بالظبط: مايصحّش اقتراح ناقص يمنع العميل من اختيار موعد بإيده.
   List<Map<String, dynamic>> _suggestedDays = const [];
   List<Map<String, dynamic>> _suggestedTimes = const [];
+
   /// نافذة اختيار الموعد (ADR-0097) — بتيجي مع اقتراح الأيام، وبتفضل الافتراضي لو النداء فشل.
   BookingWindow _bookingWindow = BookingWindow.fallback;
 
@@ -124,43 +137,54 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     _loadSuggestedDays();
   }
 
-  /// العنوان المستخدم في الاقتراح — المبعوت من الشاشة اللي فتحتنا، وإلا العنوان الافتراضي.
+  /// **العنوان بيتقرا من المدخل وبس** (ADR-0100).
   ///
-  /// المدخل من الكتالوج بييجي **قبل** اختيار العنوان أصلاً، فمن غير الاحتياطي ده الاقتراح كان
-  /// هيختفي من المسار الرئيسي بالظبط — وهو المسار اللي المالك طلب الاقتراح فيه.
-  String? _resolvedAddressId;
+  /// كان فيه رجوع للعنوان الافتراضي/الأول هنا، وهو اللي خلّى الاقتراح يتحسب على نطاق غير نطاق
+  /// الطلب لأي عميل عنده أكتر من عنوان. مفيش عنوان مبعوت = مفيش اقتراح (التقويم اليدوي زي ما
+  /// هو) — وده **أصدق** من اقتراح مبني على عنوان العميل ماختاروش.
+  bool get _canSuggest => widget.serviceId != null && widget.addressId != null;
 
-  bool get _canSuggest =>
-      widget.serviceId != null && _resolvedAddressId != null;
+  /// **عدد أيام الشغل — للعرض وحده** (ADR-0100).
+  ///
+  /// المدى الملزِم بيتحسب في الباك-إند (`candidateSpanDaysFromSource()`) وهو المرجع الوحيد
+  /// لأي قرار إتاحة. الرقم هنا بيحدد **الكلام اللي العميل يقراه** وبس — «مدة متوقعة حوالي ٥
+  /// أيام» مقابل تاريخ جاف. لو اختلف بيوم عن حساب السيرفر، أسوأ نتيجة صياغة أقل دقة، مش
+  /// قرار حجز غلط.
+  ///
+  /// `_displayDayMinutes` نسخة عرض من السقف اليومي (`matching.daily_capacity_minutes`).
+  /// **مقصود إنها مش بتتقرا من السيرفر**: قراءتها كانت هتضيف نداء في مسار حسّاس عشان صياغة
+  /// نص، والفرق الوحيد اللي تعمله لو الأدمن غيّر السقف هو كلمة «٥ أيام» تبقى «٤ أيام».
+  static const int _displayDayMinutes = 720;
 
-  Future<void> _resolveAddressId() async {
-    if (widget.addressId != null) {
-      _resolvedAddressId = widget.addressId;
-      return;
-    }
-    if (widget.serviceId == null) return;
-    try {
-      final addresses = await AddressesRepository(_auth).list();
-      if (addresses.isEmpty) return;
-      final preferred = addresses.firstWhere(
-        (address) => address.isDefault,
-        orElse: () => addresses.first,
-      );
-      _resolvedAddressId = preferred.id;
-    } catch (error) {
-      debugPrint('تعذّر تحديد العنوان الافتراضي للاقتراح: $error');
-    }
+  int get _jobSpanDays {
+    final days = widget.estimatedDurationDays;
+    if (days != null && days >= 1) return days;
+    final minutes = widget.durationMinutes;
+    if (minutes == null || minutes <= 0) return 1;
+    return (minutes / _displayDayMinutes).ceil().clamp(1, 400);
   }
 
+  bool get _isMultiDayJob => _jobSpanDays > 1;
+
+  /// مشروع طويل — الصياغة بتتحوّل من «موعد الشغل» لـ«بداية المشروع».
+  bool get _isLongProject => _jobSpanDays >= 7;
+
+  /// مدخلات حمل الشغلانة المشتركة بين نداء الأيام ونداء الساعات — نقطة بناء واحدة عشان
+  /// الاستعلامين ما يختلفوش على مدة نفس الشغلانة.
+  Map<String, String> get _jobLoadQuery => {
+    if (widget.durationMinutes != null)
+      'duration_minutes': '${widget.durationMinutes}',
+    if (widget.estimatedDurationDays != null)
+      'estimated_duration_days': '${widget.estimatedDurationDays}',
+  };
+
   Future<void> _loadSuggestedDays() async {
-    await _resolveAddressId();
     if (!_canSuggest) return;
     try {
       final query = <String, String>{
         'service_id': widget.serviceId!,
-        'address_id': _resolvedAddressId!,
-        if (widget.durationMinutes != null)
-          'duration_minutes': '${widget.durationMinutes}',
+        'address_id': widget.addressId!,
+        ..._jobLoadQuery,
       };
       final qs = query.entries
           .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
@@ -189,10 +213,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final query = <String, String>{
         'service_id': widget.serviceId!,
-        'address_id': _resolvedAddressId!,
+        'address_id': widget.addressId!,
         'day': dayString,
-        if (widget.durationMinutes != null)
-          'duration_minutes': '${widget.durationMinutes}',
+        ..._jobLoadQuery,
       };
       final qs = query.entries
           .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
@@ -398,9 +421,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     // **الرفض هنا بنفس قاعدة السيرفر بالحرف** (ADR-0097) — والرسالة بتقول الحدود بدل ما
     // تقول «غلط». من غير الفحص ده العميل كان بيكمّل كل الخطوات وياخد الرفض في آخر لحظة.
     if (!_bookingWindow.allows(picked)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_bookingWindow.rejectionAr)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_bookingWindow.rejectionAr)));
       return;
     }
     setState(() => _selectedTime = picked);
@@ -453,10 +476,19 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 // اقتراح الأيام (ADR-0088) — فوق الكالندر عمدًا: ضغطة واحدة بتخلّص الشاشة،
                 // والكالندر تحته لأي حد عايز يختار بنفسه.
                 if (_suggestedDays.isNotEmpty) ...[
-                  const _SuggestionIntro(
-                    title: 'اقتراحات مناسبة ليك',
-                    subtitle:
-                        'اخترناها لأنها أقرب أيام فيها متخصصين متاحين في منطقتك.',
+                  // **الصياغة بتتبع نوع المدة** (ADR-0100). سؤال شغل ٥ أيام مش «امتى ييجي»، هو
+                  // «امتى يبدأ» — والفرق ده لازم يبان في الكلام وإلا العميل يفهم إن اليوم ده هو
+                  // الشغل كله.
+                  _SuggestionIntro(
+                    title: _isLongProject
+                        ? 'أفضل مواعيد لبدء المشروع'
+                        : _isMultiDayJob
+                        ? 'أفضل مواعيد لبدء الشغل'
+                        : 'اقتراحات مناسبة ليك',
+                    subtitle: _isMultiDayJob
+                        ? 'الشغل ده مدته المتوقعة حوالي $_jobSpanDays أيام. '
+                              'اخترنا الأيام اللي عندنا فيها منفّذين يقدروا يخلّصوه كامل.'
+                        : 'اخترناها لأنها أقرب أيام فيها متخصصين متاحين في منطقتك.',
                   ),
                   const SizedBox(height: 10),
                   ..._suggestedDays.map((suggestion) {
@@ -480,8 +512,15 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _ScheduleOptionCard(
                         icon: Icons.bolt_outlined,
-                        title: label,
-                        subtitle: isEarliest
+                        title: _isMultiDayJob ? 'يبدأ $label' : label,
+                        // **العدد مابيتعرضش للشغل الممتد** عن قصد: «٣ متخصصين متاحين» على شغل ٥
+                        // أيام رقم مضلّل — هو عدد اللي يقدروا يشيلوا **المدى كله**، والعميل هيقراه
+                        // كعدد اللي جايين اليوم ده. الصياغة بتقول المعنى بدل الرقم.
+                        subtitle: _isMultiDayJob
+                            ? (isEarliest
+                                  ? 'أقرب بداية متاحة · مدة متوقعة حوالي $_jobSpanDays أيام'
+                                  : 'مدة متوقعة حوالي $_jobSpanDays أيام')
+                            : isEarliest
                             ? '$available متخصص متاح · أقرب فرصة لك'
                             : '$available متخصص متاح في منطقتك',
                         selected:

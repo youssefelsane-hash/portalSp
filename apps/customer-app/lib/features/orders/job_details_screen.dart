@@ -8,7 +8,6 @@ import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import '../catalog/pricing_field_widgets.dart';
 import '../support/support_contact_screen.dart';
-import '../technicians/technician_selection_screen.dart';
 import 'orders_repository.dart';
 
 // P0-10 (2026-08-13، مراجعة أمان/جودة شاملة) — كانت فجوة حقيقية موثّقة: لخدمات pricing_model=
@@ -17,32 +16,36 @@ import 'orders_repository.dart';
 // خالص — GET /services/:id/technicians محتاج field_values عشان يقدر يحسب final_price_cents لكل
 // فني (راجع catalog.controller.ts). الشاشة دي بتقلب الترتيب لخدمات formula بس: عنوان + تفاصيل
 // الشغل الأول، بعدين قايمة الفنيين وهي شايفة السعر النهائي الحقيقي فعليًا لكل واحد.
+/// ناتج شاشة تفاصيل الشغل — العنوان + الحقول المؤثّرة في التنفيذ (ADR-0100).
+///
+/// الشاشة بقت **بترجّع** ناتجها بدل ما تكمّل التنقّل بنفسها، لأنها بقت **قبل** شاشة الميعاد:
+/// الحقول دي هي مدخلات المدة، والمدة هي مدخل اقتراح الموعد. الشاشة اللي بتجمع مدخلات خطوة
+/// جاية مينفعش تقرر هي رايحة فين.
+class JobDetailsResult {
+  final Address address;
+  final Map<String, dynamic> fieldValues;
+
+  const JobDetailsResult({required this.address, required this.fieldValues});
+}
+
 class JobDetailsScreen extends StatefulWidget {
   final CatalogService service;
-  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — اتحددت قبل الشاشة دي (catalog_navigation.dart)،
-  // بتتمرر جاهزة لحد ما توصل لـTechnicianSelectionScreen/CreateOrderScreen.
-  final DateTime? requestedAt;
-  // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
-  final DateTime? requestedAtRangeEnd;
-  // دقة الوقت (docs/08 §84 جزء ج) — مليانين لو الخدمة requiresPreciseSchedule/requiresStartTimeOnly.
-  final TimeOfDay? requestedPreciseTime;
 
-  /// العنوان اللي اتحدد **قبل** شاشة الميعاد للعميل اللي مالوش عنوان محفوظ (ADR-0098) —
-  /// بيمنع إننا نسأل على العنوان تاني في نفس الرحلة. `null` = السلوك القديم بالحرف.
-  final Address? initialAddress;
+  /// العنوان الحقيقي للطلب — بيتحدد **قبل** الشاشة دي دايمًا (ADR-0100).
+  ///
+  /// بقى إجباري: العنوان هو مصدر النطاق اللي المدة والاقتراح والتسعير كلهم بيتحسبوا عليه، فمافيش
+  /// أي معنى لجمع تفاصيل الشغل قبل ما نعرفه.
+  final Address initialAddress;
+
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
-  // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
-  // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
+  // في سيشنين متوازيين).
   final BookingMode bookingMode;
 
   const JobDetailsScreen({
     super.key,
     required this.service,
+    required this.initialAddress,
     this.bookingMode = BookingMode.individual,
-    this.requestedAt,
-    this.requestedAtRangeEnd,
-    this.requestedPreciseTime,
-    this.initialAddress,
   });
 
   @override
@@ -51,7 +54,7 @@ class JobDetailsScreen extends StatefulWidget {
 
 class _JobDetailsScreenState extends State<JobDetailsScreen> {
   final _catalogRepository = CatalogRepository();
-  Address? _selectedAddress;
+  late Address _selectedAddress;
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -60,20 +63,11 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   @override
   void initState() {
     super.initState();
+    // العنوان بيوصل جاهز دايمًا (ADR-0100) — الـpush بتاع `AddressesScreen` من جوّه `initState`
+    // اتشال خلاص. (كان مصدر بَقّة حقيقية اتلقطت بالتشغيل الحي: النداء وهو الـNavigator لسه في
+    // نص انيميشن الدخول بيرمي `navigator._debugLocked` جوّه microtask والشاشة تموت لأي لمسة.)
+    _selectedAddress = widget.initialAddress;
     _loadPricingFields();
-    // العنوان اتحدد قبل شاشة الميعاد (ADR-0098) — مفيش داعي نسأل عليه تاني في نفس الرحلة.
-    if (widget.initialAddress != null) {
-      _selectedAddress = widget.initialAddress;
-      return;
-    }
-    // بَقّة حقيقية اتلقطت بالتشغيل الحي (Xvfb+fluxbox، 2026-08-19): نداء Navigator.push هنا
-    // مباشرة جوّه initState بيحصل وهو الـNavigator لسه في نص انيميشن الدخول لـJobDetailsScreen
-    // نفسها (لسه locked) — بيرمي 'navigator._debugLocked' assertion جوّه microtask، والشاشة
-    // بتفضل "ميتة" تمامًا لأي لمسة بعد كده (كل تفاعل تاني مع الـNavigator بيرمي نفس الاستثناء
-    // بصمت). addPostFrameCallback بيأجّل النداء لحد ما الفريم الحالي وانيميشن الدخول يخلصوا.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _pickAddress();
-    });
   }
 
   Future<void> _loadPricingFields() async {
@@ -111,12 +105,8 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
         builder: (_) => const AddressesScreen(selectionMode: true),
       ),
     );
-    if (address == null) {
-      // العميل رجع من غير ما يختار عنوان — مفيش داعي نفضل في شاشة فاضية، نرجعه للخلف.
-      if (mounted) Navigator.of(context).pop();
-      return;
-    }
-    if (mounted) setState(() => _selectedAddress = address);
+    // رجع من غير اختيار = سيبه على عنوانه الحالي. الشاشة مابقتش تقدر تبقى بلا عنوان أصلاً.
+    if (address != null && mounted) setState(() => _selectedAddress = address);
   }
 
   // نفس فحص CreateOrderScreen._pricingFieldsComplete بالحرف (PricingEngineService.evaluate()
@@ -146,129 +136,116 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     });
   }
 
-  void _continueToTechnicians() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TechnicianSelectionScreen(
-          service: widget.service,
-          bookingMode: widget.bookingMode,
-          initialAddress: _selectedAddress,
-          fieldValues: Map<String, dynamic>.from(_fieldValues),
-          requestedAt: widget.requestedAt,
-          requestedAtRangeEnd: widget.requestedAtRangeEnd,
-          requestedPreciseTime: widget.requestedPreciseTime,
-        ),
+  /// بترجّع الناتج لـ`catalog_navigation` اللي بيكمّل لشاشة الميعاد — الشاشة دي بقت **قبلها**.
+  void _continueToSchedule() {
+    Navigator.of(context).pop(
+      JobDetailsResult(
+        address: _selectedAddress,
+        fieldValues: Map<String, dynamic>.from(_fieldValues),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final canContinue =
-        _selectedAddress != null &&
-        _pricingFieldsComplete &&
-        !_hasUnsupportedRequiredField;
+    final canContinue = _pricingFieldsComplete && !_hasUnsupportedRequiredField;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: Text('تفاصيل الشغل: ${widget.service.nameAr}')),
-        body: _selectedAddress == null
-            ? const SizedBox.shrink() // لسه بيختار عنوان (AddressesScreen فوقها)
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _selectedAddress!.displayTitle,
-                          style: Theme.of(context).textTheme.titleMedium,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: _pickAddress,
-                        icon: const Icon(
-                          Icons.edit_location_alt_outlined,
-                          size: 18,
-                        ),
-                        label: const Text('تغيير العنوان'),
-                      ),
-                    ],
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    _selectedAddress.displayTitle,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 16),
-                  if (_loadingPricingFields)
-                    const Center(child: CircularProgressIndicator())
-                  else if (_pricingFieldsError != null)
-                    Text(
-                      _pricingFieldsError!,
-                      style: const TextStyle(color: Colors.red),
-                    )
-                  else
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children:
-                              (List.of(_pricingFields)..sort(comparePricingFields))
-                                  .map(
-                                    (field) => buildPricingFieldWidget(
-                                      context,
-                                      field,
-                                      _fieldValues,
-                                      _onFieldValueChanged,
-                                      onUploadImage:
-                                          (pricingField, image) async =>
-                                              OrdersRepository(
-                                                context.read<AuthRepository>(),
-                                              ).uploadPricingFieldImage(
-                                                serviceId: widget.service.id,
-                                                fieldId: pricingField.id,
-                                                fileBytes: await image
-                                                    .readAsBytes(),
-                                                filename: image.name,
-                                              ),
+                ),
+                TextButton.icon(
+                  onPressed: _pickAddress,
+                  icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                  label: const Text('تغيير العنوان'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // النص بيشرح **ليه** الحقول دي بدري كده (ADR-0100): هي اللي بتحدد المدة، والمدة
+            // هي اللي بتخلّي المواعيد المقترحة حقيقية بدل تخمين على مدة الخدمة الافتراضية.
+            const Text(
+              'دخّل تفاصيل الشغل الأول — منها بنحسب المدة المتوقعة، وبنقدر نقترح عليك مواعيد '
+              'فيها منفّذين يقدروا يخلّصوا الشغل كامل فعلاً.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            if (_loadingPricingFields)
+              const Center(child: CircularProgressIndicator())
+            else if (_pricingFieldsError != null)
+              Text(
+                _pricingFieldsError!,
+                style: const TextStyle(color: Colors.red),
+              )
+            else
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children:
+                        (List.of(_pricingFields)..sort(comparePricingFields))
+                            .map(
+                              (field) => buildPricingFieldWidget(
+                                context,
+                                field,
+                                _fieldValues,
+                                _onFieldValueChanged,
+                                onUploadImage: (pricingField, image) async =>
+                                    OrdersRepository(
+                                      context.read<AuthRepository>(),
+                                    ).uploadPricingFieldImage(
+                                      serviceId: widget.service.id,
+                                      fieldId: pricingField.id,
+                                      fileBytes: await image.readAsBytes(),
+                                      filename: image.name,
                                     ),
-                                  )
-                                  .toList(),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: canContinue ? _continueToTechnicians : null,
-                    child: const Text('متابعة — اختار الفني'),
+                              ),
+                            )
+                            .toList(),
                   ),
-                  // مساعدة حجز بسيطة (docs/08 §22 addendum) — كانت فجوة حقيقية: النص ده كان بيقول
-                  // "كلم الدعم" بلا أي زرار فعلي وراه، العميل يقرأ التعليمة ومالوش طريقة ينفّذها.
-                  if (_hasUnsupportedRequiredField) ...[
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text(
-                        'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SupportContactScreen(),
-                        ),
-                      ),
-                      icon: const Icon(Icons.support_agent_outlined),
-                      label: const Text('كلّمنا نكمّل الحجز يدويًا'),
-                    ),
-                  ],
-                ],
+                ),
               ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: canContinue ? _continueToSchedule : null,
+              child: const Text('متابعة — اختار الميعاد'),
+            ),
+            // مساعدة حجز بسيطة (docs/08 §22 addendum) — كانت فجوة حقيقية: النص ده كان بيقول
+            // "كلم الدعم" بلا أي زرار فعلي وراه، العميل يقرأ التعليمة ومالوش طريقة ينفّذها.
+            if (_hasUnsupportedRequiredField) ...[
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const SupportContactScreen(),
+                  ),
+                ),
+                icon: const Icon(Icons.support_agent_outlined),
+                label: const Text('كلّمنا نكمّل الحجز يدويًا'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

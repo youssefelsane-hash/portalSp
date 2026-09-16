@@ -384,12 +384,22 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       serviceId: id,
       addressId: selectedAddressId,
       durationMinutes: estimate?.duration_minutes ?? null,
+      estimatedDurationDays: estimate?.estimated_duration_days ?? null,
     })
       .then((res) => { if (active) setSuggestedDays(res.days); })
       // الاقتراح ميزة فوق الفلو — فشله بيخفي الشيبس بس ومابيوقفش الحجز.
       .catch(() => { if (active) setSuggestedDays(null); });
     return () => { active = false; };
-  }, [authedFetch, id, selectedAddressId, service?.allows_scheduling, estimate?.duration_minutes]);
+    // **الإبطال** (ADR-0100): المدة والأيام في قايمة التبعيات، فأي تغيير في مدخلات الشغل بيعيد
+    // حساب الاقتراحات بدل ما يسيب اقتراح محسوب على مدة قديمة.
+  }, [
+    authedFetch,
+    id,
+    selectedAddressId,
+    service?.allows_scheduling,
+    estimate?.duration_minutes,
+    estimate?.estimated_duration_days,
+  ]);
 
   // اقتراح الساعات — بعد ما اليوم يتحدد، ولخدمات «ساعة وصول» بس.
   useEffect(() => {
@@ -404,11 +414,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       addressId: selectedAddressId,
       day: scheduledDate,
       durationMinutes: estimate?.duration_minutes ?? null,
+      estimatedDurationDays: estimate?.estimated_duration_days ?? null,
     })
       .then((res) => { if (active) setSuggestedTimes(res.times); })
       .catch(() => { if (active) setSuggestedTimes(null); });
     return () => { active = false; };
-  }, [authedFetch, id, selectedAddressId, scheduledDate, service?.schedule_precision, estimate?.duration_minutes]);
+  }, [
+    authedFetch,
+    id,
+    selectedAddressId,
+    scheduledDate,
+    service?.schedule_precision,
+    estimate?.duration_minutes,
+    estimate?.estimated_duration_days,
+  ]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {

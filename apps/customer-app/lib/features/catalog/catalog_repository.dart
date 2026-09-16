@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../core/api_client.dart';
 import 'models.dart';
 
@@ -100,5 +102,45 @@ class CatalogRepository {
       },
     );
     return DurationEstimate.fromJson(data!);
+  }
+
+  /// **حمل الشغلانة الحقيقي قبل اختيار الموعد** (ADR-0100، docs/08 §155).
+  ///
+  /// بيقرا `duration_minutes` و`estimated_duration_days` من `POST /services/:id/estimate` —
+  /// **نفس** `CatalogService.estimate()` اللي إنشاء الطلب وقايمة الفنيين بيستخدموها. القيم دي
+  /// هي اللي اقتراح المواعيد بيشتق منها **مدى الشغل**، فمن غيرها المدى بيطلع يوم واحد وشغل
+  /// الأسبوع بيتقاس بيوم بدايته وبس.
+  ///
+  /// **مقصود إنها الـendpoint دي بالذات مش `POST /orders/preview`**: الأخيرة بتسجّل مرحلة فنل
+  /// `price_previewed`، فنداؤها هنا كان هيعدّ «شاف السعر» لعميل لسه ماشافش أي سعر ويفسد القياس.
+  ///
+  /// بترجّع `null` لو النداء فشل — الاقتراح ساعتها بيرجع لسلوكه القديم بالحرف بدل ما الرحلة تتوقف.
+  Future<({int? durationMinutes, int? estimatedDurationDays})?> estimateJobLoad(
+    String serviceId, {
+    String? zoneId,
+    Map<String, dynamic>? fieldValues,
+  }) async {
+    final params = <String, String>{};
+    if (zoneId != null) params['zone_id'] = zoneId;
+    if (fieldValues != null && fieldValues.isNotEmpty) {
+      params['field_values'] = jsonEncode(fieldValues);
+    }
+    final query = params.isEmpty
+        ? ''
+        : '?${Uri(queryParameters: params).query}';
+    try {
+      final data = await apiRequest(
+        'POST',
+        '/services/$serviceId/estimate$query',
+      );
+      if (data == null) return null;
+      final days = (data['estimated_duration_days'] as num?)?.ceil();
+      return (
+        durationMinutes: (data['duration_minutes'] as num?)?.round(),
+        estimatedDurationDays: days,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

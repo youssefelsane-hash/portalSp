@@ -13,6 +13,7 @@ import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
 import '../orders/schedule_selection_screen.dart';
 import '../technicians/technician_selection_screen.dart';
+import 'catalog_repository.dart';
 import 'models.dart';
 
 // Script 3 §6/§59 — نقطة تنقّل واحدة لكل مسارات اكتشاف الخدمة (فئات، بحث، لاحقًا: صوت/صورة) —
@@ -70,26 +71,79 @@ Future<void> navigateToServiceBooking(
   // النقطة دي بالذات لأنها مكان التقاء **كل** مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية).
   _recordServiceIntent(context, service.id);
 
-  // **العنوان الأول — بس للعميل اللي مالوش عنوان محفوظ** (طلب مالك 2026-09-16، docs/08 §152،
-  // ADR-0098).
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // **ترتيب الرحلة بقى بتبعية البيانات، مش بالعادة** (طلب مالك 2026-09-16، docs/08 §155، ADR-0100)
   //
-  // اقتراح الأيام والساعات كله مبني على **نطاق العنوان** (طاقة الفنيين المؤهّلين في النطاق ده
-  // في اليوم ده). فالعميل اللي لسه مالوش عنوان كان بيشوف تقويم فاضي بلا أي اقتراح
-  // (`_canSuggest` بترجع false)، يختار يوم بالتخمين، وبعدين يتسأل على العنوان — وساعتها بس
-  // يكتشف لو الخدمة مش متاحة في منطقته أصلاً. يعني أسوأ تجربة بتحصل لأول مرة بالظبط.
+  //   خدمة → عنوان → تفاصيل الشغل → المدة → الميعاد الذكي → المنفّذ → التأكيد
   //
-  // **مفيش أي خطوة زيادة على العميل القديم**: اللي عنده عنوان محفوظ بيعدّي على طول زي ما كان،
-  // والعنوان بيتمرر للشاشات اللي بعدها فمابيتسألش عليه تاني.
-  final Address? preselectedAddress = await _ensureAddressBeforeScheduling(context);
+  // كل خطوة محتاجة ناتج اللي قبلها بالظبط. الميعاد اتأخّر عن المدة لأنه **مالوش معنى** من
+  // غيرها: اقتراح المواعيد بيشتق «مدى الشغل» من المدة، ومن غير مدة المدى بيطلع **يوم واحد** —
+  // فشغل ٥ أيام كان بيتقاس على يوم بدايته وبس، والمطابقة بترفض بعدين اليوم اللي إحنا وعدنا بيه.
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+
+  // ── خطوة ١: العنوان الحقيقي للطلب ده ──
+  //
+  // **مش العنوان الافتراضي.** قبل كده العميل اللي عنده عنوانين كان الاقتراح بيتحسب على نطاق
+  // عنوانه الافتراضي، وبعدين يختار عنوان تاني للطلب — فالطلب يتعمل في نطاق طاقته مختلفة تمامًا
+  // عن اللي الاقتراح وعد بيه، بلا أي كود بيربط الاتنين (docs/08 §155 بند ٢).
+  //
+  // **ومش خطوة زيادة**: العميل كان بيتسأل على العنوان بعد الميعاد على أي حال
+  // (`JobDetailsScreen`/`TechnicianSelectionScreen`). نفس الخطوة، اتقدّمت لمكانها الصح، والعنوان
+  // بيتمرر لكل الشاشات بعدها فمابيتسألش عليه تاني.
+  final Address? address = await _selectOrderAddress(context);
+  if (address == null || !context.mounted) return;
+
+  // ── خطوة ٢: تفاصيل الشغل المؤثّرة في التنفيذ ──
+  //
+  // **بس اللي بيغيّر التنفيذ فعلاً** — نفس القاعدة الحاكمة لبصمة `booking-match-context.ts`
+  // بالحرف: الحقل يتقدّم لو بيغيّر المدة أو الطاقم أو المهارات أو نوع المنفّذ أو الطاقة.
+  //
+  // عمليًا دي حقول التسعير الديناميكي لخدمات `formula` — هي مدخلات `CatalogService.estimate()`
+  // اللي بتطلّع `duration_minutes`/`estimated_duration_days`. الخدمات التانية مدتها ثابتة من
+  // الكتالوج (`estimated_duration_minutes`)، فمفيش حاجة تتجمع قبل الميعاد — وملاحظات العميل
+  // وتعليمات الوصول **مابتتحركش** من مكانها في `CreateOrderScreen` لأنها مالهاش أي أثر تشغيلي.
+  Map<String, dynamic>? fieldValues;
+  Address effectiveAddress = address;
+  if (service.pricingModel == 'formula') {
+    final details = await Navigator.of(context).push<JobDetailsResult>(
+      MaterialPageRoute(
+        builder: (_) => JobDetailsScreen(
+          service: service,
+          bookingMode: availableModes.contains(BookingMode.individual)
+              ? BookingMode.individual
+              : availableModes.first,
+          initialAddress: address,
+        ),
+      ),
+    );
+    if (details == null || !context.mounted) return;
+    fieldValues = details.fieldValues;
+    // العميل يقدر يغيّر العنوان من جوّه الشاشة — والتغيير ده لازم يسري على الاقتراح والتسعير
+    // بعده، مش يتجاهل.
+    effectiveAddress = details.address;
+  }
+
+  // ── خطوة ٣: المدة الحقيقية، من محرك التسعير ──
+  //
+  // **مش محسوبة هنا.** بتتقرا من `POST /services/:id/estimate` — نفس `CatalogService.estimate()`
+  // اللي إنشاء الطلب وقايمة الفنيين بيستخدموها. أي حسبة مدة في التطبيق كانت هتبقى مصدر حقيقة
+  // تانٍ يقدر ينحرف، فيقترح يوم المطابقة ترفضه (نفس حجّة ADR-0088/0096 بالحرف).
+  //
+  // الفشل بيرجّع `null` والاقتراح بيرجع لسلوكه القديم — تدهور، مش توقف.
+  final jobLoad = await CatalogRepository().estimateJobLoad(
+    service.id,
+    fieldValues: fieldValues,
+  );
   if (!context.mounted) return;
 
+  // ── خطوة ٤: الميعاد، وهو دلوقتي عارف الشغل كله ──
+  //
   // **سؤال «إزاي حابب تحجز الخدمة دي؟» اتشال نهائيًا (ADR-0048، طلب مالك صريح، docs/08 §85)**:
   // «بدل ما أسأل الكاستمر عايز شغلنا طوارئ ولا فوري ولا فردي، نشيل دول خالص ونحط قواعد على
   // السيستم، والسيستم هو اللي بيحدد بناءً على التاريخ».
   //
-  // فالخطوة الأولى بقت **الميعاد دايمًا**، لكل الخدمات بلا استثناء. الوضع (طوارئ/فريق/فردي)
-  // بيتحسب في الباك-إند من اليوم المختار وعدد العمال المطلوب، والعميل مابيشوفش المصطلحات دي
-  // خالص — بيشوف تنبيه أحمر واضح لو اختار النهارده إن فيه رسوم استعجال، وبس.
+  // الوضع (طوارئ/فريق/فردي) بيتحسب في الباك-إند من اليوم المختار وعدد العمال، والعميل مابيشوفش
+  // المصطلحات دي خالص.
   final choice = await Navigator.of(context).push<ScheduleChoice>(
     MaterialPageRoute(
       builder: (_) => ScheduleSelectionScreen(
@@ -98,10 +152,12 @@ Future<void> navigateToServiceBooking(
         warrantyDays: service.warrantyDays,
         requiresPreciseTime: service.requiresStartTime,
         allowsSameDay: service.allowsEmergency,
-        // اقتراح المواعيد (ADR-0088) — العنوان لسه مااتختارش في المسار ده، فالشاشة بتجيب
-        // العنوان الافتراضي بنفسها. مفيش عنوان = مفيش اقتراح، والتقويم يفضل زي ما هو.
         serviceId: service.id,
-        addressId: preselectedAddress?.id,
+        // العنوان الحقيقي والمدة الحقيقية — الاتنين معروفين دلوقتي، ومن غيرهم الاقتراح كان
+        // بيتحسب على نطاق مفترض ومدة مفترضة (ADR-0100).
+        addressId: effectiveAddress.id,
+        durationMinutes: jobLoad?.durationMinutes,
+        estimatedDurationDays: jobLoad?.estimatedDurationDays,
       ),
     ),
   );
@@ -135,6 +191,8 @@ Future<void> navigateToServiceBooking(
       // الفني + دمج الشركات جوّه TechnicianMarketplaceScreen نفسها (booking_mode بيتمرر لحد هناك)،
       // مش مسار تنقّل مختلف. الطوارئ بس (حجز فوري بالتصميم، مفيش اختيار يدوي خالص) بتروح
       // CreateOrderScreen مباشرة زي ما كانت دايمًا.
+      // **فرع `formula` اتشال من هنا** (ADR-0100): تفاصيل الشغل بقت خطوة ٢ فوق، قبل الميعاد.
+      // اللي فضل هو الفرق الحقيقي الوحيد: فيه اختيار منفّذ ولا مفيش.
       builder: (_) => bookingMode == BookingMode.emergency
           ? CreateOrderScreen(
               service: service,
@@ -142,6 +200,8 @@ Future<void> navigateToServiceBooking(
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
+              initialAddress: effectiveAddress,
+              initialFieldValues: fieldValues,
             )
           // **خدمة مسارها الوحيد هو التقييم بالصور مابتعديش على اختيار فني** (docs/08 §131):
           // في المسار ده الإدارة بتحدد السعر من الصور، العميل يوافق، **وبعدين** التوزيع
@@ -157,15 +217,8 @@ Future<void> navigateToServiceBooking(
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
-            )
-          : service.pricingModel == 'formula'
-          ? JobDetailsScreen(
-              service: service,
-              bookingMode: bookingMode,
-              requestedAt: scheduledAt,
-              requestedAtRangeEnd: scheduledAtRangeEnd,
-              requestedPreciseTime: preciseTime,
-              initialAddress: preselectedAddress,
+              initialAddress: effectiveAddress,
+              initialFieldValues: fieldValues,
             )
           : TechnicianSelectionScreen(
               service: service,
@@ -173,31 +226,38 @@ Future<void> navigateToServiceBooking(
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
               requestedPreciseTime: preciseTime,
-              initialAddress: preselectedAddress,
+              initialAddress: effectiveAddress,
+              fieldValues: fieldValues,
             ),
     ),
   );
 }
 
-/// **بيضمن إن فيه عنوان قبل شاشة الميعاد — من غير ما يضيف خطوة على حد عنده عنوان** (ADR-0098).
+/// **عنوان الطلب ده بالتحديد** (ADR-0100 — بيوسّع ADR-0098 من العميل الجديد لكل العملاء).
 ///
-/// بترجّع:
-///  - `null` لو العميل عنده عناوين محفوظة (الشاشة اللي بعدها بتحل الافتراضي بنفسها زي ما كانت)،
-///    أو لو النداء فشل — الفشل مايوقفش الحجز، أسوأ حالاته إن الاقتراح مايظهرش زي الأول بالظبط.
-///  - العنوان اللي العميل أضافه/اختاره لو مكانش عنده أي عنوان.
+/// بترجّع العنوان اللي العميل اختاره فعلاً، أو `null` لو رجع من غير اختيار (ساعتها الحجز بيتلغي
+/// بهدوء — مفيش أي خطوة بعد كده ليها معنى بلا عنوان: لا مدة، ولا اقتراح، ولا سعر).
 ///
-/// ولو العميل قفل شاشة العنوان من غير ما يضيف حاجة، بنكمّل بـ`null` بدل ما نلغي الحجز — هو
-/// لسه يقدر يضيف العنوان في الخطوة اللي بعدها زي ما كان دايمًا.
-Future<Address?> _ensureAddressBeforeScheduling(BuildContext context) async {
+/// **ليه بقت دايمًا، وليه دي مش خطوة زيادة**: ADR-0098 كانت بتسأل العميل الجديد بس، واللي عنده
+/// عنوان محفوظ كان الاقتراح بيتحسب له على **العنوان الافتراضي** — وبعدين يتسأل على عنوان الطلب
+/// الحقيقي في `JobDetailsScreen`/`TechnicianSelectionScreen`. يعني السؤال كان بيتسأل على أي حال،
+/// بس **بعد** ما الاقتراح اتبنى على عنوان تاني. اللي اتغيّر هو مكان السؤال، مش عددها.
+///
+/// العميل اللي عنده عنوان واحد بياخد ضغطة واحدة على قايمة جاهزة. واللي عنده أكتر بيختار — وده
+/// بالظبط اللي كان ناقص.
+Future<Address?> _selectOrderAddress(BuildContext context) async {
+  // نداء استطلاعي بحت: لو العميل مالوش ولا عنوان، `AddressesScreen` بتفتح على فورم الإضافة
+  // مباشرةً. فشله مايمنعش أي حاجة — الشاشة بتتفتح في الحالتين.
   try {
-    final addresses = await AddressesRepository(context.read<AuthRepository>()).list();
-    if (addresses.isNotEmpty) return null;
+    await AddressesRepository(context.read<AuthRepository>()).list();
   } catch (_) {
-    return null;
+    // مفيش أي قرار متعلّق بالنتيجة — بنكمّل للشاشة على أي حال.
   }
   if (!context.mounted) return null;
   return Navigator.of(context).push<Address>(
-    MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
+    MaterialPageRoute(
+      builder: (_) => const AddressesScreen(selectionMode: true),
+    ),
   );
 }
 

@@ -162,24 +162,43 @@ export interface SuggestedTimeDto {
   free_technicians: number;
 }
 
+/**
+ * **حمل الشغلانة — المدة بالدقايق و/أو بالأيام** (ADR-0100).
+ *
+ * الاتنين لازم يتبعتوا مع بعض: منهم الباك-إند بيشتق **مدى الشغل** وبيفحص أيامه كلها. الاكتفاء
+ * بالدقايق كان بيسيب الشغل المقاس **باليوم** (مفيش دقايق) بمدى يوم واحد، فالمنفّذ المشغول في
+ * نص المدى يبان متاح.
+ */
+export interface JobLoadParams {
+  durationMinutes?: number | null;
+  estimatedDurationDays?: number | null;
+}
+
+const appendJobLoad = (query: URLSearchParams, load: JobLoadParams) => {
+  if (load.durationMinutes) query.set('duration_minutes', String(Math.round(load.durationMinutes)));
+  if (load.estimatedDurationDays) {
+    query.set('estimated_duration_days', String(Math.ceil(load.estimatedDurationDays)));
+  }
+};
+
 export const fetchSuggestedDays = (
   authedFetch: AuthedFetch,
-  params: { serviceId: string; addressId: string; durationMinutes?: number | null },
+  params: { serviceId: string; addressId: string } & JobLoadParams,
 ) => {
   const query = new URLSearchParams({ service_id: params.serviceId, address_id: params.addressId });
-  if (params.durationMinutes) query.set('duration_minutes', String(params.durationMinutes));
+  appendJobLoad(query, params);
   return authedFetch<SuggestedDaysResponseDto>(`/booking-slots/days?${query.toString()}`);
 };
 
 export const fetchSuggestedTimes = (
   authedFetch: AuthedFetch,
-  params: { serviceId: string; addressId: string; day: string; durationMinutes?: number | null },
+  params: { serviceId: string; addressId: string; day: string } & JobLoadParams,
 ) => {
   const query = new URLSearchParams({
     service_id: params.serviceId,
     address_id: params.addressId,
     day: params.day,
   });
-  if (params.durationMinutes) query.set('duration_minutes', String(params.durationMinutes));
+  appendJobLoad(query, params);
   return authedFetch<{ times: SuggestedTimeDto[] }>(`/booking-slots/times?${query.toString()}`);
 };

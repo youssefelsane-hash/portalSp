@@ -56,6 +56,7 @@ export class BookingSlotsController {
       addressId: query.address_id,
       day: query.day,
       durationMinutes: query.duration_minutes ?? null,
+      estimatedDurationDays: query.estimated_duration_days ?? null,
     });
     return { times: result.times.map((slot) => ({ time: slot.time, free_technicians: slot.freeTechnicians })) };
   }
