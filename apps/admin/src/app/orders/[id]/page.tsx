@@ -135,8 +135,9 @@ import {
 } from '@/lib/technician-labels';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { formatDateTimeAr, formatEgp  } from '@/lib/format';
-import { ErrorNotice } from '@/components/notice';
+import { ErrorNotice, Notice } from '@/components/notice';
 import { DataList, DataRow, DataBlock } from '@/components/data-list';
+import { FORMATION_STAGE_KEYS, type OrderPriceTrail } from '@/lib/order-price-trail';
 
 /** إصدار عرض سعر كما بيرجّعه `GET /admin/orders/:id/quotes`. */
 interface AdminOrderQuote {
@@ -326,6 +327,7 @@ export default function OrderDetailPage() {
   const goBack = useAdminBack('/orders');
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
+  const [priceTrail, setPriceTrail] = useState<OrderPriceTrail | null>(null);
   const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
   const [earningShares, setEarningShares] = useState<OrderEarningShareResponseDto[] | null>(null);
   const [earningSharesError, setEarningSharesError] = useState(false);
@@ -493,6 +495,10 @@ export default function OrderDetailPage() {
     authedFetch<AdminOrderQuote[]>(`/admin/orders/${id}/quotes`)
       .then(setQuotes)
       .catch(() => setQuotes([]));
+    // مسار تكوين سعر العميل (ADR-0107) — مسار منفصل، وفشله مايمنعش باقي الصفحة.
+    authedFetch<OrderPriceTrail>(`/admin/orders/${id}/price-trail`)
+      .then(setPriceTrail)
+      .catch(() => setPriceTrail(null));
     // الملخص المالي (docs/08 §20 بند 11) — مسار منفصل عمداً زي الصور وبنود العرض فوق
     authedFetch<OrderFinancialSummaryResponseDto>(`/admin/orders/${id}/financial-summary`)
       .then(setFinancialSummary)
@@ -2400,6 +2406,110 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {/*
+          ═══ تكوين سعر العميل (ADR-0107، بلاغ مالك 2026-09-17) ═══
+
+          «صفحة الطلب لا تعطيني trace واضحًا يشرح كيف وصل السعر من ناتج الـPrice Engine إلى
+          المبلغ النهائي».
+
+          الجدول ده **مقروء من لقطة الطلب التاريخية بس** — مفيش قراءة إعدادات حيّة، فتغيير
+          نسبة المنطقة أو مضاعف الفئة بعد أسبوع مايغيّرش تفسير طلب قديم.
+
+          وتوزيع المستحقات **مش هنا**: هو كارت منفصل تحت، لأن معاملات أجر الفني/المساعد مش
+          عوامل رفعت سعر العميل.
+        */}
+        {priceTrail && (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">تكوين سعر العميل</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {!priceTrail.formation_snapshot_available && (
+                <Notice tone="info" className="mb-0">
+                  {priceTrail.notes_ar[0] ?? 'مراحل التسعير التفصيلية مش متاحة للطلب ده.'}
+                </Notice>
+              )}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>المرحلة</TableHead>
+                    <TableHead className="text-end">المبلغ</TableHead>
+                    <TableHead className="text-end">الإجمالي بعدها</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {priceTrail.stages.map((stage) => (
+                    <TableRow key={stage.key} className={stage.applied ? undefined : 'opacity-55'}>
+                      <TableCell className="whitespace-normal">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{stage.label_ar}</span>
+                          {/* الحدود بين «سعر الشغل» و«الرسوم» بتبان بشريحة — الأدمن بيسأل
+                              «الزيادة دي على الشغل نفسه ولا رسم؟» */}
+                          {FORMATION_STAGE_KEYS.includes(stage.key) ? (
+                            <Badge variant="outline" className="text-[10px]">سعر الشغل</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">رسوم/خصم</Badge>
+                          )}
+                          {!stage.applied && <Badge variant="outline" className="text-[10px]">مش مطبّقة</Badge>}
+                        </div>
+                        {stage.detail_ar && (
+                          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{stage.detail_ar}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-end tabular-nums">
+                        {stage.applied ? formatEgp(stage.amount_cents) : '—'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-end tabular-nums text-muted-foreground">
+                        {formatEgp(stage.running_total_cents)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {[
+                  { label: 'إجمالي وقت الحجز', value: priceTrail.total_at_booking_cents, tone: '' },
+                  { label: 'الإجمالي المسجّل حاليًا', value: priceTrail.current_total_cents, tone: '' },
+                  {
+                    label: 'غير مفسَّر',
+                    value: priceTrail.unexplained_cents,
+                    tone: priceTrail.reconciles ? 'text-success' : 'text-destructive',
+                  },
+                ].map((tile) => (
+                  <div key={tile.label} className="rounded-xl border border-border/70 bg-muted/25 px-3 py-2.5">
+                    <p className="text-xs leading-4 text-muted-foreground">{tile.label}</p>
+                    <p className={`mt-1 font-semibold tabular-nums ${tile.tone}`}>{formatEgp(tile.value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {priceTrail.post_booking.length > 0 && (
+                <div className="rounded-xl border border-border/70 p-3">
+                  <p className="mb-2 text-sm font-semibold">تغييرات بعد الحجز</p>
+                  <div className="flex flex-col gap-2">
+                    {priceTrail.post_booking.map((change) => (
+                      <div key={change.key} className="rounded-lg border bg-muted/20 px-3 py-2">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="text-sm font-medium">{change.label_ar}</span>
+                          <span className="text-sm font-semibold tabular-nums">{formatEgp(change.amount_cents)}</span>
+                        </div>
+                        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{change.source_ar}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!priceTrail.reconciles && priceTrail.notes_ar.length > 0 && (
+                <Notice tone="warning" title="فيه فرق محتاج تفسير" className="mb-0">
+                  {priceTrail.notes_ar[priceTrail.notes_ar.length - 1]}
+                </Notice>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* الملخص المالي لكل طلب (docs/08 §20 بند 11) — كارت واحد واضح يجمع كل حاجة متبعثرة قبل
             كده: عمولة/أرباح (كانت محسوبة بس مش معروضة خالص)، وسيلة/حالة كل دفعة، وأي استرداد. */}
         {/* **عرض كامل**: الكارت ده جوّه جدول توزيع مستحقات بأربع أعمدة، وعرضه الطبيعي 561px
@@ -2410,7 +2520,7 @@ export default function OrderDetailPage() {
             <CardTitle className="text-base">الملخص المالي</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {!financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {!error && !financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
             {financialSummary && (
               <>
                 {/*

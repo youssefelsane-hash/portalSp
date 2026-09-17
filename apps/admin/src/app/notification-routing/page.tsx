@@ -128,6 +128,7 @@ export default function NotificationRoutingPage() {
     <AppShell>
       <PageHeader
         title="قواعد توجيه الإشعارات"
+        description="كل حدث داخلي بيوصل لمين وعبر أنهي قناة — بلا تعديل كود."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + قاعدة جديدة
@@ -195,7 +196,7 @@ export default function NotificationRoutingPage() {
         </Card>
       )}
 
-      {!rules && <TableSkeleton columns={5} />}
+      {!error && !rules && <TableSkeleton columns={5} />}
       {rules && rules.length === 0 && <EmptyState title="مفيش قواعد توجيه لسه" />}
 
       {rules && rules.length > 0 && (

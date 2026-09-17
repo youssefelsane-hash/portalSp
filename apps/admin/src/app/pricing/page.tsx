@@ -82,7 +82,7 @@ export default function PricingEnginePage() {
             <CardDescription>ادخل على أي خدمة تحت عشان تدير حقولها/قواعدها/تعاين السعر الناتج.</CardDescription>
           </CardHeader>
           <CardContent>
-            {!services ? (
+            {error ? null : !services ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : formulaServices.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -128,7 +128,7 @@ export default function PricingEnginePage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!services ? (
+            {error ? null : !services ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : otherServices.length === 0 ? (
               <p className="text-sm text-muted-foreground">كل الخدمات بالفعل شغالة بالمعادلة الديناميكية.</p>

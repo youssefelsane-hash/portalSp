@@ -361,7 +361,7 @@ export default function RoleDetailPage() {
               <CardTitle className="text-base">سجل التدقيق</CardTitle>
             </CardHeader>
             <CardContent>
-              {!auditLogs ? (
+              {error ? null : !auditLogs ? (
                 <p className="text-sm text-muted-foreground">جاري التحميل…</p>
               ) : auditLogs.length === 0 ? (
                 <EmptyState title="مفيش أي تعديلات مسجّلة لسه" />

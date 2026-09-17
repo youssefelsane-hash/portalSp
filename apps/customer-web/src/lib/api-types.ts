@@ -129,6 +129,14 @@ export interface ServiceDto {
   warranty_days: number;
   requires_photos: boolean;
   allows_scheduling: boolean;
+  /**
+   * **قدرات الخدمة — مدخلات لقرار السيرفر، مش قواعد يقرّرها العميل** (ADR-0106).
+   *
+   * التلاتة دول كانوا بيتقروا في `availableBookingModes()` اللي بتحسب «وضع الحجز» محليًا، وهي
+   * اتشالت: الوضع النهائي بيشتقّه السيرفر بـ`resolveBookingMode()` من نفس القدرات دي + اليوم
+   * الحقيقي + ناتج الـworkforce. سايبين في النوع لأن الـAPI بيرجّعهم فعلاً وأي قارئ تاني ممكن
+   * يحتاجهم للعرض — بس **مفيش قرار تجاري في `customer-web` مبني عليهم**، وممنوع يرجع.
+   */
   allows_emergency: boolean;
   allows_individual: boolean;
   allows_team: boolean;

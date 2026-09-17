@@ -151,6 +151,7 @@ export default function FeatureFlagsPage() {
     <AppShell>
       <PageHeader
         title="Feature Flags"
+        description="مفاتيح تشغيل الميزات — التفعيل والتعطيل بيسري فورًا بلا إعادة نشر."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + فلاج جديد

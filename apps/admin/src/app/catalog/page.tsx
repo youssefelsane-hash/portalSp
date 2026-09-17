@@ -469,7 +469,7 @@ export default function CatalogPage() {
                 </Button>
               </form>
             )}
-            {!categories ? (
+            {error ? null : !categories ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : categories.length === 0 ? (
               <EmptyState title="مفيش فئات لسه" />
@@ -794,7 +794,7 @@ export default function CatalogPage() {
               </form>
             )}
 
-            {!services ? (
+            {error ? null : !services ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : services.length === 0 ? (
               <EmptyState title="مفيش خدمات في الفئة دي" />

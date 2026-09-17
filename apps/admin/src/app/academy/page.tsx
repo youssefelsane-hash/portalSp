@@ -175,7 +175,7 @@ export default function AcademyPage() {
               </form>
             )}
 
-            {!courses ? (
+            {error ? null : !courses ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : courses.length === 0 ? (
               <EmptyState title="مفيش كورسات لسه" />
@@ -285,7 +285,7 @@ export default function AcademyPage() {
 
             {selectedTechnicianId && (
               <>
-                {!attempts ? (
+                {error ? null : !attempts ? (
                   <p className="text-sm text-muted-foreground">جاري التحميل…</p>
                 ) : attempts.length === 0 ? (
                   <EmptyState title="مفيش نتائج اختبارات مسجّلة للفني ده لسه" />

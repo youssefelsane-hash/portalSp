@@ -61,6 +61,7 @@ import {
 } from './dto/assessment-triage.dto';
 import { SubmitAdminPhotoQuoteDto } from './dto/submit-admin-photo-quote.dto';
 import { toOrderQuoteResponseDto } from './dto/order-quote-response.dto';
+import { buildOrderPriceTrail } from './order-price-trail';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -340,6 +341,24 @@ export class AdminOrdersController {
   // الملخص المالي لطلب واحد (docs/08 §20 بند 11) — كانت فجوة عرض حقيقية: عمولة المنصة/أرباح
   // الفني محسوبة ومخزّنة على الطلب من زمان (docs/08 §20 بند 1) بس صفر endpoint كان بيرجّعها، ومفيش
   // طريقة تعرف وسيلة الدفع أو تاريخ الاسترداد لطلب معيّن من غير تفتيش يدوي في /admin/wallets.
+  /**
+   * **مسار تكوين سعر العميل** (ADR-0107، بلاغ مالك 2026-09-17).
+   *
+   * بيرجّع كل مرحلة رفعت/نزّلت سعر العميل، **من اللقطة التاريخية المحفوظة على الطلب بس** —
+   * مفيش قراءة إعدادات حيّة، فتغيير نسبة المنطقة أو مضاعف الفئة بعد أسبوع مايغيّرش تفسير طلب
+   * قديم. ومفيش إعادة حساب: الأرقام محفوظة وقت الإنشاء من نفس ناتج `CatalogService.estimate()`.
+   *
+   * **منفصل عن توزيع المستحقات عن قصد**: معاملات أجر الفني/المساعد مش عوامل رفعت سعر العميل،
+   * وعرضها في نفس الجدول كان هيخلي الأدمن يفتكر إن العميل دفع بسببها.
+   */
+  @Get(':id/price-trail')
+  @RequirePermission('orders.view')
+  async getPriceTrail(@Param('id', ParseUUIDPipe) id: string) {
+    const { order } = await this.adminOrdersService.getDetail(id);
+    const extras = await this.adminOrdersService.priceTrailExtras(id);
+    return buildOrderPriceTrail(order, extras);
+  }
+
   @Get(':id/financial-summary')
   @RequirePermission('orders.view')
   async getFinancialSummary(@Param('id', ParseUUIDPipe) id: string) {

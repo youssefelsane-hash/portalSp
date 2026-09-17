@@ -146,7 +146,7 @@ export default function AdminProjectsPage() {
         description="الأعمال الكبيرة اللي بتتقسّم مراحل: عروض السعر، المراحل، والطلبات المربوطة بكل مشروع."
       />
       {error && <ErrorNotice>{error}</ErrorNotice>}
-      {!projects && <TableSkeleton columns={6} />}
+      {!error && !projects && <TableSkeleton columns={6} />}
       {projects && projects.length === 0 && <EmptyState title="مفيش مشروعات" />}
       {projects && projects.length > 0 && (
         <Table>

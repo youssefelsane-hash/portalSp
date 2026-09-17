@@ -40,6 +40,7 @@ export default function EmployeesPage() {
     <AppShell>
       <PageHeader
         title="الموظفين"
+        description="حسابات الفريق الإداري وأدوارهم — الصلاحيات كلها جاية من الدور مش من الحساب."
         actions={
           <div className="flex gap-2">
             {hasPermission('employees.activity.view') && (

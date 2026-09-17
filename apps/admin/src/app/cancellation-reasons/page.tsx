@@ -94,6 +94,7 @@ export default function CancellationReasonsPage() {
     <AppShell>
       <PageHeader
         title="أسباب الإلغاء"
+        description="الأسباب اللي بتظهر للعميل والفني والأدمن وقت الإلغاء، ورسوم كل سبب."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + سبب جديد
@@ -149,7 +150,7 @@ export default function CancellationReasonsPage() {
         </Card>
       )}
 
-      {!reasons && <TableSkeleton columns={5} />}
+      {!error && !reasons && <TableSkeleton columns={5} />}
       {reasons && reasons.length === 0 && <EmptyState title="مفيش أسباب لسه" />}
 
       {reasons && reasons.length > 0 && (

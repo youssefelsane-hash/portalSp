@@ -100,7 +100,7 @@ export default function InstallmentsPage() {
               </Button>
             ))}
           </div>
-          {!apps && <TableSkeleton columns={7} />}
+          {!error && !apps && <TableSkeleton columns={7} />}
           {apps && apps.length === 0 && <EmptyState title="مفيش طلبات مطابقة" />}
           {apps && apps.length > 0 && (
             <>
@@ -199,7 +199,7 @@ function PlansTab() {
 
       {showCreate && <CreatePlanForm onCreated={() => { setShowCreate(false); loadPlans(); }} />}
 
-      {!plans && <TableSkeleton columns={6} />}
+      {!error && !plans && <TableSkeleton columns={6} />}
       {plans && plans.length === 0 && <EmptyState title="مفيش خطط تقسيط — ابدأ بإنشاء خطة جديدة" />}
       {plans && plans.length > 0 && (
         <Table>

@@ -50,7 +50,8 @@ import {
 import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import type { TechnicianCapacityTier } from '@baytak/shared-types';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
-import { ErrorNotice } from '@/components/notice';
+import { ErrorNotice, Notice } from '@/components/notice';
+import { COMPLAINT_SEVERITY_LABELS, COMPLAINT_STATUS_LABELS } from '@/lib/support-labels';
 
 // §24 — كانت فجوة موثّقة: GET /admin/technician-productivity/:technicianId موجود ومختبر
 // (technician_productivity.view) من زمان بلا أي واجهة أدمن تعرضه — مش موجودة في @baytak/shared-types
@@ -73,8 +74,22 @@ interface ProductivityReport {
   technician_id: string;
   evaluation_period_months: number;
   snapshots_found: number;
+  snapshot_periods: { period_year: number; period_month: number; calculated_at: string | null }[];
+  period_start: string | null;
+  period_end: string | null;
   overall_score: number | null;
   explanation: string;
+  /** ADR-0105 — الأرقام اللي بتفسّر التناقض الظاهري بين تقييم البروفايل وتقييم الـKPI. */
+  rating_context: {
+    lifetime_average: number | null;
+    lifetime_ratings_count: number;
+    period_average: number | null;
+    period_ratings_count: number;
+    months_with_rating_data: number;
+    live_ratings_in_period: number;
+    ratings_missing_from_snapshots: number;
+    is_stale: boolean;
+  };
   breakdown: ProductivityMetricBreakdown[];
 }
 
@@ -1025,7 +1040,8 @@ export default function TechnicianDetailPage() {
                       <ul className="flex flex-col gap-1">
                         {profile360.complaints.recent.map((c) => (
                           <li key={c.id} className="text-muted-foreground">
-                            {c.severity} — {c.status} ({new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')})
+                            {(COMPLAINT_SEVERITY_LABELS as Record<string, string>)[c.severity] ?? c.severity} —{' '}
+                            {(COMPLAINT_STATUS_LABELS as Record<string, string>)[c.status] ?? c.status} ({new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')})
                           </li>
                         ))}
                       </ul>
@@ -1298,7 +1314,7 @@ export default function TechnicianDetailPage() {
               </Button>
             </form>
 
-            {!zones ? (
+            {error ? null : !zones ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : zones.length === 0 ? (
               <EmptyState title="مفيش مناطق عمل معيّنة لسه" />
@@ -1372,7 +1388,7 @@ export default function TechnicianDetailPage() {
               </Button>
             </form>
 
-            {!categories ? (
+            {error ? null : !categories ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : categories.length === 0 ? (
               <EmptyState title="مفيش تخصصات معيّنة لسه" />
@@ -1478,7 +1494,7 @@ export default function TechnicianDetailPage() {
                 </>
               )}
             </p>
-            {!servicePermissions ? (
+            {error ? null : !servicePermissions ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : servicePermissions.length === 0 ? (
               <EmptyState
@@ -1624,6 +1640,87 @@ export default function TechnicianDetailPage() {
                   </span>
                 </div>
                 <p className="text-muted-foreground">{productivity.explanation}</p>
+
+                {/*
+                  **الشهور اللي التقرير مبني عليها بالاسم** (ADR-0105). الخدمة بتاخد أحدث N
+                  snapshot **موجود**، مش «آخر N شهر من النهارده» — فلو آخر حساب للفني من يناير
+                  والدنيا سبتمبر، التقرير بيتكلم عن يناير. من غير السطر ده الأدمن مش عارف كده.
+                */}
+                {productivity.snapshot_periods.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    الشهور المحسوبة:{' '}
+                    {productivity.snapshot_periods
+                      .map((p) => `${String(p.period_month).padStart(2, '0')}/${p.period_year}`)
+                      .join(' · ')}
+                  </p>
+                )}
+
+                {/*
+                  ═══ سياق التقييمات (بلاغ مالك 2026-09-17، ADR-0105) ═══
+                  اللقطة كانت: البروفايل فوق «4.26 (19 تقييم)» وهنا «عينة غير كافية». الرقمين
+                  صح بس بيقيسوا حاجتين مختلفتين، ومكانش فيه حاجة في الشاشة بتقول كده — فالأدمن
+                  بيقرا تناقض. الأربع خانات دي بتفصل الأسئلة عن بعضها.
+                */}
+                <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
+                  <p className="mb-2 text-sm font-semibold">تقييم العملاء — مدى الحياة مقابل فترة الـKPI</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[
+                      {
+                        label: 'التقييم العام (مدى الحياة)',
+                        value:
+                          productivity.rating_context.lifetime_average !== null
+                            ? productivity.rating_context.lifetime_average.toFixed(2)
+                            : '—',
+                        sub: `${productivity.rating_context.lifetime_ratings_count} تقييم`,
+                      },
+                      {
+                        label: 'تقييم الفترة المحسوبة',
+                        value:
+                          productivity.rating_context.period_average !== null
+                            ? productivity.rating_context.period_average.toFixed(2)
+                            : '—',
+                        sub: `${productivity.rating_context.period_ratings_count} تقييم جوّه الفترة`,
+                      },
+                      {
+                        label: 'شهور فيها تقييمات',
+                        value: String(productivity.rating_context.months_with_rating_data),
+                        sub: 'ده اللي «العينة» بتعدّه',
+                      },
+                      {
+                        label: 'تقييمات الفترة (حيّة)',
+                        value: String(productivity.rating_context.live_ratings_in_period),
+                        sub:
+                          productivity.rating_context.ratings_missing_from_snapshots > 0
+                            ? `${productivity.rating_context.ratings_missing_from_snapshots} منهم مش داخل الحساب`
+                            : 'كلهم داخلين الحساب',
+                      },
+                    ].map((tile) => (
+                      <div key={tile.label} className="rounded-lg border bg-background px-2.5 py-2">
+                        <p className="text-[11px] leading-4 text-muted-foreground">{tile.label}</p>
+                        <p className="mt-0.5 font-semibold tabular-nums">{tile.value}</p>
+                        <p className="text-[11px] leading-4 text-muted-foreground">{tile.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {productivity.rating_context.is_stale && (
+                    <Notice tone="warning" title="الـKPI الشهري محتاج إعادة حساب" className="mb-0 mt-3">
+                      فيه {productivity.rating_context.ratings_missing_from_snapshots} تقييم عميل جوّه الفترة دي
+                      وصلوا <strong>بعد</strong> آخر حساب للـKPI، فمش داخلين التقرير. الـsnapshot مجمّد عن قصد
+                      (الـKPI مرتبط بالصرف، فمابيتحسبش تلقائي) — أعِد حساب الشهور من صفحة «KPI الشهري» عشان
+                      الرقم يتحدّث.
+                    </Notice>
+                  )}
+                  {!productivity.rating_context.is_stale &&
+                    productivity.rating_context.lifetime_ratings_count >
+                      productivity.rating_context.period_ratings_count && (
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        الفرق بين الرقمين طبيعي:{' '}
+                        {productivity.rating_context.lifetime_ratings_count -
+                          productivity.rating_context.period_ratings_count}{' '}
+                        تقييم بره الفترة المحسوبة (تقييمات أقدم). وسّع فترة التقييم لو عايز تدخلهم.
+                      </p>
+                    )}
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>

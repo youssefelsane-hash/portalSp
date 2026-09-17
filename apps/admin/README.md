@@ -480,12 +480,21 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
    `DataBlock`.
 4. **مفيش نص أحمر سايب.** استخدم `ErrorNotice`/`Notice` (`src/components/notice.tsx`) —
    إطار + خلفية + أيقونة. (`className="mb-0"` جوّه كارت.)
-5. **مفيش مفتاح إنجليزي خام ظاهر للأدمن.** لو بتعرض enum/action، ترجمه. سجل النشاط بيترجم
-   بالتركيب في `src/lib/audit-labels.ts`، والبوابة `node scripts/check-audit-labels.js`
-   بتقرا الأفعال من كود الباك-إند نفسه وتفشل لو فعل جديد مالوش ترجمة.
+5. **مفيش مفتاح إنجليزي خام ظاهر للأدمن.** لو بتعرض enum/action، ترجمه. بوابتين بيحرسوا ده:
+   - `node scripts/check-audit-labels.js` — أفعال سجل النشاط (بتقرا من كود الباك-إند نفسه؛
+     الترجمة بالتركيب في `src/lib/audit-labels.ts`).
+   - `node scripts/check-enum-labels.js` — ١٦ زوج (enum من TS أو من Postgres + الماپ في
+     اللوحة). **لو ضيفت ماپ جديد لـenum، ضيف الزوج في السكربت** — القيمة الناقصة مابتكسرش
+     الكود لأن `LABELS[v] ?? v` بيعدّيها إنجليزي خام.
 6. **مفيش تاريخ خام.** `formatDateTimeAr` من `src/lib/format.ts` —
    `toLocaleString('ar-EG-u-nu-latn')` بيطلّع «9:00:00 2026/9/17 ص».
 7. **مفيش مرجع توثيق داخلي في نص ظاهر.** `(docs/08 §36)` و`(ADR-0060)` مكانهم التعليقات.
+8. **الفشل بيوقف مؤشّر التحميل.** `{!X && <TableSkeleton/>}` بيفضل بيلف للأبد لو التحميل فشل
+   (`X` بيفضل `null`) — فالأدمن بيشوف تنبيه خطأ وهيكل تحميل في نفس الوقت، ومش عارف إن الصفحة
+   خلصت وفشلت. الصح `{!error && !X && <TableSkeleton/>}`، وللشكل التلاتي
+   `{error ? null : !X ? (تحميل) : X.length === 0 ? (فاضي) : (المحتوى)}`.
+9. **الرابط الشغّال في القايمة لازم يكون الصفحة الحالية فعلاً.** `isNavActive()` في
+   `app-shell.tsx` — `startsWith` سايب بيخلّي `/support` يضيّي وإنت على `/support-tickets`.
 
 ### ملاحظة على اللقطات
 

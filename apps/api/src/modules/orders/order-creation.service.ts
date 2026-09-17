@@ -1428,6 +1428,26 @@ export class OrderCreationService {
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder || remoteQuoteRequested ? 0 : estimate.estimated_total_cents,
+        // لقطة مراحل تكوين السعر (ADR-0107) — من نفس ناتج `estimate()` بلا إعادة حساب.
+        // إعادة الزيارة ومسار التقييم بالصور مالهمش سعر شغل أصلاً، فبتفضل NULL: الشرح الغلط
+        // أسوأ من غياب الشرح.
+        ...(originalOrder || remoteQuoteRequested
+          ? {}
+          : {
+              pricingEngineRawCents: estimate.price_formation.engine_raw_cents,
+              pricingZoneModifierPercentage:
+                estimate.price_formation.zone_modifier_percentage === null
+                  ? null
+                  : String(estimate.price_formation.zone_modifier_percentage),
+              pricingZoneAdjustmentCents: estimate.price_formation.zone_adjustment_cents,
+              pricingTierSnapshot: estimate.price_formation.pricing_tier,
+              pricingMultiplierSource: estimate.price_formation.multiplier_source,
+              pricingMultiplierSnapshot: String(estimate.price_formation.multiplier),
+              pricingTierAdjustmentCents: estimate.price_formation.tier_adjustment_cents,
+              pricingClampApplied: estimate.price_formation.clamp_applied,
+              pricingClampDeltaCents: estimate.price_formation.clamp_delta_cents,
+              pricingWorkPriceCents: estimate.price_formation.work_price_cents,
+            }),
         initialQuoteSource: remoteQuoteRequested ? 'admin_remote' : null,
         priceStatus: initialPriceStatus({
           hasLockedMatchPreview: Boolean(lockedMatchPreview),
@@ -2016,6 +2036,8 @@ export class OrderCreationService {
 
     return {
       base_price_cents: remoteAssessmentRequested ? 0 : estimate.estimated_total_cents,
+      // نفس القيمة بالاسم الصح (ADR-0107) — `base_price_cents` اسم مضلّل محفوظ للتوافق.
+      work_price_cents: remoteAssessmentRequested ? 0 : estimate.estimated_total_cents,
       inspection_fee_cents: remoteAssessmentRequested ? 0 : estimate.inspection_fee_cents,
       min_price_cents: estimate.min_price_cents,
       max_price_cents: estimate.max_price_cents,

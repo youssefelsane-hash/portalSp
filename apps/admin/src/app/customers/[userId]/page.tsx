@@ -22,6 +22,7 @@ import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/order-labels';
 import { ErrorNotice } from '@/components/notice';
 import { DataList, DataRow } from '@/components/data-list';
+import { COMPLAINT_SEVERITY_LABELS, COMPLAINT_STATUS_LABELS } from '@/lib/support-labels';
 
 const TIER_LABELS: Record<CustomerTier, string> = {
   standard: 'عادي',
@@ -592,7 +593,8 @@ export default function CustomerDetailPage() {
                         <li key={c.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
                           <span>{c.complaint_number}</span>
                           <span className="text-muted-foreground">
-                            {c.severity} · {c.status}
+                            {(COMPLAINT_SEVERITY_LABELS as Record<string, string>)[c.severity] ?? c.severity} ·{' '}
+                            {(COMPLAINT_STATUS_LABELS as Record<string, string>)[c.status] ?? c.status}
                           </span>
                         </li>
                       ))}
@@ -613,7 +615,8 @@ export default function CustomerDetailPage() {
                         <li key={c.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
                           <span>{c.complaint_number}</span>
                           <span className="text-muted-foreground">
-                            {c.severity} · {c.status}
+                            {(COMPLAINT_SEVERITY_LABELS as Record<string, string>)[c.severity] ?? c.severity} ·{' '}
+                            {(COMPLAINT_STATUS_LABELS as Record<string, string>)[c.status] ?? c.status}
                           </span>
                         </li>
                       ))}

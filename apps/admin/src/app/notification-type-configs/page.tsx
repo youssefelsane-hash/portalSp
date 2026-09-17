@@ -121,7 +121,7 @@ export default function NotificationTypeConfigsPage() {
 
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
-      {!configs && <TableSkeleton columns={6} />}
+      {!error && !configs && <TableSkeleton columns={6} />}
       {configs && configs.length === 0 && <EmptyState title="مفيش أنواع إشعارات مُعرَّفة لسه" />}
 
       {configs && configs.length > 0 && (

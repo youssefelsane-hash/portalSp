@@ -220,6 +220,46 @@ export class Order {
   @Column({ name: 'estimated_price_cents', type: 'integer', nullable: true })
   estimatedPriceCents: number | null;
 
+  /*
+    ═══ لقطة مراحل تكوين سعر العميل (ADR-0107، migration 0352) ═══
+
+    **لقطة مش قراءة حيّة**: تغيير نسبة المنطقة أو مضاعف فئة المهارة بعد أسبوع مالوش أي أثر على
+    تفسير طلب قديم. القيم دي بتتكتب مرة واحدة وقت إنشاء الطلب من نفس المتغيرات اللي
+    `CatalogService.estimate()` حسبها — مفيش إعادة حساب ولا خوارزمية تانية.
+
+    NULL لأي طلب قبل المهاجرة (مفيش backfill بالتخمين).
+    وفي القاعدة قيد `chk_orders_price_formation_sums` بيضمن إن المراحل بتجمع للسعر.
+  */
+  @Column({ name: 'pricing_engine_raw_cents', type: 'integer', nullable: true })
+  pricingEngineRawCents: number | null;
+
+  @Column({ name: 'pricing_zone_modifier_percentage', type: 'numeric', precision: 6, scale: 2, nullable: true })
+  pricingZoneModifierPercentage: string | null;
+
+  @Column({ name: 'pricing_zone_adjustment_cents', type: 'integer', nullable: true })
+  pricingZoneAdjustmentCents: number | null;
+
+  @Column({ name: 'pricing_tier_snapshot', type: 'varchar', length: 20, nullable: true })
+  pricingTierSnapshot: string | null;
+
+  @Column({ name: 'pricing_multiplier_source', type: 'varchar', length: 20, nullable: true })
+  pricingMultiplierSource: string | null;
+
+  @Column({ name: 'pricing_multiplier_snapshot', type: 'numeric', precision: 6, scale: 4, nullable: true })
+  pricingMultiplierSnapshot: string | null;
+
+  @Column({ name: 'pricing_tier_adjustment_cents', type: 'integer', nullable: true })
+  pricingTierAdjustmentCents: number | null;
+
+  @Column({ name: 'pricing_clamp_applied', type: 'varchar', length: 4, nullable: true })
+  pricingClampApplied: string | null;
+
+  @Column({ name: 'pricing_clamp_delta_cents', type: 'integer', nullable: true })
+  pricingClampDeltaCents: number | null;
+
+  @Column({ name: 'pricing_work_price_cents', type: 'integer', nullable: true })
+  pricingWorkPriceCents: number | null;
+
   @Column({ name: 'initial_quote_source', type: 'varchar', length: 30, nullable: true })
   initialQuoteSource: 'technician_onsite' | 'admin_remote' | null;
 

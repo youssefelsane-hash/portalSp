@@ -162,6 +162,7 @@ export default function TechnicianProgressionPage() {
     <AppShell>
       <PageHeader
         title="المسار الوظيفي للفنيين"
+        description="قواعد الترقية والتنزيل بين المستويات، ومين مستحق دلوقتي."
         actions={
           <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
             {isCalculating ? 'جاري التقييم…' : 'احسب أهلية كل الفنيين'}
@@ -176,7 +177,7 @@ export default function TechnicianProgressionPage() {
           <CardTitle className="text-base">قواعد الترقية بين المستويات</CardTitle>
         </CardHeader>
         <CardContent>
-          {!rules ? (
+          {error ? null : !rules ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : (
             <div className="space-y-3">
@@ -220,18 +221,26 @@ export default function TechnicianProgressionPage() {
                       </div>
                       <div>
                         <Label>أقل متوسط تقييم</Label>
+                        {/* `numeric(3,2)` في القاعدة — الـstep كان بيقرّب لعُشر (طلب مالك). */}
                         <Input
                           type="number"
-                          step="0.1"
+                          step="0.01"
+                          min="0"
+                          max="5"
+                          dir="ltr"
                           value={ruleForm.min_avg_rating}
                           onChange={(e) => setRuleForm({ ...ruleForm, min_avg_rating: e.target.value })}
                         />
                       </div>
                       <div>
                         <Label>أقصى معدل إلغاء %</Label>
+                        {/* `numeric(5,2)` — نسبة مئوية بخانتين عشريتين، مش مضاعفات عُشر. */}
                         <Input
                           type="number"
-                          step="0.1"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          dir="ltr"
                           value={ruleForm.max_cancellation_rate}
                           onChange={(e) => setRuleForm({ ...ruleForm, max_cancellation_rate: e.target.value })}
                         />
@@ -294,7 +303,7 @@ export default function TechnicianProgressionPage() {
           </label>
         </CardHeader>
         <CardContent>
-          {!statuses ? (
+          {error ? null : !statuses ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : statuses.length === 0 ? (
             <EmptyState

@@ -74,7 +74,11 @@ export default function TechnicianReferralsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="ترشيح QR الفني" actions={<p className="text-sm text-muted-foreground">{total} سجل</p>} />
+      <PageHeader
+        title="ترشيح QR الفني"
+        description="الفنيين اللي جابوا فنيين تانيين بكود QR، وحالة مكافأة كل ترشيح."
+        actions={<p className="text-sm text-muted-foreground">{total} سجل</p>}
+      />
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -116,7 +120,7 @@ export default function TechnicianReferralsPage() {
           </SelectNative>
         </CardHeader>
         <CardContent>
-          {!bonuses ? (
+          {error ? null : !bonuses ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : bonuses.length === 0 ? (
             <EmptyState title="مفيش سجلات بالفلتر ده" />

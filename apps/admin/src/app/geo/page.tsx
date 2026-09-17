@@ -491,7 +491,12 @@ export default function GeoPage() {
                   <Input name="name_ar" placeholder="اسم النطاق بالعربي" required />
                   <Input name="name_en" placeholder="اسم النطاق بالإنجليزي" required />
                   <Label htmlFor="zone_surge">مضاعف الذروة (surge، افتراضي 1)</Label>
-                  <Input id="zone_surge" name="surge_multiplier" type="number" step="0.1" min="0.1" max="10" dir="ltr" />
+                  {/* `step="0.01"` مش `0.1`: العمود `numeric(4,2)`، والـstep الخشن كان بيجبر الأدمن على
+                      مضاعفات الـ١٠٪ (طلب مالك 2026-09-17). */}
+                  <Input id="zone_surge" name="surge_multiplier" type="number" step="0.01" min="0.01" max="99.99" dir="ltr" />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    أي رقم بخانتين عشريتين مقبول: 1.04 = زيادة ٤٪، 1.5 = زيادة ٥٠٪، 1 = بلا زيادة.
+                  </p>
                   <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
                     حفظ النطاق
                   </Button>

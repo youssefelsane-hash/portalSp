@@ -79,6 +79,7 @@ export default function TechnicianKpiPage() {
     <AppShell>
       <PageHeader
         title="KPI الشهري للفنيين"
+        description="لقطة الأداء الشهرية لكل فني، والمكافأة المستحقة عليها."
         actions={
           <>
             <SelectNative value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-28">
@@ -137,7 +138,7 @@ export default function TechnicianKpiPage() {
         </Card>
       </div>
 
-      {!snapshots ? (
+      {error ? null : !snapshots ? (
         <p className="text-sm text-muted-foreground">جاري التحميل…</p>
       ) : snapshots.length === 0 ? (
         <EmptyState

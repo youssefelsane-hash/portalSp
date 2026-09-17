@@ -17,6 +17,46 @@ import { estimatedDisplayRange } from './estimated-display-range';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { BookingModeFilter } from './dto/list-services.dto';
 
+/**
+ * **مراحل تكوين سعر العميل** (ADR-0107، بلاغ مالك 2026-09-17).
+ *
+ * المحرك بيمرّ بأربع مراحل بالترتيب قبل أي رسوم إضافية:
+ *
+ *   1. ناتج محرك التسعير الخام (`engine_raw_cents`)
+ *   2. تعديل المنطقة (نسبة مئوية) → `zone_adjustment_cents`
+ *   3. مضاعف فئة مهارة التسعير/الشركة → `tier_adjustment_cents`
+ *   4. قصّ الحد الأدنى/الأقصى → `clamp_delta_cents`
+ *
+ * المشكلة اللي بتحلّها: `base_price_cents` **مش** الناتج الخام — هو السعر بعد المرحلة ٢، و
+ * `PreviewOrderResponseDto.base_price_cents` أسوأ: بيتملا من `estimated_total_cents` يعني بعد
+ * المراحل الأربعة كلها. فالأدمن مكانش يقدر يعرف كل مرحلة ضافت كام.
+ *
+ * **مفيش أي حساب جديد هنا**: كل رقم في الواجهة دي هو متغيّر `estimate()` بيحسبه أصلاً، بيترجّع
+ * بدل ما يتفقد جوّه الدالة.
+ */
+export interface PriceFormationTrace {
+  /** ناتج محرك التسعير قبل أي تعديل تجاري. */
+  engine_raw_cents: number;
+  /** نسبة تعديل المنطقة السارية وقت الحساب، `null` لو مفيش تعديل منطقة. */
+  zone_modifier_percentage: number | null;
+  /** اللي زيادة المنطقة ضافته بالقروش (سالب لو خصم). */
+  zone_adjustment_cents: number;
+  /** فئة المهارة اللي المضاعف اتقرا منها، `null` لو مفيش فني معروف أو معامل شركة. */
+  pricing_tier: TechnicianPricingTier | null;
+  /** مصدر المضاعف — بيفرّق بين فئة المهارة ومعامل الشركة (ADR-0042: بديل مش فوقه). */
+  multiplier_source: 'pricing_tier' | 'company' | 'none';
+  /** المضاعف المطبّق فعلاً (1 = مفيش). */
+  multiplier: number;
+  /** اللي المضاعف ضافه بالقروش (سالب لو أقل من 1). */
+  tier_adjustment_cents: number;
+  /** أنهي حد قصّ تدخّل، `null` لو مفيش. */
+  clamp_applied: 'min' | 'max' | null;
+  /** فرق القصّ بالقروش (موجب لو الحد الأدنى رفع السعر، سالب لو الأقصى نزّله). */
+  clamp_delta_cents: number;
+  /** سعر الشغل النهائي بعد المراحل الأربعة — **قبل** أي رسوم (كشف/طوارئ/إضافات/ضمان/خصم). */
+  work_price_cents: number;
+}
+
 export interface PriceEstimate {
   /** سعر الشغل **بعد** زيادة المنطقة (`zoneAdjustedBaseCents`) وقبل مضاعف المستوى والقصّ. */
   base_price_cents: number;
@@ -49,6 +89,8 @@ export interface PriceEstimate {
   display_price_min_cents: number | null;
   display_price_max_cents: number | null;
   price_certainty_mode: PriceCertaintyMode;
+  /** مراحل تكوين السعر (ADR-0107) — نفس المتغيرات المحسوبة جوّه `estimate()`، بلا حساب جديد. */
+  price_formation: PriceFormationTrace;
   /** معرّف صف `service_pricing_evaluations` (تدقيق/snapshot تاريخي لمعادلة formula وقت الحساب) —
    * null لأي نموذج تسعير تاني. OrdersService.create() بيربطه بالطلب بعد ما يتأكّد فعلاً
    * (linkEvaluationToOrder) عشان السعر النهائي يفضل قابل للتتبّع حتى لو الأدمن غيّر القواعد بعدين. */
@@ -530,8 +572,13 @@ export class CatalogService {
       );
     }
 
+    // مصدر المضاعف بيتسجّل صراحةً: معامل الشركة **بديل** عن فئة المهارة مش فوقه (ADR-0042)،
+    // ومن غير التفريق ده الأدمن مش هيعرف الزيادة جِت من فئة الفني ولا من الشركة.
+    const resolvedTier = technicianPricingTier ?? this.pricingTierForOperationalLevel(technicianLevel) ?? null;
     const levelMultiplier = companyPriceMultiplier ??
       (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
+    const multiplierSource: PriceFormationTrace['multiplier_source'] =
+      companyPriceMultiplier !== undefined ? 'company' : levelMultiplier === 1 ? 'none' : 'pricing_tier';
     const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
       ? await Promise.all([
           this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
@@ -549,6 +596,8 @@ export class CatalogService {
     }
 
     let estimatedTotalCents = Math.round(zoneAdjustedBaseCents * surgeMultiplier * levelMultiplier);
+    // قبل القصّ — الفرق بينه وبين النهائي هو أثر الحد الأدنى/الأقصى بالظبط.
+    const beforeClampCents = estimatedTotalCents;
     const effectiveMinPrice = [service.minPriceCents, result.minPriceCents]
       .filter((value): value is number => value !== null)
       .reduce<number | null>((maximum, value) => maximum === null ? value : Math.max(maximum, value), null);
@@ -579,6 +628,19 @@ export class CatalogService {
       // نفس الدالة الواحدة اللي معاينة الطلب بتستخدمها، مش حساب موازي.
       ...estimatedDisplayRange(service, estimatedTotalCents),
       price_certainty_mode: service.priceCertaintyMode,
+      price_formation: {
+        engine_raw_cents: result.priceCents,
+        zone_modifier_percentage: zoneOverride ? Number(zoneOverride.modifierPercentage) : null,
+        zone_adjustment_cents: zoneAdjustedBaseCents - result.priceCents,
+        pricing_tier: multiplierSource === 'pricing_tier' ? resolvedTier : null,
+        multiplier_source: multiplierSource,
+        multiplier: levelMultiplier,
+        tier_adjustment_cents: beforeClampCents - zoneAdjustedBaseCents,
+        clamp_applied:
+          estimatedTotalCents > beforeClampCents ? 'min' : estimatedTotalCents < beforeClampCents ? 'max' : null,
+        clamp_delta_cents: estimatedTotalCents - beforeClampCents,
+        work_price_cents: estimatedTotalCents,
+      },
       pricing_evaluation_id: result.evaluationId,
       estimated_duration_days: result.estimatedDurationDays,
       duration_minutes: result.durationMinutes,

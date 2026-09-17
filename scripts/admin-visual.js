@@ -32,6 +32,10 @@ const argValue = (name, fallback) => {
   return i === -1 ? fallback : args[i + 1];
 };
 const OUT_DIR = argValue('--out', '/tmp/admin-shots');
+/** `--only <a,b>` بيقصر اللقطات على صفحات بالاسم — للتحقق السريع بعد إصلاح صفحة واحدة. */
+const ONLY = (argValue('--only', '') ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+/** `--viewport <name>` بيقصر على مقاس واحد. */
+const ONLY_VIEWPORT = argValue('--viewport', '');
 const KEEP_DATA = args.includes('--keep');
 
 /**
@@ -154,9 +158,55 @@ async function main() {
       { name: 'technician-detail', url: `/technicians/${technicianId}` },
       { name: 'customer-detail', url: `/customers/${customerUserId}` },
       { name: 'service-detail', url: `/catalog/services/${serviceId}` },
+      // باقي مسارات اللوحة الثابتة — الغرض تغطية كاملة مش عيّنة.
+      { name: 'academy', url: '/academy' },
+      { name: 'analytics', url: '/analytics' },
+      { name: 'analytics-funnel', url: '/analytics/funnel' },
+      { name: 'analytics-money', url: '/analytics/money' },
+      { name: 'analytics-workforce', url: '/analytics/workforce' },
+      { name: 'branding', url: '/branding' },
+      { name: 'buildings', url: '/buildings' },
+      { name: 'campaigns', url: '/campaigns' },
+      { name: 'cancellation-reasons', url: '/cancellation-reasons' },
+      { name: 'employees-workforce', url: '/employees/workforce' },
+      { name: 'feature-flags', url: '/feature-flags' },
+      { name: 'homepage-content', url: '/homepage-content' },
+      { name: 'installments', url: '/installments' },
+      { name: 'instapay-confirmations', url: '/instapay-confirmations' },
+      { name: 'internal-chat', url: '/internal-chat' },
+      { name: 'marketing', url: '/marketing' },
+      { name: 'notification-routing', url: '/notification-routing' },
+      { name: 'notification-type-configs', url: '/notification-type-configs' },
+      { name: 'notifications', url: '/notifications' },
+      { name: 'operations-live-map', url: '/operations/live-map' },
+      { name: 'payouts', url: '/payouts' },
+      { name: 'pricing', url: '/pricing' },
+      { name: 'promotions', url: '/promotions' },
+      { name: 'recurring-orders', url: '/recurring-orders' },
+      { name: 'refunds', url: '/refunds' },
+      { name: 'reports', url: '/reports' },
+      { name: 'roles', url: '/roles' },
+      { name: 'security-center', url: '/security-center' },
+      { name: 'support', url: '/support' },
+      { name: 'support-chat', url: '/support-chat' },
+      { name: 'support-tickets', url: '/support-tickets' },
+      { name: 'technician-companies', url: '/technician-companies' },
+      { name: 'technician-kpi', url: '/technician-kpi' },
+      { name: 'technician-levels', url: '/technician-levels' },
+      { name: 'technician-progression', url: '/technician-progression' },
+      { name: 'technician-referrals', url: '/technician-referrals' },
+      { name: 'technicians-category-declarations', url: '/technicians/category-declarations' },
+      { name: 'warranty-claims', url: '/warranty-claims' },
+      { name: 'warranty-plans', url: '/warranty-plans' },
+      { name: 'assessment-queue', url: '/assessment-queue' },
+      { name: 'order-create-for-customer', url: '/orders/create-for-customer' },
+      { name: 'employee-new', url: '/employees/new' },
     ];
 
-    for (const vp of VIEWPORTS) {
+    const targetPages = ONLY.length > 0 ? pages.filter((p) => ONLY.includes(p.name)) : pages;
+    const targetViewports = ONLY_VIEWPORT ? VIEWPORTS.filter((v) => v.name === ONLY_VIEWPORT) : VIEWPORTS;
+
+    for (const vp of targetViewports) {
       const context = await browser.newContext({
         viewport: { width: vp.width, height: vp.height },
         locale: 'ar-EG',
@@ -186,7 +236,7 @@ async function main() {
       await page.locator('button[type=submit]').first().click();
       await page.waitForFunction(() => !window.location.pathname.startsWith('/login'), { timeout: 30_000 });
 
-      for (const target of pages) {
+      for (const target of targetPages) {
         await page.goto(`${ADMIN_URL}${target.url}`, { waitUntil: 'domcontentloaded' });
         // الصفحات بتجيب بياناتها بعد الرندر — بننتظر سكون الشبكة بدل انتظار عنصر بعينه.
         await page.waitForLoadState('networkidle').catch(() => undefined);
