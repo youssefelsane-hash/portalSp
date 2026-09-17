@@ -98,6 +98,28 @@ export class AdminOrdersController {
     return { canApprovePriceIncrease, canWaiveFees };
   }
 
+  /**
+   * **شريط الملخّص** (docs/08 §157) — بياخد **نفس** الفلاتر بتاعت القايمة، فأرقامه مستحيل
+   * تخالف اللي تحتها. مسار منفصل عن `list` عشان الواجهة تقدر تحدّثه بلا ما تعيد تحميل الصفوف.
+   */
+  @Get('summary')
+  @RequirePermission('orders.view')
+  async summary(@Query() query: ListOrdersQueryDto) {
+    return this.adminOrdersService.summary(query);
+  }
+
+  /**
+   * **حِمل التشغيل بالتقويم** (docs/08 §157) — عدّ لكل يوم، مش الطلبات نفسها.
+   *
+   * طلب المالك بالحرف: «التقويم ياخد aggregate counts من السيرفر لكل يوم، بدل ما ننزل آلاف
+   * الطلبات للمتصفح عشان نحسبهم».
+   */
+  @Get('calendar')
+  @RequirePermission('orders.view')
+  async calendar(@Query() query: ListOrdersQueryDto) {
+    return { days: await this.adminOrdersService.calendar(query) };
+  }
+
   @Get()
   @RequirePermission('orders.view')
   async list(@Query() query: ListOrdersQueryDto) {

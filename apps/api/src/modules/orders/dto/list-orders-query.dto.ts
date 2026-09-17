@@ -1,11 +1,62 @@
 import { Transform, Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsArray, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { OrderStatus, OrderType } from '../entities/order.entity';
+import { OrderBucket, OrderDateField, OrderScope } from '../order-scope';
 
 export class ListOrdersQueryDto {
+  /**
+   * **إيه الطلبات اللي عايز أشوفها؟** (ADR-0103) — محور منفصل تمامًا عن `sort`.
+   *
+   * `current` هو الافتراضي عن قصد: الأدمن الصبح بيشوف تشغيل اليوم مش مكتمل السنة اللي فاتت.
+   * قبل كده مكانش فيه scope خالص، فـ`sort=soonest` كان بيرتّب **كل** التاريخ بأقرب تنفيذ —
+   * والمكتمل من سنة موعده أقدم فبيطلع الأول (بلاغ المالك بالحرف).
+   */
+  @IsOptional()
+  @IsIn(['current', 'completed', 'all'])
+  scope?: OrderScope = 'current';
+
+  /**
+   * اختصار تشغيلي جوّه الـscope — **كله مشتقّ**، مفيش حالة ولا عمود جديد.
+   * `overdue` = الموعد عدّى والطلب لسه غير نهائي.
+   */
+  @IsOptional()
+  @IsIn(['today', 'tomorrow', 'next7', 'upcoming', 'overdue', 'unassigned'])
+  bucket?: OrderBucket;
+
+  /**
+   * **التاريخ المقصود** لـ`from`/`to` (ADR-0103). قبل كده كان `placed_at` **دايمًا** بلا اختيار،
+   * فـ«عايز أشوف ٢٠–٣٠ سبتمبر» كان بيجاوب على سؤال واحد بس من اتنين مختلفين تمامًا: «اللي
+   * هيتنفّذ في الفترة» مقابل «اللي اتعمل في الفترة».
+   */
+  @IsOptional()
+  @IsIn(['scheduled_at', 'placed_at', 'completed_at'])
+  date_field?: OrderDateField = 'scheduled_at';
+
   @IsOptional()
   @IsEnum(OrderStatus)
   order_status?: OrderStatus;
+
+  /**
+   * فلتر حالات **متعدد** — الأدمن بيحتاج «بيدوّر على فني» + «مستني قبول» مع بعض.
+   * `order_status` المفرد باقي للتوافق مع أي لينك محفوظ.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsEnum(OrderStatus, { each: true })
+  @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value))
+  statuses?: OrderStatus[];
+
+  @IsOptional()
+  @IsUUID()
+  service_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  service_zone_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  technician_id?: string;
 
   /**
    * بحث برقم الطلب (docs/08 §67) — طلب المالك: «لما أحب أدور على أي طلب قديم أدور عليه وألاقيه…

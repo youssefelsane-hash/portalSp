@@ -8,6 +8,9 @@ export * from './support';
 export * from './payments';
 export * from './promotions';
 export * from './orders';
+// صياغة «حجم الشغلانة» — مشتركة بين العميل والأدمن عن قصد (ADR-0102): نفس الرقم لازم
+// يتعرض بنفس الصياغة للاتنين، وإلا الأدمن والعميل بيتكلموا عن نفس الطلب بأرقام مختلفة.
+export * from './work-scope';
 export * from './catalog';
 export * from './pricing';
 export * from './settings';

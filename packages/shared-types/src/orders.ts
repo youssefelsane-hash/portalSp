@@ -130,6 +130,11 @@ export interface OrderResponseDto {
   required_technicians: number | null;
   required_assistants: number | null;
   estimated_duration_days: number | null;
+  /** المصدر الأدق لمدة الحجز (snapshot وقت الحجز) — نفس الحقل اللي العميل بيقرا منه (ADR-0102). */
+  duration_minutes: number | null;
+  /** بداية/نهاية الشغل **الفعلية** — منهم بتتحسب «المدة الفعلية»، مفصولة عن تقدير الحجز. */
+  work_started_at: string | null;
+  work_completed_at: string | null;
   /** تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — يميّز نزاع الكاش عن نزاع الزيارة الفاشلة
    * لما order_status=disputed (technician_cash_not_received_at != null = نزاع كاش). */
   customer_cash_confirmed_at: string | null;

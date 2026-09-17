@@ -33,7 +33,7 @@ import {
 } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
-import { formatWorkDuration } from '@/lib/work-scope';
+import { formatWorkDuration } from '@baytak/shared-types';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
 import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';

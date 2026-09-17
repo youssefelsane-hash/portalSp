@@ -21,6 +21,7 @@ import type {
   TechnicianCapacityTier,
   TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
+import { formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { OrderEarningAdjustmentsSection } from './order-earning-adjustments-section';
@@ -3080,47 +3081,89 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {/*
+          **مدة الشغلانة للأدمن — نفس اللي العميل شافه** (ADR-0102، docs/08 §157).
+
+          بلاغ المالك: «مدة الشغلانة نفسها مش بتظهر للأدمين». الكارت ده كان بيقرا
+          `pricing_evaluation.computed_duration_days` وبس — وهي بالأيام، و`pricing_evaluation`
+          نفسها `null` لأي خدمة مش `pricing_model=formula`. فالأدمن كان بيشوف «—» في أكتر
+          حالتين شائعتين: خدمة مش معادلية، وشغلانة مدتها بالساعات.
+
+          الـsnapshot كان **موجود على الطلب من الأول** (`duration_minutes`/
+          `estimated_duration_days`) والعميل بيقراه بنفس الحقول. فمفيش حساب جديد هنا —
+          نفس الحقول ونفس دالة الصياغة (`formatWorkDuration` من `@baytak/shared-types`).
+        */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">الإنتاجية والمدة المتوقعة</CardTitle>
+            <CardTitle className="text-base">المدة والطاقم</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
+            <p>
+              المدة المقدّرة عند الحجز:{' '}
+              <span className="font-medium">
+                {formatWorkDuration(order.duration_minutes, order.estimated_duration_days) ?? '—'}
+              </span>
+            </p>
+            {order.scheduled_at && (
+              <p>
+                موعد البداية: {new Date(order.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}
+              </p>
+            )}
+            {order.scheduled_at && order.duration_minutes !== null && order.duration_minutes > 0 && (
+              <p>
+                النهاية المتوقعة:{' '}
+                {new Date(
+                  new Date(order.scheduled_at).getTime() + order.duration_minutes * 60_000,
+                ).toLocaleString('ar-EG-u-nu-latn')}
+              </p>
+            )}
+            {/*
+              **المدة الفعلية سطر منفصل** عن التقدير عن قصد (طلب المالك: «وبعد انتهاء الطلب
+              ممكن يبقى عندنا سطر منفصل اسمه المدة الفعلية. كده ما نخلطش بين تقدير الحجز وما
+              حدث بالفعل»). بتظهر بس لما الشغل يبدأ فعلاً.
+            */}
+            {order.work_started_at && (
+              <p className="border-t pt-2">
+                المدة الفعلية:{' '}
+                <span className="font-medium">
+                  {order.work_completed_at
+                    ? (formatWorkDuration(
+                        Math.round(
+                          (new Date(order.work_completed_at).getTime() -
+                            new Date(order.work_started_at).getTime()) /
+                            60_000,
+                        ),
+                        null,
+                      ) ?? '—')
+                    : 'الشغل لسه شغّال'}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {' '}
+                  (بدأ {new Date(order.work_started_at).toLocaleString('ar-EG-u-nu-latn')})
+                </span>
+              </p>
+            )}
+            <p className="border-t pt-2">
+              الطاقم المطلوب:{' '}
+              {formatWorkforce(order.required_technicians, order.required_assistants) ?? '—'}
+            </p>
+            {/*
+              مصدر التقدير — معلومة تشخيصية للأدمن («الرقم ده جا منين؟»)، مش مصدر العرض.
+              العرض فوق بيقرا الـsnapshot على الطلب دايمًا.
+            */}
             {order.pricing_evaluation ? (
-              <>
-                <p>
-                  المدة المتوقعة:{' '}
-                  {order.pricing_evaluation.computed_duration_days !== null
-                    ? `${order.pricing_evaluation.computed_duration_days} يوم`
-                    : '—'}
-                </p>
-                <p>
-                  عدد الصنايعية المطلوب:{' '}
-                  {order.pricing_evaluation.computed_technicians ?? '—'}
-                </p>
-                <p>
-                  عدد المساعدين المطلوب:{' '}
-                  {order.pricing_evaluation.computed_assistants ?? '—'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  محسوبة وقت الحجز في:{' '}
-                  {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
-                </p>
-              </>
+              <p className="text-xs text-muted-foreground">
+                المصدر: معادلة تسعير الخدمة، محسوبة وقت الحجز في{' '}
+                {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
+              </p>
             ) : order.standard_data_id ? (
-              // محرك الإنتاجية (docs/06 §3.3-§3.6) — نفس فكرة pricing_evaluation فوق بس لخدمات
-              // مبنية على بيانات قياسية (service_standard_data) مش formula.
-              <>
-                <p>
-                  المدة المتوقعة:{' '}
-                  {order.estimated_duration_days !== null ? `${order.estimated_duration_days} يوم` : '—'}
-                </p>
-                <p>عدد الصنايعية المطلوب: {order.required_technicians ?? '—'}</p>
-                <p>عدد المساعدين المطلوب: {order.required_assistants ?? '—'}</p>
-              </>
+              <p className="text-xs text-muted-foreground">
+                المصدر: بيانات الإنتاجية القياسية للخدمة (service_standard_data)
+              </p>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
-                ولا بيانات قياسية (service_standard_data)
+              <p className="text-xs text-muted-foreground">
+                المصدر: المدة الافتراضية للخدمة من الكتالوج — الخدمة دي مش بتستخدم معادلة تسعير
+                ولا بيانات قياسية
               </p>
             )}
           </CardContent>

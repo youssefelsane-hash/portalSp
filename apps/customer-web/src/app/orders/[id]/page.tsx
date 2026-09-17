@@ -26,7 +26,7 @@ import {
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
-import { formatWorkDuration, formatWorkforce } from '@/lib/work-scope';
+import { formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
 import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
