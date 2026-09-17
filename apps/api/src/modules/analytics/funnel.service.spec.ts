@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 import { OrderSourceChannel } from '../orders/entities/order.entity';
 import { BookingFunnelEvent } from './entities/booking-funnel-event.entity';
 import { describeFunnelFailure, resolveFunnelSession } from './funnel-request.util';
@@ -73,11 +74,10 @@ describe('FunnelService + FunnelTracker (ADR-0081) — حي', () => {
     funnel = new FunnelService(dataSource);
     tracker = new FunnelTrackerService(dataSource.getRepository(BookingFunnelEvent));
 
-    const [country] = await q<{ id: string }[]>(
-      `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-       VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-      [`دولة فنل ${runId}`, `Funnel Country ${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    const country = await insertTestCountry(q, {
+      nameAr: `دولة فنل ${runId}`,
+      nameEn: `Funnel Country ${runId}`,
+    });
     ids.country = country.id;
     const [city] = await q<{ id: string }[]>(
       `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,

@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
 import { ExecutiveKpisService, KpiValue } from './executive-kpis.service';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 /**
  * ADR-0081 §1/§2 — لوحة قيادة الشركة.
@@ -120,11 +121,7 @@ describe('ExecutiveKpisService (ADR-0081) — حي', () => {
     }).initialize();
     service = new ExecutiveKpisService(dataSource, settings);
 
-    const [country] = await q<{ id: string }[]>(
-      `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-       VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-      [`دولة KPI ${runId}`, `KPI Country ${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    const country = await insertTestCountry(q, { nameAr: `دولة KPI ${runId}`, nameEn: `KPI Country ${runId}` });
     ids.country = country.id;
     const [city] = await q<{ id: string }[]>(
       `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,

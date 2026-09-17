@@ -12,7 +12,7 @@ import { Order } from './entities/order.entity';
  * الاختبار الصح ليها: وحدي، بلا قاعدة، بمدخلات صريحة. التحقق الحي إن اللقطة بتتكتب صح موجود
  * في `scripts/verify-order-price-trail.js`.
  */
-const NO_EXTRAS: OrderPriceTrailExtras = { addonsTotalCents: 0, additionalItemsTotalCents: 0 };
+const NO_EXTRAS: OrderPriceTrailExtras = { addonsTotalCents: 0, additionalItemsTotalCents: 0, approvedQuotes: [] };
 
 /** طلب بأقل الحقول اللي الدالة بتقراها — الباقي مش داخل الحساب فمش محتاج يتزيّف. */
 function orderWith(overrides: Partial<Order>): Order {
@@ -26,6 +26,8 @@ function orderWith(overrides: Partial<Order>): Order {
     totalAmountCents: 0,
     levelPremiumCents: 0,
     instapayDiscountCents: 0,
+    promoCodeId: null,
+    buildingId: null,
     assessmentFeeCreditCents: 0,
     pricingEngineRawCents: null,
     pricingZoneModifierPercentage: null,
@@ -64,6 +66,7 @@ describe('مسار تكوين سعر العميل — كل جنيه مفسَّر
       surgeAmountCents: 0,
       warrantyPriceCents: 5_000,
       discountAmountCents: 7_500,
+      promoCodeId: 'promo-1',
       totalAmountCents: 137_500 + 15_000 + 5_000 - 7_500,
     });
     const trail = buildOrderPriceTrail(order, NO_EXTRAS);
@@ -157,6 +160,96 @@ describe('مسار تكوين سعر العميل — كل جنيه مفسَّر
     expect(first.stages.find((s) => s.key === 'pricing_tier_multiplier')!.detail_ar).toContain('خبير');
   });
 
+  /*
+    بلاغ المالك 2026-09-17 (اللقطة الثانية): الأدمن شاف «غير مفسّر 30 ج» على طلب عليه حافز
+    InstaPay. السبب إن `instapay_discount_cents` **جزء من** `discount_amount_cents` مش زيادة
+    عليه، فطرح العمود كله كخصم حجز + إظهار الحافز في تغييرات ما بعد الحجز = تحصيل مزدوج للخصم.
+  */
+  describe('حافز InstaPay جزء من discount_amount_cents — ممنوع يتحسب مرتين', () => {
+    /** نفس أرقام لقطة المالك: 1,034.50 وقت الحجز، وحافز 30 ج بعد الحجز ⇒ 1,004.50. */
+    const ownerCase = () =>
+      orderWith({
+        pricingEngineRawCents: 97_500,
+        pricingZoneModifierPercentage: '1.05',
+        pricingZoneAdjustmentCents: 1_024,
+        pricingTierSnapshot: 'standard',
+        pricingMultiplierSource: 'pricing_tier',
+        pricingMultiplierSnapshot: '1.0500',
+        pricingTierAdjustmentCents: 4_926,
+        pricingClampApplied: null,
+        pricingClampDeltaCents: 0,
+        pricingWorkPriceCents: 103_450,
+        estimatedPriceCents: 103_450,
+        // الحافز دخل العمودين الاتنين: جوّه إجمالي الخصم، ومنفصل بقيمته.
+        discountAmountCents: 3_000,
+        instapayDiscountCents: 3_000,
+        totalAmountCents: 100_450,
+      });
+
+    it('الفرق «غير المفسّر» بيرجع صفر — والحافز مرة واحدة بس، بعد الحجز', () => {
+      const trail = buildOrderPriceTrail(ownerCase(), NO_EXTRAS);
+
+      // خصم الحجز صفر: مفيش كود ولا عمارة، كل الخصم حافز.
+      const discount = trail.stages.find((s) => s.key === 'discount')!;
+      expect(discount.applied).toBe(false);
+      expect(discount.amount_cents).toBe(0);
+
+      // الإجمالي وقت الحجز = قبل الحافز؛ والحافز بيوصّله للمسجّل حاليًا.
+      expect(trail.total_at_booking_cents).toBe(103_450);
+      expect(trail.current_total_cents).toBe(100_450);
+      const instapay = trail.post_booking.find((c) => c.key === 'instapay_discount')!;
+      expect(instapay.amount_cents).toBe(-3_000);
+      expect(trail.reconciles).toBe(true);
+      expect(trail.unexplained_cents).toBe(0);
+    });
+
+    it('الأدمن بيعرف الحافز جاي منين بالاسم، ومكتوب إنه مش متحسب في خصم الحجز', () => {
+      const trail = buildOrderPriceTrail(ownerCase(), NO_EXTRAS);
+      const instapay = trail.post_booking.find((c) => c.key === 'instapay_discount')!;
+      expect(instapay.label_ar).toContain('InstaPay');
+      expect(instapay.source_ar).toContain('payments.instapay_discount_egp');
+      expect(instapay.source_ar).toContain('مش متحسبة تاني');
+      // وسطر خصم الحجز نفسه بيقول إن الخصم كله حافز، مش بيسكت.
+      expect(trail.stages.find((s) => s.key === 'discount')!.detail_ar).toContain('حافز InstaPay');
+    });
+
+    it('كود خصم + حافز على نفس الطلب: كل واحد في مكانه بقيمته لوحده', () => {
+      const order = ownerCase();
+      order.promoCodeId = 'promo-1';
+      order.discountAmountCents = 3_000 + 5_000; // 50 ج كود + 30 ج حافز
+      order.totalAmountCents = 103_450 - 5_000 - 3_000;
+
+      const trail = buildOrderPriceTrail(order, NO_EXTRAS);
+      const discount = trail.stages.find((s) => s.key === 'discount')!;
+      expect(discount.amount_cents).toBe(-5_000); // الكود بس
+      expect(discount.detail_ar).toContain('كود خصم');
+      expect(trail.post_booking.find((c) => c.key === 'instapay_discount')!.amount_cents).toBe(-3_000);
+      expect(trail.total_at_booking_cents).toBe(103_450 - 5_000);
+      expect(trail.reconciles).toBe(true);
+    });
+
+    it('خصم عمارة بيتسمّى باسمه مش «خصم» مجهول', () => {
+      const order = orderWith({
+        ...REALISTIC_SNAPSHOT,
+        estimatedPriceCents: 137_500,
+        buildingId: 'building-1',
+        discountAmountCents: 13_750,
+        totalAmountCents: 137_500 - 13_750,
+      });
+      const trail = buildOrderPriceTrail(order, NO_EXTRAS);
+      expect(trail.stages.find((s) => s.key === 'discount')!.detail_ar).toContain('خصم عمارة');
+      expect(trail.reconciles).toBe(true);
+    });
+
+    it('حالة بيانات مقلوبة (حافز أكبر من إجمالي الخصم) بتتعلن مش بتطلّع رقم سالب', () => {
+      const order = ownerCase();
+      order.discountAmountCents = 1_000; // أقل من الحافز — حالة مستحيلة بعد إصلاح إعادة الاختيار
+      const trail = buildOrderPriceTrail(order, NO_EXTRAS);
+      expect(trail.stages.find((s) => s.key === 'discount')!.amount_cents).toBe(0);
+      expect(trail.notes_ar.join(' ')).toContain('غير متوقعة');
+    });
+  });
+
   it('**مفيش تحصيل مزدوج**: الاختيار اليدوي مضاعفه في السعر، وبلا علاوة بعد الحجز', () => {
     const manual = orderWith({
       ...REALISTIC_SNAPSHOT,
@@ -230,11 +323,88 @@ describe('مسار تكوين سعر العميل — كل جنيه مفسَّر
       estimatedPriceCents: 137_500,
       totalAmountCents: 137_500 + 3_000 + 12_000,
     });
-    const trail = buildOrderPriceTrail(order, { addonsTotalCents: 3_000, additionalItemsTotalCents: 12_000 });
+    const trail = buildOrderPriceTrail(order, {
+      addonsTotalCents: 3_000,
+      additionalItemsTotalCents: 12_000,
+      approvedQuotes: [],
+    });
     expect(trail.stages.find((s) => s.key === 'addons')!.amount_cents).toBe(3_000);
     expect(trail.total_at_booking_cents).toBe(137_500 + 3_000);
     expect(trail.post_booking.find((c) => c.key === 'additional_items')!.amount_cents).toBe(12_000);
     expect(trail.reconciles).toBe(true);
+  });
+
+  /*
+    العرض المعتمد كان أكبر بند «غير مفسَّر» في مسار «التقييم ثم عرض السعر»: هو بيستبدل سعر
+    الشغل مش بيضيف عليه، فأثره على الإجمالي = الفرق عن المرجع اللي قبله. الأرقام هنا بتطابق
+    `inspection-quote.service.ts` بالحرف.
+  */
+  describe('العروض المعتمدة — استبدال لسعر الشغل، والأثر هو الفرق بس', () => {
+    it('عرض أول على طلب تقييم بالصور: الإجمالي = العرض ناقص رصيد رسم التقييم', () => {
+      // طلب تقييم بالصور: سعر شغل صفر وقت الحجز، ورسم كشف 100 ج اتحصّل.
+      const order = orderWith({
+        estimatedPriceCents: 70_000,
+        inspectionFeeCents: 10_000,
+        assessmentFeeCreditCents: 10_000,
+        totalAmountCents: 10_000 + 70_000 - 10_000,
+      });
+      const trail = buildOrderPriceTrail(order, {
+        addonsTotalCents: 0,
+        additionalItemsTotalCents: 0,
+        approvedQuotes: [{ amountCents: 70_000, source: 'admin_remote', decidedAt: new Date('2026-09-10T10:00:00Z') }],
+      });
+
+      const quote = trail.post_booking.find((c) => c.key === 'approved_quote')!;
+      expect(quote.before_cents).toBe(70_000); // مفيش لقطة ⇒ المرجع `estimated_price_cents`
+      expect(quote.at).toBe('2026-09-10T10:00:00.000Z');
+      expect(quote.source_ar).toContain('تقييم إداري بالصور');
+      expect(trail.post_booking.find((c) => c.key === 'assessment_fee_credit')!.amount_cents).toBe(-10_000);
+      expect(trail.reconciles).toBe(true);
+    });
+
+    it('مراجعة تشخيص: الأثر = العرض ناقص سعر الشغل المسجّل، مش قيمة العرض كلها', () => {
+      // 1,375 سعر شغل من اللقطة، والفني شخّص فطلع 1,800 ⇒ الزيادة 425 بس.
+      const order = orderWith({
+        ...REALISTIC_SNAPSHOT,
+        estimatedPriceCents: 180_000, // بيتحدّث لقيمة العرض بعد الموافقة
+        totalAmountCents: 180_000,
+      });
+      const trail = buildOrderPriceTrail(order, {
+        addonsTotalCents: 0,
+        additionalItemsTotalCents: 0,
+        approvedQuotes: [
+          { amountCents: 180_000, source: 'technician_diagnosis', decidedAt: new Date('2026-09-11T09:00:00Z') },
+        ],
+      });
+
+      const quote = trail.post_booking.find((c) => c.key === 'approved_quote')!;
+      expect(quote.label_ar).toContain('التشخيص');
+      expect(quote.before_cents).toBe(137_500); // لقطة الحجز، مش `estimated_price_cents` المحدّث
+      expect(quote.after_cents).toBe(180_000);
+      expect(quote.amount_cents).toBe(42_500);
+      expect(trail.reconciles).toBe(true);
+    });
+
+    it('سلسلة عرضين: كل واحد مرجعه اللي قبله — مفيش تحصيل مزدوج للزيادة', () => {
+      const order = orderWith({
+        ...REALISTIC_SNAPSHOT,
+        estimatedPriceCents: 200_000,
+        totalAmountCents: 200_000,
+      });
+      const trail = buildOrderPriceTrail(order, {
+        addonsTotalCents: 0,
+        additionalItemsTotalCents: 0,
+        approvedQuotes: [
+          { amountCents: 160_000, source: 'technician_onsite', decidedAt: new Date('2026-09-11T09:00:00Z') },
+          { amountCents: 200_000, source: 'technician_diagnosis', decidedAt: new Date('2026-09-12T09:00:00Z') },
+        ],
+      });
+      const quotes = trail.post_booking.filter((c) => c.key === 'approved_quote');
+      expect(quotes.map((q) => q.amount_cents)).toEqual([22_500, 40_000]); // 160,000-137,500 ثم 200,000-160,000
+      // مجموع الأثر = الفرق الكلي مرة واحدة، مش مجموع قيم العروض.
+      expect(quotes.reduce((a, q) => a + q.amount_cents, 0)).toBe(200_000 - 137_500);
+      expect(trail.reconciles).toBe(true);
+    });
   });
 
   it('طلب قديم بلا لقطة: بيتعلّم عليه بوضوح، والرسوم لسه مفسَّرة', () => {

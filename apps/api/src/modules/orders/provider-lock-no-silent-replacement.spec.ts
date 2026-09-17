@@ -457,4 +457,58 @@ describe('قفل المنفّذ — أحمد بسعر 330 بقى غير متاح
     const [previewRow] = await q(`SELECT status FROM booking_match_previews WHERE id = $1`, [replacement.id]);
     expect(previewRow.status).toBe('consumed');
   });
+
+  /*
+    مراجعة مسارات الفلوس 2026-09-17: تحديث السعر من تذكرة بديلة كان بيدوس على
+    `discount_amount_cents` بلقطة التذكرة (خصم حجز بس) و`total_amount_cents` بسعر التذكرة
+    الكامل — فحافز InstaPay اللي العميل خده بالفعل كان بيتبخّر: العميل دفع بالسعر المخفّض،
+    وبعد استبدال الفني الإجمالي يرجع أعلى بقيمة الحافز فيتطلب منه الفرق.
+  */
+  it('حافز InstaPay بيعدّي استبدال الفني: الإجمالي الجديد مخصوم منه، والحافز لسه مسجّل', async () => {
+    const REPLACEMENT_PRICE_CENTS = 52_000;
+    const INSTAPAY_CENTS = 3_000;
+
+    // نرجّع نفس الطلب لحالة إعادة الاختيار وعليه حافز مطبّق فعلاً (نفس شكل
+    // `applyInstaPayDiscount()`: الحافز جوّه إجمالي الخصم، ومطروح من الإجمالي).
+    const [bound] = await q(
+      `SELECT id, total_amount_cents FROM orders WHERE customer_id = $1 AND selected_match_preview_id IS NOT NULL LIMIT 1`,
+      [ids.customerProfile],
+    );
+    await q(
+      `UPDATE orders SET order_status = 'awaiting_technician_reselection',
+              discount_amount_cents = $2, instapay_discount_cents = $2,
+              total_amount_cents = total_amount_cents - $2
+        WHERE id = $1`,
+      [bound.id, INSTAPAY_CENTS],
+    );
+
+    const replacement = await seedPreview(ids.mohamedTech);
+    await q(`UPDATE booking_match_previews SET final_price_cents = $1, pricing_snapshot = $2 WHERE id = $3`, [
+      REPLACEMENT_PRICE_CENTS,
+      JSON.stringify({
+        base_price_cents: REPLACEMENT_PRICE_CENTS,
+        inspection_fee_cents: 0,
+        emergency_surcharge_cents: 0,
+        // التذكرة مابتعرفش حاجة عن الحافز — هي بتسعّر الشغلانة بالفني الجديد وبس.
+        discount_cents: 0,
+        warranty_price_cents: 0,
+        duration_minutes: null,
+        estimated_duration_days: null,
+        required_technicians: null,
+        required_assistants: null,
+      }),
+      replacement.id,
+    ]);
+
+    await ordersService.requestRematch(ids.customerUser, bound.id, { match_preview_id: replacement.id } as never);
+
+    const [after] = await q(
+      `SELECT total_amount_cents, discount_amount_cents, instapay_discount_cents FROM orders WHERE id = $1`,
+      [bound.id],
+    );
+    expect(after.total_amount_cents).toBe(REPLACEMENT_PRICE_CENTS - INSTAPAY_CENTS);
+    expect(after.instapay_discount_cents).toBe(INSTAPAY_CENTS);
+    // والحافز لسه جزء من إجمالي الخصم — الثابت اللي مسار تكوين السعر بيعتمد عليه.
+    expect(after.discount_amount_cents).toBe(INSTAPAY_CENTS);
+  });
 });

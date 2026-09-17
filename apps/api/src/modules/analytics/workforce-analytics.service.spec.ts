@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
 import { WorkforceAnalyticsService } from './workforce-analytics.service';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 /**
  * إحصائيات-٤ — إحصائيات القوى العاملة (ADR-0081).
@@ -120,11 +121,7 @@ describe('WorkforceAnalyticsService — إحصائيات القوى العامل
     }).initialize();
     service = new WorkforceAnalyticsService(dataSource, settings);
 
-    const [country] = await q<{ id: string }[]>(
-      `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-       VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-      [`دولة WF ${runId}`, `WF Country ${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    const country = await insertTestCountry(q, { nameAr: `دولة WF ${runId}`, nameEn: `WF Country ${runId}` });
     ids.country = country.id;
     const [city] = await q<{ id: string }[]>(
       `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,

@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { TechnicianEarningsService } from './technician-earnings.service';
 import { deleteWalletTransactions } from './wallet-cleanup.testing';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 // اختبار حي ضد Postgres حقيقي — docs/08 §95 (سؤال مالك مباشر بلقطتين شاشة).
 //
@@ -43,17 +44,13 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
     await dataSource.initialize();
     service = new TechnicianEarningsService(dataSource);
 
-    // `iso_code` عمود بحرفين وعليه UNIQUE، يعني مساحة الأسماء ١٢٩٦ قيمة بس. أي تشغيلة اتقطعت
-    // قبل `afterAll` بتسيب صف وراها، وأول ما حرفين يتكرروا السبيك بتفشل بـduplicate key من غير
-    // أي علاقة بالمنطق اللي بتختبره. حصلت فعلاً (صف متروك من 2026-09-02). التنظيف الاستباقي هنا
-    // على أسماء السبيك نفسها بس — مابيلمسش أي دولة حقيقية.
-    await q(`DELETE FROM countries WHERE name_en LIKE 'RecCountry%' AND iso_code = $1`, [
-      runId.slice(-2).toUpperCase(),
-    ]);
-    const [country] = await q(
-      `INSERT INTO countries (name_ar,name_en,iso_code,phone_prefix,currency_code) VALUES ($1,$2,$3,'+009','EGP') RETURNING id`,
-      [`دولة مطابقة ${runId}`, `RecCountry${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    // التنظيف الاستباقي اللي كان هنا (حذف دولة بنفس الحرفين) بقى بلا لازمة: `insertTestCountry`
+    // بتختار كود ISO فاضي فعلاً وتعيد المحاولة على السباق، فمفيش تصادم من الأساس.
+    const country = await insertTestCountry(q, {
+      nameAr: `دولة مطابقة ${runId}`,
+      nameEn: `RecCountry${runId}`,
+      phonePrefix: '+009',
+    });
     ids.country = country.id;
     const [city] = await q(
       `INSERT INTO cities (country_id,name_ar,name_en,slug,is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,

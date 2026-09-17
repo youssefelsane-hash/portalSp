@@ -23,10 +23,14 @@ export interface PriceTrailStage {
 }
 
 export interface PostBookingPriceChange {
-  key: 'level_premium' | 'additional_items' | 'instapay_discount' | 'assessment_fee_credit';
+  key: 'approved_quote' | 'level_premium' | 'additional_items' | 'instapay_discount' | 'assessment_fee_credit';
   label_ar: string;
   amount_cents: number;
   source_ar: string;
+  at: string | null;
+  /** للعروض بس — العرض بيستبدل سعر الشغل، فالأثر هو الفرق بين قبل وبعد. */
+  before_cents: number | null;
+  after_cents: number | null;
 }
 
 export interface OrderPriceTrail {

@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { ApiException } from '../../common/exceptions/api.exception';
 import { BuildingsService } from './buildings.service';
 import { Building } from './entities/building.entity';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 /**
  * تدقيق T-1 (تكملة) — موديول `buildings` كان **صفر اختبارات**، وفيه تلات تصرّفات كل واحد فيهم
@@ -83,11 +84,7 @@ describe('BuildingsService (تدقيق T-1) — حي', () => {
     }).initialize();
     service = new BuildingsService(dataSource.getRepository(Building));
 
-    const [country] = await q<{ id: string }[]>(
-      `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-       VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-      [`دولة عمائر ${runId}`, `Bld Country ${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    const country = await insertTestCountry(q, { nameAr: `دولة عمائر ${runId}`, nameEn: `Bld Country ${runId}` });
     ids.country = country.id;
     const [city] = await q<{ id: string }[]>(
       `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,

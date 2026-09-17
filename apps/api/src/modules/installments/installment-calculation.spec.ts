@@ -106,6 +106,36 @@ describe('installment-calculator — الحسابات المالية المرج�
     expect(isAmountWithinPlanLimits(100_000, { minOrderAmountCents: null, maxOrderAmountCents: null })).toBe(true);
   });
 
+  /*
+    بلاغ 2026-09-17: مراجعة مسارات الفلوس كشفت إن أصل التقسيط كان بيتحسب
+    `total_amount_cents - discount_amount_cents` — والإجمالي مخصوم منه الخصم أصلاً، فالخصم
+    كان بيتطرح مرتين. الرقم اللي بيتمّول لازم يكون اللي العميل مدين بيه بالظبط.
+  */
+  describe('financeableOrderAmountCents — الخصم ما ينفعش يتطرح مرتين', () => {
+    it('طلب عليه خصم: الأصل المموّل = اللي العميل مدين بيه، مش ناقص الخصم تاني', async () => {
+      const { financeableOrderAmountCents } = await import('./installment-calculator');
+      // 1,034.50 سعر، خصم 30 ⇒ الإجمالي المسجّل 1,004.50 وهو اللي العميل مدين بيه.
+      const order = { totalAmountCents: 100_450, discountAmountCents: 3_000 };
+      expect(financeableOrderAmountCents(order)).toBe(100_450);
+      // المعادلة القديمة كانت بتطلّع 974.50 — لا الإجمالي قبل الخصم ولا بعده.
+      expect(financeableOrderAmountCents(order)).not.toBe(order.totalAmountCents - order.discountAmountCents);
+    });
+
+    it('الأصل المموّل + أي تقريب = مديونية العميل بالظبط (مفيش فرق يتطلب كاش في الزيارة)', async () => {
+      const { financeableOrderAmountCents } = await import('./installment-calculator');
+      const order = { totalAmountCents: 100_450, discountAmountCents: 3_000 };
+      const b = computeInstallmentBreakdown(financeableOrderAmountCents(order), plan({ installmentCount: 4 }));
+      expect(b.servicePriceCents).toBe(order.totalAmountCents);
+      // بلا رسوم تمويل، المبلغ الممول = المديونية بالحرف ⇒ `min(uncovered, service_price)` بيغطي الطلب كله.
+      expect(b.totalFinancedCents).toBe(order.totalAmountCents);
+    });
+
+    it('طلب بلا خصم: مفيش أي تغيير في السلوك', async () => {
+      const { financeableOrderAmountCents } = await import('./installment-calculator');
+      expect(financeableOrderAmountCents({ totalAmountCents: 500_000 })).toBe(500_000);
+    });
+  });
+
   it('مدخلات مرفوضة: سعر/عدد أقساط غير منطقي', () => {
     expect(() => computeInstallmentBreakdown(0, plan())).toThrow();
     expect(() => computeInstallmentBreakdown(-5, plan())).toThrow();
