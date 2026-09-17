@@ -21,6 +21,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let code: string = ErrorCode.VAL_001;
     let message = 'حصل خطأ غير متوقع، حاول تاني';
+    // سبب آلي اختياري (ADR-0101) — بيترجع بس لو الخدمة بعتته، فباقي الأخطاء شكلها زي ما هو.
+    let reason: string | undefined;
 
     if (exception instanceof ThrottlerException || status === HttpStatus.TOO_MANY_REQUESTS) {
       code = ErrorCode.RATE_001;
@@ -37,6 +39,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (typeof body === 'object' && body !== null && 'code' in body) {
       code = String((body as Record<string, unknown>).code);
       message = String((body as Record<string, unknown>).message ?? message);
+      const rawReason = (body as Record<string, unknown>).reason;
+      if (typeof rawReason === 'string') reason = rawReason;
     } else if (typeof body === 'object' && body !== null && 'message' in body) {
       const rawMessage = (body as Record<string, unknown>).message;
       message = Array.isArray(rawMessage) ? rawMessage.join(', ') : String(rawMessage);
@@ -75,7 +79,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       success: false,
       data: null,
       meta: null,
-      error: { code, message },
+      error: reason ? { code, message, reason } : { code, message },
       request_id: req.requestId,
     };
 

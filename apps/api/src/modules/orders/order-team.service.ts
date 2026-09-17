@@ -10,10 +10,12 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import {
   assistantServiceQualificationCondition,
+  CREW_SLOT_REJECTION_MESSAGES_AR,
+  CrewSlotRejectionReason,
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
+  crewSlotQualificationCondition,
   technicianCityCoverageCondition,
-  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -102,7 +104,21 @@ export async function assertCrewCandidateScope(
   }[]>(
     `SELECT
        (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
-       (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
+       -- **ADR-0101** — كان technicianKindCondition بالدور: قاعدة **مطلقة** بتقرا الشخص،
+       -- بينما قايمة العميل بتقرا **الخدمة**. النتيجة إن نفس الشخص كان ظاهر كقائد للعميل
+       -- ومرفوض هنا بـ«الشخص ده مش مسجل حاليًا كفني» (مُعاد إنتاجه حيًا في
+       -- scripts/verify-crew-eligibility-parity.js). دلوقتي السؤال هو نفسه اللي قايمة العميل
+       -- بتسأله: هل الخدمة دي بتشترط فني كامل؟
+       (${crewSlotQualificationCondition({
+         slot: role === 'assistant' ? 'helper' : 'execution',
+         technicianIdExpr: 'tp.id',
+         technicianAlias: 'tp',
+         serviceIdExpr: 'svc.id',
+         categoryIdExpr: 'svc.category_id',
+         serviceRequiresLeadExpr: 'svc.requires_technician_lead',
+       })}) AS correct_kind,
+       -- اعتماد التخصص وحده — بيتفصل عن شرط الخانة عشان الرسالة تقول السبب الصح بدل ما
+       -- «مش معتمد في التخصص» و«الخدمة محتاجة فني كامل» يتلخبطوا في رسالة واحدة.
        (${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
          technicianIdExpr: 'tp.id',
          serviceIdExpr: 'svc.id',
@@ -122,19 +138,36 @@ export async function assertCrewCandidateScope(
   if (!scope?.active_profile) {
     throw new ApiException(ErrorCode.TECH_001, 'الشخص غير معتمد أو مفيش موقع حالي له', HttpStatus.CONFLICT);
   }
-  if (!scope.correct_kind) {
-    throw new ApiException(
-      ErrorCode.VAL_001,
-      role === 'assistant' ? 'الشخص ده مش مسجل حاليًا كمساعد' : 'الشخص ده مش مسجل حاليًا كفني',
-      HttpStatus.CONFLICT,
-    );
-  }
+  // **الترتيب مقصود**: اعتماد التخصص بيتفحص الأول، فالشخص اللي مش معتمد أصلاً بياخد السبب ده
+  // مش «الخدمة محتاجة فني كامل» — الرسالتين بيوصّلوا لإجراءين مختلفين تمامًا عند الأدمن.
   if (!scope.approved_specialty) {
-    throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
+    throw crewSlotRejection('NOT_SERVICE_QUALIFIED');
+  }
+  if (!scope.correct_kind) {
+    throw crewSlotRejection('TECHNICIAN_ONLY_SLOT');
   }
   if (!scope.same_city) {
-    throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
+    throw crewSlotRejection('OUTSIDE_CITY');
   }
+}
+
+/**
+ * سبب مقروء + كود ثابت (ADR-0101) — «بدل الاختفاء الصامت» بنص المالك.
+ *
+ * الكود بيرجع في `details.reason` عشان الواجهة/الأدمن يقدروا يفرّقوا بين الأسباب برمجيًا، مش
+ * بمطابقة نص عربي.
+ */
+/**
+ * الخانة اللي الدور ده بيملاها (ADR-0101) — **مستقلة تمامًا عن `technician_kind`**.
+ *
+ * القائد بيطلب «عضو تنفيذ» أو «مساعد»، وده بيحدد الخانة. نوع الشخص بيحدد أجره وبس.
+ */
+function crewSlotForRole(role: CrewRole): 'execution' | 'helper' {
+  return role === 'assistant' ? 'helper' : 'execution';
+}
+
+function crewSlotRejection(reason: CrewSlotRejectionReason): ApiException {
+  return new ApiException(ErrorCode.VAL_001, CREW_SLOT_REJECTION_MESSAGES_AR[reason], HttpStatus.CONFLICT, reason);
 }
 
 // ترتيب رتبة الفني (docs/08 §31) — نفس ترتيب تعريف enum TechnicianLevel التصريحي بالحرف، قرار
@@ -262,6 +295,30 @@ export function computeOptionalAssistantSlots(
   return Math.max(0, Math.floor(opts.maxPerOrder) - assistantsAdded);
 }
 
+/**
+ * **عدّ الخانات المملوءة — نقطة القراءة الوحيدة** (ADR-0101).
+ *
+ * بيقرا `crew_slot` **مش** `member_type`. الفرق جوهري بعد ADR-0101: مساعد بيملا خانة تنفيذ
+ * بيتسجّل `crew_slot='execution'` (فالخانة اتملت) و`member_type='assistant'` (فالأجر مايتغيّرش).
+ * العدّ بـ`member_type` كان هيسيب خانة التنفيذ ناقصة للأبد ويشغّل تصعيد نقص طاقم على طلب كامل.
+ *
+ * كان نفس الـ`GROUP BY` مكتوب في **خمس** أماكن (الطاقم، شاشتين أدمن، مركز الاستثناءات، مفتّش
+ * المطابقة) — أي تعديل في القاعدة كان لازم يتعمل خمس مرات.
+ */
+export async function countCrewSlots(
+  manager: EntityManager,
+  orderId: string,
+): Promise<{ technicians: number; assistants: number }> {
+  const rows = await manager.query<{ crew_slot: string; count: string }[]>(
+    `SELECT crew_slot, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY crew_slot`,
+    [orderId],
+  );
+  return {
+    technicians: Number(rows.find((r) => r.crew_slot === 'execution')?.count ?? 0),
+    assistants: Number(rows.find((r) => r.crew_slot === 'helper')?.count ?? 0),
+  };
+}
+
 export function computeCrewComposition(
   requiredTechnicians: number | null,
   requiredAssistants: number | null,
@@ -327,8 +384,14 @@ export class OrderTeamService {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
     assertCrewMembershipMutable(order);
 
-    if (order.bookingMode !== BookingMode.TEAM) {
-      throw new ApiException(ErrorCode.VAL_001, 'توزيع أعضاء الفريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
+    // **السؤال من متطلبات الطلب، مش من الـenum** (docs/08 §156).
+    //
+    // كان `bookingMode !== TEAM` ⇒ رفض. لكن `resolveBookingMode()` بتطلّع `individual` لطلب
+    // محتاج فنيين لو الخدمة `allows_team = false` — فطلب متطلباته فنيين كان قائده **ممنوع**
+    // يجنّد حد، والطاقم مايكتملش، والشغل يقف. `orderRequiresCrewBeyondLeader()` بتجاوب من
+    // `required_technicians/required_assistants` وهي البيانات الحقيقية للطلب.
+    if (!orderRequiresCrewBeyondLeader(order)) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج طاقم زيادة عن قائده', HttpStatus.BAD_REQUEST);
     }
     if (dto.technician_id === leaderProfileId) {
       throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
@@ -420,12 +483,7 @@ export class OrderTeamService {
     order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'> & { orderType?: OrderType },
     manager: EntityManager = this.teamMembers.manager,
   ): Promise<CrewComposition> {
-    const rows = await manager.query<{ member_type: string; count: string }[]>(
-      `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
-      [orderId],
-    );
-    const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
-    const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+    const { technicians, assistants } = await countCrewSlots(manager, orderId);
     // الشغلانة اللي مش فردية عمرها ما ياخد خانة اختيارية، فمفيش أي داعي نسأل الإعدادات أصلاً —
     // `getCrewComposition()` بتتنادى في مسارات متكررة (مسح التصعيد الدوري) فالنداء المتوفّر مقصود.
     const optionalAssistantSlots = isSoloJob(order) ? computeOptionalAssistantSlots(order, assistants, await this.optionalAssistantPolicy()) : 0;
@@ -531,7 +589,24 @@ export class OrderTeamService {
         -- سواء القائد بيضم "فني" أو "مساعد" (المعامل role كان بيأثر بس على فحص "الخانة اتملت؟").
         -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
         -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
+        -- **ADR-0101 — القاعدة بقت خاصة بالخدمة، مش بالشخص.**
+        --
+        -- كان technicianKindCondition بالدور: أي شخص نوعه assistant بيختفي من خانة التنفيذ
+        -- **مهما كانت الخدمة**. النتيجة إن نفس المساعد اللي العميل شافه في قايمة اختيار المنفّذ
+        -- (اللي بتقرا requires_technician_lead) بيختفي من قايمة القائد.
+        --
+        -- دلوقتي الاتنين بيسألوا نفس السؤال: الخدمة دي شغلها المتخصص محتاج فني كامل؟
+        -- لأ ⇒ المساعد المؤهّل يقود **ويملا خانة تنفيذ**. أيوه ⇒ خانة التنفيذ للفنيين، والمساعد
+        -- يفضل متاح في خانة المساعدة زي ما هو.
+        AND ${crewSlotQualificationCondition({
+          slot: role === 'assistant' ? 'helper' : 'execution',
+          technicianIdExpr: 'tp.id',
+          technicianAlias: 'tp',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          serviceRequiresLeadExpr: 'svc.requires_technician_lead',
+          directServiceAlias: 'ts',
+        })}
         -- **الشركة المقفولة بتجنّد من طاقمها بس** (ADR-0086، طلب مالك §141 بند ٨: «هل الشركة
         -- دي يحق لها تدعو من الفنيين اللي على المنصة كمان، ولا هم community مقفولة على نفسها»).
         --
@@ -542,14 +617,7 @@ export class OrderTeamService {
           OR order_company.allows_external_recruitment IS TRUE
           OR tp.company_id = o.assigned_company_id
         )
-        -- ADR-0087 — الفني والمساعد ليهم شرط تخصص مختلف: حجب الخدمة معناه «مايقودش»، مش
-        -- «مايساعدش». التفريع هنا جاي من الفرع الرئيسي ومتحافظ عليه.
-        AND ${(role === 'assistant' ? assistantServiceQualificationCondition : technicianServiceQualificationCondition)({
-          technicianIdExpr: 'tp.id',
-          serviceIdExpr: 'svc.id',
-          categoryIdExpr: 'svc.category_id',
-          directServiceAlias: 'ts',
-        })}
+        -- (اعتماد التخصص بقى جوّه crewSlotQualificationCondition فوق — كان مكرر هنا.)
         ${role === 'assistant'
           ? `AND ${technicianCityCoverageCondition({
               technicianIdExpr: 'tp.id',
@@ -725,11 +793,14 @@ export class OrderTeamService {
       }
 
       const memberType = resolveEffectiveMemberType(role === 'assistant' ? 'assistant' : 'team_member', candidateProfile.technicianKind);
+      // **الخانة من الدور المطلوب، والطبقة المالية من نوع الشخص** (ADR-0101). الاتنين بيتفصلوا
+      // هنا بالظبط: القائد طلب «عضو تنفيذ» ⇒ الخانة `execution`، والشخص مساعد ⇒ الأجر `assistant`.
+      const crewSlot = crewSlotForRole(role);
       const label = roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : memberType === 'assistant' ? 'مساعد' : 'عضو فريق';
 
       if (tier === 'LIGHT') {
         await members.save(
-          members.create({ orderId, technicianId, roleLabel: label, addedByTechnicianId: leaderProfile.id, memberType }),
+          members.create({ orderId, technicianId, roleLabel: label, addedByTechnicianId: leaderProfile.id, memberType, crewSlot }),
         );
         crewChangedEvent = new OrderCrewChangedEvent(orderId, 'added', technicianId, null, 'technician');
         return { status: 'added' } as const;
@@ -790,7 +861,7 @@ export class OrderTeamService {
         if (
           !order ||
           !order.technicianId ||
-          (order.bookingMode !== BookingMode.TEAM && opportunity.crew_role !== 'assistant')
+          (!orderRequiresCrewBeyondLeader(order) && opportunity.crew_role !== 'assistant')
         ) {
           throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
         }
@@ -835,6 +906,7 @@ export class OrderTeamService {
           roleLabel: memberType === 'assistant' ? 'مساعد' : 'عضو فريق',
           addedByTechnicianId: order.technicianId,
           memberType,
+          crewSlot: crewSlotForRole(role),
         });
         await manager.save(member);
         await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');

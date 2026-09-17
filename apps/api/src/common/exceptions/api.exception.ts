@@ -39,7 +39,12 @@ export class ApiException extends HttpException {
     public readonly code: ErrorCodeType,
     message: string,
     status: HttpStatus = HttpStatus.BAD_REQUEST,
+    /**
+     * سبب آلي ثابت فوق الرسالة (ADR-0101) — اختياري، والسلوك من غيره **مطابق حرفيًا** للقديم.
+     * الرسالة بتتغيّر بتغيّر الصياغة؛ ده بيفضل ثابت عشان الواجهة تفرّق بين الأسباب برمجيًا.
+     */
+    public readonly reason?: string,
   ) {
-    super({ code, message }, status);
+    super(reason ? { code, message, reason } : { code, message }, status);
   }
 }

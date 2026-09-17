@@ -106,3 +106,51 @@ export function describeDispatchRoute(decision: DispatchRouteDecision): string {
       return 'مش في مرحلة التوزيع دلوقتي — التوزيع بيشتغل على الطلبات اللي حالتها «بيدوّر على فني» بس';
   }
 }
+
+/** تصنيف قدرة المرشّح كما `classifyTechnicianCapacity()` بترجّعه — `null` = مفيش مرشّح أصلاً. */
+export type CandidateCapacityTier = 'LIGHT' | 'MEANINGFUL' | 'HEAVY' | 'BLOCKED';
+
+export interface WorkloadGateInput {
+  /** عدد العروض **الحيّة** على الطلب (`sent`/`viewed`) — مش كل التاريخ. */
+  liveRequestCount: number;
+  hasOpenOffer: boolean;
+  /** `null` لما مفيش مرشّح مؤهّل أصلاً. */
+  candidateTier: CandidateCapacityTier | null;
+  /** `matching.auto_confirm_requires_idle_technician` — الافتراضي `false`. */
+  requiresIdleTechnician: boolean;
+}
+
+/**
+ * **بوابة الحمل: امتى الطلب البعيد يتحوّل لطلب يحتاج قبول؟** (docs/08 §156).
+ *
+ * دالة خالصة زي باقي الملف — عشان القرار الفعلي (`scheduledDispatchDecision`)، وشرح الأدمن،
+ * والاختبار كلهم يقروا **نفس السطور** بدل ما الاختبار يختبر نسخة من المنطق.
+ *
+ * ### القاعدتين اللي اتضبطوا بعد بلاغ المالك
+ *
+ * **١. `existing_requests` بيقرا العروض الحيّة بس.** كان بيعدّ **كل** صفوف `order_assignments`
+ * بلا فلتر حالة، فعرض انتهت مهلته من ساعتين (`timeout`) — ميت ومالوش أي أثر على الحاضر — كان
+ * بيخلّي طلب معاده بعد أسبوع يفضل في الجولات للأبد. القصد الأصلي مشروع («عرض مفتوح مايتاخدش
+ * من تحت رجل الفني اللي بيفكّر فيه») وهو اللي فضل.
+ *
+ * **٢. `same_day_workload` بيقرا التعارض الحقيقي، مش وجود شغل.** كان `tier !== 'LIGHT'`،
+ * و`MEANINGFUL` معناها بالتعريف «عنده شغل تحت السقف وبلا أي تقاطع» — يعني الشخص **مؤهّل
+ * بالكامل**، وهو نفسه اللي عدّى `technicianAvailabilityCondition` وظهر للعميل عشان كده.
+ * فالبوابة كانت بتكرّر بوابة الإتاحة وتطلّع إجابة مختلفة عنها.
+ *
+ * **ملاحظة مقاسة**: `HEAVY`/`BLOCKED` مستبعدين أصلاً من `technicianAvailabilityCondition`،
+ * فالمرشّح اللي بيوصل هنا نادرًا ما بيكون واحد منهم. الفرعين متسيبين لأنهم الحد الصح للقاعدة،
+ * والإعداد هو اللي بيرجّع السلوك القديم لو القرار التجاري اتغيّر.
+ */
+export function resolveWorkloadGate(
+  input: WorkloadGateInput,
+): { route: Extract<DispatchRoute, 'rounds' | 'auto_confirm'>; reason: DispatchRouteReason } | null {
+  if (input.liveRequestCount > 0 || input.hasOpenOffer) {
+    return { route: 'rounds', reason: 'existing_requests' };
+  }
+  if (input.candidateTier === null) return null;
+  const blocks = input.requiresIdleTechnician
+    ? input.candidateTier !== 'LIGHT'
+    : input.candidateTier === 'HEAVY' || input.candidateTier === 'BLOCKED';
+  return blocks ? { route: 'rounds', reason: 'same_day_workload' } : null;
+}

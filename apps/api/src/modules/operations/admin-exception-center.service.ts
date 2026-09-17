@@ -244,8 +244,9 @@ export class AdminExceptionCenterService {
       WITH crew AS (
         SELECT o.id, o.order_number, o.scheduled_at, o.crew_shortage_escalated_at,
                o.required_technicians, o.required_assistants,
-               COUNT(otm.*) FILTER (WHERE otm.member_type = 'team_member') AS technicians,
-               COUNT(otm.*) FILTER (WHERE otm.member_type = 'assistant') AS assistants
+               -- ADR-0101 — العدّ بالخانة (crew_slot) مش بالطبقة المالية (member_type).
+               COUNT(otm.*) FILTER (WHERE otm.crew_slot = 'execution') AS technicians,
+               COUNT(otm.*) FILTER (WHERE otm.crew_slot = 'helper') AS assistants
         FROM orders o
         LEFT JOIN order_team_members otm ON otm.order_id = o.id
         JOIN services s ON s.id = o.service_id
