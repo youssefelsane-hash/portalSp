@@ -42,6 +42,7 @@ import {
   CrewRole,
   MAX_TEAM_MEMBERS_PER_ORDER,
   computeCrewComposition,
+  countCrewSlots,
 } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderPriceStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
@@ -275,10 +276,11 @@ export class AdminOrdersService {
       order_id: string;
       technician_id: string;
       member_type: string;
+      crew_slot: string;
       full_name: string;
     }
     const memberRows = await this.teamMembers.manager.query<MemberRow[]>(
-      `SELECT otm.order_id, otm.technician_id, otm.member_type, u.full_name
+      `SELECT otm.order_id, otm.technician_id, otm.member_type, otm.crew_slot, u.full_name
        FROM order_team_members otm
        JOIN technician_profiles tp ON tp.id = otm.technician_id
        JOIN users u ON u.id = tp.user_id
@@ -300,8 +302,10 @@ export class AdminOrdersService {
 
     for (const order of orders) {
       const members = memberRows.filter((r) => r.order_id === order.id);
-      const technicians = members.filter((m) => m.member_type === 'team_member').length;
-      const assistants = members.filter((m) => m.member_type === 'assistant').length;
+      // ADR-0101 — العدّ بالخانة، والعرض بالطبقة المالية. الاتنين مش نفس الحاجة بعد ما
+      // المساعد بقى يقدر يملا خانة تنفيذ.
+      const technicians = members.filter((m) => m.crew_slot === 'execution').length;
+      const assistants = members.filter((m) => m.crew_slot === 'helper').length;
       const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, {
         technicians,
         assistants,
@@ -483,12 +487,7 @@ export class AdminOrdersService {
     let crewStatus: ReturnType<typeof computeCrewComposition> | null = null;
     let crewShortageUrgent = false;
     if (order.bookingMode === BookingMode.TEAM) {
-      const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
-        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
-        [orderId],
-      );
-      const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
-      const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      const { technicians, assistants } = await countCrewSlots(this.teamMembers.manager, orderId);
       crewStatus = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
 
       // "الطلب مميّز بصريًا" (docs/08 §35.5) — محسوب وقت القراءة، مش state مخزّن (ADR-0021 §5):
@@ -1346,6 +1345,7 @@ export class AdminOrdersService {
           technicianId: technician.id,
           roleLabel: 'مساعد',
           memberType: ASSISTANT_MEMBER_TYPE,
+          crewSlot: 'helper',
           addedByTechnicianId: null,
           addedByAdminUserId: adminUserId,
         }),
@@ -1397,7 +1397,13 @@ export class AdminOrdersService {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
     const effectiveMemberType = resolveEffectiveMemberType(memberType, technician.technicianKind);
-    const role: CrewRole = effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician';
+    // **الفحص بالخانة المطلوبة، مش بالطبقة المالية للشخص** (ADR-0101).
+    //
+    // كان الدور بيتشتق من `effectiveMemberType` — وهو بيتفرض دايمًا `assistant` لأي شخص نوعه
+    // مساعد. يعني أدمن بيضم مساعد لخانة **تنفيذ** كان بيتفحص بقواعد خانة **المساعدة**، فشرط
+    // «الخدمة دي محتاجة فني كامل» ماكانش بيتطبّق عليه أصلاً — ثغرة حقيقية بتكبر بعد ADR-0101
+    // لأن الخانة بقت بتتسجّل من الطلب مش من الطبقة. الفحص والكتابة لازم يقروا نفس المدخل.
+    const role: CrewRole = memberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician';
     await assertCrewCandidateScope(manager, order, technician.id, role);
     if (order.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل', HttpStatus.CONFLICT);
@@ -1497,6 +1503,8 @@ export class AdminOrdersService {
           technicianId,
           roleLabel,
           memberType: candidate.effectiveMemberType,
+          // ADR-0101 — الخانة من **الدور اللي الأدمن طلبه**، مش من طبقة الشخص المالية.
+          crewSlot: memberType === 'assistant' ? 'helper' : 'execution',
           addedByTechnicianId: null,
           addedByAdminUserId: adminUserId,
         }),
@@ -1559,12 +1567,7 @@ export class AdminOrdersService {
         },
         manager,
       );
-      const rows = await manager.query<{ member_type: string; count: string }[]>(
-        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
-        [orderId],
-      );
-      const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
-      const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      const { technicians, assistants } = await countCrewSlots(manager, orderId);
       const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
       removedTechnicianId = member.technicianId;
       return { crewShortage: !composition.crewComplete };
@@ -1608,11 +1611,15 @@ export class AdminOrdersService {
       if (newTechnicianId === existing.technicianId) {
         throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
       }
-      const requestedMemberType: CrewMemberType = existing.memberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'team_member';
+      // **الاستبدال بيحافظ على الخانة، مش على الطبقة المالية** (ADR-0101).
+      //
+      // الحارس القديم كان بيقارن `effectiveMemberType` — يعني استبدال فني في خانة تنفيذ بمساعد
+      // **مؤهّل لنفس الخانة** كان بيترفض، رغم إن الخدمة نفسها بتسمح للمساعد يقودها أصلاً.
+      // اللي لازم يفضل ثابت هو **الخانة** (عشان الطاقم مايبقاش ناقص)، والأجر بيتبع الشخص الجديد
+      // زي ما هو مفروض — ده بالظبط اللي `resolveEffectiveMemberType` موجودة عشانه.
+      const existingSlot = existing.crewSlot === 'helper' ? 'helper' : 'execution';
+      const requestedMemberType: CrewMemberType = existingSlot === 'helper' ? 'assistant' : 'team_member';
       const candidate = await this.validateCrewCandidateOrThrow(manager, lockedOrder, newTechnicianId, requestedMemberType);
-      if (candidate.effectiveMemberType !== existing.memberType) {
-        throw new ApiException(ErrorCode.VAL_001, 'استبدل الفني بفني أو المساعد بمساعد للحفاظ على توزيع الطاقم والأجور', HttpStatus.CONFLICT);
-      }
       const roleLabel = roleLabelOverride ?? existing.roleLabel;
       await repo.remove(existing);
       await repo.save(
@@ -1621,6 +1628,7 @@ export class AdminOrdersService {
           technicianId: newTechnicianId,
           roleLabel,
           memberType: candidate.effectiveMemberType,
+          crewSlot: existingSlot,
           addedByTechnicianId: null,
           addedByAdminUserId: adminUserId,
         }),

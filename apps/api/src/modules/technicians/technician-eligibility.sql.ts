@@ -345,6 +345,93 @@ export function technicianScheduleConflictCondition(opts: {
   `;
 }
 
+/**
+ * **نوع الخانة اللي الشخص هيملاها في الطلب** (ADR-0101).
+ *
+ * مقصود إنها **مش** `technician_kind`: دي بتوصف **الشغل**، وهي بتوصف **الشخص**. الخلط بينهم هو
+ * بالظبط البَقّة اللي ADR-0101 اتكتب عشانها — شخص ظاهر كقائد للعميل ومختفي كمنفّذ للقائد.
+ */
+export type CrewSlotKind = 'lead' | 'execution' | 'helper';
+
+/**
+ * **سبب استبعاد مرشّح من خانة** — بدل ما يختفي بصمت (طلب مالك، docs/08 §156).
+ *
+ * > «من المفيد جدًا أن يكون أي اختلاف قابلًا للتفسير عن طريق reason واضح… بدل الاختفاء الصامت.»
+ */
+export type CrewSlotRejectionReason =
+  | 'SELF'
+  | 'NOT_ACTIVE_PROFILE'
+  | 'NOT_SERVICE_QUALIFIED'
+  | 'TECHNICIAN_ONLY_SLOT'
+  | 'ALREADY_MEMBER'
+  | 'COMPANY_SCOPE'
+  | 'OUTSIDE_CITY';
+
+export const CREW_SLOT_REJECTION_MESSAGES_AR: Record<CrewSlotRejectionReason, string> = {
+  SELF: 'أنت أصلاً المسؤول عن الطلب ده',
+  NOT_ACTIVE_PROFILE: 'الشخص غير معتمد أو مفيش موقع حالي له',
+  NOT_SERVICE_QUALIFIED: 'الشخص ده مش معتمد في تخصص الخدمة دي',
+  TECHNICIAN_ONLY_SLOT: 'الخدمة دي شغلها المتخصص محتاج فني كامل — المساعد ينفع في خانة مساعدة بس',
+  ALREADY_MEMBER: 'الشخص ده موجود بالفعل في طاقم الطلب',
+  COMPANY_SCOPE: 'الشركة دي بتجنّد من طاقمها بس',
+  OUTSIDE_CITY: 'المساعد ده خارج مدينة الطلب',
+};
+
+/**
+ * **أهلية تنفيذ الخدمة — قاعدة واحدة لكل نوع خانة** (ADR-0101، docs/08 §156).
+ *
+ * ### القاعدة
+ *
+ * | الخانة | الشرط |
+ * |---|---|
+ * | `lead` / `execution` | اعتماد التخصص + (`requires_technician_lead` ⇒ `technician_kind='technician'`) |
+ * | `helper` | اعتماد التخصص وبس (شرط القيادة مابينطبقش) |
+ *
+ * **`execution` بتتقاس بنفس مسطرة `lead` بالحرف** — مش تشابه، هي نفس النداء. المنطق:
+ * الشخص اللي الخدمة بتسمح له يقودها كاملة قدام العميل، مفيش أي معنى لإنه يبقى مش مؤهّل يشارك
+ * في تنفيذها. القيادة أصعب من التنفيذ مش أسهل.
+ *
+ * ### ليه الدالة دي موجودة أصلاً
+ *
+ * تجنيد الطاقم كان بيستخدم `technicianKindCondition({ kind: 'technician' })` — قاعدة **مطلقة**
+ * بتقرا الشخص، بينما قايمة العميل بتستخدم قاعدة **خاصة بالخدمة**. النتيجة كانت شخص ظاهر في
+ * الحجز ومختفي في التجنيد (مُعاد إنتاجه: `scripts/verify-crew-eligibility-parity.js`).
+ *
+ * ADR-0087 كان **قرّر** القاعدة الخاصة بالخدمة وكتب صراحةً إن `technicianKindCondition()` ممنوع
+ * على مسارات القيادة — بس مسار التجنيد فضل على القاعدة القديمة. فالدالة دي مش قاعدة جديدة، هي
+ * نقطة النداء الواحدة اللي بتمنع الانحراف ده إنه يرجع.
+ */
+export function crewSlotQualificationCondition(opts: {
+  slot: CrewSlotKind;
+  /** تعبير SQL لمعرّف الفني، مثلاً `tp.id`. */
+  technicianIdExpr: string;
+  /** alias صف الفني — بيتقرا منه `technician_kind`. */
+  technicianAlias: string;
+  serviceIdExpr: string;
+  categoryIdExpr: string;
+  /** تعبير بوليان للعمود `requires_technician_lead` بتاع الخدمة، مثلاً `svc.requires_technician_lead`. */
+  serviceRequiresLeadExpr: string;
+  /** alias لـ`LEFT JOIN technician_services` لو الاستعلام عامله بالفعل. */
+  directServiceAlias?: string;
+}): string {
+  const base = {
+    technicianIdExpr: opts.technicianIdExpr,
+    serviceIdExpr: opts.serviceIdExpr,
+    categoryIdExpr: opts.categoryIdExpr,
+    directServiceAlias: opts.directServiceAlias,
+  };
+  // خانة المساعدة: صف `technician_excluded_services` معناه «مايقودش» مش «مايقربش» (ADR-0087)،
+  // فشرط القيادة مابينطبقش هنا — نفس سلوك `assistantServiceQualificationCondition` بالحرف.
+  if (opts.slot === 'helper') return assistantServiceQualificationCondition(base);
+  return technicianServiceQualificationCondition({
+    ...base,
+    technicianLeadRule: {
+      technicianAlias: opts.technicianAlias,
+      serviceRequiresLeadExpr: opts.serviceRequiresLeadExpr,
+    },
+  });
+}
+
 export type TechnicianCapacityTier = 'LIGHT' | 'MEANINGFUL' | 'HEAVY' | 'BLOCKED';
 
 /**

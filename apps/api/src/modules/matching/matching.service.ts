@@ -49,7 +49,13 @@ import {
   REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
   REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
 } from '../orders/revisit-pin';
-import { DispatchRouteDecision, isEmergencyBookingMode, isNearTerm, resolveDispatchRoute } from './dispatch-route';
+import {
+  DispatchRouteDecision,
+  isEmergencyBookingMode,
+  isNearTerm,
+  resolveDispatchRoute,
+  resolveWorkloadGate,
+} from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 import { candidateQualityScoreSql } from './candidate-quality-ranking';
 
@@ -1491,10 +1497,26 @@ export class MatchingService {
   async scheduledDispatchDecision(order: Order, manager = this.dataSource.manager): Promise<DispatchRouteDecision> {
     const base = resolveDispatchRoute(order, await this.nearTermRequestHours());
     if (base.route !== 'auto_confirm') return base;
-    const previousRequests = await manager.count(OrderAssignment, { where: { orderId: order.id } });
-    if (previousRequests > 0 || await this.workOpportunities.hasOpenOfferForOrder(order.id, manager)) {
-      return { ...base, route: 'rounds', reason: 'existing_requests' };
-    }
+    // **العروض الحيّة بس — مش تاريخ الطلب** (بلاغ مالك 2026-09-17، docs/08 §156).
+    //
+    // كان `count()` **بلا أي فلتر حالة**. عرض اتبعت وانتهت مهلته من ساعتين (`timeout`) — مرفوض،
+    // ميت، مالوش أي أثر على الحاضر — كان بيخلّي طلب معاده بعد أسبوع يفضل في الجولات للأبد.
+    // مُعاد إنتاجه حيًا: `scripts/verify-dispatch-route-reasons.js`.
+    //
+    // القصد الأصلي مشروع: **طلب لسه فيه عرض مفتوح مايتاخدش من تحت رجل الفني اللي بيفكّر فيه**.
+    // بس ده معناه «عرض **مفتوح**»، فالعد بقى مقصور على `sent`/`viewed`.
+    const liveRequests = await manager.count(OrderAssignment, {
+      where: { orderId: order.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
+    });
+    const hasOpenOffer = await this.workOpportunities.hasOpenOfferForOrder(order.id, manager);
+    const requestsGate = resolveWorkloadGate({
+      liveRequestCount: liveRequests,
+      hasOpenOffer,
+      candidateTier: null,
+      requiresIdleTechnician: false,
+    });
+    if (requestsGate) return { ...base, ...requestsGate };
+
     const candidate = await this.firstScheduledCandidate(order, manager);
     if (!candidate) {
       // القفل يتفك من المسار الرسمي فقط، مع إبلاغ العميل؛ لا fallback صامت لمنفذ آخر.
@@ -1503,8 +1525,34 @@ export class MatchingService {
     // موعد إعادة الضمان اختير أصلًا بأول ساعة تجتاز نفس بوابة الأهلية والتعارض. وجود حمل آخر
     // غير متقاطع في اليوم لا يحوّلها لطلب يدوي؛ الحارس داخل autoConfirm يعيد الفحص تحت القفل.
     if (base.reason === 'revisit_scheduled_far') return base;
+    // **التعارض الحقيقي بيحوّل لجولات — مش مجرد وجود شغل** (بلاغ مالك 2026-09-17، docs/08 §156).
+    //
+    // كان `tier !== 'LIGHT'` ⇒ جولات. و`MEANINGFUL` معناها **بالتعريف** «عنده شغل تاني في اليوم
+    // تحت السقف وبلا أي تقاطع وقت» — يعني الشخص **مؤهّل بالكامل**، وهو نفسه اللي عدّى
+    // `technicianAvailabilityCondition` وظهر للعميل عشان كده. مقاس حيًا: ساعتين شغل من ٧٢٠ دقيقة،
+    // بلا تقاطع، على طلب بعد ٧ أيام ⇒ كان بيتحوّل لطلب يدوي.
+    //
+    // ده بالظبط الازدواج اللي المالك رفضه: «الـcustomer availability والـdispatch availability
+    // يفضل ألا يجيبا إجابتين مختلفتين عن سؤال هل هذا الشخص يستطيع تنفيذ هذه الشغلانة في هذا
+    // الموعد». `HEAVY`/`BLOCKED` تعارض/امتلاء حقيقي، و`MEANINGFUL` لأ.
+    //
+    // الحارس تحت القفل في `autoConfirmScheduledOrder` بيفضل بيعيد الفحص زي ما هو — فالتأكيد
+    // التلقائي مش بيتخطّى أي بوابة، هو بس مابقاش بيطلب موافقة يدوية لسبب مش تعارض.
+    //
+    // الإعداد بيرجّع السلوك القديم في ثانية لو المالك شايف إن الموافقة اليدوية مطلوبة تجاريًا
+    // حتى مع الحمل الخفيف.
+    const requiresIdleTechnician = await this.settingsService.getBoolean(
+      'matching.auto_confirm_requires_idle_technician',
+      false,
+    );
     const tier = await this.classifyCandidate(order, candidate.technician_id, await resolveDailyCapacityMinutes(this.settingsService), manager);
-    return tier === 'LIGHT' ? base : { ...base, route: 'rounds', reason: 'same_day_workload' };
+    const workloadGate = resolveWorkloadGate({
+      liveRequestCount: 0,
+      hasOpenOffer: false,
+      candidateTier: tier,
+      requiresIdleTechnician,
+    });
+    return workloadGate ? { ...base, ...workloadGate } : base;
   }
 
   /**

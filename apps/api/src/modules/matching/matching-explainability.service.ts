@@ -7,7 +7,7 @@ import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity
 // دالة نقية (صفر DI) — استيرادها هنا مباشر بلا خطر cycle، بعكس OrderTeamService (Injectable
 // كامل)، اللي حقنه هنا كان هيفرض MatchingModule تستورد OrdersModule وترجّع نفس بَقّة ترتيب الـroutes
 // الموثّقة في matching.module.ts (Orders→Matching اتجاه واحد بس، ده السبب).
-import { computeCrewComposition, CrewComposition } from '../orders/order-team.service';
+import { computeCrewComposition, countCrewSlots, CrewComposition } from '../orders/order-team.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   classifyTechnicianCapacity,
@@ -530,12 +530,7 @@ export class MatchingExplainabilityService {
         }
       }
 
-      const teamRows = await this.dataSource.query<{ member_type: string; count: string }[]>(
-        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
-        [order.id],
-      );
-      const technicians = Number(teamRows.find((r) => r.member_type === 'team_member')?.count ?? 0);
-      const assistants = Number(teamRows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      const { technicians, assistants } = await countCrewSlots(this.dataSource.manager, order.id);
       crewStatus = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
     }
 

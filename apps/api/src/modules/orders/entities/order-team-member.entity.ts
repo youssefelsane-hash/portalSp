@@ -27,8 +27,19 @@ export class OrderTeamMember {
 
   // مطابق لـ infra/migrations/0070_assistant_pool_matching.sql (ADR-0007) — 'assistant' = اتوصل
   // عبر مطابقة المساعد التلقائية، 'team_member' (افتراضي) = إضافة يدوية من قائد الطلب في "اعتماد".
+  /** **الطبقة المالية** (ADR-0050) — بتتفرض من `technician_kind`، ومنها بتتحسب نسبة المساعد. */
   @Column({ name: 'member_type', type: 'varchar', length: 20, default: 'team_member' })
   memberType: string;
+
+  /**
+   * **الخانة اللي اتملت** (ADR-0101) — `execution` من `required_technicians`، `helper` من
+   * `required_assistants`.
+   *
+   * منفصل عن `memberType` عن قصد: مساعد بيملا خانة تنفيذ في خدمة مابتشترطش قائد فني بيتسجّل
+   * `crew_slot='execution'` (فالطاقم بيكتمل) و`member_type='assistant'` (فالأجر مايتغيّرش).
+   */
+  @Column({ name: 'crew_slot', type: 'varchar', length: 20, default: 'execution' })
+  crewSlot: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

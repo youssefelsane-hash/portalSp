@@ -186,6 +186,8 @@ export class AssistantMatchingService {
             technicianId: lead.assistantTechnicianId,
             roleLabel: 'مساعد',
             memberType: MEMBER_TYPE_ASSISTANT,
+          // ADR-0101 — مطابقة المساعد بتملا خانة مساعدة دايمًا.
+          crewSlot: 'helper',
             addedByTechnicianId: lead.id,
           })
           .orIgnore()
@@ -454,6 +456,8 @@ export class AssistantMatchingService {
           technicianId: profileId,
           roleLabel: 'مساعد',
           memberType: MEMBER_TYPE_ASSISTANT,
+          // ADR-0101 — مطابقة المساعد بتملا خانة مساعدة دايمًا.
+          crewSlot: 'helper',
           addedByTechnicianId: order.technicianId!,
         }),
       );
