@@ -450,6 +450,31 @@ export class AdminOrdersService {
    * في `order-team.service.ts`)، والباقي من `order_team_members`. `crewComplete` بيستخدم نفس
    * `computeCrewComposition()` اللي تطبيق الفني وصفحة التفاصيل بيستخدموها — مصدر حقيقة واحد.
    */
+  /**
+   * مجاميع بنود الطلب اللي مسار التسعير محتاجها (ADR-0107).
+   *
+   * **ليه استعلام مش عمود**: `orders.addons_amount_cents` موجود في السكيما لكن **مفيش أي كود
+   * بيكتب فيه** — الإضافات بتتسجّل بنود في `order_items` من وقت الحجز. قراءة العمود كانت
+   * هترجّع صفر دايمًا وتخلي جدول الشرح «متماسك» وهو ناقص.
+   *
+   * الإضافات مفصولة عن بنود الشغل الإضافي عن قصد: الأولى سعر حجز، والتانية زيادة بعد الحجز.
+   */
+  async priceTrailExtras(orderId: string): Promise<{ addonsTotalCents: number; additionalItemsTotalCents: number }> {
+    const rows = await this.dataSource.query<{ kind: string; total: string }[]>(
+      `SELECT CASE WHEN item_type = 'addon' THEN 'addon' ELSE 'additional' END AS kind,
+              COALESCE(SUM(total_price_cents), 0)::bigint AS total
+         FROM order_items
+        WHERE order_id = $1 AND is_customer_approved = true
+        GROUP BY 1`,
+      [orderId],
+    );
+    const byKind = new Map(rows.map((r) => [r.kind, Number(r.total)]));
+    return {
+      addonsTotalCents: byKind.get('addon') ?? 0,
+      additionalItemsTotalCents: byKind.get('additional') ?? 0,
+    };
+  }
+
   async crewSummaryForOrders(orders: Order[]): Promise<Map<string, OrderCrewSummary>> {
     const summary = new Map<string, OrderCrewSummary>();
     if (orders.length === 0) return summary;

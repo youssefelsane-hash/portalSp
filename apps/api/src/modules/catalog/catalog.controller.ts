@@ -8,6 +8,8 @@ import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { buildPricingContext } from '../pricing/pricing-context';
+import { isSameDayUrgent, resolveBookingMode } from '../orders/booking-mode-resolver';
+import { BookingMode } from '../orders/entities/order.entity';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
 import { CatalogZoneQueryDto, EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
@@ -160,7 +162,27 @@ export class CatalogController {
   @Get('services/:id/technicians')
   async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
     const service = await this.catalogService.findServiceOrThrow(id);
-    const isEmergency = query.booking_mode === 'emergency';
+    /**
+     * **الاستعجال والوضع بيتشتقّوا هنا على السيرفر** (ADR-0106، بلاغ مالك 2026-09-17).
+     *
+     * قبل كده الـendpoint ده كان بيثق في `query.booking_mode` في قرارين:
+     * `=== 'emergency'` للاستعجال، و`=== 'team'` **لكون الحجز حجز فريق** — والتاني بيغيّر
+     * **فضاء الأهلية** نفسه (`isTeamBooking` بيفلتر على `eligible_for_team_booking`).
+     *
+     * ونتيجة كده كان فيه انحراف حقيقي بين الواجهتين: `apps/customer-web` بيشتقّ محليًا
+     * `emergency` أو `individual` **وبس** (مستحيل يطلّع `team`)، بينما `apps/customer-app`
+     * بيبعت `team` لخدمة `allows_team && !allows_individual`. يعني **نفس الخدمة ونفس العنوان
+     * بيرجّعوا قايمة منفّذين مختلفة حسب الواجهة** — وده مش فرق توافر، ده فرق قاعدة عمل.
+     *
+     * القرار: العميل يبعت **حقائق** (التاريخ، حقول الشغل)، والسيرفر يشتقّ الوضع بـ**نفس**
+     * `resolveBookingMode()` اللي `POST /orders` بيستخدمها بالحرف. كده الواجهتين بيوصلوا لنفس
+     * الفضاء **بالبناء** مش بالاتفاق.
+     *
+     * `booking_mode` لسه مقبول كحقيقة استعجال بس (نسخ تطبيق منشورة بتبعته بلا `scheduled_at`
+     * للطوارئ)، ومابقاش له أي دخل في قرار الفريق.
+     */
+    const scheduledAt = query.scheduled_at ? new Date(query.scheduled_at) : null;
+    const isEmergency = isSameDayUrgent({ scheduledAt }) || query.booking_mode === 'emergency';
     // خدمات formula من غير field_values مالهاش سعر ولا حمل تشغيلي معروف لسه (العميل ما ملاش
     // الفورم) — بترجع null صراحة بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
     const canPrice = !(service.pricingModel === PricingModel.FORMULA && !query.field_values);
@@ -176,12 +198,19 @@ export class CatalogController {
     const neutralEstimate = canPrice
       ? await this.catalogService.estimate(id, zone.id, undefined, isEmergency, query.field_values)
       : null;
+    // الوضع المشتقّ — نفس الدالة اللي إنشاء الطلب بيستخدمها، وبنفس مدخلات التسعير المحايد.
+    const derivedMode = resolveBookingMode({
+      urgent: isEmergency,
+      requiredTechnicians: neutralEstimate?.required_technicians ?? null,
+      requiredAssistants: neutralEstimate?.required_assistants ?? null,
+      service,
+    });
     const { zoneId, items } = await this.techniciansService.listForServiceBooking(
       id,
       query.address_id,
       query.exclude_technician_id,
-      query.scheduled_at ? new Date(query.scheduled_at) : null,
-      query.booking_mode === 'team',
+      scheduledAt,
+      derivedMode === BookingMode.TEAM,
       // ADR-0080 — الشركة منفّذ يقدر العميل يختاره في أي حجز عادي. الطوارئ مستثناة: بتتوزّع
       // بثًّا فوريًا بلا اختيار منفّذ أصلاً، فعرض الشركات فيها بيوعد بحاجة الفلو مابيوفّهاش.
       !isEmergency,

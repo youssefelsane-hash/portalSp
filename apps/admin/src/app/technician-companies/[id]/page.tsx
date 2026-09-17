@@ -262,11 +262,14 @@ export default function TechnicianCompanyDetailPage() {
                 نصيب الفنيين جوّه الطاقم بيفضل بنفس القاعدة زي ما هو.
               </p>
               <div className="flex flex-wrap items-center gap-2">
+                {/* `step="0.01"` مش `0.05`: العمود `numeric(4,2)` (طلب مالك 2026-09-17 —
+                    «عايز أزود 4% بس»). الـstep الخشن كان بيمنع 1.04 ويسمح بـ1.05 بس. */}
                 <Input
                   type="number"
-                  step="0.05"
+                  step="0.01"
                   min="1"
                   max="3"
+                  dir="ltr"
                   className="max-w-[140px]"
                   value={multiplierInput}
                   onChange={(e) => setMultiplierInput(e.target.value)}

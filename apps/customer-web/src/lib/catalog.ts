@@ -40,7 +40,12 @@ export const estimatePrice = (
   serviceId: string,
   params: {
     zoneId?: string;
-    bookingMode?: string;
+    /**
+     * **حقيقة مش قرار** (ADR-0106): «الحجز ده لنفس اليوم؟». الـwire لسه `booking_mode`
+     * (`emergency`) للتوافق مع نسخ التطبيق المنشورة، بس العميل مابقاش بيشتقّ وضع حجز خاص بيه —
+     * السيرفر هو اللي بيشتقّ الوضع النهائي (`resolveBookingMode`).
+     */
+    sameDayUrgent?: boolean;
     fieldValues?: Record<string, PricingFieldValue>;
     pricingQuantity?: number;
     durationHours?: number;
@@ -52,7 +57,7 @@ export const estimatePrice = (
 ) => {
   const query = new URLSearchParams();
   if (params.zoneId) query.set('zone_id', params.zoneId);
-  if (params.bookingMode) query.set('booking_mode', params.bookingMode);
+  if (params.sameDayUrgent) query.set('booking_mode', 'emergency');
   if (params.fieldValues) query.set('field_values', JSON.stringify(params.fieldValues));
   if (params.pricingQuantity !== undefined) query.set('pricing_quantity', String(params.pricingQuantity));
   if (params.durationHours !== undefined) query.set('duration_hours', String(params.durationHours));

@@ -352,8 +352,15 @@ class LiveHarness {
     return this.catalog;
   }
 
-  async makeTechnician(label = 't') {
+  /**
+   * فني معتمد ومؤهّل لخدمة/منطقة الكتالوج المزروع.
+   *
+   * `opts.level` اختياري (append-only — كل الكوللرز القدام بيفضلوا `premium` زي ما كانوا):
+   * محتاج لأي اختبار بيقيس فلترة على المستوى، زي `eligible_for_team_booking`.
+   */
+  async makeTechnician(label = 't', opts = {}) {
     const { prefix } = this;
+    const level = opts.level ?? 'premium';
     const runId = this.nextTag();
     const [user] = await this.q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`,
@@ -364,9 +371,9 @@ class LiveHarness {
       `INSERT INTO technician_profiles
          (user_id, technician_code, current_level, verification_status, is_available, is_on_duty,
           technician_kind, current_location)
-       VALUES ($1,$2,'premium','approved',true,true,'technician',
+       VALUES ($1,$2,$3::technician_level,'approved',true,true,'technician',
                ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
-      [user.id, `${prefix.toUpperCase()}${label}${runId}`.slice(0, 20)],
+      [user.id, `${prefix.toUpperCase()}${label}${runId}`.slice(0, 20), level],
     );
     await this.q(
       `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)

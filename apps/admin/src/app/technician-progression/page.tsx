@@ -221,18 +221,26 @@ export default function TechnicianProgressionPage() {
                       </div>
                       <div>
                         <Label>أقل متوسط تقييم</Label>
+                        {/* `numeric(3,2)` في القاعدة — الـstep كان بيقرّب لعُشر (طلب مالك). */}
                         <Input
                           type="number"
-                          step="0.1"
+                          step="0.01"
+                          min="0"
+                          max="5"
+                          dir="ltr"
                           value={ruleForm.min_avg_rating}
                           onChange={(e) => setRuleForm({ ...ruleForm, min_avg_rating: e.target.value })}
                         />
                       </div>
                       <div>
                         <Label>أقصى معدل إلغاء %</Label>
+                        {/* `numeric(5,2)` — نسبة مئوية بخانتين عشريتين، مش مضاعفات عُشر. */}
                         <Input
                           type="number"
-                          step="0.1"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          dir="ltr"
                           value={ruleForm.max_cancellation_rate}
                           onChange={(e) => setRuleForm({ ...ruleForm, max_cancellation_rate: e.target.value })}
                         />

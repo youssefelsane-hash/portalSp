@@ -67,13 +67,18 @@ export function fetchTechniciansForService(
   serviceId: string,
   addressId: string,
   params: {
-    bookingMode?: string;
+    /**
+     * **حقيقة مش قرار** (ADR-0106). والأهم: فضاء الأهلية (فلترة `eligible_for_team_booking`)
+     * بقى **مشتقّ على السيرفر** من نفس `resolveBookingMode()` اللي إنشاء الطلب بيستخدمها —
+     * فالويب والتطبيق بيرجّعوا نفس القايمة بالبناء، مش بالاتفاق.
+     */
+    sameDayUrgent?: boolean;
     fieldValues?: Record<string, PricingFieldValue>;
     scheduledAt?: string;
   } = {},
 ) {
   const query = new URLSearchParams({ address_id: addressId });
-  if (params.bookingMode) query.set('booking_mode', params.bookingMode);
+  if (params.sameDayUrgent) query.set('booking_mode', 'emergency');
   if (params.scheduledAt) query.set('scheduled_at', params.scheduledAt);
   if (params.fieldValues && Object.keys(params.fieldValues).length > 0) {
     query.set('field_values', JSON.stringify(params.fieldValues));

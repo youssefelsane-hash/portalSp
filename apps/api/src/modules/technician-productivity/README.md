@@ -60,3 +60,23 @@ Phase 1 قراءة بس — مفيش موافقة/دفع زي KPI (لو اتطل
   استدعاء مباشر — شاشة عرض مخصوصة لو اتطلبت لاحقًا).
 - §17.15 (تدرّج دفعات الطوارئ، نفس §17 نقطة 15 في `docs/08`) **مش جزء من هذا الموديول** — نطاق
   مختلف تمامًا (تعديل منطق `MatchingService`/`AssistantMatchingService`)، لسه `NOT STARTED`.
+
+## سياق التقييمات (ADR-0105، docs/08 §159)
+
+`ProductivityReport.rating_context` بيفرّق بين أربع حاجات كان الأدمن بيقراها كتناقض:
+
+| الحقل | معناه |
+|---|---|
+| `lifetime_average` / `lifetime_ratings_count` | التقييم العام — **حيّ ومدى الحياة** |
+| `period_average` / `period_ratings_count` | تقييم الفترة + **عدد التقييمات الفعلية** فيها |
+| `months_with_rating_data` | عدد الشهور اللي دخلت — **ده اللي `sample_size` بيقيسه** |
+| `live_ratings_in_period` / `ratings_missing_from_snapshots` / `is_stale` | فيه تقييمات في الفترة مش داخلة الحساب؟ |
+
+**البروفايل والـKPI بيستخدموا نفس الفلتر بالحرف** (`customer_to_technician` + `is_published`) —
+الفرق الوحيد هو **الزمن**: البروفايل حيّ، والـKPI مجمّد شهريًا. فأي تقييم بيوصل بعد حساب
+snapshot شهره يفضل بره التقرير لحد إعادة حساب يدوية.
+
+**ممنوع** تتحوّل لإعادة حساب تلقائية: الـKPI ملزوق بالصرف (`calculateForPeriod` بيتخطّى أي
+snapshot `approved`/`paid`). القراءة الحيّة هنا **للسياق بس**، والمقياس لسه بيتحسب من الـsnapshots.
+
+`sample_size` سايب باسمه ومعناه (شهور) للتوافق؛ العدد الحقيقي في `period_ratings_count`.

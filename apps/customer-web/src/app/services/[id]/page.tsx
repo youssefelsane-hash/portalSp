@@ -54,8 +54,11 @@ const PREPAYMENT_LABELS_AR: Record<string, string> = {
 };
 
 
-
-type BookingMode = 'individual' | 'team' | 'emergency';
+/*
+  `type BookingMode` اتشال (ADR-0106): الصفحة مابقاش عندها مفهوم «وضع حجز» خالص — بتتعامل
+  بحقيقة واحدة (`isSameDayBooking`)، والوضع النهائي قرار سيرفر. سيبه كنوع مش مستخدم كان
+  هيسهّل إن حد يبني عليه محرك محلي تاني.
+*/
 /**
  * هل الطلب ده **لازم** يتبعت كطلب تقييم بالصور؟
  *
@@ -67,21 +70,15 @@ type BookingMode = 'individual' | 'team' | 'emergency';
  */
 function resolveEffectiveRemoteQuote(
   service: ServiceDto | null,
-  bookingMode: BookingMode,
+  // **حقيقة مش وضع حجز** (ADR-0106): الشرط الحقيقي هو «الحجز لنفس اليوم؟»، وكان متلبّس في
+  // `bookingMode !== 'emergency'` — وده خلّى الصفحة محتاجة تشتقّ وضع حجز كامل عشان سؤال ثنائي.
+  sameDayUrgent: boolean,
   requested: boolean,
 ): boolean {
   if (!service) return requested;
   const routes = assessmentRoutesForService(service);
-  const remoteForced = routes.remote && bookingMode !== 'emergency' && !routes.onsite;
+  const remoteForced = routes.remote && !sameDayUrgent && !routes.onsite;
   return remoteForced ? true : requested;
-}
-
-function availableBookingModes(service: ServiceDto): BookingMode[] {
-  return [
-    ...(service.allows_individual ? (['individual'] as const) : []),
-    ...(service.allows_team ? (['team'] as const) : []),
-    ...(service.allows_emergency ? (['emergency'] as const) : []),
-  ];
 }
 
 function useDebounced<T>(value: T, delayMs: number): T {
@@ -165,7 +162,23 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // مقارنة نصية على `YYYY-MM-DD` زي ما `<input type="date">` بيرجّعه — نفس أسلوب `platformDayOf`
   // في الباك-إند بالحرف، بلا أي حساب حدود يوم (البَقّة الموثّقة في `CAIRO_DAY_EXPR`).
   const isSameDayBooking = scheduledDate !== '' && scheduledDate <= new Date().toLocaleDateString('en-CA');
-  const bookingMode: BookingMode = isSameDayBooking ? 'emergency' : 'individual';
+  /*
+    ═══ محرك وضع الحجز المحلي اتشال بالكامل (ADR-0106) ═══
+
+    كان هنا: `const bookingMode = isSameDayBooking ? 'emergency' : 'individual'` وبيتبعت في
+    `booking_mode` للمعاينة والإنشاء وقايمة المنفّذين.
+
+    ليه اتشال:
+      • `OrderCreationService` **بيتجاهل `dto.booking_mode` تمامًا** ويشتقّ الوضع بنفسه من
+        اليوم الحقيقي + ناتج الـworkforce + قدرات الخدمة (ADR-0048).
+      • النسخة المحلية دي مستحيل تطلّع `team` أصلاً، بينما `apps/customer-app` بيبعته لخدمة
+        `allows_team && !allows_individual`. و`GET /services/:id/technicians` كان بيستخدم
+        `booking_mode === 'team'` في **فضاء الأهلية** — فنفس الخدمة ونفس العنوان كانوا
+        بيرجّعوا قايمة منفّذين مختلفة حسب الواجهة (اتقاس في
+        `scripts/verify-web-mobile-booking-parity.js`: ويب شاف فنيين، موبايل شاف واحد).
+
+    اللي بقى: **حقيقة واحدة** (`isSameDayBooking`)، والسيرفر هو مصدر قرار الوضع.
+  */
   // ADR-0060 §4 — دقة الموعد وضعين بس. `start_time` بيطلب ساعة وصول فوق التاريخ، و`full_day`
   // بيطلب التاريخ بس. المدة والكمية والفترة **مابقوش مدخلات جدولة** — بقوا حقول في فورم الخدمة.
   const [preciseTime, setPreciseTime] = useState('');
@@ -213,10 +226,23 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // العميل اختار يدفع الطلب كامل بدل العربون (طلب مالك 2026-09-11) — نفس اختيار التطبيق.
   const [payFullInsteadOfDeposit, setPayFullInsteadOfDeposit] = useState(false);
 
-  // بند 2-7 — الحجز بقى **تلات خطوات بالظبط**، مفيش صفحة مراجعة رابعة:
-  //   1. تفاصيل الشغل والموعد + السعر الحالي (قبل اختيار الفني)
-  //   2. العنوان وإكمال الطلب (وصف/صور/تكرار/خصم/دفع/سياسات)
-  //   3. اختيار الفني أو الترشيح التلقائي + التأكيد
+  /**
+   * الحجز **تلات خطوات بالظبط**، مفيش صفحة مراجعة رابعة:
+   *
+   *   1. العنوان + تفاصيل الشغل
+   *   2. الموعد + المنفّذ
+   *   3. باقي التفاصيل + التأكيد
+   *
+   * **الترتيب ده ترتيب اعتماديات مش تفضيل شكلي** (ADR-0106، بلاغ مالك 2026-09-17). قبل كده
+   * كان الميعاد خطوة ١ والعنوان خطوة ٢، بينما اقتراح الأيام/الساعات و`serviceAvailableForAddress`
+   * **كلهم محتاجين `selectedAddressId`** — فالعميل الجديد كان بيشوف منتقي تاريخ بلا أي اقتراح
+   * (الـeffects بتخرج بدري على `!selectedAddressId`)، وبعدها يدخل العنوان اللي المفروض
+   * الاقتراح اتبنى عليه.
+   *
+   * `apps/customer-app` بيمشي بنفس ترتيب الاعتماديات:
+   * `service → address → job details → duration → date/time → provider → confirmation`.
+   * الويب مش مطلوب يبقى نفس عدد الشاشات، بس **نفس الترتيب المنطقي**.
+   */
   const [step, setStep] = useState<1 | 2 | 3>(1);
   // تفكيك السعر الكامل من `POST /orders/preview` — نفس مصدر التطبيق بالحرف. `estimate`
   // (`/services/:id/estimate`) بيفضل للتقدير المبكّر في الخطوة الأولى بس.
@@ -299,9 +325,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     if (isAuthenticated) {
       listAddresses(authedFetch).then((list) => {
         setAddresses(list);
-        const def = list.find((a) => a.is_default) ?? list[0];
+        /*
+          **الاختيار التلقائي للعنوان الافتراضي بس — مش `?? list[0]`** (ADR-0106).
+
+          الاحتياطي القديم (`?? list[0]`) كان بيختار عنوان **عشوائي** لأي عميل عنده أكتر من
+          عنوان ومحدد فيهم افتراضي، والعنوان ده بيتحسب عليه اقتراح المواعيد وفحص توافر الخدمة
+          — يعني العميل بياخد اقتراحات لمكان هو ماختارهوش. نفس الاحتياطي اتشال من
+          `apps/customer-app` في ADR-0100 لنفس السبب بالظبط، وفضل هنا.
+
+          العنوان الافتراضي **الحقيقي** لسه بيتختار تلقائي: ده اختيار العميل نفسه المسجّل، مش
+          تخمين.
+        */
+        const def = list.find((a) => a.is_default);
         if (def) setSelectedAddressId(def.id);
-        else setShowNewAddressForm(true);
+        else if (list.length === 0) setShowNewAddressForm(true);
       })
         // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
         // والمستخدم مش عارف ليه (docs/08 §133).
@@ -361,11 +398,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       return;
     }
     setEstimating(true);
-    estimatePrice(id, { bookingMode, fieldValues: debouncedFieldValues })
+    estimatePrice(id, { sameDayUrgent: isSameDayBooking, fieldValues: debouncedFieldValues })
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [id, service, bookingMode, debouncedFieldValues, pricingFields]);
+  }, [id, service, isSameDayBooking, debouncedFieldValues, pricingFields]);
 
   // ADR-0060 — الـeffect القديم اللي كان بيسعّر `per_unit`/`monthly`/`hourly` من مدخلات منفصلة
   // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و
@@ -438,7 +475,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     let active = true;
     setTechnicians(null);
     fetchTechniciansForService(id, selectedAddressId, {
-      bookingMode,
+      sameDayUrgent: isSameDayBooking,
       // The manual marketplace must evaluate availability for the same booking
       // time as auto matching. Omitting this made future bookings look like ASAP.
       scheduledAt: computeScheduledAt(scheduledDate),
@@ -459,7 +496,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     technicianChoiceMode,
     selectedAddressId,
     id,
-    bookingMode,
+    isSameDayBooking,
     scheduledDate,
     preciseTime,
     service?.schedule_precision,
@@ -473,7 +510,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   //
   // مسار الصور مستثنى: مفيش سعر خدمة أصلاً وقت الحجز، وطلب معاينة له بيرجّع رقم مالوش معنى.
   useEffect(() => {
-    if (step !== 3 || !selectedAddressId || resolveEffectiveRemoteQuote(service, bookingMode, requestRemoteQuote)) {
+    if (step !== 3 || !selectedAddressId || resolveEffectiveRemoteQuote(service, isSameDayBooking, requestRemoteQuote)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOrderPreview(null);
       return;
@@ -483,7 +520,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     previewOrder(authedFetch, {
       service_id: id,
       address_id: selectedAddressId,
-      booking_mode: bookingMode,
+      // مفيش `booking_mode`: السيرفر بيتجاهله ويشتقّ الوضع بنفسه (ADR-0106).
       ...(scheduledDate ? { scheduled_at: computeScheduledAt(scheduledDate) } : {}),
       ...(Object.keys(debouncedFieldValues).length > 0 ? { field_values: debouncedFieldValues } : {}),
       ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
@@ -512,7 +549,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     service,
     requestRemoteQuote,
     id,
-    bookingMode,
+    isSameDayBooking,
     scheduledDate,
     preciseTime,
     debouncedFieldValues,
@@ -585,7 +622,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         {
           service_id: service.id,
           address_id: selectedAddressId,
-          booking_mode: effectiveRequestRemoteQuote ? 'individual' : bookingMode,
+          // مفيش `booking_mode`: `OrderCreationService` بيتجاهله ويشتقّ الوضع النهائي بنفسه.
           // ADR-0080 — الشركة بتتبعت في خانتها، مش في خانة الفني. التذكرة هي مصدر الحقيقة:
           // الباك-إند بيعيد تثبيت الحقل الصح منها ويرفض أي تناقض.
           requested_technician_id:
@@ -704,10 +741,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  const modes = availableBookingModes(service);
-  // الخدمة لازم تكون بتدعم وضع واحد على الأقل عشان تتحجز أصلاً — مش قايمة اختيارات للعميل بعد
-  // ADR-0048، مجرد فحص "قابلة للحجز".
-  void modes;
   const allRequiredAccepted =
     postpaidPolicies.filter((p) => p.isRequired).every((p) => acceptedPolicyVersions.has(p.currentVersionId));
   // خيار "أقرب وقت ممكن" اتشال (ADR-0018 §2) — التاريخ إجباري دايمًا لأي خدمة بتسمح بالجدولة
@@ -726,7 +759,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // اللي بتتبعت وبتحدد الشاشة: لو مسار الصور هو الوحيد المتاح، الطلب لازم يتبعت كطلب تقييم
   // بالصور — وإلا الباك-إند هيرفضه (بعد إصلاح خرق remote_only، §124-B).
   const routes = assessmentRoutesForService(service);
-  const remoteRouteAvailable = routes.remote && bookingMode !== 'emergency';
+  const remoteRouteAvailable = routes.remote && !isSameDayBooking;
   const onsiteRouteAvailable = routes.onsite;
   const remoteRouteForced = remoteRouteAvailable && !onsiteRouteAvailable;
   // رسم المعاينة **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
@@ -735,7 +768,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // بلقطة شاشة مالك: الكارت 0 ج وملخص السعر تحته 150 ج على نفس الشاشة). المعاينة الحية هي
   // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
   const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
-  const effectiveRequestRemoteQuote = resolveEffectiveRemoteQuote(service, bookingMode, requestRemoteQuote);
+  const effectiveRequestRemoteQuote = resolveEffectiveRemoteQuote(service, isSameDayBooking, requestRemoteQuote);
   // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `prepayment_method: undefined`
   // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
   // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
@@ -783,28 +816,45 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   });
   const activePreview = matchPreview !== null && matchPreviewKey === previewInputsKey ? matchPreview : null;
 
-  // بند 6 — شروط إكمال كل خطوة. مبنية من نفس أجزاء `canSubmit` تحت (مفيش قواعد صلاحية موازية):
-  // الخطوة 1 = الشغل والموعد، الخطوة 2 = العنوان والسياسات.
-  const scheduleComplete =
-    !needsSchedule ||
-    (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd);
-  const stepOneComplete = scheduleComplete && (!needsPreciseTime || !!preciseTime) && pricingFieldsValid;
+  /*
+    ═══ شروط إكمال كل خطوة — بترجع بالظبط ترتيب الاعتماديات (ADR-0106) ═══
+
+    **الانحراف اللي اتصلّح**: `stepOneComplete` القديمة مكانتش بتشترط العنوان خالص (كانت
+    الميعاد + الفورم)، بينما `serviceAvailableForAddress` كانت بتتحسب بعديها،
+    و`stepTwoComplete` كانت بتشترط `providerLocked` رغم إن اختيار المنفّذ نفسه موصوف كخطوة
+    تالتة في التعليق اللي كان فوقها. ده تراكم تعديلات مش تصميم.
+
+    دلوقتي كل شرط في خطوته:
+      • ١: عنوان مختار + الخدمة متاحة فيه + حقول الشغل الإجبارية مكتملة.
+      • ٢: الميعاد (والساعة لو مطلوبة) + المنفّذ متقفل.
+      • ٣: التأكيد (`canSubmit` تحت).
+  */
+  const selectedAddress = addresses?.find((item) => item.id === selectedAddressId);
   const serviceAvailableForAddress =
     selectedAddressId !== null && availabilityAddressId === selectedAddressId && serviceAvailabilityError === null;
-  const selectedAddress = addresses?.find((item) => item.id === selectedAddressId);
   const effectiveServiceAvailabilityError = selectedAddressId && !selectedAddress?.service_zone_id
     ? 'العنوان ده خارج مناطق الخدمة المتاحة حاليًا'
     : availabilityAddressId === selectedAddressId
       ? serviceAvailabilityError
       : null;
-  // **المنفّذ متقفل؟** — نفس تعريف الأندرويد بالحرف: الطوارئ ومسار الصور مالهمش اختيار منفّذ
-  // أصلاً (أول فني يقبل / الإدارة بتحدد)، وغير كده لازم تذكرة حقيقية: تلقائي = معاينة مطابقة،
-  // يدوي = فني/شركة مختارة. من غير الشرط ده الخطوة ٢ بتعدّي والعميل لسه مش عارف مين هينفّذ.
+
+  // الخطوة ١ — العنوان وتفاصيل الشغل. **العنوان شرط هنا** لأن كل اللي بعده متوقّف عليه.
+  const stepOneComplete = serviceAvailableForAddress && pricingFieldsValid;
+
+  const scheduleComplete =
+    !needsSchedule ||
+    (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd);
+  // **المنفّذ متقفل؟** — نفس تعريف الأندرويد بالحرف: طلب نفس اليوم ومسار الصور مالهمش اختيار
+  // منفّذ أصلاً (أول فني يقبل / الإدارة بتحدد)، وغير كده لازم تذكرة حقيقية: تلقائي = معاينة
+  // مطابقة، يدوي = فني/شركة مختارة.
   const providerLocked =
     effectiveRequestRemoteQuote ||
-    bookingMode === 'emergency' ||
+    isSameDayBooking ||
     (technicianChoiceMode === 'auto' ? !!activePreview : !!selectedTechnicianId);
-  const stepTwoComplete = stepOneComplete && serviceAvailableForAddress && providerLocked;
+
+  // الخطوة ٢ — الميعاد والمنفّذ (الاتنين بيعتمدوا على عنوان الخطوة ١).
+  const stepTwoComplete =
+    stepOneComplete && scheduleComplete && (!needsPreciseTime || !!preciseTime) && providerLocked;
 
   // **مصدر واحد لتفكيك السعر**: التذكرة المقفولة لو موجودة (نفس الرقم اللي هيتسجّل على الطلب)،
   // وإلا تقدير `POST /orders/preview`. الاتنين نفس الشكل (`PreviewOrderResponseDto`)، فالجدول
@@ -919,8 +969,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           الخطوة التالتة نفسها جنب كارت الفني والسعر النهائي. */}
       <ol className="mt-5 grid grid-cols-3 gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm sm:mt-6 sm:gap-3 sm:p-3">
         {[
-          { n: 1 as const, label: 'الشغل والموعد' },
-          { n: 2 as const, label: 'العنوان والفني' },
+          { n: 1 as const, label: 'العنوان والشغل' },
+          { n: 2 as const, label: 'الموعد والفني' },
           { n: 3 as const, label: 'التفاصيل والتأكيد' },
         ].map((s) => (
           // `min-w-0` **ضروري**: بلاها `truncate` جوّه العنصر ده مالهاش أي أثر خالص.
@@ -951,11 +1001,15 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           والسيستم هو اللي بيحدد بناءً على التاريخ». اللي محلّه: التنبيه الأحمر تحت لما العميل
           يختار النهارده. */}
 
-      {step === 1 && needsSchedule && (
+      {/*
+        ═══ الخطوة ٢ — الميعاد (بعد ما العنوان بقى معروف) ثم المنفّذ ═══
+        الاقتراحات دلوقتي ليها عنوان تبني عليه، فالعميل بيشوف أيام/ساعات حقيقية مش منتقي فاضي.
+      */}
+      {step === 2 && needsSchedule && (
         <section className="motion-rise booking-panel mt-6">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
             <div>
-              <p className="text-sm font-medium text-accent">الخطوة 1 من 3</p>
+              <p className="text-sm font-medium text-accent">الخطوة 2 من 3</p>
               <h2 className="mt-1 text-xl font-bold">اختار الموعد المناسب</h2>
             </div>
             <p className="text-sm text-muted">هنقترح أقرب وقت مناسب لك</p>
@@ -1143,36 +1197,22 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
-        <section className="motion-rise booking-panel mt-6">
-          <p className="text-sm font-medium text-accent">تفاصيل تساعدنا نطابقك صح</p>
-          <h2 className="mb-1 mt-1 text-xl font-bold">تفاصيل الشغل</h2>
-          {/* نفس الجملة بالحرف اللي `JobDetailsScreen` في التطبيق بيقولها. الفكرة إن العميل
-              يفهم **ليه** بنسأله قبل ما نعرض أي سعر: من غير التفاصيل دي، السعر اللي هيتعرض
-              جنب كل فني في القايمة مش هيكون رقمه الحقيقي. */}
-          <p className="mb-3 text-sm text-muted">
-            دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة
-          </p>
-          <div className="motion-list space-y-3">
-            {pricingFields
-              .slice()
-              .sort((a, b) => a.display_order - b.display_order)
-              .map((field) => (
-                <DynamicPricingField
-                  key={field.id}
-                  field={field}
-                  value={fieldValues[field.field_key]}
-                  onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
-                  onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
-                />
-              ))}
-          </div>
-        </section>
-      )}
+      {/*
+        ═══ الخطوة ١ — العنوان الأول، وبعده تفاصيل الشغل (ADR-0106) ═══
 
-      {step === 2 && (
+        الترتيب ده **مش تفضيل شكلي، ده ترتيب اعتماديات**: اقتراح الأيام والساعات
+        (`fetchSuggestedDays`/`fetchSuggestedTimes`) و`serviceAvailableForAddress` كلهم
+        محتاجين `selectedAddressId`. قبل كده الميعاد كان الخطوة ١ والعنوان الخطوة ٢، يعني
+        العميل الجديد كان بيشوف منتقي تاريخ **بلا أي اقتراح** — الـeffects بتخرج بدري على
+        `!selectedAddressId` — وبعدها يدخل العنوان اللي المفروض الاقتراح اتبنى عليه.
+
+        `apps/customer-app` بيمشي بنفس الترتيب:
+        service → address → job details → duration → date/time → provider → confirmation.
+        الويب مش لازم يبقى نفس عدد الشاشات، بس **نفس ترتيب الاعتماديات**.
+      */}
+      {step === 1 && (
       <section className="motion-rise booking-panel mt-6">
-        <p className="text-sm font-medium text-accent">الخطوة 2 من 3</p>
+        <p className="text-sm font-medium text-accent">الخطوة 1 من 3</p>
         <h2 className="mb-3 mt-1 text-xl font-bold">اختار عنوان التنفيذ</h2>
         {addresses === null ? (
           <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
@@ -1250,16 +1290,45 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       </section>
       )}
 
+      {/* تفاصيل الشغل بعد العنوان في نفس الخطوة: المنطقة بتأثر على التسعير، فالتقدير اللي
+          بيظهر تحت الفورم بيبقى بمنطقة العنوان الفعلي مش بلا منطقة. */}
+      {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
+        <section className="motion-rise booking-panel mt-6">
+          <p className="text-sm font-medium text-accent">تفاصيل تساعدنا نطابقك صح</p>
+          <h2 className="mb-1 mt-1 text-xl font-bold">تفاصيل الشغل</h2>
+          {/* نفس الجملة بالحرف اللي `JobDetailsScreen` في التطبيق بيقولها. الفكرة إن العميل
+              يفهم **ليه** بنسأله قبل ما نعرض أي سعر: من غير التفاصيل دي، السعر اللي هيتعرض
+              جنب كل فني في القايمة مش هيكون رقمه الحقيقي. */}
+          <p className="mb-3 text-sm text-muted">
+            دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة
+          </p>
+          <div className="motion-list space-y-3">
+            {pricingFields
+              .slice()
+              .sort((a, b) => a.display_order - b.display_order)
+              .map((field) => (
+                <DynamicPricingField
+                  key={field.id}
+                  field={field}
+                  value={fieldValues[field.field_key]}
+                  onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
+                  onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
+                />
+              ))}
+          </div>
+        </section>
+      )}
+
       {/* **اختيار الفني بقى في الخطوة ٢ جنب العنوان (2026-09-11)** — مطابقة حرفية لفلو
           الأندرويد: `catalog_navigation.dart` بيروح `TechnicianSelectionScreen` **قبل**
           `CreateOrderScreen`، والشاشة دي هي اللي بتاخد العنوان كمان. الترتيب القديم (عنوان ←
           تفاصيل ← فني) كان بيخلي العميل يعدّي على كل التفاصيل وهو لسه مش عارف مين هينفّذ ولا
           بكام — وده مصدر «فلو التسعير مختلف» في بلاغ المالك.
 
-          **الطوارئ مستثناة** (`bookingMode !== 'emergency'`) — نفس الاستثناء بالحرف في
+          **طلب نفس اليوم مستثنى** (`!isSameDayBooking`) — نفس الاستثناء بالحرف في
           `catalog_navigation.dart`: حجز اليوم بيروح لإنشاء الطلب مباشرة، وأول فني يقبل
           بياخده. سؤال العميل «مين يعمل الشغل؟» في الحالة دي بيوعده باختيار مش موجود. */}
-      {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && bookingMode !== 'emergency' && (
+      {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && !isSameDayBooking && (
         <section className="motion-rise booking-panel mt-6">
           <p className="text-sm font-medium text-accent">اختيار المنفّذ</p>
           <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>

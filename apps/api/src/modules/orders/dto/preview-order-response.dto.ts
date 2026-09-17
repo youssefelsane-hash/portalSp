@@ -9,8 +9,26 @@ export interface PreviewOrderAddonDto {
 }
 
 export interface PreviewOrderResponseDto {
-  /** السعر الأساسي/المحسوب (ثابت بعد ضرب المنطقة والمستوى، أو ناتج معادلة formula). */
+  /**
+   * **اسم مضلّل محفوظ للتوافق** (ADR-0107، بلاغ مالك 2026-09-17).
+   *
+   * الاسم بيقول «السعر الأساسي»، والقيمة فعلاً هي `estimate.estimated_total_cents` — يعني
+   * **سعر الشغل بعد** تعديل المنطقة ومضاعف فئة المهارة وقصّ الحدود. فهو مش «أساسي» بأي معنى،
+   * ومينفعش يتقرا كناتج محرك التسعير الخام.
+   *
+   * سايبينه زي ما هو لأن نسخ `apps/customer-app` المنشورة بتقراه (`basePriceCents`)،
+   * و`apps/customer-web` بيعرضه كسطر «السعر الأساسي». التسمية الصحيحة في
+   * `work_price_cents` تحت — استخدمها في أي قارئ جديد.
+   *
+   * وتفصيل المراحل نفسه **مش هنا عن قصد**: ده رد عميل، وعرض نسبة المنطقة ومضاعف الفئة فيه
+   * تسريب لتركيبة التسعير الداخلية. التفصيل الكامل للأدمن في
+   * `GET /admin/orders/:id/price-trail`.
+   *
+   * @deprecated استخدم `work_price_cents` — نفس القيمة باسم صحيح.
+   */
   base_price_cents: number;
+  /** نفس قيمة `base_price_cents` بالاسم الصح: سعر الشغل بعد المراحل التجارية وقبل الرسوم. */
+  work_price_cents: number;
   inspection_fee_cents: number;
   /** حدود السعر التقديرية لخدمات formula بس — null لباقي نماذج التسعير. */
   min_price_cents: number | null;

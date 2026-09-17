@@ -72,6 +72,7 @@ import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config
 import { PricingBuilder } from './pricing-builder';
 import { ServiceSetupRail, type ServiceStage } from '@/components/service-setup-rail';
 import { ErrorNotice } from '@/components/notice';
+import { describeMultiplier } from '@/lib/multiplier';
 
 
 /** شرح الطريقتين الباقيتين (ADR-0060 §1). */
@@ -150,6 +151,8 @@ export default function ServiceDetailPage() {
   const [pricingRules, setPricingRules] = useState<PricingRuleResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // مضاعف فئة المهارة `controlled` عشان نعرض المقابل بالمية تحته وهو بيتكتب.
+  const [tierMultiplierInput, setTierMultiplierInput] = useState('');
   const [showNewAddon, setShowNewAddon] = useState(false);
   const [showNewStandardData, setShowNewStandardData] = useState(false);
   const [actualsFormOpenFor, setActualsFormOpenFor] = useState<string | null>(null);
@@ -1555,8 +1558,29 @@ export default function ServiceDetailPage() {
                   </option>
                 ))}
               </SelectNative>
+              {/*
+                **`step="0.01"` مش `0.05`** (طلب مالك 2026-09-17: «عادي لو أنا عايز أزود 4% بس…
+                يكون متاح معايا كل معاملات المية»). العمود `numeric(4,2)` يعني القاعدة بتقبل
+                خانتين عشريتين أصلاً — الـstep الخشن كان **قيد واجهة بس** بيمنع الأدمن من 1.04
+                (زيادة ٤٪) ويجبره على مضاعفات الـ٥٪. الرقم بالمية معروض تحت الخانة لأن الأدمن
+                بيفكّر بـ«كم في المية» مش بمضاعف.
+              */}
               <Label htmlFor="ptp_multiplier">مضاعف السعر</Label>
-              <Input id="ptp_multiplier" name="price_multiplier" type="number" min="0.1" step="0.05" required />
+              <Input
+                id="ptp_multiplier"
+                name="price_multiplier"
+                type="number"
+                min="0.01"
+                max="99.99"
+                step="0.01"
+                dir="ltr"
+                required
+                value={tierMultiplierInput}
+                onChange={(e) => setTierMultiplierInput(e.target.value)}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                {describeMultiplier(tierMultiplierInput)}
+              </p>
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
                 حفظ مضاعف فئة المهارة
               </Button>
