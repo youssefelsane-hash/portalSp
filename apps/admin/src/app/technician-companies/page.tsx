@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Badge } from '@/components/ui/badge';
+import { ErrorNotice } from '@/components/notice';
 
 export default function TechnicianCompaniesPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -59,7 +60,7 @@ export default function TechnicianCompaniesPage() {
         </div>
       </section>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!companies && !error && <TableSkeleton columns={6} />}
       {companies && companies.length === 0 && <EmptyState title="مفيش شركات/فرق لسه" />}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import type { AdminSupportThreadResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 export default function SupportChatThreadsPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -31,7 +33,7 @@ export default function SupportChatThreadsPage() {
         description="شات مباشر عام مع العملاء (مش مرتبط بطلب معيّن) — منفصل عن تذاكر الدعم والشكاوى."
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!threads && !error && <TableSkeleton columns={5} />}
       {threads && threads.length === 0 && <EmptyState title="مفيش محادثات دعم لسه" />}
 
@@ -63,7 +65,7 @@ export default function SupportChatThreadsPage() {
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  {thread.last_message_at ? new Date(thread.last_message_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                  {thread.last_message_at ? (formatDateTimeAr(thread.last_message_at) ?? '—') : '—'}
                 </TableCell>
                 <TableCell>{new Date(thread.created_at).toLocaleDateString('ar-EG-u-nu-latn')}</TableCell>
               </TableRow>

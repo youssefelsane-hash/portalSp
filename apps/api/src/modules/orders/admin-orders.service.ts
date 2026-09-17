@@ -252,6 +252,16 @@ export class AdminOrdersService {
     }
 
     if (query.order_type) qb.andWhere('o.order_type = :orderType', { orderType: query.order_type });
+    if (query.payment_status) qb.andWhere('o.payment_status = :paymentStatus', { paymentStatus: query.payment_status });
+    if (query.crew === 'incomplete') {
+      // نفس قاعدة `computeCrewComposition()` بالحرف: القائد بيتحسب +1، والأعضاء بـ`crew_slot`
+      // مش `member_type` (ADR-0101). أي نسخة تانية هنا بتخلّي الفلتر والشاشة يختلفوا.
+      qb.andWhere(
+        `COALESCE(o.required_technicians, 1) > 1 + (
+           SELECT COUNT(*) FROM order_team_members otm_c
+            WHERE otm_c.order_id = o.id AND otm_c.crew_slot = 'execution')`,
+      );
+    }
     if (query.service_id) qb.andWhere('o.service_id = :serviceId', { serviceId: query.service_id });
     if (query.service_zone_id) qb.andWhere('o.service_zone_id = :zoneId', { zoneId: query.service_zone_id });
     if (query.technician_id) {

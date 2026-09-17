@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { resolveMediaUrl } from '@/lib/media-url';
+import { ErrorNotice } from '@/components/notice';
 
 // مفيش WebSocket جوّه لوحة الأدمن (البنية التحتية للسوكيت في chat.gateway.ts مبنية للعميل/الفني
 // بس) — بولينج بسيط كل 4 ثواني بدل بناء عميل Socket.IO كامل داخل Next.js لسكرين واحد.
@@ -82,7 +83,7 @@ export default function SupportChatThreadDetailPage() {
         description={thread ? <span dir="ltr">{thread.customer_phone}</span> : undefined}
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <Card>
         <CardHeader>

@@ -16,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { KPI_STATUS_LABELS, KPI_STATUS_TONE } from '@/lib/technician-kpi-labels';
+import { ErrorNotice } from '@/components/notice';
 
 const now = new Date();
 
@@ -101,7 +102,7 @@ export default function TechnicianKpiPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {calcResult && <p className="mb-4 text-sm text-muted-foreground">{calcResult}</p>}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-4">

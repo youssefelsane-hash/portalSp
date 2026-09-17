@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import type { SecurityEventDto, SecurityEventNoteDto } from '@baytak/shared-types';
@@ -15,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
+import { ErrorNotice } from '@/components/notice';
 
 // تفاصيل حدث أمني — Part 11 §23. الإجراءات (acknowledge/investigate/resolve/note) محتاجة
 // security.alerts.manage، القراءة بس محتاجة security.alerts.view (نفس فصل view/manage الموجود
@@ -124,7 +126,7 @@ export default function SecurityEventDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -159,11 +161,11 @@ export default function SecurityEventDetailPage() {
             </div>
             <div>
               <span className="text-muted-foreground">أول محاولة: </span>
-              {new Date(event.firstOccurredAt).toLocaleString('ar-EG-u-nu-latn')}
+              {(formatDateTimeAr(event.firstOccurredAt) ?? '—')}
             </div>
             <div>
               <span className="text-muted-foreground">آخر محاولة: </span>
-              {new Date(event.lastOccurredAt).toLocaleString('ar-EG-u-nu-latn')}
+              {(formatDateTimeAr(event.lastOccurredAt) ?? '—')}
             </div>
             {event.attemptedValue && (
               <div>
@@ -231,7 +233,7 @@ export default function SecurityEventDetailPage() {
               notes.map((note) => (
                 <div key={note.id} className="rounded-md border p-3 text-sm">
                   <p>{note.note}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{new Date(note.createdAt).toLocaleString('ar-EG-u-nu-latn')}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{(formatDateTimeAr(note.createdAt) ?? '—')}</p>
                 </div>
               ))
             )}

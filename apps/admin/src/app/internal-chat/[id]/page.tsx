@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ErrorNotice } from '@/components/notice';
 
 // بولينج بسيط زي /support-chat/:id بالظبط — مفيش WebSocket جوّه لوحة الأدمن.
 const POLL_INTERVAL_MS = 4000;
@@ -76,7 +77,7 @@ export default function InternalChatThreadDetailPage() {
         description={thread ? (thread.peer_user_type === 'admin' ? 'موظف' : 'فني') : undefined}
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <Card>
         <CardHeader>

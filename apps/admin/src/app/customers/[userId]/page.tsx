@@ -18,8 +18,10 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/order-labels';
+import { ErrorNotice } from '@/components/notice';
+import { DataList, DataRow } from '@/components/data-list';
 
 const TIER_LABELS: Record<CustomerTier, string> = {
   standard: 'عادي',
@@ -280,7 +282,7 @@ export default function CustomerDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <ProfileSummary
         items={[
@@ -320,17 +322,68 @@ export default function CustomerDetailPage() {
           <CardHeader>
             <CardTitle className="text-base">البيانات</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm">
-            <p dir="ltr" className="text-muted-foreground">{detail.phone_number}</p>
-            <p>الفئة: {TIER_LABELS[detail.customer_tier]}</p>
-            <p>طلبات: {detail.total_orders_count} إجمالي · {detail.completed_orders_count} مكتملة · {detail.cancelled_orders_count} ملغاة</p>
-            <p>إجمالي الإنفاق: {formatEgp(detail.total_spent_cents)}</p>
-            <div className="flex items-center gap-2">
-              <p>رصيد نقاط الولاء: {detail.loyalty_points_balance}</p>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setShowLoyaltyForm((s) => !s)}>
-                + إضافة نقاط
-              </Button>
-            </div>
+          {/* `DataList` بدل صفوف `<p>عنوان: قيمة</p>`: اللقطة الحقيقية كانت بتطلّع سطور زي
+              «طلبات: 0 إجمالي · 0 مكتملة · 0 ملغاة» و«رصيد نقاط الولاء: 0 + إضافة نقاط» —
+              أرقام وعناوين وزراير كلها على نفس الخط. */}
+          <CardContent className="flex flex-col gap-3">
+            <DataList>
+              <DataRow label="التليفون">
+                <span dir="ltr" className="inline-block">
+                  {detail.phone_number}
+                </span>
+              </DataRow>
+              <DataRow label="الفئة">{TIER_LABELS[detail.customer_tier]}</DataRow>
+              {/* الطلبات كانت سطر واحد فيه تلات أرقام بفواصل — بقت شرائح كل واحدة بعنوانها. */}
+              <DataRow label="الطلبات">
+                <span className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: 'إجمالي', value: detail.total_orders_count },
+                    { label: 'مكتملة', value: detail.completed_orders_count },
+                    { label: 'ملغاة', value: detail.cancelled_orders_count },
+                  ].map((item) => (
+                    <span key={item.label} className="rounded-md border px-1.5 py-0.5 text-xs leading-4">
+                      <span className="font-semibold tabular-nums">{item.value}</span>{' '}
+                      <span className="text-muted-foreground">{item.label}</span>
+                    </span>
+                  ))}
+                </span>
+              </DataRow>
+              <DataRow label="إجمالي الإنفاق" tone="strong">
+                {formatEgp(detail.total_spent_cents)}
+              </DataRow>
+              <DataRow label="رصيد نقاط الولاء">
+                <span className="flex items-center gap-2">
+                  <span className="tabular-nums">{detail.loyalty_points_balance}</span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setShowLoyaltyForm((s) => !s)}>
+                    + إضافة نقاط
+                  </Button>
+                </span>
+              </DataRow>
+              <DataRow label="متوسط التقييم اللي بيدّيه">{detail.average_rating_given ?? '—'}</DataRow>
+              <DataRow label="أول طلب">
+                {detail.first_order_at ? new Date(detail.first_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}
+              </DataRow>
+              <DataRow label="آخر طلب">
+                {detail.last_order_at ? new Date(detail.last_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}
+              </DataRow>
+              <DataRow label="كود الترشيح">
+                <span dir="ltr" className="inline-block">
+                  {detail.referral_code ?? '—'}
+                </span>
+              </DataRow>
+              {detail.referred_by_user_id && (
+                <DataRow label="اترشّح بواسطة">
+                  <a href={`/customers/${detail.referred_by_user_id}`} className="underline">
+                    عرض المستخدم
+                  </a>
+                </DataRow>
+              )}
+              {detail.is_blocked && detail.blocked_reason && (
+                <DataRow label="سبب الحظر" tone="danger">
+                  {detail.blocked_reason}
+                </DataRow>
+              )}
+            </DataList>
             {showLoyaltyForm && (
               <form onSubmit={handleCreditLoyalty} className="flex items-end gap-2">
                 <div>
@@ -349,22 +402,6 @@ export default function CustomerDetailPage() {
                   إضافة
                 </Button>
               </form>
-            )}
-            <p>متوسط التقييم اللي بيدّيه: {detail.average_rating_given ?? '—'}</p>
-            <p>أول طلب: {detail.first_order_at ? new Date(detail.first_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>
-            <p>آخر طلب: {detail.last_order_at ? new Date(detail.last_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>
-            <p dir="ltr" className="text-muted-foreground">كود الترشيح: {detail.referral_code ?? '—'}</p>
-            {detail.referred_by_user_id && (
-              <p className="text-xs text-muted-foreground">
-                اترشّح بواسطة مستخدم آخر (
-                <a href={`/customers/${detail.referred_by_user_id}`} className="underline">
-                  عرض
-                </a>
-                )
-              </p>
-            )}
-            {detail.is_blocked && detail.blocked_reason && (
-              <p className="text-destructive">سبب الحظر: {detail.blocked_reason}</p>
             )}
           </CardContent>
           <CardFooter className="flex-col items-stretch gap-3">
@@ -418,7 +455,7 @@ export default function CustomerDetailPage() {
             <WalletAdjustmentForm userId={userId} onAdjusted={loadWallet} />
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {walletError && <p className="text-destructive">{walletError}</p>}
+            {walletError && <ErrorNotice className="mb-0">{walletError}</ErrorNotice>}
             {walletMissing && (
               <p className="text-muted-foreground">لسه مفيش محفظة — بتتفتح تلقائيًا مع أول حركة مالية.</p>
             )}
@@ -445,7 +482,7 @@ export default function CustomerDetailPage() {
                         <div>
                           <p>{tx.description_ar ?? tx.transaction_type}</p>
                           <p className="text-muted-foreground">
-                            {new Date(tx.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                            {(formatDateTimeAr(tx.created_at) ?? '—')}
                           </p>
                         </div>
                         <span className={tx.direction === 'credit' ? 'text-green-600' : 'text-destructive'}>
@@ -466,7 +503,7 @@ export default function CustomerDetailPage() {
             <CardTitle className="text-base">نظرة تشغيلية 360°</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-5 text-sm">
-            {profile360Error && <p className="text-destructive">{profile360Error}</p>}
+            {profile360Error && <ErrorNotice className="mb-0">{profile360Error}</ErrorNotice>}
             {!profile360 && !profile360Error && <p className="text-muted-foreground">جاري التحميل…</p>}
             {profile360 && (
               <>
@@ -596,7 +633,7 @@ export default function CustomerDetailPage() {
             <CardTitle className="text-base">كل الطلبات ({orderHistoryTotal})</CardTitle>
           </CardHeader>
           <CardContent>
-            {orderHistoryError && <p className="text-destructive">{orderHistoryError}</p>}
+            {orderHistoryError && <ErrorNotice className="mb-0">{orderHistoryError}</ErrorNotice>}
             {!orderHistory && !orderHistoryError && <p className="text-muted-foreground">جاري التحميل…</p>}
             {orderHistory && orderHistory.length === 0 && <p className="text-muted-foreground">مفيش طلبات لسه</p>}
             {orderHistory && orderHistory.length > 0 && (

@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 import { Users } from 'lucide-react';
 
 // لوحة القوى العاملة (Script 5 Part 2 §5/9) — ملخص حي ليوم النهارده لكل موظف: حضور
@@ -53,7 +54,7 @@ export default function WorkforceDashboardPage() {
     <AppShell>
       <PageHeader title="لوحة القوى العاملة" description="حضور لحظي ونشاط اليوم لكل الموظفين — Script 5." />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="mb-6 grid grid-cols-3 gap-4">
         <Card>

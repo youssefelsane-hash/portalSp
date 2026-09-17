@@ -8,8 +8,10 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 interface PaymentChannelStatus {
   method: string;
@@ -20,6 +22,8 @@ interface PaymentChannelStatus {
   // تشخيص تشغيلي بيوصل للأدمن بس (docs/08 §76-ز) — العميل بياخد جملة عامة في
   // `unavailable_reason` بدل أسماء إعدادات ناقصة.
   admin_note?: string;
+  /** أسماء خانات الإعداد الناقصة — قايمة مستقلة عشان تتعرض شرائح مش جملة بفواصل. */
+  admin_missing_fields?: string[];
 }
 
 // وعاء العمولة (ADR-0037، docs/08 §60.1/§60.4) — طلب مالك صريح بمكان واحد في الأدمن بيشيل
@@ -319,8 +323,11 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الإعدادات" />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      <PageHeader
+        title="الإعدادات"
+        description="إعدادات المنصة كلها في مكان واحد. أي تعديل هنا بيتسجّل في سجل النشاط وبيسري على التطبيقات فورًا."
+      />
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!settings && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
 
       {paymentChannels.length > 0 && (
@@ -328,13 +335,41 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="text-base">جاهزية طرق الدفع الظاهرة للعميل</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+          <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {paymentChannels.map((channel) => (
-              <div key={channel.method} className="rounded-md border p-3">
-                <p className="font-medium">{PAYMENT_CHANNEL_LABELS[channel.method] ?? channel.method}</p>
-                <p className={channel.is_available ? 'text-sm text-green-700' : 'text-sm text-destructive'}>
-                  {channel.is_available ? 'جاهزة وتظهر للعميل' : channel.admin_note ?? channel.unavailable_reason ?? 'غير جاهزة'}
+              <div key={channel.method} className="flex flex-col gap-1.5 rounded-xl border border-border/70 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">{PAYMENT_CHANNEL_LABELS[channel.method] ?? channel.method}</p>
+                  {/* شارة بدل جملة ملوّنة: الحالة (جاهزة/مش جاهزة) قرار ثنائي، والسبب تحتها. */}
+                  <Badge variant={channel.is_available ? 'secondary' : 'destructive'}>
+                    {channel.is_available ? 'جاهزة' : 'مش جاهزة'}
+                  </Badge>
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {channel.is_available
+                    ? 'ظاهرة للعميل في شاشة الدفع.'
+                    : (channel.admin_note ?? channel.unavailable_reason ?? 'غير جاهزة')}
                 </p>
+                {/*
+                  **الخانات الناقصة شرائح مش جملة**: الرد كان بيلزقها جوّه `admin_note`، فالكارت
+                  كان بيعرض «إعداد Paymob غير مكتمل: API Key, Secret Key, Public Key, Card
+                  Integration ID, HMAC Secret» — أسماء إنجليزية بفواصل جوّه جملة عربية، اتجاه
+                  النص بيتلخبط ومش واضح أصلاً عدد الخانات (اتشاف في لقطة حقيقية). الباك-إند
+                  بقى يرجّعها قايمة (`admin_missing_fields`).
+                */}
+                {!channel.is_available && !!channel.admin_missing_fields?.length && (
+                  <div className="flex flex-wrap gap-1">
+                    {channel.admin_missing_fields.map((field) => (
+                      <span
+                        key={field}
+                        dir="ltr"
+                        className="rounded-md border border-destructive/30 bg-destructive/[0.06] px-1.5 py-0.5 text-[11px] leading-4 text-destructive"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </CardContent>

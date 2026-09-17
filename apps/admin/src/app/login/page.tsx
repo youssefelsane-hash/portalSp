@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ErrorNotice } from '@/components/notice';
 
 // useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build
 // بيفشل على /login (راجع: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout).
@@ -162,7 +163,7 @@ function LoginForm() {
                   autoFocus
                 />
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
             </CardContent>
             <CardFooter className="pt-6">
               <Button type="submit" className="w-full" disabled={isSubmitting}>
@@ -189,7 +190,7 @@ function LoginForm() {
                   autoFocus
                 />
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline underline-offset-4 text-start"
@@ -213,7 +214,7 @@ function LoginForm() {
         {step === 'mfa' && (
           <>
             <CardContent className="flex flex-col gap-4">
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
               {ceremony === 'authentication' && (
                 <button
                   type="button"
@@ -255,7 +256,7 @@ function LoginForm() {
                 استخدام كود الاسترجاع هيمسح كل الـPasskeys القديمة وهيقفل كل جلساتك الحالية —
                 هتحتاج تسجّل Passkey جديد فورًا بعد كده.
               </p>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline underline-offset-4 text-start"

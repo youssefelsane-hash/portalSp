@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import type { ComplaintResponseDto, ComplaintStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -13,6 +14,7 @@ import { StatusChip } from '@/components/status-chip';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 import {
   COMPLAINT_CATEGORY_LABELS,
   COMPLAINT_SEVERITY_LABELS,
@@ -67,7 +69,10 @@ export default function SupportPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الشكاوى" />
+      <PageHeader
+        title="الشكاوى"
+        description="شكاوى العملاء والفنيين وحالة كل واحدة — المفتوح محتاج قرار."
+      />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => (
@@ -82,7 +87,7 @@ export default function SupportPage() {
         ))}
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !filtered && <TableSkeleton columns={6} />}
       {filtered && filtered.length === 0 && <EmptyState title="مفيش شكاوى مطابقة" />}
 
@@ -150,7 +155,7 @@ export default function SupportPage() {
                     {COMPLAINT_STATUS_LABELS[complaint.complaint_status]}
                   </StatusChip>
                 </TableCell>
-                <TableCell>{new Date(complaint.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                <TableCell>{(formatDateTimeAr(complaint.created_at) ?? '—')}</TableCell>
               </TableRow>
             ))}
           </TableBody>

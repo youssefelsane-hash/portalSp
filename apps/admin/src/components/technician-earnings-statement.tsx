@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 // docs/08 §63.أ1 — كشف مستحقات الفني كان **موجود وشغال في الباك-إند** من §61
 // (`GET /admin/technicians/:id/earnings/statement` و`/earnings/months`) بس مفيش أي شاشة أدمن
@@ -116,7 +117,7 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
-        {error && <p className="text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
         {months && months.length > 0 && (
           <div className="flex flex-wrap gap-2">

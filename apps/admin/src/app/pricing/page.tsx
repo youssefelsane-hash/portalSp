@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 
 export default function PricingEnginePage() {
@@ -73,7 +74,7 @@ export default function PricingEnginePage() {
           description="لكل خدمة معادلة تسعير خاصة بيها مبنية من حقول (مساحة، عدد غرف، نوع التنفيذ...) وقواعد حساب — بدل سعر ثابت واحد لكل الحالات. إدارة الحقول/القواعد/المعاينة من صفحة كل خدمة."
         />
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
         <Card>
           <CardHeader>

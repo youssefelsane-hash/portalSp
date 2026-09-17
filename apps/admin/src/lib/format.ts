@@ -43,3 +43,35 @@ export function formatExecutionWindow(scheduledAt: string | null, durationMinute
     d.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: false });
   return `${hhmm(start)} → ${hhmm(end)}`;
 }
+
+/**
+ * **تاريخ + وقت مقروء** (بلاغ مالك 2026-09-17: «كلام متلخبط على بعضه»).
+ *
+ * `toLocaleString('ar-EG-u-nu-latn')` الافتراضي كان بيطلّع **«9:00:00 2026/9/17 ص»**: الوقت قبل
+ * التاريخ، ثواني مالهاش لازمة، و«ص» متعلّقة في الآخر — وده شكله غلط في سياق RTL. الخيارات
+ * الصريحة هنا بتطلّع **«17 سبتمبر 2026، 09:00»**: التاريخ الأول، بلا ثواني، وبنظام ٢٤ ساعة
+ * (اللي الأدمن والفني بيتعاملوا بيه في المواعيد).
+ *
+ * `null` للقيم الفاضية عشان الكولر يعرض «—» بنفسه بدل «Invalid Date».
+ */
+export function formatDateTimeAr(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('ar-EG-u-nu-latn', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+/** تاريخ بلا وقت — «17 سبتمبر 2026». لما الوقت مالوش معنى (يوم حجز، انتهاء ضمان). */
+export function formatDateAr(value: string | Date | null | undefined): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('ar-EG-u-nu-latn', { day: '2-digit', month: 'long', year: 'numeric' });
+}

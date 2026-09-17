@@ -1,12 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import { LockKeyhole, Send, StickyNote } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { ErrorNotice } from '@/components/notice';
 
 interface TechnicianInternalNoteDto {
   id: string;
@@ -93,7 +95,7 @@ export function TechnicianInternalNotes({ technicianId }: { technicianId: string
               {saving ? 'جاري الحفظ…' : 'إضافة ملاحظة'}
             </Button>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
         </form>
 
         <div className="max-h-64 space-y-2 overflow-y-auto pe-1">
@@ -104,7 +106,7 @@ export function TechnicianInternalNotes({ technicianId }: { technicianId: string
               <p className="whitespace-pre-wrap text-sm leading-6">{note.note}</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                 <span>{note.author_full_name}</span>
-                <time dateTime={note.created_at}>{new Date(note.created_at).toLocaleString('ar-EG-u-nu-latn')}</time>
+                <time dateTime={note.created_at}>{(formatDateTimeAr(note.created_at) ?? '—')}</time>
               </div>
             </article>
           ))}

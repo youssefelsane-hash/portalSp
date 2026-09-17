@@ -77,6 +77,8 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     const items = await controller.list(CUSTOMER);
     for (const item of items) {
       expect(item.admin_note).toBeUndefined();
+      // القايمة المنفصلة لازم تتحجب زي الجملة بالظبط — وإلا يبقى نقلنا التسريب مكان تاني.
+      expect(item.admin_missing_fields).toBeUndefined();
       if (item.unavailable_reason) {
         expect(item.unavailable_reason).not.toMatch(/أدمن|Paymob|API Key|إعداد/);
       }
@@ -85,10 +87,23 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
       .toBe('الطريقة دي مش متاحة دلوقتي — اختار طريقة تانية');
   });
 
-  it('الأدمن لسه بياخد التشخيص الكامل — التشخيص ما اتشالش، اتنقل لمكانه الصح', async () => {
+  /**
+   * التشخيص للأدمن **بقى جزئين**: جملة في `admin_note` + أسماء الخانات في
+   * `admin_missing_fields` (بلاغ مالك 2026-09-17: اللوحة كانت بتعرض «إعداد Paymob غير مكتمل:
+   * API Key, Secret Key, …» — أسماء إنجليزية بفواصل جوّه جملة عربية). الاختبار بيتأكد إن
+   * **مفيش معلومة اتضاعت** في النقل: الأسماء لسه بتوصل للأدمن كاملة.
+   */
+  it('الأدمن لسه بياخد التشخيص الكامل — الجملة والخانات الناقصة كل واحدة في مكانها', async () => {
     const items = await controller.list(ADMIN);
-    expect(items.find((i) => i.method === PaymentMethod.CARD)?.admin_note).toContain('API Key');
+    const card = items.find((i) => i.method === PaymentMethod.CARD);
+    expect(card?.admin_note).toBe('إعداد Paymob غير مكتمل');
+    // الأسماء نفسها لسه موجودة، بس في حقل مستقل ينفع يتعرض شرائح.
+    expect(card?.admin_missing_fields).toContain('API Key');
+    expect((card?.admin_missing_fields?.length ?? 0)).toBeGreaterThan(0);
+    // والجملة مابقاش فيها أي اسم خانة — ده اللي كان بيلخبط اتجاه النص في اللوحة.
+    expect(card?.admin_note).not.toMatch(/API Key|Secret|HMAC/);
     expect(items.find((i) => i.method === PaymentMethod.CASH)?.admin_note).toBeUndefined();
+    expect(items.find((i) => i.method === PaymentMethod.CASH)?.admin_missing_fields).toBeUndefined();
   });
 
   it('payments.cash_enabled=false — الكاش بس بيتحجب، باقي الوسائل زي isConfigured بتاعتها من غير تغيير', async () => {

@@ -12,8 +12,9 @@ import { StatusChip } from '@/components/status-chip';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { REFUND_METHOD_LABELS, REFUND_STATUS_LABELS } from '@/lib/payments-labels';
+import { ErrorNotice } from '@/components/notice';
 
 /**
  * **صفحة متابعة الاستردادات** (طلب مالك 2026-09-11).
@@ -81,7 +82,10 @@ export default function RefundsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الاستردادات" />
+      <PageHeader
+        title="الاستردادات"
+        description="كل استرداد وحالته الفعلية عند البوابة. اللي محتاج تسوية يدوية بيبان في تبويبه."
+      />
 
       <div className="mb-2 flex flex-wrap gap-2">
         {TABS.map((item) => (
@@ -97,7 +101,7 @@ export default function RefundsPage() {
       </div>
       {activeTab?.hint && <p className="mb-4 text-sm text-muted-foreground">{activeTab.hint}</p>}
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!error && !refunds && <TableSkeleton columns={7} />}
       {refunds && refunds.length === 0 && (
         <EmptyState
@@ -149,10 +153,10 @@ export default function RefundsPage() {
                   )}
                 </TableCell>
                 <TableCell>
-                  {new Date(refund.requested_at).toLocaleString('ar-EG-u-nu-latn')}
+                  {(formatDateTimeAr(refund.requested_at) ?? '—')}
                   {refund.completed_at && (
                     <span className="block text-xs text-muted-foreground">
-                      اكتمل: {new Date(refund.completed_at).toLocaleString('ar-EG-u-nu-latn')}
+                      اكتمل: {(formatDateTimeAr(refund.completed_at) ?? '—')}
                     </span>
                   )}
                 </TableCell>

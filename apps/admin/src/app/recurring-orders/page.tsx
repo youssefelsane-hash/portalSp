@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import type { AdminRecurringPlanResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { BOOKING_MODE_LABELS, RECURRING_FREQUENCY_LABELS } from '@/lib/order-labels';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -53,7 +55,10 @@ export default function RecurringOrdersPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الحجوزات المتكررة (الخطط)" />
+      <PageHeader
+        title="الحجوزات المتكررة (الخطط)"
+        description="خطط العملاء اللي بتولّد طلبات تلقائيًا — مواعيدها الجاية وحالة كل خطة."
+      />
 
       <p className="mb-4 text-sm text-muted-foreground">
         التعريفات اللي بتولّد طلبات عادية تلقائيًا كل موعد — الطلبات نفسها في{' '}
@@ -79,7 +84,7 @@ export default function RecurringOrdersPage() {
         ))}
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !plans && <TableSkeleton columns={8} />}
       {plans && plans.length === 0 && <EmptyState title="مفيش خطط متكررة مطابقة" />}
 
@@ -133,7 +138,7 @@ export default function RecurringOrdersPage() {
                       <span className="text-muted-foreground">بعد الشغل</span>
                     )}
                   </TableCell>
-                  <TableCell>{new Date(plan.next_run_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                  <TableCell>{(formatDateTimeAr(plan.next_run_at) ?? '—')}</TableCell>
                   <TableCell>
                     {plan.last_generated_order_id ? (
                       <Link href={`/orders/${plan.last_generated_order_id}`} className="underline">
@@ -144,7 +149,7 @@ export default function RecurringOrdersPage() {
                     )}
                     {plan.last_occurrence_at && (
                       <div className="text-xs text-muted-foreground">
-                        {new Date(plan.last_occurrence_at).toLocaleString('ar-EG-u-nu-latn')}
+                        {(formatDateTimeAr(plan.last_occurrence_at) ?? '—')}
                       </div>
                     )}
                   </TableCell>
@@ -158,7 +163,7 @@ export default function RecurringOrdersPage() {
                   <TableCell>
                     {plan.last_failure_reason ? (
                       <Badge variant="destructive" title={plan.last_failure_reason}>
-                        فشل ({plan.consecutive_failure_count}/3) — {new Date(plan.last_failed_at!).toLocaleString('ar-EG-u-nu-latn')}
+                        فشل ({plan.consecutive_failure_count}/3) — {(formatDateTimeAr(plan.last_failed_at!) ?? '—')}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">—</span>

@@ -13,8 +13,9 @@ import { PromptDialog } from '@/components/prompt-dialog';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { PAYOUT_METHOD_LABELS, PAYOUT_STATUS_LABELS, payoutStatusTone } from '@/lib/payments-labels';
+import { ErrorNotice } from '@/components/notice';
 
 const STATUS_FILTERS: { value: PayoutStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'الكل' },
@@ -96,7 +97,10 @@ export default function PayoutsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="طلبات الصرف" />
+      <PageHeader
+        title="طلبات الصرف"
+        description="مستحقات الفنيين اللي طلبوا صرفها: اللي مستني موافقة، والمعتمد، والمصروف فعلاً."
+      />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => (
@@ -111,7 +115,7 @@ export default function PayoutsPage() {
         ))}
       </div>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!error && !payouts && <TableSkeleton columns={7} />}
       {payouts && payouts.length === 0 && <EmptyState title="مفيش طلبات صرف مطابقة" />}
 
@@ -149,7 +153,7 @@ export default function PayoutsPage() {
                       <span className="block text-xs text-muted-foreground">{payout.rejection_reason}</span>
                     )}
                   </TableCell>
-                  <TableCell>{new Date(payout.requested_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                  <TableCell>{(formatDateTimeAr(payout.requested_at) ?? '—')}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="outline" disabled={isSaving} onClick={() => toggleOrderItems(payout.id)}>

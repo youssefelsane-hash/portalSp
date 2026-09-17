@@ -28,7 +28,9 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { LEVEL_LABELS } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
+import { ErrorNotice } from '@/components/notice';
 
 
 function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
@@ -43,6 +45,39 @@ function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
       <span className="max-w-24 truncate text-xs text-muted-foreground" dir="ltr" title={url}>
         الرابط محفوظ
       </span>
+    </div>
+  );
+}
+
+/**
+ * **شرائح الوسائط المختصرة** — للجداول بس.
+ *
+ * الجدول كان بيحط `MediaThumbnail` مرتين جنب بعض، فالخانة اللي مفيهاش صور كانت بتطلع
+ * «غير مضاف غير مضاف» — كلمتين مكررتين بلا أي دلالة على أي خانة ناقصة (بلاغ مالك
+ * 2026-09-17: «كلام مش معروف يعني إيه»). الشريحة هنا بتسمّي الخانة نفسها (أيقونة/غلاف)
+ * وبتقول بعلامة واحدة هي متحطّة ولا لأ.
+ */
+function MediaSlotChips({ slots }: { slots: { label: string; url: string | null }[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {slots.map(({ label, url }) => (
+        <span
+          key={label}
+          title={url ?? `${label}: غير مضافة`}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] leading-4',
+            url ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-dashed text-muted-foreground',
+          )}
+        >
+          {url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={url} alt="" className="h-4 w-4 rounded-sm bg-white object-contain" />
+          ) : (
+            <span aria-hidden>—</span>
+          )}
+          {label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -357,10 +392,21 @@ export default function CatalogPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الكتالوج" />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      <PageHeader
+        title="الكتالوج"
+        description="الفئات والخدمات اللي العميل بيشوفها. دوس على اسم الخدمة عشان تظبّط تسعيرها وإعدادات حجزها بالتفصيل."
+      />
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      {/*
+        **عمود واحد مش عمودين** (بلاغ مالك 2026-09-17: «الواجهة متلخبطة»). الشبكة كانت
+        `xl:grid-cols-2`، و`xl:` بيقيس **عرض الشاشة** مش عرض المحتوى — فعلى لابتوب 1280px
+        الشرط بيتحقّق وحاوية المحتوى (926px بعد الشريط الجانبي) بتتقسم نُصين ~440px، وكل نص
+        فيه جدول عرضه الطبيعي ~770px (اتقاس فعليًا: حاوية 400px / جدول 769px). النتيجة جدولين
+        بيتسحبوا أفقيًا جنب بعض — أسوأ حالة في اللوحة كلها. العمود الواحد بيخلي كل جدول ياخد
+        عرضه الكامل.
+      */}
+      <div className="flex flex-col gap-6">
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">الفئات</CardTitle>
@@ -431,24 +477,31 @@ export default function CatalogPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>الاسم</TableHead>
-                    <TableHead>Slug</TableHead>
-                    <TableHead>الوسائط</TableHead>
+                    <TableHead>الفئة</TableHead>
+                    <TableHead>الصور</TableHead>
                     <TableHead>الحالة</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {categories.map((category) => (
                     <Fragment key={category.id}>
                       <TableRow>
-                        <TableCell>{category.name_ar}</TableCell>
-                        <TableCell dir="ltr">{category.slug}</TableCell>
+                        {/* الاسم والـslug في خانة واحدة: الـslug تعريف تقني للاسم اللي فوقه،
+                            مش عمود مستقل يستحق عرض كامل جنبه. */}
                         <TableCell>
-                          <div className="flex gap-3">
-                            <MediaThumbnail url={category.icon_url} label={`أيقونة ${category.name_ar}`} />
-                            <MediaThumbnail url={category.cover_image_url} label={`غلاف ${category.name_ar}`} />
+                          <div className="font-medium">{category.name_ar}</div>
+                          <div className="text-xs text-muted-foreground" dir="ltr">
+                            {category.slug}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <MediaSlotChips
+                            slots={[
+                              { label: 'أيقونة', url: category.icon_url },
+                              { label: 'غلاف', url: category.cover_image_url },
+                            ]}
+                          />
                         </TableCell>
                         <TableCell>
                           <button type="button" disabled={isSaving} onClick={() => toggleCategoryActive(category)} className="cursor-pointer">
@@ -468,7 +521,10 @@ export default function CatalogPage() {
                       </TableRow>
                       {editingCategoryId === category.id && (
                         <TableRow key={`${category.id}-edit`}>
-                          <TableCell colSpan={5}>
+                          {/* `whitespace-normal` لازم: `TableCell` افتراضيًا `whitespace-nowrap`
+                              (صح للخانات القصيرة)، والقاعدة بتورَّث لجوّه — فنص الفورم الشارح
+                              كان بيمتد في سطر واحد ويوسّع الجدول كله. */}
+                          <TableCell colSpan={4} className="whitespace-normal">
                             <form
                               onSubmit={(e) => handleUpdateCategory(e, category.id)}
                               className="flex flex-col gap-5 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.045] via-background to-background p-4 shadow-sm"
@@ -745,12 +801,12 @@ export default function CatalogPage() {
             ) : (
               <Table>
                 <TableHeader>
+                  {/* ستة أعمدة اتلمّوا لأربعة: عمودين صور جنب بعض كانوا بيطلّعوا «غير مضاف غير
+                      مضاف»، والتسعير والسعر الأساسي معلومة واحدة (السعر بيوضّح الطريقة). */}
                   <TableRow>
-                    <TableHead>الاسم</TableHead>
-                    <TableHead>صورة الخدمة</TableHead>
-                    <TableHead>الأكثر طلبًا</TableHead>
-                    <TableHead>التسعير</TableHead>
-                    <TableHead>السعر الأساسي</TableHead>
+                    <TableHead>الخدمة</TableHead>
+                    <TableHead>الصور</TableHead>
+                    <TableHead>السعر</TableHead>
                     <TableHead>الحالة</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -758,35 +814,45 @@ export default function CatalogPage() {
                   {services.map((service) => (
                     <TableRow key={service.id}>
                       <TableCell>
-                        <Link href={`/catalog/services/${service.id}`} className="hover:underline">
+                        <Link href={`/catalog/services/${service.id}`} className="font-medium hover:underline">
                           {service.name_ar}
                         </Link>
+                        {/* الاسم المختصر بيبان **بس** لو مختلف فعلاً — قبل كده كان بيتكرر تحت
+                            الاسم الأساسي في كل سطر بلا أي إضافة. */}
+                        {service.featured_name_ar && service.featured_name_ar !== service.name_ar && (
+                          <div className="text-xs text-muted-foreground">في الأكثر طلبًا: {service.featured_name_ar}</div>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <MediaThumbnail url={service.icon_url} label={`أيقونة ${service.name_ar}`} />
+                        <MediaSlotChips
+                          slots={[
+                            { label: 'صورة', url: service.icon_url },
+                            { label: 'شعار', url: service.featured_icon_url },
+                          ]}
+                        />
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <MediaThumbnail url={service.featured_icon_url} label={`شعار ${service.featured_name_ar ?? service.name_ar}`} />
-                          <span className="text-xs text-muted-foreground">{service.featured_name_ar || service.name_ar}</span>
+                        <div className="font-medium">
+                          {service.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(service.base_price_cents)}
                         </div>
+                        <div className="text-xs text-muted-foreground">{PRICING_MODEL_LABELS[service.pricing_model]}</div>
                       </TableCell>
-                      <TableCell>{PRICING_MODEL_LABELS[service.pricing_model]}</TableCell>
-                      <TableCell>{service.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(service.base_price_cents)}</TableCell>
                       <TableCell>
-                        <button type="button" disabled={isSaving} onClick={() => toggleServiceActive(service)} className="cursor-pointer">
-                          <Badge variant={service.is_active ? 'secondary' : 'outline'}>{service.is_active ? 'نشطة' : 'معطّلة'}</Badge>
-                        </button>
-                        {/* ADR-0046 — الخدمة ما بتتعلنش تلقائيًا إلا لو الأدمن علّمها هنا. */}
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => toggleServicePromotable(service)}
-                          className="mr-2 cursor-pointer"
-                          title="السماح للمنصة تبعت إشعارات إعلانية عن الخدمة دي"
-                        >
-                          <Badge variant={service.is_promotable ? 'secondary' : 'outline'}>{service.is_promotable ? 'قابلة للإعلان' : 'مش بتتعلن'}</Badge>
-                        </button>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button type="button" disabled={isSaving} onClick={() => toggleServiceActive(service)} className="cursor-pointer">
+                            <Badge variant={service.is_active ? 'secondary' : 'outline'}>{service.is_active ? 'نشطة' : 'معطّلة'}</Badge>
+                          </button>
+                          {/* ADR-0046 — الخدمة ما بتتعلنش تلقائيًا إلا لو الأدمن علّمها هنا. */}
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => toggleServicePromotable(service)}
+                            className="cursor-pointer"
+                            title="السماح للمنصة تبعت إشعارات إعلانية عن الخدمة دي"
+                          >
+                            <Badge variant={service.is_promotable ? 'secondary' : 'outline'}>{service.is_promotable ? 'قابلة للإعلان' : 'مش بتتعلن'}</Badge>
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -797,11 +863,20 @@ export default function CatalogPage() {
         </Card>
       </div>
 
-      <p className="mt-6 text-sm text-muted-foreground">
-        دوس على شارة الحالة عشان تفعّل/تعطّل، وعلى شارة «قابلة للإعلان» عشان تسمح للمنصة تبعت إشعارات إعلانية عن الخدمة دي (الحملات التسويقية). دوس على اسم
-        الخدمة عشان تعدّل كل حقول الخدمة التفصيلية (السعر الأساسي، الحد الأدنى/الأقصى، الضمان، أقل مستوى فني، ...) وتدير تسعير المناطق، فئات تسعير الفني، تسعير
-        المستويات، والإضافات الاختيارية.
-      </p>
+      {/* كانت فقرة واحدة من ٣ سطور مكدّسة فيها تلات تعليمات مختلفة (بلاغ مالك: «كلام كله كده
+          متلخبط على بعضه»). نفس المعلومة بالظبط، بس كل تعليمة سطر له عنوانه. */}
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        {[
+          { title: 'شارة الحالة', body: 'دوس عليها عشان تفعّل أو تعطّل الفئة/الخدمة فورًا.' },
+          { title: 'شارة «قابلة للإعلان»', body: 'بتسمح للمنصة تبعت إشعارات إعلانية عن الخدمة في الحملات التسويقية.' },
+          { title: 'اسم الخدمة', body: 'بيفتح صفحتها: السعر، الحدود، الضمان، أقل مستوى فني، تسعير المناطق والمستويات، والإضافات.' },
+        ].map((hint) => (
+          <div key={hint.title} className="rounded-xl border border-border/70 bg-muted/25 p-3">
+            <p className="text-sm font-semibold">{hint.title}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{hint.body}</p>
+          </div>
+        ))}
+      </div>
     </AppShell>
   );
 }

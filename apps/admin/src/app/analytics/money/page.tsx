@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AnalyticsRangePicker } from '@/components/analytics-range-picker';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { DEFAULT_RANGE_DAYS, daysAgoIso, exclusiveTo, formatCount, inclusiveFrom, todayIso } from '@/lib/analytics-format';
 
 /** السطر الأخير في السلّم هو الخلاصة — بيتعرض أعرض وأغمق عشان يتقرا كنتيجة مش كبند. */
@@ -177,7 +177,7 @@ export default function MoneyPage() {
                             ) : 'بدون طلب مرتبط'}
                           </TableCell>
                           <TableCell className="tabular-nums">{formatEgp(issue.amount_cents)}</TableCell>
-                          <TableCell className="text-xs">{new Date(issue.occurred_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                          <TableCell className="text-xs">{(formatDateTimeAr(issue.occurred_at) ?? '—')}</TableCell>
                           <TableCell className="text-sm">{issue.detail}</TableCell>
                         </TableRow>
                       ))}

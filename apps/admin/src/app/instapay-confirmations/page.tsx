@@ -16,7 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 import Link from 'next/link';
 
 // طابور تأكيد InstaPay الإداري (§28) — كانت فجوة حقيقية: confirm/reject-instapay موجودين من زمان
@@ -107,7 +108,7 @@ export default function InstaPayConfirmationsPage() {
         ))}
       </div>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!error && !payments && <TableSkeleton columns={7} />}
       {payments && payments.length === 0 && (
         <EmptyState
@@ -182,19 +183,19 @@ export default function InstaPayConfirmationsPage() {
                 </TableCell>
                 <TableCell className="text-xs leading-6">
                   <span className="block">
-                    بدأت: {new Date(payment.initiated_at).toLocaleString('ar-EG-u-nu-latn')}
+                    بدأت: {(formatDateTimeAr(payment.initiated_at) ?? '—')}
                   </span>
                   <span className="block">
                     بلاغ العميل:{' '}
                     {payment.customer_confirmed_transfer_at
-                      ? new Date(payment.customer_confirmed_transfer_at).toLocaleString('ar-EG-u-nu-latn')
+                      ? (formatDateTimeAr(payment.customer_confirmed_transfer_at) ?? '—')
                       : '—'}
                   </span>
                 </TableCell>
                 <TableCell className="text-xs leading-6">
                   {payment.decided_at ? (
                     <>
-                      <span className="block">{new Date(payment.decided_at).toLocaleString('ar-EG-u-nu-latn')}</span>
+                      <span className="block">{(formatDateTimeAr(payment.decided_at) ?? '—')}</span>
                       <span className="block text-muted-foreground">
                         بواسطة {payment.decided_by_name ?? '—'}
                       </span>

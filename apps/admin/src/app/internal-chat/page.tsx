@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { InternalContactResponseDto, InternalThreadResponseDto } from '@baytak/shared-types';
@@ -15,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 export default function InternalChatThreadsPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -72,7 +74,7 @@ export default function InternalChatThreadsPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showNew && (
         <Card className="mb-6">
@@ -122,7 +124,7 @@ export default function InternalChatThreadsPage() {
                   <Badge variant="outline">{thread.peer_user_type === 'admin' ? 'موظف' : 'فني'}</Badge>
                 </TableCell>
                 <TableCell>
-                  {thread.last_message_at ? new Date(thread.last_message_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                  {thread.last_message_at ? (formatDateTimeAr(thread.last_message_at) ?? '—') : '—'}
                 </TableCell>
               </TableRow>
             ))}

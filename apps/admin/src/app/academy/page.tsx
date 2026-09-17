@@ -25,6 +25,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 export default function AcademyPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -133,7 +134,7 @@ export default function AcademyPage() {
           description="كورسات تدريب الفنيين ونتائج اختباراتهم — تسجيل النتائج يدوي من الأدمن (مفيش نظام اختبار تلقائي داخل التطبيقات لسه، قرار عمل واعي)."
         />
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">

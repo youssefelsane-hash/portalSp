@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const STATUS_LABELS_AR: Record<TechnicianReferralBonusStatus, string> = {
   credited: 'مستحقة',
@@ -74,7 +75,7 @@ export default function TechnicianReferralsPage() {
   return (
     <AppShell>
       <PageHeader title="ترشيح QR الفني" actions={<p className="text-sm text-muted-foreground">{total} سجل</p>} />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>

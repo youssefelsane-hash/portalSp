@@ -18,10 +18,14 @@ function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn('relative mb-6 flex flex-wrap items-start justify-between gap-4 overflow-hidden rounded-2xl border border-border/70 bg-card/90 p-5 shadow-sm', className)}>
+    // **الارتفاع اتقلّ** (بلاغ مالك 2026-09-17): الكارت كان `p-5` + شريط زخرفي بارتفاع ٤px
+    // وهامش تحته، فصفحة عنوانها كلمة واحدة كانت بتاخد ~١١٠px قبل أول معلومة حقيقية — والعنوان
+    // نفسه ظاهر أصلاً في شريط اللوحة فوق. الشريط الزخرفي بقى بس مع الوصف (هناك بيشتغل كمرساة
+    // بصرية لبلوك نص)، ومن غير وصف بيختفي.
+    <div className={cn('relative mb-5 flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-border/70 bg-card/90 px-5 py-4 shadow-sm', className)}>
       <div className="pointer-events-none absolute inset-y-0 end-0 w-48 bg-gradient-to-s from-primary/8 to-transparent" />
       <div className="relative">
-        <div className="mb-2 h-1 w-10 rounded-full bg-primary" />
+        {description && <div className="mb-2 h-1 w-10 rounded-full bg-primary" />}
         <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {description && <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>}
       </div>

@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { IsArray, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { OrderStatus, OrderType } from '../entities/order.entity';
+import { OrderPaymentStatus, OrderStatus, OrderType } from '../entities/order.entity';
 import { OrderBucket, OrderDateField, OrderScope } from '../order-scope';
 
 export class ListOrdersQueryDto {
@@ -45,6 +45,19 @@ export class ListOrdersQueryDto {
   @IsEnum(OrderStatus, { each: true })
   @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value))
   statuses?: OrderStatus[];
+
+  /** حالة الدفع — الأدمن بيدوّر على «خلص شغل ومادفعش» كتير. */
+  @IsOptional()
+  @IsEnum(OrderPaymentStatus)
+  payment_status?: OrderPaymentStatus;
+
+  /**
+   * حالة الطاقم — `incomplete` معناها العدد المطلوب أكبر من المملوء فعلاً (نفس قاعدة
+   * `computeCrewComposition`: القائد +1، والأعضاء بـ`crew_slot`).
+   */
+  @IsOptional()
+  @IsIn(['incomplete'])
+  crew?: 'incomplete';
 
   @IsOptional()
   @IsUUID()

@@ -13,6 +13,7 @@ import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -53,7 +54,7 @@ export default function EmployeesPage() {
         }
       />
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !employees && <TableSkeleton columns={5} />}
       {employees && employees.length === 0 && <EmptyState title="مفيش موظفين لسه" />}
 

@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ErrorNotice } from '@/components/notice';
 import { normalizeServiceOptions, type ServiceOption, type ServicesResponse } from './warranty-plan-services';
 
 interface WarrantyPlanRow {
@@ -72,11 +73,14 @@ export default function AdminWarrantyPlansPage() {
 
   return (
     <AppShell>
-      <PageHeader title="خطط الضمان" />
+      <PageHeader
+        title="خطط الضمان"
+        description="خطط الضمان الإضافية اللي العميل يقدر يشتريها مع الطلب، ومدة تغطية كل واحدة."
+      />
       <div className="mb-4">
         <Button size="sm" onClick={() => setShowCreate(!showCreate)}>{showCreate ? 'إلغاء' : '+ إنشاء خطة ضمان'}</Button>
       </div>
-      {error && <p className="text-destructive mb-4">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showCreate && <CreateWarrantyPlanForm services={services} onCreated={() => { setShowCreate(false); load(); }} />}
 
@@ -178,7 +182,7 @@ function CreateWarrantyPlanForm({ onCreated, services }: { onCreated: () => void
       </div>
       <div><Label>الشروط والأحكام</Label><textarea value={terms} onChange={(e) => setTerms(e.target.value)} className="w-full rounded border p-2 text-sm" rows={3} placeholder="شروط التغطية…" /></div>
       <div><Label>الاستثناءات</Label><textarea value={exclusions} onChange={(e) => setExclusions(e.target.value)} className="w-full rounded border p-2 text-sm" rows={2} placeholder="ما لا يشمله الضمان…" /></div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       <Button size="sm" disabled={saving} onClick={() => void submit()}>{saving ? '…' : 'إنشاء'}</Button>
     </div>
   );

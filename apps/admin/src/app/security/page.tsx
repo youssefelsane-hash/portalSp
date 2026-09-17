@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 import { KeyRound, Laptop } from 'lucide-react';
 
 // إدارة Passkeys والأجهزة/الجلسات (ADR-0011 §5/§21) — تسجيل Passkey جديد بيحصل بس جوّه مسار
@@ -75,7 +76,7 @@ export default function SecurityPage() {
     <AppShell>
       <PageHeader title="الأمان والأجهزة" description={`إدارة Passkeys والجلسات المفتوحة لحساب ${user?.full_name ?? ''}`} />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

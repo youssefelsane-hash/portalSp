@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableRow, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const AUDIT_ACTION_LABELS_AR: Record<string, string> = {
   'role.created': 'إنشاء الدور',
@@ -215,7 +216,7 @@ export default function RoleDetailPage() {
           </>
         }
       />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">

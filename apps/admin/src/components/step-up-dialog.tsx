@@ -2,6 +2,7 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { ErrorNotice } from '@/components/notice';
 
 /**
  * حوار Step-Up عام (ADR-0011 §4) — بيتفتح تلقائيًا لما أي عملية حساسة (استرداد، رفع براندنج،
@@ -32,7 +33,7 @@ export function StepUpDialog({
             داخل بالفعل. ده إجراء أمان إضافي لحماية العمليات المالية والإدارية الحساسة.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={isVerifying}>
             إلغاء
