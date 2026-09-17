@@ -175,6 +175,12 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       await q(`DELETE FROM technician_services WHERE technician_id IN ($1,$2)`, [ids.lightTechProfile, ids.meaningfulTechProfile]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      // الإشعارات بتتكتب من listener **بعد** الـcommit، فممكن توصل بعد التنظيف ده وتقفل حذف
+      // المستخدم على FK — فشل متقطّع في الـsuite كلها بلا أي اختبار فاشل (نفس فئة
+      // `chat_threads` في `admin-order-timeline.spec.ts`).
+      await q(`DELETE FROM notifications WHERE user_id = ANY($1::uuid[])`, [
+        [ids.customerUser, ids.lightTechUser, ids.meaningfulTechUser],
+      ]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
       await q(`DELETE FROM technician_profiles WHERE id IN ($1,$2)`, [ids.lightTechProfile, ids.meaningfulTechProfile]);
       await q(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.lightTechUser, ids.meaningfulTechUser]);

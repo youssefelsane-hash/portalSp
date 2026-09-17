@@ -14,6 +14,7 @@ import {
   CrewSlotRejectionReason,
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
+  companyRecruitmentScopeCondition,
   crewSlotQualificationCondition,
   technicianCityCoverageCondition,
   technicianServiceQualificationCondition,
@@ -529,9 +530,13 @@ export class OrderTeamService {
    * (`capacityTier`) عشان الواجهة تقدر تعرض "فرصة اختيارية" بدل تجنيد فوري. البلوك المستبعد
    * الوحيد هو BLOCKED (حظر يوم صريح) — ده استبعاد حقيقي، مش تفضيلي.
    *
-   * **أولوية فريق القائد الدائم (docs/08 §35 بند 2، ADR-0021 §2)**: `isLeaderTeamMember` (نفس
-   * `technician_companies.id` بتاع القائد) بيترتّب أولاً — أعضاء فريقه الدائم بيظهروا فوق أي فني
-   * تاني لو مؤهّلين، من غير ما نستبعد الباقي.
+   * **أولوية فريق القائد الدائم (docs/08 §35 بند 2، ADR-0021 §2)**: `isLeaderTeamMember` بيترتّب
+   * أولاً — أعضاء الفريق بيظهروا فوق أي فني تاني لو مؤهّلين، من غير ما نستبعد الباقي.
+   *
+   * **المقياس هو شركة الطلب لو موجودة، وإلا شركة القائد** (docs/08 §163): كان بيقارن على شركة
+   * القائد دايمًا، فطلب شركة بقائد من برّها كان بيدّي البادج والأولوية لزمايل القائد بدل ناس
+   * الشركة صاحبة الطلب — عكس اللي الأدمن والعميل فاهمينه. و`COALESCE` هنا مش تجميل: الطلب
+   * الفردي مالوش `assigned_company_id` فبيفضل على السلوك القديم بالحرف.
    *
    * **أولوية الفريق المفضّل (docs/08 §36.17، ADR-0022)**: `isPreferredCrewMember` (عضو مقبول في
    * الفريق المفضّل الدائم بتاع القائد) بيترتّب تاني حاجة بعد `isLeaderTeamMember` مباشرة — مستوى
@@ -558,7 +563,7 @@ export class OrderTeamService {
       SELECT tp.id AS "technicianId", u.full_name AS "fullName", u.avatar_url AS "avatarUrl",
              tp.current_level AS "currentLevel", tp.average_rating AS "averageRating",
              ST_Distance(tp.current_location, a.location) / 1000.0 AS "distanceKm",
-             (tp.company_id IS NOT NULL AND tp.company_id = $4::uuid) AS "isLeaderTeamMember",
+             (tp.company_id IS NOT NULL AND tp.company_id = COALESCE(o.assigned_company_id, $4::uuid)) AS "isLeaderTeamMember",
              EXISTS (
                SELECT 1 FROM technician_preferred_crew_members pcm
                WHERE pcm.owner_technician_id = $2 AND pcm.member_technician_id = tp.id
@@ -607,16 +612,14 @@ export class OrderTeamService {
           serviceRequiresLeadExpr: 'svc.requires_technician_lead',
           directServiceAlias: 'ts',
         })}
-        -- **الشركة المقفولة بتجنّد من طاقمها بس** (ADR-0086، طلب مالك §141 بند ٨: «هل الشركة
-        -- دي يحق لها تدعو من الفنيين اللي على المنصة كمان، ولا هم community مقفولة على نفسها»).
-        --
-        -- الشرط بيتفعّل بس لما الطلب **طلب شركة** وسياستها مقفولة. الطلب الفردي (حتى لو قائده
-        -- عضو في شركة) بيعدّي زي ما هو بالظبط — ودي نقطة بند ٩ بالحرف.
-        AND (
-          o.assigned_company_id IS NULL
-          OR order_company.allows_external_recruitment IS TRUE
-          OR tp.company_id = o.assigned_company_id
-        )
+        -- **الشركة مفتوحة افتراضيًا، والمقفولة بتجنّد من طاقمها بس** (ADR-0086 + تعديل ١،
+        -- docs/08 §163). الشرط اتنقل لـcompanyRecruitmentScopeCondition() عشان يتختبر بنفس
+        -- نصه على Postgres حقيقي بدل نسخة في السبيك بتفضل خضرا وهي بتمتحن حاجة تانية.
+        AND ${companyRecruitmentScopeCondition({
+          candidateCompanyIdExpr: 'tp.company_id',
+          orderCompanyIdExpr: 'o.assigned_company_id',
+          allowsExternalExpr: 'order_company.allows_external_recruitment',
+        })}
         -- (اعتماد التخصص بقى جوّه crewSlotQualificationCondition فوق — كان مكرر هنا.)
         ${role === 'assistant'
           ? `AND ${technicianCityCoverageCondition({
@@ -630,7 +633,10 @@ export class OrderTeamService {
               WHEN 'premium' THEN 3 WHEN 'team_leader' THEN 4 END <= $3
       ORDER BY ${
         role === 'assistant'
-          ? `"distanceKm" ASC NULLS LAST,
+          ? // docs/08 §163 — أعضاء الشركة الأقرب لطلبها بيظهروا فوق في **قايمة المساعدين كمان**،
+            // مش في قايمة الفنيين بس. كانت مسافة+جودة بس، فقائد طلب شركة مفتوحة كان يلاقي
+            // مساعدين من برّه فوق زمايله بلا سبب مفهوم له. الاستبعاد ما اتغيّرش — ترتيب بس.
+            `"isLeaderTeamMember" DESC, "distanceKm" ASC NULLS LAST,
              ${candidateQualityScoreSql({
                workloadWeightParam: '$6',
                fairnessWeightParam: '$9',

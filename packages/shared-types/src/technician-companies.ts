@@ -8,6 +8,13 @@ export interface CompanyResponseDto {
   is_trust_verified: boolean;
   /** ADR-0042 (docs/08 §64.و) — مضاعف سعر الشغل لحجوزات الشركة دي (1 = السعر الأساسي). */
   price_multiplier: number;
+  /**
+   * ADR-0086 + تعديل ١ (docs/08 §163) — تقدر تجنّد فنيين/مساعدين من المنصة كلها لطلباتها؟
+   *
+   * الـAPI بيرجّعه من أول ADR-0086، بس النوع المشترك مكانش بيعلنه — فلوحة الأدمن مكانتش
+   * تعرف إنه موجود أصلاً، والمفتاح فضل بلا واجهة. الافتراضي بقى `true` (مفتوحة).
+   */
+  allows_external_recruitment: boolean;
   trust_verified_at: string | null;
   trust_verified_note: string | null;
   created_at: string;
