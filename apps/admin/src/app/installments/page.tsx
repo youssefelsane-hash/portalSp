@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 const egp = (cents: number) => `${(cents / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م`;
@@ -75,7 +76,10 @@ export default function InstallmentsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="التقسيط" />
+      <PageHeader
+        title="التقسيط"
+        description="طلبات التقسيط وخططه: اللي مستني مراجعة، واللي متفعّل، والمتأخر في السداد."
+      />
       <div className="mb-4 flex gap-2">
         <Button size="sm" variant={tab === 'applications' ? 'default' : 'outline'} onClick={() => setTab('applications')}>
           طلبات المراجعة
@@ -84,7 +88,7 @@ export default function InstallmentsPage() {
           الخطط والخدمات
         </Button>
       </div>
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
       {tab === 'applications' && (
         <>
@@ -191,7 +195,7 @@ function PlansTab() {
         <span className="text-sm text-muted-foreground">الخطة لازم تتربط بخدمة واحدة على الأقل عشان تظهر للعملاء.</span>
       </div>
 
-      {error && <p className="text-destructive mb-4">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showCreate && <CreatePlanForm onCreated={() => { setShowCreate(false); loadPlans(); }} />}
 
@@ -369,7 +373,7 @@ function CreatePlanForm({ onCreated }: { onCreated: () => void }) {
         <div><Label>أقصى مبلغ (ج.م)</Label><Input type="number" min={0} value={maxCents} onChange={(e) => setMaxCents(e.target.value ? Number(e.target.value) : '')} placeholder="اختياري" /></div>
         <div className="col-span-2"><Label>مستندات مطلوبة (مفصولة بفاصلة)</Label><Input value={docReqs} onChange={(e) => setDocReqs(e.target.value)} placeholder="صورة البطاقة، إثبات عنوان" /></div>
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       <Button size="sm" disabled={saving} onClick={() => void submit()}>{saving ? 'جاري الحفظ…' : 'إنشاء الخطة'}</Button>
     </div>
   );

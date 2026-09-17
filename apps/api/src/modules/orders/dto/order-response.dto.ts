@@ -43,6 +43,14 @@ export interface OrderResponseDto {
   pricing_period_end: string | null;
   /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
   duration_minutes: number | null;
+  /**
+   * بداية/نهاية الشغل **الفعلية** (ADR-0102) — منها بتتحسب «المدة الفعلية» في شاشة الأدمن.
+   *
+   * مفصولة عن `duration_minutes` عن قصد: دي تقدير الحجز اللي العميل شافه، ودول اللي حصل فعلاً.
+   * خلطهم كان بيخلّي الأدمن مايعرفش هل التقدير كان صح ولا لأ.
+   */
+  work_started_at: string | null;
+  work_completed_at: string | null;
   /** رسايل الإدارة للعميل على الطلب (ADR-0071) — الأحدث الأول. فاضية في القوايم. */
   customer_notices: OrderCustomerNoticeDto[];
   /** يظهر في تفاصيل طلب العميل فقط؛ القوائم تتركه undefined لتجنب استعلام لكل صف. */
@@ -216,6 +224,8 @@ export function toOrderResponseDto(
     pricing_period_start: order.pricingPeriodStart ? order.pricingPeriodStart.toISOString() : null,
     pricing_period_end: order.pricingPeriodEnd ? order.pricingPeriodEnd.toISOString() : null,
     duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
+    work_started_at: order.workStartedAt?.toISOString() ?? null,
+    work_completed_at: order.workCompletedAt?.toISOString() ?? null,
     // ADR-0071 — رسايل الإدارة زي «محتاجين تفاصيل أكتر» و«حوّلناه لمعاينة في الموقع». `[]` في
     // القوايم ومسارات الأدمن اللي مابتمرّرهاش، مش `undefined`، عشان العميل مايحتاجش يفرّق بين
     // «مفيش رسايل» و«الحقل مش موجود».

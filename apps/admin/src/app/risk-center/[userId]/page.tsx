@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 import { BUCKET_LABELS } from '../page';
 
 /**
@@ -203,7 +204,7 @@ export default function RiskProfilePage({ params }: { params: Promise<{ userId: 
       </Link>
 
       {profile.loading && <p className="text-muted-foreground">جاري تحميل ملف المخاطر…</p>}
-      {profile.error && <p className="text-destructive">{profile.error}</p>}
+      {profile.error && <ErrorNotice className="mb-0">{profile.error}</ErrorNotice>}
 
       {data && (
         <>

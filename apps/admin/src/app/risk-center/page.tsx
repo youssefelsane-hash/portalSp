@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 /**
  * **مركز المخاطر والتلاعب** (ADR-0085، طلب مالك docs/08 §140).
@@ -205,7 +206,7 @@ export default function RiskCenterPage() {
         </CardHeader>
         <CardContent>
           {queue.loading && <TableSkeleton rows={6} />}
-          {queue.error && <p className="text-sm text-destructive">{queue.error}</p>}
+          {queue.error && <ErrorNotice className="mb-0">{queue.error}</ErrorNotice>}
           {!queue.loading && !queue.error && (queue.data?.length ?? 0) === 0 && (
             <EmptyState
               icon={ShieldAlert}

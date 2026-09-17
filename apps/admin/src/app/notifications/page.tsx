@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ErrorNotice } from '@/components/notice';
 
 interface AdminNotification {
   id: string;
@@ -46,20 +47,24 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const query = showUnreadOnly ? '?per_page=50&unread_only=true' : '?per_page=50';
-      const [list, count] = await Promise.all([
-        authedFetchPaginated<AdminNotification>(`/notifications${query}`),
-        authedFetch<{ unread_count: number }>('/notifications/unread-count'),
-      ]);
-      setItems(Array.isArray(list.items) ? list.items : []);
-      setUnreadCount(count.unread_count ?? 0);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الإشعارات');
-      setItems([]);
-    }
+  // سلسلة `.then` مش `async/await` عن قصد (نفس نمط باقي الصفحات): الدالة بتتنادى من
+  // `useEffect`، و`react-hooks/set-state-in-effect` بيعتبر أي `setState` جوّه دالة `async`
+  // متنادية من إفكت رندر متتالي. جوّه `.then` بيبقى واضح إنه بعد رجوع الشبكة.
+  const load = useCallback(() => {
+    const query = showUnreadOnly ? '?per_page=50&unread_only=true' : '?per_page=50';
+    return Promise.all([
+      authedFetchPaginated<AdminNotification>(`/notifications${query}`),
+      authedFetch<{ unread_count: number }>('/notifications/unread-count'),
+    ])
+      .then(([list, count]) => {
+        setError(null);
+        setItems(Array.isArray(list.items) ? list.items : []);
+        setUnreadCount(count.unread_count ?? 0);
+      })
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الإشعارات');
+        setItems([]);
+      });
   }, [authedFetch, authedFetchPaginated, showUnreadOnly]);
 
   useEffect(() => {
@@ -117,7 +122,7 @@ export default function NotificationsPage() {
         </Button>
       </div>
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {items === null ? (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">جارٍ تحميل الإشعارات...</CardContent></Card>
       ) : items.length === 0 ? (

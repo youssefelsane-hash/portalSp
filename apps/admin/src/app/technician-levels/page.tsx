@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 export default function TechnicianLevelsPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -69,7 +70,7 @@ export default function TechnicianLevelsPage() {
           <Button asChild><Link href="/earnings-policy">فتح سياسة المستحقات</Link></Button>
         </CardContent>
       </Card>
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!configs && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
       <div className="space-y-4">
         {configs?.map((config, index) => (

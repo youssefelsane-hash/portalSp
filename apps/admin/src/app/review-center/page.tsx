@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 
 /**
  * **مركز المراجعة والشواذ** (ADR-0084، طلب مالك docs/08 §139).
@@ -135,7 +135,7 @@ const SEVERITY_LABELS: Record<string, string> = {
   low: 'منخفض',
 };
 
-const formatDateTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ar-EG-u-nu-latn') : '—');
+const formatDateTime = (iso: string | null) => (iso ? (formatDateTimeAr(iso) ?? '—') : '—');
 
 /** نص الفني بيتعرض كتلة كاملة محافظة على سطوره — مش سطر واحد مقصوص. */
 function Justification({ text, missing }: { text: string | null; missing: boolean }) {

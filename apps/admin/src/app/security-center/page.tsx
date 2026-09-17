@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { SecurityEventDto, SecurityEventSeverity, SecurityEventStatus, SecurityOverviewResponse } from '@baytak/shared-types';
@@ -15,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 import { ShieldAlert } from 'lucide-react';
 
 // مركز الأمان (Script 5 Part 11) — نظرة عامة + قايمة أحداث قابلة للفلترة. صفحة جديدة منفصلة عمداً
@@ -110,7 +112,7 @@ function SecurityCenterView() {
     <AppShell>
       <PageHeader title="مركز الأمان" description="أحداث أمنية، محاولات تصعيد صلاحيات، وأفعال حساسة مرفوضة عبر المنصة كلها." />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {(['critical', 'high', 'warning', 'info'] as SecurityEventSeverity[]).map((sev) => (
@@ -175,7 +177,7 @@ function SecurityCenterView() {
                     <TableCell>{STATUS_LABELS[event.status]}</TableCell>
                     <TableCell>{event.occurrenceCount > 1 ? `×${event.occurrenceCount}` : '—'}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {new Date(event.lastOccurredAt).toLocaleString('ar-EG-u-nu-latn')}
+                      {(formatDateTimeAr(event.lastOccurredAt) ?? '—')}
                     </TableCell>
                   </TableRow>
                 ))}

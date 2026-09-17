@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { ErrorNotice } from '@/components/notice';
 
 // كارت "نصايح مفيدة" الواحد — مطابق لـ apps/api/src/modules/settings/homepage-content.controller.ts's
 // HomepageTipDto. image_url رابط حر بيحطه الأدمن (طلب مالك صريح 2026-08-23: "خلي كله لينكات" —
@@ -175,7 +176,10 @@ export default function HomepageContentPage() {
   if (!hasPermission('settings.manage')) {
     return (
       <AppShell>
-        <PageHeader title="محتوى الصفحة الرئيسية" />
+        <PageHeader
+        title="محتوى الصفحة الرئيسية"
+        description="النصايح ورسايل الثقة اللي العميل بيشوفها أول ما يفتح التطبيق."
+      />
         <p className="text-sm text-muted-foreground">مفيش صلاحية عندك تشوف الصفحة دي.</p>
       </AppShell>
     );
@@ -187,7 +191,7 @@ export default function HomepageContentPage() {
         title="محتوى الصفحة الرئيسية"
         description="صور الواجهة المتحركة ورسالة الثقة و«نصايح مفيدة» للويب والموبايل — بيتحدّثوا من مكان واحد من غير deployment."
       />
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <Card className="mb-6">
         <CardHeader>

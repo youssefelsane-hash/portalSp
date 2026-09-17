@@ -5,6 +5,7 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { toOrderResponseDto } from './dto/order-response.dto';
+import { TERMINAL_ORDER_STATUSES } from './order-scope';
 import { ORDER_STATUSES } from '@baytak/shared-types';
 
 /**
@@ -111,12 +112,32 @@ describe('§116-C — كل حالة طلب لازم تظهر في قايمة ا�
     await dataSource.destroy();
   });
 
-  it('قايمة الأدمن بلا فلتر بترجّع كل حالة موجودة في enum قاعدة البيانات', async () => {
-    const { items } = await service.list({ page: 1, per_page: 100 } as never);
+  /**
+   * **القاعدة اتغيّر شكلها مش معناها** (ADR-0103، docs/08 §157).
+   *
+   * الافتراضي بقى `scope=current` بطلب المالك («الحالية تكون هي الـdefault لما الأدمن يدخل»)،
+   * فـ«بلا فلتر» مابقاش معناه «كل التاريخ». اللي §116-C بيحميه — **مفيش حالة بتبقى غير قابلة
+   * للوصول** — لسه بيتحقق هنا، بس على النطاق اللي بيدّعي إنه بيرجّع الكل.
+   */
+  it('نطاق «كل الطلبات» بيرجّع كل حالة موجودة في enum قاعدة البيانات', async () => {
+    const { items } = await service.list({ page: 1, per_page: 100, scope: 'all' } as never);
     const mine = items.filter((o) => o.orderNumber.startsWith(`ORD-VIS-${runId}-`));
     const seen = new Set(mine.map((o) => o.orderStatus as string));
     const missing = allStatuses.filter((s) => !seen.has(s));
     expect(missing).toEqual([]);
+  });
+
+  /**
+   * الجهة التانية من نفس القاعدة: الافتراضي **لازم** يستبعد المقفول، وإلا الإصلاح كله مالوش
+   * معنى (بلاغ المالك: «بيجيبلي طلبات مكتملة وتنفيذها عدى من سنة»).
+   */
+  it('الافتراضي (الحالية) بيستبعد الحالات النهائية ويسيب غير النهائية', async () => {
+    const { items } = await service.list({ page: 1, per_page: 100 } as never);
+    const mine = items.filter((o) => o.orderNumber.startsWith(`ORD-VIS-${runId}-`));
+    const seen = new Set(mine.map((o) => o.orderStatus as string));
+    expect([...seen].filter((s) => TERMINAL_ORDER_STATUSES.includes(s as OrderStatus))).toEqual([]);
+    // ومش بيرجّع فاضي — الاستبعاد مقصور على النهائي.
+    expect(seen.has(OrderStatus.SEARCHING_TECHNICIAN)).toBe(true);
   });
 
   /**
@@ -150,7 +171,7 @@ describe('§116-C — كل حالة طلب لازم تظهر في قايمة ا�
   });
 
   it('تحويل الطلب لـDTO بيشتغل لكل حالة، وبيرجّع نفس الحالة الخام', async () => {
-    const { items } = await service.list({ page: 1, per_page: 100 } as never);
+    const { items } = await service.list({ page: 1, per_page: 100, scope: 'all' } as never);
     const mine = items.filter((o) => o.orderNumber.startsWith(`ORD-VIS-${runId}-`));
     for (const order of mine) {
       const dto = toOrderResponseDto(order);

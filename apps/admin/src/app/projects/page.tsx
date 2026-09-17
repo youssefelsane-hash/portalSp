@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ORDER_STATUS_LABELS } from '@/lib/order-labels';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
+import { ErrorNotice } from '@/components/notice';
 
 const egp = (c: number) => `${(c / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م`;
 
@@ -139,8 +141,11 @@ export default function AdminProjectsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="المشروعات والتشطيب" />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      <PageHeader
+        title="المشروعات والتشطيب"
+        description="الأعمال الكبيرة اللي بتتقسّم مراحل: عروض السعر، المراحل، والطلبات المربوطة بكل مشروع."
+      />
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!projects && <TableSkeleton columns={6} />}
       {projects && projects.length === 0 && <EmptyState title="مفيش مشروعات" />}
       {projects && projects.length > 0 && (
@@ -228,7 +233,7 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
   return (
     <TableRow>
       <TableCell colSpan={8} className="bg-muted/30 p-4 space-y-4">
-        {roomError && <p className="text-sm text-destructive">{roomError}</p>}
+        {roomError && <ErrorNotice className="mb-0">{roomError}</ErrorNotice>}
         {!room && !roomError && <p className="text-sm text-muted-foreground">جاري تحميل كل تفاصيل المشروع…</p>}
 
         <div className="grid gap-3 lg:grid-cols-3">
@@ -436,7 +441,7 @@ function ProjectConnectionsSection({ projectId, room, onChanged }: {
           <Button size="sm" disabled={busy || !planId} onClick={() => void issueWarranty()}>إصدار</Button>
         </div>
       </div>
-      {error && <p className="text-sm text-destructive lg:col-span-2">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
     </section>
   );
 }
@@ -488,7 +493,7 @@ function GeneralProjectComments({ projectId, comments, onChanged }: {
         ملاحظة داخلية
       </label>
       <Button className="mt-2" size="sm" variant="outline" disabled={busy || !body.trim()} onClick={() => void submit()}>إرسال التحديث</Button>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
     </section>
   );
 }
@@ -531,7 +536,7 @@ function QuoteLines({ title, lines }: { title: string; lines: QuoteLine[] }) {
 }
 
 function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString('ar-EG-u-nu-latn') : '—';
+  return value ? (formatDateTimeAr(value) ?? '—') : '—';
 }
 
 function quoteStatusLabel(status: string) {
@@ -588,7 +593,7 @@ function TransitionButton({ projectId, to, label, needsReason, onDone }: {
       <Button size="sm" variant="outline" disabled={busy} onClick={() => void go()}>
         {busy ? '…' : label}
       </Button>
-      {error && <p className="text-xs text-destructive mt-1 max-w-xs">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
     </div>
   );
 }
@@ -653,7 +658,7 @@ function QuoteCreationSection({ projectId, onCreated }: { projectId: string; onC
         <div><Label className="text-xs">المدة (يوم)</Label><Input type="number" min={1} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></div>
         <div><Label className="text-xs">النطاق المشمول</Label><Input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="اختياري" /></div>
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       <Button size="sm" disabled={busy} onClick={() => void create()}>{busy ? '…' : 'إنشاء العرض وإرساله للعميل'}</Button>
     </div>
   );
@@ -726,7 +731,7 @@ function MilestoneCreationSection({ projectId, approvedTotal, onCreated }: {
       <Button size="sm" variant="outline" type="button" onClick={addMilestone}>
         + إضافة مرحلة
       </Button>
-      {error && <p className="text-destructive text-sm">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       <Button size="sm" disabled={busy || !matches} onClick={() => void create()}>
         {busy ? '…' : 'إنشاء المراحل'}
       </Button>
@@ -871,7 +876,7 @@ function MilestoneCard({
         </Button>
       </div>
 
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
     </div>
   );
 }

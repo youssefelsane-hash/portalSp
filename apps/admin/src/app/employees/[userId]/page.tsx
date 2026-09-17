@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -26,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const PRESENCE_LABELS: Record<string, string> = { active: 'نشط الآن', idle: 'خامل', offline: 'غير متصل' };
 const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'> = {
@@ -238,7 +240,7 @@ export default function EmployeeDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -399,7 +401,7 @@ export default function EmployeeDetailPage() {
                     <TableRow key={i}>
                       <TableCell>{login.device_name ?? login.device_platform ?? '—'}</TableCell>
                       <TableCell dir="ltr">{login.ip_address ?? '—'}</TableCell>
-                      <TableCell>{new Date(login.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>{(formatDateTimeAr(login.created_at) ?? '—')}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -427,7 +429,7 @@ export default function EmployeeDetailPage() {
                   {detail.recent_activity.map((activity, i) => (
                     <TableRow key={i}>
                       <TableCell>{activity.action}</TableCell>
-                      <TableCell>{new Date(activity.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>{(formatDateTimeAr(activity.created_at) ?? '—')}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -458,7 +460,7 @@ export default function EmployeeDetailPage() {
                       <TableCell>{session.deviceName ?? session.devicePlatform ?? '—'}</TableCell>
                       <TableCell dir="ltr">{session.ipAddress ?? '—'}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {session.lastActivityAt ? new Date(session.lastActivityAt).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                        {session.lastActivityAt ? (formatDateTimeAr(session.lastActivityAt) ?? '—') : '—'}
                       </TableCell>
                       <TableCell>
                         {session.isRevoked ? <Badge variant="outline">ملغاة</Badge> : <Badge variant="secondary">نشطة</Badge>}

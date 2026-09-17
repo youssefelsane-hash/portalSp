@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
 import { ORDER_STATUS_LABELS, BOOKING_MODE_LABELS } from '@/lib/order-labels';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 // مساحة عمل الشركة (ADR-0033) — نفس تجميع الحالات المستخدم لـ"نشط" في apps/technician-app
 // (ACTIVE_TECHNICIAN_ORDER_STATUSES بالباك-إند)، مترجم هنا للعرض بس — صفر endpoint إحصائيات منفصل.
@@ -103,7 +104,7 @@ export default function TechnicianCompanyDetailPage() {
 
   return (
     <AppShell>
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!detail && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
 
       {detail && (
@@ -401,7 +402,7 @@ export default function TechnicianCompanyDetailPage() {
                         </TableCell>
                         <TableCell>{BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</TableCell>
                         <TableCell>
-                          {order.scheduled_at ? new Date(order.scheduled_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                          {order.scheduled_at ? (formatDateTimeAr(order.scheduled_at) ?? '—') : '—'}
                         </TableCell>
                         <TableCell>{order.technician_name ?? '—'}</TableCell>
                         <TableCell>{order.zone_name_ar ?? '—'}</TableCell>

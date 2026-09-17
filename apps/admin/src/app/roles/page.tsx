@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 // باني الأدوار الديناميكي (ADR-0010) — كانت مؤجّلة عمدًا كـbacklog بند 43. Super Admin يقدر
 // ينشئ أدوار إدارية جديدة بلا كود جديد (زي "مشرف إقليمي"، "مراجع مالية")، ويتحكم في صلاحيات كل
@@ -69,7 +70,7 @@ export default function RolesPage() {
           </Button>
         }
       />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showNew && (
         <Card className="mb-6">

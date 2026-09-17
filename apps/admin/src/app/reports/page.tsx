@@ -21,6 +21,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -237,7 +238,10 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="التقارير" />
+      <PageHeader
+        title="التقارير"
+        description="تقارير تشغيلية ومالية جاهزة للتصدير، بنطاق تاريخ تختاره."
+      />
 
       <div className="flex flex-col gap-6">
         <Card>
@@ -266,7 +270,7 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {revenueError && <p className="text-destructive">{revenueError}</p>}
+            {revenueError && <ErrorNotice className="mb-0">{revenueError}</ErrorNotice>}
             {!revenueError && !revenueRows && <p className="text-muted-foreground">جاري التحميل…</p>}
             {revenueRows && (
               <>
@@ -332,7 +336,7 @@ export default function ReportsPage() {
               </Button>
             </div>
 
-            {techError && <p className="text-destructive">{techError}</p>}
+            {techError && <ErrorNotice className="mb-0">{techError}</ErrorNotice>}
             {!techError && !techRows && <p className="text-muted-foreground">جاري التحميل…</p>}
             {techRows && techRows.length === 0 && <EmptyState title="مفيش فنيين" />}
             {techRows && techRows.length > 0 && (
@@ -397,7 +401,7 @@ export default function ReportsPage() {
             <CardTitle className="text-base">أداء المناطق</CardTitle>
           </CardHeader>
           <CardContent>
-            {zoneError && <p className="text-destructive">{zoneError}</p>}
+            {zoneError && <ErrorNotice className="mb-0">{zoneError}</ErrorNotice>}
             {!zoneError && !zoneRows && <p className="text-muted-foreground">جاري التحميل…</p>}
             {zoneRows && zoneRows.length === 0 && <EmptyState title="مفيش مناطق" />}
             {zoneRows && zoneRows.length > 0 && (

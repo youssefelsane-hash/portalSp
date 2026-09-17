@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -156,7 +157,7 @@ export default function FeatureFlagsPage() {
           </Button>
         }
       />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="mb-4 rounded-md border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
         التطبيقات تحمل Snapshot للفلاجز بعد تسجيل الدخول؛ التفعيل والتوزيع والاستهداف بالمستخدم

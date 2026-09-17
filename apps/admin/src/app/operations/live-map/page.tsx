@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MapLegend, OperationsLiveMap, type LiveMapOrder, type LiveMapTechnician } from '@/components/operations-live-map';
+import { ErrorNotice } from '@/components/notice';
 
 type LiveMapSnapshot = {
   generated_at: string;
@@ -68,7 +69,7 @@ export default function OperationsLiveMapPage() {
         </CardHeader>
         <CardContent>
           {query.loading && !snapshot && <Skeleton className="h-[62vh] min-h-[34rem] w-full" />}
-          {query.error && <p className="text-sm text-destructive">{query.error}</p>}
+          {query.error && <ErrorNotice className="mb-0">{query.error}</ErrorNotice>}
           {snapshot && snapshot.technicians.length === 0 && snapshot.orders.length === 0 && (
             <EmptyState icon={MapPinned} title="لا توجد نقاط على الخريطة الآن" description="تظهر النقاط عندما يرسل فني موقعه أو يكون لطلب تشغيلي عنوان محفوظ." />
           )}

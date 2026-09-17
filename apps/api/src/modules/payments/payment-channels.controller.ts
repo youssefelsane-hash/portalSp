@@ -96,10 +96,13 @@ export class PaymentChannelsController {
           ? Math.round(instapayDiscountEgp * 100)
           : 0;
       let adminNote: string | null = null;
+      // الخانات الناقصة **منفصلة عن الجملة** (بلاغ مالك 2026-09-17): اللزق بيطلّع في اللوحة
+      // «إعداد Paymob غير مكتمل: API Key, Secret Key, …» بأسماء إنجليزية جوّه جملة عربية.
+      let adminMissingFields: string[] = [];
       if (!isEnabled) adminNote = 'الطريقة مقفولة من إعدادات الأدمن';
       else if (!entry.isConfigured && entry.method === PaymentMethod.CARD) {
-        const missing = this.paymobProvider.getConfigurationStatus().missingFields;
-        adminNote = `إعداد Paymob غير مكتمل${missing.length ? `: ${missing.join(', ')}` : ''}`;
+        adminNote = 'إعداد Paymob غير مكتمل';
+        adminMissingFields = this.paymobProvider.getConfigurationStatus().missingFields;
       } else if (!entry.isConfigured) adminNote = 'بيانات تشغيل الطريقة غير مكتملة';
       return {
         method: entry.method,
@@ -114,6 +117,7 @@ export class PaymentChannelsController {
         discount_label_ar: discountCents > 0 ? `وفّر ${discountCents / 100} ج.م لما تدفع بـInstaPay` : null,
         // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
         ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
+        ...(isAdmin && adminMissingFields.length ? { admin_missing_fields: adminMissingFields } : {}),
       };
     });
 
@@ -122,7 +126,7 @@ export class PaymentChannelsController {
     const installmentAdminNote = !installmentsEnabled
       ? 'التقسيط مقفول من إعدادات الأدمن'
       : !paymobStatus.configured
-        ? `التقسيط يحتاج Paymob مكتمل${paymobStatus.missingFields.length ? `: ${paymobStatus.missingFields.join(', ')}` : ''}`
+        ? 'التقسيط يحتاج Paymob مكتمل'
         : null;
     channels.push({
       method: 'installment',
@@ -138,6 +142,9 @@ export class PaymentChannelsController {
       discount_cents: 0,
       discount_label_ar: null,
       ...(isAdmin && installmentAdminNote ? { admin_note: installmentAdminNote } : {}),
+      ...(isAdmin && !paymobStatus.configured && paymobStatus.missingFields.length
+        ? { admin_missing_fields: paymobStatus.missingFields }
+        : {}),
     });
 
     // الترتيب آخر خطوة عشان يشمل التقسيط اللي بيتضاف فوق. `Infinity` للوسائل اللي مش في

@@ -41,6 +41,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ZoneBoundaryMap } from '@/components/zone-boundary-map';
+import { ErrorNotice } from '@/components/notice';
 
 export default function GeoPage() {
   const { isLoading, authedFetch, hasPermission } = useAuth();
@@ -305,8 +306,11 @@ export default function GeoPage() {
 
   return (
     <AppShell>
-      <PageHeader title="المدن والمناطق ونطاقات الخدمة" />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      <PageHeader
+        title="المدن والمناطق ونطاقات الخدمة"
+        description="المدينة فيها مناطق، والمناطق بتتجمّع في نطاقات خدمة — والنطاق هو وحدة التسعير والتوزيع."
+      />
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {/* **تحذير «تسعير المناطق مش شغّال»** (بلاغ المالك ١٠ في §141: «غيّرت العنوان لمنطقة
           سعرها أعلى والسعر مااتغيّرش»). السبب مش التسعير — النطاق بلا مضلّع مرسوم مستحيل
@@ -411,7 +415,7 @@ export default function GeoPage() {
       </Card>
 
       {selectedCityId && (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 @[88rem]:grid-cols-2">
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="text-base">المناطق</CardTitle>

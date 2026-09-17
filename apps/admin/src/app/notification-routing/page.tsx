@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const CHANNEL_LABELS: Record<NotificationChannel, string> = {
   push: 'Push',
@@ -138,7 +139,7 @@ export default function NotificationRoutingPage() {
         عبر القنوات المختارة — بدون أي تعديل كود.
       </p>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showNew && (
         <Card className="mb-6">

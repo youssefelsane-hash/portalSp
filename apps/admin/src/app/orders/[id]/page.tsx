@@ -21,6 +21,7 @@ import type {
   TechnicianCapacityTier,
   TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
+import { formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { OrderEarningAdjustmentsSection } from './order-earning-adjustments-section';
@@ -133,7 +134,9 @@ import {
   type TechnicianKindCode,
 } from '@/lib/technician-labels';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
+import { DataList, DataRow, DataBlock } from '@/components/data-list';
 
 /** إصدار عرض سعر كما بيرجّعه `GET /admin/orders/:id/quotes`. */
 interface AdminOrderQuote {
@@ -1250,6 +1253,275 @@ export default function OrderDetailPage() {
     return (
       <AppShell>
         <p className="text-destructive">{error}</p>
+
+      {/*
+        **أدوات التشخيص في آخر الصفحة عن قصد** (بلاغ مالك 2026-09-17).
+
+        الكارتين دول (التسلسل الزمني + مفتّش المطابقة) كانوا **أول حاجة** في الصفحة، قبل
+        بيانات الطلب والعميل والفلوس. فموظف العمليات اللي فاتح الطلب عشان يعرف «مين العميل
+        وإيه الخدمة وامتى الموعد» كان بيقابل أول ما يفتح: «Timeline (0)» فاضي، وبعده جدول
+        `order_assignments` وصفوف أصفار وبادجات تشخيصية كتيفة. ده بالظبط «كلام مش معروف
+        الكلام ده متلخبط على بعضه».
+
+        هما **مهمين ومابيتشالوش** — بس مكانهم بعد الأساسيات: الأدمن بيوصلهم لما يكون بيسأل
+        «ليه الطلب بيتصرّف كده؟» مش لما يكون بيسأل «الطلب ده بتاع مين؟».
+      */}
+      {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
+          المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
+          (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
+      <Card className="mb-6">
+        <CardHeader>
+          {/* «Timeline» كانت إنجليزي وسط واجهة عربية بالكامل — بلاغ المالك عن «كلام عربي على
+              إنجليزي». الاسم العربي هو نفس المعنى بالظبط. */}
+          <CardTitle className="text-base">التسلسل الزمني للطلب ({timeline.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {timeline.length === 0 ? (
+            <EmptyState title="مفيش أحداث مسجّلة لسه" />
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {timeline.map((event) => {
+                const reason = event.detail?.reason;
+                const reasonText = event.detail?.reason_text;
+                const actorTypeLabel =
+                  event.actor_user_type === 'admin' ? 'أدمن' : event.actor_user_type === 'technician' ? 'فني' : event.actor_user_type;
+                return (
+                  <li key={`${event.source}-${event.id}`} className="flex flex-col gap-1 border-r-2 border-muted pr-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip tone={timelineEventSourceTone(event.source)}>{TIMELINE_SOURCE_LABELS[event.source]}</StatusChip>
+                      <span className="text-sm">{event.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {(formatDateTimeAr(event.timestamp) ?? '—')}
+                      {event.actor_full_name && (
+                        <>
+                          {' — '}
+                          {event.actor_full_name} ({actorTypeLabel})
+                        </>
+                      )}
+                    </p>
+                    {typeof reason === 'string' && reason && <p className="text-xs text-muted-foreground">السبب: {reason}</p>}
+                    {typeof reasonText === 'string' && reasonText && (
+                      <p className="text-xs text-muted-foreground">ملاحظات: {reasonText}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
+          (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. فانل الطلب + تفسير فني محدد اختياري. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">مفتّش المطابقة — ليه الطلب ده بيتصرّف كده؟</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {funnelError && <ErrorNotice className="mb-0">{funnelError}</ErrorNotice>}
+          {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
+          {matchingFunnel && (
+            <div className="flex flex-col gap-4 text-sm">
+              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
+                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
+                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
+              <div>
+                <p className="mb-2 font-medium">مسار التوزيع</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
+                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
+                  </Badge>
+                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
+                <div className="flex flex-wrap gap-2">
+                  <StatusChip tone="neutral">مؤهّل للفئة: {matchingFunnel.pool.category_eligible}</StatusChip>
+                  <StatusChip tone="neutral">مؤهّل للنطاق: {matchingFunnel.pool.zone_eligible}</StatusChip>
+                  <Badge variant="outline" className={capacityTierBadgeClass('LIGHT')}>
+                    {CAPACITY_TIER_LABELS.LIGHT}: {matchingFunnel.pool.light}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('MEANINGFUL')}>
+                    {CAPACITY_TIER_LABELS.MEANINGFUL}: {matchingFunnel.pool.meaningful}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('HEAVY')}>
+                    {CAPACITY_TIER_LABELS.HEAVY}: {matchingFunnel.pool.heavy}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('BLOCKED')}>
+                    {CAPACITY_TIER_LABELS.BLOCKED}: {matchingFunnel.pool.blocked}
+                  </Badge>
+                </div>
+              </div>
+              <div>
+                {/* **اسم الجدول اتشال** (`order_assignments`): الأدمن مش بيقرا schema.
+                    و**الأصفار اتخفت**: «اتبعت: 0 · اتشاف: 0 · قُبل: 0 · رُفض: 0 · انتهت مهلته: 0
+                    · اتلغى: 0» كان سطر أصفار كامل مالوش أي معلومة — ودي حالة الطلب اللي لسه
+                    مااتبعتلوش أي عرض، يعني الحالة الشائعة. */}
+                <p className="mb-2 font-medium">العروض المبعوتة للفنيين</p>
+                {(() => {
+                  const a = matchingFunnel.dispatch_assignments;
+                  const parts = (
+                    [
+                      ['اتبعت', a.sent],
+                      ['اتشاف', a.viewed],
+                      ['قُبل', a.accepted],
+                      ['رُفض', a.rejected],
+                      ['انتهت مهلته', a.timeout],
+                      ['اتلغى', a.cancelled],
+                    ] as const
+                  ).filter(([, count]) => count > 0);
+                  return parts.length === 0 ? (
+                    <p className="text-muted-foreground">مااتبعتش أي عروض على الطلب ده لسه</p>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      {parts.map(([label, count]) => `${label}: ${count}`).join(' · ')}
+                    </p>
+                  );
+                })()}
+                {/* العدّادات فوق مسطّحة: «اتبعت 8» ما بتقولش لو دي جولة واحدة وصلت لـ8 ولا تلات
+                    جولات لسه بتوسّع، ولا مين منهم فتح العرض أصلاً. نفس البيانات بالظبط مقروءة
+                    بالجولة (GET /admin/operations/order-traces/:id) — مفيش استعلام تشخيصي جديد. */}
+                <OrderTraceRounds trace={orderTrace} />
+              </div>
+              {matchingFunnel.crew_recruit_opportunities && (
+                <div>
+                  <p className="mb-2 font-medium">فرص تجنيد الفريق</p>
+                  <p className="text-muted-foreground">
+                    اتعرضت: {matchingFunnel.crew_recruit_opportunities.offered} · اتقبلت: {matchingFunnel.crew_recruit_opportunities.accepted} ·
+                    اتراضت: {matchingFunnel.crew_recruit_opportunities.declined} · اتقفلت: {matchingFunnel.crew_recruit_opportunities.closed}
+                  </p>
+                </div>
+              )}
+              {matchingFunnel.crew_status && (
+                <div>
+                  <p className="mb-2 font-medium">حالة الطاقم</p>
+                  <p className="text-muted-foreground">
+                    فنيين: {matchingFunnel.crew_status.assignedTechnicians}/{matchingFunnel.crew_status.requiredTechnicians} · مساعدين:{' '}
+                    {matchingFunnel.crew_status.assignedAssistants}/{matchingFunnel.crew_status.requiredAssistants} —{' '}
+                    <span className={matchingFunnel.crew_status.crewComplete ? 'text-success' : 'text-warning'}>
+                      {matchingFunnel.crew_status.crewComplete ? 'الطاقم مكتمل' : 'الطاقم ناقص'}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
+            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
+                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
+            <p className="mb-2 text-xs text-muted-foreground">
+              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
+            </p>
+            <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
+                  الفني/المساعد
+                </Label>
+                <SelectNative
+                  id="explain_technician"
+                  value={explainTechnicianId}
+                  onFocus={() => {
+                    if (!explainCandidates) loadExplainCandidates();
+                  }}
+                  onChange={(e) => setExplainTechnicianId(e.target.value)}
+                  className="min-w-[280px]"
+                >
+                  <option value="">اختار فني أو مساعد</option>
+                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
+                    if (group.length === 0) return null;
+                    return (
+                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                        {group.map((candidate) => (
+                          <option key={candidate.technicianId} value={candidate.technicianId}>
+                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
+                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </SelectNative>
+              </div>
+              <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
+                {explainLoading ? 'جاري التفسير...' : 'فسّر'}
+              </Button>
+            </form>
+            {explainError && <ErrorNotice className="mb-0">{explainError}</ErrorNotice>}
+            {explanation && (
+              <div className="mt-3 flex flex-col gap-2 text-sm">
+                {(() => {
+                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
+                  if (!subject) return null;
+                  return (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <TechnicianKindTag kind={subject.technicianKind} />
+                      <span>{subject.fullName}</span>
+                      {subject.currentLevel && (
+                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
+                      )}
+                    </p>
+                  );
+                })()}
+                <p className="font-medium">
+                  <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
+                    {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
+                  </span>
+                  {' — '}
+                  {explanation.reason_ar}
+                </p>
+                {explanation.capacity_tier && (
+                  <p>
+                    القدرة الاستيعابية:{' '}
+                    <Badge variant="outline" className={capacityTierBadgeClass(explanation.capacity_tier)}>
+                      {CAPACITY_TIER_LABELS[explanation.capacity_tier]}
+                    </Badge>
+                  </p>
+                )}
+                {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
+                {explanation.rank_info && (
+                  <>
+                    <p>
+                      الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
+                      {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
+                      {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
+                      {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
+                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
+                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)} − مسافة{' '}
+                      {explanation.rank_info.score_breakdown.distance_penalty.toFixed(2)}
+                      {explanation.rank_info.score_breakdown.distance_weight > 0 && (
+                        <span className="text-muted-foreground">
+                          {' '}(وزن {explanation.rank_info.score_breakdown.distance_weight} —{' '}
+                          {explanation.rank_info.score_breakdown.distance_weight_context_ar})
+                        </span>
+                      )}
+                    </p>
+                  </>
+                )}
+                {!explanation.rank_info && (
+                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
+                )}
+                <ul className="flex flex-col gap-1">
+                  {explanation.checks.map((check) => (
+                    <li key={check.key} className="flex items-center gap-2">
+                      <span className={check.passed ? 'text-success' : 'text-destructive'}>{check.passed ? '✓' : '✗'}</span>
+                      <span className={check.passed ? undefined : 'text-destructive'}>{check.label_ar}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       </AppShell>
     );
   }
@@ -1295,7 +1567,7 @@ export default function OrderDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {order.order_status === 'awaiting_admin_quote' && (
         <Card className="mb-6 border-amber-300 bg-amber-50/60">
@@ -1517,337 +1789,110 @@ export default function OrderDetailPage() {
         </Card>
       )}
 
-      {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
-          المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
-          (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">Timeline — كل الأحداث بترتيب زمني ({timeline.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {timeline.length === 0 ? (
-            <EmptyState title="مفيش أحداث مسجّلة لسه" />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {timeline.map((event) => {
-                const reason = event.detail?.reason;
-                const reasonText = event.detail?.reason_text;
-                const actorTypeLabel =
-                  event.actor_user_type === 'admin' ? 'أدمن' : event.actor_user_type === 'technician' ? 'فني' : event.actor_user_type;
-                return (
-                  <li key={`${event.source}-${event.id}`} className="flex flex-col gap-1 border-r-2 border-muted pr-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusChip tone={timelineEventSourceTone(event.source)}>{TIMELINE_SOURCE_LABELS[event.source]}</StatusChip>
-                      <span className="text-sm">{event.title}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(event.timestamp).toLocaleString('ar-EG-u-nu-latn')}
-                      {event.actor_full_name && (
-                        <>
-                          {' — '}
-                          {event.actor_full_name} ({actorTypeLabel})
-                        </>
-                      )}
-                    </p>
-                    {typeof reason === 'string' && reason && <p className="text-xs text-muted-foreground">السبب: {reason}</p>}
-                    {typeof reasonText === 'string' && reasonText && (
-                      <p className="text-xs text-muted-foreground">ملاحظات: {reasonText}</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
-          (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. فانل الطلب + تفسير فني محدد اختياري. */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">مفتّش المطابقة — ليه الطلب ده بيتصرّف كده؟</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {funnelError && <p className="text-sm text-destructive">{funnelError}</p>}
-          {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
-          {matchingFunnel && (
-            <div className="flex flex-col gap-4 text-sm">
-              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
-                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
-                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
-              <div>
-                <p className="mb-2 font-medium">مسار التوزيع</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
-                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
-                  </Badge>
-                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
-                </div>
-              </div>
-              <div>
-                <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
-                <div className="flex flex-wrap gap-2">
-                  <StatusChip tone="neutral">مؤهّل للفئة: {matchingFunnel.pool.category_eligible}</StatusChip>
-                  <StatusChip tone="neutral">مؤهّل للنطاق: {matchingFunnel.pool.zone_eligible}</StatusChip>
-                  <Badge variant="outline" className={capacityTierBadgeClass('LIGHT')}>
-                    {CAPACITY_TIER_LABELS.LIGHT}: {matchingFunnel.pool.light}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('MEANINGFUL')}>
-                    {CAPACITY_TIER_LABELS.MEANINGFUL}: {matchingFunnel.pool.meaningful}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('HEAVY')}>
-                    {CAPACITY_TIER_LABELS.HEAVY}: {matchingFunnel.pool.heavy}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('BLOCKED')}>
-                    {CAPACITY_TIER_LABELS.BLOCKED}: {matchingFunnel.pool.blocked}
-                  </Badge>
-                </div>
-              </div>
-              <div>
-                <p className="mb-2 font-medium">توزيع الطلب (order_assignments)</p>
-                <p className="text-muted-foreground">
-                  اتبعت: {matchingFunnel.dispatch_assignments.sent} · اتشاف: {matchingFunnel.dispatch_assignments.viewed} · قُبل:{' '}
-                  {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
-                  {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
-                </p>
-                {/* العدّادات فوق مسطّحة: «اتبعت 8» ما بتقولش لو دي جولة واحدة وصلت لـ8 ولا تلات
-                    جولات لسه بتوسّع، ولا مين منهم فتح العرض أصلاً. نفس البيانات بالظبط مقروءة
-                    بالجولة (GET /admin/operations/order-traces/:id) — مفيش استعلام تشخيصي جديد. */}
-                <OrderTraceRounds trace={orderTrace} />
-              </div>
-              {matchingFunnel.crew_recruit_opportunities && (
-                <div>
-                  <p className="mb-2 font-medium">فرص تجنيد الفريق</p>
-                  <p className="text-muted-foreground">
-                    اتعرضت: {matchingFunnel.crew_recruit_opportunities.offered} · اتقبلت: {matchingFunnel.crew_recruit_opportunities.accepted} ·
-                    اتراضت: {matchingFunnel.crew_recruit_opportunities.declined} · اتقفلت: {matchingFunnel.crew_recruit_opportunities.closed}
-                  </p>
-                </div>
-              )}
-              {matchingFunnel.crew_status && (
-                <div>
-                  <p className="mb-2 font-medium">حالة الطاقم</p>
-                  <p className="text-muted-foreground">
-                    فنيين: {matchingFunnel.crew_status.assignedTechnicians}/{matchingFunnel.crew_status.requiredTechnicians} · مساعدين:{' '}
-                    {matchingFunnel.crew_status.assignedAssistants}/{matchingFunnel.crew_status.requiredAssistants} —{' '}
-                    <span className={matchingFunnel.crew_status.crewComplete ? 'text-success' : 'text-warning'}>
-                      {matchingFunnel.crew_status.crewComplete ? 'الطاقم مكتمل' : 'الطاقم ناقص'}
-                    </span>
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="border-t pt-4">
-            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
-            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
-                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
-            <p className="mb-2 text-xs text-muted-foreground">
-              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
-            </p>
-            <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
-                  الفني/المساعد
-                </Label>
-                <SelectNative
-                  id="explain_technician"
-                  value={explainTechnicianId}
-                  onFocus={() => {
-                    if (!explainCandidates) loadExplainCandidates();
-                  }}
-                  onChange={(e) => setExplainTechnicianId(e.target.value)}
-                  className="min-w-[280px]"
-                >
-                  <option value="">اختار فني أو مساعد</option>
-                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
-                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
-                    if (group.length === 0) return null;
-                    return (
-                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
-                        {group.map((candidate) => (
-                          <option key={candidate.technicianId} value={candidate.technicianId}>
-                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
-                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </SelectNative>
-              </div>
-              <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
-                {explainLoading ? 'جاري التفسير...' : 'فسّر'}
-              </Button>
-            </form>
-            {explainError && <p className="mt-2 text-sm text-destructive">{explainError}</p>}
-            {explanation && (
-              <div className="mt-3 flex flex-col gap-2 text-sm">
-                {(() => {
-                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
-                  if (!subject) return null;
-                  return (
-                    <p className="flex items-center gap-2 text-muted-foreground">
-                      <TechnicianKindTag kind={subject.technicianKind} />
-                      <span>{subject.fullName}</span>
-                      {subject.currentLevel && (
-                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
-                      )}
-                    </p>
-                  );
-                })()}
-                <p className="font-medium">
-                  <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
-                    {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
-                  </span>
-                  {' — '}
-                  {explanation.reason_ar}
-                </p>
-                {explanation.capacity_tier && (
-                  <p>
-                    القدرة الاستيعابية:{' '}
-                    <Badge variant="outline" className={capacityTierBadgeClass(explanation.capacity_tier)}>
-                      {CAPACITY_TIER_LABELS[explanation.capacity_tier]}
-                    </Badge>
-                  </p>
-                )}
-                {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
-                {explanation.rank_info && (
-                  <>
-                    <p>
-                      الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
-                      {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
-                      {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
-                      {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
-                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
-                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)} − مسافة{' '}
-                      {explanation.rank_info.score_breakdown.distance_penalty.toFixed(2)}
-                      {explanation.rank_info.score_breakdown.distance_weight > 0 && (
-                        <span className="text-muted-foreground">
-                          {' '}(وزن {explanation.rank_info.score_breakdown.distance_weight} —{' '}
-                          {explanation.rank_info.score_breakdown.distance_weight_context_ar})
-                        </span>
-                      )}
-                    </p>
-                  </>
-                )}
-                {!explanation.rank_info && (
-                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
-                )}
-                <ul className="flex flex-col gap-1">
-                  {explanation.checks.map((check) => (
-                    <li key={check.key} className="flex items-center gap-2">
-                      <span className={check.passed ? 'text-success' : 'text-destructive'}>{check.passed ? '✓' : '✗'}</span>
-                      <span className={check.passed ? undefined : 'text-destructive'}>{check.label_ar}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">البيانات</CardTitle>
+            <CardTitle className="text-base">بيانات الطلب</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm">
-            {/* اسم الخدمة — كان غايب تمامًا (docs/08 §73 بند 3)، موظف مركز الاتصال محتاج يعرف
-                الطلب ده على إيه بالظبط من أول نظرة، مش يستنتج من السعر/الوصف بس. */}
-            {order.service_name_ar && <p>الخدمة: {order.service_name_ar}</p>}
-            <p>نوع الطلب: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
-            <p>وضع الحجز: {BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</p>
-            <p>الإجمالي: {formatEgp(order.total_amount_cents)}</p>
-            <p className="flex items-center gap-2">
-              حالة الدفع:
-              <StatusChip tone={paymentStatusTone(order.payment_status)}>
-                {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
-              </StatusChip>
-            </p>
-            <p>رسوم الكشف: {formatEgp(order.inspection_fee_cents)}</p>
-            {order.surge_amount_cents > 0 && (
-              <p className="text-destructive">رسوم الطوارئ: {formatEgp(order.surge_amount_cents)}</p>
-            )}
-            {order.discount_amount_cents > 0 && <p>الخصم: {formatEgp(order.discount_amount_cents)}</p>}
-            {/* اسم/تليفون الفني بدل الـUUID الخام (طلب مالك صريح — موظف العمليات مش المفروض ينسخ
-                UUID يدويًا عشان يعرف مين الفني). الـUUID لسه موجود كمعلومة ثانوية (title) لو
-                احتاجه حد للتصحيح التقني. الاسم قابل للنقر — بيودّي لصفحة بروفايل الفني. */}
-            <p>
-              الفني:{' '}
-              {order.technician_id ? (
-                order.technician_name ? (
-                  <Link href={`/technicians/${order.technician_id}`} className="underline" title={order.technician_id}>
-                    {order.technician_name}
-                    {order.technician_phone ? ` — ${order.technician_phone}` : ''}
-                  </Link>
-                ) : (
-                  <span dir="ltr" title="اسم الفني مش متاح">
-                    {order.technician_id}
-                  </span>
-                )
-              ) : (
-                'لسه مفيش'
+          {/* العناوين في عمود والقيم في عمود (`DataList`) بدل صفوف `<p>عنوان: قيمة</p>` —
+              اللقطة الحقيقية كانت تمن سطور نص جارية مفيهاش أي عمود تمسكه العين. النصوص
+              الطويلة نزلت لـ`DataBlock` تحت عشان ما تضغطش عمود القيم. */}
+          <CardContent>
+            <DataList>
+              {/* اسم الخدمة — كان غايب تمامًا (docs/08 §73 بند 3)، موظف مركز الاتصال محتاج يعرف
+                  الطلب ده على إيه بالظبط من أول نظرة، مش يستنتج من السعر/الوصف بس. */}
+              {order.service_name_ar && (
+                <DataRow label="الخدمة" tone="strong">
+                  {order.service_name_ar}
+                </DataRow>
               )}
-            </p>
-            {order.problem_description && <p>وصف المشكلة: {order.problem_description}</p>}
-            {/* docs/08 §71 — اللي العميل اختاره في الفورم الديناميكي وقت الحجز، سطر واحد. */}
-            {order.customer_inputs && order.customer_inputs.length > 0 && (
-              <p className="whitespace-normal">
-                اختيارات العميل:{' '}
-                {order.customer_inputs
-                  .map((input) => `${input.label}: ${input.value}${input.unit ? ` ${input.unit}` : ''}`)
-                  .join(' · ')}
-              </p>
-            )}
-            {order.customer_notes && <p>ملاحظات العميل: {order.customer_notes}</p>}
-            <p>
-              اتحجز في: {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
-            </p>
-            {/* موعد الخدمة المطلوب — مختلف تمامًا عن "اتحجز في" (وقت إنشاء الطلب). طلب مالك صريح:
-                موظفي العمليات كانوا بيلخبطوا بين الاتنين. null = "في أقرب وقت ممكن" (ASAP)، مش
-                غياب بيانات — نفس دلالة scheduled_at=null في باقي المشروع (ScheduleChoice.asap). */}
-            <p className="font-medium">
-              موعد الخدمة المطلوب:{' '}
-              {order.scheduled_at ? (
-                new Date(order.scheduled_at).toLocaleDateString('ar-EG-u-nu-latn', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })
-              ) : (
-                <Badge variant="secondary">في أقرب وقت ممكن</Badge>
-              )}
-            </p>
-            <p>
-              تأجيلات العميل الذاتية: <Badge variant="secondary">{order.customer_reschedule_count ?? 0}</Badge>
-            </p>
-            {order.warranty_expires_at && (
-              <p>
-                الضمان لحد: {new Date(order.warranty_expires_at).toLocaleString('ar-EG-u-nu-latn')}
-                {new Date(order.warranty_expires_at) > new Date() ? (
-                  <Badge variant="secondary" className="mr-2">
-                    سارٍ
-                  </Badge>
+              <DataRow label="نوع الطلب">{ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</DataRow>
+              <DataRow label="وضع الحجز">{BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</DataRow>
+              {/* موعد الخدمة المطلوب — مختلف تمامًا عن "اتحجز في" (وقت إنشاء الطلب). طلب مالك صريح:
+                  موظفي العمليات كانوا بيلخبطوا بين الاتنين. null = "في أقرب وقت ممكن" (ASAP)، مش
+                  غياب بيانات — نفس دلالة scheduled_at=null في باقي المشروع (ScheduleChoice.asap). */}
+              <DataRow label="موعد الخدمة المطلوب" tone="strong">
+                {order.scheduled_at ? (
+                  (formatDateTimeAr(order.scheduled_at) ?? '—')
                 ) : (
-                  <Badge variant="outline" className="mr-2">
-                    منتهي
-                  </Badge>
+                  <Badge variant="secondary">في أقرب وقت ممكن</Badge>
                 )}
-              </p>
-            )}
-            {order.optional_warranty && (
-              <p className="rounded-md border border-blue-200 bg-blue-50 p-2 text-blue-900">
-                ضمان إضافي: {order.optional_warranty.name_ar} ({order.optional_warranty.coverage_months} شهر)
-                {' · '}تكلفته {formatEgp(order.warranty_price_cents)} ضمن إجمالي الطلب
-              </p>
-            )}
+              </DataRow>
+              <DataRow label="اتحجز في">{order.placed_at ? (formatDateTimeAr(order.placed_at) ?? '—') : '—'}</DataRow>
+              {/* اسم/تليفون الفني بدل الـUUID الخام (طلب مالك صريح — موظف العمليات مش المفروض ينسخ
+                  UUID يدويًا عشان يعرف مين الفني). الـUUID لسه موجود كمعلومة ثانوية (title) لو
+                  احتاجه حد للتصحيح التقني. الاسم قابل للنقر — بيودّي لصفحة بروفايل الفني. */}
+              <DataRow label="الفني">
+                {order.technician_id ? (
+                  order.technician_name ? (
+                    <Link href={`/technicians/${order.technician_id}`} className="underline" title={order.technician_id}>
+                      {order.technician_name}
+                      {order.technician_phone ? ` — ${order.technician_phone}` : ''}
+                    </Link>
+                  ) : (
+                    <span dir="ltr" title="اسم الفني مش متاح">
+                      {order.technician_id}
+                    </span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">لسه مفيش</span>
+                )}
+              </DataRow>
+              <DataRow label="الإجمالي" tone="strong">
+                {formatEgp(order.total_amount_cents)}
+              </DataRow>
+              <DataRow label="حالة الدفع">
+                <StatusChip tone={paymentStatusTone(order.payment_status)}>
+                  {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+                </StatusChip>
+              </DataRow>
+              <DataRow label="رسوم الكشف">{formatEgp(order.inspection_fee_cents)}</DataRow>
+              {order.surge_amount_cents > 0 && (
+                <DataRow label="رسوم الطوارئ" tone="danger">
+                  {formatEgp(order.surge_amount_cents)}
+                </DataRow>
+              )}
+              {order.discount_amount_cents > 0 && <DataRow label="الخصم">{formatEgp(order.discount_amount_cents)}</DataRow>}
+              {/* بتظهر **بس لو حصل تأجيل فعلاً** — «تأجيلات: 0» بادج على كل طلب زحمة بلا معلومة. */}
+              {(order.customer_reschedule_count ?? 0) > 0 && (
+                <DataRow label="تأجيلات العميل الذاتية">
+                  <Badge variant="secondary">{order.customer_reschedule_count}</Badge>
+                </DataRow>
+              )}
+              {order.warranty_expires_at && (
+                <DataRow label="الضمان لحد">
+                  {formatDateTimeAr(order.warranty_expires_at) ?? '—'}
+                  {new Date(order.warranty_expires_at) > new Date() ? (
+                    <Badge variant="secondary" className="ms-2">
+                      سارٍ
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="ms-2">
+                      منتهي
+                    </Badge>
+                  )}
+                </DataRow>
+              )}
+              {order.problem_description && <DataBlock label="وصف المشكلة">{order.problem_description}</DataBlock>}
+              {/* docs/08 §71 — اللي العميل اختاره في الفورم الديناميكي وقت الحجز. */}
+              {order.customer_inputs && order.customer_inputs.length > 0 && (
+                <DataBlock label="اختيارات العميل وقت الحجز">
+                  {order.customer_inputs
+                    .map((input) => `${input.label}: ${input.value}${input.unit ? ` ${input.unit}` : ''}`)
+                    .join(' · ')}
+                </DataBlock>
+              )}
+              {order.customer_notes && <DataBlock label="ملاحظات العميل">{order.customer_notes}</DataBlock>}
+              {order.optional_warranty && (
+                <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                  <p className="font-medium">ضمان إضافي: {order.optional_warranty.name_ar}</p>
+                  <p className="mt-0.5 text-xs">
+                    {order.optional_warranty.coverage_months} شهر · تكلفته {formatEgp(order.warranty_price_cents)} ضمن إجمالي الطلب
+                  </p>
+                </div>
+              )}
+            </DataList>
           </CardContent>
           {/* ADR-0083 §5 — الزرار بيفضل **ظاهر دايمًا**. طلب المالك الحرفي: «إلغاء الطلب دايمًا
               ظاهرة للأدمن، يكون دايمًا عنده أكسس». إخفاؤه كان بيخلي الأدمن يفتكر إن الميزة مش
@@ -2318,42 +2363,49 @@ export default function OrderDetailPage() {
           <CardHeader>
             <CardTitle className="text-base">بيانات العميل</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm">
-            <p>
-              الاسم:{' '}
-              {/* `customer_user_id` مش `customer_id` (docs/08 §77-A1): التاني هو مُعرّف
-                  البروفايل (`customer_profiles.id`)، وصفحة العميل بتاخد `users.id` — فاللينك
-                  كان بيرجّع 404 دايمًا. */}
-              {order.customer_user_id ? (
-                <Link
-                  href={`/customers/${order.customer_user_id}`}
-                  className="underline"
-                  title={order.customer_user_id}
-                >
-                  {order.customer_name ?? 'عرض البروفايل'}
-                </Link>
-              ) : (
-                // لو السيرفر ما رجّعش الـuser id لأي سبب، بنعرض الاسم كنص بدل لينك مكسور.
-                <span>{order.customer_name ?? '—'}</span>
+          <CardContent>
+            <DataList>
+              <DataRow label="الاسم" tone="strong">
+                {/* `customer_user_id` مش `customer_id` (docs/08 §77-A1): التاني هو مُعرّف
+                    البروفايل (`customer_profiles.id`)، وصفحة العميل بتاخد `users.id` — فاللينك
+                    كان بيرجّع 404 دايمًا. */}
+                {order.customer_user_id ? (
+                  <Link
+                    href={`/customers/${order.customer_user_id}`}
+                    className="underline"
+                    title={order.customer_user_id}
+                  >
+                    {order.customer_name ?? 'عرض البروفايل'}
+                  </Link>
+                ) : (
+                  // لو السيرفر ما رجّعش الـuser id لأي سبب، بنعرض الاسم كنص بدل لينك مكسور.
+                  <span>{order.customer_name ?? '—'}</span>
+                )}
+              </DataRow>
+              {/* التليفون كان سطر سايب من غير عنوان — رقم لوحده في الكارت مش واضح هو إيه. */}
+              {order.customer_phone && (
+                <DataRow label="التليفون">
+                  <span dir="ltr" className="inline-block">
+                    {order.customer_phone}
+                  </span>
+                </DataRow>
               )}
-            </p>
-            {order.customer_phone && (
-              <p dir="ltr" className="text-start">
-                {order.customer_phone}
-              </p>
-            )}
-            {order.address && (
-              <p>
-                العنوان: {order.address.street_name}
-                {order.address.landmark ? ` — ${order.address.landmark}` : ''}
-              </p>
-            )}
+              {order.address && (
+                <DataRow label="العنوان">
+                  {order.address.street_name}
+                  {order.address.landmark ? ` — ${order.address.landmark}` : ''}
+                </DataRow>
+              )}
+            </DataList>
           </CardContent>
         </Card>
 
         {/* الملخص المالي لكل طلب (docs/08 §20 بند 11) — كارت واحد واضح يجمع كل حاجة متبعثرة قبل
             كده: عمولة/أرباح (كانت محسوبة بس مش معروضة خالص)، وسيلة/حالة كل دفعة، وأي استرداد. */}
-        <Card>
+        {/* **عرض كامل**: الكارت ده جوّه جدول توزيع مستحقات بأربع أعمدة، وعرضه الطبيعي 561px
+            جوّه نص الشبكة (398px على لابتوب 1280) — فآخر عمود «المستحق» كان بره الشاشة
+            (اتقاس بـ`scripts/admin-visual.js`). */}
+        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">الملخص المالي</CardTitle>
           </CardHeader>
@@ -2361,33 +2413,44 @@ export default function OrderDetailPage() {
             {!financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
             {financialSummary && (
               <>
-                <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3">
-                  <p>إجمالي الطلب: {formatEgp(financialSummary.total_amount_cents)}</p>
-                  <p className="text-success">مدفوع فعليًا: {formatEgp(financialSummary.paid_amount_cents)}</p>
-                  {financialSummary.financed_order_amount_cents > 0 && (
-                    <p>مغطى بالتقسيط: {formatEgp(financialSummary.financed_order_amount_cents)}</p>
-                  )}
-                  <p className={financialSummary.amount_due_to_technician_cents > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-success'}>
-                    المطلوب من الفني تحصيله: {formatEgp(financialSummary.amount_due_to_technician_cents)}
+                {/*
+                  **مربّعات: العنوان فوق والرقم تحته** بدل `عنوان: رقم` في شبكة عمودين. في
+                  اللقطة الحقيقية الشكل القديم كان بيطلّع «المطلوب من الفني تحصيله: 450.00 ج.م»
+                  ملفوف على سطرين فالرقم بيتوه عن عنوانه، والأرقام مش متراصّة فوق بعض فمقارنة
+                  مبلغين بالعين كانت مستحيلة. `tabular-nums` بيرصّ الخانات.
+                */}
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {[
+                    { label: 'إجمالي الطلب', value: financialSummary.total_amount_cents, tone: '' },
+                    { label: 'مدفوع فعليًا', value: financialSummary.paid_amount_cents, tone: 'text-success' },
+                    ...(financialSummary.financed_order_amount_cents > 0
+                      ? [{ label: 'مغطى بالتقسيط', value: financialSummary.financed_order_amount_cents, tone: '' }]
+                      : []),
+                    {
+                      label: 'المطلوب من الفني تحصيله',
+                      value: financialSummary.amount_due_to_technician_cents,
+                      tone: financialSummary.amount_due_to_technician_cents > 0 ? 'text-amber-700' : 'text-success',
+                    },
+                    ...(financialSummary.refunded_amount_cents > 0
+                      ? [{ label: 'مسترد فعليًا', value: financialSummary.refunded_amount_cents, tone: 'text-destructive' }]
+                      : []),
+                    { label: 'عمولة المنصة', value: financialSummary.platform_commission_cents, tone: '' },
+                    { label: 'أرباح الفني', value: financialSummary.technician_earning_cents, tone: '' },
+                    ...(financialSummary.cancellation_fee_cents > 0
+                      ? [{ label: 'رسوم إلغاء', value: financialSummary.cancellation_fee_cents, tone: 'text-destructive' }]
+                      : []),
+                  ].map((tile) => (
+                    <div key={tile.label} className="rounded-xl border border-border/70 bg-muted/25 px-3 py-2.5">
+                      <p className="text-xs leading-4 text-muted-foreground">{tile.label}</p>
+                      <p className={`mt-1 font-semibold tabular-nums ${tile.tone}`}>{formatEgp(tile.value)}</p>
+                    </div>
+                  ))}
+                </div>
+                {financialSummary.installment_outstanding_cents > 0 && (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    باقي جدول التقسيط على العميل: {formatEgp(financialSummary.installment_outstanding_cents)} — تحصّله المنصة، وليس الفني.
                   </p>
-                  {financialSummary.installment_outstanding_cents > 0 && (
-                    <p className="col-span-2 text-xs text-muted-foreground">
-                      باقي جدول التقسيط على العميل: {formatEgp(financialSummary.installment_outstanding_cents)} — تحصّله المنصة، وليس الفني.
-                    </p>
-                  )}
-                  {financialSummary.refunded_amount_cents > 0 && (
-                    <p className="text-destructive">مسترد فعليًا: {formatEgp(financialSummary.refunded_amount_cents)}</p>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <p>عمولة المنصة: {formatEgp(financialSummary.platform_commission_cents)}</p>
-                  <p>أرباح الفني: {formatEgp(financialSummary.technician_earning_cents)}</p>
-                  {financialSummary.cancellation_fee_cents > 0 && (
-                    <p className="text-destructive">
-                      رسوم إلغاء: {formatEgp(financialSummary.cancellation_fee_cents)}
-                    </p>
-                  )}
-                </div>
+                )}
 
                 <div className="rounded-md border">
                   <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
@@ -2686,6 +2749,83 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {/*
+          **مدة الشغلانة للأدمن — نفس اللي العميل شافه** (ADR-0102، docs/08 §157).
+
+          بلاغ المالك: «مدة الشغلانة نفسها مش بتظهر للأدمين». الكارت ده كان بيقرا
+          `pricing_evaluation.computed_duration_days` وبس — وهي بالأيام، و`pricing_evaluation`
+          نفسها `null` لأي خدمة مش `pricing_model=formula`. فالأدمن كان بيشوف «—» في أكتر
+          حالتين شائعتين: خدمة مش معادلية، وشغلانة مدتها بالساعات.
+
+          الـsnapshot كان **موجود على الطلب من الأول** (`duration_minutes`/
+          `estimated_duration_days`) والعميل بيقراه بنفس الحقول. فمفيش حساب جديد هنا —
+          نفس الحقول ونفس دالة الصياغة (`formatWorkDuration` من `@baytak/shared-types`).
+        */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">المدة والطاقم</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <DataList>
+              <DataRow label="المدة المقدّرة عند الحجز" tone="strong">
+                {formatWorkDuration(order.duration_minutes, order.estimated_duration_days) ?? '—'}
+              </DataRow>
+              {order.scheduled_at && <DataRow label="موعد البداية">{formatDateTimeAr(order.scheduled_at) ?? '—'}</DataRow>}
+              {order.scheduled_at && order.duration_minutes !== null && order.duration_minutes > 0 && (
+                <DataRow label="النهاية المتوقعة">
+                  {/* كان `toLocaleString('ar-EG-u-nu-latn')` خام فبيطلّع «12:00:00 2026/9/17 م»
+                      — ثواني ملهاش لازمة وترتيب متلخبط. `formatDateTimeAr` هو نفس الصيغة
+                      المستخدمة في كل اللوحة. */}
+                  {formatDateTimeAr(
+                    new Date(new Date(order.scheduled_at).getTime() + order.duration_minutes * 60_000),
+                  ) ?? '—'}
+                </DataRow>
+              )}
+              <DataRow label="الطاقم المطلوب">
+                {formatWorkforce(order.required_technicians, order.required_assistants) ?? '—'}
+              </DataRow>
+            </DataList>
+
+            {/*
+              **المدة الفعلية بلوك منفصل** عن التقدير عن قصد (طلب المالك: «وبعد انتهاء الطلب
+              ممكن يبقى عندنا سطر منفصل اسمه المدة الفعلية. كده ما نخلطش بين تقدير الحجز وما
+              حدث بالفعل»). بيظهر بس لما الشغل يبدأ فعلاً.
+            */}
+            {order.work_started_at && (
+              <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2">
+                <p className="text-xs font-medium text-muted-foreground">المدة الفعلية</p>
+                <p className="mt-0.5 text-sm font-semibold">
+                  {order.work_completed_at
+                    ? (formatWorkDuration(
+                        Math.round(
+                          (new Date(order.work_completed_at).getTime() -
+                            new Date(order.work_started_at).getTime()) /
+                            60_000,
+                        ),
+                        null,
+                      ) ?? '—')
+                    : 'الشغل لسه شغّال'}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  بدأ {formatDateTimeAr(order.work_started_at) ?? '—'}
+                </p>
+              </div>
+            )}
+
+            {/*
+              مصدر التقدير — معلومة تشخيصية للأدمن («الرقم ده جا منين؟»)، مش مصدر العرض.
+              العرض فوق بيقرا الـsnapshot على الطلب دايمًا.
+            */}
+            <p className="text-xs leading-5 text-muted-foreground">
+              {order.pricing_evaluation
+                ? `المصدر: معادلة تسعير الخدمة، محسوبة وقت الحجز في ${formatDateTimeAr(order.pricing_evaluation.created_at) ?? '—'}`
+                : order.standard_data_id
+                  ? 'المصدر: بيانات الإنتاجية القياسية للخدمة (service_standard_data)'
+                  : 'المصدر: المدة الافتراضية للخدمة من الكتالوج — الخدمة دي مش بتستخدم معادلة تسعير ولا بيانات قياسية'}
+            </p>
+          </CardContent>
+        </Card>
+
         {/* docs/08 §108-A — نتيجة آخر تعيين مساعد/عضو طاقم: فورًا ولا فرصة مستنية قبول. */}
         {crewAssignOutcome && (
           <div
@@ -2722,7 +2862,7 @@ export default function OrderDetailPage() {
                       <TableRow key={member.id}>
                         <TableCell>{member.full_name}</TableCell>
                         <TableCell>{member.role_label}</TableCell>
-                        <TableCell>{new Date(member.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                        <TableCell>{(formatDateTimeAr(member.created_at) ?? '—')}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -2816,7 +2956,7 @@ export default function OrderDetailPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>{member.role_label}</TableCell>
-                          <TableCell>{new Date(member.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                          <TableCell>{(formatDateTimeAr(member.created_at) ?? '—')}</TableCell>
                           {hasPermission('orders.manage_crew') && (
                             <TableCell>
                               <div className="flex gap-2">
@@ -3024,7 +3164,7 @@ export default function OrderDetailPage() {
                         {rating.rating_type === 'customer_to_technician' ? 'العميل قيّم الفني' : 'الفني قيّم العميل'}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
-                        {new Date(rating.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                        {(formatDateTimeAr(rating.created_at) ?? '—')}
                       </span>
                     </div>
                     <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -3071,7 +3211,7 @@ export default function OrderDetailPage() {
                     <TableRow key={entry.id}>
                       <TableCell>{entry.previous_status ? ORDER_STATUS_LABELS[entry.previous_status] : '—'}</TableCell>
                       <TableCell>{ORDER_STATUS_LABELS[entry.new_status]}</TableCell>
-                      <TableCell>{new Date(entry.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>{(formatDateTimeAr(entry.created_at) ?? '—')}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -3080,51 +3220,6 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">الإنتاجية والمدة المتوقعة</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm">
-            {order.pricing_evaluation ? (
-              <>
-                <p>
-                  المدة المتوقعة:{' '}
-                  {order.pricing_evaluation.computed_duration_days !== null
-                    ? `${order.pricing_evaluation.computed_duration_days} يوم`
-                    : '—'}
-                </p>
-                <p>
-                  عدد الصنايعية المطلوب:{' '}
-                  {order.pricing_evaluation.computed_technicians ?? '—'}
-                </p>
-                <p>
-                  عدد المساعدين المطلوب:{' '}
-                  {order.pricing_evaluation.computed_assistants ?? '—'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  محسوبة وقت الحجز في:{' '}
-                  {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
-                </p>
-              </>
-            ) : order.standard_data_id ? (
-              // محرك الإنتاجية (docs/06 §3.3-§3.6) — نفس فكرة pricing_evaluation فوق بس لخدمات
-              // مبنية على بيانات قياسية (service_standard_data) مش formula.
-              <>
-                <p>
-                  المدة المتوقعة:{' '}
-                  {order.estimated_duration_days !== null ? `${order.estimated_duration_days} يوم` : '—'}
-                </p>
-                <p>عدد الصنايعية المطلوب: {order.required_technicians ?? '—'}</p>
-                <p>عدد المساعدين المطلوب: {order.required_assistants ?? '—'}</p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
-                ولا بيانات قياسية (service_standard_data)
-              </p>
-            )}
-          </CardContent>
-        </Card>
 
         {order.technician_cancellations.length > 0 && (
           <Card>
@@ -3146,7 +3241,7 @@ export default function OrderDetailPage() {
                 <TableBody>
                   {order.technician_cancellations.map((c) => (
                     <TableRow key={c.id}>
-                      <TableCell>{new Date(c.cancelled_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>{(formatDateTimeAr(c.cancelled_at) ?? '—')}</TableCell>
                       <TableCell>{Math.round(c.elapsed_seconds_after_acceptance / 60)} دقيقة</TableCell>
                       <TableCell>{c.within_policy_window ? 'أيوه' : 'لأ (متأخر)'}</TableCell>
                       <TableCell>
@@ -3174,7 +3269,7 @@ export default function OrderDetailPage() {
               )}
               <p><span className="text-muted-foreground">رسوم الإلغاء:</span> {order.customer_cancellation.fee_cents > 0 ? formatEgp(order.customer_cancellation.fee_cents) : 'لا توجد رسوم'}</p>
               {order.customer_cancellation.cancelled_at && (
-                <p className="text-xs text-muted-foreground">وقت الإلغاء: {new Date(order.customer_cancellation.cancelled_at).toLocaleString('ar-EG-u-nu-latn')}</p>
+                <p className="text-xs text-muted-foreground">وقت الإلغاء: {(formatDateTimeAr(order.customer_cancellation.cancelled_at) ?? '—')}</p>
               )}
             </CardContent>
           </Card>
@@ -3335,7 +3430,7 @@ export default function OrderDetailPage() {
                   <li key={n.id} className="rounded-md border p-2 text-sm">
                     <p>{n.note}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {n.author_full_name ?? 'موظف'} — {new Date(n.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                      {n.author_full_name ?? 'موظف'} — {(formatDateTimeAr(n.created_at) ?? '—')}
                     </p>
                   </li>
                 ))}

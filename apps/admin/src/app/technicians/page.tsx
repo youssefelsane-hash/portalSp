@@ -19,6 +19,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -117,7 +118,7 @@ export default function TechniciansPage() {
         </div>
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !technicians && <TableSkeleton columns={7} />}
       {technicians && technicians.length === 0 && <EmptyState title="مفيش فنيين مطابقين" />}
 

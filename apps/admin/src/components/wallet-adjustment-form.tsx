@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { SelectNative } from '@/components/ui/select-native';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { ErrorNotice } from '@/components/notice';
 
 // §24 — كانت فجوة موثّقة: PATCH /admin/wallets/:userId/adjust موجود ومختبر (wallets.adjust +
 // step-up إجباري، docs/08 §20 بند 5) بس صفر زرار له في أي شاشة — أدمن Finance مضطر ينادي الـAPI
@@ -116,7 +117,7 @@ function WalletAdjustmentForm({ userId, onAdjusted }: { userId: string; onAdjust
               </Label>
               <Input id="wallet-adjust-reason" value={reason} onChange={(e) => setReason(e.target.value)} minLength={5} required />
             </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
           </div>
           <DialogFooter>
             <DialogClose asChild>

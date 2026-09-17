@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { ErrorNotice } from '@/components/notice';
 
 const ASSET_GUIDANCE: Record<BrandingAssetType, string> = {
   primary_logo: 'شعار أفقي شفاف بنسبة قريبة من 3.5:1. الأفضل PNG بعرض 1200 بكسل.',
@@ -85,7 +86,10 @@ export default function BrandingPage() {
   if (!hasPermission('branding.manage')) {
     return (
       <AppShell>
-        <PageHeader title="البراندنج" />
+        <PageHeader
+        title="البراندنج"
+        description="الشعارات والصور والألوان اللي بتظهر في التطبيقات والموقع. التغيير بيسري على طول."
+      />
         <p className="text-sm text-muted-foreground">مفيش صلاحية عندك تشوف الصفحة دي.</p>
       </AppShell>
     );
@@ -94,7 +98,7 @@ export default function BrandingPage() {
   return (
     <AppShell>
       <PageHeader title="البراندنج" description="رفع/استبدال شعارات المنصة — بتتحدّث فورًا في كل التطبيقات من غير أي deployment. PNG/JPEG/WEBP بس، حتى 5MB، أبعاد بين 32 و4096 بكسل." />
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <Card className="mb-5 overflow-hidden border-primary/20 bg-[linear-gradient(135deg,#123b69_0%,#09294b_68%,#142235_100%)] text-[#fff8f2]">
         <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_auto] lg:items-center">

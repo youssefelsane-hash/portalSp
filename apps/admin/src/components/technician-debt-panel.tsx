@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 // ADR-0041 / docs/08 §63.أ2 — نص المالك: «الأدمن يكون عنده الأكسس إنه يقول إن الراجل ده دفع
 // فنصفر له المديونيات بتاعته، الراجل ده ما دفعش فلأ الفلوس دول مفتوحة كده عنده في الظل».
@@ -119,7 +120,7 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
-        {error && <p className="text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
         {!debt && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
 
         {debt && (
@@ -239,7 +240,7 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
                   <TableBody>
                     {debt.settlements.map((s) => (
                       <TableRow key={s.id}>
-                        <TableCell>{new Date(s.recordedAt).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                        <TableCell>{(formatDateTimeAr(s.recordedAt) ?? '—')}</TableCell>
                         <TableCell className="tabular-nums">{formatEgp(s.amountCents)}</TableCell>
                         <TableCell>{METHOD_LABELS[s.method]}</TableCell>
                         <TableCell dir="ltr">{s.externalReference ?? '—'}</TableCell>

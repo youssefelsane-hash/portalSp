@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Between, DataSource, EntityManager, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -12,6 +12,12 @@ import {
 } from '../../common/events/order-assistant-assigned-manually.event';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { resolveEffectiveMemberType } from './crew-member-type';
+import {
+  ORDER_DATE_COLUMNS,
+  OrderBucket,
+  TERMINAL_ORDER_STATUSES,
+  statusesForScope,
+} from './order-scope';
 import { CrewMemberType } from './dto/admin-crew-member.dto';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -180,20 +186,6 @@ export class AdminOrdersService {
   ): Promise<{ items: Order[]; meta: { page: number; per_page: number; total: number } }> {
     const page = query.page ?? 1;
     const perPage = query.per_page ?? 20;
-    const where: FindOptionsWhere<Order> = {};
-    if (query.order_status) where.orderStatus = query.order_status;
-    if (query.order_type) where.orderType = query.order_type;
-    // فلتر التكرار — IsNull/Not(IsNull) على recurring_template_id (العمود دايمًا زوجي مع
-    // recurring_occurrence_at عبر CHECK constraint chk_orders_recurring_identity_pair).
-    if (query.recurring === 'true') where.recurringTemplateId = Not(IsNull());
-    if (query.recurring === 'false') where.recurringTemplateId = IsNull();
-    if (query.from && query.to) {
-      where.placedAt = Between(new Date(query.from), new Date(query.to));
-    } else if (query.from) {
-      where.placedAt = MoreThanOrEqual(new Date(query.from));
-    } else if (query.to) {
-      where.placedAt = LessThanOrEqual(new Date(query.to));
-    }
 
     // docs/08 §63.ب5 — بلاغ المالك: «الطلبات بتبقى مترتبة بطريقة شبه عشوائية».
     //
@@ -204,35 +196,7 @@ export class AdminOrdersService {
     //
     // الإصلاح: `COALESCE(placed_at, created_at)` — الطلب اللي لسه ما اتسجّلش وقت طلبه بيترتّب بوقت
     // إنشائه بدل ما يقفز فوق أو يغرق تحت، + `id DESC` كـtie-break حتمي (uuid v7 مرتّب زمنيًا أصلاً).
-    const qb = this.orders
-      .createQueryBuilder('o')
-      .where(where)
-      .skip((page - 1) * perPage)
-      .take(perPage);
-
-    // docs/08 §67 — بحث برقم الطلب. §73 بند 3 وسّعه لاسم/تليفون العميل والفني وPayment ID —
-    // بلاغ مالك صريح: "مركز الاتصال محتاج يدوّر برقم تليفون العميل مش رقم الطلب بس". `ILIKE` مع
-    // `%…%` عشان الأدمن يقدر يلزق جزء بس. الحروف الخاصة بتاعت LIKE بتتهرّب، وإلا `%` اللي
-    // المستخدم يكتبه بيبقى wildcard ويرجّع القايمة كلها بدل ما يفلتر. الـJOINs بتتضاف بس لو فيه
-    // بحث فعلي — صفر تكلفة إضافية على القايمة العادية بلا بحث. قرار خصوصية موثّق (docs/08 §73):
-    // كل الأدمن يقدروا يدوروا بالتليفون — نفس صلاحية عرض الصفحة كلها، مفيش تعقيد إضافي هنا.
-    const search = query.search?.trim();
-    if (search) {
-      const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-      qb.leftJoin('customer_profiles', 'cp', 'cp.id = o.customer_id')
-        .leftJoin('users', 'cu', 'cu.id = cp.user_id')
-        .leftJoin('technician_profiles', 'tp', 'tp.id = o.technician_id')
-        .leftJoin('users', 'tu', 'tu.id = tp.user_id')
-        .andWhere(
-          `(o.order_number ILIKE :search ESCAPE '\\'
-            OR cu.full_name ILIKE :search ESCAPE '\\'
-            OR cu.phone_number ILIKE :search ESCAPE '\\'
-            OR tu.full_name ILIKE :search ESCAPE '\\'
-            OR tu.phone_number ILIKE :search ESCAPE '\\'
-            OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.gateway_reference ILIKE :search ESCAPE '\\'))`,
-          { search: `%${escaped}%` },
-        );
-    }
+    const qb = this.buildOrdersFilter(query).skip((page - 1) * perPage).take(perPage);
 
     if (query.sort === 'soonest') {
       // "اللي تنفيذه قرّب" — الأقرب موعدًا الأول. الطلبات بلا موعد محدد بتروح الآخر (NULLS LAST)
@@ -252,6 +216,227 @@ export class AdminOrdersService {
     const [items, total] = await qb.getManyAndCount();
 
     return { items, meta: { page, per_page: perPage, total } };
+  }
+
+  /**
+   * **بنّاء فلتر واحد لقايمة الطلبات والملخّص والتقويم** (ADR-0103، docs/08 §157).
+   *
+   * التلاتة لازم يقروا **نفس** التعريف: لو الملخّص قال «٢٧ طلب» والقايمة عرضت ٣١، الأدمن بيفقد
+   * الثقة في الشاشة كلها. فالفلترة مكتوبة مرة واحدة هنا وبس.
+   *
+   * ### أهم تغيير: `scope` منفصل عن `sort`
+   *
+   * قبل كده `sort=soonest` كان ORDER BY بلا أي فلترة، فـ«تنفيذها قرّب» كانت بترتّب **كل**
+   * التاريخ — والمكتمل من سنة موعده أقدم فبيطلع الأول (بلاغ المالك). دلوقتي `scope` بيحدّد
+   * المجموعة و`sort` بيحدّد الترتيب جواها.
+   */
+  private buildOrdersFilter(query: ListOrdersQueryDto): SelectQueryBuilder<Order> {
+    const qb = this.orders.createQueryBuilder('o');
+
+    // ــ الحالات المسموحة: الاختيار الصريح **بيكسب** النطاق ــ
+    //
+    // **ليه بيكسب مش بيتقاطع**: أول نسخة كانت بتقاطعهم، فأدمن واقف على «الحالية» ودايس «مكتمل»
+    // من قايمة الحالة كان بيشوف **صفر نتيجة** — وهو اختار حاجة موجودة فعلاً. اتلقط في
+    // `admin-orders-visibility.spec.ts` (§116-C: أي حالة لازم توصل للأدمن).
+    //
+    // الاختيار الصريح للحالة هو **نطاق أضيق بطبيعته**، فمنطقي إنه يحدّده بدل ما يتصادم معاه.
+    // والنطاق بيفضل هو اللي بيحكم لما مفيش اختيار صريح — وده الوضع الافتراضي والأهم.
+    const explicitStatuses = query.statuses?.length ? query.statuses : query.order_status ? [query.order_status] : null;
+    if (explicitStatuses) {
+      qb.andWhere('o.order_status = ANY(:explicitStatuses)', { explicitStatuses });
+    } else {
+      const scopeStatuses = statusesForScope(query.scope ?? 'current');
+      if (scopeStatuses) {
+        qb.andWhere('o.order_status = ANY(:scopeStatuses)', { scopeStatuses: [...scopeStatuses] });
+      }
+    }
+
+    if (query.order_type) qb.andWhere('o.order_type = :orderType', { orderType: query.order_type });
+    if (query.payment_status) qb.andWhere('o.payment_status = :paymentStatus', { paymentStatus: query.payment_status });
+    if (query.crew === 'incomplete') {
+      // نفس قاعدة `computeCrewComposition()` بالحرف: القائد بيتحسب +1، والأعضاء بـ`crew_slot`
+      // مش `member_type` (ADR-0101). أي نسخة تانية هنا بتخلّي الفلتر والشاشة يختلفوا.
+      qb.andWhere(
+        `COALESCE(o.required_technicians, 1) > 1 + (
+           SELECT COUNT(*) FROM order_team_members otm_c
+            WHERE otm_c.order_id = o.id AND otm_c.crew_slot = 'execution')`,
+      );
+    }
+    if (query.service_id) qb.andWhere('o.service_id = :serviceId', { serviceId: query.service_id });
+    if (query.service_zone_id) qb.andWhere('o.service_zone_id = :zoneId', { zoneId: query.service_zone_id });
+    if (query.technician_id) {
+      // القائد **أو** عضو طاقم — نفس توحيد `technicianCommittedOrdersSource` بالحرف: الأدمن
+      // اللي بيدوّر على شغل فني معناه كل شغله، مش اللي هو قائده بس.
+      qb.andWhere(
+        `(o.technician_id = :technicianId
+          OR EXISTS (SELECT 1 FROM order_team_members otm_f
+                      WHERE otm_f.order_id = o.id AND otm_f.technician_id = :technicianId))`,
+        { technicianId: query.technician_id },
+      );
+    }
+
+    // فلتر التكرار — العمود دايمًا زوجي مع recurring_occurrence_at عبر CHECK constraint
+    // chk_orders_recurring_identity_pair.
+    if (query.recurring === 'true') qb.andWhere('o.recurring_template_id IS NOT NULL');
+    if (query.recurring === 'false') qb.andWhere('o.recurring_template_id IS NULL');
+
+    // ــ النطاق الزمني على **الحقل اللي الأدمن اختاره** ــ
+    const dateColumn = ORDER_DATE_COLUMNS[query.date_field ?? 'scheduled_at'];
+    if (query.from) qb.andWhere(`${dateColumn} >= :from`, { from: new Date(query.from) });
+    if (query.to) qb.andWhere(`${dateColumn} <= :to`, { to: new Date(query.to) });
+
+    // ــ الاختصارات التشغيلية — كلها مشتقّة ــ
+    this.applyBucket(qb, query.bucket);
+
+    const search = query.search?.trim();
+    if (search) {
+      // docs/08 §67 + §73 بند 3 — رقم الطلب واسم/تليفون العميل والفني وPayment ID. الحروف
+      // الخاصة بتاعت LIKE بتتهرّب، وإلا `%` اللي المستخدم يكتبه بيبقى wildcard ويرجّع الكل.
+      // الـJOINs بتتضاف بس لو فيه بحث فعلي — صفر تكلفة على القايمة العادية.
+      const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      qb.leftJoin('customer_profiles', 'cp', 'cp.id = o.customer_id')
+        .leftJoin('users', 'cu', 'cu.id = cp.user_id')
+        .leftJoin('technician_profiles', 'tp', 'tp.id = o.technician_id')
+        .leftJoin('users', 'tu', 'tu.id = tp.user_id')
+        .andWhere(
+          `(o.order_number ILIKE :search ESCAPE '\\'
+            OR cu.full_name ILIKE :search ESCAPE '\\'
+            OR cu.phone_number ILIKE :search ESCAPE '\\'
+            OR tu.full_name ILIKE :search ESCAPE '\\'
+            OR tu.phone_number ILIKE :search ESCAPE '\\'
+            OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.gateway_reference ILIKE :search ESCAPE '\\'))`,
+          { search: `%${escaped}%` },
+        );
+    }
+
+    return qb;
+  }
+
+  /**
+   * الاختصارات التشغيلية — **مشتقّة بالكامل**، مفيش `OrderStatus` ولا عمود جديد (طلب المالك
+   * بالحرف: «مش محتاجين نخترع Order Status جديد»).
+   *
+   * الأيام بتتحسب بتوقيت القاهرة مش UTC: «اليوم» للأدمن هو اليوم اللي هو قاعد فيه، وأي حساب
+   * بـUTC الخام بيزحزح الحدود بساعتين-تلاتة فيدخل/يطلّع طلبات الليل بالغلط.
+   */
+  private applyBucket(qb: SelectQueryBuilder<Order>, bucket?: OrderBucket): void {
+    if (!bucket) return;
+    const cairoDay = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
+    const today = `(now() AT TIME ZONE 'Africa/Cairo')::date`;
+    switch (bucket) {
+      case 'today':
+        qb.andWhere(`${cairoDay} = ${today}`);
+        return;
+      case 'tomorrow':
+        qb.andWhere(`${cairoDay} = ${today} + 1`);
+        return;
+      case 'next7':
+        qb.andWhere(`${cairoDay} BETWEEN ${today} AND ${today} + 7`);
+        return;
+      case 'upcoming':
+        qb.andWhere('o.scheduled_at >= now()');
+        return;
+      case 'overdue':
+        // **المتأخر = الموعد عدّى والطلب لسه غير نهائي.** شرط الحالة مذكور صراحةً هنا مش
+        // متروك للـscope: الأدمن ممكن يفتح «المتأخرة» وهو في نطاق «كل الطلبات».
+        qb.andWhere('o.scheduled_at < now()').andWhere('o.order_status <> ALL(:terminalForOverdue)', {
+          terminalForOverdue: [...TERMINAL_ORDER_STATUSES],
+        });
+        return;
+      case 'unassigned':
+        qb.andWhere('o.technician_id IS NULL');
+        return;
+    }
+  }
+
+  /**
+   * **شريط الملخّص** (docs/08 §157) — بيتحدّث مع نفس الفلاتر السارية بالظبط.
+   *
+   * استعلام **واحد** بـ`FILTER` لكل خانة بدل ٦ استعلامات، وبيعيد استخدام `buildOrdersFilter()`
+   * فالأرقام مستحيل تخالف القايمة اللي تحتها.
+   */
+  async summary(query: ListOrdersQueryDto): Promise<{
+    total: number;
+    today: number;
+    in_progress: number;
+    overdue: number;
+    unassigned: number;
+    crew_incomplete: number;
+  }> {
+    const qb = this.buildOrdersFilter(query)
+      .select('COUNT(*)::int', 'total')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE (o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date = (now() AT TIME ZONE 'Africa/Cairo')::date)::int`,
+        'today',
+      )
+      .addSelect(`COUNT(*) FILTER (WHERE o.order_status = 'in_progress')::int`, 'in_progress')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE o.scheduled_at < now() AND o.order_status <> ALL(:terminalForSummary))::int`,
+        'overdue',
+      )
+      .addSelect(`COUNT(*) FILTER (WHERE o.technician_id IS NULL)::int`, 'unassigned')
+      // «الفريق ناقص» بنفس قاعدة `computeCrewComposition()`: القائد بيتحسب +1، والأعضاء
+      // بيتعدّوا بـ`crew_slot` مش `member_type` (ADR-0101).
+      .addSelect(
+        `COUNT(*) FILTER (
+           WHERE COALESCE(o.required_technicians, 1) > 1 + (
+             SELECT COUNT(*) FROM order_team_members otm_s
+              WHERE otm_s.order_id = o.id AND otm_s.crew_slot = 'execution')
+         )::int`,
+        'crew_incomplete',
+      )
+      .setParameter('terminalForSummary', [...TERMINAL_ORDER_STATUSES]);
+
+    const row = await qb.getRawOne<{
+      total: string; today: string; in_progress: string; overdue: string; unassigned: string; crew_incomplete: string;
+    }>();
+    return {
+      total: Number(row?.total ?? 0),
+      today: Number(row?.today ?? 0),
+      in_progress: Number(row?.in_progress ?? 0),
+      overdue: Number(row?.overdue ?? 0),
+      unassigned: Number(row?.unassigned ?? 0),
+      crew_incomplete: Number(row?.crew_incomplete ?? 0),
+    };
+  }
+
+  /**
+   * **حِمل التشغيل بالتقويم** (docs/08 §157) — «فين الأيام الفاضية وفين المكدسة».
+   *
+   * بيرجّع **عدّ لكل يوم** من السيرفر، مش الطلبات نفسها: طلب المالك بالحرف «التقويم ياخد
+   * aggregate counts من السيرفر لكل يوم، بدل ما ننزل آلاف الطلبات للمتصفح عشان نحسبهم».
+   *
+   * اليوم الفاضي **مش** بيترجع كصف — الواجهة بتعرف إنه صفر من غيابه، وده أرخص من توليد سلسلة
+   * أيام كاملة في السيرفر.
+   */
+  async calendar(query: ListOrdersQueryDto): Promise<
+    { day: string; total: number; unassigned: number; in_progress: number; completed: number; overdue: number }[]
+  > {
+    const dayExpr = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
+    const rows = await this.buildOrdersFilter(query)
+      .select(`${dayExpr}::text`, 'day')
+      .addSelect('COUNT(*)::int', 'total')
+      .addSelect(`COUNT(*) FILTER (WHERE o.technician_id IS NULL)::int`, 'unassigned')
+      .addSelect(`COUNT(*) FILTER (WHERE o.order_status = 'in_progress')::int`, 'in_progress')
+      .addSelect(`COUNT(*) FILTER (WHERE o.order_status = 'completed')::int`, 'completed')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE o.scheduled_at < now() AND o.order_status <> ALL(:terminalForCalendar))::int`,
+        'overdue',
+      )
+      .setParameter('terminalForCalendar', [...TERMINAL_ORDER_STATUSES])
+      .andWhere('o.scheduled_at IS NOT NULL')
+      .groupBy(dayExpr)
+      .orderBy(dayExpr, 'ASC')
+      .getRawMany<{ day: string; total: string; unassigned: string; in_progress: string; completed: string; overdue: string }>();
+
+    return rows.map((r) => ({
+      day: r.day,
+      total: Number(r.total),
+      unassigned: Number(r.unassigned),
+      in_progress: Number(r.in_progress),
+      completed: Number(r.completed),
+      overdue: Number(r.overdue),
+    }));
   }
 
   /**

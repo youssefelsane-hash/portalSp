@@ -39,8 +39,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { LiveValue } from '@/components/live-value';
+import { ErrorNotice } from '@/components/notice';
 import {
   VERIFICATION_STATUS_LABELS,
   LEVEL_LABELS,
@@ -57,7 +58,7 @@ import {
  * لفّها في `\u2066…\u2069` بتكسرها لـ"22026/9/" — العزل بيتعارض مع الـRLM مش بيساعده.
  */
 function arDateTime(value: string): string {
-  return new Date(value).toLocaleString('ar-EG-u-nu-latn');
+  return (formatDateTimeAr(value) ?? '—');
 }
 
 function KpiCard({
@@ -96,7 +97,18 @@ function KpiCard({
 // كارت توزيع القدرة الاستيعابية اليوم — نفس الألوان المعتمدة لمستويات التصنيف في باقي الشاشات
 // (LIGHT/MEANINGFUL/HEAVY/BLOCKED)، معروضة كأربع قيم مجاورة بدل رسم بياني كامل — مقياس واحد
 // بسيط مايستاهلش مكوّن رسم منفصل (راجع dataviz skill: "هل ده أصلاً رسم بياني؟").
-function CapacityTierRow({ label, value, tone }: { label: string; value: number; tone: 'success' | 'warning' | 'danger' | 'muted' }) {
+function CapacityTierRow({
+  label,
+  hint,
+  value,
+  tone,
+}: {
+  label: string;
+  /** المفتاح التقني (LIGHT/HEAVY…) — في tooltip مش في الخانة نفسها. */
+  hint?: string;
+  value: number;
+  tone: 'success' | 'warning' | 'danger' | 'muted';
+}) {
   const toneClass =
     tone === 'success'
       ? 'text-success'
@@ -106,7 +118,9 @@ function CapacityTierRow({ label, value, tone }: { label: string; value: number;
           ? 'text-danger'
           : 'text-muted-foreground';
   return (
-    <div className="flex flex-1 flex-col items-center gap-1 rounded-lg border p-3">
+    // المفتاح الإنجليزي اتشال من الخانة (كان «خفيف (LIGHT)») وبقى في `title`: الأدمن العربي
+    // مش محتاجه في كل نظرة، واللي بيقارن باللوجز بيلاقيه بالمرور بالماوس.
+    <div className="flex flex-1 flex-col items-center gap-1 rounded-lg border p-3" title={hint}>
       <LiveValue value={value} className={`text-2xl font-semibold ${toneClass}`} />
       <span className="text-xs text-muted-foreground">{label}</span>
     </div>
@@ -353,7 +367,7 @@ function ExceptionCenterSection({
         مركز الاستثناءات/التنبيهات
       </h2>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && loading && !data && <Skeleton className="h-24" />}
 
       {!error && data && totalCount === 0 && (
@@ -376,9 +390,12 @@ function ExceptionCenterSection({
                     <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
                       {item.order_number}
                     </Link>
-                    <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
-                      {item.full_name}
-                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      الفني{' '}
+                      <Link href={`/technicians/${item.technician_id}`} className="text-foreground hover:underline">
+                        {item.full_name}
+                      </Link>
+                    </span>
                     <span className="text-xs text-muted-foreground">
                       معاده: {arDateTime(item.scheduled_at)}
                     </span>
@@ -396,7 +413,14 @@ function ExceptionCenterSection({
                 {data.stale_in_progress.items.map((item) => (
                   <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
                     <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">{item.order_number}</Link>
-                    {item.technician_id && <Link href={`/technicians/${item.technician_id}`} className="hover:underline">{item.full_name}</Link>}
+                    {item.technician_id && (
+                      <span className="text-xs text-muted-foreground">
+                        الفني{' '}
+                        <Link href={`/technicians/${item.technician_id}`} className="text-foreground hover:underline">
+                          {item.full_name}
+                        </Link>
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground">بدأ: {arDateTime(item.work_started_at)}</span>
                     <Badge variant="destructive">متوقف {formatDelay(item.age_seconds)}</Badge>
                   </li>
@@ -481,9 +505,12 @@ function ExceptionCenterSection({
                       <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
                         {item.order_number}
                       </Link>
-                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
-                        {item.full_name}
-                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        الفني{' '}
+                        <Link href={`/technicians/${item.technician_id}`} className="text-foreground hover:underline">
+                          {item.full_name}
+                        </Link>
+                      </span>
                       <span className="text-xs text-muted-foreground">
                         فات معاده: {arDateTime(item.expires_at)}
                       </span>
@@ -516,9 +543,12 @@ function ExceptionCenterSection({
                           </Link>
                         </span>
                       )}
-                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
-                        {item.full_name}
-                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        الفني{' '}
+                        <Link href={`/technicians/${item.technician_id}`} className="text-foreground hover:underline">
+                          {item.full_name}
+                        </Link>
+                      </span>
                       {item.phone && <span className="text-xs text-muted-foreground">{item.phone}</span>}
                       <Badge variant="outline">{REVISIT_REASON_LABELS[item.reason] ?? item.reason}</Badge>
                       <span className="text-xs text-muted-foreground">
@@ -1091,7 +1121,7 @@ function DispatchDeliverySection({
         </div>
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
       {!error && loading && !data && <TableSkeleton rows={5} columns={6} />}
 
@@ -1338,7 +1368,7 @@ function CoverageIntelligenceSection({
         </div>
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
       {!error && loading && !items && <TableSkeleton rows={5} columns={7} />}
 
@@ -1557,7 +1587,7 @@ function OrderTraceSection({ authedFetch }: { authedFetch: ReturnType<typeof use
         تتبّع الطلبات اللي لسه بتدوّر على فني
       </h2>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && loading && !data && <Skeleton className="h-40" />}
       {!error && data && items.length === 0 && (
         <EmptyState icon={Compass} title="مفيش طلبات بتدوّر على فني دلوقتي" description="كل الطلبات المفتوحة اتعيّنت أو خرجت من مرحلة البحث." />
@@ -1640,7 +1670,7 @@ function OperationsOverviewPage() {
     <AppShell>
       <PageHeader
         title="مركز العمليات"
-        description="نظرة تشغيلية لحظية على التوزيع والطاقم والقدرة الاستيعابية — بداية مركز عمليات موسّع (docs/08 §36)"
+        description="نظرة تشغيلية لحظية على التوزيع والطاقم والقدرة الاستيعابية."
       />
 
       <div className="mb-6 flex items-center gap-2">
@@ -1662,7 +1692,7 @@ function OperationsOverviewPage() {
         </SelectNative>
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !overview && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -1693,7 +1723,7 @@ function OperationsOverviewPage() {
               <KpiCard
                 title="فنيين أونلاين دلوقتي"
                 value={String(overview.technicians_online_count)}
-                description="متصلين فعليًا الآن (observability بس، مش شرط أهلية)"
+                description="متصلين فعليًا الآن — مؤشّر مراقبة، مش شرط أهلية للتوزيع."
                 icon={Radio}
                 href="/technicians"
               />
@@ -1706,10 +1736,10 @@ function OperationsOverviewPage() {
               توزيع القدرة الاستيعابية اليوم
             </h2>
             <div className="flex flex-wrap gap-3">
-              <CapacityTierRow label="خفيف (LIGHT)" value={overview.capacity_today.light} tone="success" />
-              <CapacityTierRow label="متوسط (MEANINGFUL)" value={overview.capacity_today.meaningful} tone="muted" />
-              <CapacityTierRow label="مشغول (HEAVY)" value={overview.capacity_today.heavy} tone="warning" />
-              <CapacityTierRow label="محظور (BLOCKED)" value={overview.capacity_today.blocked} tone="danger" />
+              <CapacityTierRow label="خفيف" hint="LIGHT" value={overview.capacity_today.light} tone="success" />
+              <CapacityTierRow label="متوسط" hint="MEANINGFUL" value={overview.capacity_today.meaningful} tone="muted" />
+              <CapacityTierRow label="مشغول" hint="HEAVY" value={overview.capacity_today.heavy} tone="warning" />
+              <CapacityTierRow label="محظور" hint="BLOCKED" value={overview.capacity_today.blocked} tone="danger" />
             </div>
           </section>
 

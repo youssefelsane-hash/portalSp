@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { ErrorNotice } from '@/components/notice';
 
 export default function NewEmployeePage() {
   const { authedFetch, isLoading } = useAuth();
@@ -62,7 +63,10 @@ export default function NewEmployeePage() {
 
   return (
     <AppShell>
-      <PageHeader title="إضافة موظف" />
+      <PageHeader
+        title="إضافة موظف"
+        description="الحساب بيتفعّل فورًا بالدور اللي تختاره — الصلاحيات كلها جاية من الدور مش من الحساب."
+      />
       <Card className="max-w-lg">
         <form onSubmit={handleSubmit}>
           <CardHeader>
@@ -120,7 +124,7 @@ export default function NewEmployeePage() {
                 ))}
               </SelectNative>
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
           </CardContent>
           <CardFooter className="gap-2">
             <Button type="submit" disabled={isSubmitting}>

@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 /** نفس فلاتر الباك-إند بالحرف (`AssessmentQueueFilter`) — مفيش فلتر واجهة ملهوش مقابل. */
 const FILTERS = [
@@ -109,7 +110,7 @@ export default function AssessmentQueuePage() {
       </div>
       <p className="mb-4 text-sm text-muted-foreground">{active.hint}</p>
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {rows === null ? (
         <TableSkeleton />

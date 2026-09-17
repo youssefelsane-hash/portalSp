@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import { useParams } from 'next/navigation';
 import type { EmployeeResponseDto, SupportTicketResponseDto, SupportTicketStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -12,6 +13,7 @@ import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
+import { ErrorNotice } from '@/components/notice';
 import {
   TICKET_ALLOWED_TRANSITIONS,
   TICKET_CHANNEL_LABELS,
@@ -86,7 +88,7 @@ export default function SupportTicketDetailPage() {
 
   return (
     <AppShell>
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!ticket && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
 
       {ticket && (
@@ -124,15 +126,15 @@ export default function SupportTicketDetailPage() {
               </div>
               <div>
                 <span className="text-muted-foreground">تاريخ الإنشاء: </span>
-                {new Date(ticket.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                {(formatDateTimeAr(ticket.created_at) ?? '—')}
               </div>
               <div>
                 <span className="text-muted-foreground">أول رد: </span>
-                {ticket.first_response_at ? new Date(ticket.first_response_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                {ticket.first_response_at ? (formatDateTimeAr(ticket.first_response_at) ?? '—') : '—'}
               </div>
               <div>
                 <span className="text-muted-foreground">تاريخ الحل: </span>
-                {ticket.resolved_at ? new Date(ticket.resolved_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                {ticket.resolved_at ? (formatDateTimeAr(ticket.resolved_at) ?? '—') : '—'}
               </div>
               <div>
                 <span className="text-muted-foreground">تقييم الرضا: </span>

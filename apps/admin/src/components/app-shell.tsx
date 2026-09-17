@@ -393,7 +393,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mt-1 text-muted-foreground/60">قواعد الاستخدام (قريبًا)</div>
         </div>
       </aside>
-      <div className="flex flex-1 flex-col">
+      {/*
+        **`min-w-0` ضروري مش تجميل** (بلاغ مالك 2026-09-17: «الواجهة مش منظمة»).
+
+        العنصر ده ابن `flex`، والافتراضي `min-width: auto` — يعني **بيرفض ينضغط** تحت العرض
+        الطبيعي لمحتواه. فأي صف عريض (جدول، سطر فلاتر بـ`whitespace-nowrap`) كان بيمدّ الحاوية
+        **بره الشاشة**، والأب عنده `overflow-hidden` فالزيادة بتتقصّ بدل ما تعمل scroll —
+        والنتيجة أعمدة وبلاطات مقطوعة من الشمال في **كل** صفحات اللوحة، مش الطلبات بس.
+
+        اتلقط بلقطة حقيقية (`scripts/admin-visual.js`) — `typecheck`/`build` مابيشوفوش ده أصلاً.
+      */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex min-h-16 items-center justify-between border-b border-border/60 bg-card/75 px-6 py-3 backdrop-blur-xl">
           <div>
             {activeNavigation?.group && <p className="text-[11px] text-muted-foreground">{activeNavigation.group}</p>}
@@ -418,7 +428,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* حاوية الـscroll الحقيقية — لازم تكون هنا مش على المستند، وإلا الشريط الجانبي
             بيتحرّك مع المحتوى وبيضيع مكانه (نفس الشكوى في §63.ب4). */}
         <main ref={mainRef} className="relative flex-1 overflow-y-auto p-5 sm:p-6 lg:p-8">
-          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+          {/*
+            **`@container`**: الصفحات محتاجة تقرر «هل ينفع عمودين؟» على **عرض المحتوى** مش عرض
+            الشاشة. `xl:grid-cols-2` بيقيس الشاشة، فعلى لابتوب 1280px الشرط بيتحقّق والمحتوى
+            926px بس (الشريط الجانبي بياخد الباقي) — فكل عمود ~440px وأي جدول جوّاه بيحتاج سحب
+            أفقي (اتقاس: /catalog 769px جوّه 400px، /geo 589px جوّه 400px). الصفحات اللي فيها
+            جداول بقت تستخدم `@[88rem]:grid-cols-2` — يعني «اقسم لعمودين لما المحتوى **نفسه**
+            يبقى ≥1408px».
+          */}
+          <div className="mx-auto w-full max-w-[1600px] @container">{children}</div>
         </main>
       </div>
     </div>

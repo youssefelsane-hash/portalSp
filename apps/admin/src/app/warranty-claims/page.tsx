@@ -13,6 +13,7 @@ import { TableSkeleton } from '@/components/table-skeleton';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ErrorNotice } from '@/components/notice';
 
 interface ClaimRow {
   id: string; warranty_id: string; customer_id: string | null;
@@ -104,8 +105,11 @@ export default function AdminWarrantyClaimsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="مطالبات الضمان" />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      <PageHeader
+        title="مطالبات الضمان"
+        description="مطالبات العملاء تحت الضمان — كل واحدة محتاجة مراجعة وقرار موثّق."
+      />
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       <div className="mb-4 flex gap-2 flex-wrap">
         {['all','open','under_review','inspection_scheduled','approved','rejected','repair_in_progress','resolved','closed'].map((s) => (
           <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}

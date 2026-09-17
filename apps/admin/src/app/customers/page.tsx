@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -103,7 +104,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       {!error && !customers && <TableSkeleton columns={6} />}
       {customers && customers.length === 0 && <EmptyState title="مفيش عملاء مطابقين" />}
 

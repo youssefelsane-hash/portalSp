@@ -28,6 +28,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { PromoCodeQr } from '@/components/promo-code-qr';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
 
@@ -212,7 +213,7 @@ export default function PromotionsPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showNew && (
         <Card className="mb-6">

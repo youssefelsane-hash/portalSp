@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import type { AdminTechnicianDetailResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ErrorNotice, Notice } from '@/components/notice';
 
 type NationalIdSummary = AdminTechnicianDetailResponseDto['national_id'];
 
@@ -92,11 +94,12 @@ export function NationalIdCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
+        {/* تنبيه مؤطّر مش نص ملوّن سايب: في لقطة حقيقية كان سطر أصفر طويل جوّه الكارت مفيش
+            حاجة تقول إنه تحذير أصلاً. */}
         {!nationalId.has_value && (
-          <p className="text-warning">
-            الفني ده ملوش رقم قومي مسجّل — الاعتماد مش هيعدّي من غيره، وما ينفعش نمنع رجوعه بحساب
-            جديد لو اتوقف.
-          </p>
+          <Notice tone="warning" title="مفيش رقم قومي مسجّل" className="mb-0">
+            الاعتماد مش هيعدّي من غيره، وما ينفعش نمنع رجوعه بحساب جديد لو اتوقف.
+          </Notice>
         )}
 
         {nationalId.has_value && (
@@ -106,7 +109,7 @@ export function NationalIdCard({
             </p>
             {nationalId.set_at && (
               <p className="text-muted-foreground">
-                اتسجّل: {new Date(nationalId.set_at).toLocaleString('ar-EG-u-nu-latn')}
+                اتسجّل: {(formatDateTimeAr(nationalId.set_at) ?? '—')}
               </p>
             )}
             {canManage && !revealed && (
@@ -120,15 +123,23 @@ export function NationalIdCard({
         {/* إشارة «الشخص ده كان عندنا قبل كده» — الغرض الأساسي من الحقل كله. الحسابات المتشالة
             داخلة عمدًا: فني اتوقف وحسابه اتمسح ورجع تاني هو بالظبط الحالة اللي بندوّر عليها. */}
         {nationalId.linked_account_codes.length > 0 && (
-          <div className="rounded-md border border-s-4 border-s-destructive p-3">
-            <p className="font-medium text-destructive">
-              نفس الرقم القومي مستخدم في {nationalId.linked_account_codes.length} حساب تاني
-            </p>
-            <p className="mt-1 text-muted-foreground">{nationalId.linked_account_codes.join('، ')}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+          <Notice
+            tone="error"
+            title={`نفس الرقم القومي مستخدم في ${nationalId.linked_account_codes.length} حساب تاني`}
+            className="mb-0"
+          >
+            {/* الأكواد شرائح مش نص مفصول بفواصل — الكود قابل للبحث، والعدد بيبان بالعين. */}
+            <div className="flex flex-wrap gap-1">
+              {nationalId.linked_account_codes.map((code) => (
+                <span key={code} dir="ltr" className="rounded-md border border-current/30 px-1.5 py-0.5 text-xs leading-4">
+                  {code}
+                </span>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs opacity-80">
               راجع سبب إيقاف/حذف الحساب القديم قبل الاعتماد — دي إشارة إن الشخص ده رجع تاني.
             </p>
-          </div>
+          </Notice>
         )}
 
         {canManage && (
@@ -170,7 +181,7 @@ export function NationalIdCard({
           </>
         )}
 
-        {error && <p className="text-destructive">{error}</p>}
+        {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
       </CardContent>
     </Card>
   );

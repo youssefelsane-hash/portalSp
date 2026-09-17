@@ -47,9 +47,10 @@ import {
   CAPACITY_TIER_LABELS,
   capacityTierBadgeClass,
 } from '@/lib/technician-labels';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import type { TechnicianCapacityTier } from '@baytak/shared-types';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
+import { ErrorNotice } from '@/components/notice';
 
 // §24 — كانت فجوة موثّقة: GET /admin/technician-productivity/:technicianId موجود ومختبر
 // (technician_productivity.view) من زمان بلا أي واجهة أدمن تعرضه — مش موجودة في @baytak/shared-types
@@ -576,7 +577,7 @@ export default function TechnicianDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <ProfileSummary
         items={[
@@ -904,7 +905,7 @@ export default function TechnicianDetailPage() {
             <CardTitle className="text-base">نظرة تشغيلية 360°</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4 text-sm">
-            {profile360Error && <p className="text-destructive">{profile360Error}</p>}
+            {profile360Error && <ErrorNotice className="mb-0">{profile360Error}</ErrorNotice>}
             {!profile360 && !profile360Error && <p className="text-muted-foreground">جاري التحميل…</p>}
             {profile360 && (
               <>
@@ -914,7 +915,7 @@ export default function TechnicianDetailPage() {
                   </Badge>
                   {!profile360.online && profile360.last_active_at && (
                     <span className="text-muted-foreground">
-                      آخر نشاط: {new Date(profile360.last_active_at).toLocaleString('ar-EG-u-nu-latn')}
+                      آخر نشاط: {(formatDateTimeAr(profile360.last_active_at) ?? '—')}
                     </span>
                   )}
                   <Badge variant="outline" className={capacityTierBadgeClass(profile360.capacity_today.tier)}>
@@ -943,7 +944,7 @@ export default function TechnicianDetailPage() {
                             </Link>
                             <p className="text-muted-foreground">
                               {j.order_status}
-                              {j.scheduled_at ? ` · ${new Date(j.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}` : ''}
+                              {j.scheduled_at ? ` · ${(formatDateTimeAr(j.scheduled_at) ?? '—')}` : ''}
                             </p>
                           </li>
                         ))}
@@ -967,18 +968,18 @@ export default function TechnicianDetailPage() {
                             <p className="text-muted-foreground">
                               {o.kind === 'assignment' ? 'تعيين مباشر' : o.context === 'crew_recruit' ? 'تجنيد فريق' : 'فرصة تولّي طلب'}
                               {' · '}
-                              اتبعت {new Date(o.sent_at).toLocaleString('ar-EG-u-nu-latn')}
+                              اتبعت {(formatDateTimeAr(o.sent_at) ?? '—')}
                               {' · '}
                               {/* «ما شافهاش» ≠ «شافها وسكت» — فرق حقيقي في تشخيص سبب عدم الرد. */}
                               {o.viewed_at
-                                ? `شافها ${new Date(o.viewed_at).toLocaleString('ar-EG-u-nu-latn')}`
+                                ? `شافها ${(formatDateTimeAr(o.viewed_at) ?? '—')}`
                                 : o.status === 'sent'
                                   ? 'لسه ما شافهاش'
                                   : 'وقت المشاهدة مش مسجّل'}
                             </p>
                             {o.broadcast_expands_at && (
                               <p className="text-muted-foreground">
-                                توسيع البث لغيره: {new Date(o.broadcast_expands_at).toLocaleString('ar-EG-u-nu-latn')}
+                                توسيع البث لغيره: {(formatDateTimeAr(o.broadcast_expands_at) ?? '—')}
                               </p>
                             )}
                           </li>
@@ -1348,7 +1349,7 @@ export default function TechnicianDetailPage() {
               الفني بيبقى مؤهّل لكل خدمات الفئة اللي معتمدة له تلقائيًا — أي خدمة جديدة تتضاف تحت
               الفئة دي تتاحله من غير أي خطوة إضافية.
             </p>
-            {categoryError && <p className="text-sm text-destructive">{categoryError}</p>}
+            {categoryError && <ErrorNotice className="mb-0">{categoryError}</ErrorNotice>}
             <form onSubmit={handleAssignCategory} className="flex flex-wrap items-end gap-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="category_select">تخصص جديد</Label>
@@ -1550,7 +1551,7 @@ export default function TechnicianDetailPage() {
             <WalletAdjustmentForm userId={detail.user_id} onAdjusted={() => loadWallet(detail.user_id)} />
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {walletError && <p className="text-destructive">{walletError}</p>}
+            {walletError && <ErrorNotice className="mb-0">{walletError}</ErrorNotice>}
             {walletMissing && (
               <p className="text-muted-foreground">لسه مفيش محفظة — بتتفتح تلقائيًا مع أول حركة مالية.</p>
             )}
@@ -1584,7 +1585,7 @@ export default function TechnicianDetailPage() {
                         <div>
                           <p>{tx.description_ar ?? tx.transaction_type}</p>
                           <p className="text-muted-foreground">
-                            {new Date(tx.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                            {(formatDateTimeAr(tx.created_at) ?? '—')}
                           </p>
                         </div>
                         <span className={tx.direction === 'credit' ? 'text-green-600' : 'text-destructive'}>
@@ -1608,7 +1609,7 @@ export default function TechnicianDetailPage() {
             </Button>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {productivityError && <p className="text-destructive">{productivityError}</p>}
+            {productivityError && <ErrorNotice className="mb-0">{productivityError}</ErrorNotice>}
             {!productivity && !productivityError && (
               <p className="text-muted-foreground">تقرير الإنتاجية محسوب (مش مخزّن) من KPI الشهري — اضغط «عرض التقرير».</p>
             )}

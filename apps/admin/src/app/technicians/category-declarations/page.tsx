@@ -13,6 +13,7 @@ import { TableSkeleton } from '@/components/table-skeleton';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 // طابور مراجعة تصريحات التخصص/الفئة الذاتية (§29) — بدّل طابور "المهارات" القديم اللي كان
 // خدمة-بخدمة بالكامل (كانت فجوة موثّقة: كل خدمة بمفردها تحتاج تصريح وموافقة منفصلين، غير قابل
@@ -74,7 +75,7 @@ export default function CategoryDeclarationsQueuePage() {
         title="طابور تصريحات التخصصات"
         description="طلبات الفنيين للاعتماد كتخصص/فئة كاملة (سباكة، كهرباء...) — أي خدمة جديدة تتضاف تحت الفئة دي تبقى متاحة للفني تلقائيًا بعد الاعتماد"
       />
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {items === null ? (
         <TableSkeleton columns={5} />
       ) : items.length === 0 ? (

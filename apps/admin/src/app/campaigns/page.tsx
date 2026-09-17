@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatDateTimeAr } from '@/lib/format';
 import type {
   AbandonedLeadResponseDto,
   CampaignResponseDto,
@@ -238,7 +239,7 @@ export default function CampaignsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {new Date(lead.occurred_at).toLocaleString('ar-EG-u-nu-latn')}
+                      {(formatDateTimeAr(lead.occurred_at) ?? '—')}
                     </TableCell>
                     <TableCell>
                       <Badge variant={lead.reminder_processed ? 'default' : 'outline'}>

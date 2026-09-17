@@ -16,8 +16,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { KPI_STATUS_LABELS, KPI_STATUS_TONE } from '@/lib/technician-kpi-labels';
+import { ErrorNotice } from '@/components/notice';
 
 const DIMENSION_LABELS_AR: Record<keyof KpiDimensionScores, string> = {
   rating: 'متوسط التقييم',
@@ -122,7 +123,7 @@ export default function TechnicianKpiDetailPage() {
         actions={<StatusChip tone={KPI_STATUS_TONE[snapshot.status]}>{KPI_STATUS_LABELS[snapshot.status]}</StatusChip>}
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -251,7 +252,7 @@ export default function TechnicianKpiDetailPage() {
 
             {snapshot.status === 'paid' && (
               <p className="border-t pt-4 text-sm text-muted-foreground">
-                اتصرفت بتاريخ {snapshot.paid_at ? new Date(snapshot.paid_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                اتصرفت بتاريخ {snapshot.paid_at ? (formatDateTimeAr(snapshot.paid_at) ?? '—') : '—'}
               </p>
             )}
 

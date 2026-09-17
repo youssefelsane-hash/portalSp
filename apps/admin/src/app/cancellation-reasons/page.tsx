@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 
 const APPLIES_TO_LABELS: Record<CancellationAppliesTo, string> = {
   customer: 'العميل',
@@ -100,7 +101,7 @@ export default function CancellationReasonsPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {showNew && (
         <Card className="mb-6">

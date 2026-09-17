@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ErrorNotice } from '@/components/notice';
 
 interface PricingFieldOption {
   value: string;
@@ -297,7 +298,7 @@ export default function CreateOrderForCustomerPage() {
                 {searching ? 'بيدوّر...' : 'بحث'}
               </Button>
             </form>
-            {searchError && <p className="mt-2 text-sm text-destructive">{searchError}</p>}
+            {searchError && <ErrorNotice className="mb-0">{searchError}</ErrorNotice>}
             {customers && (
               <div className="mt-4 space-y-2">
                 {customers.length === 0 ? (
@@ -408,7 +409,7 @@ export default function CreateOrderForCustomerPage() {
                         <p className="text-xs text-muted-foreground">اسأل العميل الأسئلة بالترتيب وسجّل إجاباته كما قالها.</p>
                       </div>
                       {fieldsLoading && <p className="text-sm text-muted-foreground">جاري تحميل الأسئلة…</p>}
-                      {fieldsError && <p className="text-sm text-destructive">{fieldsError}</p>}
+                      {fieldsError && <ErrorNotice className="mb-0">{fieldsError}</ErrorNotice>}
                       {!fieldsLoading && !fieldsError && pricingFields.length === 0 && (
                         <p className="text-sm text-muted-foreground">الخدمة دي مفيش لها أسئلة إضافية مفعّلة.</p>
                       )}
@@ -441,7 +442,7 @@ export default function CreateOrderForCustomerPage() {
                 </CardContent>
               </Card>
 
-              {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+              {submitError && <ErrorNotice className="mb-0">{submitError}</ErrorNotice>}
               <Button type="submit" disabled={submitting || !selectedAddressId || !selectedService}>
                 {submitting ? 'بيتسجّل...' : 'تأكيد إنشاء الطلب'}
               </Button>

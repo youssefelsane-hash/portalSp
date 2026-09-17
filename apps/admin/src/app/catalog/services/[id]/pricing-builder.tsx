@@ -43,6 +43,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 import { FormulaTreeEditor, type FormulaEditorContext } from './formula-tree-editor';
 import { collectFormulaPayloadIssues, isRecord } from './formula-validation';
 import { FORMULA_LIMITS } from '@baytak/shared-types';
@@ -562,7 +563,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {error && <p className="text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
       {/* حقول الفورم الديناميكي */}
       <Card>
@@ -771,7 +772,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 @[88rem]:grid-cols-2">
         {/* الثوابت */}
         <Card>
           <CardHeader>
@@ -1023,7 +1024,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                 dir="ltr"
                 className="font-mono text-sm"
               />
-              {jsonError && <p className="mt-1 text-sm text-destructive">{jsonError}</p>}
+              {jsonError && <ErrorNotice className="mb-0">{jsonError}</ErrorNotice>}
               <Button
                 type="button"
                 size="sm"
@@ -1107,7 +1108,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   احفظ كحالة اختبار
                 </Button>
               </div>
-              {previewError && <p className="mt-3 text-destructive">{previewError}</p>}
+              {previewError && <ErrorNotice className="mb-0">{previewError}</ErrorNotice>}
               {previewResult && (
                 <div className="mt-3 rounded-md border p-3 text-sm">
                   <p className="text-lg font-semibold">{formatEgp(previewResult.price_cents)}</p>

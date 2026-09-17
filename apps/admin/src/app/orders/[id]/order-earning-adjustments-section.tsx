@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError } from '@/lib/api-client';
+import { ErrorNotice } from '@/components/notice';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
@@ -153,7 +154,7 @@ export function OrderEarningAdjustmentsSection({
         )}
       </div>
 
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
 
       {open && canEdit && (
         <form onSubmit={submit} className="mt-3 grid gap-3 rounded-md border p-3 sm:grid-cols-4">

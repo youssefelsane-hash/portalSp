@@ -71,6 +71,7 @@ import { formatEgp } from '@/lib/format';
 import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 import { PricingBuilder } from './pricing-builder';
 import { ServiceSetupRail, type ServiceStage } from '@/components/service-setup-rail';
+import { ErrorNotice } from '@/components/notice';
 
 
 /** شرح الطريقتين الباقيتين (ADR-0060 §1). */
@@ -733,7 +734,7 @@ export default function ServiceDetailPage() {
           </Button>
         }
       />
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {/* الشريط في العمود الأول (يمين في RTL) والمحتوى في التاني — بتحديد `col-start` صريح مش
           بـ`order`: مع `order` الـtracks كانت بتتوزّع بالعكس فعمود المحتوى بياخد عرض الشريط
@@ -1068,7 +1069,7 @@ export default function ServiceDetailPage() {
                 <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
                   <div className="mb-3">
                     <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">الافتراضي تاريخ + ساعة وصول؛ اختَر «يوم كامل» فقط لو وقت الزيارة غير مهم للخدمة. المدة والفترة بقوا حقول في فورم الخدمة (ADR-0060).</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">الافتراضي تاريخ + ساعة وصول؛ اختَر «يوم كامل» فقط لو وقت الزيارة غير مهم للخدمة. المدة والفترة حقول في فورم الخدمة نفسها.</p>
                   </div>
                   {schedulingMode === 'start_time' && <input type="hidden" name="requires_start_time_only" value="on" />}
                   <div className="grid gap-3 md:grid-cols-2">
@@ -1422,7 +1423,7 @@ export default function ServiceDetailPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 @[88rem]:grid-cols-2">
         <Card id="stage-price-modifiers" className="scroll-mt-6">
           <CardHeader>
             <CardTitle className="text-base">تسعير حسب المنطقة</CardTitle>
@@ -1924,7 +1925,7 @@ function PricingTemplateStrip({
           .map((key) => `${PRICING_TEMPLATES[key].labelAr}: ${PRICING_TEMPLATES[key].fields.map((f) => f.labelAr).join(' + ')}`)
           .join(' — ')}
       </p>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
     </div>
   );
 }

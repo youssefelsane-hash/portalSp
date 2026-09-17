@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
+import { ErrorNotice } from '@/components/notice';
 
 const CHANNEL_LABELS: Record<NotificationChannel, string> = {
   push: 'Push',
@@ -108,14 +109,17 @@ export default function NotificationTypeConfigsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="إعدادات أنواع الإشعارات" />
+      <PageHeader
+        title="إعدادات أنواع الإشعارات"
+        description="لكل نوع إشعار: هو مفعّل ولا لأ، وبيروح على أنهي قناة (تطبيق/SMS/بريد)."
+      />
       <p className="mb-4 text-sm text-muted-foreground">
         الأولوية (وتأثيرها على الصوت/الإلحاح)، القنوات الافتراضية، وهل الإشعار actionable (بيحتاج قبول/رفض) —
         لكل نوع إشعار في النظام، بدون أي تعديل كود. الأنواع نفسها بتتحدد في الكود (`notification_type`)، هنا
         بس بنظبط سلوكها.
       </p>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       {!configs && <TableSkeleton columns={6} />}
       {configs && configs.length === 0 && <EmptyState title="مفيش أنواع إشعارات مُعرَّفة لسه" />}

@@ -23,7 +23,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp  } from '@/lib/format';
+import { ErrorNotice } from '@/components/notice';
 import {
   CLOSABLE_COMPLAINT_STATUSES,
   COMPLAINT_CATEGORY_LABELS,
@@ -234,7 +235,7 @@ export default function ComplaintDetailPage() {
         }
       />
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -257,7 +258,7 @@ export default function ComplaintDetailPage() {
             )}
             {complaint.resolution_notes && <p>ملاحظات الحل: {complaint.resolution_notes}</p>}
             {complaint.compensation_cents > 0 && <p>التعويض: {formatEgp(complaint.compensation_cents)}</p>}
-            <p>مهلة الرد (SLA): {new Date(complaint.sla_due_at).toLocaleString('ar-EG-u-nu-latn')}</p>
+            <p>مهلة الرد (SLA): {(formatDateTimeAr(complaint.sla_due_at) ?? '—')}</p>
 
             {attachments.length > 0 && (
               <div className="mt-2 grid grid-cols-3 gap-2">
@@ -376,7 +377,7 @@ export default function ComplaintDetailPage() {
                   <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{msg.sender_role}</span>
                     {msg.is_internal_note && <Badge variant="outline">ملاحظة داخلية</Badge>}
-                    <span>{new Date(msg.created_at).toLocaleString('ar-EG-u-nu-latn')}</span>
+                    <span>{(formatDateTimeAr(msg.created_at) ?? '—')}</span>
                   </div>
                   <p>{msg.message}</p>
                 </div>

@@ -13,6 +13,7 @@ import { StatusChip } from '@/components/status-chip';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ErrorNotice } from '@/components/notice';
 import {
   TICKET_CHANNEL_LABELS,
   TICKET_PRIORITY_LABELS,
@@ -69,7 +70,7 @@ export default function SupportTicketsPage() {
         ))}
       </div>
 
-      {error && <p className="mb-4 text-destructive">{error}</p>}
+      {error && <ErrorNotice>{error}</ErrorNotice>}
       {!tickets && !error && <TableSkeleton columns={8} />}
       {tickets && tickets.length === 0 && <EmptyState title="مفيش تذاكر" />}
 
