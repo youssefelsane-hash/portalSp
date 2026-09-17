@@ -206,6 +206,7 @@ export default function PromotionsPage() {
     <AppShell>
       <PageHeader
         title="العروض والتسويق"
+        description="أكواد الخصم والعروض: شروط كل كود، وحدود استخدامه، وأثره الفعلي."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + كود جديد
@@ -363,7 +364,7 @@ export default function PromotionsPage() {
         </Card>
       )}
 
-      {!promoCodes && <TableSkeleton columns={9} />}
+      {!error && !promoCodes && <TableSkeleton columns={9} />}
       {promoCodes && promoCodes.length === 0 && <EmptyState title="مفيش أكواد خصم لسه" />}
 
       {promoCodes && promoCodes.length > 0 && (

@@ -118,7 +118,7 @@ export default function AdminWarrantyClaimsPage() {
           </button>
         ))}
       </div>
-      {!claims && <TableSkeleton columns={6} />}
+      {!error && !claims && <TableSkeleton columns={6} />}
       {claims && claims.length === 0 && <EmptyState title="مفيش مطالبات" />}
       {claims && claims.length > 0 && (
         <Table>

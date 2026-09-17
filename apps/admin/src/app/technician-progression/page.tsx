@@ -162,6 +162,7 @@ export default function TechnicianProgressionPage() {
     <AppShell>
       <PageHeader
         title="المسار الوظيفي للفنيين"
+        description="قواعد الترقية والتنزيل بين المستويات، ومين مستحق دلوقتي."
         actions={
           <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
             {isCalculating ? 'جاري التقييم…' : 'احسب أهلية كل الفنيين'}
@@ -176,7 +177,7 @@ export default function TechnicianProgressionPage() {
           <CardTitle className="text-base">قواعد الترقية بين المستويات</CardTitle>
         </CardHeader>
         <CardContent>
-          {!rules ? (
+          {error ? null : !rules ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : (
             <div className="space-y-3">
@@ -294,7 +295,7 @@ export default function TechnicianProgressionPage() {
           </label>
         </CardHeader>
         <CardContent>
-          {!statuses ? (
+          {error ? null : !statuses ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : statuses.length === 0 ? (
             <EmptyState

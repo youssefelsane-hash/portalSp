@@ -716,7 +716,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
               </Button>
             </form>
           )}
-          {!fields ? (
+          {error ? null : !fields ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : fields.length === 0 ? (
             <EmptyState title="مفيش حقول تسعير للخدمة دي لسه" />

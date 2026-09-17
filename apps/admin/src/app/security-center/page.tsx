@@ -54,6 +54,9 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   session_reuse_after_revoke: 'محاولة استخدام جلسة ملغاة',
   blocked_account_access_attempt: 'محاولة وصول من حساب محظور',
   security_setting_change: 'تغيير إعداد أمني',
+  // كان ناقص من الماپ فالشاشة كانت بتعرض `duplicate_identity_attempt` خام — وده أكتر حدث
+  // مرجّح يضرب فعلاً (ADR-0045 §3). البوابة `scripts/check-enum-labels.js` بتمنع تكراره.
+  duplicate_identity_attempt: 'محاولة تسجيل برقم قومي محجوز',
 };
 
 // useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build

@@ -64,6 +64,7 @@ export default function RolesPage() {
     <AppShell>
       <PageHeader
         title="الأدوار الإدارية"
+        description="الدور هو مصدر الصلاحيات الوحيد. تعديل دور بيسري على كل حساب مربوط بيه."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + دور جديد

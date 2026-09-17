@@ -84,7 +84,7 @@ export default function AdminWarrantyPlansPage() {
 
       {showCreate && <CreateWarrantyPlanForm services={services} onCreated={() => { setShowCreate(false); load(); }} />}
 
-      {!plans && <TableSkeleton columns={6} />}
+      {!error && !plans && <TableSkeleton columns={6} />}
       {plans && plans.length === 0 && <EmptyState title="مفيش خطط ضمان" />}
       {plans && plans.length > 0 && (
         <Table>

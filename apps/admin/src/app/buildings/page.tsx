@@ -114,6 +114,7 @@ export default function BuildingsPage() {
     <AppShell>
       <PageHeader
         title="العمائر"
+        description="العمائر المسجّلة وأكواد خصمها — العميل بيكتب الكود فياخد سعر العمارة."
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
             + عمارة جديدة
@@ -176,7 +177,7 @@ export default function BuildingsPage() {
         </Card>
       )}
 
-      {!buildings && <TableSkeleton columns={7} />}
+      {!error && !buildings && <TableSkeleton columns={7} />}
       {buildings && buildings.length === 0 && <EmptyState title="مفيش عمائر لسه" />}
 
       {buildings && buildings.length > 0 && (

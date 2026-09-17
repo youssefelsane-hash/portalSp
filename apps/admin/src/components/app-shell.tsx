@@ -208,6 +208,22 @@ const BARE_ROUTES = new Set(['/login']);
  * استرجاع الـscroll التلقائي بتاع المتصفح مبقاش بيشتغل عليه، فبنعمله بنفسنا: بنفتكر آخر مكان
  * لكل مسار، فلما الأدمن يرجع للقايمة يلاقي نفسه في نفس الصف اللي كان فيه مش في أول الصفحة.
  */
+/**
+ * **هل عنصر القايمة ده هو الصفحة الحالية؟**
+ *
+ * كان `pathname.startsWith(item.href)` بلا أي حدّ، فـ`/support` كان بيتطابق مع
+ * `/support-tickets` و`/support-chat` كمان. أثره الحقيقي اتشاف في لقطة: الأدمن على
+ * «تذاكر الدعم» والقايمة مضيّية على **«الشكاوى»** والشريط فوق مكتوب فيه «الشكاوى» —
+ * يعني الواجهة بتقوله إنه في صفحة تانية غير اللي هو فيها.
+ *
+ * الشرط الصح تطابق كامل أو تطابق مع فاصل مسار بعده (`/support/123` آه، `/support-tickets` لأ).
+ * ولو عنصر الصفحة نفسها مخفي (صلاحية ناقصة)، **مفيش حاجة تضيّ** — وده أصدق من إضاءة الغلط.
+ */
+function isNavActive(pathname: string, href: string): boolean {
+  if (href === '/') return pathname === '/';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 function useMainScrollMemory(pathname: string) {
   const mainRef = useRef<HTMLElement>(null);
 
@@ -331,7 +347,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeNavigation = visibleGroups
     .flatMap((group) => group.items.map((item) => ({ group: group.label, item })))
     .sort((a, b) => b.item.href.length - a.item.href.length)
-    .find(({ item }) => item.href === '/' ? pathname === '/' : pathname.startsWith(item.href));
+    .find(({ item }) => isNavActive(pathname, item.href));
 
   // نسخة متداخلة (صفحة لسه بتلفّ محتواها بـ<AppShell>) — الشِل الحقيقي متركّب في الـlayout فوق،
   // فبنعدّي المحتوى زي ما هو بدل ما نرسم شريط جانبي تاني.
@@ -366,7 +382,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => {
-                  const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+                  const isActive = isNavActive(pathname, item.href);
                   const Icon = item.icon;
                   return (
                     <Link

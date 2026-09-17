@@ -1493,7 +1493,7 @@ export default function ServiceDetailPage() {
                 حفظ تسعير المنطقة
               </Button>
             </form>
-            {!zonePricing ? (
+            {error ? null : !zonePricing ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : zonePricing.length === 0 ? (
               <EmptyState title="مفيش تسعير مخصص لمناطق — بيستخدم السعر الأساسي" />
@@ -1561,7 +1561,7 @@ export default function ServiceDetailPage() {
                 حفظ مضاعف فئة المهارة
               </Button>
             </form>
-            {!pricingTierPricing ? (
+            {error ? null : !pricingTierPricing ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : pricingTierPricing.length === 0 ? (
               <EmptyState title="مفيش تسعير مخصص لفئات المهارة — السعر الأساسي هو المستخدم" />
@@ -1607,7 +1607,7 @@ export default function ServiceDetailPage() {
                 </Button>
               </form>
             )}
-            {!addons ? (
+            {error ? null : !addons ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : addons.length === 0 ? (
               <EmptyState title="مفيش إضافات اختيارية للخدمة دي لسه" />
@@ -1689,7 +1689,7 @@ export default function ServiceDetailPage() {
                 </Button>
               </form>
             )}
-            {!standardData ? (
+            {error ? null : !standardData ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : standardData.length === 0 ? (
               <EmptyState title="مفيش بيانات قياسية للخدمة دي لسه — محرك تقدير المدة مش هيشتغل من غيرها" />

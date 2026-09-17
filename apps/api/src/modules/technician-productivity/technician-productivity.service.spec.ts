@@ -30,7 +30,11 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
 
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
-    service = new TechnicianProductivityService(dataSource.getRepository(TechnicianKpiSnapshot), settingsService);
+    service = new TechnicianProductivityService(
+      dataSource.getRepository(TechnicianKpiSnapshot),
+      settingsService,
+      dataSource,
+    );
 
     // technician_kpi_snapshots.technician_id بيربط بـ technician_profiles(id) فعليًا (مش users) —
     // لازم مستخدم + بروفايل فني حقيقيين عشان الـ FK ما يرفضش الـ insert. راجع نفس النمط في
@@ -156,7 +160,15 @@ describe('TechnicianProductivityService — تجميع حقيقي عبر فتر�
     const report = await service.computeForTechnician(technicianId, 3);
     const ratingMetric = report.breakdown.find((b) => b.key === 'customer_rating');
     expect(ratingMetric?.included).toBe(false);
-    expect(ratingMetric?.exclusion_reason).toContain('عينة غير كافية');
+    // **الوحدة لازم تبان في الرسالة** (بلاغ مالك 2026-09-17): الصيغة القديمة «عينة غير كافية»
+    // خلّت الأدمن يقرا «مفيش تقييمات» وهو شايف ١٩ تقييم في نفس الصفحة. القيمة هنا بتعدّ
+    // **شهور**، فالرسالة لازم تقول شهور.
+    expect(ratingMetric?.exclusion_reason).toContain('شهور فيها بيانات');
+    expect(ratingMetric?.exclusion_reason).toContain('شهر مطلوبين');
+    expect(ratingMetric?.sample_size).toBe(3);
+    // والسياق بيوضّح إن الشهور التلاتة دي فيها ٣٨ تقييم عميل فعلي — الرقمين مختلفين عن قصد.
+    expect(report.rating_context.months_with_rating_data).toBe(3);
+    expect(report.rating_context.period_ratings_count).toBe(8 + 12 + 18);
 
     await dataSource.query(
       `UPDATE settings SET value = $1 WHERE key = 'productivity.metrics_config'`,

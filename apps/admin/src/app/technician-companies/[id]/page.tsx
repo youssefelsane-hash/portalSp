@@ -372,7 +372,7 @@ export default function TechnicianCompanyDetailPage() {
               <CardTitle className="text-base">الطلبات ({orders?.length ?? 0})</CardTitle>
             </CardHeader>
             <CardContent>
-              {!orders ? (
+              {error ? null : !orders ? (
                 <p className="text-sm text-muted-foreground">جاري التحميل…</p>
               ) : orders.length === 0 ? (
                 <EmptyState title="مفيش طلبات اتعيّنت للشركة دي لسه" />

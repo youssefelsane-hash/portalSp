@@ -2410,7 +2410,7 @@ export default function OrderDetailPage() {
             <CardTitle className="text-base">الملخص المالي</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {!financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {!error && !financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
             {financialSummary && (
               <>
                 {/*

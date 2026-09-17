@@ -19,9 +19,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
+import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { ErrorNotice } from '@/components/notice';
+import { LEVEL_LABELS } from '@/lib/technician-labels';
 
 const PER_PAGE = 20;
 
@@ -344,28 +346,41 @@ export default function ReportsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>الكود</TableHead>
-                      <TableHead>الاسم</TableHead>
+                      {/* الكود اتلمّ تحت الاسم، والطلبات (مكتملة/ملغاة) في خانة واحدة: الجدول
+                          كان 973px جوّه حاوية 876px فعمود «متوسط زمن الرد» كان بره الشاشة
+                          (اتقاس بـ`scripts/admin-visual.js`). */}
+                      <TableHead>الفني</TableHead>
                       <TableHead>المستوى</TableHead>
-                      <TableHead>مكتملة</TableHead>
-                      <TableHead>ملغاة</TableHead>
+                      <TableHead>الطلبات</TableHead>
                       <TableHead>التقييم</TableHead>
-                      <TableHead>نقاط الجودة</TableHead>
-                      <TableHead>متوسط زمن الرد</TableHead>
-                      <TableHead>شكاوى مفتوحة</TableHead>
+                      {/* عناوين مختصرة + `title` بالمعنى الكامل: الجدول كان لسه 948px جوّه
+                          876px بعد لمّ الأعمدة، والعناوين الطويلة هي اللي كانت فارضة العرض. */}
+                      <TableHead title="نقاط الجودة">الجودة</TableHead>
+                      <TableHead title="متوسط زمن الرد على العروض">زمن الرد</TableHead>
+                      <TableHead title="شكاوى مفتوحة على الفني">شكاوى</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {techRows.map((row) => (
                       <TableRow key={row.technician_id}>
-                        <TableCell dir="ltr">{row.technician_code}</TableCell>
-                        <TableCell>{row.full_name}</TableCell>
-                        <TableCell>{row.current_level}</TableCell>
-                        <TableCell>{row.completed_orders_count}</TableCell>
-                        <TableCell>{row.cancelled_orders_count}</TableCell>
-                        <TableCell>{row.average_rating.toFixed(2)}</TableCell>
-                        <TableCell>{row.quality_score.toFixed(2)}</TableCell>
                         <TableCell>
+                          <div className="font-medium">{row.full_name}</div>
+                          <div className="text-xs text-muted-foreground" dir="ltr">
+                            {row.technician_code}
+                          </div>
+                        </TableCell>
+                        {/* كان بيعرض `new`/`verified` خام — نفس ماپ المستويات المستخدم في كل
+                            شاشات الفنيين (`LEVEL_LABELS`). */}
+                        <TableCell>
+                          {(LEVEL_LABELS as Record<string, string>)[row.current_level] ?? row.current_level}
+                        </TableCell>
+                        <TableCell className="tabular-nums">
+                          {row.completed_orders_count} مكتملة
+                          <span className="text-muted-foreground"> · {row.cancelled_orders_count} ملغاة</span>
+                        </TableCell>
+                        <TableCell className="tabular-nums">{row.average_rating.toFixed(2)}</TableCell>
+                        <TableCell className="tabular-nums">{row.quality_score.toFixed(2)}</TableCell>
+                        <TableCell className="tabular-nums">
                           {row.avg_response_seconds !== null ? `${Math.round(row.avg_response_seconds)} ث` : '—'}
                         </TableCell>
                         <TableCell>{row.open_complaints_count}</TableCell>
@@ -408,8 +423,11 @@ export default function ReportsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {/* المنطقة والمدينة في خانة واحدة: القياس طلّع إن العمودين بياخدوا 228px
+                        لكل واحد (456px من 948px)، فالجدول كان بيتجاوز حاويته 876px وآخر عمود
+                        «فنيين نشطين» يخرج بره الشاشة. المدينة تعريف للمنطقة اللي فوقها، مش
+                        بُعد مستقل يستحق عمود كامل جنبها. */}
                     <TableHead>المنطقة</TableHead>
-                    <TableHead>المدينة</TableHead>
                     <TableHead>الحالة</TableHead>
                     <TableHead>الطلبات</TableHead>
                     <TableHead>المكتملة</TableHead>
@@ -421,14 +439,20 @@ export default function ReportsPage() {
                 <TableBody>
                   {zoneRows.map((zone) => (
                     <TableRow key={zone.zone_id}>
-                      <TableCell>{zone.name_ar}</TableCell>
-                      <TableCell>{zone.city_name_ar}</TableCell>
-                      <TableCell>{zone.is_active ? 'نشط' : 'معطّل'}</TableCell>
-                      <TableCell>{zone.orders_count}</TableCell>
-                      <TableCell>{zone.completed_orders_count}</TableCell>
-                      <TableCell>{formatEgp(zone.revenue_cents)}</TableCell>
-                      <TableCell>{formatEgp(zone.platform_commission_cents)}</TableCell>
-                      <TableCell>{zone.active_technicians_count}</TableCell>
+                      <TableCell>
+                        <div className="font-medium">{zone.name_ar}</div>
+                        <div className="text-xs text-muted-foreground">{zone.city_name_ar}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={zone.is_active ? 'secondary' : 'outline'}>
+                          {zone.is_active ? 'نشط' : 'معطّل'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="tabular-nums">{zone.orders_count}</TableCell>
+                      <TableCell className="tabular-nums">{zone.completed_orders_count}</TableCell>
+                      <TableCell className="tabular-nums">{formatEgp(zone.revenue_cents)}</TableCell>
+                      <TableCell className="tabular-nums">{formatEgp(zone.platform_commission_cents)}</TableCell>
+                      <TableCell className="tabular-nums">{zone.active_technicians_count}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
