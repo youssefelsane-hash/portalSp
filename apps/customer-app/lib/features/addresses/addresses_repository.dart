@@ -51,6 +51,10 @@ class AddressesRepository {
     double? longitude,
     String? label,
     String? buildingNumber,
+    // الدور والشقة كانوا في `create()` بس — فتعديل عنوان كان بيرجّعهم `null` بصمت لأن الشاشة
+    // مابتبعتهمش خالص. اتضافوا هنا مع حقول الشاشة (docs/08 §164).
+    String? floorNumber,
+    String? apartmentNumber,
     String? landmark,
   }) async {
     final data = await auth.authedRequest('PATCH', '/addresses/$addressId', body: {
@@ -61,6 +65,8 @@ class AddressesRepository {
       'longitude': ?longitude,
       'label': ?label,
       'building_number': ?buildingNumber,
+      'floor_number': ?floorNumber,
+      'apartment_number': ?apartmentNumber,
       'landmark': ?landmark,
     });
     return Address.fromJson(data!);

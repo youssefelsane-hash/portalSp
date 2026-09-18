@@ -30,6 +30,10 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
   final _labelController = TextEditingController();
   final _streetController = TextEditingController();
   final _buildingController = TextEditingController();
+  // الدور والشقة موجودين في الـAPI والريبو من الأول، بس الشاشة مكانتش بتجمّعهم — فالفني
+  // بيوصل العمارة ويقف. الحقول دي بتكمّل العنوان بدل ما يتحشر في «علامة مميزة».
+  final _floorController = TextEditingController();
+  final _apartmentController = TextEditingController();
   final _landmarkController = TextEditingController();
   LatLng? _pickedLocation;
 
@@ -44,12 +48,27 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
       _labelController.text = existing.label ?? '';
       _streetController.text = existing.streetName;
       _buildingController.text = existing.buildingNumber ?? '';
+      _floorController.text = existing.floorNumber ?? '';
+      _apartmentController.text = existing.apartmentNumber ?? '';
       _landmarkController.text = existing.landmark ?? '';
       _cityId = existing.cityId;
       _areaId = existing.areaId;
       _pickedLocation = LatLng(existing.latitude, existing.longitude);
     }
     _loadCities();
+  }
+
+  @override
+  void dispose() {
+    // الشاشة مكانش فيها `dispose()` خالص، فكل كنترولر كان بيفضل متعلّق بعد قفلها. مضفناش
+    // الاتنين الجداد على وارت قايم — قفلناه كله.
+    _labelController.dispose();
+    _streetController.dispose();
+    _buildingController.dispose();
+    _floorController.dispose();
+    _apartmentController.dispose();
+    _landmarkController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCities() async {
@@ -131,6 +150,8 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
               longitude: _pickedLocation!.longitude,
               label: _labelController.text.trim(),
               buildingNumber: _buildingController.text.trim(),
+              floorNumber: _floorController.text.trim(),
+              apartmentNumber: _apartmentController.text.trim(),
               landmark: _landmarkController.text.trim(),
             )
           : await widget.repository.update(
@@ -142,6 +163,8 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
               longitude: _pickedLocation!.longitude,
               label: _labelController.text.trim(),
               buildingNumber: _buildingController.text.trim(),
+              floorNumber: _floorController.text.trim(),
+              apartmentNumber: _apartmentController.text.trim(),
               landmark: _landmarkController.text.trim(),
             );
       if (mounted) Navigator.of(context).pop(address);
@@ -197,7 +220,11 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                       ),
                     TextFormField(
                       controller: _labelController,
-                      decoration: const InputDecoration(labelText: 'اسم العنوان (مثلاً: البيت)'),
+                      decoration: const InputDecoration(
+                        labelText: 'اسم العنوان',
+                        hintText: 'المنزل · العمل · منزل العيلة',
+                        helperText: 'اسم مختصر يخليك تفرّق بين عناوينك بسرعة',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -241,18 +268,52 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _streetController,
-                      decoration: const InputDecoration(labelText: 'اسم الشارع'),
+                      decoration: const InputDecoration(
+                        labelText: 'اسم الشارع',
+                        hintText: 'مثال: شارع سوريا',
+                      ),
                       validator: (value) => (value == null || value.trim().length < 2) ? 'مطلوب' : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _buildingController,
-                      decoration: const InputDecoration(labelText: 'رقم المبنى (اختياري)'),
+                      decoration: const InputDecoration(
+                        labelText: 'رقم المبنى',
+                        hintText: 'مثال: 12',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _floorController,
+                            decoration: const InputDecoration(
+                              labelText: 'الدور',
+                              hintText: 'مثال: 3',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _apartmentController,
+                            decoration: const InputDecoration(
+                              labelText: 'رقم الشقة',
+                              hintText: 'مثال: 7',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _landmarkController,
-                      decoration: const InputDecoration(labelText: 'علامة مميزة (اختياري)'),
+                      decoration: const InputDecoration(
+                        labelText: 'علامة مميزة قريبة',
+                        hintText: 'مثال: فوق صيدلية العزبي، جنب المسجد',
+                        helperText: 'اختياري، بيساعد الفني يوصلك من غير ما يتوه',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
