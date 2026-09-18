@@ -2,72 +2,82 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { previewInstaPay, payWithWallet } from '@/lib/payments';
+import { payWithWallet } from '@/lib/payments';
 import { fetchWallet } from '@/lib/account';
-import { formatEgp } from '@/lib/orders';
+import { formatEgp, OrderResponseDto } from '@/lib/orders';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
 /**
+ * الحالات اللي لسه فيها مبلغ ممكن يتدفع — **نسخة طبق الأصل من `_payableOrderStatuses`** في
+ * `apps/customer-app/lib/features/orders/order_detail_screen.dart`. أي تغيير هنا لازم يتغيّر
+ * هناك، وإلا الويب والتطبيق يعرضوا مدخلين دفع مختلفين على نفس الطلب.
+ */
+const PAYABLE_ORDER_STATUSES = new Set(['work_completed', 'awaiting_payment', 'pending_payment']);
+
+/**
  * **الدفع من رصيد المحفظة جوّه الطلب** (docs/08 §165، طلب مالك 2026-09-18).
  *
- * > «اتأكد إن الكاستمر اللي عنده رصيد في المحفظة — سواء جاله عن طريق استرداد أو تعويض شكوى —
- * > يعرف فعليًا يدفع بالجزء اللي على الموقع.»
+ * > «أنا ككاستمر طلبت طلب، مش عارف أدفع بالفلوس اللي معايا على الموقع، أعمل إيه عشان أدفع بيها؟»
  *
- * الرصيد ده حقيقي (استرداد طلب ملغي، تعويض شكوى، تعديل إداري) و`POST /orders/:id/pay-with-wallet`
- * شغّال من زمان والتطبيق بيستخدمه — بس **الويب مكانش فيه أي مسار له**. فالعميل كان بيشوف
- * الرقم في «محفظتي» ومايقدرش يستخدمه من المتصفح.
+ * ### ليه النسخة الأولى فضلت مش ظاهرة
  *
- * ### ليه بنقرا `instapay-preview` هنا
+ * كانت بتقرا `GET /orders/:id/instapay-preview` عشان تعرف «المطلوب كام»، وبتختفي بالكامل لو
+ * النداء ده فشل أو رجّع `is_closed`. يعني ربطت وسيلة دفع بوسيلة دفع تانية بلا داعي: بيئة
+ * InstaPay مش متظبطة فيها ⇒ خانة المحفظة تختفي، والعميل يفضل شايف رصيده ومش عارف يستخدمه.
  *
- * عشان سؤال «الطلب ده قابل للدفع دلوقتي بكام؟» يبقى له **مصدر واحد**. الشرط ده متكتب في
- * الباك-إند (`is_payable`/`is_closed`/`amount_cents`)، ولو حسبناه هنا تاني كان هيبقى نسختين
- * بتنحرفوا. الاستدعاء قراءة بحتة ومابيفتحش أي دفعة.
+ * دلوقتي بتقرا **الطلب نفسه** (`amount_due_now_cents` وحالة الدفع) — نفس المصدر اللي تطبيق
+ * العميل بيقرا منه بالظبط، فالويب والتطبيق بيعرضوا نفس المدخل على نفس الطلب.
  *
- * **الحافز مش هنا عن قصد**: حافز InstaPay قرار وسيلة دفع خاص بالتحويل، فبنعرض
- * `cash_amount_cents` (السعر المعتاد) عشان العميل مايفتكرش إن الدفع بالمحفظة هياخد الهدية.
+ * ### ومابتختفيش بصمت
+ *
+ * لو فيه رصيد ولسه مش ينفع يتدفع دلوقتي، الخانة **بتفضل ظاهرة وبتقول السبب**. الاختفاء
+ * الصامت هو اللي بيخلي العميل يفتكر إن الخيار مش موجود أصلاً.
  */
 export function WalletPaySection({
   authedFetch,
-  orderId,
+  order,
   onPaid,
 }: {
   authedFetch: AuthedFetch;
-  orderId: string;
+  order: OrderResponseDto;
   onPaid: () => void;
 }) {
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [isFrozen, setIsFrozen] = useState(false);
-  const [dueCents, setDueCents] = useState<number | null>(null);
-  const [payable, setPayable] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetchWallet(authedFetch), previewInstaPay(authedFetch, orderId)])
-      .then(([wallet, preview]) => {
+    fetchWallet(authedFetch)
+      .then((wallet) => {
         if (!active) return;
         setBalanceCents(wallet.balance_cents);
         setIsFrozen(wallet.is_frozen);
-        setDueCents(preview.is_closed ? null : preview.cash_amount_cents);
-        setPayable(preview.is_payable && !preview.is_closed);
       })
-      // فشل القراءة بيخفي الخانة بهدوء — مايصحّش يبوّظ صفحة الطلب كلها (نفس قاعدة خانة InstaPay).
-      .catch(() => { if (active) setBalanceCents(null); });
-    return () => { active = false; };
-  }, [authedFetch, orderId]);
+      .catch(() => {
+        if (active) setBalanceCents(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authedFetch]);
 
-  // رصيد صفر = مفيش حاجة تتعرض أصلاً. الخانة دي مالهاش معنى غير لما يكون فيه فلوس فعلاً.
-  if (balanceCents === null || balanceCents <= 0 || dueCents === null) return null;
+  // مفيش رصيد = مفيش خانة. دي الحالة الوحيدة اللي الإخفاء فيها صادق.
+  if (balanceCents === null || balanceCents <= 0) return null;
 
+  // المطلوب دلوقتي من الطلب نفسه؛ `amount_due_now_cents` بيرجع للإجمالي لو مش محسوب.
+  const dueCents = order.amount_due_now_cents ?? order.total_amount_cents;
+  const isPayableNow =
+    PAYABLE_ORDER_STATUSES.has(order.order_status) && (order.payment_status !== 'paid' || dueCents > 0);
   const coversFullAmount = balanceCents >= dueCents;
 
   async function handlePay() {
     setIsPaying(true);
     setError(null);
     try {
-      await payWithWallet(authedFetch, orderId);
+      await payWithWallet(authedFetch, order.id);
       onPaid();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'حصل خطأ أثناء الدفع من المحفظة');
@@ -79,24 +89,26 @@ export function WalletPaySection({
   return (
     <section className="mt-4 rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-1 font-semibold">ادفع من رصيد محفظتك</h2>
-      <p className="text-sm text-muted-foreground">
-        رصيدك المتاح: <span className="font-semibold text-foreground">{formatEgp(balanceCents)}</span>
-        {' · '}المطلوب على الطلب ده: <span className="font-semibold text-foreground">{formatEgp(dueCents)}</span>
+      <p className="text-sm text-muted">
+        رصيدك المتاح: <span className="font-semibold text-fg">{formatEgp(balanceCents)}</span>
+        {isPayableNow && (
+          <>
+            {' · '}المطلوب دلوقتي: <span className="font-semibold text-fg">{formatEgp(dueCents)}</span>
+          </>
+        )}
       </p>
 
       {isFrozen ? (
-        <p className="mt-3 text-sm text-warning-foreground">
-          محفظتك متجمّدة مؤقتًا، فمينفعش تدفع منها دلوقتي. تواصل مع الدعم.
+        <p className="mt-3 text-sm text-danger">محفظتك متجمّدة مؤقتًا، فمينفعش تدفع منها دلوقتي. كلّم الدعم.</p>
+      ) : !isPayableNow ? (
+        <p className="mt-3 text-sm text-muted">
+          الطلب ده مفيهوش مبلغ مستحق دلوقتي. هتقدر تدفع من رصيدك أول ما الشغل يخلص وتيجي الفاتورة.
         </p>
       ) : !coversFullAmount ? (
         // الدفع الجزئي مش مدعوم في الباك-إند، فالوعد بيه هنا كان هيبقى كذب.
-        <p className="mt-3 text-sm text-muted-foreground">
-          رصيدك أقل من المطلوب، والدفع من المحفظة بيتم بالكامل أو لأ. تقدر تدفع بوسيلة تانية،
-          والرصيد يفضل لطلب جاي.
-        </p>
-      ) : !payable ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          هتقدر تدفع من المحفظة أول ما الفاتورة تبقى جاهزة.
+        <p className="mt-3 text-sm text-muted">
+          رصيدك أقل من المطلوب، والدفع من المحفظة بيتم بالكامل أو لأ. ادفع بوسيلة تانية والرصيد
+          يفضل لطلب جاي.
         </p>
       ) : (
         <button
@@ -108,8 +120,8 @@ export function WalletPaySection({
         </button>
       )}
 
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-      <p className="mt-2 text-xs text-muted-foreground">
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      <p className="mt-2 text-xs text-muted">
         <Link href="/account/wallet" className="underline">
           شوف كل حركات المحفظة
         </Link>

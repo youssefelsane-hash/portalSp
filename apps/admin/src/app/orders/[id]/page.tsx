@@ -205,8 +205,30 @@ function traceTime(value: string | null): string {
  *
  * بيقرا `GET /admin/operations/order-traces/:id` (نفس `order_assignments`). صفر منطق مطابقة هنا.
  */
-function OrderTraceRounds({ trace }: { trace: OrderTraceDto | null }) {
-  if (!trace || trace.rounds.length === 0) return null;
+function OrderTraceRounds({ trace, error }: { trace: OrderTraceDto | null; error: string | null }) {
+  /*
+    **الغياب بيتشرح، مابيحصلش بصمت** (بلاغ مالك 2026-09-18).
+
+    الجدول ده كان بيرجّع `null` في تلات حالات مختلفة تمامًا — نداء فشل، طلب مالوش جولات،
+    وطلب اتعيّن يدويًا — والتلاتة بيدّوا نفس النتيجة على الشاشة: **مفيش حاجة**. فالأدمن اللي
+    شاف الجدول على طلب وما شافهوش على طلب تاني بيستنتج إن الميزة «اتشالت». دلوقتي كل حالة
+    بتقول نفسها.
+  */
+  if (error) {
+    return (
+      <p className="mt-3 text-xs text-destructive">
+        مش قادرين نحمّل جولات التوزيع دلوقتي ({error}) — العدّادات فوق لسه صحيحة.
+      </p>
+    );
+  }
+  if (!trace || trace.rounds.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-muted-foreground">
+        مفيش جولات توزيع على الطلب ده — يا إما اتعيّن على فني بعينه من غير ما يتعرض على حد،
+        يا إما لسه ما دخلش التوزيع.
+      </p>
+    );
+  }
 
   return (
     <div className="mt-3 flex flex-col gap-3">
@@ -463,6 +485,8 @@ export default function OrderDetailPage() {
   const [matchingFunnel, setMatchingFunnel] = useState<OrderMatchingFunnelDto | null>(null);
   // تتبّع جولات المطابقة — نفس order_assignments اللي الفانل بيعدّها، بس مجمّعة بالجولة والفني.
   const [orderTrace, setOrderTrace] = useState<OrderTraceDto | null>(null);
+  /** سبب غياب جولات التوزيع — `catch` صامت كان بيخلّي فشل النداء يبان زي «مفيش بيانات». */
+  const [traceError, setTraceError] = useState<string | null>(null);
   const [funnelError, setFunnelError] = useState<string | null>(null);
   const [explainTechnicianId, setExplainTechnicianId] = useState('');
   const [explanation, setExplanation] = useState<TechnicianEligibilityExplanationDto | null>(null);
@@ -525,8 +549,16 @@ export default function OrderDetailPage() {
       });
     // جولات المطابقة للطلب ده — مسار منفصل عمداً: لو وقع، الفانل بعدّاداته بيفضل ظاهر.
     authedFetch<OrderTraceResponseDto>(`/admin/operations/order-traces/${id}`)
-      .then(({ trace }) => setOrderTrace(trace))
-      .catch(() => setOrderTrace(null));
+      .then(({ trace }) => {
+        setOrderTrace(trace);
+        setTraceError(null);
+      })
+      .catch((err) => {
+        setOrderTrace(null);
+        // أشهر سبب: الدور مالوش `operations.view` (الصفحة بتفتح بـ`orders.view`) — والرسالة
+        // دي هي الفرق بين «الأدمن يعرف يطلب الصلاحية» و«الأدمن فاكر إن الميزة اتشالت».
+        setTraceError(err instanceof ApiError ? err.message : 'تعذّر التحميل');
+      });
     // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
     authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
       .then(setInternalNotes)
@@ -1361,35 +1393,25 @@ export default function OrderDetailPage() {
                 </div>
               </div>
               <div>
-                {/* **اسم الجدول اتشال** (`order_assignments`): الأدمن مش بيقرا schema.
-                    و**الأصفار اتخفت**: «اتبعت: 0 · اتشاف: 0 · قُبل: 0 · رُفض: 0 · انتهت مهلته: 0
-                    · اتلغى: 0» كان سطر أصفار كامل مالوش أي معلومة — ودي حالة الطلب اللي لسه
-                    مااتبعتلوش أي عرض، يعني الحالة الشائعة. */}
+                {/*
+                  **العدّادات بتتعرض كاملة دايمًا — حتى لو أصفار** (بلاغ مالك 2026-09-18).
+
+                  في جولة تنظيم الواجهة (§158) خفّيت الأصفار بحجّة إنها «سطر مالوش معلومة».
+                  ده كان غلط: صفر **معلومة حقيقية** («الطلب ده مااتبعتلوش حد» ≠ «القسم مش
+                  موجود»)، وإخفاؤه خلّى القسم يبان كأنه اتشال. المالك قال صراحةً إنه ما طلبش
+                  إخفاء أي حاجة — فرجعت زي ما كانت بالحرف، واسم الجدول فضل مشال لأنه مصطلح
+                  داخلي مش معلومة تشغيلية.
+                */}
                 <p className="mb-2 font-medium">العروض المبعوتة للفنيين</p>
-                {(() => {
-                  const a = matchingFunnel.dispatch_assignments;
-                  const parts = (
-                    [
-                      ['اتبعت', a.sent],
-                      ['اتشاف', a.viewed],
-                      ['قُبل', a.accepted],
-                      ['رُفض', a.rejected],
-                      ['انتهت مهلته', a.timeout],
-                      ['اتلغى', a.cancelled],
-                    ] as const
-                  ).filter(([, count]) => count > 0);
-                  return parts.length === 0 ? (
-                    <p className="text-muted-foreground">مااتبعتش أي عروض على الطلب ده لسه</p>
-                  ) : (
-                    <p className="text-muted-foreground">
-                      {parts.map(([label, count]) => `${label}: ${count}`).join(' · ')}
-                    </p>
-                  );
-                })()}
+                <p className="text-muted-foreground">
+                  اتبعت: {matchingFunnel.dispatch_assignments.sent} · اتشاف: {matchingFunnel.dispatch_assignments.viewed} · قُبل:{' '}
+                  {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
+                  {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
+                </p>
                 {/* العدّادات فوق مسطّحة: «اتبعت 8» ما بتقولش لو دي جولة واحدة وصلت لـ8 ولا تلات
                     جولات لسه بتوسّع، ولا مين منهم فتح العرض أصلاً. نفس البيانات بالظبط مقروءة
                     بالجولة (GET /admin/operations/order-traces/:id) — مفيش استعلام تشخيصي جديد. */}
-                <OrderTraceRounds trace={orderTrace} />
+                <OrderTraceRounds trace={orderTrace} error={traceError} />
               </div>
               {matchingFunnel.crew_recruit_opportunities && (
                 <div>

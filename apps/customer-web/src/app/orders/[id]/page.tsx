@@ -272,7 +272,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* رصيد المحفظة وسيلة دفع حقيقية (استرداد/تعويض شكوى)، وكانت متاحة في التطبيق بس —
           فعميل معاه رصيد كان بيشوفه في «محفظتي» ومايقدرش يستخدمه من المتصفح (docs/08 §165). */}
-      <WalletPaySection authedFetch={authedFetch} orderId={order.id} onPaid={refresh} />
+      <WalletPaySection authedFetch={authedFetch} order={order} onPaid={refresh} />
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">
