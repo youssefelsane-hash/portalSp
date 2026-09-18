@@ -245,6 +245,75 @@ export class ReferralsService {
     };
   }
 
+  /**
+   * **نظرة الأدمن على «رشّح صحابك»** (docs/08 §165، طلب مالك 2026-09-18: «الأدمين يكون عنده
+   * نظرة للموضوع»).
+   *
+   * البرنامج كان بيشتغل بالكامل (كود، ربط وقت التسجيل، مكافأة عند أول طلب مكتمل) لكن **من
+   * غير أي مسار أدمن خالص** — الموظف مش قادر يجاوب «العميل ده رشّح مين؟ وخد إيه؟» ولا يراجع
+   * شكوى عن مكافأة ناقصة.
+   *
+   * قراءة بحتة: مفيش أي تعديل هنا، والمكافآت بتفضل تتولّد من مسارها الطبيعي.
+   */
+  async adminReferralOverview(userId: string): Promise<{
+    referral_code: string | null;
+    completed_count: number;
+    pending_count: number;
+    required_per_reward: number;
+    referred: {
+      user_id: string;
+      full_name: string | null;
+      phone_number: string | null;
+      status: string;
+      completed_at: string | null;
+      reference_order_number: string | null;
+      joined_at: string;
+    }[];
+  }> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    const rows = await this.referrals.query<
+      {
+        user_id: string;
+        full_name: string | null;
+        phone_number: string | null;
+        status: string;
+        completed_at: Date | null;
+        reference_order_number: string | null;
+        joined_at: Date;
+      }[]
+    >(
+      `SELECT r.referred_user_id AS user_id, u.full_name, u.phone_number, r.status,
+              r.completed_at, o.order_number AS reference_order_number, r.created_at AS joined_at
+         FROM referrals r
+         LEFT JOIN users u ON u.id = r.referred_user_id
+         LEFT JOIN orders o ON o.id = r.reference_order_id
+        WHERE r.referrer_user_id = $1 AND r.deleted_at IS NULL
+        ORDER BY r.created_at DESC
+        LIMIT 100`,
+      [userId],
+    );
+    const [completed, pending, requiredPerReward] = await Promise.all([
+      this.referrals.count({ where: { referrerUserId: userId, status: ReferralStatus.COMPLETED } }),
+      this.referrals.count({ where: { referrerUserId: userId, status: ReferralStatus.PENDING } }),
+      this.settingsService.getNumber('referral.required_referrals_per_reward', 1),
+    ]);
+    return {
+      referral_code: user?.referralCode ?? null,
+      completed_count: completed,
+      pending_count: pending,
+      required_per_reward: requiredPerReward,
+      referred: rows.map((row) => ({
+        user_id: row.user_id,
+        full_name: row.full_name,
+        phone_number: row.phone_number,
+        status: row.status,
+        completed_at: row.completed_at?.toISOString() ?? null,
+        reference_order_number: row.reference_order_number,
+        joined_at: row.joined_at.toISOString(),
+      })),
+    };
+  }
+
   private async assignReferralCode(userId: string): Promise<string> {
     for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt++) {
       let code = '';

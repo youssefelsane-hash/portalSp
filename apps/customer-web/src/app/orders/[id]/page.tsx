@@ -32,6 +32,7 @@ import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
 import { WarrantyRevisitSection } from './warranty-revisit-section';
 import { InstaPayInlineSection } from './instapay-inline-section';
+import { WalletPaySection } from './wallet-pay-section';
 
 /**
  * الحالات اللي لسه فيها مبلغ ممكن يتدفع — **نسخة طبق الأصل من `_payableOrderStatuses`** في
@@ -268,6 +269,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         orderId={order.id}
         paymentMethod={order.payment_method ?? null}
       />
+
+      {/* رصيد المحفظة وسيلة دفع حقيقية (استرداد/تعويض شكوى)، وكانت متاحة في التطبيق بس —
+          فعميل معاه رصيد كان بيشوفه في «محفظتي» ومايقدرش يستخدمه من المتصفح (docs/08 §165). */}
+      <WalletPaySection authedFetch={authedFetch} orderId={order.id} onPaid={refresh} />
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">

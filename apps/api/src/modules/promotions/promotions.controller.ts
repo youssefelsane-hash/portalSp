@@ -1,13 +1,11 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
-import { LoyaltySource } from './entities/loyalty-transaction.entity';
 import { LoyaltyService } from './loyalty.service';
 import { PromotionsService } from './promotions.service';
 import { toLoyaltyTransactionResponseDto } from './dto/loyalty-transaction-response.dto';
 import { toPromoCodeResponseDto } from './dto/promo-code-response.dto';
-import { RedeemLoyaltyPointsDto } from './dto/redeem-loyalty-points.dto';
 import { ValidatePromoCodeQueryDto } from './dto/validate-promo-code-query.dto';
 
 // مفتوح لأي مستخدم مسجّل دخول (عميل بيتحقق من كود قبل ما يحجز، مفيش @Roles مخصوصة)
@@ -51,17 +49,18 @@ export class PromotionsController {
     return transactions.map(toLoyaltyTransactionResponseDto);
   }
 
-  // كانت فجوة موثّقة: LoyaltyService.redeem() كان جاهز بس مش موصول لمسار عميل. مفيش تحويل
-  // تلقائي للنقاط لخصم فعلي هنا — مجرد خصم رصيد وتسجيل معاملة، القاموس مالوش سعر صرف محدد.
-  @Post('loyalty/redeem')
-  @HttpCode(HttpStatus.OK)
-  async redeem(@CurrentUser() user: JwtPayload, @Body() dto: RedeemLoyaltyPointsDto) {
-    const transaction = await this.loyaltyService.redeem(
-      user.sub,
-      dto.points,
-      LoyaltySource.ORDER,
-      dto.reference_id ?? null,
-    );
-    return { points_balance: transaction.balanceAfter, transaction: toLoyaltyTransactionResponseDto(transaction) };
-  }
+  /*
+    `POST /loyalty/redeem` **اتشال** (docs/08 §165).
+
+    كان بيخصم نقاط **ومايدّيش أي حاجة** — «القاموس مالوش سعر صرف محدد» بنص تعليقه. يعني أي
+    عميل ينده عليه يخسر نقاطه مقابل صفر. مفيش أي عميل بينده عليه (اتأكدنا بالبحث في التطبيقين
+    والويب واللوحة)، فشيله مابيكسرش حاجة وبيقفل فخ.
+
+    البديل الحقيقي: `POST /wallet/loyalty-redemption` — بيخصم النقاط **ويضيف رصيد محفظة** في
+    نفس الترانزاكشن بسعر صرف من الإعدادات. مكانه في `payments` لأن الناتج رصيد والقواعد
+    المالية هناك.
+
+    و`LoyaltyService.redeem()` نفسها فضلت زي ما هي كـprimitive — هي اللي الخدمة الجديدة
+    بتستخدمها.
+  */
 }

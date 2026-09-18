@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { randomInt } from 'node:crypto';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { resolveSmartLinkTarget } from '../../common/marketing/smart-link-destination';
 import { SettingsService } from '../settings/settings.service';
 import { MarketingAttribution } from './entities/marketing-attribution.entity';
 import { MarketingHitPlatform, MarketingLinkHit } from './entities/marketing-link-hit.entity';
@@ -170,14 +171,8 @@ export class MarketingService {
    * الوضع الطبيعي قبل ما التطبيق ينزل المتاجر أصلاً.
    */
   async resolveDestination(platform: MarketingHitPlatform, code: string): Promise<string> {
-    const [android, ios, landing] = await Promise.all([
-      this.settings.getString('marketing.android_store_url', ''),
-      this.settings.getString('marketing.ios_store_url', ''),
-      this.settings.getString('marketing.web_landing_url', ''),
-    ]);
-    const fallback = landing.trim() || process.env.CUSTOMER_WEB_URL || process.env.WEB_APP_URL || '/';
-    const storeUrl = platform === 'android' ? android.trim() : platform === 'ios' ? ios.trim() : '';
-    const target = storeUrl || fallback;
+    // نفس اختيار الوجهة بتاع كل رابط ذكي — مستخرج مرة واحدة (docs/08 §165).
+    const target = await resolveSmartLinkTarget(this.settings, platform);
     return appendMarketingCode(target, code);
   }
 

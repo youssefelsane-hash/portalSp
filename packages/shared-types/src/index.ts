@@ -29,6 +29,7 @@ export * from './domestic-workers';
 export * from './academy';
 export * from './favorites';
 export * from './roles';
+export * from './referrals';
 export * from './technician-referrals';
 export * from './technician-kpi';
 export * from './technician-progression';

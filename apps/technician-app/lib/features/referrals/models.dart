@@ -38,6 +38,8 @@ class ReferralBonus {
 
 class ReferralSummary {
   final String referralToken;
+  /// الرابط العام اللي الـQR بيشفّره — الكاميرا العادية لازم تلاقي لينك مش نص خام.
+  final String shareUrl;
   final int attributedCustomersCount;
   final int qualifyingOrdersCount;
   final int totalCreditedCents;
@@ -47,6 +49,7 @@ class ReferralSummary {
 
   ReferralSummary({
     required this.referralToken,
+    required this.shareUrl,
     required this.attributedCustomersCount,
     required this.qualifyingOrdersCount,
     required this.totalCreditedCents,
@@ -57,6 +60,8 @@ class ReferralSummary {
 
   factory ReferralSummary.fromJson(Map<String, dynamic> json) => ReferralSummary(
         referralToken: json['referral_token'] as String,
+        // نسخ أقدم من الباك-إند مش بترجّع الحقل — بنرجع للتوكن بدل ما الشاشة تقع.
+        shareUrl: (json['share_url'] as String?) ?? (json['referral_token'] as String),
         attributedCustomersCount: json['attributed_customers_count'] as int,
         qualifyingOrdersCount: json['qualifying_orders_count'] as int,
         totalCreditedCents: json['total_credited_cents'] as int,

@@ -31,6 +31,19 @@ export const payWithCard = (authedFetch: AuthedFetch, orderId: string) =>
   });
 
 /**
+ * الدفع من رصيد المحفظة (docs/08 §165).
+ *
+ * الرصيد ده حقيقي: بييجي من استرداد طلب ملغي، أو تعويض شكوى، أو تعديل إداري. الـendpoint
+ * موجود وشغّال من زمان والتطبيق بيستخدمه، لكن **الويب مكانش فيه أي مسار له خالص** — فعميل
+ * معاه 120 ج في محفظته كان بيشوف الرقم في صفحة «محفظتي» ومايقدرش يدفع بيه من المتصفح.
+ */
+export const payWithWallet = (authedFetch: AuthedFetch, orderId: string) =>
+  authedFetch<PaymentResponseDto>(`/orders/${orderId}/pay-with-wallet`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+  });
+
+/**
  * تفاصيل تحويل InstaPay — **مطابقة حرفيًا لـ`InstaPayReferenceResponseDto`** في الباك-إند.
  *
  * الأرقام (الحساب، المبلغ، رقم الطلب) حقول مستقلة **مش مدفونة جوّه `instructions_ar`**: رقم

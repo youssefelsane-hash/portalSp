@@ -94,11 +94,22 @@ export class LoyaltyService {
     return manager ? run(manager) : this.dataSource.transaction(run);
   }
 
-  async redeem(userId: string, points: number, source: LoyaltySource, referenceId: string | null = null): Promise<LoyaltyTransaction> {
+  /**
+   * `manager` اختياري عشان الاستبدال يقدر يضم الخصم **وقيد المحفظة** في ترانزاكشن واحدة
+   * (`LoyaltyRedemptionService`، docs/08 §165). من غيره كانت هتفضل حالة «النقاط راحت والفلوس
+   * ما جتش» ممكنة — نفس نمط `earn()` فوق بالحرف.
+   */
+  async redeem(
+    userId: string,
+    points: number,
+    source: LoyaltySource,
+    referenceId: string | null = null,
+    manager?: EntityManager,
+  ): Promise<LoyaltyTransaction> {
     if (points <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'عدد النقاط لازم يكون أكبر من صفر', HttpStatus.BAD_REQUEST);
     }
-    return this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager): Promise<LoyaltyTransaction> => {
       const profile = await this.lockProfile(userId, manager);
       if (profile.loyaltyPointsBalance < points) {
         throw new ApiException(ErrorCode.VAL_001, 'رصيد النقاط مش كافي', HttpStatus.BAD_REQUEST);
@@ -115,6 +126,7 @@ export class LoyaltyService {
           balanceAfter,
         }),
       );
-    });
+    };
+    return manager ? run(manager) : this.dataSource.transaction(run);
   }
 }
