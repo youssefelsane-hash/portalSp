@@ -4530,7 +4530,28 @@ export class PaymentsService {
   ): Promise<{ debit: unknown; credit: unknown; newBalanceCents: number }> {
     const result = await this.dataSource.transaction(async (manager) => {
       const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
-      const targetWallet = await this.walletsService.findByUserIdOrThrow(targetUserId, manager);
+      /*
+        **بتتفتح لو مش موجودة** (docs/08 §165).
+
+        شاشة الأدمن بتقول للموظف «لسه مفيش محفظة — بتتفتح تلقائيًا مع أول حركة مالية»،
+        والتعديل الإداري **هو** أول حركة مالية — ومع ذلك كان بيرجّع 404 «المحفظة غير موجودة».
+        يعني الوعد اللي في الشاشة مكانش بيتحقق في الفعل الوحيد المتاح فيها، والموظف مش لاقي
+        طريقة يعوّض عميل محفظته ما اتفتحتش (مثلاً عميل قديم أو تهيئة فشلت).
+
+        نوع المالك بيتقرا من `users` مش بيتخمّن: فني بمحفظة عميل كان هيكسر تقارير الصرف.
+      */
+      const [owner] = await manager.query<{ user_type: string }[]>(
+        `SELECT user_type FROM users WHERE id = $1 AND deleted_at IS NULL`,
+        [targetUserId],
+      );
+      if (!owner) {
+        throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
+      }
+      const targetWallet = await this.walletsService.getOrCreateWallet(
+        targetUserId,
+        owner.user_type === 'technician' ? WalletOwnerType.TECHNICIAN : WalletOwnerType.CUSTOMER,
+        manager,
+      );
 
       const inserted = await manager.query<{ id: string }[]>(
         `INSERT INTO wallet_adjustments

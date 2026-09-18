@@ -151,6 +151,12 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ── loyalty ───────────────────────────────────────────────────────────
   'loyalty.earn_points_per_100_egp_spent': { type: 'number', default: 1, group: 'loyalty', description: 'نقاط الولاء المكتسبة لكل 100 جنيه إنفاق عند اكتمال الطلب' },
   'loyalty.points_expiry_months': { type: 'number', default: 12, group: 'loyalty', description: 'بعد كام شهر تنتهي نقاط الولاء المكتسبة (0 = ماتنتهيش أبدًا). التغيير بيسري على النقاط الجديدة بس — النقاط القديمة بتحتفظ بتاريخ انتهائها المتسجّل وقت اكتسابها.' },
+  // ── استبدال النقاط (docs/08 §165) ──
+  // كانت النقاط بتتحسب وتنتهي وبس: `POST /loyalty/redeem` بيخصم نقاط **ومايدّيش حاجة**،
+  // والشاشة بتقول «برنامج الاستبدال جاي قريب». الإعدادين دول هما اللي بيحوّلوها لقيمة حقيقية.
+  'loyalty.redeem_enabled': { type: 'boolean', default: true, group: 'loyalty', description: 'تفعيل استبدال نقاط الولاء برصيد محفظة. لما يبقى مقفول، الرصيد بيفضل يتجمّع والاستبدال بيترفض برسالة واضحة.' },
+  'loyalty.points_per_egp_redeemed': { type: 'number', default: 10, group: 'loyalty', description: 'كام نقطة تساوي جنيه واحد عند الاستبدال (10 = كل 10 نقاط بجنيه). لازم أكبر من صفر.' },
+  'loyalty.min_redeem_points': { type: 'number', default: 100, group: 'loyalty', description: 'أقل عدد نقاط مسموح باستبداله في المرة الواحدة — بيمنع عمليات بقروش.' },
 
   // ── marketing ─────────────────────────────────────────────────────────
   // الوجهات التلاتة دي هي اللي `GET /r/:code` بيوزّع عليها حسب جهاز الزائر. موجودة في

@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../orders/qr_code_scan_screen.dart';
 import 'technician_referral_repository.dart';
 
-// كود ترشيح فني (docs/11 §1) — لعميل مسجّل بالفعل. مسح QR بالكاميرا مؤجّل عمدًا (نفس قرار
-// مسح QR العمائر — مفيش جهاز حقيقي للاختبار)، إدخال يدوي بس حاليًا.
+// كود ترشيح فني (docs/11 §1) — لعميل مسجّل بالفعل.
+//
+// المسح بالكاميرا بقى موجود (docs/08 §165، طلب مالك 2026-09-18: «يبقى متاح دايمًا مكان يدوس
+// عليه يفتح بيه الكاميرا يسكن بدل ما يقعد يكتب الكود بإيده»). الماسح نفسه مش جديد —
+// `QrCodeScanScreen` موجودة لأكواد الخصم، واستخراج الكود بقى بيفهم روابط `/t/` كمان.
 class TechnicianReferralScreen extends StatefulWidget {
   const TechnicianReferralScreen({super.key});
 
@@ -23,6 +27,20 @@ class _TechnicianReferralScreenState extends State<TechnicianReferralScreen> {
   void dispose() {
     _codeController.dispose();
     super.dispose();
+  }
+
+  /// بيفتح نفس ماسح أكواد الخصم — شاشة واحدة لكل مسح في التطبيق، مفيش نسخة تانية.
+  Future<void> _scan() async {
+    final scanned = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const QrCodeScanScreen()),
+    );
+    if (!mounted || scanned == null || scanned.trim().isEmpty) return;
+    setState(() {
+      _codeController.text = scanned.trim();
+      _error = null;
+    });
+    // المسح نية واضحة إن ده الكود المقصود، فبنكمّل على طول بدل ما نطلب دوسة تانية.
+    await _submit();
   }
 
   Future<void> _submit() async {
@@ -59,7 +77,13 @@ class _TechnicianReferralScreenState extends State<TechnicianReferralScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text('لو فني رشّحلك وأديك كوده، اكتبه هنا:'),
+                    const Text('لو فني رشّحلك، امسح الـQR بتاعه أو اكتب كوده هنا:'),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _submitting ? null : _scan,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('امسح الكود بالكاميرا'),
+                    ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _codeController,

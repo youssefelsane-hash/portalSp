@@ -11,8 +11,9 @@ import 'referrals_repository.dart';
 // ترشيح QR للفني (docs/11 §1) — كانت مؤجّلة عمدًا كـbacklog بند 39. كود الترشيح هو
 // technician_code الموجود بالفعل (مفيش عمود جديد) — عميل يمسحه أو يدخله يدويًا وقت التسجيل/بعده
 // يتحول لعميل مرشّح من الفني ده، ويكسب الفني مكافأة قابلة للإعداد بالكامل لأول طلب مؤهّل له
-// (أو كل طلب، حسب سياسة الأدمن). مسح QR بالكاميرا لسه مش مبني (نفس قرار مسح QR العمائر —
-// إدخال يدوي بس، مفيش جهاز حقيقي للاختبار في بيئة التطوير) — العرض/المشاركة هنا كاملين.
+// (أو كل طلب، حسب سياسة الأدمن). العميل بيقدر يمسح الـQR ده بكاميرا التطبيق من شاشة «كود
+// ترشيح فني»، أو بكاميرا الموبايل العادية — الـQR بيشفّر رابط `/t/:token` بيحوّل للمتجر/الموقع
+// (docs/08 §165)، مش التوكن الخام.
 class ReferralScreen extends StatefulWidget {
   const ReferralScreen({super.key});
 
@@ -44,10 +45,11 @@ class _ReferralScreenState extends State<ReferralScreen> {
     }
   }
 
-  Future<void> _share(String token) async {
+  /// بنشارك **الرابط** مع الكود: الرسالة بتوصل لواتساب، والعميل عايز يدوس مش ينسخ نص.
+  Future<void> _share(String token, String shareUrl) async {
     await SharePlus.instance.share(
       ShareParams(
-        text: 'استخدم كود الترشيح بتاعي "$token" عشان تحجز أول خدمة معايا على تطبيق أسطى! 🛠️',
+        text: 'استخدم كود الترشيح بتاعي "$token" عشان تحجز أول خدمة معايا على تطبيق أسطى! 🛠️\n$shareUrl',
       ),
     );
   }
@@ -78,13 +80,15 @@ class _ReferralScreenState extends State<ReferralScreen> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-                              child: QrImageView(data: summary.referralToken, size: 180),
+                              // الـQR بيشفّر **الرابط** مش التوكن (docs/08 §165): كاميرا الموبايل العادية بتفتح
+                              // لينك بيوصّل للمتجر/الموقع، بدل ما تطلّع نص خام العميل مايعرفش يعمل بيه إيه.
+                              child: QrImageView(data: summary.shareUrl, size: 180),
                             ),
                             const SizedBox(height: 12),
                             SelectableText(summary.referralToken, style: Theme.of(context).textTheme.titleMedium),
                             const SizedBox(height: 12),
                             FilledButton.icon(
-                              onPressed: () => _share(summary.referralToken),
+                              onPressed: () => _share(summary.referralToken, summary.shareUrl),
                               icon: const Icon(Icons.share),
                               label: const Text('مشاركة الكود'),
                             ),
@@ -163,9 +167,28 @@ class _ReferralScreenState extends State<ReferralScreen> {
                                       : Colors.orange,
                             ),
                             title: Text(_formatEgp(bonus.bonusAmountCents)),
-                            subtitle: Text(
-                              referralBonusStatusLabelsAr[bonus.status] ?? bonus.status,
+                            // السبب متخزّن في `rejection_reason` وبيرجع في الرد من زمان، بس
+                            // مكانش بيتعرض خالص — الفني بيشوف «مرفوضة» وخلاص ومايعرفش عمل إيه
+                            // غلط ولا إيه اللي يمنع تكرارها (بلاغ مالك 2026-09-18، docs/08 §165).
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(referralBonusStatusLabelsAr[bonus.status] ?? bonus.status),
+                                if (bonus.rejectionReason != null && bonus.rejectionReason!.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      bonus.rejectionReason!,
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                              ],
                             ),
+                            isThreeLine:
+                                bonus.rejectionReason != null && bonus.rejectionReason!.isNotEmpty,
                             trailing: Text(
                               bonus.createdAt.substring(0, 10),
                               style: Theme.of(context).textTheme.bodySmall,

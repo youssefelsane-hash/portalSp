@@ -33,6 +33,13 @@ export function toTechnicianReferralBonusResponseDto(bonus: TechnicianReferralBo
 
 export interface TechnicianReferralSummaryResponseDto {
   referral_token: string;
+  /**
+   * الرابط العام اللي الـQR بيشفّره (docs/08 §165) — نفس دور `share_url` في أكواد الخصم.
+   *
+   * الـQR كان بيشفّر التوكن الخام، فالعميل اللي بيصوّره بكاميرا الموبايل العادية بيشوف نص
+   * زي `TECH-000004` ومايعرفش يعمل بيه إيه. الرابط بيحوّله للمتجر أو لصفحة الهبوط بالكود جاهز.
+   */
+  share_url: string;
   attributed_customers_count: number;
   qualifying_orders_count: number;
   total_credited_cents: number;
@@ -44,6 +51,7 @@ export interface TechnicianReferralSummaryResponseDto {
 export function toTechnicianReferralSummaryResponseDto(summary: TechnicianReferralSummary): TechnicianReferralSummaryResponseDto {
   return {
     referral_token: summary.referralToken,
+    share_url: technicianReferralShareUrl(summary.referralToken),
     attributed_customers_count: summary.attributedCustomersCount,
     qualifying_orders_count: summary.qualifyingOrdersCount,
     total_credited_cents: summary.totalCreditedCents,
@@ -51,4 +59,13 @@ export function toTechnicianReferralSummaryResponseDto(summary: TechnicianReferr
     total_rejected_cents: summary.totalRejectedCents,
     recent_bonuses: summary.recentBonuses.map(toTechnicianReferralBonusResponseDto),
   };
+}
+
+/**
+ * رابط QR ترشيح الفني — **نفس بناء `PromoCodeLinksService.shareUrl()` بالحرف**: الدومين من
+ * البيئة والمسار القصير ثابت، عشان الكود المطبوع/المعروض يفضل صالح لو الوجهة اتغيّرت.
+ */
+export function technicianReferralShareUrl(token: string): string {
+  const base = process.env.PUBLIC_BASE_URL || process.env.API_PUBLIC_URL || process.env.CUSTOMER_WEB_URL || '';
+  return `${base.replace(/\/+$/, '')}/t/${encodeURIComponent(token)}`;
 }

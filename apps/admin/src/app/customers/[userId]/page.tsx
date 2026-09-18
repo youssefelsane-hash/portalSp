@@ -4,7 +4,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BadgeDollarSign, CheckCircle2, ClipboardList, WalletCards } from 'lucide-react';
-import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
+import type {
+  AdminCustomerResponseDto,
+  AdminReferralOverview,
+  AdminWalletDetailResponseDto,
+  CreditLoyaltyBody,
+  CustomerTier,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
@@ -102,6 +108,11 @@ export default function CustomerDetailPage() {
 
   const [detail, setDetail] = useState<AdminCustomerResponseDto | null>(null);
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
+  /**
+   * نظرة «رشّح صحابك» (docs/08 §165) — البرنامج كان شغّال من غير أي مسار أدمن خالص، فالموظف
+   * مش قادر يجاوب «العميل ده رشّح مين وخد إيه؟» ولا يراجع شكوى عن مكافأة ناقصة.
+   */
+  const [referrals, setReferrals] = useState<AdminReferralOverview | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   /** العميل لسه مالوش محفظة (مفيش حركة مالية) — حالة فاضية طبيعية مش خطأ. */
   const [walletMissing, setWalletMissing] = useState(false);
@@ -129,6 +140,10 @@ export default function CustomerDetailPage() {
   }
 
   function loadWallet() {
+    authedFetch<AdminReferralOverview>(`/admin/referrals/customers/${userId}`)
+      .then(setReferrals)
+      // نظرة ثانوية — فشلها مايصحّش يبوّظ صفحة العميل كلها.
+      .catch(() => setReferrals(null));
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
       .then(setWallet)
       .catch((err) => {
@@ -372,6 +387,37 @@ export default function CustomerDetailPage() {
                   {detail.referral_code ?? '—'}
                 </span>
               </DataRow>
+              {referrals && (
+                <DataRow label="رشّح صحابه">
+                  {referrals.completed_count + referrals.pending_count === 0 ? (
+                    <span className="text-muted-foreground">لسه محدش سجّل بكوده</span>
+                  ) : (
+                    <>
+                      <span>
+                        {referrals.completed_count} اكتملوا · {referrals.pending_count} لسه
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        كل {referrals.required_per_reward} ترشيح مكتمل = مكافأة
+                      </span>
+                      {referrals.referred.slice(0, 5).map((row) => (
+                        <span key={row.user_id} className="mt-1 block text-xs text-muted-foreground">
+                          {row.full_name ?? 'بلا اسم'}
+                          {row.phone_number && <span dir="ltr"> · {row.phone_number}</span>}
+                          {' · '}
+                          {row.status === 'completed'
+                            ? `اكتمل${row.reference_order_number ? ` بطلب ${row.reference_order_number}` : ''}`
+                            : 'لسه ما عملش طلب مكتمل'}
+                        </span>
+                      ))}
+                      {referrals.referred.length > 5 && (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          و{referrals.referred.length - 5} غيرهم
+                        </span>
+                      )}
+                    </>
+                  )}
+                </DataRow>
+              )}
               {detail.referred_by_user_id && (
                 <DataRow label="اترشّح بواسطة">
                   <a href={`/customers/${detail.referred_by_user_id}`} className="underline">

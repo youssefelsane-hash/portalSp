@@ -23,6 +23,7 @@ import { PaymentsService } from './payments.service';
 import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
 import { PayoutsService } from './payouts.service';
 import { SavedPaymentMethodsService } from './saved-payment-methods.service';
+import { LoyaltyRedemptionService } from './loyalty-redemption.service';
 import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
 import { PrepaidOrderSettlementListener } from './prepaid-order-settlement.listener';
@@ -105,6 +106,7 @@ import { AdminEarningsPolicyService } from './admin-earnings-policy.service';
     EarningsPolicyService,
     CrewEarningsService,
     WalletsService,
+    LoyaltyRedemptionService,
     PaymentsService,
     PayoutsService,
     SavedPaymentMethodsService,

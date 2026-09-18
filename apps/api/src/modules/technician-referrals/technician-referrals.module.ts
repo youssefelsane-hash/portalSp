@@ -8,6 +8,7 @@ import { Order } from '../orders/entities/order.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { PaymentsModule } from '../payments/payments.module';
 import { SettingsModule } from '../settings/settings.module';
+import { TechnicianReferralLinkController } from './technician-referral-link.controller';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminTechnicianReferralsController } from './admin-technician-referrals.controller';
@@ -37,7 +38,13 @@ import { TechnicianReferralsService } from './technician-referrals.service';
     NotificationsModule,
     TechniciansModule,
   ],
-  controllers: [TechnicianReferralsController, MeTechnicianReferralController, AdminTechnicianReferralsController],
+  controllers: [
+    TechnicianReferralsController,
+    MeTechnicianReferralController,
+    AdminTechnicianReferralsController,
+    // رابط QR عام (docs/08 §165) — مسجّل في `http-bootstrap.ts` ضمن المسارات برّه البادئة.
+    TechnicianReferralLinkController,
+  ],
   providers: [
     TechnicianReferralsService,
     TechnicianReferralRecoveryService,

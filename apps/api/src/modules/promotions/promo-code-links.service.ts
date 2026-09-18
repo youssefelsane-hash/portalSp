@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import { resolveSmartLinkTarget } from '../../common/marketing/smart-link-destination';
 import { SettingsService } from '../settings/settings.service';
 import { PromoCode } from './entities/promo-code.entity';
 import { PromoCodeLinkAttribution } from './entities/promo-code-link-attribution.entity';
@@ -82,14 +83,8 @@ export class PromoCodeLinksService {
 
   /** نفس الوجهة الذكية لمصادر التسويق؛ الروابط المطبوعة لا ترتبط بمتجر أو دومين ثابت. */
   async resolveDestination(platform: PromoLinkHitPlatform, code: string, shouldPrefillDiscount = true): Promise<string> {
-    const [android, ios, landing] = await Promise.all([
-      this.settings.getString('marketing.android_store_url', ''),
-      this.settings.getString('marketing.ios_store_url', ''),
-      this.settings.getString('marketing.web_landing_url', ''),
-    ]);
-    const fallback = landing.trim() || process.env.CUSTOMER_WEB_URL || process.env.WEB_APP_URL || '/';
-    const storeUrl = platform === 'android' ? android.trim() : platform === 'ios' ? ios.trim() : '';
-    const target = storeUrl || fallback;
+    // اختيار الوجهة (متجر/هبوط) مشترك مع كل رابط ذكي تاني — `resolveSmartLinkTarget` (docs/08 §165).
+    const target = await resolveSmartLinkTarget(this.settings, platform);
     return code ? appendPromoLinkCode(target, code, shouldPrefillDiscount) : target;
   }
 
