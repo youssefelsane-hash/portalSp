@@ -27,7 +27,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { PromoCodeQr } from '@/components/promo-code-qr';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { formatEgp } from '@/lib/format';
+import { formatDateTimeAr, formatEgp } from '@/lib/format';
 import { ErrorNotice } from '@/components/notice';
 
 const PER_PAGE = 20;
@@ -376,7 +376,9 @@ export default function PromotionsPage() {
                 <TableHead>الاسم</TableHead>
                 <TableHead>الخصم</TableHead>
                 <TableHead>القيود</TableHead>
-                <TableHead>الرحلة</TableHead>
+                {/* «الرحلة» كانت رقمين ملصوقين (`0 / 0`) بلا أي دلالة — الأدمن مش عارف
+                    الرقمين دول إيه أصلاً ولا إيه الفرق بينهم وبين «القيود» جنبهم. */}
+                <TableHead>مسح / تسجيل</TableHead>
                 <TableHead>النتيجة</TableHead>
                 <TableHead>الميزانية المتبقية</TableHead>
                 <TableHead>الحالة</TableHead>
@@ -388,14 +390,40 @@ export default function PromotionsPage() {
               {promoCodes.map((promo) => (
                 <TableRow key={promo.id}>
                   <TableCell dir="ltr">{promo.code}</TableCell>
-                  <TableCell>{promo.name_ar}</TableCell>
+                  {/* بيانات الشريك كانت متخزّنة ومرجّعة من الـAPI بس مش معروضة في أي مكان
+                      (docs/08 §164) — والأدمن محتاجها جنب الكود عشان يعرف الكود ده بتاع مين. */}
+                  <TableCell>
+                    <span className="block">{promo.name_ar}</span>
+                    {promo.payout_contact_name && (
+                      <span className="block text-xs text-muted-foreground">
+                        {promo.payout_contact_name}
+                        {promo.payout_contact_phone && (
+                          <span dir="ltr"> · {promo.payout_contact_phone}</span>
+                        )}
+                      </span>
+                    )}
+                    {promo.payout_per_completed_order_cents > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        مستحق الشريك: {formatEgp(promo.payout_per_completed_order_cents)} لكل أول طلب مكتمل
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>{promo.discount_enabled ? discountLabel(promo) : 'إسناد فقط'}</TableCell>
                   <TableCell>
                     {promo.used_count}
                     {promo.usage_limit_total ? ` / ${promo.usage_limit_total}` : ''}
                   </TableCell>
                   <TableCell className="tabular-nums">
-                    {promo.link_hit_count} / {promo.link_signup_count}
+                    {promo.link_hit_count === 0 && promo.link_signup_count === 0 ? (
+                      <span className="text-xs text-muted-foreground">لسه محدش مسح الكود</span>
+                    ) : (
+                      <>
+                        <span className="block">{promo.link_hit_count} مسح للرابط/QR</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {promo.link_signup_count} سجّل حساب من المسح ده
+                        </span>
+                      </>
+                    )}
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {promo.attributed_completed_order_count} مكتمل · {formatEgp(promo.attributed_gross_revenue_cents)}
@@ -447,12 +475,57 @@ export default function PromotionsPage() {
                 تعليم الكل مدفوعًا
               </Button>
             </div>
+            {/* الأعمدة دي كانت «الكود / الطلب / المبلغ» بـUUID خام ومن غير أي هوية للشريك —
+                يعني الأدمن مش عارف هيدفع لمين ولا على أنهي شغلانة. البيانات كانت على السيرفر،
+                والربط اتنقل له (docs/08 §164). */}
             <Table>
-              <TableHeader><TableRow><TableHead>الكود</TableHead><TableHead>الطلب</TableHead><TableHead>المبلغ</TableHead></TableRow></TableHeader>
-              <TableBody>{commissions.map((commission) => {
-                const promo = promoCodes?.find((item) => item.id === commission.promoCodeId);
-                return <TableRow key={commission.id}><TableCell dir="ltr">{promo?.code ?? commission.promoCodeId}</TableCell><TableCell dir="ltr">{commission.orderId}</TableCell><TableCell>{formatEgp(commission.amountCents)}</TableCell></TableRow>;
-              })}</TableBody>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>الشريك</TableHead>
+                  <TableHead>الكود</TableHead>
+                  <TableHead>الطلب</TableHead>
+                  <TableHead>تاريخ الاستحقاق</TableHead>
+                  <TableHead>المبلغ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {commissions.map((commission) => (
+                  <TableRow key={commission.id}>
+                    <TableCell>
+                      {commission.payout_contact_name ? (
+                        <>
+                          <span className="block">{commission.payout_contact_name}</span>
+                          {commission.payout_contact_phone && (
+                            <span className="block text-xs text-muted-foreground" dir="ltr">
+                              {commission.payout_contact_phone}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          مفيش بيانات شريك على الكود — ضيفها من تعديل الكود قبل الدفع
+                        </span>
+                      )}
+                      {commission.marketing_channel && (
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {MARKETING_CHANNEL_LABELS_AR[commission.marketing_channel] ?? commission.marketing_channel}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell dir="ltr">{commission.promo_code}</TableCell>
+                    <TableCell>
+                      <span dir="ltr" className="block">{commission.order_number ?? '—'}</span>
+                      {commission.customer_name && (
+                        <span className="block text-xs text-muted-foreground">{commission.customer_name}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDateTimeAr(commission.accrued_at) ?? '—'}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{formatEgp(commission.amount_cents)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
             </Table>
           </CardContent>
         </Card>

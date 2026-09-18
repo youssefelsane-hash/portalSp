@@ -9,6 +9,32 @@ import { PromoCodeMarketingCommission } from './entities/promo-code-marketing-co
 
 const USER_AGENT_SCAN_LIMIT = 512;
 
+/**
+ * صف مستحق شريك جاهز للعرض — الأعمدة بأسماء `snake_case` زي ما الاستعلام بيرجّعها، والواجهة
+ * بتقراها زي ما هي بلا تحويل (نفس نمط باقي استعلامات الأدمن الخام في المشروع).
+ */
+export interface PromoCodeCommissionRow {
+  id: string;
+  promo_code_id: string;
+  order_id: string;
+  customer_user_id: string;
+  amount_cents: number;
+  status: 'accrued' | 'paid' | 'cancelled';
+  accrued_at: Date;
+  paid_at: Date | null;
+  paid_by_user_id: string | null;
+  payment_note: string | null;
+  promo_code: string;
+  promo_name_ar: string;
+  payout_contact_name: string | null;
+  payout_contact_phone: string | null;
+  marketing_channel: string | null;
+  order_number: string | null;
+  order_total_cents: number | null;
+  order_closed_at: Date | null;
+  customer_name: string | null;
+}
+
 export interface PromoCodeLinkStats {
   hits: number;
   signups: number;
@@ -199,12 +225,31 @@ export class PromoCodeLinksService {
     await this.commissions.update({ orderId, status: 'accrued' }, { status: 'cancelled' });
   }
 
-  listCommissions(status?: string): Promise<PromoCodeMarketingCommission[]> {
-    return this.commissions.find({
-      where: status ? { status: status as PromoCodeMarketingCommission['status'] } : {},
-      order: { accruedAt: 'DESC' },
-      take: 500,
-    });
+  /**
+   * مستحقات الشركاء **بهوية الشريك ورقم الطلب**، مش معرّفات خام (بلاغ مالك 2026-09-18:
+   * «تفاصيل الـinfluencer رقمه والحاجات دي كلها مش ظاهرة في التفاصيل»).
+   *
+   * الأدمن كان بيشوف `order_id` كـUUID، واسم الشريك كان بيتجاب في المتصفح من قايمة الأكواد
+   * **المقسّمة لصفحات** — فأي مستحق لكود بره الصفحة الحالية كان بيتعرض كـUUID تاني. البيانات
+   * كانت موجودة على السيرفر طول الوقت، فالمكان الصح للربط هنا مش في الواجهة.
+   */
+  listCommissions(status?: string): Promise<PromoCodeCommissionRow[]> {
+    return this.commissions.query(
+      `SELECT c.id, c.promo_code_id, c.order_id, c.customer_user_id, c.amount_cents, c.status,
+              c.accrued_at, c.paid_at, c.paid_by_user_id, c.payment_note,
+              p.code AS promo_code, p.name_ar AS promo_name_ar,
+              p.payout_contact_name, p.payout_contact_phone, p.marketing_channel,
+              o.order_number, o.total_amount_cents AS order_total_cents, o.closed_at AS order_closed_at,
+              cu.full_name AS customer_name
+         FROM promo_code_marketing_commissions c
+         JOIN promo_codes p ON p.id = c.promo_code_id
+         LEFT JOIN orders o ON o.id = c.order_id
+         LEFT JOIN users cu ON cu.id = c.customer_user_id
+        WHERE ($1::text IS NULL OR c.status = $1)
+        ORDER BY c.accrued_at DESC
+        LIMIT 500`,
+      [status ?? null],
+    );
   }
 
   async markCommissionsPaid(ids: string[], adminUserId: string, note?: string): Promise<number> {

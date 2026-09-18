@@ -67,15 +67,33 @@ export interface CreatePromoCodeBody {
   payout_contact_phone?: string;
 }
 
+/**
+ * مستحق شريك كود خصم — **بهوية الشريك ورقم الطلب** (docs/08 §164).
+ *
+ * الشكل القديم كان بيرجّع الكيان الخام بـ`camelCase` ومعرّفات بس، فالأدمن كان بيشوف UUID
+ * الطلب واسم الشريك مش ظاهر خالص. الأسماء دلوقتي `snake_case` لأن الرد بقى استعلام مباشر
+ * زي باقي ردود الأدمن الخام.
+ */
 export interface PromoMarketingCommissionDto {
   id: string;
-  promoCodeId: string;
-  orderId: string;
-  customerUserId: string;
-  amountCents: number;
+  promo_code_id: string;
+  order_id: string;
+  customer_user_id: string;
+  amount_cents: number;
   status: 'accrued' | 'paid' | 'cancelled';
-  accruedAt: string;
-  paidAt: string | null;
-  paidByUserId: string | null;
-  paymentNote: string | null;
+  accrued_at: string;
+  paid_at: string | null;
+  paid_by_user_id: string | null;
+  payment_note: string | null;
+  /** الكود نفسه — بديل عن البحث في قايمة الأكواد المقسّمة لصفحات في المتصفح. */
+  promo_code: string;
+  promo_name_ar: string;
+  /** بيانات الشريك/المؤثّر اللي هياخد الفلوس — كانت مخزّنة ومرجّعة لكن غير معروضة. */
+  payout_contact_name: string | null;
+  payout_contact_phone: string | null;
+  marketing_channel: MarketingChannel | null;
+  order_number: string | null;
+  order_total_cents: number | null;
+  order_closed_at: string | null;
+  customer_name: string | null;
 }
