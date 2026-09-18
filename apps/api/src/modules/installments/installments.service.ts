@@ -21,6 +21,7 @@ import { PaymentPoliciesService } from '../payment-policies/payment-policies.ser
 import {
   assertBreakdownInvariant,
   computeInstallmentBreakdown,
+  financeableOrderAmountCents,
   isAmountWithinPlanLimits,
 } from './installment-calculator';
 import { InstallmentPlanDocumentRequirement } from './entities/installment-plan-document-requirement.entity';
@@ -319,7 +320,7 @@ export class InstallmentsService {
       };
     }
 
-    const priceCents = order.totalAmountCents - order.discountAmountCents;
+    const priceCents = financeableOrderAmountCents(order);
     if (priceCents <= 0) {
       // نفس تفرقة §64.ب: «لسه ما اتحددش» مش «صفر».
       return { eligible: false, reason_code: 'price_undetermined', reason_ar: 'سعر الطلب لسه ما اتحددش', plans: [] };
@@ -403,7 +404,7 @@ export class InstallmentsService {
       ) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب ده اتحصّل بالفعل — مينفعش يتقسّط', HttpStatus.BAD_REQUEST);
       }
-      const priceCents = order.totalAmountCents - order.discountAmountCents;
+      const priceCents = financeableOrderAmountCents(order);
       if (priceCents <= 0) {
         throw new ApiException(ErrorCode.VAL_001, 'مفيش مبلغ صالح للتقسيط على الطلب ده', HttpStatus.BAD_REQUEST);
       }

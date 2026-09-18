@@ -146,6 +146,10 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       await q(`DELETE FROM technician_order_cancellations WHERE order_id = $1`, [ids.order]);
       await purgeAuditLogs(dataSource, `DELETE FROM audit_logs WHERE entity_id = $1`, [ids.order]);
       await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
+      // الـlistener بيفتح محادثة للطلب بشكل غير متزامن، فالصف ممكن يوصل **بعد** التنظيف ده
+      // ويقفل حذف الطلب على FK — كان بيطلّع فشل متقطّع في الـsuite كلها بلا أي اختبار فاشل.
+      await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = $1)`, [ids.order]);
+      await q(`DELETE FROM chat_threads WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
       await q(`DELETE FROM cancellation_reasons WHERE id = $1`, [ids.cancellationReason]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);

@@ -17,10 +17,14 @@ const { LiveHarness } = require('./lib/live-harness');
 const ok = (pass, label, extra = '') => console.log(`${pass ? '✅' : '❌'} ${label}${extra ? `\n     ${extra}` : ''}`);
 const egp = (c) => `${(c / 100).toFixed(2)} ج.م`;
 
+/** إعدادات InstaPay اللي التدقيق بيضبطها مؤقتًا ويرجّعها بعد كده. */
+const INSTAPAY_KEYS = ['payments.instapay.ipa_address', 'payments.instapay.recipient_name'];
+
 async function main() {
   const h = new LiveHarness('trl');
   await h.connect();
   let failures = 0;
+  const originalSettings = new Map();
   try {
     await h.seedCatalog({ priceCents: 100_000, durationMinutes: 180 });
     const serviceId = h.catalog.service.id;
@@ -158,6 +162,66 @@ async function main() {
       if (newZone?.amount_cents !== 90_000) failures += 1;
     }
 
+    /*
+      ═══ حافز InstaPay: خصم بعد الحجز، وممنوع يتحسب مرتين (بلاغ مالك 2026-09-17) ═══
+
+      الأدمن كان بيشوف «غير مفسّر 30 ج» على طلب عليه حافز. السبب إن
+      `instapay_discount_cents` **جزء من** `discount_amount_cents`، فطرح العمود كله كخصم حجز
+      + إظهار الحافز تحت = تحصيل مزدوج. هنا بنمشي المسار الحقيقي (إعداد الحافز + نداء
+      `pay-with-instapay` الحقيقي) مش بنكتب الأعمدة بالإيد.
+    */
+    await h.setSetting('payments.instapay_discount_egp', 30);
+    // InstaPay مابيبقاش «مُهيّأ» غير لما العنوان واسم المستلم موجودين (`provider.isConfigured`)،
+    // وإلا النداء بيرجع 503 قبل ما يوصل للحافز أصلاً. القيمتين دول نص تعليمات للعميل مش سر.
+    // بناخد نسخة من القيم الأصلية ونرجّعها في `finally` — التدقيق مايسيبش بيئة متغيّرة وراه.
+    for (const key of INSTAPAY_KEYS) {
+      const [row] = await h.q(`SELECT value FROM settings WHERE key = $1`, [key]);
+      if (row) originalSettings.set(key, row.value);
+    }
+    await h.setSetting('payments.instapay.ipa_address', 'trail.audit@instapay');
+    await h.setSetting('payments.instapay.recipient_name', 'تدقيق مسار السعر');
+    const beforeInstapay = Number(
+      (await h.q(`SELECT total_amount_cents FROM orders WHERE id = $1`, [orderId]))[0].total_amount_cents,
+    );
+    const pay = await h.api(`/orders/${orderId}/pay-with-instapay`, {
+      method: 'POST',
+      token: customer.token,
+      headers: { 'idempotency-key': `trail-instapay-${orderId}` },
+    });
+    const [afterRow] = await h.q(
+      `SELECT total_amount_cents, discount_amount_cents, instapay_discount_cents FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    const granted = Number(afterRow.instapay_discount_cents);
+    ok(
+      granted === 3_000 && Number(afterRow.total_amount_cents) === beforeInstapay - 3_000,
+      'الحافز اتطبّق فعلاً من المسار الحقيقي (مش كتابة أعمدة بالإيد)',
+      `status=${pay.status} حافز=${egp(granted)} إجمالي=${egp(beforeInstapay)}→${egp(Number(afterRow.total_amount_cents))}`,
+    );
+    if (!(granted === 3_000 && Number(afterRow.total_amount_cents) === beforeInstapay - 3_000)) failures += 1;
+
+    const withInstapay = await readTrail();
+    const instapayEntry = withInstapay.trail.post_booking.find((c) => c.key === 'instapay_discount');
+    const bookingDiscountStage = withInstapay.trail.stages.find((s) => s.key === 'discount');
+    const explainedOnce =
+      withInstapay.trail.reconciles === true &&
+      withInstapay.trail.unexplained_cents === 0 &&
+      instapayEntry?.amount_cents === -3_000 &&
+      bookingDiscountStage?.amount_cents === 0;
+    ok(
+      explainedOnce,
+      '**الحافز مفسَّر مرة واحدة بس**: خصم الحجز صفر، الحافز تحت بقيمته، وصفر غير مفسَّر',
+      `خصم حجز=${egp(bookingDiscountStage?.amount_cents ?? 0)} · حافز=${egp(instapayEntry?.amount_cents ?? 0)} · غير مفسَّر=${egp(withInstapay.trail.unexplained_cents)}`,
+    );
+    if (!explainedOnce) failures += 1;
+
+    ok(
+      withInstapay.trail.total_at_booking_cents === beforeInstapay,
+      'وإجمالي وقت الحجز فضل هو الإجمالي قبل الحافز (الحافز مش خصم حجز)',
+      `${egp(withInstapay.trail.total_at_booking_cents)} = ${egp(beforeInstapay)}`,
+    );
+    if (withInstapay.trail.total_at_booking_cents !== beforeInstapay) failures += 1;
+
     // ═══ توزيع المستحقات مش في المسار ═══
     const keys = [...first.trail.stages.map((s) => s.key), ...first.trail.post_booking.map((c) => c.key)];
     const noEarnings = !keys.some((k) => /earning|assistant|commission|pool/.test(k));
@@ -172,6 +236,7 @@ async function main() {
       ['TRAIL %'],
     );
     await h.deleteOrders(`problem_description LIKE $1`, ['TRAIL %']);
+    for (const [key, value] of originalSettings) await h.setSetting(key, value);
     await h.cleanup();
     await h.close();
   }

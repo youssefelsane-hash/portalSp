@@ -26,11 +26,14 @@ export class TechnicianCompany {
    * **سياسة تجنيد الشركة** (ADR-0086، طلب مالك §141 بند ٨): هل الشركة تقدر تجنّد من مجمع
    * المنصة كله لطلباتها، ولا مقفولة على طاقمها؟
    *
-   * `false` افتراضيًا عن قصد — «شركة» بمعناها عند المالك مقفولة لحد ما يفتحها هو صراحةً.
+   * **`true` افتراضيًا** (migration 0353، docs/08 §163): «مش عايزين تكون الشركة مغلقة على
+   * نفسها» — طلب مالك صريح بيعكس الافتراضي الأصلي في ADR-0086. القفل بقى **استثناء** بقرار
+   * أدمن مسجّل في `audit_logs`، مش وضع تلقائي بيسري بالسكوت.
+   *
    * والقيد بيسري بس على الطلب اللي `orders.assigned_company_id` بتاعته = الشركة دي: نفس الفني
    * على طلب **خاص بيه** بيتعامل كمستقل تمامًا (بند ٩، `resolveAssignedCompanyId`).
    */
-  @Column({ name: 'allows_external_recruitment', type: 'boolean', default: false })
+  @Column({ name: 'allows_external_recruitment', type: 'boolean', default: true })
   allowsExternalRecruitment: boolean;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })

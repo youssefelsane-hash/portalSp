@@ -2488,12 +2488,22 @@ export default function OrderDetailPage() {
                 <div className="rounded-xl border border-border/70 p-3">
                   <p className="mb-2 text-sm font-semibold">تغييرات بعد الحجز</p>
                   <div className="flex flex-col gap-2">
-                    {priceTrail.post_booking.map((change) => (
-                      <div key={change.key} className="rounded-lg border bg-muted/20 px-3 py-2">
+                    {/* المفتاح فيه الترتيب: طلب عليه سلسلة عروض معتمدة بيرجّع أكتر من صف
+                        بنفس `key` — واحد منهم كان هيختفي من الشبكة. */}
+                    {priceTrail.post_booking.map((change, index) => (
+                      <div key={`${change.key}-${index}`} className="rounded-lg border bg-muted/20 px-3 py-2">
                         <div className="flex flex-wrap items-baseline justify-between gap-2">
                           <span className="text-sm font-medium">{change.label_ar}</span>
                           <span className="text-sm font-semibold tabular-nums">{formatEgp(change.amount_cents)}</span>
                         </div>
+                        {change.before_cents !== null && change.after_cents !== null && (
+                          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+                            سعر الشغل: {formatEgp(change.before_cents)} ← {formatEgp(change.after_cents)}
+                          </p>
+                        )}
+                        {change.at && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTimeAr(change.at) ?? '—'}</p>
+                        )}
                         <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{change.source_ar}</p>
                       </div>
                     ))}
@@ -2501,9 +2511,23 @@ export default function OrderDetailPage() {
                 </div>
               )}
 
-              {!priceTrail.reconciles && priceTrail.notes_ar.length > 0 && (
-                <Notice tone="warning" title="فيه فرق محتاج تفسير" className="mb-0">
-                  {priceTrail.notes_ar[priceTrail.notes_ar.length - 1]}
+              {/* الملاحظات بتتعرض كلها: ملاحظة «بيانات غير متوقعة» ممكن تطلع على طلب مسار
+                  حسابه مقفول — إخفاؤها لأن `reconciles = true` كان بيدفن التحذير الأهم. */}
+              {priceTrail.notes_ar.length > 0 && (
+                <Notice
+                  tone="warning"
+                  title={priceTrail.reconciles ? 'ملاحظات على الشرح' : 'فيه فرق محتاج تفسير'}
+                  className="mb-0"
+                >
+                  {priceTrail.notes_ar.length === 1 ? (
+                    priceTrail.notes_ar[0]
+                  ) : (
+                    <ul className="list-inside list-disc space-y-1">
+                      {priceTrail.notes_ar.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
                 </Notice>
               )}
             </CardContent>

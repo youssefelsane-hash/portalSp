@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { TechnicianEarningsService } from './technician-earnings.service';
 import { insertV2EarningShare } from './order-earning-share.testing';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 // اختبار حي ضد Postgres حقيقي — كشف مستحقات الفني الشهري (ADR-0038، docs/08 §61).
 //
@@ -79,8 +80,7 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     await dataSource.initialize();
     service = new TechnicianEarningsService(dataSource);
 
-    const [country] = await q(`INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,'+009','EGP') RETURNING id`,
-      [`دولة كشف ${runId}`, `Stmt Country ${runId}`, runId.slice(-2).toUpperCase()]);
+    const country = await insertTestCountry(q, { nameAr: `دولة كشف ${runId}`, nameEn: `Stmt Country ${runId}`, phonePrefix: '+009' });
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
       [ids.country, `مدينة كشف ${runId}`, `Stmt City ${runId}`, `stmt-city-${runId}`]);

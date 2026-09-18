@@ -101,3 +101,28 @@
 قبل ما الواجهة تتحدّث). صفر تعديل frontend على `apps/customer-app` أو `apps/customer-web` — القسم
 في الاتنين أصلاً بيختفي بالكامل لأي `reason_code` غير `application_pending`/`application_approved`
 (نفس منطق §64.ز). اختبارين جداد في `installments-review.spec.ts` بيتأكدوا من السلوك حي.
+
+## بَقّة اتصلحت (2026-09-17، docs/08 §162) — الخصم كان بيتطرح مرتين من أصل التقسيط
+
+`priceCents` كان بيتحسب `order.totalAmountCents - order.discountAmountCents` في المكانين
+(فحص الأهلية + إنشاء التقديم). و`total_amount_cents` **مخصوم منه الخصم أصلاً**:
+`order-creation.service.ts` بتعمل `order.totalAmountCents -= discountCents` لكود الخصم وخصم
+العمارة، و`applyInstaPayDiscount()` بتعمل نفس الحاجة للحافز.
+
+يعني الرقم ده مكانش لا الإجمالي قبل الخصم ولا بعده — رقم تالت مالوش معنى:
+
+| | طلب 1,034.50 عليه خصم 30 |
+|---|---|
+| المديونية الحقيقية | 1,004.50 |
+| اللي كان بيتمّول | **974.50** |
+| الفرق | 30 بتفضل مستحقة **كاش في الزيارة** |
+
+والفرق ده مكانش بيضيع من المنصة — كان بيقع على العميل:
+`getCollectionBreakdownForOrder()` بتحسب
+`amountDueToTechnician = total - directPaid - min(uncovered, service_price_cents)`، فالفني
+بيطلب الفرق كاش من عميل فاكر إن طلبه متقسّط بالكامل.
+
+**الإصلاح**: `financeableOrderAmountCents()` في `installment-calculator.ts` — دالة مسمّاة
+بمصدر واحد للأهلية وللمبلغ الممول مع بعض، عشان مايفترقوش تاني. خطط اتعمدت قبل الإصلاح بتفضل
+بقيمتها المتعاقد عليها (لقطة مالية)، والإصلاح بيسري على التقديمات الجديدة.
+`scripts/audit-money-paths.js` فيه ثابت بيراقب ده على كل طلب.

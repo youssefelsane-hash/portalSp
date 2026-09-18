@@ -41,6 +41,24 @@ export interface ComputedInstallmentBreakdown {
 // التقريب المطلوب "أقرب قرش" للمبالغ الموجبة — Math.round محددة وثابتة هنا.
 const toCents = (value: number): number => Math.round(value);
 
+/**
+ * المبلغ القابل للتقسيط = **اللي العميل مدين بيه فعلاً** = `orders.total_amount_cents`.
+ *
+ * `total_amount_cents` **مخصوم منه الخصم أصلاً**: `order-creation.service.ts` بتعمل
+ * `order.totalAmountCents -= discountCents` لكود الخصم وخصم العمارة، و`applyInstaPayDiscount()`
+ * بتعمل نفس الحاجة لحافز InstaPay. فالمعادلة القديمة `total_amount_cents - discount_amount_cents`
+ * كانت **بتطرح الخصم مرتين** (ولا هي الإجمالي قبل الخصم ولا بعده — رقم تالت مالوش معنى):
+ * طلب 1,034.50 عليه خصم 30 كان بيتمّول 974.50 بدل 1,004.50، والـ30 الناقصة كانت تفضل مستحقة
+ * كاش وقت الزيارة (`getCollectionBreakdownForOrder()`:
+ * `amountDueToTechnician = total - directPaid - min(uncovered, service_price_cents)`) —
+ * يعني عميل فاكر طلبه متقسّط بالكامل يتطلب منه فرق في الزيارة.
+ *
+ * دالة مسمّاة عشان فحص الأهلية والمبلغ الممول مايفترقوش تاني (كان نفس التعبير مكرر في مكانين).
+ */
+export function financeableOrderAmountCents(order: { totalAmountCents: number }): number {
+  return order.totalAmountCents;
+}
+
 export function computeInstallmentBreakdown(
   servicePriceCents: number,
   plan: InstallmentPlanFinancials,

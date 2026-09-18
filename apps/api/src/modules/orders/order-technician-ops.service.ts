@@ -579,9 +579,15 @@ export class OrderTechnicianOpsService {
     order.estimatedPriceCents = snapshot.base_price_cents;
     order.inspectionFeeCents = snapshot.inspection_fee_cents;
     order.surgeAmountCents = snapshot.emergency_surcharge_cents;
-    order.discountAmountCents = snapshot.discount_cents;
+    // حافز InstaPay اللي العميل خده بالفعل لازم يعدّي التحديث ده. لقطة التذكرة بتحسب خصم
+    // الحجز (كود/عمارة) بس، والإسناد المباشر منها كان بيدوس على الحافز: `discount_amount_cents`
+    // بيفقده (وهو أصلاً جزء منه) و`total_amount_cents` بيرجع أعلى بقيمته — يعني عميل دفع
+    // بالسعر المخفّض يتطلب منه الفرق تاني بعد استبدال الفني. الحافز قرار وسيلة دفع، مش
+    // خاصية للفني، فمالوش علاقة بتغيير المنفّذ.
+    const retainedInstapayCents = order.instapayDiscountCents ?? 0;
+    order.discountAmountCents = snapshot.discount_cents + retainedInstapayCents;
     order.warrantyPriceCents = snapshot.warranty_price_cents;
-    order.totalAmountCents = locked.finalPriceCents;
+    order.totalAmountCents = locked.finalPriceCents - retainedInstapayCents;
     if (snapshot.duration_minutes !== null) order.durationMinutes = snapshot.duration_minutes;
     if (snapshot.estimated_duration_days !== null) order.estimatedDurationDays = snapshot.estimated_duration_days;
     if (snapshot.required_technicians !== null) order.requiredTechnicians = snapshot.required_technicians;

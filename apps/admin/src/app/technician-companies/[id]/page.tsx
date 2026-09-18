@@ -75,6 +75,38 @@ export default function TechnicianCompanyDetailPage() {
     }
   }
 
+  /*
+    سياسة تجنيد الشركة (ADR-0086 + تعديل ١، docs/08 §163).
+
+    الـendpoint موجود من ADR-0086 ومعاه `audit_logs`، بس **مكانش ليه أي واجهة** — فالمفتاح
+    فضل على قيمته الافتراضية للأبد والميزة مقفولة عمليًا. ده الزرار الناقص، مش مسار جديد.
+  */
+  const [recruitmentNote, setRecruitmentNote] = useState('');
+  const [isSavingRecruitment, setIsSavingRecruitment] = useState(false);
+
+  async function handleSetRecruitmentPolicy(allowsExternal: boolean) {
+    setIsSavingRecruitment(true);
+    setError(null);
+    try {
+      const company = await authedFetch<CompanyResponseDto>(
+        `/admin/technician-companies/${id}/recruitment-policy`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            allows_external_recruitment: allowsExternal,
+            note: recruitmentNote.trim() || undefined,
+          }),
+        },
+      );
+      setDetail((prev) => (prev ? { ...prev, company } : prev));
+      setRecruitmentNote('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحديث سياسة التجنيد');
+    } finally {
+      setIsSavingRecruitment(false);
+    }
+  }
+
   // ADR-0042 — تغيير معامل السعر. محمي بصلاحية orders.adjust_price في الباك-إند.
   async function handleSaveMultiplier() {
     const parsed = Number(multiplierInput);
@@ -233,6 +265,55 @@ export default function TechnicianCompanyDetailPage() {
                 ) : (
                   <Button size="sm" disabled={isSavingBadge} onClick={() => handleSetTrustBadge(true)}>
                     امنح العلامة
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* سياسة تجنيد الطاقم (ADR-0086 + تعديل ١، docs/08 §163) — «مش عايزين تكون الشركة
+              مغلقة على نفسها». الافتراضي مفتوح، والقفل استثناء بيتسجّل باسم الموظف. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">تجنيد الطاقم لطلبات الشركة</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                {detail.company.allows_external_recruitment ? (
+                  <Badge variant="secondary">مفتوحة — تقدر تدعو من المنصة كلها</Badge>
+                ) : (
+                  <Badge variant="outline">مقفولة على طاقمها بس</Badge>
+                )}
+              </div>
+              <p className="text-muted-foreground">
+                لما طلب الشركة يحتاج فنيين أو مساعدين زيادة، القائد يقدر يدعو مين؟ «مفتوحة» معناها
+                أي فني/مساعد مؤهّل على المنصة — وأعضاء الشركة بيفضلوا يظهروا فوق القايمة وعليهم بادج.
+                «مقفولة» بتحصر الدعوة في طاقم الشركة بس. القيد ده بيسري على طلبات الشركة بس؛ الفني
+                اللي جاي له طلب خاص بيه بيتعامل كمستقل مهما كانت السياسة.
+              </p>
+              <Input
+                value={recruitmentNote}
+                onChange={(e) => setRecruitmentNote(e.target.value)}
+                placeholder="سبب التغيير (اختياري، بيتسجّل في سجل النشاط)"
+                maxLength={500}
+              />
+              <div>
+                {detail.company.allows_external_recruitment ? (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={isSavingRecruitment}
+                    onClick={() => handleSetRecruitmentPolicy(false)}
+                  >
+                    اقفلها على طاقمها
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled={isSavingRecruitment}
+                    onClick={() => handleSetRecruitmentPolicy(true)}
+                  >
+                    افتح التجنيد من المنصة
                   </Button>
                 )}
               </div>

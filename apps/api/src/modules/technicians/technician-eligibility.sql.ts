@@ -861,3 +861,35 @@ export function technicianKindCondition(opts: {
 }): string {
   return `${opts.technicianAlias}.technician_kind = '${opts.kind}'`;
 }
+
+/**
+ * **نطاق تجنيد طاقم طلب الشركة** (ADR-0086 + تعديل ١، docs/08 §163).
+ *
+ * الشركة تقدر تدعو فنيين/مساعدين من مجمع المنصة كله لطلباتها، إلا لو الأدمن قفلها صراحةً.
+ * الافتراضي `true` من migration 0353 — «مش عايزين تكون الشركة مغلقة على نفسها» (طلب مالك).
+ *
+ * تلات حالات، وكل واحدة مقصودة:
+ *
+ * 1. `assigned_company_id IS NULL` ⇒ **الطلب مش طلب شركة أصلاً** فمفيش أي قيد (بند ٩ في
+ *    ADR-0086: الفني اللي في شركة ولما ييجي له طلب خاص بيه بيتعامل كمستقل تمامًا).
+ * 2. الشركة مفتوحة ⇒ أي مرشّح مؤهّل يعدّي، من جوّه الشركة أو من برّه.
+ * 3. الشركة مقفولة ⇒ أعضاء الشركة بس.
+ *
+ * **مستخرجة كـfragment مسمّى عشان تتختبر على Postgres حقيقي بنفس النص اللي بيشتغل في
+ * `OrderTeamService.listRecruitCandidates()`** — نسخة تانية في الاختبار كانت هتفضل خضرا وهي
+ * بتمتحن حاجة تانية.
+ */
+export function companyRecruitmentScopeCondition(opts: {
+  /** عمود شركة المرشّح (`tp.company_id`). */
+  candidateCompanyIdExpr: string;
+  /** عمود شركة الطلب (`o.assigned_company_id`). */
+  orderCompanyIdExpr: string;
+  /** عمود سياسة الشركة صاحبة الطلب (`order_company.allows_external_recruitment`). */
+  allowsExternalExpr: string;
+}): string {
+  return `(
+          ${opts.orderCompanyIdExpr} IS NULL
+          OR ${opts.allowsExternalExpr} IS TRUE
+          OR ${opts.candidateCompanyIdExpr} = ${opts.orderCompanyIdExpr}
+        )`;
+}

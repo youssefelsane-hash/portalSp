@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 /**
  * سياسة رؤية طلبات الشركة (طلب مالك صريح، 2026-09-08):
@@ -71,11 +72,7 @@ describe('رؤية طلبات الشركة حسب الدور — حي', () => {
       entities: [],
     }).initialize();
 
-    const [country] = await q<{ id: string }[]>(
-      `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-       VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-      [`دولة CV ${runId}`, `CV Country ${runId}`, runId.slice(-2).toUpperCase()],
-    );
+    const country = await insertTestCountry(q, { nameAr: `دولة CV ${runId}`, nameEn: `CV Country ${runId}` });
     ids.country = country.id;
     const [city] = await q<{ id: string }[]>(
       `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,

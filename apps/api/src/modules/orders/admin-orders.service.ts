@@ -23,6 +23,7 @@ import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { OrderPriceTrailExtras } from './order-price-trail';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
 import {
@@ -459,7 +460,7 @@ export class AdminOrdersService {
    *
    * الإضافات مفصولة عن بنود الشغل الإضافي عن قصد: الأولى سعر حجز، والتانية زيادة بعد الحجز.
    */
-  async priceTrailExtras(orderId: string): Promise<{ addonsTotalCents: number; additionalItemsTotalCents: number }> {
+  async priceTrailExtras(orderId: string): Promise<OrderPriceTrailExtras> {
     const rows = await this.dataSource.query<{ kind: string; total: string }[]>(
       `SELECT CASE WHEN item_type = 'addon' THEN 'addon' ELSE 'additional' END AS kind,
               COALESCE(SUM(total_price_cents), 0)::bigint AS total
@@ -469,9 +470,23 @@ export class AdminOrdersService {
       [orderId],
     );
     const byKind = new Map(rows.map((r) => [r.kind, Number(r.total)]));
+    // العروض المعتمدة بترتيب قرار العميل — الترتيب جزء من الحساب (كل عرض مرجعه اللي قبله)،
+    // فـ`NULLS LAST` هنا مقصود: عرض بلا وقت قرار (بيانات قديمة) بيتحسب آخر واحد.
+    const quotes = await this.dataSource.query<{ amount_cents: number; source: string; customer_decided_at: Date | null }[]>(
+      `SELECT amount_cents, source, customer_decided_at
+         FROM order_quotes
+        WHERE order_id = $1 AND status = 'approved'
+        ORDER BY customer_decided_at ASC NULLS LAST, created_at ASC`,
+      [orderId],
+    );
     return {
       addonsTotalCents: byKind.get('addon') ?? 0,
       additionalItemsTotalCents: byKind.get('additional') ?? 0,
+      approvedQuotes: quotes.map((q) => ({
+        amountCents: Number(q.amount_cents),
+        source: q.source,
+        decidedAt: q.customer_decided_at,
+      })),
     };
   }
 

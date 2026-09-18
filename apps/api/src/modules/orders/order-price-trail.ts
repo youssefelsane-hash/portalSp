@@ -48,10 +48,27 @@ export interface PriceTrailStage {
 }
 
 export interface PostBookingPriceChange {
-  key: 'level_premium' | 'additional_items' | 'instapay_discount' | 'assessment_fee_credit';
+  key: 'approved_quote' | 'level_premium' | 'additional_items' | 'instapay_discount' | 'assessment_fee_credit';
   label_ar: string;
+  /** أثر التغيير ده على سعر العميل (سالب = نزّله). */
   amount_cents: number;
   source_ar: string;
+  /** وقت التغيير لو متسجّل على الصف المصدر، `null` لو مش متسجّل. */
+  at: string | null;
+  /**
+   * سعر الشغل المرجعي قبل/بعد — **للعروض بس**، لأن العرض المعتمد **بيستبدل** سعر الشغل مش
+   * بيضيف عليه. باقي التغييرات إضافة/خصم على الإجمالي فمالهاش «قبل/بعد» بمعنى مختلف عن المبلغ.
+   */
+  before_cents: number | null;
+  after_cents: number | null;
+}
+
+/** عرض سعر معتمد — بالترتيب الزمني لقرار العميل. */
+export interface ApprovedQuoteRef {
+  amountCents: number;
+  /** مصدر العرض زي ما هو متسجّل (`technician_onsite`/`admin_remote`/`technician_diagnosis`). */
+  source: string;
+  decidedAt: Date | string | null;
 }
 
 export interface OrderPriceTrail {
@@ -81,6 +98,15 @@ const TIER_LABELS_AR: Record<string, string> = {
   expert: 'خبير',
 };
 
+const QUOTE_SOURCE_AR: Record<string, string> = {
+  technician_onsite: 'معاينة على الأرض',
+  admin_remote: 'تقييم إداري بالصور',
+  technician_diagnosis: 'تشخيص الفني وقت التنفيذ',
+};
+
+const isoOrNull = (value: Date | string | null): string | null =>
+  value === null ? null : value instanceof Date ? value.toISOString() : value;
+
 const MULTIPLIER_SOURCE_AR: Record<string, string> = {
   pricing_tier: 'فئة مهارة التسعير',
   company: 'معامل سعر الشركة',
@@ -99,6 +125,39 @@ export interface OrderPriceTrailExtras {
   addonsTotalCents: number;
   /** مجموع بنود الشغل الإضافي المعتمدة بعد الحجز (`spare_part`/`extra_labor` وخلافه). */
   additionalItemsTotalCents: number;
+  /**
+   * العروض المعتمدة على الطلب مرتّبة بوقت قرار العميل.
+   *
+   * لازم تيجي من برّه: العرض بيغيّر سعر الشغل بعد الحجز (`inspection_quote` /
+   * `diagnosis_revision` في `OrderFinancialFinalizationService`)، وبدونه كان أثره بيظهر
+   * للأدمن كـ«فرق غير مفسَّر» رغم إنه أكبر بند في مسار «التقييم ثم عرض السعر».
+   */
+  approvedQuotes: ApprovedQuoteRef[];
+}
+
+/**
+ * مصدر خصم الحجز بالاسم — الأدمن لازم يعرف الرقم جاي منين، مش «خصم» ومفيش تفسير.
+ *
+ * بنقرا `promo_code_id`/`building_id` من صف الطلب نفسه (لقطة تاريخية)، مش من جداول الأكواد —
+ * فحتى لو الكود اتشال أو العمارة اتغيّرت نسبتها بعدين، السطر ده يفضل صادق.
+ */
+function bookingDiscountSource(order: Order): string {
+  const sources: string[] = [];
+  if (order.promoCodeId) sources.push('كود خصم');
+  if (order.buildingId) sources.push('خصم عمارة');
+  if (sources.length === 0) {
+    return 'خصم مسجّل على الطلب بلا كود خصم ولا عمارة مربوطين — يحتاج مراجعة في سجل النشاط.';
+  }
+  return `${sources.join(' + ')} — بيتخصم من الإجمالي وقت الحجز. حافز InstaPay مش هنا (مكانه تحت في تغييرات بعد الحجز).`;
+}
+
+function bookingDiscountNone(order: Order, instapayCents: number): string {
+  if (instapayCents > 0) {
+    return 'مفيش خصم وقت الحجز. الخصم اللي على الطلب ده كله حافز InstaPay بعد الحجز (تحت).';
+  }
+  return order.promoCodeId || order.buildingId
+    ? 'فيه كود/عمارة مربوطين بالطلب بس قيمة الخصم طلعت صفر.'
+    : 'مفيش كود خصم ولا خصم عمارة على الطلب ده.';
 }
 
 /**
@@ -208,18 +267,67 @@ export function buildOrderPriceTrail(order: Order, extras: OrderPriceTrailExtras
     amount_cents: order.warrantyPriceCents ?? 0,
     detail_ar: 'خطة ضمان اختيارية — السعر لقطة من الخطة وقت الحجز.',
   });
+  /*
+    خصم **وقت الحجز** بس = `discount_amount_cents` ناقص حافز InstaPay.
+
+    `instapay_discount_cents` **جزء من** `discount_amount_cents` مش زيادة عليه (شوف تعليق العمود
+    في `Order`): `applyInstaPayDiscount()` بتعمل `discountAmountCents += discountCents`. فطرح
+    العمود كله هنا كان بيحصّل الحافز مرتين — مرة كخصم حجز ومرة في «تغييرات بعد الحجز» — والفرق
+    كان يظهر للأدمن كـ«غير مفسّر» (بلاغ المالك 2026-09-17). والحافز أصلاً مش خصم حجز: هو بيحصل
+    وقت تأكيد التحويل بعد إنشاء الطلب، فمكانه الصح تحت.
+
+    الطرح مقصوص عند صفر: الحالة الوحيدة اللي كانت بتخليه سالب (تحديث السعر من تذكرة معاينة بديلة
+    وهو بيدوس على الخصم) اتقفلت في `consumeReplacementPreview()`، وبنسجّل ملاحظة لو حصلت برضه
+    بدل ما نطلّع رقم مقلوب.
+  */
+  const instapayCents = order.instapayDiscountCents ?? 0;
+  const totalDiscountCents = order.discountAmountCents ?? 0;
+  const bookingDiscountCents = Math.max(0, totalDiscountCents - instapayCents);
+  if (totalDiscountCents - instapayCents < 0) {
+    notes.push(
+      'حالة غير متوقعة: حافز InstaPay المسجّل أكبر من إجمالي الخصم على الطلب. الخصم وقت الحجز اتعرض صفر بدل رقم سالب — يحتاج مراجعة يدوية.',
+    );
+  }
   push({
     key: 'discount',
-    label_ar: 'الخصم',
-    applied: (order.discountAmountCents ?? 0) !== 0,
-    amount_cents: -(order.discountAmountCents ?? 0),
-    detail_ar: 'كود خصم أو كود عمارة — بيتخصم من الإجمالي قبل الدفع.',
+    label_ar: 'الخصم وقت الحجز',
+    applied: bookingDiscountCents !== 0,
+    // `-0` مش قيمة مقبولة في عقد بيتقري ويتقارن — الصفر صفر.
+    amount_cents: bookingDiscountCents === 0 ? 0 : -bookingDiscountCents,
+    detail_ar: bookingDiscountCents === 0 ? bookingDiscountNone(order, instapayCents) : bookingDiscountSource(order),
   });
 
   const totalAtBooking = running;
   const currentTotal = order.totalAmountCents ?? 0;
 
   const postBooking: PostBookingPriceChange[] = [];
+
+  /*
+    العروض المعتمدة — **استبدال لسعر الشغل مش إضافة عليه**، وده مش اختيار عرض هنا، ده اللي
+    `inspection-quote.service.ts` بتعمله بالظبط:
+
+      عرض أول:       delta = quote.amount_cents - assessment_fee_credit
+      مراجعة تشخيص:  delta = quote.amount_cents - estimated_price_cents (سعر الشغل قبلها)
+
+    يعني أثر العرض على سعر العميل = قيمة العرض ناقص المرجع اللي قبله، والرصيد (خصم رسم التقييم)
+    بند منفصل تحت بقيمته. المرجع الأول هو سعر الشغل وقت الحجز، وكل عرض بعد كده مرجعه العرض
+    اللي قبله — فسلسلة المراجعات بتتفسّر كلها بلا تحصيل مزدوج.
+  */
+  let quoteReferenceCents = order.pricingWorkPriceCents ?? order.estimatedPriceCents ?? 0;
+  for (const quote of extras.approvedQuotes) {
+    const deltaCents = quote.amountCents - quoteReferenceCents;
+    postBooking.push({
+      key: 'approved_quote',
+      label_ar: quote.source === 'technician_diagnosis' ? 'مراجعة سعر بعد التشخيص' : 'عرض سعر معتمد',
+      amount_cents: deltaCents,
+      source_ar: `${QUOTE_SOURCE_AR[quote.source] ?? quote.source} — العميل وافق على ${egp(quote.amountCents)} بدل ${egp(quoteReferenceCents)}. العرض بيستبدل سعر الشغل، فالأثر على الإجمالي هو الفرق بس.`,
+      at: isoOrNull(quote.decidedAt),
+      before_cents: quoteReferenceCents,
+      after_cents: quote.amountCents,
+    });
+    quoteReferenceCents = quote.amountCents;
+  }
+
   if ((order.levelPremiumCents ?? 0) !== 0) {
     postBooking.push({
       key: 'level_premium',
@@ -227,14 +335,9 @@ export function buildOrderPriceTrail(order: Order, extras: OrderPriceTrailExtras
       amount_cents: order.levelPremiumCents!,
       source_ar:
         'اتضافت **بعد** التعيين التلقائي: الفني مكانش معروف وقت التسعير الأول، فالمضاعف مادخلش في السعر الأصلي. الفني المختار يدويًا مضاعفه داخل السعر من الأول، فمفيش علاوة تانية (مفيش تحصيل مزدوج).',
-    });
-  }
-  if ((order.instapayDiscountCents ?? 0) !== 0) {
-    postBooking.push({
-      key: 'instapay_discount',
-      label_ar: 'خصم InstaPay',
-      amount_cents: -(order.instapayDiscountCents ?? 0),
-      source_ar: 'اتطبّق وقت تأكيد التحويل، بعد إنشاء الطلب (ADR-0089).',
+      at: null,
+      before_cents: null,
+      after_cents: null,
     });
   }
   if (extras.additionalItemsTotalCents !== 0) {
@@ -244,6 +347,9 @@ export function buildOrderPriceTrail(order: Order, extras: OrderPriceTrailExtras
       amount_cents: extras.additionalItemsTotalCents,
       source_ar:
         'بنود الفني المعتمدة بعد بداية الشغل (قطع غيار/أجر إضافي) — العميل وافق عليها، فهي زيادة حقيقية على سعر الحجز.',
+      at: null,
+      before_cents: null,
+      after_cents: null,
     });
   }
   if ((order.assessmentFeeCreditCents ?? 0) !== 0) {
@@ -251,7 +357,22 @@ export function buildOrderPriceTrail(order: Order, extras: OrderPriceTrailExtras
       key: 'assessment_fee_credit',
       label_ar: 'خصم رسم التقييم',
       amount_cents: -(order.assessmentFeeCreditCents ?? 0),
-      source_ar: 'رسم التقييم اتحسب من إجمالي الطلب بعد اعتماد السعر.',
+      source_ar: 'رسم التقييم اللي العميل دفعه اتحسب من سعر العرض بدل ما يتحصّل مرتين.',
+      at: null,
+      before_cents: null,
+      after_cents: null,
+    });
+  }
+  if (instapayCents !== 0) {
+    postBooking.push({
+      key: 'instapay_discount',
+      label_ar: 'حافز الدفع بـInstaPay',
+      amount_cents: -instapayCents,
+      source_ar:
+        'هدية اختيار العميل للدفع بـInstaPay — اتطبّقت وقت بدء التحويل، بعد إنشاء الطلب (ADR-0089/ADR-0091). القيمة من إعداد `payments.instapay_discount_egp` وقتها. مسجّلة جوّه `discount_amount_cents` كجزء منه، فمش متحسبة تاني في خصم الحجز فوق.',
+      at: null,
+      before_cents: null,
+      after_cents: null,
     });
   }
 

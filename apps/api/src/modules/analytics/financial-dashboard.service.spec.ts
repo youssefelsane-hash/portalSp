@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { FinancialDashboardService } from './financial-dashboard.service';
 import { deleteWalletTransactions } from '../payments/wallet-cleanup.testing';
+import { insertTestCountry } from '../../common/testing/insert-test-country';
 
 /**
  * ADR-0081 §5 — لوحة المال، و«Unreconciled money = 0» اللي المالك سمّاه أهم سطر.
@@ -243,11 +244,7 @@ describe('FinancialDashboardService — لوحة المال وفحص التسو�
     };
 
     beforeAll(async () => {
-      const [country] = await q<{ id: string }[]>(
-        `INSERT INTO countries (name_ar, name_en, iso_code, currency_code, phone_prefix)
-         VALUES ($1,$2,$3,'EGP','+20') RETURNING id`,
-        [`دولة دفع ${runId}`, `Pay Country ${runId}`, runId.slice(-2).toUpperCase()],
-      );
+      const country = await insertTestCountry(q, { nameAr: `دولة دفع ${runId}`, nameEn: `Pay Country ${runId}` });
       seed.country = country.id;
       const [city] = await q<{ id: string }[]>(
         `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,
