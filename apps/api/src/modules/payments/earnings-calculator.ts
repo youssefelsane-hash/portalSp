@@ -17,8 +17,8 @@ export interface EarningsParticipantInput {
   technicianLevel: string;
   levelWeightBps: number;
   assistantRatioBps: number;
-  serviceSkill: string;
-  serviceSkillFactorBps: number;
+  serviceWageTier: string;
+  serviceWageFactorBps: number;
   individualAdjustmentBps?: number;
   orderAdjustmentBps?: number;
 }
@@ -118,14 +118,14 @@ function effectiveWeight(participant: EarningsParticipantInput): bigint {
 
   assertFactor('levelWeightBps', participant.levelWeightBps);
   assertFactor('assistantRatioBps', participant.assistantRatioBps);
-  assertFactor('serviceSkillFactorBps', participant.serviceSkillFactorBps);
+  assertFactor('serviceWageFactorBps', participant.serviceWageFactorBps);
   assertFactor('individual adjustment factor', individualFactor);
   assertFactor('order adjustment factor', orderFactor);
 
   return (
     BigInt(participant.levelWeightBps) *
     BigInt(roleFactor) *
-    BigInt(participant.serviceSkillFactorBps) *
+    BigInt(participant.serviceWageFactorBps) *
     BigInt(individualFactor) *
     BigInt(orderFactor)
   );

@@ -217,6 +217,7 @@ export interface EligibleTechnicianResponseDto {
   id: string;
   service_id: string;
   technician_id: string;
+  // اسم الحقل على السلك لسه `skill_level` عن قصد — عقد الـAPI مااتكسرش (docs/08 §172).
   skill_level: string;
   is_active: boolean;
   completed_count: number;
@@ -229,7 +230,7 @@ export function toEligibleTechnicianResponseDto(row: TechnicianService): Eligibl
     id: row.id,
     service_id: row.serviceId,
     technician_id: row.technicianId,
-    skill_level: row.skillLevel,
+    skill_level: row.wageTier,
     is_active: row.isActive,
     completed_count: row.completedCount,
     average_rating: row.averageRating === null ? null : Number(row.averageRating),

@@ -63,10 +63,10 @@ describe('سياسة المستحقات — حلّ السياسة من الجد�
     }[]) {
       levelConfig[row.level] = { weight: Number(row.earning_weight_bps), assistantRatio: Number(row.assistant_ratio_bps) };
     }
-    for (const row of (await q(`SELECT skill_level, factor_bps FROM earnings_skill_policy`)) as {
-      skill_level: string; factor_bps: number;
+    for (const row of (await q(`SELECT wage_tier, factor_bps FROM earnings_skill_policy`)) as {
+      wage_tier: string; factor_bps: number;
     }[]) {
-      skillFactor[row.skill_level] = Number(row.factor_bps);
+      skillFactor[row.wage_tier] = Number(row.factor_bps);
     }
 
     ids.adminUserId = await makeUser('adm', 'admin');
@@ -226,7 +226,7 @@ describe('سياسة المستحقات — حلّ السياسة من الجد�
   describe('الوزن الفعلي المحسوب', () => {
     it('بيبني وزن القائد من وزن درجته × عامل مهارته × ١ (مفيش نسبة مساعد على القائد)', async () => {
       await q(
-        `INSERT INTO technician_services (technician_id, service_id, skill_level) VALUES ($1,$2,'expert')`,
+        `INSERT INTO technician_services (technician_id, service_id, wage_tier) VALUES ($1,$2,'expert')`,
         [ids.leaderId, ids.serviceId],
       );
       const result = await service.calculateOrder(ids.orderId, 100_000);
@@ -235,7 +235,7 @@ describe('سياسة المستحقات — حلّ السياسة من الجد�
       expect(leader.isLeader).toBe(true);
       expect(leader.earningRole).toBe('technician');
       expect(leader.levelWeightBps).toBe(levelConfig.professional.weight);
-      expect(leader.serviceSkillFactorBps).toBe(skillFactor.expert);
+      expect(leader.serviceWageFactorBps).toBe(skillFactor.expert);
       // المعادلة الكاملة زي ما `effectiveWeight` بيحسبها — بلا أي رقم مكتوب بالإيد.
       expect(leader.effectiveWeightUnits).toBe(
         (BigInt(levelConfig.professional.weight) * 10_000n * BigInt(skillFactor.expert) * 10_000n * 10_000n).toString(),
@@ -259,32 +259,32 @@ describe('سياسة المستحقات — حلّ السياسة من الجد�
     it('فني بلا صف مهارة على الخدمة بياخد «قياسي» المحايد — مش صفر ولا سقوط من القسمة', async () => {
       const participants = await service.resolveParticipants(ids.orderId);
       expect(participants).toHaveLength(2);
-      expect(byId(participants, ids.leaderId).serviceSkill).toBe('standard');
-      expect(byId(participants, ids.leaderId).serviceSkillFactorBps).toBe(10_000);
+      expect(byId(participants, ids.leaderId).serviceWageTier).toBe('standard');
+      expect(byId(participants, ids.leaderId).serviceWageFactorBps).toBe(10_000);
     });
 
     it('صف مهارة مش معتمد أو موقوف مابيتحسبش — بيرجع للمحايد', async () => {
       await q(
-        `INSERT INTO technician_services (technician_id, service_id, skill_level, verification_status)
+        `INSERT INTO technician_services (technician_id, service_id, wage_tier, verification_status)
          VALUES ($1,$2,'expert','pending_verification')`,
         [ids.leaderId, ids.serviceId],
       );
       let participants = await service.resolveParticipants(ids.orderId);
-      expect(byId(participants, ids.leaderId).serviceSkillFactorBps).toBe(10_000);
+      expect(byId(participants, ids.leaderId).serviceWageFactorBps).toBe(10_000);
 
       await q(`UPDATE technician_services SET verification_status = 'approved', is_active = false
                 WHERE technician_id = $1 AND service_id = $2`, [ids.leaderId, ids.serviceId]);
       participants = await service.resolveParticipants(ids.orderId);
-      expect(byId(participants, ids.leaderId).serviceSkillFactorBps).toBe(10_000);
+      expect(byId(participants, ids.leaderId).serviceWageFactorBps).toBe(10_000);
     });
 
     it('مهارة الفني على **خدمة تانية** مابتأثرش على الطلب ده', async () => {
       await q(
-        `INSERT INTO technician_services (technician_id, service_id, skill_level) VALUES ($1,$2,'expert')`,
+        `INSERT INTO technician_services (technician_id, service_id, wage_tier) VALUES ($1,$2,'expert')`,
         [ids.leaderId, ids.otherServiceId],
       );
       const participants = await service.resolveParticipants(ids.orderId);
-      expect(byId(participants, ids.leaderId).serviceSkillFactorBps).toBe(10_000);
+      expect(byId(participants, ids.leaderId).serviceWageFactorBps).toBe(10_000);
     });
   });
 
@@ -376,14 +376,14 @@ describe('سياسة المستحقات — حلّ السياسة من الجد�
 
     it('استثناء عامل المهارة على خدمة بعينها بيغلب السياسة العامة', async () => {
       await q(
-        `INSERT INTO service_earnings_skill_overrides (service_id, skill_level, factor_bps, updated_by_user_id)
-         VALUES ($1,'standard'::skill_level,12500,$2)`,
+        `INSERT INTO service_earnings_skill_overrides (service_id, wage_tier, factor_bps, updated_by_user_id)
+         VALUES ($1,'standard'::technician_wage_tier,12500,$2)`,
         [ids.serviceId, ids.adminUserId],
       );
       const participants = await service.resolveParticipants(ids.orderId);
       // الاتنين على «قياسي» (مفيش صف مهارة)، فالاستثناء بيوصلهم الاتنين.
-      expect(byId(participants, ids.leaderId).serviceSkillFactorBps).toBe(12_500);
-      expect(byId(participants, ids.assistantId).serviceSkillFactorBps).toBe(12_500);
+      expect(byId(participants, ids.leaderId).serviceWageFactorBps).toBe(12_500);
+      expect(byId(participants, ids.assistantId).serviceWageFactorBps).toBe(12_500);
     });
 
     it('استثناء **على شخص بعينه** بيتطبّق عليه هو بس', async () => {

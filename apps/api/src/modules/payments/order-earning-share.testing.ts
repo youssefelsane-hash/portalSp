@@ -27,7 +27,7 @@ export interface V2EarningShareFixture {
   /** الدور المحاسبي: فني كامل ولا مساعد. الافتراضي مشتق من `participantRole`. */
   earningRole?: 'technician' | 'assistant';
   levelWeightBps?: number;
-  serviceSkill?: 'beginner' | 'standard' | 'expert';
+  serviceWageTier?: 'beginner' | 'standard' | 'expert';
 }
 
 type QueryFn = (sql: string, params?: unknown[]) => Promise<unknown>;
@@ -42,9 +42,9 @@ export async function insertV2EarningShare(q: QueryFn, fixture: V2EarningShareFi
        order_id, technician_id, participant_role, technician_level, share_weight, pool_cents, share_cents,
        calculation_method, settlement_policy_version, calculation_algorithm_version,
        technician_kind_snapshot, earning_role, level_weight_bps_snapshot, assistant_ratio_bps_snapshot,
-       service_skill_snapshot, service_skill_factor_bps_snapshot,
+       service_wage_tier_snapshot, service_wage_factor_bps_snapshot,
        individual_adjustment_bps_snapshot, order_adjustment_bps_snapshot, effective_weight_units
-     ) VALUES ($1,$2,$3,$4::technician_level,$5,$6,$7,'earnings_policy_v2',2,$8,$9,$10,$11,10000,$12::skill_level,10000,0,0,$13)`,
+     ) VALUES ($1,$2,$3,$4::technician_level,$5,$6,$7,'earnings_policy_v2',2,$8,$9,$10,$11,10000,$12::technician_wage_tier,10000,0,0,$13)`,
     [
       fixture.orderId,
       fixture.technicianId,
@@ -57,7 +57,7 @@ export async function insertV2EarningShare(q: QueryFn, fixture: V2EarningShareFi
       earningRole,
       earningRole,
       levelWeightBps,
-      fixture.serviceSkill ?? 'standard',
+      fixture.serviceWageTier ?? 'standard',
       String(levelWeightBps),
     ],
   );

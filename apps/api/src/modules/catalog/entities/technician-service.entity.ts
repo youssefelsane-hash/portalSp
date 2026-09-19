@@ -1,6 +1,16 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
-export enum SkillLevel {
+/**
+ * **درجة أجر الفني في خدمة بعينها** (migration 0356، docs/08 §172).
+ *
+ * بتضرب في **أجر الفني** (`earnings_skill_policy.factor_bps`, افتراضي 0.95 / 1.00 / 1.10)،
+ * وماليهاش أي أثر على السعر اللي العميل بيدفعه — ده شغل `TechnicianPricingTier` المنفصل تمامًا.
+ * كانت اسمها `SkillLevel` وعمودها `skill_level`، وده كان بيخليها تتقرا كأنها نفس سلّم السعر.
+ *
+ * **القيم على السلك لسه `skill_level`** في كل الـrequests/responses — الـDTOs بتعمل mapping
+ * صريح، وكسر عقد الـAPI مكانش مطلوب.
+ */
+export enum TechnicianWageTier {
   BEGINNER = 'beginner',
   STANDARD = 'standard',
   EXPERT = 'expert',
@@ -28,8 +38,8 @@ export class TechnicianService {
   @Column({ name: 'service_id', type: 'uuid' })
   serviceId: string;
 
-  @Column({ name: 'skill_level', type: 'enum', enum: SkillLevel, enumName: 'skill_level', default: SkillLevel.STANDARD })
-  skillLevel: SkillLevel;
+  @Column({ name: 'wage_tier', type: 'enum', enum: TechnicianWageTier, enumName: 'technician_wage_tier', default: TechnicianWageTier.STANDARD })
+  wageTier: TechnicianWageTier;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

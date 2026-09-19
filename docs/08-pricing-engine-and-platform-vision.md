@@ -17832,3 +17832,71 @@ professional→متقدم · premium/team_leader→خبير`.
 اسم النوع في القاعدة لسه `skill_level`، وهو اسم عام مش بيقول إنه عن الأجر. إعادة تسميته بتلمس
 جداول فلوس ولقطات محفوظة على طلبات قديمة — مخاطرة أعلى بكتير من فايدتها للأدمن، اللي بقى
 بيقرا الأسماء الصح خلاص. متسجّل هنا لو حصل تنظيف schema أوسع بعدين.
+
+## §172 — `skill_level` بقى `technician_wage_tier` في القاعدة (طلب مالك 2026-09-19، بعد §171)
+
+§171 فكّت اللبس على الشاشة، والبند اللي فضل مفتوح كان الاسم جوّه القاعدة. اتنفّذ دلوقتي —
+**بعد تصحيح تقديري الأول للمخاطرة**.
+
+### تصحيح: المخاطرة كانت أقل مما كتبت
+
+قلت في §171 إن إعادة التسمية «بتلمس جداول فلوس ولقطات محفوظة، مخاطرتها أعلى من فايدتها».
+**ده كان غلط على جانب القاعدة**: `ALTER TYPE … RENAME` و`ALTER TABLE … RENAME COLUMN` في
+Postgres عمليات على البيانات الوصفية بس — مفيش إعادة كتابة لأي صف، والقيود والفهارس بتتحدّث
+تعريفاتها تلقائيًا (اتأكد: `chk_order_earning_shares_v2_complete_snapshot` بيشاور على العمود
+الجديد لوحده بعد الترحيل).
+
+وكمان صحّحت حاجة تانية قلتها: `order_earning_shares.service_skill_snapshot` **مش `varchar`** —
+نوعه الـenum. والـentity مكتوب فيه `varchar` عن **قصد**، نفس `technicianLevel` اللي فوقه بالحرف:
+اللقطة لازم تفضل مقروءة لو درجة اتشالت من الـenum بعدين. ده تصميم مش انحراف، فاتساب زي ما هو.
+
+**التكلفة الحقيقية مكانها الكود**، مش القاعدة: ٦ جُمل SQL خام في `admin-earnings-policy.service.ts`
+والاستعلام الأساسي في `earnings-policy.service.ts` — `tsc` مابيشوفش أسماء الأعمدة جوّاها.
+
+### اللي اتغيّر
+
+| قبل | بعد |
+|---|---|
+| النوع `skill_level` | `technician_wage_tier` |
+| `technician_services.skill_level` | `technician_services.wage_tier` |
+| `earnings_skill_policy.skill_level` | `earnings_skill_policy.wage_tier` |
+| `service_earnings_skill_overrides.skill_level` | `…wage_tier` |
+| `order_earning_shares.service_skill_snapshot` | `service_wage_tier_snapshot` |
+| `order_earning_shares.service_skill_factor_bps_snapshot` | `service_wage_factor_bps_snapshot` |
+| `SkillLevel` (TS) | `TechnicianWageTier` |
+| `serviceSkill` / `serviceSkillFactorBps` | `serviceWageTier` / `serviceWageFactorBps` |
+
+### اللي **ما**اتغيّرش: عقد الـAPI بالكامل
+
+حقول `skill_level` و`service_skill_snapshot` و`service_skill_factor_bps_snapshot` في كل
+الـrequests والـresponses، والمسارات `PATCH /admin/earnings-policy/skills/:skill` و
+`PUT /admin/earnings-policy/services/:id/skills/:skill` — كلها زي ما هي بالحرف. الجسر بيتم
+بـ`AS` في الـSQL وmapping صريح في الـDTOs.
+
+وأسماء الجداول (`earnings_skill_policy`, `service_earnings_skill_overrides`) اتسابت: إعادة
+تسميتها بتلمس أسماء القيود والفهارس المشتقّة منها مقابل صفر مكسب على الوضوح.
+
+### البَقّة اللي التحقق الحي مسكها والاختبارات ماشفتهاش
+
+بعد ما ٣٦٧ سويت عدّت خضرا، التحقق الحي على API شغّال كشف إن
+**`GET /admin/earnings-policy` بقى بيرجّع `wage_tier` بدل `skill_level`**: الاستعلام بيرجّع
+الصفوف الخام وبتروح للرد كما هي، فإعادة تسمية العمود غيّرت مفتاح الرد وكسرت العقد — ومفيش
+اختبار واحد وقع.
+
+ده بالظبط الدرس: **الاختبارات الموجودة ماكانتش بتغطي المسارات دي أصلاً.** الإصلاح جزئين:
+١. `AS skill_level` في التلات استعلامات اللي بتغذّي الرد.
+٢. سويت جديدة `admin-earnings-policy-sql.spec.ts` (٥ اختبارات حية) بتغطي الفجوة الأقدم من
+الترحيل ده: `overview()` · `updateSkill()` · رفض درجة مش في السلّم · `upsertServiceSkillOverride()`
+بالإضافة ثم التحديث على نفس المفتاح · ظهور الاستثناء في الـoverview. وكل واحدة بتتأكد إن
+المفتاح على السلك لسه `skill_level` وإن `wage_tier` **مش** ظاهر — فأي تسمية جاية تكسر العقد
+هتقع هنا.
+
+بتنادي الـservice مباشرةً مش عبر HTTP عن قصد: مسارات الكتابة وراها حارس Passkey (ADR-0011)
+مايتعملش في اختبار مؤتمت، والمقصود هو الـSQL نفسه.
+
+### التحقق
+
+- ٣٦٨ سويت / ٢٤٠١ اختبار خضر (زيادة ٥ من السويت الجديدة).
+- حي على API شغّال: الرد لسه `beginner/standard/expert` تحت مفتاح `skill_level`؛ مسارات
+  الكتابة بترد `AUTH_006` (يعني موجودة ووصلناها، والحارس هو اللي رد) مش `404`؛ والعمود الجديد
+  بيتكتب ويتقرا.

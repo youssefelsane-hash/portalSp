@@ -29,7 +29,7 @@ export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional',
  * |---|---|---|
  * | رتبة تشغيلية | `technician_profiles.current_level` | وزن حصة الفني في الطاقم + أهلية حجز الفريق |
  * | **فئة سعر الفني** | `technician_profiles.pricing_tier` | **السعر اللي العميل بيشوفه ويدفعه** |
- * | **درجة أجر المهارة** | `technician_services.skill_level` | **أجر الفني** (عامل على حصّته) |
+ * | **درجة أجر المهارة** | `technician_services.wage_tier` | **أجر الفني** (عامل على حصّته) |
  *
  * الاتنين الأخرانيين كانوا بيتعرضوا بنفس التلات كلمات بالحرف (مبتدئ/قياسي/خبير) وتحت نفس
  * الكلمة «مهارة» — فالأدمن اللي بيظبط «خبير» مكانش عارف هو بيغلي على العميل ولا بيزوّد أجر
@@ -46,7 +46,8 @@ export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
 export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['beginner', 'standard', 'advanced', 'expert'];
 
 /**
- * درجة أجر المهارة لكل خدمة (`technician_services.skill_level`, enum `skill_level`).
+ * درجة أجر المهارة لكل خدمة (`technician_services.wage_tier`, enum `technician_wage_tier`).
+ * اسم الحقل على السلك لسه `skill_level` — عقد الـAPI مااتكسرش (migration 0356).
  *
  * **مش نفس `PRICING_TIER_LABELS` فوق**: دي بتضرب في **أجر الفني** (عامل افتراضي 0.95 / 1.00 /
  * 1.10)، وماليهاش أي أثر على السعر اللي العميل بيدفعه. القيم في القاعدة لسه

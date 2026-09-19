@@ -9,13 +9,13 @@ describe('EarningsPolicyService', () => {
           {
             technician_id: 'leader', participant_role: 'leader', technician_kind: 'technician',
             technician_level: 'professional', level_weight_bps: 12_500, assistant_ratio_bps: 7_600,
-            service_skill: 'expert', service_skill_factor_bps: 11_000,
+            service_wage_tier: 'expert', service_wage_factor_bps: 11_000,
             individual_adjustment_bps: null, order_adjustment_bps: null, used_neutral_skill_fallback: false,
           },
           {
             technician_id: 'helper', participant_role: 'assistant', technician_kind: 'technician',
             technician_level: 'verified', level_weight_bps: 11_000, assistant_ratio_bps: 7_000,
-            service_skill: 'standard', service_skill_factor_bps: 10_000,
+            service_wage_tier: 'standard', service_wage_factor_bps: 10_000,
             individual_adjustment_bps: 500, order_adjustment_bps: null, used_neutral_skill_fallback: true,
           },
         ]),
@@ -56,13 +56,13 @@ describe('EarningsPolicyService', () => {
       {
         technician_id: 'leader', participant_role: 'leader', technician_kind: technicianKind,
         technician_level: 'professional', level_weight_bps: 12_500, assistant_ratio_bps: 6_500,
-        service_skill: 'standard', service_skill_factor_bps: 10_000,
+        service_wage_tier: 'standard', service_wage_factor_bps: 10_000,
         individual_adjustment_bps: null, order_adjustment_bps: null, used_neutral_skill_fallback: false,
       },
       {
         technician_id: 'helper', participant_role: 'assistant', technician_kind: 'assistant',
         technician_level: 'professional', level_weight_bps: 12_500, assistant_ratio_bps: 6_500,
-        service_skill: 'standard', service_skill_factor_bps: 10_000,
+        service_wage_tier: 'standard', service_wage_factor_bps: 10_000,
         individual_adjustment_bps: null, order_adjustment_bps: null, used_neutral_skill_fallback: false,
       },
     ];

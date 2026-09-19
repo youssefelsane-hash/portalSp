@@ -860,7 +860,7 @@ export class AdminTechniciansService {
     row.verificationStatus = TechnicianServiceVerificationStatus.APPROVED;
     row.isActive = true;
     row.rejectionReason = null;
-    if (dto.skill_level) row.skillLevel = dto.skill_level;
+    if (dto.skill_level) row.wageTier = dto.skill_level;
     row.reviewedByUserId = adminUserId;
     row.reviewedAt = new Date();
     await this.technicianServices.save(row);
@@ -874,7 +874,7 @@ export class AdminTechniciansService {
       entityType: 'technician_service',
       entityId: row.id,
       oldValues: { verification_status: previousStatus },
-      newValues: { verification_status: row.verificationStatus, skill_level: row.skillLevel },
+      newValues: { verification_status: row.verificationStatus, wage_tier: row.wageTier },
       meta,
     });
     return row;
