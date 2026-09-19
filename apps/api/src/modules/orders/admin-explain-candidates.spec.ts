@@ -301,6 +301,36 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
     }
   });
 
+  /*
+    بلاغ مالك 2026-09-19 (docs/08 §168): «بيدّي رسالة إن إنت كاستمر وبيقول الخدمة مش متاحة في
+    منطقتك. أنا المفروض الأدمين، مفيش منطقة بالنسبة للأدمين».
+
+    `resolveZoneForAddressOrThrow()` بترمي رسالة **عميل** لما العنوان مايقعش جوّه نطاق نشط،
+    وكانت بتوقّع قايمة التشخيص كلها. الأهلية معلومة مساعدة مش شرط عرض.
+  */
+  it('فشل حساب الأهلية مابيوقّعش القايمة، وبيتقال بلغة الأدمن مش بلغة العميل (§168)', async () => {
+    // مدينة «فعّلت المطابقة الجغرافية» بمضلّع بعيد ⇒ عنوان الطلب بره كل المضلّعات.
+    const [farZone] = await q(
+      `INSERT INTO service_zones (city_id, name_ar, name_en, is_active, boundary)
+       SELECT city_id, 'نطاق بعيد اختبار', 'Far test', true,
+              ST_SetSRID(ST_GeomFromText('POLYGON((10 10,10 11,11 11,11 10,10 10))'),4326)::geography
+         FROM service_zones WHERE id = $1 RETURNING id`,
+      [ids.zone],
+    );
+    await q(`UPDATE orders SET technician_id = $1 WHERE id = $2`, [ids.techPro, ids.individualOrder]);
+    try {
+      const { items, scopeNoteAr } = await service.listExplainCandidates(ids.individualOrder);
+      // القايمة عاشت، والشخص اللي على الطلب فيها.
+      expect(items.map((i) => i.technicianId)).toContain(ids.techPro);
+      // ومفيش أي أثر لنص العميل.
+      expect(scopeNoteAr).not.toContain('منطقتك');
+      expect(scopeNoteAr).toContain('نطاق خدمة نشط');
+    } finally {
+      await q(`UPDATE orders SET technician_id = NULL WHERE id = $1`, [ids.individualOrder]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [farZone.id]);
+    }
+  });
+
   it('طلب بلا نطاق خدمة بيرجّع قايمة مش 400 — الرفض كان بيبان «مفيش مرشّحين» (§167)', async () => {
     await q(`UPDATE orders SET technician_id = $1, service_zone_id = NULL WHERE id = $2`, [ids.techPro, ids.individualOrder]);
     try {
