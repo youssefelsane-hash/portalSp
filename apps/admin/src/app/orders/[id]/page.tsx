@@ -11,6 +11,7 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   DispatchRouteDto,
+  ExplainCandidateRelationDto,
   OrderMatchingFunnelDto,
   OrderRatingResponseDto,
   OrderTraceDto,
@@ -187,6 +188,19 @@ const TRACE_NEXT_ACTION_LABELS: Record<OrderTraceDto['next_action'], string> = {
   assigned: 'اتعيّن على فني',
   no_matching_required: 'مش في مرحلة بحث',
 };
+
+/**
+ * مجموعات قايمة «ليه/ليه لأ» بترتيب **قرب الشخص من الطلب** (docs/08 §167).
+ *
+ * الترتيب هنا هو الإجابة على بلاغ المالك: «لما الطلب بيروح لصنايعي معين بلاقي إن بتاعه مش
+ * شغال» — الشخص اللي على الطلب لازم يكون أول اسم يشوفه، مش مدفون في مجمّع المدينة (أو غايب منه).
+ */
+const EXPLAIN_RELATION_GROUPS: { relation: ExplainCandidateRelationDto; label: string }[] = [
+  { relation: 'assigned', label: 'متعيّن على الطلب ده' },
+  { relation: 'crew', label: 'في طاقم الطلب ده' },
+  { relation: 'offered', label: 'اتعرض عليه الطلب ده' },
+  { relation: 'city_pool', label: 'معتمدين في مدينة الطلب' },
+];
 
 /** وقت قصير في سطر واحد — الجدول ده جوّه كارت، فالتاريخ الكامل بياخد عرض من غير فايدة. */
 function traceTime(value: string | null): string {
@@ -446,8 +460,12 @@ export default function OrderDetailPage() {
       technicianKind: TechnicianKindCode;
       currentLevel: string | null;
       isEligibleNow: boolean;
+      relationToOrder: ExplainCandidateRelationDto;
     }[] | null
   >(null);
+  /** الغياب بيتشرح: نداء فاشل ≠ «مفيش مرشّحين» (docs/08 §167). */
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  const [candidatesScopeNote, setCandidatesScopeNote] = useState<string | null>(null);
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
@@ -699,9 +717,13 @@ export default function OrderDetailPage() {
         technician_kind: TechnicianKindCode;
         current_level: string | null;
         is_eligible_now: boolean;
+        relation_to_order: ExplainCandidateRelationDto;
       }[];
+      scope_note_ar: string;
     }>(`/admin/orders/${id}/explain-candidates`)
-      .then(({ items }) =>
+      .then(({ items, scope_note_ar }) => {
+        setCandidatesError(null);
+        setCandidatesScopeNote(scope_note_ar);
         setExplainCandidates(
           items.map((item) => ({
             technicianId: item.technician_id,
@@ -709,10 +731,16 @@ export default function OrderDetailPage() {
             technicianKind: item.technician_kind,
             currentLevel: item.current_level,
             isEligibleNow: item.is_eligible_now,
+            relationToOrder: item.relation_to_order,
           })),
-        ),
-      )
-      .catch(() => setExplainCandidates([]));
+        );
+      })
+      // كان `.catch(() => setExplainCandidates([]))` — نداء فاشل كان بيدّي **نفس** شكل «مفيش
+      // حد»، فالأدمن يفتكر إن مفيش مرشّحين وهو أصلاً مشافش الخطأ (بلاغ مالك 2026-09-19).
+      .catch((err) => {
+        setExplainCandidates([]);
+        setCandidatesError(err instanceof ApiError ? err.message : 'مش قادرين نحمّل قايمة المرشّحين');
+      });
   }
 
   async function handleReassign(e: FormEvent) {
@@ -3566,9 +3594,12 @@ export default function OrderDetailPage() {
           <div className="border-t pt-4">
             <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
             {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
-                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
+                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص.
+                §167 — والنص جاي من الباك-إند دلوقتي، لأن نطاق القايمة نفسه بيتغيّر حسب الطلب
+                (طلب بلا نطاق خدمة مالوش مجمّع مدينة أصلاً). نص ثابت هنا كان هيكذب على الأدمن. */}
             <p className="mb-2 text-xs text-muted-foreground">
-              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
+              {candidatesScopeNote ??
+                'القايمة بتشمل اللي له علاقة بالطلب ده + المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.'}
             </p>
             <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
               <div className="flex flex-col gap-1">
@@ -3585,11 +3616,14 @@ export default function OrderDetailPage() {
                   className="min-w-[280px]"
                 >
                   <option value="">اختار فني أو مساعد</option>
-                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
-                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
+                  {/* التجميع بقى بـ**العلاقة بالطلب** مش بالدور (docs/08 §167): الأدمن بيفتح
+                      القايمة دي وهو بيسأل عن شخص بعينه على الطلب، فلازم يلاقيه فوق خالص بدل ما
+                      يدوّر عليه وسط مجمّع المدينة — ولو مش في المجمّع أصلاً، يفضل موجود. */}
+                  {EXPLAIN_RELATION_GROUPS.map(({ relation, label }) => {
+                    const group = explainCandidates?.filter((c) => c.relationToOrder === relation) ?? [];
                     if (group.length === 0) return null;
                     return (
-                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                      <optgroup key={relation} label={label}>
                         {group.map((candidate) => (
                           <option key={candidate.technicianId} value={candidate.technicianId}>
                             {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
@@ -3605,6 +3639,12 @@ export default function OrderDetailPage() {
                 {explainLoading ? 'جاري التفسير...' : 'فسّر'}
               </Button>
             </form>
+            {candidatesError && <ErrorNotice className="mb-0 mt-2">{candidatesError}</ErrorNotice>}
+            {!candidatesError && explainCandidates?.length === 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                مفيش ولا فني أو مساعد له علاقة بالطلب ده، ومفيش معتمدين في مدينته — مش عطل في الشاشة.
+              </p>
+            )}
             {explainError && <ErrorNotice className="mb-0">{explainError}</ErrorNotice>}
             {explanation && (
               <div className="mt-3 flex flex-col gap-2 text-sm">

@@ -4,6 +4,15 @@ import type { OrderStatus } from './orders';
 // مطابق لـ apps/api/src/modules/orders/admin-orders.controller.ts §36.5 endpoints — واجهة فوق
 // MatchingExplainabilityService الموجود بالفعل (docs/08 §35.7/§35.8)، صفر خوارزمية تشخيصية موازية.
 
+/**
+ * علاقة الشخص بالطلب اللي بيتفسّر (docs/08 §167، بلاغ مالك 2026-09-19).
+ *
+ * قايمة «ليه/ليه لأ» كانت مجمّع مدينة بس، فالفني اللي **شايل الطلب** كان بيختفي منها لو مش
+ * مغطّي مدينة الطلب دلوقتي — وهو بالظبط اللي الأدمن بيسأل عنه. الحقل ده بيخلّي الأدمن يفهم
+ * **ليه كل اسم في القايمة**، مش بس مين فيها.
+ */
+export type ExplainCandidateRelationDto = 'assigned' | 'crew' | 'offered' | 'city_pool';
+
 export interface TechnicianEligibilityCheckDto {
   key: string;
   passed: boolean;
