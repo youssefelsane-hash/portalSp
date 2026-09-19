@@ -347,7 +347,8 @@ export default function TechnicianDetailPage() {
     );
   }
 
-  // فئة مهارة التسعير الموحدة؛ مستقلة عن مستوى الترقية التشغيلي.
+  // **فئة سعر الفني** — بتحدد سعر العميل. مستقلة عن الرتبة التشغيلية فوق (وزن حصة الطاقم)
+// وعن «عامل أجر المهارة» لكل خدمة في صفحة المستحقات (أجر الفني).
   async function handleChangePricingTier(e: FormEvent) {
     e.preventDefault();
     if (!selectedPricingTier) return;
@@ -884,7 +885,13 @@ export default function TechnicianDetailPage() {
         <Card>
           <form onSubmit={handleChangePricingTier}>
             <CardHeader>
-              <CardTitle className="text-base">فئة مهارة التسعير</CardTitle>
+              <CardTitle className="text-base">فئة سعر الفني</CardTitle>
+              {/* الرتبة فوق والفئة دي بيتشافوا جنب بعض في نفس الصفحة — السطر ده بيمنع
+                  الخلط بينهم وبين «عامل أجر المهارة» في المستحقات (docs/08 §171). */}
+              <p className="text-xs text-muted-foreground">
+                بتحدد <strong>السعر اللي العميل يشوفه</strong> لما يختار الفني ده. مالهاش علاقة
+                بالرتبة فوق (وزن حصّته في الطاقم) ولا بعامل أجر المهارة في المستحقات.
+              </p>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
@@ -903,7 +910,7 @@ export default function TechnicianDetailPage() {
             </CardContent>
             <CardFooter>
               <Button type="submit" size="sm" disabled={isSaving || selectedPricingTier === detail.pricing_tier}>
-                حفظ فئة المهارة
+                حفظ فئة السعر
               </Button>
             </CardFooter>
           </form>

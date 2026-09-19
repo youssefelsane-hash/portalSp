@@ -89,7 +89,8 @@ const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
   team_leader: 'قائد فريق',
 };
 
-// فئة مهارة التسعير الموحدة؛ المستوى التشغيلي أعلاه يظل للترقية والمطابقة فقط.
+// **فئة سعر الفني** — بتضرب في السعر اللي العميل بيدفعه. مش نفس «عامل أجر المهارة» في
+// صفحة المستحقات (ده بيضرب في أجر الفني)، ومش نفس الرتبة التشغيلية (وزن حصة الطاقم).
 const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   beginner: 'مبتدئ',
   standard: 'قياسي',
@@ -152,7 +153,7 @@ export default function ServiceDetailPage() {
   const [pricingRules, setPricingRules] = useState<PricingRuleResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  // مضاعف فئة المهارة `controlled` عشان نعرض المقابل بالمية تحته وهو بيتكتب.
+  // مضاعف فئة السعر `controlled` عشان نعرض المقابل بالمية تحته وهو بيتكتب.
   const [tierMultiplierInput, setTierMultiplierInput] = useState('');
   const [showNewAddon, setShowNewAddon] = useState(false);
   const [showNewStandardData, setShowNewStandardData] = useState(false);
@@ -700,7 +701,7 @@ export default function ServiceDetailPage() {
             (zonePricing?.length ?? 0) + (pricingTierPricing?.length ?? 0) > 0
               ? 'ready'
               : 'optional',
-          hint: 'تسعير المناطق وفئة مهارة الفني — بتعدّل السعر الأساسي',
+          hint: 'تسعير المناطق وفئة سعر الفني — بتعدّل السعر الأساسي',
         },
         {
           id: 'stage-addons',
@@ -1544,7 +1545,7 @@ export default function ServiceDetailPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">تسعير حسب فئة مهارة الفني</CardTitle>
+            <CardTitle className="text-base">تسعير حسب فئة سعر الفني</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleUpsertPricingTierPricing} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
@@ -1583,13 +1584,13 @@ export default function ServiceDetailPage() {
                 {describeMultiplier(tierMultiplierInput)}
               </p>
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
-                حفظ مضاعف فئة المهارة
+                حفظ مضاعف فئة السعر
               </Button>
             </form>
             {error ? null : !pricingTierPricing ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : pricingTierPricing.length === 0 ? (
-              <EmptyState title="مفيش تسعير مخصص لفئات المهارة — السعر الأساسي هو المستخدم" />
+              <EmptyState title="مفيش تسعير مخصص لفئات سعر الفني — السعر الأساسي هو المستخدم" />
             ) : (
               <Table>
                 <TableHeader>

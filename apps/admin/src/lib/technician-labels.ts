@@ -22,7 +22,20 @@ export const LEVEL_LABELS: Record<TechnicianLevel, string> = {
 
 export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional', 'premium', 'team_leader'];
 
-// فئة مهارة التسعير الموحدة؛ المستوى أعلاه يظل للتشغيل والترقية فقط.
+/**
+ * **تلات سلالم مختلفة، وكل واحد بيتحكم في حاجة تانية خالص** (docs/08 §171).
+ *
+ * | السلّم | العمود | بيتحكم في |
+ * |---|---|---|
+ * | رتبة تشغيلية | `technician_profiles.current_level` | وزن حصة الفني في الطاقم + أهلية حجز الفريق |
+ * | **فئة سعر الفني** | `technician_profiles.pricing_tier` | **السعر اللي العميل بيشوفه ويدفعه** |
+ * | **درجة أجر المهارة** | `technician_services.skill_level` | **أجر الفني** (عامل على حصّته) |
+ *
+ * الاتنين الأخرانيين كانوا بيتعرضوا بنفس التلات كلمات بالحرف (مبتدئ/قياسي/خبير) وتحت نفس
+ * الكلمة «مهارة» — فالأدمن اللي بيظبط «خبير» مكانش عارف هو بيغلي على العميل ولا بيزوّد أجر
+ * الفني. بقوا **مفيش ولا كلمة مشتركة** بينهم دلوقتي، والقيم في القاعدة زي ما هي (صفر migration،
+ * صفر تغيير في أي حساب فلوس).
+ */
 export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   beginner: 'مبتدئ',
   standard: 'قياسي',
@@ -31,6 +44,28 @@ export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
 };
 
 export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['beginner', 'standard', 'advanced', 'expert'];
+
+/**
+ * درجة أجر المهارة لكل خدمة (`technician_services.skill_level`, enum `skill_level`).
+ *
+ * **مش نفس `PRICING_TIER_LABELS` فوق**: دي بتضرب في **أجر الفني** (عامل افتراضي 0.95 / 1.00 /
+ * 1.10)، وماليهاش أي أثر على السعر اللي العميل بيدفعه. القيم في القاعدة لسه
+ * `beginner/standard/expert` — الأسماء المعروضة بس هي اللي اتغيّرت.
+ *
+ * `Record<string, …>` عن قصد: القيمة جاية من لقطة محفوظة على الطلب (`service_skill_snapshot`،
+ * `varchar` مش enum)، فممكن تكون قيمة قديمة اتشالت — الـfallback بيعرض الخام بدل ما يفضى.
+ */
+export const WAGE_SKILL_LABELS: Record<string, string> = {
+  beginner: 'أساسي',
+  standard: 'متوسط',
+  expert: 'متمكّن',
+};
+
+/** اسم درجة أجر المهارة للعرض، مع الرجوع للقيمة الخام لو مش معروفة. */
+export function wageSkillLabel(value: string | null | undefined): string {
+  if (!value) return '—';
+  return WAGE_SKILL_LABELS[value] ?? value;
+}
 
 // لغة بصرية موحّدة لتصنيف القدرة الاستيعابية (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — نُقلت هنا من
 // operations/page.tsx (docs/08 §36.3) عشان تُستخدَم كمان في مفتّش المطابقة بصفحة تفاصيل الطلب

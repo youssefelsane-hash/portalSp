@@ -133,6 +133,7 @@ import {
   LEVEL_LABELS,
   capacityTierBadgeClass,
   technicianKindOptionPrefix,
+  wageSkillLabel,
   type TechnicianKindCode,
 } from '@/lib/technician-labels';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
@@ -2479,14 +2480,14 @@ export default function OrderDetailPage() {
                               {share.calculation_method === 'earnings_policy_v2' ? (
                                 <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                                   <p>
-                                    V2 · {share.earning_role === 'assistant' ? 'مساعد' : 'فني'} · مهارة{' '}
-                                    {share.service_skill_snapshot ?? 'قياسية'}
+                                    V2 · {share.earning_role === 'assistant' ? 'مساعد' : 'فني'} · أجر مهارة{' '}
+                                    {wageSkillLabel(share.service_skill_snapshot ?? 'standard')}
                                   </p>
                                   <p>
                                     وزن المستوى {((share.level_weight_bps_snapshot ?? 10000) / 10000).toFixed(2)}
                                     {share.earning_role === 'assistant' &&
                                       ` × نسبة مساعد ${((share.assistant_ratio_bps_snapshot ?? 10000) / 100).toFixed(2)}%`}
-                                    {' × '}مهارة {((share.service_skill_factor_bps_snapshot ?? 10000) / 10000).toFixed(2)}
+                                    {' × '}أجر مهارة {((share.service_skill_factor_bps_snapshot ?? 10000) / 10000).toFixed(2)}
                                   </p>
                                   {(share.individual_adjustment_bps_snapshot !== 0 || share.order_adjustment_bps_snapshot !== 0) && (
                                     <p>

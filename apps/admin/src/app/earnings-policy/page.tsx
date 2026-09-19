@@ -23,6 +23,8 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { formatEgp } from '@/lib/format';
+// الأسماء من المصدر المشترك عشان سلّم الأجر وسلّم السعر مايرجعوش يتلخبطوا (docs/08 §171).
+import { wageSkillLabel } from '@/lib/technician-labels';
 
 type LevelPolicy = {
   id: string;
@@ -89,7 +91,7 @@ type Overview = {
   audit_history: AuditEntry[];
 };
 
-const skillNames: Record<string, string> = { beginner: 'مبتدئ', standard: 'قياسي', expert: 'خبير' };
+
 
 export default function EarningsPolicyPage() {
   const { authedFetch, isLoading } = useAuth();
@@ -339,7 +341,15 @@ export default function EarningsPolicyPage() {
           <section>
             <div className="mb-3 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-sky-700" />
-              <h2 className="text-xl font-bold">عامل مهارة الخدمة</h2>
+              <div>
+                <h2 className="text-xl font-bold">عامل أجر المهارة</h2>
+                {/* السطر ده هو الفرق بين «بزوّد أجر الفني» و«بغلّي على العميل» — الاتنين كانوا
+                    بيتسمّوا «مهارة» بنفس القيم بالظبط (docs/08 §171). */}
+                <p className="text-xs text-muted-foreground">
+                  درجة مهارة الفني في الخدمة — بتأثر على <strong>أجر الفني</strong> بس.
+                  سعر العميل بيتحدد من «فئة سعر الفني» في صفحة الخدمة.
+                </p>
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               {overview.skills.map((skill) => (
@@ -347,12 +357,12 @@ export default function EarningsPolicyPage() {
                   <CardContent className="pt-6">
                     <form className="grid gap-3" onSubmit={(event) => saveSkill(event, skill)}>
                       <div className="flex items-center justify-between">
-                        <strong>{skillNames[skill.skill_level] ?? skill.skill_level}</strong>
+                        <strong>{wageSkillLabel(skill.skill_level)}</strong>
                         <Badge variant="outline">× {(skill.factor_bps / 10_000).toFixed(2)}</Badge>
                       </div>
                       <Input name="factor" type="number" min="0.0001" step="0.01" defaultValue={skill.factor_bps / 10_000} dir="ltr" required />
                       <Input name="reason" placeholder="سبب التعديل" minLength={3} required />
-                      <Button size="sm" variant="outline" disabled={saving === `skill:${skill.skill_level}`}>حفظ عامل المهارة</Button>
+                      <Button size="sm" variant="outline" disabled={saving === `skill:${skill.skill_level}`}>حفظ عامل الأجر</Button>
                     </form>
                   </CardContent>
                 </Card>
@@ -441,13 +451,14 @@ export default function EarningsPolicyPage() {
                       })}
                     </div>
                     <div className="space-y-3">
-                      <h3 className="font-bold">عامل مهارة الخدمة</h3>
+                      <h3 className="font-bold">عامل أجر المهارة</h3>
+                      <p className="text-xs text-muted-foreground">أجر الفني في الخدمة دي، مش سعر العميل.</p>
                       {overview.skills.map((skill) => {
                         const active = overview.service_skill_overrides.find((item) => item.service_id === selectedServiceId && item.skill_level === skill.skill_level);
                         return (
                           <form key={skill.skill_level} onSubmit={(event) => saveSkillOverride(event, skill)} className="rounded-xl border p-3">
                             <div className="mb-2 flex items-center justify-between gap-2">
-                              <strong className="text-sm">{skillNames[skill.skill_level] ?? skill.skill_level}</strong>
+                              <strong className="text-sm">{wageSkillLabel(skill.skill_level)}</strong>
                               <Badge variant={active ? 'default' : 'outline'}>{active ? 'استثناء نشط' : 'السياسة العامة'}</Badge>
                             </div>
                             <div className="grid gap-2 sm:grid-cols-[110px_1fr_auto]">
@@ -543,14 +554,14 @@ export default function EarningsPolicyPage() {
                           </select>
                         </div>
                         <div>
-                          <Label className="text-xs text-muted-foreground">مهارة الخدمة</Label>
+                          <Label className="text-xs text-muted-foreground">درجة أجر المهارة</Label>
                           <select
                             name={`${participant.key}_skill`}
                             className="mt-1 h-10 w-full rounded-md border px-2"
                             defaultValue={participant.skill}
                           >
                             {overview.skills.map((skill) => (
-                              <option key={skill.skill_level} value={skill.skill_level}>{skillNames[skill.skill_level]}</option>
+                              <option key={skill.skill_level} value={skill.skill_level}>{wageSkillLabel(skill.skill_level)}</option>
                             ))}
                           </select>
                         </div>
