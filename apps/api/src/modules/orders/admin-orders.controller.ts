@@ -446,7 +446,7 @@ export class AdminOrdersController {
   @Get(':id/explain-candidates')
   @RequirePermission('orders.view')
   async listExplainCandidates(@Param('id', ParseUUIDPipe) id: string) {
-    const { items } = await this.adminOrdersService.listExplainCandidates(id);
+    const { items, scopeNoteAr } = await this.adminOrdersService.listExplainCandidates(id);
     return {
       items: items.map((item) => ({
         technician_id: item.technicianId,
@@ -455,7 +455,10 @@ export class AdminOrdersController {
         current_level: item.currentLevel,
         has_location: item.hasLocation,
         is_eligible_now: item.isEligibleNow,
+        // ليه ده في القايمة — الأدمن لازم يفهم القايمة نفسها مش بس محتواها (docs/08 §167).
+        relation_to_order: item.relationToOrder,
       })),
+      scope_note_ar: scopeNoteAr,
     };
   }
 

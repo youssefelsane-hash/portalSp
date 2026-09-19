@@ -160,6 +160,9 @@ export interface CustomerCancellationSummary {
   cancelledAt: Date | null;
 }
 
+/** ليه الشخص ده في قايمة «ليه/ليه لأ» — مطابق لـ`ExplainCandidateRelationDto` (docs/08 §167). */
+export type ExplainCandidateRelation = 'assigned' | 'crew' | 'offered' | 'city_pool';
+
 @Injectable()
 export class AdminOrdersService {
   constructor(
@@ -968,55 +971,134 @@ export class AdminOrdersService {
    * ومعاه `is_eligible_now` عشان الواجهة تفرّق بصريًا. التفسير نفسه
    * (`explainTechnicianForOrder`) شغال أصلاً لأي صف في `technician_profiles` بغض النظر عن الدور
    * أو الأهلية — هو اللي بيرجّع الـchecks اللي بتقول «ليه لأ» بالنص.
+   *
+   * ### بَقّة حقيقية (بلاغ مالك 2026-09-19، docs/08 §167): الفني اللي **على الطلب** كان بيختفي
+   *
+   * > «لما الطلب بيروح لصنايعي معين أو مساعد معين بلاقي إن بتاعه مش شغال… ما بيظهرليش أحد،
+   * >  على الرغم إن هي مع ناس تانية ممكن تظهرلي.»
+   *
+   * القايمة كانت مبنية على سؤال «مين **معتمد ومغطّي مدينة** الطلب دلوقتي؟» — وده سؤال تاني خالص
+   * عن «مين له علاقة بالطلب ده؟». فالشخص اللي شايل الطلب فعلاً كان بيقع بره القايمة لو غطّيته
+   * للمدينة اتغيّرت/اتلغت بعد التعيين، أو اتعيّن باستثناء إداري من مدينة تانية، أو اعتماده اتسحب.
+   *
+   * اتقاس على بيانات حقيقية وقت الإصلاح: **١٣ من ٣٧ طلب (٣٥٪)** — ٧ منهم الـendpoint كان بيرمي
+   * فيهم 400 (طلب بلا نطاق)، و٦ الفني بتاعهم مش مغطّي مدينة الطلب.
+   *
+   * دلوقتي القايمة = **(كل اللي له علاقة بالطلب ده) ∪ (مجمّع المدينة)**، والعلاقة بتترجع مع كل
+   * صف في `relationToOrder` عشان الأدمن يفهم القايمة نفسها. اللي على الطلب بيطلع الأول ومابيتقيّدش
+   * لا بمدينة ولا باعتماد — لأنه هو بالظبط اللي السؤال عنه.
    */
-  async listExplainCandidates(orderId: string) {
+  async listExplainCandidates(orderId: string): Promise<{
+    items: {
+      technicianId: string;
+      fullName: string;
+      technicianKind: 'technician' | 'assistant';
+      currentLevel: string;
+      hasLocation: boolean;
+      isEligibleNow: boolean;
+      relationToOrder: ExplainCandidateRelation;
+    }[];
+    scopeNoteAr: string;
+  }> {
     const order = await this.findOrThrow(orderId);
-    if (!order.serviceZoneId) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الطلب ده مالوش نطاق خدمة محدد — مفيش مطابقة ممكنة عليه أصلاً',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+
+    /*
+      **الطلب بلا نطاق مابيرفضش القايمة** — كان بيرمي 400، والواجهة بتبلع الخطأ فالأدمن يشوف
+      قايمة فاضية بلا أي سبب. مجمّع المدينة هو اللي محتاج النطاق؛ اللي على الطلب لأ.
+    */
+    const hasZone = Boolean(order.serviceZoneId);
 
     // المؤهّلون فعلاً دلوقتي — نفس مصدر التعيين الإجباري بالحرف، عشان العلامة اللي الواجهة
     // بتعرضها تبقى متطابقة مع اللي الأدمن هيلاقيه في dropdown التعيين، مش تقدير موازي.
-    const eligible = await this.listEligibleTechniciansForReassign(orderId);
-    const eligibleIds = new Set(eligible.items.map((item) => item.technicianId));
+    const eligibleIds = new Set<string>();
+    if (hasZone) {
+      const eligible = await this.listEligibleTechniciansForReassign(orderId);
+      for (const item of eligible.items) eligibleIds.add(item.technicianId);
+    }
 
-    const rows = await this.dataSource.query<
-      {
-        technician_id: string;
-        full_name: string;
-        technician_kind: 'technician' | 'assistant';
-        current_level: string;
-        has_location: boolean;
-      }[]
-    >(
-      `SELECT tp.id AS technician_id, u.full_name, tp.technician_kind, tp.current_level,
-              (tp.current_location IS NOT NULL) AS has_location
-       FROM technician_profiles tp
-       JOIN users u ON u.id = tp.user_id
-       WHERE tp.deleted_at IS NULL
-         AND tp.verification_status = 'approved'
-         AND ${technicianCityCoverageCondition({
-           technicianIdExpr: 'tp.id',
-           requestedServiceZoneIdExpr: '$1',
-         })}
-       ORDER BY tp.technician_kind ASC, u.full_name ASC
-       LIMIT 300`,
-      [order.serviceZoneId],
+    type Row = {
+      technician_id: string;
+      full_name: string;
+      technician_kind: 'technician' | 'assistant';
+      current_level: string;
+      has_location: boolean;
+      relation: ExplainCandidateRelation;
+    };
+
+    /*
+      كل مصادر «له علاقة بالطلب ده» في استعلام واحد. مقصود إنها **مش** متقيّدة بمدينة ولا
+      باعتماد: الشخص المستبعد دلوقتي هو بالظبط اللي الأدمن بيسأل عن سبب استبعاده.
+    */
+    const relatedRows = await this.dataSource.query<Row[]>(
+      `WITH related AS (
+         SELECT o.technician_id AS tid, 'assigned'::text AS relation
+           FROM orders o WHERE o.id = $1 AND o.technician_id IS NOT NULL
+         UNION ALL
+         SELECT otm.technician_id, 'crew' FROM order_team_members otm WHERE otm.order_id = $1
+         UNION ALL
+         SELECT oa.technician_id, 'offered' FROM order_assignments oa WHERE oa.order_id = $1
+         UNION ALL
+         SELECT two.technician_id, 'offered'
+           FROM technician_work_opportunities two
+          WHERE two.order_id = $1 AND two.deleted_at IS NULL
+       ),
+       ranked AS (
+         -- أقوى علاقة بتكسب: متعيّن > طاقم > اتعرض عليه، عشان الشخص مايتكررش بصفتين.
+         SELECT tid, MIN(CASE relation WHEN 'assigned' THEN 1 WHEN 'crew' THEN 2 ELSE 3 END) AS rank
+           FROM related GROUP BY tid
+       )
+       SELECT tp.id AS technician_id, u.full_name, tp.technician_kind, tp.current_level,
+              (tp.current_location IS NOT NULL) AS has_location,
+              (CASE ranked.rank WHEN 1 THEN 'assigned' WHEN 2 THEN 'crew' ELSE 'offered' END) AS relation
+         FROM ranked
+         JOIN technician_profiles tp ON tp.id = ranked.tid AND tp.deleted_at IS NULL
+         JOIN users u ON u.id = tp.user_id
+        ORDER BY ranked.rank ASC, u.full_name ASC`,
+      [orderId],
     );
 
+    const cityRows = hasZone
+      ? await this.dataSource.query<Row[]>(
+          `SELECT tp.id AS technician_id, u.full_name, tp.technician_kind, tp.current_level,
+                  (tp.current_location IS NOT NULL) AS has_location, 'city_pool'::text AS relation
+           FROM technician_profiles tp
+           JOIN users u ON u.id = tp.user_id
+           WHERE tp.deleted_at IS NULL
+             AND tp.verification_status = 'approved'
+             AND ${technicianCityCoverageCondition({
+               technicianIdExpr: 'tp.id',
+               requestedServiceZoneIdExpr: '$1',
+             })}
+           ORDER BY tp.technician_kind ASC, u.full_name ASC
+           LIMIT 300`,
+          [order.serviceZoneId],
+        )
+      : [];
+
+    // اللي على الطلب بيتحط الأول، فالـMap بتحافظ على علاقته الأقوى لو ظهر في المجمّع كمان.
+    const byId = new Map<string, Row>();
+    for (const row of [...relatedRows, ...cityRows]) {
+      if (!byId.has(row.technician_id)) byId.set(row.technician_id, row);
+    }
+
+    const relatedCount = relatedRows.length;
+    const scopeNoteAr = hasZone
+      ? `القايمة = كل اللي له علاقة بالطلب ده (${relatedCount}) + المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.`
+      : // بنقول الحد ده **قبل** ما يدوس «فسّر»: `explainTechnicianForOrder()` بترفض طلب بلا نطاق
+        // (أهلية النطاق مالهاش معنى من غيره)، فسيبه يكتشف ده بخطأ بعد الضغط كان إخفاء للسبب.
+        `الطلب ده مالوش نطاق خدمة، فمفيش مجمّع مدينة يتحسب — القايمة هنا هي اللي له علاقة بالطلب ده بس (${relatedCount}). والتفسير التفصيلي مش هيشتغل عليه لأن أهلية النطاق مالهاش معنى من غير نطاق؛ اربط الطلب بنطاق الأول.`;
+
     return {
-      items: rows.map((row) => ({
+      items: [...byId.values()].map((row) => ({
         technicianId: row.technician_id,
         fullName: row.full_name,
         technicianKind: row.technician_kind,
         currentLevel: row.current_level,
         hasLocation: row.has_location,
         isEligibleNow: eligibleIds.has(row.technician_id),
+        relationToOrder: row.relation,
       })),
+      scopeNoteAr,
     };
   }
 

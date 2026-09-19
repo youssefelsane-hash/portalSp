@@ -259,4 +259,56 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
       await q(`DELETE FROM users WHERE id = $1`, [admin.id]);
     }
   });
+
+  /*
+    ═══ بلاغ مالك 2026-09-19 (docs/08 §167): «لما الطلب بيروح لصنايعي معين بلاقي إن بتاعه مش شغال» ═══
+
+    القايمة كانت «معتمدي مدينة الطلب» وبس، فالشخص اللي **شايل الطلب** كان بيختفي منها لو غطّيته
+    للمدينة اتلغت بعد التعيين. اتقاس على بيانات حقيقية: ١٣ من ٣٧ طلب.
+  */
+  it('الفني اللي على الطلب بيفضل في القايمة حتى لو غطّيته للمدينة اتلغت (بَقّة حقيقية §167)', async () => {
+    await q(`UPDATE orders SET technician_id = $1 WHERE id = $2`, [ids.techPro, ids.individualOrder]);
+    await q(`UPDATE technician_zones SET is_active = false WHERE technician_id = $1`, [ids.techPro]);
+    try {
+      const { items, scopeNoteAr } = await service.listExplainCandidates(ids.individualOrder);
+      const candidate = items.find((item) => item.technicianId === ids.techPro);
+      expect(candidate).toBeDefined();
+      // العلاقة هي اللي بتخلّي الواجهة تحطّه فوق بدل ما يتدفن في مجمّع المدينة.
+      expect(candidate!.relationToOrder).toBe('assigned');
+      expect(scopeNoteAr).toContain('علاقة بالطلب');
+    } finally {
+      await q(`UPDATE technician_zones SET is_active = true WHERE technician_id = $1`, [ids.techPro]);
+      await q(`UPDATE orders SET technician_id = NULL WHERE id = $1`, [ids.individualOrder]);
+    }
+  });
+
+  it('اللي اتعرض عليه الطلب بيفضل في القايمة وعلاقته offered — «مين رفضه» سؤال أساسي (§167)', async () => {
+    await q(
+      `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status,
+         sent_at, expires_at, responded_at)
+       VALUES ($1,$2,1,'rejected', now() - interval '2 hours', now() - interval '1 hour', now() - interval '90 minutes')`,
+      [ids.individualOrder, ids.techNew],
+    );
+    await q(`UPDATE technician_zones SET is_active = false WHERE technician_id = $1`, [ids.techNew]);
+    try {
+      const { items } = await service.listExplainCandidates(ids.individualOrder);
+      const candidate = items.find((item) => item.technicianId === ids.techNew);
+      expect(candidate).toBeDefined();
+      expect(candidate!.relationToOrder).toBe('offered');
+    } finally {
+      await q(`UPDATE technician_zones SET is_active = true WHERE technician_id = $1`, [ids.techNew]);
+      await q(`DELETE FROM order_assignments WHERE order_id = $1 AND technician_id = $2`, [ids.individualOrder, ids.techNew]);
+    }
+  });
+
+  it('طلب بلا نطاق خدمة بيرجّع قايمة مش 400 — الرفض كان بيبان «مفيش مرشّحين» (§167)', async () => {
+    await q(`UPDATE orders SET technician_id = $1, service_zone_id = NULL WHERE id = $2`, [ids.techPro, ids.individualOrder]);
+    try {
+      const { items, scopeNoteAr } = await service.listExplainCandidates(ids.individualOrder);
+      expect(items.map((i) => i.technicianId)).toContain(ids.techPro);
+      expect(scopeNoteAr).toContain('مالوش نطاق خدمة');
+    } finally {
+      await q(`UPDATE orders SET technician_id = NULL, service_zone_id = $1 WHERE id = $2`, [ids.zone, ids.individualOrder]);
+    }
+  });
 });
