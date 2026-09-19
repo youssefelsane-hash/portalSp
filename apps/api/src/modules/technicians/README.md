@@ -1444,3 +1444,27 @@ ADR-0086 خلّاه `false` عمدًا («فتح الباب قرار إداري 
 كان بيقارن على شركة القائد دايمًا، فطلب شركة بقائد من برّها كان بيدّي البادج والأولوية لزمايل
 القائد بدل ناس الشركة صاحبة الطلب. أي كود جديد بيقيس «عضو في الشركة» لازم يسأل عن شركة
 **الطلب** الأول.
+
+### تشخيص «القايمة فاضية ليه» — نفس الشروط، مش محرك تاني (docs/08 §169)
+
+`diagnoseBookingCandidatePool()` بتعدّ المرشّحين تراكميًا على المراحل دي وترجّع **أول واحدة وقعت
+لصفر** (`firstBlockingStage`):
+
+`in_zone → qualified → has_location → individually_visible → team_level_ok → not_blocked →
+no_schedule_conflict → available`
+
+**كل مرحلة بتستخدم نفس دالة الشرط المستوردة بنفس الـparameters** — `technicianServiceQualificationCondition`,
+`technicianIndividualVisibilityCondition`, `blockedExistsExpr`, `activeOrderConflictExistsExpr`,
+`dailyCapacityExceededExpr`, `technicianAvailabilityCondition`. مفيش أي قاعدة عمل مكتوبة تاني هنا،
+فأي تعديل في `technician-eligibility.sql.ts` بيوصل للتشخيص تلقائيًا.
+
+⚠️ **فخ اتلقط أثناء البناء**: `technicianScheduleConflictCondition()` بترجّع الفنيين **المتعارضين**
+(ADR-0030 — «مؤهّل بس متعارض»)، مش المتاحين. استخدامها كـ«مفيش تعارض» بيقلب النتيجة. المرحلة
+بتتبني من `NOT activeOrderConflictExistsExpr(...)` مطروح منها السقف اليومي، عشان «مشغول في الموعد»
+و«عدّى سقفه» مايتلموش في سبب واحد.
+
+السقف اليومي جزء من تعبير التعارض نفسه، فبيتحسب لوحده (`dailyCapacityExceededExpr`) وبيتطرح في
+المرحلة اللي بعدها — والمرحلة الأخيرة (`available`) بتتحسب من `technicianAvailabilityCondition()`
+كاملة، فهي فحص ذاتي للمراحل اللي قبلها.
+
+بتتنادى من `CatalogController` لما قايمة الحجز تطلع فاضية في غير الإنتاج، ومن الاختبارات مباشرةً.

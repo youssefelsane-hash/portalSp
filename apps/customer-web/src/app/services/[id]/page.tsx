@@ -33,6 +33,7 @@ import {
 } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
+import { isProviderDiscoveryReady, providerEligibilityKey } from '@/lib/provider-discovery';
 import { formatWorkDuration } from '@baytak/shared-types';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
@@ -466,9 +467,46 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     estimate?.estimated_duration_days,
   ]);
 
+  /**
+   * **قايمة المنفّذين مالهاش معنى قبل ما الموعد يكتمل** (بلاغ مالك 2026-09-19).
+   *
+   * السؤال اللي القايمة بتجاوب عليه هو «مين متاح **للحجز ده**؟» — والحجز ده مش موجود لسه لو
+   * العميل ماختارش ميعاد. الـeffect كان بينطلق أول ما الوضع يبقى «اختار بنفسك» ويبقى فيه
+   * عنوان، و`computeScheduledAt()` بترجّع `undefined` والتاريخ فاضي، فالباك-إند كان بيقيس
+   * التوافر على **دلوقتي** (`COALESCE(scheduled_at, now())`). النتيجة: فني مؤهّل تمامًا للموعد
+   * اللي العميل ناوي عليه بيختفي لأنه مشغول اللحظة دي، والشاشة بتقول «مفيش فنيين متاحين في
+   * منطقتك» قبل ما العميل يختار ميعاد أصلاً.
+   *
+   * الترتيب المحفوظ زي ما هو: خدمة ← عنوان ← تفاصيل ← تاريخ ← ساعة (لو مطلوبة) ← منفّذ. الشرط
+   * ده هو بوابة الخطوة الأخيرة: ما تسألش قبل ما تبقى قادر تسأل السؤال الصح.
+   */
+  const providerScheduleInputs = {
+    allowsScheduling: service?.allows_scheduling !== false,
+    schedulePrecision: service?.schedule_precision ?? null,
+    scheduleDayMode,
+    scheduledDate,
+    scheduledDateRangeEnd,
+    preciseTime,
+    isSameDayBooking,
+  };
+  const providerScheduleReady = isProviderDiscoveryReady(providerScheduleInputs);
+  // بصمة كل مدخل بيغيّر «مين متاح» — هي وحدها اعتمادية الجلب/التصفير تحت، فأي تغيّر في
+  // العنوان أو الميعاد أو الساعة أو حقول الشغل بيبطّل القايمة والاختيار معاها.
+  const eligibilityKey = providerEligibilityKey({
+    ...providerScheduleInputs,
+    addressId: selectedAddressId,
+    pricingModel: service?.pricing_model ?? null,
+    fieldValues: debouncedFieldValues,
+  });
+
   useEffect(() => {
-    if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    // **اختيار قديم على سياق جديد = وعد كاذب.** اعتماديات الـeffect ده هي بالظبط المدخلات
+    // اللي بتغيّر الأهلية (العنوان، التاريخ، الساعة، حقول الشغل اللي بتحدد المدة والطاقم)، فأي
+    // تغيّر فيها معناه إن القايمة اللي الاختيار اتعمل منها بطلت. من غير التصفير ده العميل يفضل
+    // شايف الفني اللي اختاره «محجوز» وهو ممكن يكون مابقاش مؤهّل، والباك-إند يرفضه عند التأكيد.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedTechnicianId(null);
+    if (technicianChoiceMode !== 'manual' || !selectedAddressId || !providerScheduleReady) {
       setTechnicians(null);
       return;
     }
@@ -492,17 +530,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    technicianChoiceMode,
-    selectedAddressId,
-    id,
-    isSameDayBooking,
-    scheduledDate,
-    preciseTime,
-    service?.schedule_precision,
-    service?.pricing_model,
-    debouncedFieldValues,
-  ]);
+  }, [technicianChoiceMode, providerScheduleReady, eligibilityKey, id]);
 
   // **معاينة الطلب الكاملة** — بتتنادى في الخطوة التالتة بس، وبنفس مدخلات `POST /orders`
   // بالظبط (العنوان، الميعاد، المنفّذ المطلوب، كود الخصم، حقول التسعير). ده اللي بيضمن إن
@@ -1414,7 +1442,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
           {technicianChoiceMode === 'manual' && (
             <div className="motion-list mt-3 space-y-2">
-              {technicians === null ? (
+              {/* الموعد لسه ناقص ⇒ حالة محايدة، مش «مفيش فنيين». القايمة ماتسألتش أصلاً. */}
+              {!providerScheduleReady ? (
+                <p className="text-sm text-muted">اختار الموعد الأول عشان نعرض لك الفنيين المتاحين وقتها</p>
+              ) : technicians === null ? (
                 <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
               ) : technicians.length === 0 ? (
                 <p className="text-sm text-muted">مفيش فنيين متاحين في منطقتك دلوقتي للخدمة دي</p>

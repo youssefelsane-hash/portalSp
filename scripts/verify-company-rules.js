@@ -11,6 +11,13 @@
  */
 const { LiveHarness } = require('./lib/live-harness');
 
+// قايمة المنفّذين لخدمة بتقبل الجدولة محتاجة ميعاد صريح — الميعاد الناقص بيترفض عمدًا بدل ما
+// يتفسّر كـ«دلوقتي» (بلاغ مالك 2026-09-19). أي يوم جاي بيخدم الغرض هنا: البند اللي بيتقاس هو
+// اشتراط قائد فني، مش التوافر.
+const SCHEDULED_QS = `&scheduled_at=${encodeURIComponent(
+  new Date(Date.now() + 3 * 86_400_000).toISOString(),
+)}`;
+
 async function main() {
   const h = new LiveHarness('coRules');
   await h.connect();
@@ -138,7 +145,7 @@ async function main() {
     // ── بند ٣ — اشتراط قائد فني ─────────────────────────────────────────────
     const helper = await makeWorker('helper', 'assistant', 'professional');
     const listBefore = await h.api(
-      `/services/${catalog.service.id}/technicians?address_id=${customer.addressId}`,
+      `/services/${catalog.service.id}/technicians?address_id=${customer.addressId}${SCHEDULED_QS}`,
       { token: customer.token },
     );
     // الحقل اسمه `id` في الرد (مش `technician_id`) — والشركات بتيجي في نفس القايمة بـ`is_company`.
@@ -151,7 +158,7 @@ async function main() {
 
     await h.q(`UPDATE services SET requires_technician_lead = true WHERE id = $1`, [catalog.service.id]);
     const listAfter = await h.api(
-      `/services/${catalog.service.id}/technicians?address_id=${customer.addressId}`,
+      `/services/${catalog.service.id}/technicians?address_id=${customer.addressId}${SCHEDULED_QS}`,
       { token: customer.token },
     );
     const afterIds = new Set((listAfter.body?.data ?? []).map((i) => i.id));
