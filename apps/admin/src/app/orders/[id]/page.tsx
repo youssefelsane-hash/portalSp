@@ -10,6 +10,7 @@ import type {
   OrderEarningShareResponseDto,
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
+  DispatchRouteDto,
   OrderMatchingFunnelDto,
   OrderRatingResponseDto,
   OrderTraceDto,
@@ -201,18 +202,50 @@ function traceTime(value: string | null): string {
 }
 
 /**
+ * ليه الطلب ده مالوش جولات توزيع — بالاسم، مش «يا إما… يا إما».
+ *
+ * المالك سأل بالنص: «عايز حتى لو الطلب راح للشخص على طول exception يلاقيه أو شايف، عايز أبقى
+ * فاهم السيستم بيتصرف إزاي من كل طلب». الرسالة القديمة كانت بتعدّد احتمالين وتسيبه يخمّن؛
+ * دي بتقرا حالة الطلب ومسار التوزيع اللي الباك-إند حسبه وتقول الحاصل فعلاً.
+ */
+function noRoundsReasonAr(order: OrderDetailResponseDto | null, dispatchRoute: DispatchRouteDto | null): string {
+  if (order?.technician_id) {
+    return dispatchRoute === 'auto_confirm'
+      ? 'اتعيّن على الفني مباشرةً (تأكيد تلقائي) من غير ما يتعرض على حد ولا ينتظر قبوله.'
+      : 'فيه فني متعيّن عليه خلاص، والتعيين اتم من غير جولات عرض (تعيين إداري/مباشر).';
+  }
+  if (dispatchRoute === 'not_dispatchable') {
+    return 'الطلب مش في مرحلة توزيع أصلاً (حالته الحالية مش بتدوّر على فني).';
+  }
+  if (dispatchRoute === 'auto_confirm') {
+    return 'مساره تأكيد تلقائي — أول فني مؤهّل هياخده على طول من غير جولات عرض.';
+  }
+  return 'لسه ما دخلش التوزيع — أول جولة لسه ما اتبعتتش.';
+}
+
+/**
  * جولات المطابقة للطلب — توسيع للعدّادات المسطّحة اللي فوقه في نفس الكارت، مش قسم منفصل.
  *
  * بيقرا `GET /admin/operations/order-traces/:id` (نفس `order_assignments`). صفر منطق مطابقة هنا.
  */
-function OrderTraceRounds({ trace, error }: { trace: OrderTraceDto | null; error: string | null }) {
+function OrderTraceRounds({
+  trace,
+  error,
+  order,
+  dispatchRoute,
+}: {
+  trace: OrderTraceDto | null;
+  error: string | null;
+  order: OrderDetailResponseDto | null;
+  dispatchRoute: DispatchRouteDto | null;
+}) {
   /*
-    **الغياب بيتشرح، مابيحصلش بصمت** (بلاغ مالك 2026-09-18).
+    **الغياب بيتشرح، مابيحصلش بصمت** (بلاغ مالك 2026-09-18/19).
 
     الجدول ده كان بيرجّع `null` في تلات حالات مختلفة تمامًا — نداء فشل، طلب مالوش جولات،
     وطلب اتعيّن يدويًا — والتلاتة بيدّوا نفس النتيجة على الشاشة: **مفيش حاجة**. فالأدمن اللي
     شاف الجدول على طلب وما شافهوش على طلب تاني بيستنتج إن الميزة «اتشالت». دلوقتي كل حالة
-    بتقول نفسها.
+    بتقول نفسها **بالاسم** — بما فيها حالة «راح للفني على طول» اللي المالك سأل عنها بالنص.
   */
   if (error) {
     return (
@@ -224,8 +257,7 @@ function OrderTraceRounds({ trace, error }: { trace: OrderTraceDto | null; error
   if (!trace || trace.rounds.length === 0) {
     return (
       <p className="mt-3 text-xs text-muted-foreground">
-        مفيش جولات توزيع على الطلب ده — يا إما اتعيّن على فني بعينه من غير ما يتعرض على حد،
-        يا إما لسه ما دخلش التوزيع.
+        مفيش جولات توزيع على الطلب ده — {noRoundsReasonAr(order, dispatchRoute)}
       </p>
     );
   }
@@ -239,8 +271,12 @@ function OrderTraceRounds({ trace, error }: { trace: OrderTraceDto | null; error
         <StatusChip tone={trace.next_action === 'expand_next_round' || trace.next_action === 'matching_exhausted' ? 'danger' : 'neutral'}>
           {TRACE_NEXT_ACTION_LABELS[trace.next_action]}
         </StatusChip>
-        {trace.delay_seconds > 0 && (
+        {/* «مفيش تأخير» معلومة زي «متأخر ٥ دقايق» — إخفاؤها بيخلي الأدمن مش عارف
+            إذا كان المقياس اتحسب أصلاً ولا لأ. */}
+        {trace.delay_seconds > 0 ? (
           <span className="text-destructive">متأخر {Math.floor(trace.delay_seconds / 60)} دقيقة</span>
+        ) : (
+          <span className="text-muted-foreground">مفيش تأخير</span>
         )}
       </div>
 
@@ -1291,265 +1327,6 @@ export default function OrderDetailPage() {
     return (
       <AppShell>
         <p className="text-destructive">{error}</p>
-
-      {/*
-        **أدوات التشخيص في آخر الصفحة عن قصد** (بلاغ مالك 2026-09-17).
-
-        الكارتين دول (التسلسل الزمني + مفتّش المطابقة) كانوا **أول حاجة** في الصفحة، قبل
-        بيانات الطلب والعميل والفلوس. فموظف العمليات اللي فاتح الطلب عشان يعرف «مين العميل
-        وإيه الخدمة وامتى الموعد» كان بيقابل أول ما يفتح: «Timeline (0)» فاضي، وبعده جدول
-        `order_assignments` وصفوف أصفار وبادجات تشخيصية كتيفة. ده بالظبط «كلام مش معروف
-        الكلام ده متلخبط على بعضه».
-
-        هما **مهمين ومابيتشالوش** — بس مكانهم بعد الأساسيات: الأدمن بيوصلهم لما يكون بيسأل
-        «ليه الطلب بيتصرّف كده؟» مش لما يكون بيسأل «الطلب ده بتاع مين؟».
-      */}
-      {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
-          المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
-          (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
-      <Card className="mb-6">
-        <CardHeader>
-          {/* «Timeline» كانت إنجليزي وسط واجهة عربية بالكامل — بلاغ المالك عن «كلام عربي على
-              إنجليزي». الاسم العربي هو نفس المعنى بالظبط. */}
-          <CardTitle className="text-base">التسلسل الزمني للطلب ({timeline.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {timeline.length === 0 ? (
-            <EmptyState title="مفيش أحداث مسجّلة لسه" />
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {timeline.map((event) => {
-                const reason = event.detail?.reason;
-                const reasonText = event.detail?.reason_text;
-                const actorTypeLabel =
-                  event.actor_user_type === 'admin' ? 'أدمن' : event.actor_user_type === 'technician' ? 'فني' : event.actor_user_type;
-                return (
-                  <li key={`${event.source}-${event.id}`} className="flex flex-col gap-1 border-r-2 border-muted pr-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusChip tone={timelineEventSourceTone(event.source)}>{TIMELINE_SOURCE_LABELS[event.source]}</StatusChip>
-                      <span className="text-sm">{event.title}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {(formatDateTimeAr(event.timestamp) ?? '—')}
-                      {event.actor_full_name && (
-                        <>
-                          {' — '}
-                          {event.actor_full_name} ({actorTypeLabel})
-                        </>
-                      )}
-                    </p>
-                    {typeof reason === 'string' && reason && <p className="text-xs text-muted-foreground">السبب: {reason}</p>}
-                    {typeof reasonText === 'string' && reasonText && (
-                      <p className="text-xs text-muted-foreground">ملاحظات: {reasonText}</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
-          (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. فانل الطلب + تفسير فني محدد اختياري. */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">مفتّش المطابقة — ليه الطلب ده بيتصرّف كده؟</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {funnelError && <ErrorNotice className="mb-0">{funnelError}</ErrorNotice>}
-          {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
-          {matchingFunnel && (
-            <div className="flex flex-col gap-4 text-sm">
-              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
-                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
-                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
-              <div>
-                <p className="mb-2 font-medium">مسار التوزيع</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
-                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
-                  </Badge>
-                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
-                </div>
-              </div>
-              <div>
-                <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
-                <div className="flex flex-wrap gap-2">
-                  <StatusChip tone="neutral">مؤهّل للفئة: {matchingFunnel.pool.category_eligible}</StatusChip>
-                  <StatusChip tone="neutral">مؤهّل للنطاق: {matchingFunnel.pool.zone_eligible}</StatusChip>
-                  <Badge variant="outline" className={capacityTierBadgeClass('LIGHT')}>
-                    {CAPACITY_TIER_LABELS.LIGHT}: {matchingFunnel.pool.light}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('MEANINGFUL')}>
-                    {CAPACITY_TIER_LABELS.MEANINGFUL}: {matchingFunnel.pool.meaningful}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('HEAVY')}>
-                    {CAPACITY_TIER_LABELS.HEAVY}: {matchingFunnel.pool.heavy}
-                  </Badge>
-                  <Badge variant="outline" className={capacityTierBadgeClass('BLOCKED')}>
-                    {CAPACITY_TIER_LABELS.BLOCKED}: {matchingFunnel.pool.blocked}
-                  </Badge>
-                </div>
-              </div>
-              <div>
-                {/*
-                  **العدّادات بتتعرض كاملة دايمًا — حتى لو أصفار** (بلاغ مالك 2026-09-18).
-
-                  في جولة تنظيم الواجهة (§158) خفّيت الأصفار بحجّة إنها «سطر مالوش معلومة».
-                  ده كان غلط: صفر **معلومة حقيقية** («الطلب ده مااتبعتلوش حد» ≠ «القسم مش
-                  موجود»)، وإخفاؤه خلّى القسم يبان كأنه اتشال. المالك قال صراحةً إنه ما طلبش
-                  إخفاء أي حاجة — فرجعت زي ما كانت بالحرف، واسم الجدول فضل مشال لأنه مصطلح
-                  داخلي مش معلومة تشغيلية.
-                */}
-                <p className="mb-2 font-medium">العروض المبعوتة للفنيين</p>
-                <p className="text-muted-foreground">
-                  اتبعت: {matchingFunnel.dispatch_assignments.sent} · اتشاف: {matchingFunnel.dispatch_assignments.viewed} · قُبل:{' '}
-                  {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
-                  {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
-                </p>
-                {/* العدّادات فوق مسطّحة: «اتبعت 8» ما بتقولش لو دي جولة واحدة وصلت لـ8 ولا تلات
-                    جولات لسه بتوسّع، ولا مين منهم فتح العرض أصلاً. نفس البيانات بالظبط مقروءة
-                    بالجولة (GET /admin/operations/order-traces/:id) — مفيش استعلام تشخيصي جديد. */}
-                <OrderTraceRounds trace={orderTrace} error={traceError} />
-              </div>
-              {matchingFunnel.crew_recruit_opportunities && (
-                <div>
-                  <p className="mb-2 font-medium">فرص تجنيد الفريق</p>
-                  <p className="text-muted-foreground">
-                    اتعرضت: {matchingFunnel.crew_recruit_opportunities.offered} · اتقبلت: {matchingFunnel.crew_recruit_opportunities.accepted} ·
-                    اتراضت: {matchingFunnel.crew_recruit_opportunities.declined} · اتقفلت: {matchingFunnel.crew_recruit_opportunities.closed}
-                  </p>
-                </div>
-              )}
-              {matchingFunnel.crew_status && (
-                <div>
-                  <p className="mb-2 font-medium">حالة الطاقم</p>
-                  <p className="text-muted-foreground">
-                    فنيين: {matchingFunnel.crew_status.assignedTechnicians}/{matchingFunnel.crew_status.requiredTechnicians} · مساعدين:{' '}
-                    {matchingFunnel.crew_status.assignedAssistants}/{matchingFunnel.crew_status.requiredAssistants} —{' '}
-                    <span className={matchingFunnel.crew_status.crewComplete ? 'text-success' : 'text-warning'}>
-                      {matchingFunnel.crew_status.crewComplete ? 'الطاقم مكتمل' : 'الطاقم ناقص'}
-                    </span>
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="border-t pt-4">
-            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
-            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
-                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
-            <p className="mb-2 text-xs text-muted-foreground">
-              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
-            </p>
-            <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
-                  الفني/المساعد
-                </Label>
-                <SelectNative
-                  id="explain_technician"
-                  value={explainTechnicianId}
-                  onFocus={() => {
-                    if (!explainCandidates) loadExplainCandidates();
-                  }}
-                  onChange={(e) => setExplainTechnicianId(e.target.value)}
-                  className="min-w-[280px]"
-                >
-                  <option value="">اختار فني أو مساعد</option>
-                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
-                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
-                    if (group.length === 0) return null;
-                    return (
-                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
-                        {group.map((candidate) => (
-                          <option key={candidate.technicianId} value={candidate.technicianId}>
-                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
-                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </SelectNative>
-              </div>
-              <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
-                {explainLoading ? 'جاري التفسير...' : 'فسّر'}
-              </Button>
-            </form>
-            {explainError && <ErrorNotice className="mb-0">{explainError}</ErrorNotice>}
-            {explanation && (
-              <div className="mt-3 flex flex-col gap-2 text-sm">
-                {(() => {
-                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
-                  if (!subject) return null;
-                  return (
-                    <p className="flex items-center gap-2 text-muted-foreground">
-                      <TechnicianKindTag kind={subject.technicianKind} />
-                      <span>{subject.fullName}</span>
-                      {subject.currentLevel && (
-                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
-                      )}
-                    </p>
-                  );
-                })()}
-                <p className="font-medium">
-                  <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
-                    {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
-                  </span>
-                  {' — '}
-                  {explanation.reason_ar}
-                </p>
-                {explanation.capacity_tier && (
-                  <p>
-                    القدرة الاستيعابية:{' '}
-                    <Badge variant="outline" className={capacityTierBadgeClass(explanation.capacity_tier)}>
-                      {CAPACITY_TIER_LABELS[explanation.capacity_tier]}
-                    </Badge>
-                  </p>
-                )}
-                {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
-                {explanation.rank_info && (
-                  <>
-                    <p>
-                      الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
-                      {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
-                      {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
-                      {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
-                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
-                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)} − مسافة{' '}
-                      {explanation.rank_info.score_breakdown.distance_penalty.toFixed(2)}
-                      {explanation.rank_info.score_breakdown.distance_weight > 0 && (
-                        <span className="text-muted-foreground">
-                          {' '}(وزن {explanation.rank_info.score_breakdown.distance_weight} —{' '}
-                          {explanation.rank_info.score_breakdown.distance_weight_context_ar})
-                        </span>
-                      )}
-                    </p>
-                  </>
-                )}
-                {!explanation.rank_info && (
-                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
-                )}
-                <ul className="flex flex-col gap-1">
-                  {explanation.checks.map((check) => (
-                    <li key={check.key} className="flex items-center gap-2">
-                      <span className={check.passed ? 'text-success' : 'text-destructive'}>{check.passed ? '✓' : '✗'}</span>
-                      <span className={check.passed ? undefined : 'text-destructive'}>{check.label_ar}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       </AppShell>
     );
   }
@@ -1876,18 +1653,21 @@ export default function OrderDetailPage() {
                 </StatusChip>
               </DataRow>
               <DataRow label="رسوم الكشف">{formatEgp(order.inspection_fee_cents)}</DataRow>
-              {order.surge_amount_cents > 0 && (
-                <DataRow label="رسوم الطوارئ" tone="danger">
-                  {formatEgp(order.surge_amount_cents)}
-                </DataRow>
-              )}
-              {order.discount_amount_cents > 0 && <DataRow label="الخصم">{formatEgp(order.discount_amount_cents)}</DataRow>}
-              {/* بتظهر **بس لو حصل تأجيل فعلاً** — «تأجيلات: 0» بادج على كل طلب زحمة بلا معلومة. */}
-              {(order.customer_reschedule_count ?? 0) > 0 && (
-                <DataRow label="تأجيلات العميل الذاتية">
-                  <Badge variant="secondary">{order.customer_reschedule_count}</Badge>
-                </DataRow>
-              )}
+              {/*
+                الصفوف التلاتة دي بتتعرض **دايمًا، حتى بصفر** (بلاغ مالك 2026-09-19).
+
+                في جولة التنظيم (§158) خفّيتهم عند الصفر بحجّة «سطر مالوش معلومة». الحجّة دي
+                غلط في ملخّص مالي: «رسوم الطوارئ: ٠» جواب على سؤال («الطلب ده اتحسبتله رسوم
+                طوارئ؟»)، أما غياب السطر فمش جواب — ممكن يتقرا «مفيش» وممكن يتقرا «الخانة
+                اتشالت». وده بالظبط اللي حصل مع المالك.
+              */}
+              <DataRow label="رسوم الطوارئ" tone={order.surge_amount_cents > 0 ? 'danger' : undefined}>
+                {formatEgp(order.surge_amount_cents)}
+              </DataRow>
+              <DataRow label="الخصم">{formatEgp(order.discount_amount_cents)}</DataRow>
+              <DataRow label="تأجيلات العميل الذاتية">
+                <Badge variant="secondary">{order.customer_reschedule_count ?? 0}</Badge>
+              </DataRow>
               {order.warranty_expires_at && (
                 <DataRow label="الضمان لحد">
                   {formatDateTimeAr(order.warranty_expires_at) ?? '—'}
@@ -3595,6 +3375,306 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        **البَقّة الحقيقية اللي خلّت المالك «مش شايف التوزيع»** (2026-09-19).
+
+        الكارتين دول (التسلسل الزمني + مفتّش المطابقة) اتنقلوا لآخر الصفحة في جولة التنظيم
+        (§158) — بس اتحطّوا **جوّه فرع `if (error && !order)`** بالغلط، يعني بيترندروا بس لما
+        الطلب نفسه يفشل في التحميل. على أي صفحة طلب شغّالة كانوا **مش موجودين في الـDOM خالص**.
+
+        `tsc`/`eslint`/`next build` كلهم عدّوا: الكود سليم نحويًا، بس في الفرع الغلط. اللي مسكها
+        هو `scripts/visual-matching-inspector.js` — بيدوّر على عناوين الأقسام في نص الصفحة
+        الحقيقي بعد تسجيل دخول حقيقي، فـ«الكارت مش موجود في الصفحة خالص» طلعت صريحة.
+      */}
+      {/*
+        **أدوات التشخيص في آخر الصفحة عن قصد** (بلاغ مالك 2026-09-17).
+
+        الكارتين دول (التسلسل الزمني + مفتّش المطابقة) كانوا **أول حاجة** في الصفحة، قبل
+        بيانات الطلب والعميل والفلوس. فموظف العمليات اللي فاتح الطلب عشان يعرف «مين العميل
+        وإيه الخدمة وامتى الموعد» كان بيقابل أول ما يفتح: «Timeline (0)» فاضي، وبعده جدول
+        `order_assignments` وصفوف أصفار وبادجات تشخيصية كتيفة. ده بالظبط «كلام مش معروف
+        الكلام ده متلخبط على بعضه».
+
+        هما **مهمين ومابيتشالوش** — بس مكانهم بعد الأساسيات: الأدمن بيوصلهم لما يكون بيسأل
+        «ليه الطلب بيتصرّف كده؟» مش لما يكون بيسأل «الطلب ده بتاع مين؟».
+      */}
+      {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
+          المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
+          (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
+      <Card className="mb-6">
+        <CardHeader>
+          {/* «Timeline» كانت إنجليزي وسط واجهة عربية بالكامل — بلاغ المالك عن «كلام عربي على
+              إنجليزي». الاسم العربي هو نفس المعنى بالظبط. */}
+          <CardTitle className="text-base">التسلسل الزمني للطلب ({timeline.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {timeline.length === 0 ? (
+            <EmptyState title="مفيش أحداث مسجّلة لسه" />
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {timeline.map((event) => {
+                const reason = event.detail?.reason;
+                const reasonText = event.detail?.reason_text;
+                const actorTypeLabel =
+                  event.actor_user_type === 'admin' ? 'أدمن' : event.actor_user_type === 'technician' ? 'فني' : event.actor_user_type;
+                return (
+                  <li key={`${event.source}-${event.id}`} className="flex flex-col gap-1 border-r-2 border-muted pr-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip tone={timelineEventSourceTone(event.source)}>{TIMELINE_SOURCE_LABELS[event.source]}</StatusChip>
+                      <span className="text-sm">{event.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {(formatDateTimeAr(event.timestamp) ?? '—')}
+                      {event.actor_full_name && (
+                        <>
+                          {' — '}
+                          {event.actor_full_name} ({actorTypeLabel})
+                        </>
+                      )}
+                    </p>
+                    {typeof reason === 'string' && reason && <p className="text-xs text-muted-foreground">السبب: {reason}</p>}
+                    {typeof reasonText === 'string' && reasonText && (
+                      <p className="text-xs text-muted-foreground">ملاحظات: {reasonText}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
+          (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. فانل الطلب + تفسير فني محدد اختياري. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">مفتّش المطابقة — ليه الطلب ده بيتصرّف كده؟</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {/*
+            **فشل الفانل مابيوقّعش القسم كله** (بلاغ مالك 2026-09-19).
+
+            كل اللي تحت كان جوّه `{matchingFunnel && …}`، فأي رفض من الـendpoint — وأشهره طلب
+            بلا `service_zone_id` — كان بيخفي **جدول جولات التوزيع كمان**، رغم إن الجدول ده
+            مصدره endpoint تاني خالص وبيشتغل عادي. الأدمن كان بيشوف رسالة حمرا بس ويستنتج إن
+            القسم اتشال. دلوقتي جدول الجولات برّه الشرط، والفانل بيرجّع اللي يقدر عليه.
+          */}
+          {funnelError && <ErrorNotice className="mb-0">{funnelError}</ErrorNotice>}
+          {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
+          {matchingFunnel && (
+            <div className="flex flex-col gap-4 text-sm">
+              {/* «ليه ده استنى قبول فني وده اتعيّنله على طول؟» — طلبان بنفس وضع الحجز بياخدوا
+                  مسارين مختلفين حسب بُعد الموعد، وده كان غير مرئي خالص. النص جاي من الباك-إند
+                  (نفس دالة القرار اللي المحرك بيستخدمها) مش متكرّر هنا. */}
+              <div>
+                <p className="mb-2 font-medium">مسار التوزيع</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={dispatchRouteBadgeClass(matchingFunnel.dispatch_route.route)}>
+                    {DISPATCH_ROUTE_LABELS[matchingFunnel.dispatch_route.route]}
+                  </Badge>
+                  <span className="text-muted-foreground">{matchingFunnel.dispatch_route.explanation_ar}</span>
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
+                {matchingFunnel.pool ? (
+                  <div className="flex flex-wrap gap-2">
+                    <StatusChip tone="neutral">مؤهّل للفئة: {matchingFunnel.pool.category_eligible}</StatusChip>
+                    <StatusChip tone="neutral">مؤهّل للنطاق: {matchingFunnel.pool.zone_eligible}</StatusChip>
+                    <Badge variant="outline" className={capacityTierBadgeClass('LIGHT')}>
+                      {CAPACITY_TIER_LABELS.LIGHT}: {matchingFunnel.pool.light}
+                    </Badge>
+                    <Badge variant="outline" className={capacityTierBadgeClass('MEANINGFUL')}>
+                      {CAPACITY_TIER_LABELS.MEANINGFUL}: {matchingFunnel.pool.meaningful}
+                    </Badge>
+                    <Badge variant="outline" className={capacityTierBadgeClass('HEAVY')}>
+                      {CAPACITY_TIER_LABELS.HEAVY}: {matchingFunnel.pool.heavy}
+                    </Badge>
+                    <Badge variant="outline" className={capacityTierBadgeClass('BLOCKED')}>
+                      {CAPACITY_TIER_LABELS.BLOCKED}: {matchingFunnel.pool.blocked}
+                    </Badge>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">
+                    {matchingFunnel.pool_unavailable_reason_ar ?? 'المجمّع مش متاح لهذا الطلب.'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {/*
+                  **العدّادات بتتعرض كاملة دايمًا — حتى لو أصفار** (بلاغ مالك 2026-09-18).
+
+                  في جولة تنظيم الواجهة (§158) خفّيت الأصفار بحجّة إنها «سطر مالوش معلومة».
+                  ده كان غلط: صفر **معلومة حقيقية** («الطلب ده مااتبعتلوش حد» ≠ «القسم مش
+                  موجود»)، وإخفاؤه خلّى القسم يبان كأنه اتشال. المالك قال صراحةً إنه ما طلبش
+                  إخفاء أي حاجة — فرجعت زي ما كانت بالحرف، واسم الجدول فضل مشال لأنه مصطلح
+                  داخلي مش معلومة تشغيلية.
+                */}
+                <p className="mb-2 font-medium">العروض المبعوتة للفنيين</p>
+                <p className="text-muted-foreground">
+                  اتبعت: {matchingFunnel.dispatch_assignments.sent} · اتشاف: {matchingFunnel.dispatch_assignments.viewed} · قُبل:{' '}
+                  {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
+                  {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
+                </p>
+              </div>
+              {/* القسمين دول كانوا بيختفوا خالص لأي طلب فردي — نفس نمط «الاختفاء الصامت» اللي
+                  خلّى المالك يفتكر إن الميزة اتشالت. دلوقتي الغياب نفسه بيتشرح بسببه. */}
+              <div>
+                <p className="mb-2 font-medium">فرص تجنيد الفريق</p>
+                {matchingFunnel.crew_recruit_opportunities ? (
+                  <p className="text-muted-foreground">
+                    اتعرضت: {matchingFunnel.crew_recruit_opportunities.offered} · اتقبلت: {matchingFunnel.crew_recruit_opportunities.accepted} ·
+                    اتراضت: {matchingFunnel.crew_recruit_opportunities.declined} · اتقفلت: {matchingFunnel.crew_recruit_opportunities.closed}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">{matchingFunnel.crew_unavailable_reason_ar ?? 'مش منطبق على الطلب ده.'}</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-2 font-medium">حالة الطاقم</p>
+                {matchingFunnel.crew_status ? (
+                  <p className="text-muted-foreground">
+                    فنيين: {matchingFunnel.crew_status.assignedTechnicians}/{matchingFunnel.crew_status.requiredTechnicians} · مساعدين:{' '}
+                    {matchingFunnel.crew_status.assignedAssistants}/{matchingFunnel.crew_status.requiredAssistants} —{' '}
+                    <span className={matchingFunnel.crew_status.crewComplete ? 'text-success' : 'text-warning'}>
+                      {matchingFunnel.crew_status.crewComplete ? 'الطاقم مكتمل' : 'الطاقم ناقص'}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">{matchingFunnel.crew_unavailable_reason_ar ?? 'مش منطبق على الطلب ده.'}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/*
+            **جولات التوزيع برّه شرط الفانل** — مصدرها endpoint تاني خالص
+            (`/admin/operations/order-traces/:id`) وبتشتغل حتى لما الفانل يرفض. ودي بالظبط
+            الحتة اللي المالك بيسأل عنها: «الطلب ده اتبعت لمين، ومين رفضه، وهيتبعت تاني إمتى».
+          */}
+          <div className="border-t pt-4">
+            <p className="mb-1 text-sm font-medium">جولات التوزيع — اتبعت لمين وإمتى</p>
+            <OrderTraceRounds
+              trace={orderTrace}
+              error={traceError}
+              order={order}
+              dispatchRoute={matchingFunnel?.dispatch_route.route ?? null}
+            />
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
+            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
+                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
+            <p className="mb-2 text-xs text-muted-foreground">
+              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
+            </p>
+            <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
+                  الفني/المساعد
+                </Label>
+                <SelectNative
+                  id="explain_technician"
+                  value={explainTechnicianId}
+                  onFocus={() => {
+                    if (!explainCandidates) loadExplainCandidates();
+                  }}
+                  onChange={(e) => setExplainTechnicianId(e.target.value)}
+                  className="min-w-[280px]"
+                >
+                  <option value="">اختار فني أو مساعد</option>
+                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
+                    if (group.length === 0) return null;
+                    return (
+                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                        {group.map((candidate) => (
+                          <option key={candidate.technicianId} value={candidate.technicianId}>
+                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
+                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </SelectNative>
+              </div>
+              <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
+                {explainLoading ? 'جاري التفسير...' : 'فسّر'}
+              </Button>
+            </form>
+            {explainError && <ErrorNotice className="mb-0">{explainError}</ErrorNotice>}
+            {explanation && (
+              <div className="mt-3 flex flex-col gap-2 text-sm">
+                {(() => {
+                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
+                  if (!subject) return null;
+                  return (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <TechnicianKindTag kind={subject.technicianKind} />
+                      <span>{subject.fullName}</span>
+                      {subject.currentLevel && (
+                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
+                      )}
+                    </p>
+                  );
+                })()}
+                <p className="font-medium">
+                  <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
+                    {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
+                  </span>
+                  {' — '}
+                  {explanation.reason_ar}
+                </p>
+                {explanation.capacity_tier && (
+                  <p>
+                    القدرة الاستيعابية:{' '}
+                    <Badge variant="outline" className={capacityTierBadgeClass(explanation.capacity_tier)}>
+                      {CAPACITY_TIER_LABELS[explanation.capacity_tier]}
+                    </Badge>
+                  </p>
+                )}
+                {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
+                {explanation.rank_info && (
+                  <>
+                    <p>
+                      الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
+                      {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
+                      {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
+                      {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
+                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
+                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)} − مسافة{' '}
+                      {explanation.rank_info.score_breakdown.distance_penalty.toFixed(2)}
+                      {explanation.rank_info.score_breakdown.distance_weight > 0 && (
+                        <span className="text-muted-foreground">
+                          {' '}(وزن {explanation.rank_info.score_breakdown.distance_weight} —{' '}
+                          {explanation.rank_info.score_breakdown.distance_weight_context_ar})
+                        </span>
+                      )}
+                    </p>
+                  </>
+                )}
+                {!explanation.rank_info && (
+                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
+                )}
+                <ul className="flex flex-col gap-1">
+                  {explanation.checks.map((check) => (
+                    <li key={check.key} className="flex items-center gap-2">
+                      <span className={check.passed ? 'text-success' : 'text-destructive'}>{check.passed ? '✓' : '✗'}</span>
+                      <span className={check.passed ? undefined : 'text-destructive'}>{check.label_ar}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </AppShell>
   );
 }

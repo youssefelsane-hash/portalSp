@@ -1646,14 +1646,14 @@ export default function TechnicianDetailPage() {
                   snapshot **موجود**، مش «آخر N شهر من النهارده» — فلو آخر حساب للفني من يناير
                   والدنيا سبتمبر، التقرير بيتكلم عن يناير. من غير السطر ده الأدمن مش عارف كده.
                 */}
-                {productivity.snapshot_periods.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    الشهور المحسوبة:{' '}
-                    {productivity.snapshot_periods
-                      .map((p) => `${String(p.period_month).padStart(2, '0')}/${p.period_year}`)
-                      .join(' · ')}
-                  </p>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  الشهور المحسوبة:{' '}
+                  {productivity.snapshot_periods.length > 0
+                    ? productivity.snapshot_periods
+                        .map((p) => `${String(p.period_month).padStart(2, '0')}/${p.period_year}`)
+                        .join(' · ')
+                    : 'مفيش ولا شهر محسوب للفني ده لسه — التقرير فاضي عشان كده، مش عشان أرقامه صفر.'}
+                </p>
 
                 {/*
                   ═══ سياق التقييمات (بلاغ مالك 2026-09-17، ADR-0105) ═══

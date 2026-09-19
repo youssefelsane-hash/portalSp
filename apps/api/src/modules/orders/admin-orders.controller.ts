@@ -295,7 +295,8 @@ export class AdminOrdersController {
         near_term_hours: funnel.dispatchRoute.nearTermHours,
         explanation_ar: funnel.dispatchRoute.explanationAr,
       },
-      pool: {
+      // `null` لطلب بلا نطاق خدمة — باقي الأرقام تحت لسه صحيحة (docs/08 §166).
+      pool: funnel.pool && {
         category_eligible: funnel.pool.categoryEligible,
         zone_eligible: funnel.pool.zoneEligible,
         blocked: funnel.pool.blocked,
@@ -303,9 +304,11 @@ export class AdminOrdersController {
         meaningful: funnel.pool.meaningful,
         light: funnel.pool.light,
       },
+      pool_unavailable_reason_ar: funnel.poolUnavailableReasonAr,
       dispatch_assignments: funnel.dispatchAssignments,
       crew_recruit_opportunities: funnel.crewRecruitOpportunities,
       crew_status: funnel.crewStatus,
+      crew_unavailable_reason_ar: funnel.crewUnavailableReasonAr,
     };
   }
 
