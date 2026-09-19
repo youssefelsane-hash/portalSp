@@ -182,6 +182,9 @@ const TECHNICIAN_LEVEL_RANK: Record<TechnicianLevel, number> = {
   [TechnicianLevel.TEAM_LEADER]: 4,
 };
 
+/** أعلى رتبة في السلّم فوق — سقف بيعطّل قاعدة الرتبة فعليًا (خانة المساعدة، `listRecruitCandidates`). */
+const MAX_TECHNICIAN_LEVEL_RANK = Math.max(...Object.values(TECHNICIAN_LEVEL_RANK));
+
 export interface RecruitCandidateRow {
   technicianId: string;
   fullName: string;
@@ -554,6 +557,21 @@ export class OrderTeamService {
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const leaderRank = TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel];
+    // **سقف الرتبة لخانة التنفيذ بس** (بلاغ مالك 2026-09-19).
+    //
+    // قاعدة «ماتجنّدش حد أعلى منك رتبة» أصلها خانة التنفيذ: هناك المُجنَّد بيشتغل منفّذ جنب
+    // القائد، فمنطقي ما يبقاش أعلى منه. في خانة المساعدة مالهاش معنى — المساعد بيساعد،
+    // والرتبة بتوصف مستواه كمنفّذ مش كمساعد.
+    //
+    // والضرر كان حقيقي: من ADR-0087 المساعد بقى يقدر يقود طلب، والمساعد اللي بيقود عادةً رتبته
+    // الأدنى (صفر). فالسقف كان بيقع على صفر ويخفي **كل** مساعد أعلى من مبتدئ مهما كانت مناطقه
+    // وتخصصاته مظبوطة — قايمة فاضية مهما عمل الأدمن أي حاجة، وده بالظبط البلاغ.
+    //
+    // الرفع بيتم على **قيمة الـparameter** مش بحذف الشرط من الـSQL: نص الاستعلام بيفضل زي ما
+    // هو بالحرف، و`$3` يفضل مربوط ومُعرَّف النوع (حذف الإشارة ليه بيكسر الاستعلام بـ
+    // "could not determine data type of parameter $3"). الاستبعادات التانية (التخصص، المدينة،
+    // الشركة، الجدول، الموقع) ما اتغيّرتش.
+    const rankCeiling = role === 'assistant' ? MAX_TECHNICIAN_LEVEL_RANK : leaderRank;
     const ranking = role === 'assistant'
       ? await resolveCandidateQualityRankingSettings(this.settingsService)
       : null;
@@ -653,7 +671,7 @@ export class OrderTeamService {
         ? [
             orderId,
             leaderProfileId,
-            leaderRank,
+            rankCeiling,
             leaderProfile.companyId,
             ACTIVE_TECHNICIAN_ORDER_STATUSES,
             ranking!.workloadWeight,
@@ -664,7 +682,7 @@ export class OrderTeamService {
             ranking!.reliabilityWeight,
             ranking!.reliabilityMinRatingsCount,
           ]
-        : [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
+        : [orderId, leaderProfileId, rankCeiling, leaderProfile.companyId],
     );
 
     const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
@@ -767,7 +785,10 @@ export class OrderTeamService {
       }
       await this.assertCrewSlotOpen(orderId, order, role, manager);
       await assertCrewCandidateScope(manager, order, technicianId, role);
-      if (TECHNICIAN_LEVEL_RANK[candidateProfile.currentLevel] > TECHNICIAN_LEVEL_RANK[lockedLeader.currentLevel]) {
+      // نفس سقف الرتبة اللي في `listRecruitCandidates` بالظبط — خانة التنفيذ بس. لازم الاتنين
+      // يتغيّروا مع بعض: لو القايمة عرضت مساعد والكتابة رفضته برتبته، القائد بيدوس على اسم
+      // ظاهر قدامه وياخد رفض مش مفهوم (ده اللي الكومنت فوق `assertCrewSlotOpen` بيحذّر منه).
+      if (role !== 'assistant' && TECHNICIAN_LEVEL_RANK[candidateProfile.currentLevel] > TECHNICIAN_LEVEL_RANK[lockedLeader.currentLevel]) {
         throw new ApiException(ErrorCode.VAL_001, 'الفني ده رتبته أعلى منك — مينفعش تجنّده', HttpStatus.FORBIDDEN);
       }
       if (!candidateProfile.currentLocation) {

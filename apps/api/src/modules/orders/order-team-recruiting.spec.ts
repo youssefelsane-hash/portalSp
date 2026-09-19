@@ -109,14 +109,14 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     );
   }
 
-  async function insertOrder(label: string, opts: { requiredTechnicians: number | null; requiredAssistants?: number | null; bookingMode?: BookingMode }) {
+  async function insertOrder(label: string, opts: { requiredTechnicians: number | null; requiredAssistants?: number | null; bookingMode?: BookingMode; leaderProfileId?: string }) {
     const [order] = await q(
       `INSERT INTO orders (commission_rate_applied,order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
        VALUES (20,$1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
       [
         `TESTREC-${label}`.slice(0, 24),
         ids.customerProfile,
-        ids.leaderProfile,
+        opts.leaderProfileId ?? ids.leaderProfile,
         ids.service,
         ids.address,
         ids.zone,
@@ -385,6 +385,55 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     expect(candidateIds).not.toContain(ids.juniorProfile);
     expect(candidateIds).not.toContain(ids.leaderProfile);
     await q(`DELETE FROM technician_excluded_services WHERE technician_id = $1`, [ids.assistantProfile]);
+  });
+
+  // بلاغ مالك 2026-09-19: «الأوردر راح لفني هو أصلاً مساعد، دوس محتاج مساعد، القايمة فاضية
+  // دايمًا — حتى بعد ما إدّيت لمساعد تاني تغطية نفس منطقة الطلب».
+  //
+  // السبب: سقف الرتبة `CASE current_level ... <= $3` (رتبة القائد) كان بينطبق على **خانة
+  // المساعدة** كمان. القاعدة دي أصلها من خانة **التنفيذ** («ماتجنّدش حد أعلى منك رتبة كمنفّذ»)،
+  // ولها معنى هناك. لكن من ADR-0087 بقى المساعد يقدر يقود طلب، والمساعد اللي بيقود عادةً
+  // `new` (رتبة 0) — فالسقف بيقع على صفر ويخفي **كل** مساعد رتبته أعلى من مبتدئ، مهما كانت
+  // مناطقه وتخصصاته مظبوطة. الأعراض بالظبط: قايمة فاضية مهما عملت في الأدمن.
+  //
+  // السويت القديمة ماكانتش بتمسك ده لأن القائد فيها فني `professional` (رتبة 2).
+  it('قائد مساعد بيدوّر على مساعد أعلى منه رتبة — لازم يظهر (سقف الرتبة مالوش معنى في خانة المساعدة)', async () => {
+    const assistantLeaderProfile = await insertTechnician('al', {
+      level: TechnicianLevel.NEW,
+      hasLocation: true,
+      kind: TechnicianKind.ASSISTANT,
+    });
+    const [assistantLeaderUser] = await q(`SELECT user_id FROM technician_profiles WHERE id = $1`, [assistantLeaderProfile]);
+    const seniorAssistant = await insertTechnician('as', {
+      level: TechnicianLevel.VERIFIED,
+      hasLocation: true,
+      kind: TechnicianKind.ASSISTANT,
+    });
+
+    try {
+      const orderId = await insertOrder(`asst-leader-${runId}`, {
+        requiredTechnicians: 1,
+        requiredAssistants: 2,
+        leaderProfileId: assistantLeaderProfile,
+      });
+      const candidates = await orderTeamService.listRecruitCandidates(assistantLeaderUser.user_id, orderId, 'assistant');
+      expect(candidates.map((candidate) => candidate.technicianId)).toContain(seniorAssistant);
+
+      // والكتابة لازم توافق القايمة: لو دي عرضته ودي رفضته بالرتبة، القائد بيدوس على اسم ظاهر
+      // قدامه وياخد رفض مش مفهوم. الحارسين اتغيّروا مع بعض عمدًا.
+      await orderTeamService.recruitMember(assistantLeaderUser.user_id, orderId, seniorAssistant, 'assistant');
+      const members = await q(`SELECT technician_id FROM order_team_members WHERE order_id = $1`, [orderId]);
+      expect(members.map((member: { technician_id: string }) => member.technician_id)).toContain(seniorAssistant);
+      await q(`DELETE FROM order_team_members WHERE order_id = $1`, [orderId]);
+    } finally {
+      // التنظيف لازم يشيل البروفايل والمستخدم كمان، مش النطاقات/الخدمات بس — `technician_code`
+      // بيتقص على ٢٠ حرف فصفّ متسيب من تشغيلة فاتت بيصطدم بالتشغيلة الجاية (حصل فعلاً هنا).
+      const ids2 = [assistantLeaderProfile, seniorAssistant];
+      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1::uuid[])`, [ids2]);
+      await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [ids2]);
+      await q(`DELETE FROM orders WHERE technician_id = ANY($1::uuid[])`, [ids2]);
+      await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [ids2]);
+    }
   });
 
   it('ترتيب المساعدين: المسافة أولًا ثم نفس أولوية المستوى عند تساوي المسافة', async () => {
