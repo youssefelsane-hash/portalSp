@@ -16,6 +16,7 @@
     "lint": "eslint",
     "pretypecheck": "npm --prefix ../../packages/shared-types run build",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node --test test/*.test.mjs",
     "test:e2e:operations": "node test/operations-center.e2e.mjs"
   },
   "dependencies": {

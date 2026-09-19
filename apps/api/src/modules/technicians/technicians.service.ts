@@ -255,7 +255,7 @@ export class TechniciansService {
         throw new ApiException(ErrorCode.VAL_001, 'عندك طلب/اعتماد قائم بالفعل لنفس الخدمة دي', HttpStatus.CONFLICT);
       }
       const previousStatus = existing.verificationStatus;
-      existing.skillLevel = dto.skill_level ?? existing.skillLevel;
+      existing.wageTier = dto.skill_level ?? existing.wageTier;
       existing.verificationStatus = TechnicianServiceVerificationStatus.PENDING_VERIFICATION;
       existing.isSelfDeclared = true;
       existing.isActive = false;
@@ -279,7 +279,7 @@ export class TechniciansService {
     const row = this.technicianServices.create({
       technicianId: profile.id,
       serviceId: dto.service_id,
-      skillLevel: dto.skill_level,
+      wageTier: dto.skill_level,
       isActive: false,
       isSelfDeclared: true,
       verificationStatus: TechnicianServiceVerificationStatus.PENDING_VERIFICATION,
@@ -292,7 +292,7 @@ export class TechniciansService {
       action: 'technician_service.declared',
       entityType: 'technician_service',
       entityId: row.id,
-      newValues: { service_id: dto.service_id, skill_level: row.skillLevel },
+      newValues: { service_id: dto.service_id, wage_tier: row.wageTier },
     });
     return row;
   }

@@ -16,6 +16,8 @@ export enum TechnicianLevel {
 export enum TechnicianPricingTier {
   BEGINNER = 'beginner',
   STANDARD = 'standard',
+  /** درجة وسطية بين القياسي والخبير (migration 0355) — الترتيب هنا هو ترتيب الـenum في القاعدة. */
+  ADVANCED = 'advanced',
   EXPERT = 'expert',
 }
 

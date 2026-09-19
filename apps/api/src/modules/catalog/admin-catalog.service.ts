@@ -753,7 +753,7 @@ export class AdminCatalogService {
         throw new ApiException(ErrorCode.VAL_001, 'الفني ده متأهّل للخدمة دي بالفعل', HttpStatus.CONFLICT);
       }
       const previousStatus = existing.verificationStatus;
-      if (dto.skill_level) existing.skillLevel = dto.skill_level;
+      if (dto.skill_level) existing.wageTier = dto.skill_level;
       existing.verificationStatus = TechnicianServiceVerificationStatus.APPROVED;
       existing.isActive = true;
       existing.rejectionReason = null;
@@ -773,7 +773,7 @@ export class AdminCatalogService {
         },
         newValues: {
           technician_id: dto.technician_id,
-          skill_level: existing.skillLevel,
+          wage_tier: existing.wageTier,
           verification_status: existing.verificationStatus,
         },
         meta,
@@ -784,7 +784,7 @@ export class AdminCatalogService {
     const assignment = this.technicianServices.create({
       serviceId,
       technicianId: dto.technician_id,
-      skillLevel: dto.skill_level,
+      wageTier: dto.skill_level,
       verificationStatus: TechnicianServiceVerificationStatus.APPROVED,
       isActive: true,
       isSelfDeclared: false,
@@ -801,7 +801,7 @@ export class AdminCatalogService {
       entityId: serviceId,
       newValues: {
         technician_id: dto.technician_id,
-        skill_level: assignment.skillLevel,
+        wage_tier: assignment.wageTier,
       },
       meta,
     });

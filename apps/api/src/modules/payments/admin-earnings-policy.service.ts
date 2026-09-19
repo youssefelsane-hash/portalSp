@@ -28,7 +28,7 @@ export class AdminEarningsPolicyService {
       skills,
       services,
       serviceLevelOverrides,
-      serviceSkillOverrides,
+      serviceWageTierOverrides,
       technicians,
       adjustments,
       auditHistory,
@@ -38,13 +38,20 @@ export class AdminEarningsPolicyService {
                 order_priority_weight, can_lead_team
            FROM technician_level_config ORDER BY order_priority_weight`,
       ),
-      this.dataSource.query(`SELECT skill_level, factor_bps, updated_at FROM earnings_skill_policy ORDER BY skill_level`),
+      // الصفوف بتروح للرد كما هي، فالـalias بيحافظ على مفتاح السلك `skill_level` بعد ما
+      // العمود اتسمّى `wage_tier` (docs/08 §172). اتلقط بتحقق حي، مش بالاختبارات.
+      this.dataSource.query(
+        `SELECT wage_tier AS skill_level, factor_bps, updated_at FROM earnings_skill_policy ORDER BY wage_tier`,
+      ),
       this.dataSource.query(
         `SELECT id, name_ar, slug, is_active, ROUND(commission_percentage * 100)::integer AS platform_commission_bps
            FROM services WHERE deleted_at IS NULL ORDER BY is_active DESC, name_ar`,
       ),
       this.dataSource.query(`SELECT * FROM service_earnings_level_overrides ORDER BY service_id, technician_level`),
-      this.dataSource.query(`SELECT * FROM service_earnings_skill_overrides ORDER BY service_id, skill_level`),
+      this.dataSource.query(
+        `SELECT id, service_id, wage_tier AS skill_level, factor_bps, updated_by_user_id, created_at, updated_at
+           FROM service_earnings_skill_overrides ORDER BY service_id, wage_tier`,
+      ),
       this.dataSource.query(
         `SELECT tp.id, u.full_name, tp.technician_kind, tp.current_level
            FROM technician_profiles tp
@@ -86,7 +93,7 @@ export class AdminEarningsPolicyService {
       skills,
       services,
       service_level_overrides: serviceLevelOverrides,
-      service_skill_overrides: serviceSkillOverrides,
+      service_skill_overrides: serviceWageTierOverrides,
       technicians,
       technician_adjustments: adjustments,
       audit_history: auditHistory,
@@ -175,8 +182,8 @@ export class AdminEarningsPolicyService {
     const updated = returningFirst<Record<string, unknown>>(await this.dataSource.query(
       `UPDATE earnings_skill_policy
           SET factor_bps = $2, updated_by_user_id = $3, updated_at = now()
-        WHERE skill_level = $1
-        RETURNING skill_level, factor_bps, updated_at`,
+        WHERE wage_tier = $1
+        RETURNING wage_tier AS skill_level, factor_bps, updated_at`,
       [skillLevel, dto.factor_bps, adminUserId],
     ));
     await this.auditLog.record({
@@ -203,8 +210,8 @@ export class AdminEarningsPolicyService {
         technicianLevel: participant.technician_level,
         levelWeightBps: participant.level_weight_bps,
         assistantRatioBps: participant.assistant_ratio_bps,
-        serviceSkill: participant.service_skill,
-        serviceSkillFactorBps: participant.service_skill_factor_bps,
+        serviceWageTier: participant.service_skill,
+        serviceWageFactorBps: participant.service_skill_factor_bps,
         individualAdjustmentBps: participant.individual_adjustment_bps ?? 0,
         orderAdjustmentBps: participant.order_adjustment_bps ?? 0,
       })),
@@ -559,9 +566,9 @@ export class AdminEarningsPolicyService {
     return this.dataSource.transaction(async (manager) => {
       const [row] = await manager.query(
         `INSERT INTO service_earnings_skill_overrides
-          (service_id, skill_level, factor_bps, updated_by_user_id)
+          (service_id, wage_tier, factor_bps, updated_by_user_id)
          VALUES ($1,$2,$3,$4)
-         ON CONFLICT (service_id, skill_level) DO UPDATE
+         ON CONFLICT (service_id, wage_tier) DO UPDATE
            SET factor_bps = EXCLUDED.factor_bps,
                updated_by_user_id = EXCLUDED.updated_by_user_id,
                updated_at = now()
@@ -593,7 +600,7 @@ export class AdminEarningsPolicyService {
     meta?: AuditActorMeta,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      const keyColumn = table === 'service_earnings_level_overrides' ? 'technician_level' : 'skill_level';
+      const keyColumn = table === 'service_earnings_level_overrides' ? 'technician_level' : 'wage_tier';
       // نفس السبب فوق: `const [deleted] =` كان بياخد **مصفوفة** الصفوف، ومصفوفة فاضية قيمتها
       // truthy — يعني حارس «لا يوجد استثناء لإزالته» **ماكانش بيشتغل أبدًا**، وحذف استثناء
       // مش موجود كان بيرجّع نجاح ويكتب صف تدقيق بـ`entityId: undefined`.

@@ -58,11 +58,18 @@ export class OrderEarningShare {
   @Column({ name: 'assistant_ratio_bps_snapshot', type: 'integer', nullable: true })
   assistantRatioBpsSnapshot: number | null;
 
-  @Column({ name: 'service_skill_snapshot', type: 'varchar', nullable: true })
-  serviceSkillSnapshot: string | null;
+  /**
+   * **لقطة مقصود إنها نص، مش النوع المعدّد** — نفس `technicianLevel` فوق بالظبط.
+   *
+   * العمود في القاعدة نوعه `technician_wage_tier`، بس اللقطة بتتقري كنص عن قصد: لو درجة
+   * اتشالت من الـenum بعدين، الصفوف القديمة تفضل مقروءة بدل ما القراءة تقع. ده سجل لـ«الحساب
+   * اتعمل بإيه ساعتها»، مش مرجع حي للقيم المسموحة دلوقتي.
+   */
+  @Column({ name: 'service_wage_tier_snapshot', type: 'varchar', nullable: true })
+  serviceWageTierSnapshot: string | null;
 
-  @Column({ name: 'service_skill_factor_bps_snapshot', type: 'integer', nullable: true })
-  serviceSkillFactorBpsSnapshot: number | null;
+  @Column({ name: 'service_wage_factor_bps_snapshot', type: 'integer', nullable: true })
+  serviceWageFactorBpsSnapshot: number | null;
 
   @Column({ name: 'individual_adjustment_bps_snapshot', type: 'integer', nullable: true })
   individualAdjustmentBpsSnapshot: number | null;

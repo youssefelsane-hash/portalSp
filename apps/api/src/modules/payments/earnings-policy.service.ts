@@ -15,8 +15,8 @@ interface ResolvedPolicyRow {
   technician_level: string;
   level_weight_bps: number | string;
   assistant_ratio_bps: number | string;
-  service_skill: string;
-  service_skill_factor_bps: number | string;
+  service_wage_tier: string;
+  service_wage_factor_bps: number | string;
   individual_adjustment_bps: number | string | null;
   order_adjustment_bps: number | string | null;
   used_neutral_skill_fallback: boolean;
@@ -118,8 +118,8 @@ export class EarningsPolicyService {
               tp.current_level AS technician_level,
               tlc.earning_weight_bps AS level_weight_bps,
               COALESCE(slo.assistant_ratio_bps, tlc.assistant_ratio_bps) AS assistant_ratio_bps,
-              COALESCE(ts.skill_level, 'standard'::skill_level) AS service_skill,
-              COALESCE(sso.factor_bps, esp.factor_bps) AS service_skill_factor_bps,
+              COALESCE(ts.wage_tier, 'standard'::technician_wage_tier) AS service_wage_tier,
+              COALESCE(sso.factor_bps, esp.factor_bps) AS service_wage_factor_bps,
               ia.adjustment_bps AS individual_adjustment_bps,
               oa.adjustment_bps AS order_adjustment_bps,
               (ts.id IS NULL) AS used_neutral_skill_fallback
@@ -133,13 +133,13 @@ export class EarningsPolicyService {
           AND ts.is_active = true
           AND ts.verification_status = 'approved'
          LEFT JOIN earnings_skill_policy esp
-           ON esp.skill_level = COALESCE(ts.skill_level, 'standard'::skill_level)
+           ON esp.wage_tier = COALESCE(ts.wage_tier, 'standard'::technician_wage_tier)
          LEFT JOIN service_earnings_level_overrides slo
            ON slo.service_id = o.service_id
           AND slo.technician_level = tp.current_level
          LEFT JOIN service_earnings_skill_overrides sso
            ON sso.service_id = o.service_id
-          AND sso.skill_level = COALESCE(ts.skill_level, 'standard'::skill_level)
+          AND sso.wage_tier = COALESCE(ts.wage_tier, 'standard'::technician_wage_tier)
          LEFT JOIN LATERAL (
            SELECT tea.adjustment_bps
              FROM technician_earning_adjustments tea
@@ -188,8 +188,8 @@ export class EarningsPolicyService {
         technicianLevel: row.technician_level,
         levelWeightBps: Number(row.level_weight_bps),
         assistantRatioBps: Number(row.assistant_ratio_bps),
-        serviceSkill: row.service_skill,
-        serviceSkillFactorBps: Number(row.service_skill_factor_bps),
+        serviceWageTier: row.service_wage_tier,
+        serviceWageFactorBps: Number(row.service_wage_factor_bps),
         individualAdjustmentBps: Number(row.individual_adjustment_bps ?? 0),
         orderAdjustmentBps: Number(row.order_adjustment_bps ?? 0),
       };

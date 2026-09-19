@@ -1,5 +1,5 @@
 import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { SkillLevel } from '../../catalog/entities/technician-service.entity';
+import { TechnicianWageTier } from '../../catalog/entities/technician-service.entity';
 
 // موافقة الأدمن على تصريح مهارة ذاتي — نفس النمط بالحرف زي ReviewDocumentDto/RejectTechnicianDto.
 export class RejectTechnicianServiceDto {
@@ -12,6 +12,6 @@ export class RejectTechnicianServiceDto {
 export class ApproveTechnicianServiceDto {
   // الأدمن يقدر يضبط مستوى المهارة النهائي وقت الاعتماد (اقتراح الفني مش ملزم).
   @IsOptional()
-  @IsEnum(SkillLevel)
-  skill_level?: SkillLevel;
+  @IsEnum(TechnicianWageTier)
+  skill_level?: TechnicianWageTier;
 }

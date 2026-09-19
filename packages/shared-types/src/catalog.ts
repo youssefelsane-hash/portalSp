@@ -241,13 +241,19 @@ export interface UpsertZonePricingBody {
   valid_from?: string;
 }
 
-export type SkillLevel = 'beginner' | 'standard' | 'expert';
+/**
+ * درجة أجر الفني في خدمة (`technician_services.wage_tier`, enum `technician_wage_tier`).
+ *
+ * **مش نفس `TechnicianPricingTier`**: دي بتضرب في **أجر الفني**، والتانية في **سعر العميل**
+ * (docs/08 §171/§172). اسم الحقل على السلك لسه `skill_level` — عقد الـAPI مااتكسرش.
+ */
+export type TechnicianWageTier = 'beginner' | 'standard' | 'expert';
 
 export interface EligibleTechnicianResponseDto {
   id: string;
   service_id: string;
   technician_id: string;
-  skill_level: SkillLevel;
+  skill_level: TechnicianWageTier;
   is_active: boolean;
   completed_count: number;
   average_rating: number | null;
@@ -256,7 +262,7 @@ export interface EligibleTechnicianResponseDto {
 
 export interface AssignTechnicianServiceBody {
   technician_id: string;
-  skill_level?: SkillLevel;
+  skill_level?: TechnicianWageTier;
 }
 
 // مصدر تسعير الخدمة الوحيد حسب فئة مهارة الفني الموحدة.

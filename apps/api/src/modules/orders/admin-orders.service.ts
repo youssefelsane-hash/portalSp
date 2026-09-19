@@ -579,7 +579,7 @@ export class AdminOrdersService {
       earning_role: 'technician' | 'assistant' | null;
       level_weight_bps_snapshot: number | null;
       assistant_ratio_bps_snapshot: number | null;
-      service_skill_snapshot: string | null;
+      service_skill_snapshot: string | null;   // مفتاح السلك زي ما هو (alias تحت)
       service_skill_factor_bps_snapshot: number | null;
       individual_adjustment_bps_snapshot: number | null;
       order_adjustment_bps_snapshot: number | null;
@@ -594,7 +594,11 @@ export class AdminOrdersService {
               oes.settlement_policy_version, oes.calculation_algorithm_version,
               oes.technician_kind_snapshot, oes.earning_role,
               oes.level_weight_bps_snapshot, oes.assistant_ratio_bps_snapshot,
-              oes.service_skill_snapshot, oes.service_skill_factor_bps_snapshot,
+              -- العمودين اتسمّوا service_wage_* في migration 0356؛ الـalias بيحافظ على
+              -- مفتاح الرد زي ما هو عشان عقد الـAPI مايتكسرش (docs/08 §172).
+              -- (بلا backticks: الاستعلام جوّه template literal، والـbacktick بيقفله.)
+              oes.service_wage_tier_snapshot AS service_skill_snapshot,
+              oes.service_wage_factor_bps_snapshot AS service_skill_factor_bps_snapshot,
               oes.individual_adjustment_bps_snapshot, oes.order_adjustment_bps_snapshot,
               oes.effective_weight_units, false AS is_preview
          FROM order_earning_shares oes
@@ -654,8 +658,8 @@ export class AdminOrdersService {
       earning_role: share.earningRole,
       level_weight_bps_snapshot: share.levelWeightBps,
       assistant_ratio_bps_snapshot: share.assistantRatioBps,
-      service_skill_snapshot: share.serviceSkill,
-      service_skill_factor_bps_snapshot: share.serviceSkillFactorBps,
+      service_skill_snapshot: share.serviceWageTier,
+      service_skill_factor_bps_snapshot: share.serviceWageFactorBps,
       individual_adjustment_bps_snapshot: share.individualAdjustmentBps ?? 0,
       order_adjustment_bps_snapshot: share.orderAdjustmentBps ?? 0,
       effective_weight_units: share.effectiveWeightUnits,

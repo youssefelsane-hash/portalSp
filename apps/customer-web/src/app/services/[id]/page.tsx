@@ -381,6 +381,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   const debouncedFieldValues = useDebounced(fieldValues, 400);
 
+  /**
+   * **نطاق العنوان المختار** — مدخل تسعير، مش تفصيلة عرض (بلاغ مالك 2026-09-19).
+   *
+   * `service_zone_pricing.modifier_percentage` بيتطبّق في `CatalogService.estimate()` **بس لما
+   * يوصلها `zoneId`**. الصفحة كانت بتنادي `estimatePrice()` من غيره خالص، فالرقم المعروض كان
+   * السعر الخام قبل نسبة المنطقة، بينما `POST /orders` (وبيبعت `zone.id` دايمًا) بيسجّل السعر
+   * بعدها. النتيجة مقاسة حيًا: الصفحة بتعرض ١٠٠ ج والطلب بيتسجّل بـ١٥٠ ج لنطاق +٥٠٪.
+   *
+   * مقصود إنه نطاق **العنوان المختار في الخطوة ١**، مش العنوان الافتراضي (`useCatalogZone`):
+   * التسعير بيتم على مكان التنفيذ الفعلي.
+   */
+  const selectedAddressZoneId =
+    addresses?.find((item) => item.id === selectedAddressId)?.service_zone_id ?? undefined;
+
   useEffect(() => {
     if (!service || service.pricing_model !== 'formula') return;
     const requiredFilled = (pricingFields ?? []).every((field) => {
@@ -399,11 +413,15 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       return;
     }
     setEstimating(true);
-    estimatePrice(id, { sameDayUrgent: isSameDayBooking, fieldValues: debouncedFieldValues })
+    estimatePrice(id, {
+      sameDayUrgent: isSameDayBooking,
+      fieldValues: debouncedFieldValues,
+      zoneId: selectedAddressZoneId,
+    })
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [id, service, isSameDayBooking, debouncedFieldValues, pricingFields]);
+  }, [id, service, isSameDayBooking, debouncedFieldValues, pricingFields, selectedAddressZoneId]);
 
   // ADR-0060 — الـeffect القديم اللي كان بيسعّر `per_unit`/`monthly`/`hourly` من مدخلات منفصلة
   // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و

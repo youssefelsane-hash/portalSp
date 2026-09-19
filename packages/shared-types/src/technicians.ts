@@ -3,7 +3,8 @@ export type TechnicianLevel = 'new' | 'verified' | 'professional' | 'premium' | 
 
 // فئة التسعير التجارية الموحدة. هي نفس لغة المهارة الظاهرة في سياسة المستحقات، بينما
 // TechnicianLevel فوق يظل مستوى تشغيليًا للترقية والمطابقة فقط.
-export type TechnicianPricingTier = 'beginner' | 'standard' | 'expert';
+// الترتيب هنا هو ترتيب الـenum في القاعدة (migration 0355): مبتدئ ← قياسي ← متقدم ← خبير.
+export type TechnicianPricingTier = 'beginner' | 'standard' | 'advanced' | 'expert';
 /**
  * دور الشخص نفسه (ADR-0050) — مستقل تمامًا عن `TechnicianLevel` (جودة/أقدمية) و
  * `TechnicianPricingTier` (مضاعف سعر تجاري). `assistant` = ما يظهرش في أي قايمة فنيين، وما ياخدش

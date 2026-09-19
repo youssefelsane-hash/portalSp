@@ -12,8 +12,8 @@ const participant = (
   technicianLevel: 'professional',
   levelWeightBps: 12_500,
   assistantRatioBps: 7_600,
-  serviceSkill: 'standard',
-  serviceSkillFactorBps: 10_000,
+  serviceWageTier: 'standard',
+  serviceWageFactorBps: 10_000,
   ...options,
 });
 
@@ -45,8 +45,8 @@ describe('Unified Workforce Earnings Engine V2', () => {
       participant('expert', {
         isLeader: false,
         levelWeightBps: 10_000,
-        serviceSkill: 'expert',
-        serviceSkillFactorBps: 11_000,
+        serviceWageTier: 'expert',
+        serviceWageFactorBps: 11_000,
         individualAdjustmentBps: 1_000,
         orderAdjustmentBps: 1_000,
       }),
@@ -187,14 +187,14 @@ describe('Unified Workforce Earnings Engine V2', () => {
       participant('member', { isLeader: false }),
     ]);
     const changed = calculateEarningsV2(500_000, 50_000, [
-      participant('lead', { levelWeightBps: 16_000, serviceSkillFactorBps: 11_000 }),
+      participant('lead', { levelWeightBps: 16_000, serviceWageFactorBps: 11_000 }),
       participant('member', {
         isLeader: false,
         earningRole: 'assistant',
         technicianKindSnapshot: 'assistant',
         levelWeightBps: 10_000,
         assistantRatioBps: 6_500,
-        serviceSkillFactorBps: 9_500,
+        serviceWageFactorBps: 9_500,
         individualAdjustmentBps: -2_500,
         orderAdjustmentBps: 1_500,
       }),
@@ -220,7 +220,7 @@ describe('Unified Workforce Earnings Engine V2', () => {
           technicianKindSnapshot: index > 0 && (index + seed) % 4 === 0 ? 'assistant' : 'technician',
           levelWeightBps: 10_000 + ((seed + index) % 6) * 1_250,
           assistantRatioBps: 6_000 + ((seed + index) % 7) * 500,
-          serviceSkillFactorBps: 9_500 + ((seed + index) % 4) * 500,
+          serviceWageFactorBps: 9_500 + ((seed + index) % 4) * 500,
           individualAdjustmentBps: ((seed + index) % 9 - 4) * 250,
           orderAdjustmentBps: ((seed * 3 + index) % 7 - 3) * 200,
         }),
@@ -239,8 +239,8 @@ describe('Unified Workforce Earnings Engine V2', () => {
         isLeader: true,
         technicianLevel: 'professional',
         levelWeightBps: 12_500,
-        serviceSkill: 'expert',
-        serviceSkillFactorBps: 12_000,
+        serviceWageTier: 'expert',
+        serviceWageFactorBps: 12_000,
       }),
       participant('omar', {
         isLeader: false,
@@ -249,8 +249,8 @@ describe('Unified Workforce Earnings Engine V2', () => {
         technicianLevel: 'verified',
         levelWeightBps: 11_000,
         assistantRatioBps: 7_000,
-        serviceSkill: 'standard',
-        serviceSkillFactorBps: 10_000,
+        serviceWageTier: 'standard',
+        serviceWageFactorBps: 10_000,
         individualAdjustmentBps: 500,
       }),
     ]);
@@ -267,8 +267,8 @@ describe('Unified Workforce Earnings Engine V2', () => {
       participant('ahmed', {
         isLeader: true,
         levelWeightBps: 12_500,
-        serviceSkill: 'expert',
-        serviceSkillFactorBps: 12_000,
+        serviceWageTier: 'expert',
+        serviceWageFactorBps: 12_000,
       }),
       participant('omar', {
         isLeader: false,

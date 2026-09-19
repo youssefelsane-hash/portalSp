@@ -3,6 +3,7 @@ import { TechnicianService } from '../../catalog/entities/technician-service.ent
 export interface TechnicianServiceResponseDto {
   id: string;
   service_id: string;
+  // اسم الحقل على السلك لسه `skill_level` عن قصد — عقد الـAPI مااتكسرش (docs/08 §172).
   skill_level: string;
   verification_status: string;
   is_self_declared: boolean;
@@ -22,7 +23,7 @@ export function toTechnicianServiceResponseDto(
   return {
     id: row.id,
     service_id: row.serviceId,
-    skill_level: row.skillLevel,
+    skill_level: row.wageTier,
     verification_status: row.verificationStatus,
     is_self_declared: row.isSelfDeclared,
     is_active: row.isActive,
