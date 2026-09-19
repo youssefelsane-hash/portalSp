@@ -114,6 +114,17 @@ export class InstallmentCollectionService implements OnModuleInit, OnModuleDestr
        UPDATE installments
        SET status = 'processing',
            attempt_count = installments.attempt_count + 1,
+           -- ختم الـlease وقت الـclaim نفسه، مش بعد رحلة البوابة. فرع استرداد الـclaim
+           -- المعلّق فوق بيقرا الحالة processing مع last_attempt_at فاضية أو أقدم من نص ساعة.
+           -- العمود ده كان بيتكتب لأول مرة جوه attemptInstallmentCharge (بعد حفظ صف الدفعة)،
+           -- يعني بين لحظة الـclaim ولحظة الكتابة دي الصف بيبقى processing وlast_attempt_at
+           -- لسه NULL/قديمة — فالفرع ده بيعتبره claim ميت فورًا وclaimer تاني بياخده. النتيجة
+           -- محاولتين متتاليتين على نفس القسط بمفتاحين idempotency مختلفين (المفتاح فيه رقم
+           -- المحاولة) — يعني شحنتين حقيقيتين على نفس القسط، والـunique constraint مابيمنعهاش.
+           -- الختم هنا بيخلي النص ساعة تبتدي من الـclaim، وهو المعنى المقصود أصلاً.
+           -- بيقفل كمان فجوة تانية: صف بيقع failed من catch بتاع sweep() (اللي مابيكتبش العمود
+           -- ده) كان بيفضل NULL، ومقارنة NULL بترجع NULL مش true، فالقسط مابيترجعش للمحاولة أبدًا.
+           last_attempt_at = now(),
            updated_at = now()
        WHERE id IN (SELECT id FROM candidates)
        RETURNING id`,

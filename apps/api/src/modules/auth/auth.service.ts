@@ -38,6 +38,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { readOtpTestMode, usesFixedOtp } from './otp-test-mode';
 
 export interface TokenPair {
   access_token: string;
@@ -89,7 +90,15 @@ export class AuthService {
   // ── OTP ──────────────────────────────────────────────────────────────
 
   async requestOtp(dto: RequestOtpDto, requestIp: string | null): Promise<{ expires_in_seconds: number }> {
-    const code = String(randomInt(0, 1_000_000)).padStart(OTP_CODE_LENGTH, '0');
+    // **وضع اختبار Google Play** (docs/08 §173، `otp-test-mode.ts`) — النقطة **الوحيدة** في
+    // المشروع اللي الوضع ده بيأثر فيها. بيغيّر حاجتين وبس: الكود المولَّد، وإرسال الـSMS.
+    // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
+    // القرار كله من بيئة السيرفر — مفيش أي حاجة الـclient بيبعتها بتدخل في الحساب ده.
+    const testMode = readOtpTestMode(this.config);
+    const useFixedCode = usesFixedOtp(testMode, dto.phone_number);
+    const code = useFixedCode
+      ? testMode.fixedCode
+      : String(randomInt(0, 1_000_000)).padStart(OTP_CODE_LENGTH, '0');
     const codeHash = await bcrypt.hash(code, BCRYPT_SALT_ROUNDS);
     const expiryMinutes = this.config.get<number>('otp.expiryMinutes')!;
     const maxAttempts = this.config.get<number>('otp.maxAttempts')!;
@@ -149,6 +158,15 @@ export class AuthService {
     // docs/03-external-integrations.md)، هنا أول استهلاك حقيقي ليها. فشل الإرسال (بوابة مش
     // مظبوطة أو خطأ شبكة) ميرمّيش الطلب — نفس فلسفة "فشل تقني مايكسرش تجربة المستخدم الحقيقي"
     // المتّبعة في كل مكان تاني، وخصوصاً هنا: العميل المحلي بيقدر يكمل التسجيل من اللوج فوق.
+    // في وضع الاختبار مفيش أي نداء لبوابة SMS خالص — لا CEQUENS ولا Twilio. الـreturn بدري
+    // هنا هو الضمان: مفيش مسار بديل بيوصل للمزوّد.
+    if (useFixedCode) {
+      this.logger.warn(
+        `[OTP] وضع الاختبار مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}). ممنوع في staging/production بحارس env.validation.`,
+      );
+      return { expires_in_seconds: expiryMinutes * 60 };
+    }
+
     const result = await this.smsDispatcher.send({
       notificationId: null, // مفيش صف `notifications` لكود التحقق — مفيش استلام يتأكّد (تدقيق L-7)
       userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — بوابات الـSMS مبتقراش الحقل ده أصلاً

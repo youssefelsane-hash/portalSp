@@ -281,6 +281,34 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
     ]);
   });
 
+  // regression لبَقّة حقيقية اتلقطت في التشغيل الكامل للسويت (2026-09-19): الـclaim كان بيسيب
+  // last_attempt_at زي ما هي (NULL أو قديمة) وبيكتفي بـstatus='processing'. بس فرع استرداد
+  // الـclaim المعلّق في نفس الاستعلام بيقرا الحالة دي بالظبط كـ«claim ميت» لو العمود فاضي أو
+  // أقدم من نص ساعة — فصف لسه متاخد بيبقى متاح فورًا لـclaimer تاني. ده مش قلق نظري: مفتاح
+  // الـidempotency فيه رقم المحاولة، فالمحاولة التانية بتعدّي الـunique constraint وتعمل
+  // **شحنة حقيقية تانية** على نفس القسط. الإصلاح: الـclaim بيختم last_attempt_at، فالنص ساعة
+  // بتبتدي من لحظة الـclaim. التست ده بيثبّت الختم ده مباشرةً.
+  it('الـclaim بيختم last_attempt_at فورًا — الـlease بتبتدي من الـclaim مش من رحلة البوابة', async () => {
+    await flushSettingCache('true');
+    await q(
+      `UPDATE installments SET status='scheduled', attempt_count=0, last_attempt_at=NULL WHERE id=$1`,
+      [ids.installmentIds[0]],
+    );
+    await collectionService.sweep({ installmentIds: ids.installmentIds });
+
+    const [row] = await q<{ last_attempt_at: Date | null }[]>(
+      `SELECT last_attempt_at FROM installments WHERE id=$1`,
+      [ids.installmentIds[0]],
+    );
+    expect(row.last_attempt_at).not.toBeNull();
+
+    // الصف دلوقتي failed بختم حديث — الـbackoff لسه ما عداش، فأي sweep تاني مالوش أي أثر
+    const before = await q<{ attempt_count: number }[]>(`SELECT attempt_count FROM installments WHERE id=$1`, [ids.installmentIds[0]]);
+    await collectionService.sweep({ installmentIds: ids.installmentIds });
+    const after = await q<{ attempt_count: number }[]>(`SELECT attempt_count FROM installments WHERE id=$1`, [ids.installmentIds[0]]);
+    expect(Number(after[0].attempt_count)).toBe(Number(before[0].attempt_count));
+  });
+
   it('webhook النجاح: القسط paid + قيد double-entry واحد — والمكرر (نفس/مختلف event id) مالوش أي أثر', async () => {
     // نحاكي إن الشحنة اتقبلت مزامنًا: القسط processing + دفعة PENDING مربوطة بيه
     await q(`UPDATE installments SET status='processing', last_attempt_at=now() WHERE id=$1`, [ids.installmentIds[0]]);
