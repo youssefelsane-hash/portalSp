@@ -26,6 +26,8 @@ import { TechnicianCertificate } from './entities/technician-certificate.entity'
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
 import {
+  blockedExistsExpr,
+  activeOrderConflictExistsExpr,
   describeTechnicianCapacity,
   technicianAvailabilityCondition,
   technicianScheduleConflictCondition,
@@ -33,8 +35,31 @@ import {
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
+import { CandidateOperationalLoad, dailyCapacityExceededExpr, resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 import { cairoDayString, cairoDaySequence, cairoMidnight } from '../pricing/pricing-temporal';
+
+/** مرحلة واحدة في تشخيص «ليه القايمة فاضية» — العدد المتبقّي بعد تطبيق شرطها تراكميًا. */
+export interface BookingCandidatePoolStage {
+  stage:
+    | 'in_zone'
+    | 'qualified'
+    | 'has_location'
+    | 'individually_visible'
+    | 'team_level_ok'
+    | 'not_blocked'
+    | 'no_schedule_conflict'
+    | 'available';
+  labelAr: string;
+  remaining: number;
+}
+
+export interface BookingCandidatePoolDiagnosis {
+  zoneId: string;
+  scheduledAt: Date | null;
+  stages: BookingCandidatePoolStage[];
+  /** أول مرحلة وصل فيها العدد لصفر — السبب الأساسي. `null` يعني فيه مرشّحين فعلاً. */
+  firstBlockingStage: BookingCandidatePoolStage['stage'] | null;
+}
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -838,6 +863,161 @@ export class TechniciansService {
       zoneId: zone.id,
       items: dedupeTechnicianBookingItems([...merged, ...conflictedItems]),
     };
+  }
+
+  /**
+   * **ليه القايمة طلعت فاضية؟** — عدّاد مراحل على نفس بوابة الأهلية، مش محرك تاني.
+   *
+   * لما `listForServiceBooking()` ترجّع صفر، «مفيش فنيين متاحين» بتخفي سبع احتمالات مختلفة
+   * تمامًا، وكل واحد له علاج مختلف: الفني مش مؤهّل للخدمة، مش متعيّن على النطاق، مفتحش
+   * التطبيق فمفيش GPS، مستواه مش مسموح لحجز الفريق، مشغول بشغل تاني وقتها، حاجز اليوم
+   * لنفسه، أو عدّى سقفه اليومي.
+   *
+   * **الضمان اللي بيخلّي ده مفيد بدل مضلّل**: كل مرحلة هنا بتستخدم **نفس دالة الشرط المستوردة**
+   * اللي الاستعلام الحقيقي بيستخدمها بالحرف، وبنفس الـparameters — مفيش أي قاعدة عمل مكتوبة
+   * تاني هنا. لو الشرط اتغيّر في `technician-eligibility.sql.ts`، التشخيص بيتغيّر معاه تلقائيًا.
+   * العدّ **تراكمي** (كل مرحلة بتضيف شرطها لللي قبلها)، فأول رقم بيقع لصفر هو السبب الأساسي.
+   *
+   * أداة تطوير/اختبار — بتتنادى من الـcontroller لما القايمة تطلع فاضية في غير الإنتاج، ومن
+   * الاختبارات مباشرةً. (بلاغ مالك 2026-09-19)
+   */
+  async diagnoseBookingCandidatePool(opts: {
+    serviceId: string;
+    addressId: string;
+    scheduledAt: Date | null;
+    isTeamBooking: boolean;
+    candidateLoad?: CandidateOperationalLoad;
+  }): Promise<BookingCandidatePoolDiagnosis> {
+    const { serviceId, addressId, scheduledAt, isTeamBooking, candidateLoad } = opts;
+    const zone = await this.resolveZoneForAddressOrThrow(addressId);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
+
+    const serviceDurationExpr =
+      'COALESCE($9::int, (SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1))';
+    const availabilityArgs = {
+      technicianIdExpr: 'tp.id',
+      scheduledAtParam: '$3',
+      excludeOrderIdParam: 'NULL',
+      activeStatusesParam: '$4',
+      engagedStatusesParam: '$5',
+      isEmergencyParam: '$6',
+      serviceDurationExpr,
+      candidateLoad: {
+        estimatedDurationDaysExpr: '$10::numeric',
+        durationMinutesExpr: '$9::int',
+        serviceDefaultMinutesExpr: 'svc.estimated_duration_minutes',
+      },
+      preciseDurationHoursExpr: '$9::numeric / 60.0',
+      dailyCapacityMinutesParam: '$7',
+    } as const;
+
+    // نفس شروط الاستعلام الحقيقي، كل واحد كـflag على نفس الصف — التراكم بيتم في الـSELECT تحت.
+    const qualified = technicianServiceQualificationCondition({
+      technicianIdExpr: 'tp.id',
+      serviceIdExpr: 'svc.id',
+      categoryIdExpr: 'svc.category_id',
+      directServiceAlias: 'ts',
+      technicianLeadRule: { technicianAlias: 'tp', serviceRequiresLeadExpr: 'svc.requires_technician_lead' },
+    });
+    const visible = technicianIndividualVisibilityCondition({ technicianAlias: 'tp' });
+    const notBlocked = `NOT ${blockedExistsExpr({
+      technicianIdExpr: 'tp.id',
+      scheduledAtParam: '$3',
+      serviceDurationExpr,
+      dailyCapacityMinutesParam: '$7',
+      candidateLoad: availabilityArgs.candidateLoad,
+    })}`;
+    // السقف اليومي جزء من تعبير التعارض نفسه، فبيتحسب لوحده هنا عشان «مشغول في الموعد»
+    // و«عدّى سقفه اليومي» مايتلموش في سبب واحد — كل واحد فيهم له علاج مختلف تمامًا.
+    const capacityExceeded = dailyCapacityExceededExpr({
+      technicianIdExpr: 'tp.id',
+      activeStatusesParam: '$4',
+      excludeOrderIdParam: 'NULL',
+      dailyCapacityParam: '$7',
+      scheduledAtParam: '$3',
+      candidateLoad: availabilityArgs.candidateLoad,
+    });
+    const anyConflict = activeOrderConflictExistsExpr({
+      technicianIdExpr: 'tp.id',
+      scheduledAtParam: '$3',
+      excludeOrderIdParam: 'NULL',
+      activeStatusesParam: '$4',
+      engagedStatusesParam: '$5',
+      isEmergencyParam: '$6',
+      serviceDurationExpr,
+      preciseDurationHoursExpr: availabilityArgs.preciseDurationHoursExpr,
+      dailyCapacityMinutesParam: '$7',
+      candidateLoad: availabilityArgs.candidateLoad,
+    });
+    // تعبير التعارض = (تقاطع وقت) OR (تجاوز السقف). طرح السقف منه بيسيب التقاطع الوقتي لوحده،
+    // والمرحلة اللي بعديها بتطرح السقف — فأول صفر بيسمّي السبب الحقيقي مش المجموع.
+    const noTimeConflict = `(NOT (${anyConflict}) OR (${capacityExceeded}))`;
+    const fullyAvailable = technicianAvailabilityCondition(availabilityArgs).replace(/^\s*AND\s+/, '');
+
+    interface DiagnosisRow {
+      in_zone: string;
+      qualified: string;
+      has_location: string;
+      individually_visible: string;
+      team_level_ok: string;
+      no_schedule_conflict: string;
+      not_blocked: string;
+      available: string;
+    }
+    const [row] = await this.technicianProfiles.manager.query<DiagnosisRow[]>(
+      `
+      SELECT
+        COUNT(*)::text AS in_zone,
+        COUNT(*) FILTER (WHERE ${qualified})::text AS qualified,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL)::text AS has_location,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL
+                           AND ${visible})::text AS individually_visible,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL AND ${visible}
+                           AND ($8::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true))::text AS team_level_ok,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL AND ${visible}
+                           AND ($8::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
+                           AND ${notBlocked})::text AS not_blocked,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL AND ${visible}
+                           AND ($8::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
+                           AND ${notBlocked} AND ${noTimeConflict})::text AS no_schedule_conflict,
+        COUNT(*) FILTER (WHERE ${qualified} AND tp.current_location IS NOT NULL AND ${visible}
+                           AND ($8::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
+                           AND ${fullyAvailable})::text AS available
+      FROM technician_profiles tp
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
+      LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+      `,
+      [
+        serviceId,
+        zone.id,
+        scheduledAt ?? null,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        dailyCapacityMinutes,
+        isTeamBooking,
+        candidateLoad?.durationMinutes ?? null,
+        candidateLoad?.estimatedDurationDays ?? null,
+      ],
+    );
+
+    const stages: BookingCandidatePoolStage[] = [
+      { stage: 'in_zone', labelAr: 'فنيين معتمدين متعيّنين على النطاق', remaining: Number(row?.in_zone ?? 0) },
+      { stage: 'qualified', labelAr: 'مؤهّلين للخدمة/الفئة (وشرط القيادة لو مطلوب)', remaining: Number(row?.qualified ?? 0) },
+      { stage: 'has_location', labelAr: 'عندهم موقع GPS مسجّل', remaining: Number(row?.has_location ?? 0) },
+      { stage: 'individually_visible', labelAr: 'مش حصريين لشركة', remaining: Number(row?.individually_visible ?? 0) },
+      { stage: 'team_level_ok', labelAr: 'مستواهم مسموح لوضع الحجز', remaining: Number(row?.team_level_ok ?? 0) },
+      { stage: 'not_blocked', labelAr: 'مش حاجزين الموعد ده لنفسهم', remaining: Number(row?.not_blocked ?? 0) },
+      { stage: 'no_schedule_conflict', labelAr: 'مش مشغولين بشغل تاني في الموعد', remaining: Number(row?.no_schedule_conflict ?? 0) },
+      { stage: 'available', labelAr: 'تحت السقف اليومي (متاحين فعلاً)', remaining: Number(row?.available ?? 0) },
+    ];
+    // أول مرحلة وصلت لصفر هي السبب الأساسي — اللي بعدها بيبقى صفر بالتبعية مش باستحقاق.
+    const firstBlockingStage = stages.find((s) => s.remaining === 0)?.stage ?? null;
+    return { zoneId: zone.id, scheduledAt, stages, firstBlockingStage };
   }
 
   /**

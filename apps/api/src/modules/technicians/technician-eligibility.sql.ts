@@ -190,7 +190,7 @@ export function technicianAvailabilityCondition(opts: {
  * "مؤهّل بس متعارض"، ADR-0030). تعديل قاعدة التعارض هنا بيتفعّل تلقائيًا في الدالتين، صفر خطر
  * انحراف (drift) بين نسختين منفصلتين لنفس المنطق.
  */
-function activeOrderConflictExistsExpr(opts: {
+export function activeOrderConflictExistsExpr(opts: {
   technicianIdExpr: string;
   scheduledAtParam: string;
   excludeOrderIdParam: string;
@@ -288,7 +288,7 @@ function activeOrderConflictExistsExpr(opts: {
  * (تاريخ + وقت محلي) لـ`timestamptz` بتوقيت مصر، ونافذة الشغل المرشّح بتمتد على أيامه كلها
  * (`spanDays - 1` يوم + مدة اليوم) — فالإجازة في أي يوم من أيام الشغل بتتلقط.
  */
-function blockedExistsExpr(opts: {
+export function blockedExistsExpr(opts: {
   technicianIdExpr: string;
   scheduledAtParam: string;
   serviceDurationExpr: string;

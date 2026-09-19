@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Inject, Logger, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
+import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { resolveAvatarUrl } from '../../common/storage/resolve-avatar-url';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { toTechnicianBookingListItemResponseDto } from '../technicians/dto/technician-booking-list-response.dto';
@@ -17,6 +18,7 @@ import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/servic
 import { PricingModel } from './entities/service.entity';
 import { toStandardDataResponseDto } from './dto/standard-data-response.dto';
 import { SettingsService } from '../settings/settings.service';
+import { isProductionLikeEnv } from '../../config/env.validation';
 import {
   MIN_PUNCTUALITY_SAMPLE_FALLBACK,
   resolveArrivalMetric,
@@ -24,6 +26,8 @@ import {
 
 @Controller()
 export class CatalogController {
+  private readonly logger = new Logger(CatalogController.name);
+
   constructor(
     private readonly catalogService: CatalogService,
     private readonly techniciansService: TechniciansService,
@@ -183,6 +187,27 @@ export class CatalogController {
      */
     const scheduledAt = query.scheduled_at ? new Date(query.scheduled_at) : null;
     const isEmergency = isSameDayUrgent({ scheduledAt }) || query.booking_mode === 'emergency';
+    /**
+     * **`scheduled_at = null` معناها «دلوقتي» — وده صح للطوارئ بس** (بلاغ مالك 2026-09-19).
+     *
+     * محرك الأهلية بيقرا الميعاد بـ`COALESCE(scheduled_at, now())`، يعني الغياب بيتفسّر
+     * **حرفيًا** كتوافر اللحظة دي. للطوارئ/الـASAP ده هو المقصود بالظبط ومابيتلمسش. لكن لما
+     * العميل يكون بيحضّر حجز **مجدول** ولسه ماختارش تاريخ، الواجهة كانت بتنادي المسار ده بلا
+     * `scheduled_at` — فالقايمة بتتقاس على «النهاردة دلوقتي» بدل الموعد اللي لسه جاي. النتيجة
+     * فني مؤهّل تمامًا للموعد الحقيقي بيختفي (مشغول دلوقتي بس فاضي يوم الحجز)، والعميل بيشوف
+     * «مفيش فنيين متاحين في منطقتك» قبل ما يختار ميعاد أصلاً.
+     *
+     * القرار: الغموض ده **مايتخمّنش**. خدمة بتقبل الجدولة + مش طوارئ + بلا ميعاد = مدخلات
+     * ناقصة، وبترجع رفض واضح بدل قايمة مضلّلة. الطوارئ والخدمات اللي مابتقبلش جدولة
+     * (`allows_scheduling = false`) بيفضلوا على نفس السلوك بالحرف.
+     */
+    if (service.allowsScheduling && !isEmergency && !scheduledAt) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'اختار الموعد الأول عشان نعرض لك المنفّذين المتاحين وقتها',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     // خدمات formula من غير field_values مالهاش سعر ولا حمل تشغيلي معروف لسه (العميل ما ملاش
     // الفورم) — بترجع null صراحة بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
     const canPrice = !(service.pricingModel === PricingModel.FORMULA && !query.field_values);
@@ -221,6 +246,35 @@ export class CatalogController {
           }
         : undefined,
     );
+    // **قايمة فاضية = سبع احتمالات مختلفة، كل واحد له علاج مختلف** (بلاغ مالك 2026-09-19).
+    // بدل ما المطوّر يفضل يخمّن (مش مؤهّل؟ مش في النطاق؟ مفيش GPS؟ مشغول وقتها؟ حاجز اليوم؟
+    // عدّى سقفه؟)، بنعدّ المراحل على **نفس** شروط الأهلية بنفس الـparameters ونطبع أول مرحلة
+    // وقعت لصفر. مش endpoint ولا شاشة أدمن — سطر لوج في التطوير/الاختبار بس، والاستعلام
+    // الزيادة مابيحصلش أصلاً إلا لما القايمة تطلع فاضية.
+    if (items.length === 0 && !isProductionLikeEnv(process.env.NODE_ENV)) {
+      try {
+        const diagnosis = await this.techniciansService.diagnoseBookingCandidatePool({
+          serviceId: id,
+          addressId: query.address_id,
+          scheduledAt,
+          isTeamBooking: derivedMode === BookingMode.TEAM,
+          candidateLoad: neutralEstimate
+            ? {
+                durationMinutes: neutralEstimate.duration_minutes,
+                estimatedDurationDays: neutralEstimate.estimated_duration_days,
+              }
+            : undefined,
+        });
+        this.logger.warn(
+          `قايمة منفّذين فاضية — service=${id} zone=${diagnosis.zoneId} scheduled_at=${scheduledAt?.toISOString() ?? 'null'} ` +
+            `أول مرحلة وقعت لصفر: ${diagnosis.firstBlockingStage ?? 'مفيش (اتفلتروا بعد البوابة)'} | ` +
+            diagnosis.stages.map((st) => `${st.stage}=${st.remaining}`).join(' · '),
+        );
+      } catch (err) {
+        // التشخيص أداة مساعدة — فشله مايصحّش يحوّل رد ٢٠٠ سليم لعطل.
+        this.logger.warn(`تشخيص القايمة الفاضية فشل: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     // ADR-0031 — avatar_storage_key (لو موجود) هو المصدر المعتمد، بيتفك لرابط طازة هنا قبل الرد
     // (presigned S3 URLs بتنتهي، مش نستخدم avatarUrl الخام مباشرة). صفر أثر لو مفيش صور معتمدة أصلاً.
     await Promise.all(

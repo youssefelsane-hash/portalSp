@@ -324,7 +324,13 @@ async function main() {
         method: 'POST', token: customerToken,
         body: { service_id: serviceId, address_id: customer.address_id, scheduled_at: scheduledAt, selection_mode: 'auto' },
       })]);
-      probes.push(['قايمة الفنيين', await api(`/services/${serviceId}/technicians`, { token: customerToken })]);
+      // كانت بتتنادى بلا `address_id` (فبترجع 400 من التحقق قبل ما توصل للمسار أصلاً) وبلا
+      // ميعاد — والاتنين لازمين عشان البروب ده يقيس اللي العميل بيشوفه فعلاً.
+      probes.push(['قايمة الفنيين', await api(
+        `/services/${serviceId}/technicians?address_id=${customer.address_id}`
+          + `&scheduled_at=${encodeURIComponent(scheduledAt)}`,
+        { token: customerToken },
+      )]);
       probes.push(['تقدير المدة', await api(`/services/${serviceId}/estimate-duration`, {
         method: 'POST', token: customerToken, body: {},
       })]);
