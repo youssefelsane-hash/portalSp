@@ -383,16 +383,18 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
   it('explainOrderFunnel() — أعداد الفانل الحقيقية مطابقة لفنيي الفيكستشر بالظبط', async () => {
     const order = await orderRow();
     const funnel = await service.explainOrderFunnel(order);
-    expect(funnel.pool.categoryEligible).toBe(5);
-    expect(funnel.pool.zoneEligible).toBe(4);
-    expect(funnel.pool.blocked).toBe(1);
-    expect(funnel.pool.heavy).toBe(0);
-    expect(funnel.pool.meaningful).toBe(0);
-    expect(funnel.pool.light).toBe(3);
+    expect(funnel.pool!.categoryEligible).toBe(5);
+    expect(funnel.pool!.zoneEligible).toBe(4);
+    expect(funnel.pool!.blocked).toBe(1);
+    expect(funnel.pool!.heavy).toBe(0);
+    expect(funnel.pool!.meaningful).toBe(0);
+    expect(funnel.pool!.light).toBe(3);
     expect(funnel.dispatchAssignments.rejected).toBe(1);
     expect(funnel.dispatchAssignments.sent).toBe(0);
     expect(funnel.crewStatus).toBeNull();
     expect(funnel.crewRecruitOpportunities).toBeNull();
+    // الغياب لازم يجي ومعاه سببه — الواجهة بتعرض السبب ده بدل ما تخفي القسم (docs/08 §166).
+    expect(funnel.crewUnavailableReasonAr).toContain('فردي');
   });
 
   it('explainOrderFunnel() — طلب فريق بيرجّع crew_status + crew_recruit_opportunities بدل null', async () => {
@@ -416,5 +418,7 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     expect(funnel.crewStatus?.crewComplete).toBe(false);
     expect(funnel.crewRecruitOpportunities).not.toBeNull();
     expect(funnel.crewRecruitOpportunities?.offered).toBe(1);
+    // القسمين محسوبين، فمفيش سبب غياب — لو اتملى هنا يبقى الواجهة هتقول «مش منطبق» غلط.
+    expect(funnel.crewUnavailableReasonAr).toBeNull();
   });
 });

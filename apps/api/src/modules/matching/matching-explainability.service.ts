@@ -392,9 +392,17 @@ export class MatchingExplainabilityService {
    * منفصل، عشان الأداء مع مجمّعات كبيرة زي طلب المالك "avoid expensive synchronous diagnostics").
    */
   async explainOrderFunnel(order: Order): Promise<OrderMatchingFunnel> {
-    if (!order.serviceZoneId) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش نطاق خدمة محدد — مفيش فانل مطابقة ممكن عليه أصلاً', HttpStatus.BAD_REQUEST);
-    }
+    /*
+      **طلب بلا نطاق خدمة مابيرفضش الفانل كله** (بلاغ مالك 2026-09-19).
+
+      النطاق لازم لحساب **المجمّع** بس (مين مؤهّل في المنطقة دي). عدّادات العروض المبعوتة
+      ومسار التوزيع وحالة الطاقم مالهمش علاقة بيه خالص. الرفض الشامل كان بيخلّي كل قسم
+      «مفتّش المطابقة» في صفحة الطلب يختفي — والأدمن يفتكر إن الميزة اتشالت، وهو بس طلب
+      بلا نطاق. دلوقتي بيرجع اللي يقدر عليه، والمجمّع بيقول سبب غيابه.
+    */
+    const poolUnavailableReasonAr = order.serviceZoneId
+      ? null
+      : 'الطلب ده مالوش نطاق خدمة محدد، فمفيش مجمّع فنيين ممكن يتحسب عليه. باقي الأرقام تحت صحيحة.';
 
     // نفس الدالة اللي `dispatchOrAutoConfirm()` بتقرا منها — مش إعادة تنفيذ للقاعدة.
     const routeDecision = await this.matchingService.scheduledDispatchDecision(order);
@@ -412,7 +420,8 @@ export class MatchingExplainabilityService {
     );
     const serviceDurationMinutes = service?.estimated_duration_minutes ?? 60;
 
-    const [poolRow] = await this.dataSource.query<
+    // الاستعلام ده بيفلتر على النطاق، فبيتخطّى بالكامل لما يكون غايب — بدل ما يرمي.
+    const [poolRow] = !order.serviceZoneId ? [null] : await this.dataSource.query<
       { category_eligible_count: string; zone_eligible_count: string; blocked_count: string; heavy_count: string; meaningful_count: string; light_count: string }[]
     >(
       `
@@ -517,6 +526,14 @@ export class MatchingExplainabilityService {
 
     let crewRecruitOpportunities: WorkOpportunityStatusCounts | null = null;
     let crewStatus: CrewComposition | null = null;
+    /*
+      نفس قاعدة `poolUnavailableReasonAr`: الغياب بيتشرح مابيحصلش بصمت. قسمي الطاقم كانوا
+      بيختفوا خالص لأي طلب مش `TEAM`، فالأدمن يفتكر إنهم اتشالوا بدل ما يفهم إن الطلب فردي.
+    */
+    const crewUnavailableReasonAr =
+      order.bookingMode === BookingMode.TEAM
+        ? null
+        : 'الطلب ده فردي (فني واحد)، مش طلب فريق — فمفيش تجنيد طاقم ولا تركيبة طاقم تتحسب عليه.';
     if (order.bookingMode === BookingMode.TEAM) {
       const opportunityRows = await this.dataSource.query<{ status: string; count: string }[]>(
         `SELECT status, COUNT(*) AS count FROM technician_work_opportunities
@@ -538,17 +555,21 @@ export class MatchingExplainabilityService {
       orderId: order.id,
       orderStatus: order.orderStatus,
       dispatchRoute,
-      pool: {
-        categoryEligible: Number(poolRow?.category_eligible_count ?? 0),
-        zoneEligible: Number(poolRow?.zone_eligible_count ?? 0),
-        blocked: Number(poolRow?.blocked_count ?? 0),
-        heavy: Number(poolRow?.heavy_count ?? 0),
-        meaningful: Number(poolRow?.meaningful_count ?? 0),
-        light: Number(poolRow?.light_count ?? 0),
-      },
+      pool: poolUnavailableReasonAr
+        ? null
+        : {
+            categoryEligible: Number(poolRow?.category_eligible_count ?? 0),
+            zoneEligible: Number(poolRow?.zone_eligible_count ?? 0),
+            blocked: Number(poolRow?.blocked_count ?? 0),
+            heavy: Number(poolRow?.heavy_count ?? 0),
+            meaningful: Number(poolRow?.meaningful_count ?? 0),
+            light: Number(poolRow?.light_count ?? 0),
+          },
+      poolUnavailableReasonAr,
       dispatchAssignments,
       crewRecruitOpportunities,
       crewStatus,
+      crewUnavailableReasonAr,
     };
   }
 }
@@ -599,11 +620,19 @@ export interface OrderMatchingFunnel {
   orderStatus: OrderStatus;
   /** مسار التوزيع اللي الطلب ده واخده (أو هياخده لو رجع للتوزيع). */
   dispatchRoute: OrderDispatchRouteExplanation;
-  pool: OrderMatchingFunnelPoolCounts;
+  /**
+   * `null` لما المجمّع مش قابل للحساب (طلب بلا نطاق خدمة) — **مش سبب لرفض الفانل كله**
+   * (بلاغ مالك 2026-09-19). العدّادات والمسار تحت مالهمش علاقة بالنطاق.
+   */
+  pool: OrderMatchingFunnelPoolCounts | null;
+  /** سبب غياب المجمّع بالعربي، `null` لما يكون محسوب. */
+  poolUnavailableReasonAr: string | null;
   /** توزيع order_assignments (مسار التوزيع العادي/الطوارئ) — سواء اتبعت للطلب فعليًا لحد دلوقتي. */
   dispatchAssignments: OrderAssignmentStatusCounts;
   /** null لطلبات فردية/طوارئ — بس لطلبات الفريق (technician_work_opportunities، context='crew_recruit'). */
   crewRecruitOpportunities: WorkOpportunityStatusCounts | null;
   /** null لطلبات فردية/طوارئ. */
   crewStatus: CrewComposition | null;
+  /** سبب غياب قسمي الطاقم بالعربي، `null` لطلب فريق (يعني الاتنين فوق محسوبين). */
+  crewUnavailableReasonAr: string | null;
 }

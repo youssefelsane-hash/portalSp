@@ -615,6 +615,26 @@ opportunities sent/declined/pending → crew shortage، كل عدد بيتحسب
 .ts`) بدل حقن `OrderTeamService` كامل، عمدًا (نفس سبب تجنّب `OrdersModule` cycle الموثّق فوق).
 `Endpoint`: `GET /admin/orders/:id/matching-funnel`.
 
+### الفانل بيتدهور جزئيًا، مابيرفضش (docs/08 §166، بلاغ مالك 2026-09-19)
+
+كان بيرمي **400** لأي طلب بلا `service_zone_id`. النطاق لازم لحساب **المجمّع بس**، بس الرفض كان
+شامل — وفي الواجهة ده كان بيخفي «مفتّش المطابقة» كله، **وجدول جولات التوزيع معاه** (رغم إن مصدره
+endpoint تاني خالص)، فالأدمن يفتكر إن الميزة اتشالت.
+
+دلوقتي بيرجّع اللي يقدر عليه ومعاه سبب اللي مايقدرش:
+
+| الحقل | `null` لما | الحقل اللي بيشرح |
+|---|---|---|
+| `pool` | الطلب بلا `service_zone_id` | `poolUnavailableReasonAr` |
+| `crewRecruitOpportunities` / `crewStatus` | `bookingMode !== TEAM` | `crewUnavailableReasonAr` |
+
+`dispatchRoute` و`dispatchAssignments` بيتحسبوا **دايمًا** — مالهمش أي تعلّق بالنطاق ولا بنوع الحجز.
+
+ملاحظة: `explainTechnicianForOrder()` **لسه بترمي** لطلب بلا نطاق، وده صح — تفسير فني محدد بلا
+نطاق استعلام بلا معنى، مش عرض ناقص.
+
+الدليل الحي: `node scripts/verify-matching-inspector-completeness.js` (خمسة أشكال طلب × كل قسم).
+
 ## تعميق تفسير المطابقة — decision_limit_ok + rank_info حقيقي (docs/08 §36.6)
 
 **بَقّة حقيقية اتلقطت وقت بناء §36.5's UI (مفتّش المطابقة في صفحة تفاصيل الطلب)**:

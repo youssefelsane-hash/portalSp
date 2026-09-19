@@ -40,10 +40,16 @@ const PER_PAGE = 20;
  * منفصل عن الترتيب عن قصد: قبل كده «تنفيذها قرّب» كانت Sort على كل التاريخ، فالمكتمل من سنة
  * كان بيطلع أول القايمة (بلاغ المالك). `current` هو الافتراضي عشان الأدمن يشوف تشغيل اليوم.
  */
-const SCOPES: { value: 'current' | 'completed' | 'all'; label: string }[] = [
-  { value: 'current', label: 'الحالية' },
-  { value: 'completed', label: 'المكتملة' },
-  { value: 'all', label: 'كل الطلبات' },
+/*
+  الـ`hint` رجع بعد ما اتشال في جولة التنظيم (بلاغ مالك 2026-09-19: «أي حاجة مخفية تظهرها»).
+  «الحالية/المكتملة/كل الطلبات» أسماء مش بتقول حدودها — «المكتملة» بتشمل الملغي والمسترد كمان،
+  وده مالوش أي دليل من الاسم. رجع كـ`title` على كل زرار **وكسطر ظاهر تحت النطاق المختار**،
+  مش كسطر عريض جنب كل زرار (ده كان سبب شيله: كان بيكسر الشريط على شاشة لابتوب).
+*/
+const SCOPES: { value: 'current' | 'completed' | 'all'; label: string; hint: string }[] = [
+  { value: 'current', label: 'الحالية', hint: 'كل طلب لسه ماوصلش لحالة نهائية' },
+  { value: 'completed', label: 'المكتملة', hint: 'سجل الطلبات المقفولة (مكتمل/ملغي/مسترد)' },
+  { value: 'all', label: 'كل الطلبات', hint: 'التاريخ كله — للتنقيب' },
 ];
 
 const BUCKETS: { value: string; label: string }[] = [
@@ -246,21 +252,25 @@ function OrdersListPage() {
 
       {/* ═══ شريط واحد: النطاق + شكل العرض ═══ */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex rounded-xl border p-0.5">
-          {SCOPES.map((s) => (
-            <button
-              key={s.value}
-              type="button"
-              onClick={() => setParams({ scope: s.value === 'current' ? null : s.value, page: '1' })}
-              className={
-                scope === s.value
-                  ? 'rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground'
-                  : 'rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground'
-              }
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="flex flex-col gap-1">
+          <div className="inline-flex rounded-xl border p-0.5">
+            {SCOPES.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                title={s.hint}
+                onClick={() => setParams({ scope: s.value === 'current' ? null : s.value, page: '1' })}
+                className={
+                  scope === s.value
+                    ? 'rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground'
+                    : 'rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground'
+                }
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{SCOPES.find((s) => s.value === scope)?.hint}</p>
         </div>
 
         <div className="inline-flex rounded-xl border p-0.5">

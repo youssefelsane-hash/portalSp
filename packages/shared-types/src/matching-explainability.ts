@@ -112,8 +112,15 @@ export interface OrderMatchingFunnelDto {
   order_id: string;
   order_status: OrderStatus;
   dispatch_route: OrderDispatchRouteDto;
-  pool: OrderMatchingFunnelPoolCountsDto;
+  /**
+   * `null` لطلب بلا نطاق خدمة (docs/08 §166) — **مش سبب لإخفاء الفانل كله**. العدّادات
+   * ومسار التوزيع تحت مالهمش علاقة بالنطاق.
+   */
+  pool: OrderMatchingFunnelPoolCountsDto | null;
+  pool_unavailable_reason_ar: string | null;
   dispatch_assignments: OrderAssignmentStatusCountsDto;
   crew_recruit_opportunities: WorkOpportunityStatusCountsDto | null;
   crew_status: OrderMatchingFunnelCrewStatusDto | null;
+  /** سبب غياب قسمي الطاقم (طلب فردي) — عشان الواجهة تشرح الغياب بدل ما تخفي القسم. */
+  crew_unavailable_reason_ar: string | null;
 }

@@ -674,6 +674,9 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
   afterAll(async () => {
     try {
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTARSC-%`]);
+      // نفس سبب مسح `notifications` تحت: خيط الشات بيتفتح من listener **بعد** الرد، فالصف ده
+      // بيظهر بعد ما الاختبارات تخلص ويقفل حذف الطلبات بمفتاح أجنبي. اتلقط في تشغيل كامل حقيقي.
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTARSC-%`]);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTARSC-%`]);
       await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
