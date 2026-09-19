@@ -167,13 +167,21 @@ export class CatalogService {
     return 1;
   }
 
+  /**
+   * **احتياطي توافق بس** — مصدر مضاعف السعر الحقيقي هو `technician_profiles.pricing_tier`،
+   * وكل مسارات الحجز الحقيقية (قايمة المنفّذين، المعاينة، إنشاء الطلب) بتمرّره صراحةً. الخريطة
+   * دي بتشتغل بس لما الكولر يبعت مستوى تشغيلي بلا فئة (نسخ تطبيق قديمة، `technician_level` في
+   * `EstimateQueryDto`). الرتبة التشغيلية نفسها **مالهاش** جدول تسعير مستقل (0316).
+   */
   private pricingTierForOperationalLevel(level?: TechnicianLevel): TechnicianPricingTier | undefined {
     switch (level) {
       case TechnicianLevel.NEW:
         return TechnicianPricingTier.BEGINNER;
       case TechnicianLevel.VERIFIED:
-      case TechnicianLevel.PROFESSIONAL:
         return TechnicianPricingTier.STANDARD;
+      // الفئة الرابعة (0355) بتقع هنا: «محترف» أعلى من القياسي وأقل من البريميوم/قائد الفريق.
+      case TechnicianLevel.PROFESSIONAL:
+        return TechnicianPricingTier.ADVANCED;
       case TechnicianLevel.PREMIUM:
       case TechnicianLevel.TEAM_LEADER:
         return TechnicianPricingTier.EXPERT;

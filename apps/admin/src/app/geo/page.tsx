@@ -202,12 +202,10 @@ export default function GeoPage() {
     e.preventDefault();
     if (!selectedCityId) return;
     const form = new FormData(e.target as HTMLFormElement);
-    const surge = form.get('surge_multiplier') as string;
     const body: CreateServiceZoneBody = {
       city_id: selectedCityId,
       name_ar: form.get('name_ar') as string,
       name_en: form.get('name_en') as string,
-      surge_multiplier: surge ? Number(surge) : undefined,
     };
     setIsSaving(true);
     setError(null);
@@ -490,20 +488,18 @@ export default function GeoPage() {
                 <form onSubmit={handleCreateZone} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
                   <Input name="name_ar" placeholder="اسم النطاق بالعربي" required />
                   <Input name="name_en" placeholder="اسم النطاق بالإنجليزي" required />
-                  <Label htmlFor="zone_surge">مضاعف الذروة (surge، افتراضي 1)</Label>
-                  {/* `step="0.01"` مش `0.1`: العمود `numeric(4,2)`، والـstep الخشن كان بيجبر الأدمن على
-                      مضاعفات الـ١٠٪ (طلب مالك 2026-09-17). */}
-                  <Input id="zone_surge" name="surge_multiplier" type="number" step="0.01" min="0.01" max="99.99" dir="ltr" />
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    أي رقم بخانتين عشريتين مقبول: 1.04 = زيادة ٤٪، 1.5 = زيادة ٥٠٪، 1 = بلا زيادة.
-                  </p>
+                  {/* **مضاعف الذروة اتشال من هنا عن قصد** (بلاغ مالك 2026-09-19، docs/08 §170):
+                      العمود موجود في القاعدة والواجهة كانت بتحفظه وتعرضه «1.5×»، بس محرك التسعير
+                      مابيقراهوش خالص (`CatalogService.estimate()` بتثبّت المضاعف على 1). إعداد
+                      بيتحفظ وماليهوش أثر أسوأ من إعداد مش موجود. تسعير المنطقة الفعلي بيتظبط من
+                      شاشة الخدمة (نسبة مئوية على service_zone_pricing) وهو شغّال ومختبر. */}
                   <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
                     حفظ النطاق
                   </Button>
                 </form>
               )}
               {!zones ? (
-                <TableSkeleton columns={5} />
+                <TableSkeleton columns={4} />
               ) : zones.length === 0 ? (
                 <EmptyState title="مفيش نطاقات خدمة للمدينة دي لسه" />
               ) : (
@@ -511,7 +507,6 @@ export default function GeoPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>الاسم</TableHead>
-                      <TableHead>مضاعف الذروة</TableHead>
                       <TableHead>مضلّع مرسوم؟</TableHead>
                       <TableHead>الحالة</TableHead>
                       <TableHead></TableHead>
@@ -521,7 +516,6 @@ export default function GeoPage() {
                     {zones.map((zone) => (
                       <TableRow key={zone.id}>
                         <TableCell>{zone.name_ar}</TableCell>
-                        <TableCell dir="ltr">{zone.surge_multiplier}×</TableCell>
                         <TableCell>{zone.has_boundary ? 'مرسوم' : '—'}</TableCell>
                         <TableCell>
                           <button

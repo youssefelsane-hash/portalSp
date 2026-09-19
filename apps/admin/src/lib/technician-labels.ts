@@ -26,10 +26,11 @@ export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional',
 export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   beginner: 'مبتدئ',
   standard: 'قياسي',
+  advanced: 'متقدم',
   expert: 'خبير',
 };
 
-export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['beginner', 'standard', 'expert'];
+export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['beginner', 'standard', 'advanced', 'expert'];
 
 // لغة بصرية موحّدة لتصنيف القدرة الاستيعابية (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — نُقلت هنا من
 // operations/page.tsx (docs/08 §36.3) عشان تُستخدَم كمان في مفتّش المطابقة بصفحة تفاصيل الطلب

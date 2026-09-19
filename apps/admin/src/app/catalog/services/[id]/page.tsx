@@ -93,6 +93,7 @@ const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
 const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   beginner: 'مبتدئ',
   standard: 'قياسي',
+  advanced: 'متقدم',
   expert: 'خبير',
 };
 

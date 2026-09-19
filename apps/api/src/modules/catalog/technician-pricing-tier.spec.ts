@@ -66,7 +66,8 @@ describe('CatalogService.estimate() — فئة مهارة الفني الموح�
       [ids.tierService],
     );
     await q(
-      `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier) VALUES ($1,'expert',1.5), ($1,'standard',1.2)`,
+      `INSERT INTO service_pricing_tier_pricing (service_id, pricing_tier, price_multiplier)
+       VALUES ($1,'expert',1.5), ($1,'advanced',1.3), ($1,'standard',1.2)`,
       [ids.tierService],
     );
 
@@ -119,8 +120,18 @@ describe('CatalogService.estimate() — فئة مهارة الفني الموح�
     expect(estimate.estimated_total_cents).toBe(15000);
   });
 
-  it('الاستدعاء القديم بـprofessional يتحول إلى قياسي (1.2) من نفس جدول الفئات', async () => {
+  // migration 0355 ضافت فئة رابعة (`advanced`)، فخريطة الرتبة←الفئة بقت بتستخدم الأربعة:
+  // new→مبتدئ · verified→قياسي · **professional→متقدم** · premium/team_leader→خبير.
+  // القيمة الافتراضية للفئة الجديدة في الـmigration = نفس القياسي، فالمسار القديم مابيتغيّرش
+  // سعره إلا لما الأدمن يرفع «متقدم» بنفسه — زي ما بيحصل هنا بالظبط (1.3).
+  it('الاستدعاء القديم بـprofessional يتحول إلى متقدم (1.3) من نفس جدول الفئات', async () => {
     const estimate = await service.estimate(ids.tierService, undefined, TechnicianLevel.PROFESSIONAL);
+    expect(estimate.level_price_multiplier).toBe(1.3);
+    expect(estimate.estimated_total_cents).toBe(13000);
+  });
+
+  it('والرتبة `verified` لسه بتتحوّل لقياسي (1.2) — الفئة الجديدة ما نقلتش اللي تحتها', async () => {
+    const estimate = await service.estimate(ids.tierService, undefined, TechnicianLevel.VERIFIED);
     expect(estimate.level_price_multiplier).toBe(1.2);
     expect(estimate.estimated_total_cents).toBe(12000);
   });

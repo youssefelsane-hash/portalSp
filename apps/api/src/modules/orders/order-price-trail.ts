@@ -92,9 +92,12 @@ export interface OrderPriceTrail {
 
 const egp = (cents: number) => `${(cents / 100).toLocaleString('ar-EG-u-nu-latn', { minimumFractionDigits: 2 })} ج.م`;
 
+// `Record<string, ...>` عن قصد (القيمة جاية من لقطة محفوظة على الطلب، ممكن تكون فئة قديمة
+// اتشالت من الـenum) — فأي فئة جديدة لازم تتضاف هنا بالإيد، الـtypechecker مش هيمسكها.
 const TIER_LABELS_AR: Record<string, string> = {
   beginner: 'مبتدئ',
   standard: 'قياسي',
+  advanced: 'متقدم',
   expert: 'خبير',
 };
 
