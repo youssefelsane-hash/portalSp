@@ -1,3 +1,4 @@
+import { parseTestModePhones } from '../modules/auth/otp-test-mode';
 import { getRedisUrl } from './redis-url.util';
 
 export default () => ({
@@ -60,6 +61,15 @@ export default () => ({
   otp: {
     expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES ?? '5', 10),
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),
+
+    // **مؤقت — فترة Google Play Testing وبس** (docs/08 §173، `auth/otp-test-mode.ts`).
+    // الإقلاع بيترفض لو الوضع ده مفعّل مع `NODE_ENV=production|staging` (env.validation.ts)،
+    // فالفصل بين الاختبار والإنتاج مفروض عند الإقلاع مش بمراجعة بشرية.
+    testMode: {
+      enabled: process.env.OTP_TEST_MODE === 'true',
+      fixedCode: process.env.OTP_TEST_MODE_CODE ?? '111111',
+      allowedPhones: parseTestModePhones(process.env.OTP_TEST_MODE_PHONES),
+    },
   },
 
   // WebAuthn/Passkeys لدخول الأدمن (ADR-0011) — القيم الافتراضية مضبوطة لبيئة التطوير المحلية

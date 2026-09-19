@@ -59,6 +59,16 @@ export const envValidationSchema = Joi.object({
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
+  // ── وضع اختبار الـOTP (مؤقت — Google Play Testing، docs/08 §173) ────────────────
+  // مرفوض تمامًا في staging/production بالحارس تحت. الشرح الكامل في
+  // `modules/auth/otp-test-mode.ts` — الوضع بيغيّر **الكود المولَّد** وبيوقف إرسال SMS،
+  // ومسار التحقق مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية زي ما هي.
+  OTP_TEST_MODE: Joi.boolean().default(false),
+  // ٦ أرقام زي الكود الحقيقي — أي طول تاني بيخلي شاشة الإدخال في التطبيق مستحيل تتملى.
+  OTP_TEST_MODE_CODE: Joi.string().length(6).pattern(/^[0-9]{6}$/).default('111111'),
+  // أرقام المختبرين مفصولة بفواصل. فاضية = أي رقم (ينفع بس لو قاعدة الاختبار منفصلة).
+  OTP_TEST_MODE_PHONES: Joi.string().allow('').optional(),
+
   // WebAuthn/Passkeys لدخول الأدمن (ADR-0011) — قيم localhost الافتراضية شغالة في التطوير بس،
   // مرفوضة صراحة في الإنتاج (نفس فلسفة JWT secrets فوق) — لو نسيت تظبطهم، السيرفر يرفض يشتغل
   // بدل ما WebAuthn يترفض بصمت من كل متصفح حقيقي.
@@ -220,6 +230,27 @@ export const envValidationSchema = Joi.object({
           });
         }
       }
+    }
+    return value;
+  })
+  /**
+   * **الحارس اللي بيمنع تسريب وضع الاختبار للإنتاج** (docs/08 §173).
+   *
+   * لو `OTP_TEST_MODE=true` وصل لبيئة إنتاجية، كود الدخول بيبقى **متوقّع لكل الأرقام**. متغيّر
+   * بيئة منسي في لوحة الاستضافة سيناريو واقعي جدًا، فالفصل مابيتسابش لمراجعة بشرية: السيرفر
+   * **مابيقلعش** أصلاً. فشل الإقلاع صوته عالي وبيتصلّح في دقيقة؛ بايباس صامت في الإنتاج ممكن
+   * يفضل شهور.
+   *
+   * مقصود إنه `isProductionLikeEnv` مش `=== 'production'`: النشر الحقيقي شغّال بـ`staging`
+   * (شوف التعليق فوق) — الفحص ضد 'production' لوحدها كان هيخلي الحارس ده بلا أثر بالظبط في
+   * البيئة اللي بتخدم مستخدمين حقيقيين.
+   */
+  .custom((value: Record<string, unknown>, helpers) => {
+    if (isProductionLikeEnv(value.NODE_ENV as string | undefined) && value.OTP_TEST_MODE === true) {
+      return helpers.message({
+        custom:
+          'OTP_TEST_MODE=true ممنوع مع NODE_ENV=staging/production — ده بيخلي كود الدخول متوقّعًا لكل الأرقام. شيل المتغيّر ده قبل النشر، أو سيبه false',
+      });
     }
     return value;
   });
