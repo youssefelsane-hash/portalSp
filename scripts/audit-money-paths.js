@@ -12,10 +12,37 @@
  *
  * الخروج بكود 1 لو فيه أي خرق — صالح للـCI.
  */
+const fs = require('node:fs');
+const path = require('node:path');
 const { Client } = require('pg');
 
 const VERBOSE = process.argv.includes('--verbose');
-const CONN = process.env.DATABASE_URL || 'postgres://baytak:baytak@localhost:5432/baytak';
+
+/**
+ * **بَقّة أداة اتصلحت هنا (تدقيق شامل 2026-09-20)**: الافتراضي كان مكتوب بالإيد
+ * `postgres://baytak:baytak@localhost:5432/baytak` — وقاعدة `baytak` القديمة **لسه موجودة**
+ * على سيرفر التطوير. فتشغيل السكريبت بالطريقة الموثّقة (`node scripts/audit-money-paths.js`
+ * من غير `export DATABASE_URL`) كان بيدقّق **٥٣ طلب في قاعدة قديمة** بدل ٥٢٢ في القاعدة
+ * الحقيقية، ويطلّع «خرقين» سببهم إن عمودين مش موجودين هناك أصلاً.
+ *
+ * الحل: نفس مصدر الحقيقة اللي كل أدوات التدقيق التانية بتقراه (`scripts/lib/live-harness.js`)
+ * — `apps/api/.env`. مفيش fallback مكتوب بالإيد خالص: لو مالقيناش DSN بنوقف بصوت عالي بدل
+ * ما ندقّق حاجة مش دي.
+ */
+function resolveConnectionString() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const envPath = path.resolve(__dirname, '../apps/api/.env');
+  const fromFile = fs.existsSync(envPath)
+    ? /^DATABASE_URL=(.*)$/m.exec(fs.readFileSync(envPath, 'utf8'))?.[1]?.trim()
+    : undefined;
+  if (fromFile) return fromFile;
+  console.error(
+    'مفيش DATABASE_URL — لا في البيئة ولا في apps/api/.env. وقفت بدل ما أدقّق قاعدة غلط.',
+  );
+  process.exit(2);
+}
+
+const CONN = resolveConnectionString();
 
 /**
  * كل ثابت: عنوان، مصدره في الكود، واستعلام بيرجّع **الصفوف المخالفة بس**.
@@ -130,16 +157,23 @@ const INVARIANTS = [
   const client = new Client({ connectionString: CONN });
   await client.connect();
   const [{ count: orderCount }] = (await client.query('SELECT COUNT(*)::int AS count FROM orders WHERE deleted_at IS NULL')).rows;
-  console.log(`## تدقيق مسارات الفلوس — ${orderCount} طلب في القاعدة\n`);
+  // اسم القاعدة مطبوع عمدًا — ده اللي كان هيكشف تشغيلة على القاعدة الغلط من أول سطر.
+  const [{ current_database: dbName }] = (await client.query('SELECT current_database()')).rows;
+  console.log(`## تدقيق مسارات الفلوس — قاعدة "${dbName}"، ${orderCount} طلب\n`);
 
   let violations = 0;
+  // **«معرفتش أفحص» مش «خرق»** (تدقيق 2026-09-20): الاتنين كانوا بيتعدّوا في نفس العدّاد،
+  // والمرآة دي خطر: عمود ناقص كان بيطلّع «خرق» كذب، ولو القاعدة الغلط صادف إن فيها الأعمدة،
+  // ثابت مكسور فعلاً كان هيطلع أخضر. دلوقتي الاتنين منفصلين في التقرير — وبرضه الاتنين
+  // بيخلّوا الخروج غير صفري، لأن ثابت مالحقناش نفحصه **مش** ثابت ناجح.
+  let unchecked = 0;
   for (const inv of INVARIANTS) {
     let rows;
     try {
       rows = (await client.query(inv.sql)).rows;
     } catch (err) {
-      console.log(`⚠️  ${inv.title}: الاستعلام فشل — ${err.message}`);
-      violations += 1;
+      console.log(`⚠️  ${inv.title}: **معرفتش أفحص** (مش خرق) — ${err.message}`);
+      unchecked += 1;
       continue;
     }
     if (rows.length === 0) {
@@ -158,8 +192,18 @@ const INVARIANTS = [
   }
 
   await client.end();
-  console.log(violations === 0 ? '\n✅ كل ثوابت الفلوس سليمة.' : `\n❌ ${violations} خرق محتاج مراجعة.`);
-  process.exit(violations === 0 ? 0 : 1);
+  if (violations === 0 && unchecked === 0) {
+    console.log('\n✅ كل ثوابت الفلوس سليمة.');
+  } else {
+    if (violations > 0) console.log(`\n❌ ${violations} خرق محتاج مراجعة.`);
+    if (unchecked > 0) {
+      console.log(
+        `\n⚠️  ${unchecked} ثابت **ما اتفحصش** (استعلامه فشل) — ده مش نجاح. غالبًا القاعدة الغلط ` +
+          'أو مخطط قديم. شوف اسم القاعدة المطبوع فوق.',
+      );
+    }
+  }
+  process.exit(violations === 0 && unchecked === 0 ? 0 : 1);
 })().catch((err) => {
   console.error(err);
   process.exit(1);

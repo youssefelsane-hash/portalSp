@@ -83,8 +83,23 @@ export class RedisIoAdapter extends IoAdapter {
     }
   }
 
+  /**
+   * **سقف صريح لحجم الرسالة الواحدة** (تدقيق شامل 2026-09-20).
+   *
+   * الافتراضي في socket.io هو 1MB للإطار الواحد — والـ`StrictWebsocketValidationPipe` بيرفض أي
+   * حقل مش معروف، بس **بعد** ما الإطار يتفك ويتحوّل لكائن في الذاكرة. يعني الفلترة بتحصل متأخر
+   * عن نقطة التكلفة. أكبر حمولة مشروعة عندنا هي رسالة شات نصّية (كيلوبايتات)، فـ64KB سقف واسع
+   * جدًا للاستخدام الحقيقي وبيقفل الفرق بين «رسالة» و«ميجابايت».
+   * الصور في الشات بتتبعت عبر REST multipart (`sendImageMessage`) مش عبر السوكِت، فمفيش مسار
+   * مشروع بيعدّي السقف ده.
+   */
+  private static readonly MAX_MESSAGE_BYTES = 64 * 1024;
+
   createIOServer(port: number, options?: CreateServerOptions): IoServer {
-    const server = super.createIOServer(port, options) as IoServer;
+    const server = super.createIOServer(port, {
+      maxHttpBufferSize: RedisIoAdapter.MAX_MESSAGE_BYTES,
+      ...options,
+    } as CreateServerOptions) as IoServer;
     // `null` = الاتصال فشل فوق؛ بنسيب الـadapter الافتراضي (in-process) زي ما هو.
     if (this.adapterConstructor) {
       // الـcast هنا بسبب نسختَي `socket.io` المشروحتين فوق: `createAdapter` مبنية على نسخة

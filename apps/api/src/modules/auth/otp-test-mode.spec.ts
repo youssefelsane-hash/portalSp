@@ -278,6 +278,8 @@ describe('وضع اختبار الـOTP — حارس الإقلاع (docs/08 §1
     PII_ENCRYPTION_KEY: 'd'.repeat(40),
     DATABASE_URL: 'postgres://u:p@localhost:5432/db',
     CORS_ORIGIN: 'https://admin.ostahome.com',
+    // مطلوب في البيئات الإنتاجية (وجهة الـQR لما مفيش متجر — تدقيق 2026-09-20).
+    CUSTOMER_WEB_URL: 'https://ostahome.com',
     ADMIN_BASE_URL: 'https://admin.ostahome.com',
     WEBAUTHN_RP_ID: 'admin.ostahome.com',
     WEBAUTHN_ORIGIN: 'https://admin.ostahome.com',

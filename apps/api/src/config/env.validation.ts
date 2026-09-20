@@ -56,6 +56,29 @@ export const envValidationSchema = Joi.object({
     .optional()
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(1).required() }),
 
+  /**
+   * **وجهة الملصق المطبوع لما مفيش متجر** (تدقيق شامل 2026-09-20).
+   *
+   * `resolveSmartLinkTarget()` بيقرا الترتيب: متجر المنصة ⇐ `marketing.web_landing_url` ⇐
+   * المتغيّر ده ⇐ `/`. المتغيّر ده كان **بيتقرا من `process.env` مباشرةً وبس** — مش معرّف في
+   * `.env.example` ولا في `configuration.ts` ولا هنا، فمحدش كان يعرف إنه مطلوب أصلاً.
+   *
+   * النتيجة اللي اتقاست حيًّا: `marketing.ios_store_url` و`marketing.web_landing_url` فاضيين
+   * في القاعدة، فمستخدم آيفون أو كمبيوتر بيمسح **أي** QR من المنصة (ترشيح فني `/t`، كود خصم
+   * `/p`، حملة `/r`) كان بيروح على `/` على دومين الـAPI نفسه — صفحة ميتة. أندرويد لوحده هو
+   * اللي كان شغّال لأن متجره هو المظبوط.
+   *
+   * الملصق المطبوع عايش شهور بعد ما يتطبع، فده مش إعداد تجميلي: بنطلبه صراحةً في الإنتاج بدل
+   * ما نستنى حد يبلّغ إن الـQR مش شغّال.
+   */
+  CUSTOMER_WEB_URL: Joi.string()
+    .allow('')
+    .optional()
+    .when('NODE_ENV', {
+      is: PRODUCTION_LIKE_ENV,
+      then: Joi.string().uri().invalid('http://localhost:3002').required(),
+    }),
+
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 

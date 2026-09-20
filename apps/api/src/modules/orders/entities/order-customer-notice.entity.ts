@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn } from 'typeorm';
 
 /** نوع الرسالة — بيحدد الأيقونة/العنوان اللي الواجهة بتعرضهم، مش النص نفسه. */
 export enum OrderCustomerNoticeType {
@@ -46,6 +46,15 @@ export class OrderCustomerNotice {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
-  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  /**
+   * **`@DeleteDateColumn` مش `@Column` عادي** (تدقيق شامل 2026-09-20).
+   *
+   * إشعارات العميل على الطلب سجل تاريخي — بس العمود موجود بقاعدة البيانات من أول يوم
+   * (اتفاقية docs/01 §1.3: كل جدول فيه deleted_at).
+   * وبـ`@Column` عادي، TypeORM **مابيفلترش** الصفوف المحذوفة في `find()` — فأول ما حد يبدأ
+   * يحذف حذف ناعم يوم، الصفوف المحذوفة بترجع تظهر في القراءات بصمت. دلوقتي الجدول ده متوافق
+   * مع الـ43 جدول التانيين اللي عندهم `deleted_at` في المشروع.
+   */
+  @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 }

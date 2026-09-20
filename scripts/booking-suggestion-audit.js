@@ -216,6 +216,10 @@ function cairoDayPlus(days) {
       `order_number LIKE 'BSG-%' OR order_number LIKE 'BSH-%' OR order_number LIKE 'BSP-%'`,
     );
     await h.cleanup();
+    // `cleanup()` بيمسح البيانات بس ومابيقفلش اتصال القاعدة ولا موزّع `fetch` — من غير السطر
+    // ده السكريبت بيطبع نتيجته الخضرا وبعدين يفضل معلّق لحد ما الـtimeout يقتله (شوف
+    // `LiveHarness.close()`).
+    await h.close();
   }
 })().catch((err) => {
   console.error(err);

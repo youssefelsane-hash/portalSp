@@ -26,7 +26,23 @@ const argValue = (name) => {
 const ONLY_ZONE = argValue('--zone');
 const ONLY_CITY = argValue('--city');
 
-const DB = process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak';
+// نفس إصلاح `audit-money-paths.js` (تدقيق 2026-09-20): الافتراضي المكتوب بالإيد كان بيشاور على
+// قاعدة `baytak` القديمة اللي لسه موجودة على سيرفر التطوير — فالتشخيص كان بيطلع من بيانات تانية
+// خالص من غير ما حد يلاحظ. المصدر بقى نفس اللي كل الأدوات بتقراه.
+const DB = process.env.DATABASE_URL ?? readDatabaseUrlFromEnvFile();
+
+function readDatabaseUrlFromEnvFile() {
+  const envPath = require('node:path').resolve(__dirname, '../apps/api/.env');
+  const fs = require('node:fs');
+  const found = fs.existsSync(envPath)
+    ? /^DATABASE_URL=(.*)$/m.exec(fs.readFileSync(envPath, 'utf8'))?.[1]?.trim()
+    : undefined;
+  if (!found) {
+    console.error('مفيش DATABASE_URL — لا في البيئة ولا في apps/api/.env.');
+    process.exit(2);
+  }
+  return found;
+}
 
 /**
  * سلسلة الفني الواحد — «هو معتمد في النطاق، أمال ليه مش ظاهر؟».

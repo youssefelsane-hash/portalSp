@@ -9,6 +9,8 @@ const MINIMAL_VALID_PRODUCTION_ENV = {
   JWT_REFRESH_SECRET: 'b'.repeat(32),
   SETTINGS_ENCRYPTION_KEY: 'c'.repeat(32),
   CORS_ORIGIN: 'https://app.example.com',
+  // مطلوب في البيئات الإنتاجية (وجهة الـQR لما مفيش متجر — تدقيق 2026-09-20).
+  CUSTOMER_WEB_URL: 'https://app.example.com',
   WEBAUTHN_RP_ID: 'example.com',
   WEBAUTHN_ORIGIN: 'https://app.example.com',
   STORAGE_PROVIDER: 's3',
@@ -228,5 +230,36 @@ describe('envValidationSchema — staging لازم يتفحص بنفس صرام�
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
     expect(error).toBeDefined();
     expect(error!.message).toContain('WEBAUTHN_RP_ID');
+  });
+
+  // ── CUSTOMER_WEB_URL (تدقيق شامل 2026-09-20) ────────────────────────────────────
+  // ليه التلات تستات دول موجودين: المتغيّر ده كان **بيتقرا من `process.env` مباشرةً وبس** في
+  // `smart-link-destination.ts` — مش معرّف في أي مكان تاني، فمحدش كان يعرف إنه مطلوب. النتيجة
+  // المقيسة حيًّا: مستخدم آيفون أو كمبيوتر بيمسح أي QR من المنصة كان بيروح لصفحة ميتة على دومين
+  // الـAPI. الحارس هنا بيمنع نشر إنتاج تاني بنفس الفجوة الصامتة.
+
+  it('CUSTOMER_WEB_URL ناقصة في production يترفض — وجهة الـQR مالهاش افتراضي آمن', () => {
+    const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
+    delete (env as Record<string, unknown>).CUSTOMER_WEB_URL;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('CUSTOMER_WEB_URL');
+  });
+
+  it('CUSTOMER_WEB_URL بقيمة localhost في production يترفض — نفس فلسفة WEBAUTHN_ORIGIN', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_PRODUCTION_ENV, CUSTOMER_WEB_URL: 'http://localhost:3002' },
+      { allowUnknown: true },
+    );
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('CUSTOMER_WEB_URL');
+  });
+
+  it('CUSTOMER_WEB_URL فاضية في التطوير بتعدّي — التطوير مالوش دومين عام', () => {
+    const { error } = envValidationSchema.validate(
+      { NODE_ENV: 'development', DATABASE_URL: 'postgres://u:p@h:5432/d', JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'b'.repeat(32), CUSTOMER_WEB_URL: '' },
+      { allowUnknown: true },
+    );
+    expect(error).toBeUndefined();
   });
 });

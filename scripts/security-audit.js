@@ -349,6 +349,14 @@ async function run() {
     'modules/settings/social-links.controller.ts', // روابط سوشيال معلنة للفوتر — نفس فلسفة legal-entity
     'modules/promotions/promo-code-link.controller.ts', // /p/:code — تحويل QR، بيسجّل زيارة مجهولة وبيـ302، throttle 120/د
     'modules/marketing/marketing-link.controller.ts', // /r/:code — نفس الشيء لمصادر الحملات، throttle 120/د
+    // ── مراجعة 2026-09-20 ────────────────────────────────────────────────────────────────
+    // /t/:token (docs/08 §165) — تالت رابط QR بنفس نمط /p و/r فوق بالحرف. اتراجع حيًّا مش
+    // بالقراءة بس: التوكن الموجود والتوكن الوهمي بيرجّعوا **نفس** الـ302 بالظبط (مفيش
+    // enumeration oracle — الكونترولر عمدًا مابيسألش القاعدة)، و`x&evil=1#frag` رجع مشفّر
+    // (`encodeURIComponent` في appendLinkParams) فمفيش حقن بارامترات، والوجهة بتيجي من
+    // الإعدادات بس عمرها ما بتيجي من الطلب فمفيش open redirect. throttle 120/د، والـuser-agent
+    // متقصوص على 512 حرف قبل أي فحص.
+    'modules/technician-referrals/technician-referral-link.controller.ts',
   ]);
   const unexpected = publicList.filter((f) => !EXPECTED_PUBLIC.has(f));
   h.record(
