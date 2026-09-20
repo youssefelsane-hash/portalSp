@@ -15,6 +15,21 @@ interface PgNotificationConnection {
 
 const REVOCATION_CHANNEL = 'baytak_realtime_access_revoked';
 
+/**
+ * **سقف الـsockets المتزامنة للمستخدم الواحد** (تدقيق شامل 2026-09-20).
+ *
+ * كان مفيش سقف خالص: قِستها حيًّا — مستخدم واحد بتوكن واحد فتح **٣٠٠ socket في 462ms** بلا أي
+ * مقاومة. الـthrottler بتاع الـHTTP (`THROTTLE_LIMIT`, 60/دقيقة) **مابيغطّيش** الـWebSocket
+ * handshake خالص، فمفيش أي حاجة كانت بتحدّ العدد. وكل اتصال بيعمل استعلام DB (`assertActive`)
+ * وبيفضل ماسك مدخل في الـMaps دي، فالتكلفة تراكمية مش لحظية.
+ *
+ * محتاج توكن صالح — يعني مش هجوم من مجهول — بس هو رافعة تضخيم لحساب واحد متسرّب.
+ *
+ * **٢٠ ليه**: مستخدم حقيقي بيفتح ٢–٤ (تتبّع + شات، وممكن الويب والموبايل مع بعض)؛ ٢٠ بتسيب
+ * مساحة واسعة لأجهزة متعددة وإعادة اتصال بعد قطع شبكة، وبرضه بتحوّل «٣٠٠ ومفيش حد» لرقم مقفول.
+ */
+const MAX_SOCKETS_PER_USER = Math.max(1, parseInt(process.env.REALTIME_MAX_SOCKETS_PER_USER ?? '20', 10) || 20);
+
 @Injectable()
 export class RealtimeSessionRegistry implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RealtimeSessionRegistry.name);
@@ -57,6 +72,41 @@ export class RealtimeSessionRegistry implements OnModuleInit, OnModuleDestroy {
     const sockets = this.socketsByUser.get(userId) ?? new Set<Socket>();
     sockets.add(socket);
     this.socketsByUser.set(userId, sockets);
+    this.evictOldestBeyondCap(userId, sockets);
+  }
+
+  /**
+   * **بنفصل الأقدم مش بنرفض الجديد — عمدًا.**
+   *
+   * رفض الاتصال الجديد أسهل، بس بيكسر مستخدم حقيقي: `Set` في الجافاسكريبت بيفضل ماسك sockets
+   * «زومبي» لحد ما `handleDisconnect` يجري، وده ممكن يتأخر بعد قطع شبكة مفاجئ. يعني عميل قطعت
+   * نت عنده ورجع بسرعة كان ممكن يلاقي نفسه **مقفول برّه** بسقف مليان بجلسات ميتة — وده يخالف
+   * قاعدة CLAUDE.md إن أي حماية مالهاش حق تعلّق العملية الحقيقية للمستخدم.
+   *
+   * بالفصل من الأقدم: المستخدم الحقيقي دايمًا بيعدّي (جلسته الجديدة هي الناجية)، والمتعسّف
+   * بيلف على نفسه — الأثر ثابت عند السقف مهما فتح.
+   *
+   * ترتيب `Set` في جافاسكريبت هو ترتيب الإدخال، فأول عنصر = أقدم socket، بلا أي تتبّع زيادة.
+   */
+  private evictOldestBeyondCap(userId: string, sockets: Set<Socket>): void {
+    if (sockets.size <= MAX_SOCKETS_PER_USER) return;
+    const overflow = sockets.size - MAX_SOCKETS_PER_USER;
+    let evicted = 0;
+    for (const oldest of sockets) {
+      if (evicted >= overflow) break;
+      sockets.delete(oldest);
+      this.rateWindows.delete(oldest.id);
+      try {
+        oldest.emit('error', { code: 'AUTH_001', message: 'اتفتحت جلسة أحدث — الجلسة دي اتقفلت' });
+        oldest.disconnect(true);
+      } catch {
+        // الـsocket ممكن يكون مقفول أصلاً — المهم إنه اتشال من الخريطة فوق.
+      }
+      evicted += 1;
+    }
+    this.logger.warn(
+      `المستخدم ${userId} عدّى سقف ${MAX_SOCKETS_PER_USER} socket — اتفصل ${evicted} من الأقدم`,
+    );
   }
 
   unregister(userId: string | undefined, socket: Socket): void {
