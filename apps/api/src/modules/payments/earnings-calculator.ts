@@ -140,9 +140,8 @@ function validateParticipants(participants: EarningsParticipantInput[]): void {
     ids.add(participant.technicianId);
 
     if (participant.isLeader) leaders += 1;
-    // مقيّد بغير القائد عمدًا (ADR-0055/0087): المساعد اللي شايل الطلب لوحده **قائد بتسعيرة
-    // قائد**. الحارس بيفضل على المنضم لطاقم حد تاني — صف مساعد مسجّل `team_member` معناه
-    // بيانات مخالفة هتديله تسعيرة فني جوّه طاقم، وده اللي الحارس اتكتب عشانه.
+    // مقيّد بغير القائد عمدًا: الحارس ده بيمسك **بيانات مخالفة** — صف مساعد مسجّل
+    // `team_member` جوّه طاقم حد تاني، اللي كان هيديله تسعيرة فني بالغلط. بيفضل زي ما هو.
     if (
       !participant.isLeader &&
       participant.technicianKindSnapshot === 'assistant' &&
@@ -150,9 +149,19 @@ function validateParticipants(participants: EarningsParticipantInput[]): void {
     ) {
       throw new Error('A permanent assistant joining another crew must use the assistant earning role');
     }
-    if (participant.isLeader && participant.earningRole === 'assistant') {
-      throw new Error('An assistant cannot lead a V2 earning crew');
-    }
+    // **اتشال حارس «المساعد مايقودش» هنا** (قرار مالك 2026-09-20، ADR-0108).
+    //
+    // كان: `isLeader && earningRole === 'assistant'` ⇒ رمي. الحارس ده كان مبني على السياسة
+    // القديمة (ADR-0055 §3) اللي بتقول إن المساعد لما يقود بياخد تسعيرة فني كاملة، فالتركيبة
+    // دي كانت معناها بيانات متناقضة. القاعدة الجديدة بتخلّيها **الحالة الطبيعية**: المساعد
+    // بياخد معامل رتبته كمساعد حتى وهو قائد الطاقم.
+    //
+    // شيله مش اختياري مع تغيير `EarningsPolicyService.resolveParticipants()` — الاتنين لازم
+    // يتحركوا مع بعض. لو الـresolver اتغيّر والحارس فضل، كل تسوية لطلب قائده مساعد كانت هترمي
+    // والطلب يتعلّق على `work_completed/unpaid` للأبد (لا العميل يدفع، ولا حد ياخد نصيبه، ولا
+    // المنصة تاخد عمولتها) — وده بالظبط اللي حصل فعليًا في 2026-09-11 قبل ما يتلقط.
+    //
+    // «طاقم فيه قائد واحد بالظبط» لسه مفروضة تحت — دي عن **عدد** القادة مش عن نوعهم.
   }
   if (participants.length > 0 && leaders !== 1) {
     throw new Error('V2 earning crew must contain exactly one leader');
