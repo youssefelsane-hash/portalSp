@@ -88,12 +88,15 @@ describe('Unified Workforce Earnings Engine V2', () => {
     );
   });
 
-  it('rejects an assistant leader and a crew without one technician leader', () => {
+  // كان بيرفض القائد المساعد. اتقلب مع قرار المالك 2026-09-20 (ADR-0108): قائد بمعامل مساعد
+  // بقى **الحالة الطبيعية** مش بيانات متناقضة. لو الحارس رجع، كل طلب قائده مساعد هيتعلّق على
+  // `work_completed/unpaid` لأن التسوية بترمي.
+  it('بيقبل قائد بمعامل مساعد، ولسه بيطلب قائد واحد بالظبط', () => {
     expect(() =>
       calculateEarningsV2(10_000, 0, [
         participant('lead', { earningRole: 'assistant', technicianKindSnapshot: 'assistant' }),
       ]),
-    ).toThrow('assistant cannot lead');
+    ).not.toThrow();
 
     expect(() => calculateEarningsV2(10_000, 0, [participant('member', { isLeader: false })])).toThrow(
       'exactly one leader',
@@ -118,35 +121,59 @@ describe('Unified Workforce Earnings Engine V2', () => {
     expect(result.participantShares.map((share) => share.shareCents)).toEqual([100_000, 65_000]);
   });
 
-  // ADR-0055 §3 — «مساعد شايل طلب لوحده → participant_role = leader → نصيب القائد الكامل».
-  // كانت بتترمي هنا بـ«A permanent assistant must use the assistant earning role»، فالتسوية
-  // بتفشل والطلب بيتعلّق على work_completed/unpaid من غير ما حد ياخد مليم.
-  it('يدي المساعد اللي شايل الطلب لوحده نصيب القائد الكامل بلا نسبة مساعد', () => {
+  // **نتيجة ADR-0055 §3 اتحافظ عليها رياضيًا مش بشرط خاص** (ADR-0108): المساعد اللي شايل
+  // الطلب لوحده لسه بياخد الوعاء كامل، حتى بعد ما بقى بمعامل مساعد. السبب إن `effectiveWeight`
+  // بيحكم التوزيع **النسبي** بس — مشارك واحد ⇒ `الوعاء × وزنه ÷ وزنه` = الوعاء كامل أيًا كان
+  // المعامل. التست ده هو الحارس على الخاصية دي: لو حد حوّل المعامل لخصم مطلق يومًا، هيقع هنا.
+  it('المساعد اللي شايل الطلب لوحده بياخد الوعاء كامل رغم معامل المساعد', () => {
     const result = calculateEarningsV2(100_000, 20_000, [
-      participant('lead', { technicianKindSnapshot: 'assistant', assistantRatioBps: 6_500 }),
+      participant('lead', {
+        earningRole: 'assistant',
+        technicianKindSnapshot: 'assistant',
+        assistantRatioBps: 6_500,
+      }),
     ]);
 
     expect(result.participantShares[0].shareCents).toBe(80_000);
-    expect(result.participantShares[0].earningRole).toBe('technician');
+    expect(result.participantShares[0].earningRole).toBe('assistant');
   });
 
-  it('يدي المساعد القائد نصيب قائد كامل جنب طاقم، مش نصيب مخفّض', () => {
-    // نفس المعاملات بالظبط لقائد مساعد وقائد فني — النتيجة لازم تطابق، وإلا يبقى نوع الحساب
-    // بيخصم من حد عمل الشغلانة، وده اللي ADR-0055 رفضه صراحةً.
-    const crew = (leaderKind: 'technician' | 'assistant') =>
-      calculateEarningsV2(165_000, 0, [
-        participant('lead', { levelWeightBps: 10_000, technicianKindSnapshot: leaderKind }),
-        participant('helper', {
-          isLeader: false,
-          earningRole: 'assistant',
-          technicianKindSnapshot: 'assistant',
-          levelWeightBps: 10_000,
-          assistantRatioBps: 6_500,
-        }),
-      ]).participantShares.map((share) => share.shareCents);
+  // **نص طلب المالك (2026-09-20، ADR-0108)**: «لو اتنين مساعدين في نفس الرتبة شغالين في نفس
+  // الفريق، واحد فيهم قائد فريق والتاني هو اللي جايبه تحته، الاتنين ياخدوا زي بعض».
+  it('مساعدان بنفس الرتبة — القائد والمنضم — بياخدوا بالظبط زي بعض', () => {
+    const result = calculateEarningsV2(160_000, 0, [
+      participant('lead', {
+        earningRole: 'assistant',
+        technicianKindSnapshot: 'assistant',
+        levelWeightBps: 10_000,
+        assistantRatioBps: 8_000,
+      }),
+      participant('helper', {
+        isLeader: false,
+        earningRole: 'assistant',
+        technicianKindSnapshot: 'assistant',
+        levelWeightBps: 10_000,
+        assistantRatioBps: 8_000,
+      }),
+    ]).participantShares.map((share) => share.shareCents);
 
-    expect(crew('assistant')).toEqual([100_000, 65_000]);
-    expect(crew('assistant')).toEqual(crew('technician'));
+    expect(result).toEqual([80_000, 80_000]);
+  });
+
+  // الفرق الطبيعي بين فني ومساعد لازم يفضل موجود — القاعدة الجديدة بتساوي المتساويين بس.
+  it('قائد فني جنب مساعد: الفرق بالمعامل لسه قايم', () => {
+    const result = calculateEarningsV2(165_000, 0, [
+      participant('lead', { levelWeightBps: 10_000 }),
+      participant('helper', {
+        isLeader: false,
+        earningRole: 'assistant',
+        technicianKindSnapshot: 'assistant',
+        levelWeightBps: 10_000,
+        assistantRatioBps: 6_500,
+      }),
+    ]).participantShares.map((share) => share.shareCents);
+
+    expect(result).toEqual([100_000, 65_000]);
   });
 
   it('لسه بيرفض مساعد منضم لطاقم حد تاني بتسعيرة فني', () => {

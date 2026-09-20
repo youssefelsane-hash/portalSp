@@ -49,9 +49,10 @@ describe('EarningsPolicyService', () => {
     );
   });
 
-  // ADR-0055 §3 — «القسمة بتشتغل على participant_role مش على technician_kind». المطابقة هنا
-  // كانت بتقرا الاتنين، فالمساعد القائد كان بيوصل للحاسبة بتركيبة مرفوضة والتسوية كلها بتفشل.
-  it('بيدّي المساعد القائد دور فني في القسمة — مش دور مساعد', async () => {
+  // **قرار مالك 2026-09-20 (ADR-0108)** — يعدّل الأثر المالي في ADR-0055 §3: معامل المساعد
+  // بيتحدد من `technician_kind` كمان، مش من `participant_role` وحده. التست ده كان بيثبّت
+  // العكس بالظبط (القائد المساعد بياخد دور فني)، فاتقلب لنص القاعدة الجديدة.
+  it('بيدّي المساعد القائد دور مساعد في القسمة — رتبته هي اللي بتحكم', async () => {
     const rows = (technicianKind: 'technician' | 'assistant') => [
       {
         technician_id: 'leader', participant_role: 'leader', technician_kind: technicianKind,
@@ -77,11 +78,17 @@ describe('EarningsPolicyService', () => {
 
     const asAssistant = await run('assistant');
     expect(asAssistant.participantShares[0]).toMatchObject({
-      technicianId: 'leader', technicianKindSnapshot: 'assistant', earningRole: 'technician', isLeader: true,
+      technicianId: 'leader', technicianKindSnapshot: 'assistant', earningRole: 'assistant', isLeader: true,
     });
-    // نفس أرقام القائد الفني بالظبط — نوع الحساب مابيخصمش من اللي عمل الشغلانة.
-    expect(asAssistant.participantShares.map((share) => share.shareCents)).toEqual(
-      (await run('technician')).participantShares.map((share) => share.shareCents),
-    );
+
+    // القائد لسه بيتعرض كـ«قائد» — التعديل على **معامل الفلوس** بس، مش على دوره في الطلب.
+    expect(asAssistant.participantShares[0].isLeader).toBe(true);
+
+    // الطلب ده: قائد مساعد + منضم مساعد، الاتنين `professional` بنفس المعاملات ⇒ نص بنص.
+    expect(asAssistant.participantShares.map((share) => share.shareCents)).toEqual([82_500, 82_500]);
+
+    // وقائد **فني** جنب نفس المساعد لسه بياخد أكتر — الفرق بين الفني والمساعد ماتشالش.
+    const asTechnician = await run('technician');
+    expect(asTechnician.participantShares.map((share) => share.shareCents)).toEqual([100_000, 65_000]);
   });
 });
