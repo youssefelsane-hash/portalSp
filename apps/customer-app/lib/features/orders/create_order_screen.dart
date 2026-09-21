@@ -1193,7 +1193,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // عليه ٣٠ جنيه خصم… شطب على السعر القديم»). القيمة والنص الاتنين جايين من الباك-إند —
     // التطبيق بيعرض بس، فتغيير المبلغ من لوحة الأدمن مايحتاجش نسخة جديدة من التطبيق.
     final discountCents = available ? (channel?.discountCents ?? 0) : 0;
-    final total = _pricePreview?.totalAmountCents;
+    // الرقم المعروض بييجي من **اللي بيتدفع دلوقتي**، مش من سعر الشغل — الشرح الكامل والسبب
+    // في `resolveOnlineDiscountDisplay()` تحت.
+    final discountDisplay = resolveOnlineDiscountDisplay(
+      discountCents: discountCents,
+      remoteAssessmentFeeDueCents: _dueRemoteAssessmentFeeCents,
+      previewTotalCents: _pricePreview?.totalAmountCents,
+    );
     return RadioListTile<String?>(
       value: method,
       enabled: available,
@@ -1211,11 +1217,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(available ? subtitle : reason),
-          if (discountCents > 0) ...[
+          if (discountDisplay.applies) ...[
             const SizedBox(height: 4),
             _OnlineDiscountLine(
               discountCents: discountCents,
-              totalCents: total,
+              totalCents: discountDisplay.baseCents,
               labelAr: channel?.discountLabelAr,
               formatEgp: _formatEgp,
             ),
@@ -2277,6 +2283,34 @@ class _RecommendedBadge extends StatelessWidget {
 /// السعر القديم بيظهر مشطوب جنب الجديد **بس لما نعرف الإجمالي فعلاً**؛ قبل ما التسعير يرجع
 /// (العميل لسه ما اختارش عنوان مثلاً) بنعرض قيمة الخصم لوحدها بدل ما نخترع سعرًا وهميًا
 /// ونشطب عليه.
+/// **قرار «الخصم الإلكتروني يتعرض على أي رقم؟»** — دالة نقية عشان تتختبر لوحدها.
+///
+/// بلاغ مالك 2026-09-21 (بلقطة شاشة): الكارت كان بيعرض «150 ج.م ← 120 ج.م» في طلب تقييم
+/// بالصور، جنب ملخّص في نفس الشاشة بيقول «رسم التقييم (يتدفع دلوقتي) 50 ج.م» — رقمين
+/// متناقضين. السبب إن الشطب كان مربوط بـ`totalAmountCents` بتاع المعاينة دايمًا، و
+/// `_refreshPreview()` مابيبعتش `request_remote_quote` للباك-إند فالمعاينة بترجع تقدير
+/// المعاينة الميدانية.
+///
+/// الباك-إند نفسه سليم تمامًا: `previewOrder()` بيحط `subtotal = remoteAssessmentFeeCents` لو
+/// العلم اتبعت، و`POST /orders` بيحط `totalAmountCents = remoteAssessmentFeeCents` فعليًا،
+/// و`applyInstaPayDiscount()` بيخصم من **المستحق دلوقتي** مش من سعر الشغل. فالإصلاح عرض بحت.
+///
+/// [remoteAssessmentFeeDueCents] = رسم التقييم المستحق دلوقتي (صفر أو null لو مش مسار صور).
+({int? baseCents, bool applies}) resolveOnlineDiscountDisplay({
+  required int discountCents,
+  required int? remoteAssessmentFeeDueCents,
+  required int? previewTotalCents,
+}) {
+  final base = (remoteAssessmentFeeDueCents != null && remoteAssessmentFeeDueCents > 0)
+      ? remoteAssessmentFeeDueCents
+      : previewTotalCents;
+  // نفس قاعدة `eligibleInstaPayDiscountCents()` في الباك-إند بالحرف: خصم مساوي أو أكبر من
+  // المستحق مابيتطبّقش أصلاً. من غير الحارس ده، خدمة رسم تقييمها أقل من الحافز كانت هتعرض
+  // «20 ج.م ← 0 ج.م» والعميل يتحاسب 20 — وعد كاذب في الواجهة.
+  final applies = discountCents > 0 && (base == null || discountCents < base);
+  return (baseCents: base, applies: applies);
+}
+
 class _OnlineDiscountLine extends StatelessWidget {
   const _OnlineDiscountLine({
     required this.discountCents,

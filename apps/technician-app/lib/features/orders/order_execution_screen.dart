@@ -18,6 +18,7 @@ import '../schedule/models.dart' show ScheduleSlot;
 import '../schedule/schedule_repository.dart';
 import 'models.dart';
 import 'order.dart';
+import 'order_context_badges.dart';
 import 'orders_repository.dart';
 import 'recruit_team_screen.dart';
 import '../../design/order_number_title.dart';
@@ -1659,12 +1660,22 @@ class _JobBriefCard extends StatelessWidget {
       durationMinutes: order.durationMinutes,
       estimatedDurationDays: order.estimatedDurationDays,
     );
+    final badges = orderContextBadges(
+      isRecurring: order.isRecurring,
+      isWarrantyRevisit: order.isWarrantyRevisit,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // شارات سياق الطلب فوق الاسم مباشرةً — أول حاجة الفني يشوفها لما يفتح الطلب
+            // (بلاغ مالك 2026-09-21).
+            if (badges.isNotEmpty) ...[
+              Wrap(spacing: 6, runSpacing: 4, children: badges),
+              const SizedBox(height: 8),
+            ],
             Text(
               order.serviceNameAr ?? 'طلب خدمة',
               style: theme.textTheme.titleLarge,

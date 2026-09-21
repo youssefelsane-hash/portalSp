@@ -172,6 +172,24 @@ class Order {
   // الباك-إند (orders.technician_viewed_at) مش محليًا، فبيفضل صح بعد إعادة تثبيت أو جهاز تاني.
   final bool isNewForTechnician;
 
+  /// نوع الطلب زي ما الباك-إند بيرجّعه (`orders.order_type`): `standard` / `scheduled` /
+  /// `recurring` / `revisit` / `emergency` / `b2b`.
+  ///
+  /// **ليه الفني محتاجه** (بلاغ مالك 2026-09-21): الطلب المتكرر والطلب اللي جاي من ضمان
+  /// بيتعاملوا معاملة مختلفة على الأرض، والفني ماكانش عنده أي طريقة يعرف بيها إنه واقف قدام
+  /// واحد منهم — الشاشة كانت بتبان زي أي طلب عادي بالظبط. القيمة موجودة في رد الـAPI من زمان
+  /// (`order-response.dto.ts`) بس ماكانتش متقروءة هنا خالص.
+  final String orderType;
+
+  /// طلب متكرر متولّد من قالب (`RecurringOrdersService` بيحط `order_type='recurring'` مع
+  /// `recurring_template_id`).
+  bool get isRecurring => orderType == 'recurring';
+
+  /// إعادة زيارة تحت الضمان — العميل رجع في فترة الضمان وطلب الفني يعدّي تاني.
+  /// `order-creation.service.ts` بيفرض `OrderType.REVISIT` لأي طلب له `original_order_id`،
+  /// فده مصدر الحقيقة الوحيد ومفيش حاجة تانية محتاجة تتسأل.
+  bool get isWarrantyRevisit => orderType == 'revisit';
+
   Order({
     required this.id,
     required this.orderNumber,
@@ -206,6 +224,7 @@ class Order {
     this.customerPhone,
     this.serviceNameAr,
     this.isNewForTechnician = false,
+    this.orderType = 'standard',
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -230,6 +249,7 @@ class Order {
     // وده السلوك الصح ليها: مفيش زرار تسعير بيظهر.
     priceStatus: json['price_status'] as String? ?? 'confirmed',
     bookingMode: json['booking_mode'] as String? ?? 'individual',
+    orderType: json['order_type'] as String? ?? 'standard',
     requiredTechnicians: json['required_technicians'] as int?,
     requiredAssistants: json['required_assistants'] as int?,
     address: json['address'] != null
