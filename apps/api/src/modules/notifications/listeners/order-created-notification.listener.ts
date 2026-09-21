@@ -7,6 +7,7 @@ import { CustomerProfilesService } from '../../customers/customer-profiles.servi
 import { Order } from '../../orders/entities/order.entity';
 import { NotificationsService } from '../notifications.service';
 import { NotificationRoutingService } from '../notification-routing.service';
+import { orderRef } from '../notification-format.util';
 
 @Injectable()
 export class OrderCreatedNotificationListener {
@@ -34,8 +35,8 @@ export class OrderCreatedNotificationListener {
           order.orderType === 'revisit' && order.scheduledAt
             ? `إعادة الزيارة رقم ${order.orderNumber} اتحددلها أول موعد متاح للفني: ${formatCairoDateTime(order.scheduledAt)}.`
             : order.orderStatus === 'awaiting_admin_quote'
-            ? `طلب رقم ${order.orderNumber} — الإدارة بتراجع الصور وهتبعتلك السعر قبل اختيار الفني.`
-            : `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
+            ? `${orderRef(order.orderNumber)} — الإدارة بتراجع الصور وهتبعتلك السعر قبل اختيار الفني.`
+            : `${orderRef(order.orderNumber)} — بندوّرلك على أقرب فني متاح دلوقتي.`,
         referenceType: 'order',
         referenceId: order.id,
         deepLink: `/orders/${order.id}`,

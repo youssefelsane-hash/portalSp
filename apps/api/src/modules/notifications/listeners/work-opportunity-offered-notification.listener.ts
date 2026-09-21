@@ -4,6 +4,7 @@ import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 // نفس شكل عرض order_assignments العادي (order-offer-notification.listener.ts's orderOfferDeepLink)
 // — apps/technician-app بتحتاج orderId فورًا لفتح تفاصيل الطلب من الإشعار مباشرة.
@@ -48,8 +49,8 @@ export class WorkOpportunityOfferedNotificationListener {
           notificationType: isCrewRecruit ? 'crew_recruit_opportunity' : 'work_opportunity',
           titleAr: isCrewRecruit ? 'دعوة انضمام لفريق' : 'فرصة شغل إضافي',
           bodyAr: isCrewRecruit
-            ? `فريق طلب رقم ${event.orderNumber} محتاجك تنضم — راجع التفاصيل.`
-            : `طلب رقم ${event.orderNumber} متاح ليك كفرصة إضافية يوم ${formatServiceDay(event.scheduledAt)} — راجع التفاصيل.`,
+            ? `فريق ${orderRef(event.orderNumber)} محتاجك تنضم — راجع التفاصيل.`
+            : `${orderRef(event.orderNumber)} متاح ليك كفرصة إضافية يوم ${formatServiceDay(event.scheduledAt)} — راجع التفاصيل.`,
           referenceType: 'technician_work_opportunity',
           referenceId: event.opportunityId,
           deepLink: workOpportunityDeepLink(event.orderId),

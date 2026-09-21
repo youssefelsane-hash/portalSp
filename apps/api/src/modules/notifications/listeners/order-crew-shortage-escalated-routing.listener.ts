@@ -5,6 +5,7 @@ import {
   OrderCrewShortageEscalatedEvent,
 } from '../../../common/events/order-crew-shortage-escalated.event';
 import { NotificationRoutingService } from '../notification-routing.service';
+import { arDateTime } from '../notification-format.util';
 
 // تصعيد نقص طاقم قبل الموعد (docs/08 §35.5) — نفس نمط EmergencyDispatchStrugglingRoutingListener/
 // OrderNoTechnicianFoundRoutingListener بالحرف (routeToRole الموجود بالفعل، مفيش نظام توجيه موازي).
@@ -25,7 +26,7 @@ export class OrderCrewShortageEscalatedRoutingListener {
       await this.routingService.routeToRole('order.crew_shortage_escalated', {
         notificationType: 'order_crew_shortage_escalated',
         titleAr: `طاقم ناقص قبل الموعد: ${event.orderNumber}`,
-        bodyAr: `الطلب موعده ${event.scheduledAt.toLocaleString('ar-EG')} ولسه ناقصه ${missingText} — محتاج تدخّل يدوي قبل ما الموعد يوصل.`,
+        bodyAr: `الطلب موعده ${arDateTime(event.scheduledAt)} ولسه ناقصه ${missingText} — محتاج تدخّل يدوي قبل ما الموعد يوصل.`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/admin/orders/${event.orderId}`,

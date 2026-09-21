@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../../common/events/order-reassigned.event';
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 @Injectable()
 export class OrderReassignedNotificationListener {
@@ -21,7 +22,7 @@ export class OrderReassignedNotificationListener {
         userId: technician.userId,
         notificationType: 'order_reassigned_to_you',
         titleAr: 'الإدارة عيّنتلك طلب',
-        bodyAr: `طلب رقم ${event.orderNumber} اتعيّن ليك مباشرة من فريق العمليات.`,
+        bodyAr: `${orderRef(event.orderNumber)} اتعيّن ليك مباشرة من فريق العمليات.`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/technician/orders/${event.orderId}`,
@@ -32,7 +33,7 @@ export class OrderReassignedNotificationListener {
           userId: previousTechnician.userId,
           notificationType: 'order_reassigned_away',
           titleAr: 'الإدارة نقلت الطلب لفني آخر',
-          bodyAr: `طلب رقم ${event.orderNumber} لم يعد ضمن طلباتك.`,
+          bodyAr: `${orderRef(event.orderNumber)} لم يعد ضمن طلباتك.`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,

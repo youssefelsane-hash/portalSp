@@ -7,10 +7,7 @@ import {
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
-
-function egp(amountCents: number): string {
-  return (amountCents / 100).toFixed(2).replace(/\.00$/, '');
-}
+import { egp, orderRef } from '../notification-format.util';
 
 /**
  * ADR-0067 §1 — نتيجة مراجعة الأدمن لسعر خارج النطاق، بتروح للفني اللي **بعت العرض** (مش الفني
@@ -35,8 +32,8 @@ export class OrderQuoteAboveRangeDecidedNotificationListener {
       const deepLink = `/technician/orders/${event.orderId}`;
       const titleAr = event.approved ? 'الإدارة اعتمدت سعرك' : 'الإدارة رفضت السعر — محتاجين سعر جديد';
       const bodyAr = event.approved
-        ? `طلب رقم ${event.orderNumber}: سعر ${egp(event.amountCents)} ج.م اتعتمد وراح للعميل للموافقة.`
-        : `طلب رقم ${event.orderNumber}: سعر ${egp(event.amountCents)} ج.م اترفض — ${event.reason}. ابعت سعر جديد من تفاصيل الطلب.`;
+        ? `${orderRef(event.orderNumber)}: سعر ${egp(event.amountCents)} اتعتمد وراح للعميل للموافقة.`
+        : `${orderRef(event.orderNumber)}: سعر ${egp(event.amountCents)} اترفض — ${event.reason}. ابعت سعر جديد من تفاصيل الطلب.`;
 
       const workflow = event.approved
         ? null

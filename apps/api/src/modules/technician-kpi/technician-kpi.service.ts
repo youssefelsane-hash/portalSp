@@ -13,6 +13,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { User } from '../auth/entities/user.entity';
 import { TechnicianKpiCalculationService } from './technician-kpi-calculation.service';
 import { KpiSnapshotStatus, TechnicianKpiSnapshot } from './entities/technician-kpi-snapshot.entity';
+import { egp, ltr } from '../notifications/notification-format.util';
 
 export interface ListKpiSnapshotsParams {
   periodYear?: number;
@@ -401,7 +402,7 @@ export class TechnicianKpiService {
         userId: paid.technicianUserId,
         notificationType: 'technician_kpi_bonus_paid',
         titleAr: 'مكافأة أداء شهرية',
-        bodyAr: `اتصرفت مكافأة أداء بقيمة ${((paid.snapshot.approvedBonusCents ?? 0) / 100).toFixed(0)} ج.م. عن ${paid.snapshot.periodMonth}/${paid.snapshot.periodYear}`,
+        bodyAr: `اتصرفت مكافأة أداء بقيمة ${egp(paid.snapshot.approvedBonusCents ?? 0)} عن شهر ${ltr(`${paid.snapshot.periodMonth}/${paid.snapshot.periodYear}`)}`,
         referenceType: 'technician_kpi_snapshot',
         referenceId: paid.snapshot.id,
       })

@@ -10,6 +10,7 @@ import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationRoutingService } from '../notification-routing.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 // سياسة إلغاء الفني (docs/10) — إشعار عالي الأولوية للعميل (in_app + push، مش in_app بس) بسبب
 // آمن للعميل + رابط مباشر، ونسخة تشغيلية للأدمن عبر NotificationRoutingService الموجود أصلاً
@@ -32,8 +33,8 @@ export class TechnicianCancellationNotificationListener {
       const requiresManualReselection = event.recoveryAction === CancellationRecoveryAction.MANUAL_RESELECTION_REQUIRED;
       const deepLink = requiresManualReselection ? `/orders/${event.orderId}/select-technician` : `/orders/${event.orderId}`;
       const body = requiresManualReselection
-        ? `الفني اعتذر عن طلب رقم ${event.orderNumber} — السبب: ${event.customerSafeReasonAr}. اختار فني بديل بنفسك دلوقتي.`
-        : `الفني اعتذر عن طلب رقم ${event.orderNumber} — السبب: ${event.customerSafeReasonAr}. بندوّرلك على فني بديل فورًا.`;
+        ? `الفني اعتذر عن ${orderRef(event.orderNumber)} — السبب: ${event.customerSafeReasonAr}. اختار فني بديل بنفسك دلوقتي.`
+        : `الفني اعتذر عن ${orderRef(event.orderNumber)} — السبب: ${event.customerSafeReasonAr}. بندوّرلك على فني بديل فورًا.`;
 
       // العميل لازم يختار بنفسه (مش auto-rematch) — action_required حقيقي (ADR-0012، تصحيح
       // المالك الصريح: "الرفض نفسه مش المهم، المهم هل العميل مطلوب منه يعمل حاجة"). نوع منفصل

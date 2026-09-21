@@ -5,6 +5,7 @@ import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 // orderId مدموج في الـpath عمدًا — apps/technician-app بتحتاجه فورًا في حمولة الإشعار (data-only
 // FCM payload، راجع FcmPushDispatcher) عشان تقدر تنادي POST /technician/orders/:id/accept|reject
@@ -65,7 +66,7 @@ export class OrderOfferNotificationListener {
             userId: technician.userId,
             notificationType: 'order_offer',
             titleAr: 'طلب جديد قريب منك',
-            bodyAr: `طلب رقم ${event.orderNumber} متاح دلوقتي — أول واحد يقبل ياخده.`,
+            bodyAr: `${orderRef(event.orderNumber)} متاح دلوقتي — أول واحد يقبل ياخده.`,
             referenceType: 'order_assignment',
             referenceId: event.assignmentId,
             deepLink: orderOfferDeepLink(event.orderId),

@@ -5,6 +5,7 @@ import {
   PaymentInstaPayTransferReportedEvent,
 } from '../../../common/events/payment-instapay-transfer-reported.event';
 import { NotificationRoutingService } from '../notification-routing.service';
+import { egp } from '../notification-format.util';
 
 // §28 — فجوة رصد حقيقية: العميل بيدوس "حوّلت" وده كان بيتسجّل بلا أي تنبيه فعلي لفريق Finance
 // (نفس نمط PayoutRequiresReviewRoutingListener/SupportChatMessageRoutingListener بالحرف).
@@ -20,7 +21,7 @@ export class PaymentInstaPayTransferReportedRoutingListener {
       await this.routingService.routeToRole(PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT, {
         notificationType: 'payment_instapay_transfer_reported',
         titleAr: `عميل بلّغ تحويل InstaPay: ${event.orderNumber}`,
-        bodyAr: `قيمة ${(event.amountCents / 100).toFixed(2)} ج.م — محتاج مراجعة وتأكيد.`,
+        bodyAr: `قيمة ${egp(event.amountCents)} — محتاج مراجعة وتأكيد.`,
         referenceType: 'payment',
         referenceId: event.paymentId,
         // التحويل يحتاج اعتمادًا ماليًا، فالتنبيه يفتح طابور المراجعة مباشرة بدل تفاصيل الطلب.

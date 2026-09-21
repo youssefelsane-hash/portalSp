@@ -6,10 +6,7 @@ import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationRoutingService } from '../notification-routing.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
-
-function egp(amountCents: number): string {
-  return (amountCents / 100).toFixed(2).replace(/\.00$/, '');
-}
+import { egp, orderRef } from '../notification-format.util';
 
 /**
  * ADR-0067 §2 — عرض سعر عدّى مهلته واتقفل بالكاسح.
@@ -37,7 +34,7 @@ export class OrderQuoteExpiredNotificationListener {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
       const deepLink = `/orders/${event.orderId}`;
       const titleAr = 'انتهت صلاحية عرض السعر';
-      const bodyAr = `طلب رقم ${event.orderNumber}: عرض ${egp(event.amountCents)} ج.م خلصت مهلته قبل ما توافق. الطلب لسه قايم — فريقنا هيراجعه ويبعتلك سعر محدّث.`;
+      const bodyAr = `${orderRef(event.orderNumber)}: عرض ${egp(event.amountCents)} خلصت مهلته قبل ما توافق. الطلب لسه قايم — فريقنا هيراجعه ويبعتلك سعر محدّث.`;
 
       await this.notificationsService.notifyMultiChannel(
         {
@@ -58,7 +55,7 @@ export class OrderQuoteExpiredNotificationListener {
       await this.routingService.routeToRole('order.quote_expired', {
         notificationType: 'order_quote_expired_ops',
         titleAr: `عرض سعر انتهت صلاحيته: ${event.orderNumber}`,
-        bodyAr: `عرض ${egp(event.amountCents)} ج.م سقط من غير رد من العميل — الطلب محتاج إعادة إصدار عرض أو قرار إداري.`,
+        bodyAr: `عرض ${egp(event.amountCents)} سقط من غير رد من العميل — الطلب محتاج إعادة إصدار عرض أو قرار إداري.`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/admin/orders/${event.orderId}`,
@@ -69,7 +66,7 @@ export class OrderQuoteExpiredNotificationListener {
           userId: event.submittedByUserId,
           notificationType: 'order_quote_expired_technician',
           titleAr: 'عرض السعر بتاعك انتهت صلاحيته',
-          bodyAr: `طلب رقم ${event.orderNumber}: العميل مردّش خلال المهلة. الطلب اتوقف لحد ما الإدارة تعيد إصدار العرض.`,
+          bodyAr: `${orderRef(event.orderNumber)}: العميل مردّش خلال المهلة. الطلب اتوقف لحد ما الإدارة تعيد إصدار العرض.`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,

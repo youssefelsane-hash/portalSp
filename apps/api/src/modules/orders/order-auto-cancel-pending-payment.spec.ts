@@ -77,6 +77,30 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
     return payment.id as string;
   }
 
+  /** دفعة InstaPay بحالة محددة، مع/من غير تبليغ العميل إنه حوّل (قرار مالك 2026-09-21). */
+  async function insertInstaPayPayment(
+    orderId: string,
+    label: string,
+    opts: { status: PaymentGatewayStatus; reported: boolean },
+  ) {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [payment] = await q(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method,
+          payment_status, idempotency_key, customer_confirmed_transfer_at)
+       VALUES ($1,$2,$3,$4,'instapay',$5::payment_gateway_status,$6,$7) RETURNING id`,
+      [
+        `PAYIP-${label}`.slice(0, 24),
+        orderId,
+        ids.customerProfile,
+        30000,
+        opts.status,
+        `idem-ip-${label}-${Math.random()}`,
+        opts.reported ? new Date() : null,
+      ],
+    );
+    return payment.id as string;
+  }
+
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
@@ -250,5 +274,66 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
 
     const refund = await dataSource.getRepository(Refund).findOne({ where: { orderId } });
     expect(refund).toBeNull();
+  });
+
+  // ── تحويل InstaPay مُبلَّغ من العميل (قرار مالك 2026-09-21) ──────────────────────────
+  // «لما يكون العميل بلغ التحويل، الطلب ما يتلغيش… ما بيتلغيش أصلًا غير لو الـadmin لغاه.»
+  // السبب التشغيلي: تأكيد التحويل بشري وممكن ياخد يوم أو يومين في الإجازات، والمهلة بالدقايق.
+
+  it.each([
+    ['pending', PaymentGatewayStatus.PENDING],
+    ['manual_review', PaymentGatewayStatus.MANUAL_REVIEW],
+  ])('العميل بلّغ تحويل InstaPay (%s) — الطلب مايتلغيش تلقائيًا مهما طال', async (label, status) => {
+    const { orderId } = await insertOrder({
+      label: `ip${label.slice(0, 3)}-${runId}`,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await insertInstaPayPayment(orderId, `r${label.slice(0, 3)}-${runId}`, { status, reported: true });
+
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order?.cancelledAt).toBeNull();
+  });
+
+  it('فتح تحويل InstaPay من غير ما يبلّغ — الطلب يتلغى عادي (مفيش ادّعاء دفع)', async () => {
+    const { orderId } = await insertOrder({
+      label: `ipno-${runId}`,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await insertInstaPayPayment(orderId, `no-${runId}`, {
+      status: PaymentGatewayStatus.PENDING,
+      reported: false,
+    });
+
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
+  });
+
+  it('الأدمن رفض التحويل (failed) — الحماية بتفك والطلب يرجع يتلغى تلقائيًا', async () => {
+    // مهم: الحارس على **الحالة المفتوحة** مش على عمود التبليغ لوحده. لو كان على العمود بس،
+    // طلب اتثبت إن تحويله مش موجود كان هيفضل معلّق للأبد.
+    const { orderId } = await insertOrder({
+      label: `iprej-${runId}`,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await insertInstaPayPayment(orderId, `rej-${runId}`, {
+      status: PaymentGatewayStatus.FAILED,
+      reported: true,
+    });
+
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
   });
 });
