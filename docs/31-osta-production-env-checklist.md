@@ -84,8 +84,10 @@ CEQUENS بيحتاج ~٣٠ يوم تحقّق على الدومين. خلال ا�
 | الـAPI | `api.ostahome.com` |
 | لوحة الأدمن | `admin.ostahome.com` |
 
-`CORS_ORIGIN` المفروض يبقى `https://ostahome.com,https://admin.ostahome.com` (بلا مسافات، مفصول
-بفاصلة). أي مثال قديم بـ`baytak.com` اتشال من `.env.example` والتعليقات والاختبارات.
+`CORS_ORIGIN` المفروض يبقى
+`https://ostahome.com,https://www.ostahome.com,https://admin.ostahome.com` (بلا مسافات، مفصول
+بفاصلة). وجود `www` ضروري طالما الموقع يستقبله؛ بدونه الصفحة تفتح لكن نداءات المتصفح للـAPI
+تُحجب بواسطة CORS. أي مثال قديم بـ`baytak.com` اتشال من `.env.example` والتعليقات والاختبارات.
 
 ---
 
