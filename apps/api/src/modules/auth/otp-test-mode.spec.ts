@@ -8,7 +8,13 @@ import * as Joi from 'joi';
 import { envValidationSchema } from '../../config/env.validation';
 import { SMS_DISPATCHER, SmsDispatcher } from '../../common/notifications/sms-dispatcher';
 import { AuthService } from './auth.service';
-import { OTP_TEST_MODE_DISABLED, OtpTestMode, parseTestModePhones, usesFixedOtp } from './otp-test-mode';
+import {
+  isAllowedOtpTestPhone,
+  OTP_TEST_MODE_DISABLED,
+  OtpTestMode,
+  parseTestModePhones,
+  usesFixedOtp,
+} from './otp-test-mode';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
@@ -25,7 +31,7 @@ import { Wallet } from '../payments/entities/wallet.entity';
  *   ٢. أي كود تاني بيترفض — الوضع **مش** بايباس.
  *   ٣. بوابة الـSMS (CEQUENS) مابتتنداش خالص في الوضع ده.
  *   ٤. لما يتقفل، مسار الـOTP الحقيقي بيرجع زي ما هو (كود عشوائي + إرسال).
- *   ٥. الإقلاع بيترفض لو الوضع اتفعّل مع `NODE_ENV=production|staging`.
+ *   ٥. في Production Beta، القائمة الصريحة إلزامية وأي رقم خارجها يُرفض قبل كتابة OTP أو SMS.
  *   ٦. الـclient مايقدرش يفعّله ولا يتحكم فيه.
  *   ٧. باقي حمايات الـOTP (المحاولات، الصلاحية، إلغاء الأقدم) بتفضل سارية.
  */
@@ -216,17 +222,22 @@ describe('وضع اختبار الـOTP — السلوك (docs/08 §173)', () =>
     expect(otp.id).toBe(otpCodes.rows[1].id);
   });
 
-  it('allowlist: الرقم اللي مش في القايمة بياخد كود حقيقي وSMS', async () => {
-    const { service, smsSend } = await buildAuth({
+  it('Production Beta: الرقم خارج القائمة يُرفض قبل إنشاء OTP أو محاولة SMS', async () => {
+    const { service, smsSend, otpCodes } = await buildAuth({
+      nodeEnv: 'production',
       'otp.testMode': { enabled: true, fixedCode: '111111', allowedPhones: ['+201009998887'] },
     });
-    await service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null);
-    expect(smsSend).toHaveBeenCalledTimes(1);
-    await expect(consume(service, '111111')).rejects.toBeDefined();
+    await expect(service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null)).rejects.toMatchObject({
+      code: 'AUTH_007',
+      reason: 'closed_beta',
+    });
+    expect(otpCodes.rows).toHaveLength(0);
+    expect(smsSend).not.toHaveBeenCalled();
   });
 
-  it('allowlist: الرقم اللي في القايمة بياخد الكود الثابت بلا SMS', async () => {
+  it('Production Beta: الرقم الموجود في القائمة يأخذ الكود الثابت بلا SMS', async () => {
     const { service, smsSend } = await buildAuth({
+      nodeEnv: 'production',
       'otp.testMode': { enabled: true, fixedCode: '111111', allowedPhones: [PHONE] },
     });
     await service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null);
@@ -245,6 +256,12 @@ describe('وضع اختبار الـOTP — قرار التفعيل (دوال ن
     const scoped: OtpTestMode = { enabled: true, fixedCode: '111111', allowedPhones: ['+201009998887'] };
     expect(usesFixedOtp(scoped, PHONE)).toBe(false);
     expect(usesFixedOtp(scoped, '+201009998887')).toBe(true);
+  });
+
+  it('فحص الـallowlist الصريح لا يفتح القائمة الفارغة لأي رقم', () => {
+    expect(isAllowedOtpTestPhone(TEST_MODE_ON, PHONE)).toBe(false);
+    const scoped: OtpTestMode = { enabled: true, fixedCode: '111111', allowedPhones: [PHONE] };
+    expect(isAllowedOtpTestPhone(scoped, PHONE)).toBe(true);
   });
 
   it('المقارنة بعد التطبيع — نفس الرقم بصيغة تانية بيتعرف', () => {
@@ -270,7 +287,7 @@ describe('وضع اختبار الـOTP — قرار التفعيل (دوال ن
   });
 });
 
-describe('وضع اختبار الـOTP — حارس الإقلاع (docs/08 §173)', () => {
+describe('وضع Closed Beta OTP — حارس الإقلاع (docs/08 §173)', () => {
   const baseEnv = {
     JWT_ACCESS_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
@@ -301,14 +318,42 @@ describe('وضع اختبار الـOTP — حارس الإقلاع (docs/08 §1
   const validate = (env: Record<string, unknown>) =>
     (envValidationSchema as Joi.ObjectSchema).validate(env, { allowUnknown: true, abortEarly: false });
 
-  it('٥) production + OTP_TEST_MODE=true ⇒ الإقلاع بيترفض', () => {
-    const { error } = validate({ ...baseEnv, NODE_ENV: 'production', OTP_TEST_MODE: 'true' });
-    expect(error?.message).toContain('OTP_TEST_MODE=true ممنوع');
+  const productionBetaEnv = (nodeEnv: 'production' | 'staging') => {
+    const env: Record<string, unknown> = {
+      ...baseEnv,
+      NODE_ENV: nodeEnv,
+      OTP_TEST_MODE: 'true',
+      OTP_TEST_MODE_CODE: '483927',
+      OTP_TEST_MODE_PHONES: PHONE,
+    };
+    delete env.CEQUENS_API_KEY;
+    delete env.CEQUENS_SENDER_NAME;
+    return env;
+  };
+
+  it('٥) Production Beta بقائمة صريحة يعدّي بلا CEQUENS — لأن SMS لن يُستدعى', () => {
+    const { error } = validate(productionBetaEnv('production'));
+    expect(error).toBeUndefined();
   });
 
-  it('٥-ب) staging كمان مرفوض — النشر الحقيقي شغّال بيها', () => {
-    const { error } = validate({ ...baseEnv, NODE_ENV: 'staging', OTP_TEST_MODE: 'true' });
-    expect(error?.message).toContain('OTP_TEST_MODE=true ممنوع');
+  it('٥-ب) staging يخضع لنفس Closed Beta الصارم', () => {
+    const { error } = validate(productionBetaEnv('staging'));
+    expect(error).toBeUndefined();
+  });
+
+  it('٥-ج) Production Beta بقائمة فارغة يرفض الإقلاع بدل فتح الكود الثابت للجميع', () => {
+    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_PHONES: '' });
+    expect(error?.message).toContain('OTP_TEST_MODE_PHONES غير فارغ');
+  });
+
+  it('٥-د) Production Beta يرفض كود 111111 الافتراضي', () => {
+    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_CODE: '111111' });
+    expect(error?.message).toContain('OTP_TEST_MODE_CODE');
+  });
+
+  it('٥-هـ) Production Beta يرفض رقمًا غير صالح في القائمة', () => {
+    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_PHONES: '00201009998887' });
+    expect(error?.message).toContain('OTP_TEST_MODE_PHONES');
   });
 
   it('production بلا الوضع بيعدّي عادي — الحارس مابيكسرش الإنتاج', () => {

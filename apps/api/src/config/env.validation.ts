@@ -1,6 +1,7 @@
 import * as Joi from 'joi';
 // مصدر واحد لأسماء المزوّدات — الـJoi هنا واللي بيختار وقت التركيب بيقروا نفس القايمة.
 import { SMS_PROVIDERS } from '../common/notifications/sms-dispatcher';
+import { parseTestModePhones } from '../modules/auth/otp-test-mode';
 
 // Script 2 Part M (finding #63، اتكشفت أثناء مراجعة Part G) — بَقّة أمنية حقيقية وخطيرة: كل
 // فحوصات fail-fast تحت دي كانت بتتفحص ضد 'production' بس. النشر الفعلي الحقيقي (Railway) شغال
@@ -82,10 +83,9 @@ export const envValidationSchema = Joi.object({
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
-  // ── وضع اختبار الـOTP (مؤقت — Google Play Testing، docs/08 §173) ────────────────
-  // مرفوض تمامًا في staging/production بالحارس تحت. الشرح الكامل في
-  // `modules/auth/otp-test-mode.ts` — الوضع بيغيّر **الكود المولَّد** وبيوقف إرسال SMS،
-  // ومسار التحقق مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية زي ما هي.
+  // ── وضع اختبار الـOTP (مؤقت — Google Play Closed Testing، docs/08 §173) ─────────
+  // في الإنتاج يسمح به الحارس فقط كـClosed Beta بقائمة أرقام صريحة وكود غير افتراضي. الوضع
+  // بيغيّر **الكود المولَّد** ويوقف إرسال SMS؛ مسار التحقق نفسه لا يتغير.
   OTP_TEST_MODE: Joi.boolean().default(false),
   // ٦ أرقام زي الكود الحقيقي — أي طول تاني بيخلي شاشة الإدخال في التطبيق مستحيل تتملى.
   OTP_TEST_MODE_CODE: Joi.string().length(6).pattern(/^[0-9]{6}$/).default('111111'),
@@ -230,7 +230,9 @@ export const envValidationSchema = Joi.object({
     return value;
   })
   .custom((value: Record<string, unknown>, helpers) => {
-    if (isProductionLikeEnv(value.NODE_ENV as string | undefined)) {
+    const productionLike = isProductionLikeEnv(value.NODE_ENV as string | undefined);
+    const closedBetaOtp = productionLike && value.OTP_TEST_MODE === true;
+    if (productionLike && !closedBetaOtp) {
       const provider = (value.SMS_PROVIDER as string | undefined) ?? 'cequens';
       if (provider === 'twilio') {
         const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
@@ -257,23 +259,31 @@ export const envValidationSchema = Joi.object({
     return value;
   })
   /**
-   * **الحارس اللي بيمنع تسريب وضع الاختبار للإنتاج** (docs/08 §173).
+   * **حارس Closed Beta OTP للإنتاج** (docs/08 §173).
    *
-   * لو `OTP_TEST_MODE=true` وصل لبيئة إنتاجية، كود الدخول بيبقى **متوقّع لكل الأرقام**. متغيّر
-   * بيئة منسي في لوحة الاستضافة سيناريو واقعي جدًا، فالفصل مابيتسابش لمراجعة بشرية: السيرفر
-   * **مابيقلعش** أصلاً. فشل الإقلاع صوته عالي وبيتصلّح في دقيقة؛ بايباس صامت في الإنتاج ممكن
-   * يفضل شهور.
-   *
-   * مقصود إنه `isProductionLikeEnv` مش `=== 'production'`: النشر الحقيقي شغّال بـ`staging`
-   * (شوف التعليق فوق) — الفحص ضد 'production' لوحدها كان هيخلي الحارس ده بلا أثر بالظبط في
-   * البيئة اللي بتخدم مستخدمين حقيقيين.
+   * السماح لا يعني فتح الكود الثابت للجميع: لا بد من whitelist صريحة بصيغة E.164 وكود غير
+   * افتراضي. `AuthService` يرفض أي رقم خارجها قبل إنشاء OTP أو محاولة SMS. الشرط ينطبق على
+   * staging أيضًا لأنها بنية تخدم مستخدمين حقيقيين وليست بيئة بيانات وهمية.
    */
   .custom((value: Record<string, unknown>, helpers) => {
     if (isProductionLikeEnv(value.NODE_ENV as string | undefined) && value.OTP_TEST_MODE === true) {
-      return helpers.message({
-        custom:
-          'OTP_TEST_MODE=true ممنوع مع NODE_ENV=staging/production — ده بيخلي كود الدخول متوقّعًا لكل الأرقام. شيل المتغيّر ده قبل النشر، أو سيبه false',
-      });
+      const phones = parseTestModePhones(value.OTP_TEST_MODE_PHONES as string | undefined);
+      if (phones.length === 0) {
+        return helpers.message({
+          custom:
+            'OTP_TEST_MODE=true في staging/production يتطلب OTP_TEST_MODE_PHONES غير فارغ بأرقام المختبرين فقط — القائمة الفارغة قد تفتح الكود الثابت لكل الأرقام',
+        });
+      }
+      if (phones.some((phone) => !/^\+[1-9]\d{7,14}$/.test(phone))) {
+        return helpers.message({
+          custom: 'OTP_TEST_MODE_PHONES يجب أن يحتوي أرقام مختبرين صحيحة بصيغة E.164، مفصولة بفواصل',
+        });
+      }
+      if (value.OTP_TEST_MODE_CODE === '111111') {
+        return helpers.message({
+          custom: 'OTP_TEST_MODE_CODE لا يمكن أن يكون 111111 في staging/production — اختر كود اختبار سريًا من 6 أرقام',
+        });
+      }
     }
     return value;
   });
