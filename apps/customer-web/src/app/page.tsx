@@ -63,6 +63,7 @@ export default function HomePage() {
   const [mostRequested, setMostRequested] = useState<ServiceDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [catalogLoadKey, setCatalogLoadKey] = useState<string | null>(null);
+  const [catalogRetry, setCatalogRetry] = useState(0);
   const [query, setQuery] = useState('');
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
@@ -113,14 +114,11 @@ export default function HomePage() {
 
     let active = true;
     const loadKey = catalogZone.zoneId ?? 'public';
-    Promise.all([
-      fetchCategories(catalogZone.zoneId ?? undefined),
-      fetchMostRequestedServices(catalogZone.zoneId ?? undefined),
-    ])
-      .then(([nextCategories, nextMostRequested]) => {
+    // الفئات هي مسار الصفحة الأساسي. فشل "الأكثر طلبًا" لا يجب أن يمسح الكتالوج كله.
+    fetchCategories(catalogZone.zoneId ?? undefined)
+      .then((nextCategories) => {
         if (!active) return;
         setCategories(nextCategories);
-        setMostRequested(nextMostRequested);
         setError(null);
         setCatalogLoadKey(loadKey);
       })
@@ -129,10 +127,20 @@ export default function HomePage() {
         setError('تعذّر تحميل الفئات — حاول تاني');
         setCatalogLoadKey(loadKey);
       });
+
+    fetchMostRequestedServices(catalogZone.zoneId ?? undefined)
+      .then((nextMostRequested) => {
+        if (active) setMostRequested(nextMostRequested);
+      })
+      .catch(() => {
+        // القسم اختياري؛ نخفيه مؤقتًا ونبقي الفئات ومسار الحجز متاحين.
+        if (active) setMostRequested([]);
+      });
+
     return () => {
       active = false;
     };
-  }, [catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId]);
+  }, [catalogRetry, catalogZone.canLoadCatalog, catalogZone.isReady, catalogZone.zoneId]);
 
   const effectiveHeroImages = useMemo(
     () => (heroImages.length > 0 ? heroImages : heroBackgroundUrl ? [heroBackgroundUrl] : []),
@@ -193,6 +201,14 @@ export default function HomePage() {
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
     router.push(`/search?q=${encodeURIComponent(query)}`);
+  }
+
+  function retryCatalog() {
+    setCategories(null);
+    setError(null);
+    setCatalogLoadKey(null);
+    setShowAllCategories(false);
+    setCatalogRetry((current) => current + 1);
   }
 
   return (
@@ -344,7 +360,16 @@ export default function HomePage() {
           </div>
 
           {visibleError ? (
-            <p className="rounded-2xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger">{visibleError}</p>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger" role="alert">
+              <p>{visibleError}</p>
+              <button
+                type="button"
+                onClick={retryCatalog}
+                className="motion-press rounded-xl border border-danger/35 bg-surface px-3 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10"
+              >
+                إعادة المحاولة
+              </button>
+            </div>
           ) : visibleCategories === null ? (
             <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
               {Array.from({ length: 6 }).map((_, i) => (
