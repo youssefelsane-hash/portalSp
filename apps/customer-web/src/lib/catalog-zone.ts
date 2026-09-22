@@ -13,6 +13,7 @@ interface CatalogZoneState {
 interface ResolvedCustomerZone {
   customerId: string;
   zoneId: string | null;
+  hasAddress: boolean;
 }
 
 /** Resolves the signed-in customer's active catalog zone from their default address. */
@@ -29,11 +30,11 @@ export function useCatalogZone(): CatalogZoneState {
         if (!active) return;
         const address = addresses.find((item) => item.is_default) ?? addresses[0];
         const zoneId = address?.service_zone_id ?? null;
-        setResolved({ customerId: user.id, zoneId });
+        setResolved({ customerId: user.id, zoneId, hasAddress: Boolean(address) });
       })
       .catch(() => {
         // Fail closed for signed-in customers: never leak a service blocked in their zone.
-        if (active) setResolved({ customerId: user.id, zoneId: null });
+        if (active) setResolved({ customerId: user.id, zoneId: null, hasAddress: true });
       });
 
     return () => {
@@ -47,6 +48,8 @@ export function useCatalogZone(): CatalogZoneState {
   return {
     isReady: true,
     zoneId: resolved.zoneId,
-    canLoadCatalog: resolved.zoneId !== null,
+    // العميل الذي لم يضف عنوانًا بعد يمكنه تصفح الكتالوج العام، ثم نتحقق من التغطية عند اختيار
+    // عنوانه للحجز. أما عنوان موجود بلا منطقة خدمة فيبقى مقفلاً كي لا نعرض خدمة غير متاحة له.
+    canLoadCatalog: !resolved.hasAddress || resolved.zoneId !== null,
   };
 }
