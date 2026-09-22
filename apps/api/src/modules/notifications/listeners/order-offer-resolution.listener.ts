@@ -4,6 +4,7 @@ import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../../co
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 /**
  * عرض طلب اتحل (docs/08 §17.16) — بيوقف أي دورة تذكير critical_offer شغالة فورًا (idempotent،
@@ -31,7 +32,7 @@ export class OrderOfferResolutionListener {
           userId: technician.userId,
           notificationType: 'order_offer_lost',
           titleAr: 'العرض بقى مش متاح',
-          bodyAr: `طلب رقم ${event.orderNumber} — فني تاني قبله قبلك.`,
+          bodyAr: `${orderRef(event.orderNumber)} — فني تاني قبله قبلك.`,
           referenceType: 'order_assignment',
           referenceId: event.assignmentId,
         });

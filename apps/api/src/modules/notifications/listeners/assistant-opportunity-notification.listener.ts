@@ -9,6 +9,7 @@ import {
 import { TechniciansService } from '../../technicians/technicians.service';
 import { Notification } from '../entities/notification.entity';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 /**
  * أقل فاصل زمني بين إشعارين من نوع "فرصة مساعدة" لنفس الفني (docs/08 §92، طلب مالك مباشر).
@@ -58,7 +59,7 @@ export class AssistantOpportunityNotificationListener {
         userId: candidate.userId,
         notificationType: 'assistant_opportunity',
         titleAr: 'فرصة مساعدة جديدة',
-        bodyAr: `حد محتاج مساعد على طلب رقم ${event.orderNumber} قريب منك — أول واحد يقبل ياخدها.`,
+        bodyAr: `حد محتاج مساعد على ${orderRef(event.orderNumber)} قريب منك — أول واحد يقبل ياخدها.`,
         referenceType: 'order_assistant_offer',
         referenceId: event.offerId,
         deepLink: `/technician/assistant-offers/${event.offerId}`,

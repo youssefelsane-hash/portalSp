@@ -5,11 +5,7 @@ import {
   OrderQuoteAboveRangeSubmittedEvent,
 } from '../../../common/events/order-quote-above-range-submitted.event';
 import { NotificationRoutingService } from '../notification-routing.service';
-
-/** قرش → جنيه للعرض في نص الإشعار — نفس تنسيق `refund-notification.listener.ts`. */
-function egp(amountCents: number): string {
-  return (amountCents / 100).toFixed(2).replace(/\.00$/, '');
-}
+import { egp } from '../notification-format.util';
 
 /**
  * ADR-0067 §1 — سعر خارج النطاق اتحجز في `pending_admin_review`.
@@ -30,12 +26,12 @@ export class OrderQuoteAboveRangeRoutingListener {
       const rangeText =
         event.expectedMaxCents === null
           ? 'أعلى من آخر سعر معتمد على الطلب'
-          : `أعلى من سقف النطاق المعروض للعميل (${egp(event.expectedMaxCents)} ج.م)`;
+          : `أعلى من سقف النطاق المعروض للعميل (${egp(event.expectedMaxCents)})`;
 
       await this.routingService.routeToRole('order.quote_above_range_submitted', {
         notificationType: 'order_quote_above_range_submitted',
         titleAr: `سعر خارج النطاق يستنى قرارك: ${event.orderNumber}`,
-        bodyAr: `السعر المطلوب ${egp(event.amountCents)} ج.م — ${rangeText}. العميل ماشافوش، والطلب واقف لحد ما تعتمد أو ترفض.`,
+        bodyAr: `السعر المطلوب ${egp(event.amountCents)} — ${rangeText}. العميل ماشافوش، والطلب واقف لحد ما تعتمد أو ترفض.`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/admin/orders/${event.orderId}`,

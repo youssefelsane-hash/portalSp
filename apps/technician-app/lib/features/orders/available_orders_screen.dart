@@ -26,6 +26,7 @@ import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order.dart';
+import 'order_context_badges.dart';
 import 'active_order_visibility.dart';
 import 'order_date_labels.dart';
 import 'order_execution_screen.dart';
@@ -1430,6 +1431,15 @@ class _UpcomingJobCard extends StatelessWidget {
           children: [
             if (order.isNewForTechnician) ...[
               const _NewBadge(),
+              const SizedBox(width: 6),
+            ],
+            // شارات «متكرر»/«ضمان» في الكارت كمان مش جوّه الطلب بس — الفني بيرتّب يومه من
+            // القايمة دي، فمحتاج يعرف نوع الشغلانة قبل ما يفتحها (بلاغ مالك 2026-09-21).
+            for (final badge in orderContextBadges(
+              isRecurring: order.isRecurring,
+              isWarrantyRevisit: order.isWarrantyRevisit,
+            )) ...[
+              badge,
               const SizedBox(width: 6),
             ],
             Expanded(

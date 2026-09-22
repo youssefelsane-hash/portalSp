@@ -33,6 +33,7 @@ import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR, orderPriceIsProviderBound } 
 import { OrderQueriesService } from './order-queries.service';
 import { crewShortageMessageAr, orderRequiresCrewBeyondLeader, OrderTeamService } from './order-team.service';
 import { canTransition } from './order-state-machine';
+import { orderRef } from '../notifications/notification-format.util';
 
 // نافذة إلغاء الفني بلا عقوبة (docs/10) — والحد الأدنى قبل الموعد المجدول.
 const TECHNICIAN_CANCEL_WINDOW_MINUTES_FALLBACK = 10;
@@ -309,7 +310,7 @@ export class OrderTechnicianOpsService {
           notificationType: 'order_rescheduled',
           titleAr: 'الفني هيكمّل شغل طلبك يوم تاني',
           bodyAr:
-            `طلب رقم ${order.orderNumber}: الفني وقف الشغل مؤقتًا — ${dto.pause_reason.trim()}. ` +
+            `${orderRef(order.orderNumber)}: الفني وقف الشغل مؤقتًا — ${dto.pause_reason.trim()}. ` +
             `هيرجع يكمّل يوم ${dto.next_session_date}.`,
           orderId,
           deepLink: `/orders/${orderId}`,

@@ -13,6 +13,7 @@ import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationRoutingService } from '../notification-routing.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 /**
  * ADR-0065 §2 — الفني المقفول ضاع، والطلب واقف مستني العميل يختار من جديد.
@@ -40,7 +41,7 @@ export class OrderLockedProviderLostNotificationListener {
     try {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
       const deepLink = `/orders/${event.orderId}/select-technician`;
-      const body = `طلب رقم ${event.orderNumber}: ${LOCKED_PROVIDER_LOST_MESSAGE_AR}`;
+      const body = `${orderRef(event.orderNumber)}: ${LOCKED_PROVIDER_LOST_MESSAGE_AR}`;
 
       // العميل مطلوب منه فعل حقيقي (يختار من جديد) — `action_required` مش إشعار خبري.
       const workflow = await this.workflowService.create({

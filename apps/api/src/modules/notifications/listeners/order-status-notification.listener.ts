@@ -7,6 +7,7 @@ import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
 import { NotificationRoutingService } from '../notification-routing.service';
+import { orderRef } from '../notification-format.util';
 
 // أسباب الإلغاء التلقائي الداخلية (matching.service.ts/order-auto-cancel.service.ts) بتتسجّل
 // بصيغة "CODE: نص عربي مفهوم" لمصلحة الأدمن/الـtimeline (Part 12/13 — كود دقيق للتشخيص).
@@ -111,7 +112,7 @@ export class OrderStatusNotificationListener {
           userId: technician.userId,
           notificationType: 'order_cancelled_by_customer',
           titleAr: 'العميل لغى الطلب',
-          bodyAr: `طلب رقم ${event.orderNumber} اتلغى من العميل.`,
+          bodyAr: `${orderRef(event.orderNumber)} اتلغى من العميل.`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,
@@ -188,7 +189,7 @@ export class OrderStatusNotificationListener {
           userId: technician.userId,
           notificationType: 'order_quote_decision',
           titleAr: 'العميل رد على عرض السعر',
-          bodyAr: event.reason ?? `طلب رقم ${event.orderNumber} — راجع تفاصيل عرض السعر.`,
+          bodyAr: event.reason ?? `${orderRef(event.orderNumber)} — راجع تفاصيل عرض السعر.`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,
@@ -227,8 +228,8 @@ export class OrderStatusNotificationListener {
             notificationType: isAdminInitiated ? 'order_cancelled_by_admin' : 'order_cancelled_automatically',
             titleAr: isAdminInitiated ? 'طلب اتلغى من الإدارة' : 'طلب اتلغى تلقائيًا',
             bodyAr: isAdminInitiated
-              ? `طلب رقم ${event.orderNumber} اتلغى من الإدارة.`
-              : `طلب رقم ${event.orderNumber} اتلغى تلقائيًا.`,
+              ? `${orderRef(event.orderNumber)} اتلغى من الإدارة.`
+              : `${orderRef(event.orderNumber)} اتلغى تلقائيًا.`,
             referenceType: 'order',
             referenceId: event.orderId,
             deepLink: `/technician/orders/${event.orderId}`,

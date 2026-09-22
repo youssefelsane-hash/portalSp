@@ -7,10 +7,7 @@ import {
 import { CustomerProfilesService } from '../../customers/customer-profiles.service';
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationsService } from '../notifications.service';
-
-function egp(amountCents: number): string {
-  return (amountCents / 100).toFixed(2).replace(/\.00$/, '');
-}
+import { egp, orderRef } from '../notification-format.util';
 
 /**
  * ADR-0067 §1 — الصور ماكانتش كافية، فالطلب اتحوّل لمعاينة في الموقع.
@@ -35,7 +32,7 @@ export class OrderRoutedToOnsiteNotificationListener {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
       const feeText =
         event.inspectionFeeCents > 0
-          ? ` رسم المعاينة ${egp(event.inspectionFeeCents)} ج.م، وبيتخصم من سعر الشغل حسب سياسة الخدمة.`
+          ? ` رسم المعاينة ${egp(event.inspectionFeeCents)}، وبيتخصم من سعر الشغل حسب سياسة الخدمة.`
           : ' المعاينة من غير رسوم.';
 
       await this.notificationsService.notifyMultiChannel(
@@ -43,7 +40,7 @@ export class OrderRoutedToOnsiteNotificationListener {
           userId: customer.userId,
           notificationType: 'order_routed_to_onsite_assessment',
           titleAr: 'هنعاين طلبك على الطبيعة',
-          bodyAr: `طلب رقم ${event.orderNumber}: الصور مش كافية لتحديد سعر دقيق، فهنبعتلك فني يعاين المكان ويحدد السعر.${feeText}`,
+          bodyAr: `${orderRef(event.orderNumber)}: الصور مش كافية لتحديد سعر دقيق، فهنبعتلك فني يعاين المكان ويحدد السعر.${feeText}`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/orders/${event.orderId}`,

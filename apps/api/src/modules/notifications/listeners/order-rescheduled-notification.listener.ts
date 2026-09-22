@@ -5,6 +5,7 @@ import { CustomerProfilesService } from '../../customers/customer-profiles.servi
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 // إشعار عالي الوضوح للفني (in_app + push، مش in_app بس) — docs/08 §22 بند 9-12 نص صراحة على
 // "إشعار الفني بشكل واضح" لأنه بيغيّر خطة يومه.
@@ -44,8 +45,8 @@ export class OrderRescheduledNotificationListener {
         notificationType: 'order_rescheduled',
         titleAr: technicianRequested ? 'العميل وافق على الموعد المقترح' : 'تم تغيير ميعاد الطلب',
         bodyAr: technicianRequested
-          ? `العميل وافق على تأجيل طلب رقم ${event.orderNumber} إلى ${newTimeAr}`
-          : `طلب رقم ${event.orderNumber} اتغيّر ميعاده لـ ${newTimeAr}`,
+          ? `العميل وافق على تأجيل ${orderRef(event.orderNumber)} إلى ${newTimeAr}`
+          : `${orderRef(event.orderNumber)} اتغيّر ميعاده لـ ${newTimeAr}`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/technician/orders/${event.orderId}`,
@@ -64,7 +65,7 @@ export class OrderRescheduledNotificationListener {
         userId: customer.userId,
         notificationType: 'order_rescheduled',
         titleAr: 'تم تغيير موعد طلبك',
-        bodyAr: `الإدارة غيّرت موعد طلب رقم ${event.orderNumber} إلى ${newTimeAr}`,
+        bodyAr: `الإدارة غيّرت موعد ${orderRef(event.orderNumber)} إلى ${newTimeAr}`,
         referenceType: 'order',
         referenceId: event.orderId,
         deepLink: `/orders/${event.orderId}`,

@@ -17,6 +17,7 @@ import {
   VoidResult,
   WebhookVerificationResult,
 } from './payment-provider.interface';
+import { arDateTime, ltr } from '../../notifications/notification-format.util';
 
 const FAWRY_ENABLED_FALLBACK = false;
 
@@ -64,7 +65,7 @@ export class FawryProvider implements PaymentProvider {
     return {
       kind: 'reference',
       referenceCode: result.referenceNumber,
-      instructionsAr: `اذهب لأقرب منفذ فوري وادفع الكود ${result.referenceNumber} كاش قبل ${result.expiresAt.toLocaleString('ar-EG')}.`,
+      instructionsAr: `اذهب لأقرب منفذ فوري وادفع الكود ${ltr(result.referenceNumber)} كاش قبل ${arDateTime(result.expiresAt)}.`,
       providerReference: result.gatewayOrderId,
       expiresAt: result.expiresAt,
     };

@@ -18,6 +18,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianReferralAttribution } from './entities/technician-referral-attribution.entity';
 import { TechnicianReferralBonus, TechnicianReferralBonusStatus } from './entities/technician-referral-bonus.entity';
+import { egp } from '../notifications/notification-format.util';
 
 type QualifyingStatus = 'accepted' | 'work_completed' | 'completed';
 type RewardMode = 'first_order_only' | 'every_order';
@@ -442,7 +443,7 @@ export class TechnicianReferralsService {
         userId: technician.userId,
         notificationType: 'technician_referral.bonus_credited',
         titleAr: 'مكافأة ترشيح جديدة! 🎉',
-        bodyAr: `اتحسبلك مكافأة ${(bonus.bonusAmountCents / 100).toFixed(0)} ج.م. عشان عميل رشّحته حجز خدمة.`,
+        bodyAr: `اتحسبلك مكافأة ${egp(bonus.bonusAmountCents)} عشان عميل رشّحته حجز خدمة.`,
         referenceType: 'technician_referral_bonus',
         referenceId: bonus.id,
       })
@@ -503,7 +504,7 @@ export class TechnicianReferralsService {
           userId: technician.userId,
           notificationType: 'technician_referral.bonus_revoked',
           titleAr: 'إلغاء مكافأة ترشيح',
-          bodyAr: `اتلغت مكافأة ترشيح كانت محسوبالك (${(bonus.bonusAmountCents / 100).toFixed(0)} ج.م.) بسبب: ${reason}`,
+          bodyAr: `اتلغت مكافأة ترشيح كانت محسوبالك (${egp(bonus.bonusAmountCents)}) بسبب: ${reason}`,
           referenceType: 'technician_referral_bonus',
           referenceId: bonus.id,
         })

@@ -8,6 +8,7 @@ import { CustomerProfilesService } from '../../customers/customer-profiles.servi
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
+import { orderRef } from '../notification-format.util';
 
 /**
  * بند 8 — الأدمن طلب معلومات/صور إضافية قبل التسعير.
@@ -34,7 +35,7 @@ export class OrderAssessmentInfoRequestedListener {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
       const deepLink = `/orders/${event.orderId}`;
       const titleAr = 'محتاجين تفاصيل أكتر عشان نسعّر طلبك';
-      const bodyAr = `طلب رقم ${event.orderNumber}: ${event.message}`;
+      const bodyAr = `${orderRef(event.orderNumber)}: ${event.message}`;
 
       // فعل مطلوب من العميل (يرفع صور/يكتب تفاصيل) — مش إشعار خبري.
       const workflow = await this.workflowService.create({

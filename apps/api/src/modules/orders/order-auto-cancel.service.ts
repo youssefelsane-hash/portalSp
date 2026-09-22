@@ -18,6 +18,33 @@ const PAYMENT_TIMEOUT_MINUTES_FALLBACK = 15;
 const SWEEP_BATCH_SIZE = 25;
 
 /**
+ * **طلب بلّغ عنه العميل تحويل InstaPay مايتلغيش تلقائيًا** (قرار مالك 2026-09-21).
+ *
+ * > «الـadmin بيكون محدد مدة معينة للطلبات اللي مش مدفوعة فيها بتتلغي أوتوماتيك، وده مضبوط…
+ * > ولكن لما يكون العميل بلغ التحويل، الطلب ما يتلغيش، لأن ده ممكن يكون الراجل فعليًا حوّل
+ * > الفلوس. الطلب ما بيتلغيش أصلًا غير لو الـadmin لغاه من عنده.»
+ *
+ * الواقع التشغيلي اللي بيخلّي ده لازم: تأكيد تحويل InstaPay بشري وبيمرّ على موظف مالي — ممكن
+ * ياخد ١٢ ساعة، يوم، أو يومين في الإجازات. مهلة الإلغاء التلقائي بالدقايق (افتراضي ١٥)، يعني
+ * عميل حوّل فلوس حقيقية كان طلبه بيتلغي من تحته قبل ما حد يبص على التحويل أصلاً.
+ *
+ * **ليه الحالات التلاتة دي بالذات**: هي «التحويل لسه مفتوح» — نفس `ACTIVE_ORDER_PAYMENT_STATUSES`
+ * في `payments.service.ts`. الأدمن لو **رفض** التحويل، `rejectInstaPayPayment()` بتحط الدفعة
+ * `failed`، فالطلب بيرجع قابل للإلغاء التلقائي زي أي طلب مدفوعش — وده الصح: العميل ادّعى تحويل
+ * واتثبت إنه مش موجود. لو كان الحارس على `customer_confirmed_transfer_at` لوحده من غير الحالة،
+ * كان هيقفل الطلب للأبد حتى بعد الرفض.
+ */
+const OPEN_REPORTED_INSTAPAY_TRANSFER_EXISTS = `
+  EXISTS (
+    SELECT 1
+      FROM payments p
+     WHERE p.order_id = o.id
+       AND p.payment_method = 'instapay'
+       AND p.customer_confirmed_transfer_at IS NOT NULL
+       AND p.payment_status IN ('pending', 'processing', 'manual_review')
+  )`;
+
+/**
  * كانت فجوة موثّقة صراحة في settings/README.md: `orders.auto_cancel_after_minutes` كان مزروع
  * بس مش مستخدم خالص — الميزة (job إلغاء تلقائي لطلب فضل معلّق) مبنيتش أصلاً.
  *
@@ -104,6 +131,8 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
       .where('o.order_status = :status', { status: OrderStatus.PENDING_PAYMENT })
       .andWhere('o.placed_at < :cutoff', { cutoff })
       .andWhere('(o.recurring_template_id IS NULL OR o.payment_method IS DISTINCT FROM :card)', { card: 'card' })
+      // العميل بلّغ تحويل InstaPay لسه مفتوح ⇒ برّه الـsweep خالص (شوف الثابت فوق).
+      .andWhere(`NOT ${OPEN_REPORTED_INSTAPAY_TRANSFER_EXISTS}`)
       .andWhere(orderNumberPrefix ? 'o.order_number LIKE :prefix' : 'TRUE', orderNumberPrefix ? { prefix: `${orderNumberPrefix}%` } : {})
       .orderBy('o.placed_at', 'ASC')
       .take(SWEEP_BATCH_SIZE)
@@ -129,6 +158,16 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
         .getOne();
 
       if (!order || order.orderStatus !== OrderStatus.PENDING_PAYMENT) return null;
+
+      // **إعادة الفحص جوّه القفل مش تزويد — ده سباق حقيقي بفلوس.** الاستعلام فوق بيختار
+      // الطلبات في لحظة، والإلغاء بيحصل بعدها بلحظات. لو العميل دوس «حوّلت» في الفرق ده،
+      // الفحص الأول بيكون عدّى والطلب بيتلغي وهو مدفوع فعلاً. الفحص هنا تحت
+      // `pessimistic_write` على نفس الصف، فأي تبليغ سبق الإلغاء بيتشاف.
+      const reported: Array<{ exists: boolean }> = await manager.query(
+        `SELECT ${OPEN_REPORTED_INSTAPAY_TRANSFER_EXISTS} AS exists FROM orders o WHERE o.id = $1`,
+        [orderId],
+      );
+      if (reported[0]?.exists) return null;
 
       order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
       order.cancelledAt = new Date();

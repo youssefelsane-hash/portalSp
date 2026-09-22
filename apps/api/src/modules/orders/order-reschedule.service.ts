@@ -28,6 +28,7 @@ import { canTransition } from './order-state-machine';
 import { assertNoScheduleOverlap, resolveRescheduledInterval, slotEnd, slotStart } from './order-schedule-interval';
 import { orderCandidateLoad } from '../technicians/technician-day-capacity.sql';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
+import { orderRef } from '../notifications/notification-format.util';
 
 export type OrderRescheduleRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -256,7 +257,7 @@ export class OrderRescheduleService {
         userId: customer.userId,
         notificationType: 'order_reschedule_requested',
         titleAr: 'الفني يقترح تغيير الموعد',
-        bodyAr: `الفني طلب تأجيل طلب رقم ${order.orderNumber}. افتح الطلب للموافقة أو الرفض.`,
+        bodyAr: `الفني طلب تأجيل ${orderRef(order.orderNumber)}. افتح الطلب للموافقة أو الرفض.`,
         orderId,
         deepLink: `/orders/${orderId}`,
       });
@@ -363,8 +364,8 @@ export class OrderRescheduleService {
         titleAr: decision === 'approved' ? 'العميل وافق على تأجيل الموعد' : 'العميل رفض تأجيل الموعد',
         bodyAr:
           decision === 'approved'
-            ? `تم اعتماد الموعد المقترح لطلب رقم ${order.orderNumber}.`
-            : `العميل فضّل الاحتفاظ بالموعد الحالي لطلب رقم ${order.orderNumber}.`,
+            ? `تم اعتماد الموعد المقترح ل${orderRef(order.orderNumber)}.`
+            : `العميل فضّل الاحتفاظ بالموعد الحالي ل${orderRef(order.orderNumber)}.`,
         orderId,
         deepLink: `/technician/orders/${orderId}`,
       });
@@ -536,7 +537,7 @@ export class OrderRescheduleService {
         userId: customer.userId,
         notificationType: 'order_rescheduled',
         titleAr: 'تم تغيير موعد طلبك',
-        bodyAr: `الإدارة غيّرت موعد طلب رقم ${order.orderNumber}. افتح الطلب لمراجعة الموعد الجديد.`,
+        bodyAr: `الإدارة غيّرت موعد ${orderRef(order.orderNumber)}. افتح الطلب لمراجعة الموعد الجديد.`,
         orderId: order.id,
         deepLink: `/orders/${order.id}`,
       });
@@ -778,7 +779,7 @@ export class OrderRescheduleService {
           userId: customer.userId,
           notificationType: 'order_rescheduled',
           titleAr: 'تم تغيير موعد طلبك',
-          bodyAr: `الإدارة غيّرت موعد طلب رقم ${fresh.orderNumber}. افتح الطلب لمراجعة الموعد الجديد.`,
+          bodyAr: `الإدارة غيّرت موعد ${orderRef(fresh.orderNumber)}. افتح الطلب لمراجعة الموعد الجديد.`,
           orderId,
           deepLink: `/orders/${orderId}`,
         });
