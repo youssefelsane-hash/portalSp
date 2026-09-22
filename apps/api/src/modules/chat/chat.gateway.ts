@@ -1,4 +1,4 @@
-import { Logger, UsePipes } from '@nestjs/common';
+import { Inject, Logger, UsePipes } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -13,6 +13,7 @@ import { websocketCorsOriginHandler } from '../../common/websocket/websocket-cor
 import { RealtimeAccessService } from '../../common/websocket/realtime-access.service';
 import { RealtimeSessionRegistry } from '../../common/websocket/realtime-session-registry.service';
 import { StrictWebsocketValidationPipe } from '../../common/websocket/strict-websocket-validation.pipe';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatService } from './chat.service';
 import { toMessageResponseDto } from './dto/message-response.dto';
@@ -34,6 +35,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly sessions: RealtimeSessionRegistry,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
@@ -107,6 +109,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const message = await this.chatService.sendMessage(user.sub, body.thread_id, {
       content: body.content,
     });
-    this.server.to(`thread:${body.thread_id}`).emit('chat:message_received', toMessageResponseDto(message));
+    this.server.to(`thread:${body.thread_id}`).emit('chat:message_received', await toMessageResponseDto(message, this.storage));
   }
 }

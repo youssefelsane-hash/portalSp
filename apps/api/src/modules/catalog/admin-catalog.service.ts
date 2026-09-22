@@ -141,11 +141,15 @@ export class AdminCatalogService {
     const key = `service-categories/${id}/${slot}/${randomUUID()}.${extension}`;
     const previousUrl = slot === 'icon' ? category.iconUrl : category.coverImageUrl;
 
-    // `fileUrl` جاي من `storage.save()` نفسها — نفس اللي كل مسارات الرفع التانية بتخزّنه، فمفيش
-    // نداء `getUrl()` زيادة ولا احتمال إن الاتنين يختلفوا.
+    // `fileUrl` fallback للسجلات الحالية؛ المفتاح هو المصدر المعتمد حتى نوقّع رابط R2 جديد في كل قراءة.
     const saved = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
-      if (slot === 'icon') category.iconUrl = fileUrl;
-      else category.coverImageUrl = fileUrl;
+      if (slot === 'icon') {
+        category.iconUrl = fileUrl;
+        category.iconStorageKey = key;
+      } else {
+        category.coverImageUrl = fileUrl;
+        category.coverImageStorageKey = key;
+      }
       return this.categories.save(category);
     });
 
@@ -173,8 +177,13 @@ export class AdminCatalogService {
   async clearCategoryMedia(adminUserId: string, id: string, slot: 'icon' | 'cover', meta?: AuditActorMeta): Promise<ServiceCategory> {
     const category = await this.findCategoryOrThrow(id);
     const previousUrl = slot === 'icon' ? category.iconUrl : category.coverImageUrl;
-    if (slot === 'icon') category.iconUrl = null;
-    else category.coverImageUrl = null;
+    if (slot === 'icon') {
+      category.iconUrl = null;
+      category.iconStorageKey = null;
+    } else {
+      category.coverImageUrl = null;
+      category.coverImageStorageKey = null;
+    }
     const saved = await this.categories.save(category);
 
     await this.auditLog.record({
@@ -208,8 +217,15 @@ export class AdminCatalogService {
     if (dto.name_en !== undefined) category.nameEn = dto.name_en;
     if (dto.slug !== undefined) category.slug = dto.slug;
     if (dto.description_ar !== undefined) category.descriptionAr = dto.description_ar;
-    if (dto.icon_url !== undefined) category.iconUrl = dto.icon_url;
-    if (dto.cover_image_url !== undefined) category.coverImageUrl = dto.cover_image_url;
+    // رابط يدوي يستبدل أصل R2 المرفوع؛ إبقاء المفتاح هنا كان هيخلّي الرد يرجّع الصورة القديمة.
+    if (dto.icon_url !== undefined) {
+      category.iconUrl = dto.icon_url;
+      category.iconStorageKey = null;
+    }
+    if (dto.cover_image_url !== undefined) {
+      category.coverImageUrl = dto.cover_image_url;
+      category.coverImageStorageKey = null;
+    }
     if (dto.display_order !== undefined) category.displayOrder = dto.display_order;
     if (dto.is_featured !== undefined) category.isFeatured = dto.is_featured;
     if (dto.launch_phase !== undefined) category.launchPhase = dto.launch_phase;

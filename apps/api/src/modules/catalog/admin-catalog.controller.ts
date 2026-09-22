@@ -17,9 +17,11 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Inject } from '@nestjs/common';
 import { MAX_BRANDING_FILE_SIZE_BYTES } from '../branding/branding-file-validator';
 import { CategoryMediaSlotParamDto } from './dto/category-media-slot-param.dto';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -58,6 +60,7 @@ export class AdminCatalogController {
   constructor(
     private readonly adminCatalogService: AdminCatalogService,
     private readonly productivityLearningService: ProductivityLearningService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   // ── الفئات ───────────────────────────────────────────────────────────
@@ -66,7 +69,7 @@ export class AdminCatalogController {
   @RequirePermission('catalog.view')
   async listCategories() {
     const categories = await this.adminCatalogService.listAllCategories();
-    return categories.map(toAdminServiceCategoryResponseDto);
+    return Promise.all(categories.map((category) => toAdminServiceCategoryResponseDto(category, this.storage)));
   }
 
   @Post('service-categories')
@@ -76,7 +79,7 @@ export class AdminCatalogController {
     @Body() dto: CreateServiceCategoryDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toAdminServiceCategoryResponseDto(await this.adminCatalogService.createCategory(admin.sub, dto, audit));
+    return toAdminServiceCategoryResponseDto(await this.adminCatalogService.createCategory(admin.sub, dto, audit), this.storage);
   }
 
   @Patch('service-categories/:id')
@@ -87,7 +90,7 @@ export class AdminCatalogController {
     @Body() dto: UpdateServiceCategoryDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toAdminServiceCategoryResponseDto(await this.adminCatalogService.updateCategory(admin.sub, id, dto, audit));
+    return toAdminServiceCategoryResponseDto(await this.adminCatalogService.updateCategory(admin.sub, id, dto, audit), this.storage);
   }
 
   /**
@@ -110,6 +113,7 @@ export class AdminCatalogController {
     }
     return toAdminServiceCategoryResponseDto(
       await this.adminCatalogService.uploadCategoryMedia(admin.sub, params.id, params.slot, file, audit),
+      this.storage,
     );
   }
 
@@ -124,6 +128,7 @@ export class AdminCatalogController {
   ) {
     return toAdminServiceCategoryResponseDto(
       await this.adminCatalogService.clearCategoryMedia(admin.sub, params.id, params.slot, audit),
+      this.storage,
     );
   }
 

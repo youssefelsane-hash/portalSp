@@ -1,4 +1,5 @@
 import { ServiceCategory } from '../entities/service-category.entity';
+import { StorageService } from '../../../common/storage/storage.service';
 import { AssessmentRoutePolicy, PriceCertaintyMode, Service } from '../entities/service.entity';
 import { SchedulePrecision, schedulePrecision } from '../schedule-precision';
 
@@ -19,15 +20,18 @@ export interface ServiceCategoryResponseDto {
   is_featured: boolean;
 }
 
-export function toServiceCategoryResponseDto(category: ServiceCategory): ServiceCategoryResponseDto {
+export async function toServiceCategoryResponseDto(
+  category: ServiceCategory,
+  storage: StorageService,
+): Promise<ServiceCategoryResponseDto> {
   return {
     id: category.id,
     parent_category_id: category.parentCategoryId,
     name_ar: category.nameAr,
     name_en: category.nameEn,
     slug: category.slug,
-    icon_url: category.iconUrl,
-    cover_image_url: category.coverImageUrl,
+    icon_url: category.iconStorageKey ? await storage.getUrl(category.iconStorageKey) : category.iconUrl,
+    cover_image_url: category.coverImageStorageKey ? await storage.getUrl(category.coverImageStorageKey) : category.coverImageUrl,
     is_featured: category.isFeatured,
   };
 }

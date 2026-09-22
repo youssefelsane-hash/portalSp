@@ -140,6 +140,8 @@ export interface OrderResponseDto {
    * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
   technician_name?: string;
   technician_phone?: string;
+  /** اسم الشركة المنفذة فعليًا. لا يُرسل لانتماء الفني لشركة وحده؛ المصدر هو assigned_company_id. */
+  assigned_company_name?: string;
   /** بيانات العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـtechnician_name/phone فوق:
    * موجودة بس في مسارات `technician/orders/*` وبس بعد تأكيد حجز حقيقي (نفس
    * TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES بالظبط). الفني كان بيشوف شاشة تنفيذ بلا اسم العميل ولا
@@ -201,6 +203,8 @@ export function toOrderResponseDto(
      * مش في القوايم (استعلام إضافي لكل صف بلا فايدة عرض). */
     customerNotices?: OrderCustomerNotice[];
     safetyGuidanceAr?: string | null;
+    /** جهة التنفيذ المثبتة على الطلب، وتظل ظاهرة للطلب التاريخي حتى لو الشركة توقفت لاحقًا. */
+    assignedCompanyName?: string | null;
   },
 ): OrderResponseDto {
   return {
@@ -293,6 +297,7 @@ export function toOrderResponseDto(
       : undefined,
     technician_name: technicianContact?.name,
     technician_phone: technicianContact?.phone,
+    assigned_company_name: viewerExtras?.assignedCompanyName ?? undefined,
     customer_name: viewerExtras?.customerContact?.name,
     customer_phone: viewerExtras?.customerContact?.phone,
     customer_user_id: viewerExtras?.customerContact?.userId,

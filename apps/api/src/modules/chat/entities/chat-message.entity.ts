@@ -29,6 +29,10 @@ export class ChatMessage {
   @Column({ name: 'file_url', type: 'text', nullable: true })
   fileUrl: string | null;
 
+  // الـURL القديم متروك للتوافق مع الرسائل قبل R2، لكن أي رفع جديد بيحفظ المفتاح الدائم هنا.
+  @Column({ name: 'storage_key', type: 'text', nullable: true })
+  storageKey: string | null;
+
   @Column({ name: 'is_read', type: 'boolean', default: false })
   isRead: boolean;
 

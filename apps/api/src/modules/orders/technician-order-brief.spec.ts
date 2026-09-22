@@ -61,10 +61,12 @@ describe('toOrderResponseDto — بيانات العميل/الخدمة للفن
     const dto = toOrderResponseDto(fakeOrder(OrderStatus.ACCEPTED), null, null, {
       customerContact: contact,
       serviceNameAr: 'تسليك مواسير',
+      assignedCompanyName: 'شركة أوستا للخدمات',
     });
     expect(dto.customer_name).toBe('يوسف السنى');
     expect(dto.customer_phone).toBe('+201000000000');
     expect(dto.service_name_ar).toBe('تسليك مواسير');
+    expect(dto.assigned_company_name).toBe('شركة أوستا للخدمات');
     // وصف المشكلة كان موجود من الأصل — بيتأكد إنه مش اتكسر مع الإضافة.
     expect(dto.problem_description).toBe('الحنفية بتنقّط');
   });
@@ -84,6 +86,7 @@ describe('toOrderResponseDto — بيانات العميل/الخدمة للفن
     expect(dto.customer_name).toBeUndefined();
     expect(dto.customer_phone).toBeUndefined();
     expect(dto.service_name_ar).toBeUndefined();
+    expect(dto.assigned_company_name).toBeUndefined();
   });
 
   it('بيانات العميل للفني تظل في التحصيل بعد العمل، وهي سياسة مستقلة عن رقم الفني عند العميل', () => {

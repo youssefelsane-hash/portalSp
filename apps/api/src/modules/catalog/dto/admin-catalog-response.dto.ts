@@ -1,5 +1,6 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
+import { StorageService } from '../../../common/storage/storage.service';
 import { ServicePricingTierPricing } from '../entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
 import { ServiceProductivitySuggestion } from '../entities/service-productivity-suggestion.entity';
@@ -25,7 +26,10 @@ export interface AdminServiceCategoryResponseDto {
   created_at: string;
 }
 
-export function toAdminServiceCategoryResponseDto(category: ServiceCategory): AdminServiceCategoryResponseDto {
+export async function toAdminServiceCategoryResponseDto(
+  category: ServiceCategory,
+  storage: StorageService,
+): Promise<AdminServiceCategoryResponseDto> {
   return {
     id: category.id,
     parent_category_id: category.parentCategoryId,
@@ -33,8 +37,8 @@ export function toAdminServiceCategoryResponseDto(category: ServiceCategory): Ad
     name_en: category.nameEn,
     slug: category.slug,
     description_ar: category.descriptionAr,
-    icon_url: category.iconUrl,
-    cover_image_url: category.coverImageUrl,
+    icon_url: category.iconStorageKey ? await storage.getUrl(category.iconStorageKey) : category.iconUrl,
+    cover_image_url: category.coverImageStorageKey ? await storage.getUrl(category.coverImageStorageKey) : category.coverImageUrl,
     display_order: category.displayOrder,
     is_active: category.isActive,
     is_featured: category.isFeatured,

@@ -11,20 +11,10 @@ import { StorageService } from './storage.service';
  * كود بيستخدم StorageService (orders/support/technicians)، بالظبط زي ما LocalDiskStorageService
  * وStorageService.README.md وعدوا من الأول.
  *
- * **قرار تصميم صريح عن نوع الرابط الراجع من save()** (وليس تحقيق كامل لـ"presigned 15 دقيقة"
- * الموثّقة في docs/01-master-plan.md §7.2 — فجوة موثّقة بصراحة، مش سهو): الواجهة الحالية
- * (`StorageService.save(): Promise<string>`) بترجع سترينج واحد بيتخزن *دايماً* في العمود
- * (`file_url` في order_media/complaint_attachments/technician_documents) وبيتقرا كما هو في كل
- * رد API بعد كده — مفيش أي طبقة "تجديد رابط وقت القراءة" في التصميم الحالي (الـ DTO mappers
- * دوال pure، مش services، ومحتاجين يبقوا async يحقنوا StorageService عشان يولّدوا رابط جديد كل
- * مرة). تطبيق "presigned 15 دقيقة" حرفياً كان معناه تخزين الـ key بس (مش رابط) وتعديل الأربع
- * مسارات القراءة كلها (order-media/complaint-attachment/technician-document/chat-message) —
- * تغيير معماري أوسع من نطاق "أضف S3 adapter" وغير قابل للاختبار حياً هنا أصلاً (مفيش S3 حقيقي
- * نقدر نتأكد بيه). القرار العملي: presigned URL لكن بأطول مدة صلاحية ممكنة لـ SigV4 (7 أيام،
- * `STORAGE_S3_URL_EXPIRY_SECONDS` — الحد الأقصى الرسمي لـAWS SigV4 presigned URLs)، مش دقائق —
- * بيغطي عملياً كل حالات الاستخدام الحالية (مراجعة صور طلب/مستندات فني بعد الرفع بوقت قريب نسبياً،
- * ولوحة الإدارة بتجيب البيانات fresh في كل تحميل صفحة مش بتكاش قديم). سجل حي أقدم من 7 أيام هيحتاج
- * رفع تاني أو (تحسين مستقبلي) الانتقال لتخزين الـ key + توليد رابط وقت القراءة.
+ * `save()` يرجّع URL لأن الواجهة القديمة تحتاجه كـfallback، لكنه presigned ومؤقت. كل أصل مرفوع
+ * يحتاج أن يسجّل مفتاحه الدائم كذلك، ثم يولّد URL طازجًا عبر `getUrl()` عند القراءة. هذا النمط
+ * مطبّق على وسائط الطلب والدعم والفنيين والبراندنج والشات والفئات؛ لا يجوز تخزين URL وحده لأصل
+ * يفترض أن يبقى متاحًا بعد انتهاء مدة التوقيع.
  */
 @Injectable()
 export class S3StorageService implements StorageService {

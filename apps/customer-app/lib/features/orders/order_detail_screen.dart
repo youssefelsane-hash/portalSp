@@ -1199,7 +1199,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onTap: () => _showSafetyGuidance(order),
                         ),
                       ),
-                      if (order.technicianPhone != null) ...[
+                      if (order.technicianPhone != null || order.assignedCompanyName != null) ...[
                         const SizedBox(height: 16),
                         Card(
                           color: Theme.of(context).colorScheme.primaryContainer,
@@ -1208,8 +1208,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                const Text('يفضل الاتصال بالفني لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
-                                const SizedBox(height: 8),
+                                if (order.assignedCompanyName != null) ...[
+                                  Text(
+                                    'التنفيذ عن طريق شركة: ${order.assignedCompanyName}',
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context).textTheme.titleSmall,
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                if (order.technicianPhone != null) ...[
+                                  const Text('يفضل الاتصال بالفني لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
+                                  const SizedBox(height: 8),
                                 // قاعدة بساطة الواجهة (docs/08 §22 بند 20-30) — زرار ثانوي (اتصال/تواصل)
                                 // مش الفعل الأساسي للمرحلة، فمش لازم يتنافس بصريًا مع الفعل الأساسي
                                 // (دفع/تقييم/موافقة عرض سعر) اللي بيظهر تحت في نفس الحالة.
@@ -1218,6 +1227,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   icon: const Icon(Icons.call),
                                   label: Text('اتصل بالفني${order.technicianName != null ? ' — ${order.technicianName}' : ''}'),
                                 ),
+                                ],
                               ],
                             ),
                           ),

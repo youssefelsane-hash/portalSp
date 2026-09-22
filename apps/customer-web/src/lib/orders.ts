@@ -237,6 +237,8 @@ export interface OrderResponseDto {
   address?: OrderAddressResponseDto;
   technician_name?: string;
   technician_phone?: string;
+  /** اسم الشركة المنفذة عندما يكون الطلب مسندًا لشركة، لا مجرد شركة انتساب الفني. */
+  assigned_company_name?: string;
   customer_cash_confirmed_at: string | null;
   technician_cash_not_received_at: string | null;
   initial_quote_source: 'technician_onsite' | 'admin_remote' | null;

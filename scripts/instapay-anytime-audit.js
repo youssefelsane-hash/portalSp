@@ -93,9 +93,11 @@ async function main() {
     console.log(`\nقيمة الحافز المضبوطة: ${JSON.stringify(configured)} ج.م.`);
     check('٠', 'الحافز مفعّل بقيمة ٣٠ ج.م.', Number(configured), 30);
 
-    // ═══ ١ — طلب شغّال: الخصم ظاهر والدفع متاح ═══
-    console.log('\n═══ ١ — طلب لسه بيتنفّذ: الخصم ظاهر والدفع متاح ═══');
-    const live = await seedOrder(customer, tech, catalog, { status: 'in_progress', suffix: 'live' });
+    // ═══ ١ — طلب مقبول: الخصم ظاهر والدفع متاح ═══
+    // البلاغ الفعلي كان من الويب في حالة accepted. الاختبار لازم يثبت الحالة دي بالاسم،
+    // مش يكتفي بـ in_progress لأن ده كان هيسيب نفس الحاجز يرجع قبل بداية الشغل بلا إنذار.
+    console.log('\n═══ ١ — طلب الفني قبله: الخصم ظاهر والدفع متاح ═══');
+    const live = await seedOrder(customer, tech, catalog, { status: 'accepted', suffix: 'accepted' });
     const preview = await h.api(`/orders/${live.id}/instapay-preview`, { token: customer.token });
     check('١', 'المعاينة رجعت ٢٠٠', preview.status, 200);
     const p = preview.body.data ?? preview.body;
@@ -118,7 +120,7 @@ async function main() {
       token: customer.token,
       headers: { 'Idempotency-Key': `ipany-live-${Date.now()}` },
     });
-    check('٢', 'الدفع اتقبل وهو in_progress', payRes.status, 201);
+    check('٢', 'الدفع اتقبل وهو accepted', payRes.status, 201);
     const [paymentRow] = await h.q(
       `SELECT id, amount_cents, payment_status FROM payments WHERE order_id = $1`, [live.id],
     );
@@ -130,7 +132,7 @@ async function main() {
     check('٢', 'إجمالي الطلب اتخصم منه الحافز', afterDiscount.total_amount_cents, PRICE - DISCOUNT);
     check('٢', 'الحافز اتسجّل في عموده المستقل', afterDiscount.instapay_discount_cents, DISCOUNT);
     check('٢', 'والحافز داخل خصم الطلب الكلي', afterDiscount.discount_amount_cents, DISCOUNT);
-    check('٢', 'حالة الطلب ما اتغيّرتش بمجرد فتح التحويل', afterDiscount.order_status, 'in_progress');
+    check('٢', 'حالة الطلب ما اتغيّرتش بمجرد فتح التحويل', afterDiscount.order_status, 'accepted');
 
     // ═══ ٣ — تأكيد التحويل: فلوس اتسجّلت، الطلب **ما اتقفلش** ═══
     console.log('\n═══ ٣ — تأكيد التحويل والطلب لسه شغّال (أخطر بند) ═══');
@@ -145,7 +147,7 @@ async function main() {
     );
     check('٣', 'الطلب اتسجّل مدفوع', settled.payment_status, 'paid');
     check('٣', 'وسيلة الدفع بقت instapay', settled.payment_method, 'instapay');
-    check('٣', '⚠️ الطلب **لسه شغّال** ما اتقفلش', settled.order_status, 'in_progress');
+    check('٣', '⚠️ الطلب يفضل accepted وما يتقفلش', settled.order_status, 'accepted');
     const earnings = await h.q(
       `SELECT count(*)::int AS n FROM wallet_transactions
         WHERE reference_type = 'order' AND reference_id = $1`, [live.id],
@@ -172,6 +174,9 @@ async function main() {
 
     // ═══ ٥ — الزيادة: بتتدفع لوحدها وبلا حافز ═══
     console.log('\n═══ ٥ — زيادة بعد الدفع: الخصم مرة واحدة لكل طلب ═══');
+    // اقتراح البنود متاح بعد ما الفني يبدأ العمل فقط. الأقسام السابقة تحققت من سلوك accepted
+    // نفسه؛ هنا نكمل نفس الطلب في المرحلة الطبيعية التالية حتى يظل تدقيق الزيادة مستقلًا.
+    await h.q(`UPDATE orders SET order_status = 'in_progress' WHERE id = $1`, [live.id]);
     const EXTRA = 8_000; // ٨٠ ج.م. قطعة غيار
     const proposeRes = await h.api(`/technician/orders/${live.id}/quote-items`, {
       method: 'POST',

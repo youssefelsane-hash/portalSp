@@ -215,10 +215,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </section>
       )}
 
-      {order.technician_name && (
+      {(order.technician_name || order.assigned_company_name) && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">
-          <h2 className="mb-1 font-semibold">الفني</h2>
-          <p>{order.technician_name}</p>
+          <h2 className="mb-1 font-semibold">جهة التنفيذ</h2>
+          {order.technician_name && <p>الفني: {order.technician_name}</p>}
+          {order.assigned_company_name && <p className="mt-1 text-sm text-muted">عن طريق شركة: {order.assigned_company_name}</p>}
           {order.technician_phone && (
             <a href={`tel:${order.technician_phone}`} dir="ltr" className="text-primary hover:underline">
               {order.technician_phone}
