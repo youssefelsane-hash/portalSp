@@ -46,6 +46,7 @@ class FeaturedServiceItem extends StatelessWidget {
                       clipBehavior: Clip.antiAlias,
                       child: CachedNetworkImage(
                         imageUrl: resolveCachedRemoteImageUrl(iconUrl),
+                        cacheKey: remoteImageCacheKey(iconUrl),
                         fit: BoxFit.contain,
                         memCacheWidth:
                             (_kFeaturedIconSize *

@@ -318,7 +318,7 @@ export default function HomePage() {
         {projectsEnabled && (
           <section aria-labelledby="projects-title">
             <Link
-              href="/projects"
+              href="/projects/new"
               className="motion-rise motion-press group flex flex-col gap-5 overflow-hidden rounded-3xl border border-border bg-surface p-5 transition-colors hover:border-primary sm:flex-row sm:items-center sm:justify-between sm:p-7"
             >
               <span className="flex min-w-0 items-center gap-4">

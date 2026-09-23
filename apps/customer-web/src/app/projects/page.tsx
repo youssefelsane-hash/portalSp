@@ -77,10 +77,20 @@ export default function MyProjectsPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold">مشاريعي</h1>
-        <p className="mt-1 text-sm text-muted">
-          تجهيز شقة أو تشطيب كامل — من المعاينة لحد التسليم في مكان واحد.
-        </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">مشاريعي</h1>
+            <p className="mt-1 text-sm text-muted">
+              تجهيز شقة أو تشطيب كامل — من المعاينة لحد التسليم في مكان واحد.
+            </p>
+          </div>
+          <Link
+            href="/projects/new"
+            className="motion-press inline-flex w-fit items-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            ابدأ مشروع جديد
+          </Link>
+        </div>
       </header>
 
       {projects === null ? (
@@ -136,15 +146,11 @@ function EmptyProjects() {
       <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
         صوّر المكان واحكي لنا اللي محتاجه، وأسطى ترتب لك المعاينة والعرض والمراحل.
       </p>
-      {/* **إنشاء المشروع لسه في التطبيق بس** (`CreateProjectScreen`): بيحتاج رفع صور المكان
-          واختيار عنوان محفوظ، والاتنين لهم فلو مختلف تمامًا على الويب. الرابط بيوصّل لخدمات
-          التشطيب الحقيقية بدل زرار بيفتح صفحة نص خلاص — ده اللي متاح فعلاً دلوقتي، وأصدق من
-          وعد بشاشة مش موجودة. فجوة موثّقة في `apps/customer-web/README.md`. */}
       <Link
-        href="/search"
+        href="/projects/new"
         className="motion-press mt-6 inline-block rounded-xl bg-primary px-6 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
       >
-        تصفّح خدمات التشطيب
+        ابدأ مشروعك واطلب معاينة
       </Link>
     </div>
   );

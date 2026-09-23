@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/cached_remote_image.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../support/support_contact_screen.dart';
@@ -39,7 +42,18 @@ class _ServicesScreenState extends State<ServicesScreen> {
         categoryId: widget.category.id,
         zoneId: widget.zoneId,
       );
-      if (mounted) setState(() => _services = services);
+      if (mounted) {
+        setState(() => _services = services);
+        // ابدأ تنزيل صور الكروت فور وصول القائمة بدل انتظار بناء كل كارت أثناء التمرير.
+        unawaited(
+          precacheRemoteImages(
+            context,
+            services.map((service) => service.iconUrl),
+            logicalWidth: 360,
+            concurrency: 4,
+          ),
+        );
+      }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
