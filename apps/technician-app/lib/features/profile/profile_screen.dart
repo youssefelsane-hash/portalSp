@@ -146,7 +146,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _changePhoto() async {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
-      imageQuality: 85,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 80,
     );
     if (picked == null) return;
     setState(() {
