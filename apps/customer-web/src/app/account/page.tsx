@@ -25,6 +25,8 @@ const ACCOUNT_SECTIONS: { href: string; label: string; description: string }[] =
   { href: '/account/referrals', label: 'رشّح صحابك', description: 'كود الترشيح ومكافآتك' },
   { href: '/account/complaints', label: 'شكاويّي', description: 'الشكاوى المفتوحة والمقفولة' },
   { href: '/account/notifications', label: 'الإشعارات', description: 'كل الإشعارات اللي وصلتك' },
+  // ADR-0109 — رمز الدخول بقى السر الأساسي للحساب، فلازم يكون له مكان ظاهر يتغيّر منه.
+  { href: '/account/security', label: 'رمز الدخول', description: 'غيّر الرمز اللي بتدخل بيه' },
 ];
 
 export default function AccountPage() {

@@ -9,9 +9,11 @@ interface AuthContextValue {
   user: UserResponseDto | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  requestOtp: (phoneNumber: string, purpose: 'login' | 'register') => Promise<void>;
-  verifyOtp: (phoneNumber: string, otpCode: string) => Promise<void>;
-  register: (phoneNumber: string, otpCode: string, fullName: string, promoLinkCode?: string) => Promise<void>;
+  /** دخول برقم + رمز (ADR-0109). بيرمي `ApiError` برسالة الباك-إند زي ما هي. */
+  loginWithPin: (phoneNumber: string, pin: string) => Promise<void>;
+  registerWithPin: (phoneNumber: string, pin: string, fullName: string, promoLinkCode?: string) => Promise<void>;
+  /** تعيين/تغيير الرمز لمستخدم **داخل بالفعل** — مسار هجرة المستخدمين القدام (ADR-0109 §6-أ). */
+  setPin: (pin: string, currentPin?: string) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
   /** لـendpoints مُقسّمة صفحات (`{items, meta}`) — راجع `apiFetchPage` للسبب. */
@@ -90,35 +92,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requestOtp = useCallback(async (phoneNumber: string, purpose: 'login' | 'register') => {
-    await callLocalAuthRoute('/api/auth/otp/request', { phone_number: phoneNumber, purpose });
-  }, []);
+  // ── الدخول برمز (ADR-0109) ────────────────────────────────────────────
+  // نفس شكل مسارات الـOTP القديمة بالحرف — بيرجّعوا نفس الرد وبيعملوا نفس الخطوات بعده.
+  // الفرق الجوهري: **مفيش خطوة أولى بتنادي السيرفر** خالص. قبل كده الصفحة كانت بتنادي
+  // `otp/request` وتستنى SMS.
 
-  const verifyOtp = useCallback(
-    async (phoneNumber: string, otpCode: string) => {
-      const result = await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/otp/verify', {
-        phone_number: phoneNumber,
-        otp_code: otpCode,
-      });
+  const adoptSession = useCallback(
+    async (result: Pick<TokenPair, 'access_token' | 'expires_in_seconds'>) => {
       setAccessTokenBoth(result.access_token);
       await fetchMe(result.access_token);
     },
     [fetchMe, setAccessTokenBoth],
   );
 
-  const register = useCallback(
-    async (phoneNumber: string, otpCode: string, fullName: string, promoLinkCode?: string) => {
-      const result = await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/register', {
-        phone_number: phoneNumber,
-        otp_code: otpCode,
-        full_name: fullName,
-        user_type: 'customer',
-        ...(promoLinkCode ? { promo_link_code: promoLinkCode } : {}),
-      });
-      setAccessTokenBoth(result.access_token);
-      await fetchMe(result.access_token);
+  const loginWithPin = useCallback(
+    async (phoneNumber: string, pin: string) => {
+      await adoptSession(
+        await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/pin/login', {
+          phone_number: phoneNumber,
+          pin,
+        }),
+      );
     },
-    [fetchMe, setAccessTokenBoth],
+    [adoptSession],
+  );
+
+  const registerWithPin = useCallback(
+    async (phoneNumber: string, pin: string, fullName: string, promoLinkCode?: string) => {
+      await adoptSession(
+        await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/pin/register', {
+          phone_number: phoneNumber,
+          pin,
+          full_name: fullName,
+          user_type: 'customer',
+          ...(promoLinkCode ? { promo_link_code: promoLinkCode } : {}),
+        }),
+      );
+    },
+    [adoptSession],
+  );
+
+  const setPin = useCallback(
+    async (pin: string, currentPin?: string) => {
+      // بيمرّ على `authedFetch`-زي بالإيد عشان الهيدر يوصل: المسار ده متوثّق، مش عام زي
+      // الدخول والتسجيل.
+      const res = await fetch('/api/auth/pin/set', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessTokenRef.current ? { Authorization: `Bearer ${accessTokenRef.current}` } : {}),
+        },
+        body: JSON.stringify({ pin, ...(currentPin ? { current_pin: currentPin } : {}) }),
+      });
+      const envelope = (await res.json()) as ApiEnvelope<unknown>;
+      if (!res.ok || !envelope.success) {
+        throw new ApiError(envelope.error?.code ?? 'UNKNOWN', envelope.error?.message ?? 'حصل خطأ غير متوقع', res.status);
+      }
+      // `pin_set` في `/auth/me` بيتغيّر، والصفحات بتقرا منه — فلازم نعيد الجلب.
+      if (accessTokenRef.current) await fetchMe(accessTokenRef.current);
+    },
+    [fetchMe],
   );
 
   const logout = useCallback(async () => {
@@ -164,14 +197,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       isAuthenticated: accessToken !== null,
-      requestOtp,
-      verifyOtp,
-      register,
+      loginWithPin,
+      registerWithPin,
+      setPin,
       logout,
       authedFetch,
       authedFetchPage,
     }),
-    [accessToken, user, isLoading, requestOtp, verifyOtp, register, logout, authedFetch, authedFetchPage],
+    [accessToken, user, isLoading, loginWithPin, registerWithPin, setPin, logout, authedFetch, authedFetchPage],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

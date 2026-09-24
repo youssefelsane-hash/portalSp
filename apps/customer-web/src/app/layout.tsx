@@ -6,6 +6,7 @@ import { AuthProvider } from '@/lib/auth-context';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { PromoLinkCapture } from '@/components/promo-link-capture';
+import { SetPinBanner } from '@/components/set-pin-banner';
 
 // §8 — Arabic-first، مش English UI بترقّع RTL بعدين. Tajawal خط عربي عصري مقروء، مدعوم Google
 // Fonts (يشتغل تحت CSP الافتراضي للـArtifacts، ومفيش قيد مشابه هنا لأن ده Next.js عادي، بس
@@ -37,6 +38,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             <PromoLinkCapture />
           </Suspense>
           <SiteHeader />
+          {/* ADR-0109 §6-أ — بيظهر لوحده بس للمستخدم اللي مالوش رمز، ومالوش زرار إغلاق. */}
+          <Suspense fallback={null}>
+            <SetPinBanner />
+          </Suspense>
           <main className="flex-1">{children}</main>
           <SiteFooter />
         </AuthProvider>
