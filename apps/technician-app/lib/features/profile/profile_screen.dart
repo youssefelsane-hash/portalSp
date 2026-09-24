@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../auth/set_pin_screen.dart';
 import '../../core/auth_repository.dart';
 import '../../core/biometric_auth_service.dart';
 import '../onboarding/models.dart';
@@ -54,7 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // docs/08 §17.22 — "بصمة اختياري على جهاز موثوق": تفعيلها بيتطلب تأكيد هوية فوري بالبصمة
   // نفسها (مش مجرد تبديل switch)، عشان نتأكد إن اللي بيفعّلها فعلاً هو صاحب البصمة المسجّلة على
-  // الجهاز، مش حد لاقي الموبايل مفتوح وقلب الإعداد. تعطيلها مايحتاجش تأكيد (رجوع لمسار OTP بس).
+  // الجهاز، مش حد لاقي الموبايل مفتوح وقلب الإعداد. تعطيلها مايحتاجش تأكيد (رجوع لرمز الدخول بس).
   Future<void> _toggleBiometric(bool wantEnabled) async {
     if (!wantEnabled) {
       await BiometricAuthService.setEnabled(false);
@@ -475,6 +476,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  // ADR-0109 — رمز الدخول بقى السر الأساسي للحساب، فلازم يكون له مكان ظاهر
+                  // يتغيّر منه. فوق البصمة عمدًا: السر الأساسي الأول، بعده الراحة المبنية عليه.
+                  Card(
+                    child: ListTile(
+                      key: const ValueKey('profile-change-pin'),
+                      leading: const Icon(Icons.password_outlined),
+                      title: const Text('تغيير رمز الدخول'),
+                      subtitle: const Text(
+                        'الرمز اللي بتدخل بيه لو سجّلت خروج أو غيّرت موبايلك',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SetPinScreen()),
+                      ),
+                    ),
+                  ),
                   if (_biometricAvailable) ...[
                     const SizedBox(height: 16),
                     Card(
@@ -482,7 +500,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         secondary: const Icon(Icons.fingerprint),
                         title: const Text('الدخول بالبصمة'),
                         subtitle: const Text(
-                          'افتح أسطى ببصمتك بدل ما تستنى كود التحقق كل مرة',
+                          'افتح أسطى ببصمتك بدل ما تكتب رمز الدخول كل مرة',
                         ),
                         value: _biometricEnabled,
                         onChanged: _toggleBiometric,

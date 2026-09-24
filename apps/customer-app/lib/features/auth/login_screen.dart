@@ -251,6 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (!_pinStep) ...[
                       if (_isRegisterMode) ...[
                         TextField(
+                          key: const ValueKey('login-full-name-field'),
                           controller: _fullNameController,
                           textCapitalization: TextCapitalization.words,
                           decoration: const InputDecoration(
@@ -261,6 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                       ],
                       TextField(
+                        key: const ValueKey('login-phone-field'),
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
                         textDirection: TextDirection.ltr,
@@ -276,6 +278,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (_isRegisterMode) ...[
                         const SizedBox(height: 12),
                         TextField(
+                          key: const ValueKey('login-referral-field'),
                           controller: _referralCodeController,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
@@ -286,6 +289,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
+                          key: const ValueKey('login-technician-referral-field'),
                           controller: _technicianReferralCodeController,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
@@ -339,6 +343,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ],
                       AdaptiveTextAction(
+                        key: const ValueKey('login-back-to-phone'),
                         onPressed: _isSubmitting ? null : _backToPhoneStep,
                         icon: Icons.edit_outlined,
                         label: 'رقم الموبايل غلط؟ رجّع خطوة',
@@ -348,6 +353,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 8),
                       Text(
                         _error!,
+                        key: const ValueKey('login-error-text'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: theme.colorScheme.error),
                       ),
@@ -355,12 +361,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (_suggestRegister) ...[
                       const SizedBox(height: 4),
                       AdaptiveTextAction(
+                        key: const ValueKey('login-suggest-register'),
                         onPressed: _isSubmitting ? null : _switchToRegister,
                         label: 'معندكش حساب؟ سجّل بنفس الرقم',
                       ),
                     ],
                     const SizedBox(height: 16),
                     FilledButton(
+                      key: const ValueKey('login-submit'),
                       onPressed: _isSubmitting
                           ? null
                           : (_pinStep ? _submitPin : _goToPinStep),
@@ -386,6 +394,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (!_pinStep) ...[
                       const SizedBox(height: 8),
                       AdaptiveTextAction(
+                        key: const ValueKey('login-toggle-mode'),
                         onPressed: _isSubmitting ? null : _toggleMode,
                         label: _isRegisterMode
                             ? 'عندك حساب؟ سجّل دخول'

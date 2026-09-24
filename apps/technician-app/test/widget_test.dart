@@ -1,4 +1,5 @@
 // اختبار دخان بسيط: التطبيق (من غير جلسة محفوظة) لازم يعرض شاشة تسجيل الدخول.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,6 +43,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('أسطى'), findsWidgets);
-    expect(find.text('ابعت كود التحقق'), findsOneWidget);
+    // **بالمفتاح مش بالنص** (ADR-0109): النسخة القديمة كانت بتدوّر على `'ابعت كود التحقق'`،
+    // فأي تغيير في كلام الزرار بيسقّط الاختبار من غير أي عيب حقيقي — وده اللي حصل بالظبط لما
+    // الزرار بقى «التالي» (مفيش كود بيتبعت خلاص). المفتاح بيختبر **وجود** الزرار، والنص
+    // منفصل عنه.
+    expect(find.byKey(const ValueKey('login-submit')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login-phone-field')), findsOneWidget);
+
+    // خطوة الرمز مالهاش وجود قبل ما المستخدم يدوس «التالي» — ده اللي بيثبت إن الشاشة بقت
+    // خطوتين حقيقيين مش خانة واحدة مخفية.
+    expect(find.byKey(const ValueKey('login-pin-field')), findsNothing);
+  });
+
+  testWidgets('«التالي» بينقل لخطوة الرمز بلا أي نداء شبكة', (WidgetTester tester) async {
+    await tester.pumpWidget(const BaytakTechnicianApp());
+    await tester.pumpAndSettle();
+
+    // **ده جوهر ADR-0109**: الاختبار ده بيشتغل تحت `TestWidgetsFlutterBinding`، واللي بيرجّع
+    // 400 لأي HTTP request. فلو الانتقال لخطوة الرمز كان لسه بيعمل أي نداء (زي `otp/request`
+    // قبل كده)، الخطوة مكانتش هتظهر خالص وكنا هنشوف رسالة خطأ. ظهورها = إثبات إن مفيش شبكة.
+    await tester.enterText(find.byKey(const ValueKey('login-phone-field')), '+201000000021');
+    await tester.tap(find.byKey(const ValueKey('login-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('login-pin-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login-error-text')), findsNothing);
+  });
+
+  testWidgets('رقم ناقص بيترفض محليًا ومابيوصلش لخطوة الرمز', (WidgetTester tester) async {
+    await tester.pumpWidget(const BaytakTechnicianApp());
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('login-phone-field')), '+2010');
+    await tester.tap(find.byKey(const ValueKey('login-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('login-pin-field')), findsNothing);
+    expect(find.byKey(const ValueKey('login-error-text')), findsOneWidget);
   });
 }

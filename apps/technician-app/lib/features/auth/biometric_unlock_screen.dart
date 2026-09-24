@@ -63,7 +63,7 @@ class _BiometricUnlockScreenState extends State<BiometricUnlockScreen> {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: _isAuthenticating ? null : () => context.read<AuthRepository>().useOtpInsteadOfBiometrics(),
+                onPressed: _isAuthenticating ? null : () => context.read<AuthRepository>().usePinInsteadOfBiometrics(),
                 child: const Text('استخدم رقم موبايلك بدلاً'),
               ),
             ],

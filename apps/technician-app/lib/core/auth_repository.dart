@@ -13,13 +13,27 @@ class BaytakUser {
   final String fullName;
   final String userType;
 
-  BaytakUser({required this.id, required this.phoneNumber, required this.fullName, required this.userType});
+  /// هل الحساب ليه رمز دخول؟ (ADR-0109)
+  ///
+  /// `false` لفني قديم اتسجّل بالـOTP قبل التبديل — التطبيق بيطلب منه يحط رمزه وهو داخل بالفعل.
+  /// الافتراضي `true` عمدًا لو الحقل مش موجود في الرد: نسخة API أقدم مالهاش الحقل معناها إن
+  /// الـOTP لسه شغّال، فمالناش حق نزنّق الفني بشاشة مالهاش لازمة وهو بيشتغل.
+  final bool pinSet;
+
+  BaytakUser({
+    required this.id,
+    required this.phoneNumber,
+    required this.fullName,
+    required this.userType,
+    this.pinSet = true,
+  });
 
   factory BaytakUser.fromJson(Map<String, dynamic> json) => BaytakUser(
         id: json['id'] as String,
         phoneNumber: json['phone_number'] as String,
         fullName: json['full_name'] as String,
         userType: json['user_type'] as String,
+        pinSet: json['pin_set'] as bool? ?? true,
       );
 }
 
@@ -133,7 +147,7 @@ class AuthRepository extends ChangeNotifier {
   /// بترجّع true لو الدخول نجح فعليًا (بصمة + refresh + fetchMe الاتلاتة). false لو أي خطوة فشلت
   /// (بصمة اتلغت/فشلت، أو الباك-إند رفض الجلسة المحفوظة — حساب موقوف/جلسة ملغاة، fail-closed
   /// حقيقي من `AuthService.refresh()` مش افتراض محلي) — الكولر (شاشة القفل) بيوجّه المستخدم
-  /// لمسار OTP العادي في الحالتين.
+  /// لشاشة الدخول بالرقم + الرمز في الحالتين.
   Future<bool> unlockWithBiometrics() async {
     final authenticated = await BiometricAuthService.authenticate(reason: 'افتح أسطى ببصمتك');
     if (!authenticated) return false;
@@ -156,10 +170,10 @@ class AuthRepository extends ChangeNotifier {
     }
   }
 
-  /// "استخدم رقم موبايلك بدلاً" — بيقفل شاشة البصمة ويوديك لمسار OTP العادي (LoginScreen) من
+  /// "استخدم رقم موبايلك بدلاً" — بيقفل شاشة البصمة ويوديك لشاشة الدخول بالرقم + الرمز من
   /// غير ما يمسح الجلسة المحفوظة (لو المستخدم رجع بعدين ممكن يجرّب البصمة تاني بدل ما يتسجّل
   /// خروج كامل قسرًا لمجرد إنه اختار يفضّل الرقم المرة دي).
-  void useOtpInsteadOfBiometrics() {
+  void usePinInsteadOfBiometrics() {
     _biometricUnlockPending = false;
     notifyListeners();
   }
@@ -174,42 +188,66 @@ class AuthRepository extends ChangeNotifier {
     unawaited(PushNotificationService.registerCurrentDevice(authedRequest));
   }
 
-  Future<void> requestOtp(String phoneNumber, {String purpose = 'login'}) async {
-    await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': purpose});
-  }
+  // ── الدخول برمز (ADR-0109) ──────────────────────────────────────────
+  // نفس شكل مسارات الـOTP القديمة بالحرف — بيرجّعوا نفس زوج التوكنز وبيعملوا نفس الخطوات بعده.
+  // التغيير الوحيد هو الحقل اللي بيتبعت.
 
-  Future<void> verifyOtp(String phoneNumber, String otpCode) async {
+  /// دخول برقم + رمز. بيرمي `ApiException` برسالة الباك-إند زي ما هي.
+  Future<void> loginWithPin(String phoneNumber, String pin) async {
     final data = await apiRequest(
       'POST',
-      '/auth/otp/verify',
-      body: {'phone_number': phoneNumber, 'otp_code': otpCode},
+      '/auth/pin/login',
+      body: {'phone_number': phoneNumber, 'pin': pin},
     );
-    _accessToken = data!['access_token'] as String;
-    await _persistRefreshToken(data['refresh_token'] as String);
-    await _fetchMe();
-    _registerPushDeviceInBackground();
-    notifyListeners();
+    await _adoptTokenPair(data!);
   }
 
-  // تسجيل فني جديد (كانت فجوة موثّقة صراحة: Technician App عندها OTP login بس، بيفترض ضمنيًا
-  // إن اليوزر موجود بالفعل — POST /auth/register كان جاهز ومختبر في الباك-إند بلا أي شاشة
-  // تستخدمه). user_type ثابت 'technician' — التطبيق ده للفني بس. تسجيل فني بينشئ technician_profiles
-  // تلقائيًا بـverification_status='pending' (TechnicianProfileListener)، فالفني لازم يكمّل رفع
-  // مستنداته بعد كده مباشرة (OnboardingScreen) قبل ما يقدر يستقبل طلبات فعلية.
-  // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني بدل تطبيق مستقل، فـuserType
-  // بقى باراميتر بدل ثابت. 'technician' هو الافتراضي (مفيش تغيير في مسار الفني الموجود).
-  Future<void> register(String phoneNumber, String otpCode, String fullName, {String userType = 'technician'}) async {
+  /// تسجيل فني جديد برمز.
+  ///
+  /// تسجيل فني بينشئ `technician_profiles` تلقائيًا بـ`verification_status='pending'`
+  /// (`TechnicianProfileListener`)، فالفني لازم يكمّل رفع مستنداته بعد كده مباشرة
+  /// (`OnboardingScreen`) قبل ما يقدر يستقبل طلبات فعلية — زي ما كان بالظبط.
+  ///
+  /// بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني بدل تطبيق مستقل، فـ
+  /// `userType` باراميتر بدل ثابت. `'technician'` هو الافتراضي.
+  Future<void> registerWithPin(
+    String phoneNumber,
+    String pin,
+    String fullName, {
+    String userType = 'technician',
+  }) async {
     final data = await apiRequest(
       'POST',
-      '/auth/register',
+      '/auth/pin/register',
       body: {
         'phone_number': phoneNumber,
-        'otp_code': otpCode,
+        'pin': pin,
         'full_name': fullName,
         'user_type': userType,
       },
     );
-    _accessToken = data!['access_token'] as String;
+    await _adoptTokenPair(data!);
+  }
+
+  /// تعيين/تغيير الرمز لفني **داخل بالفعل** — مسار هجرة الفنيين القدام (ADR-0109 §6-أ).
+  ///
+  /// `currentPin` مطلوب بس لو الحساب ليه رمز. الباك-إند هو اللي بيفرض ده حسب حالة الحساب.
+  Future<void> setPin(String pin, {String? currentPin}) async {
+    await authedRequest('POST', '/auth/pin', body: {
+      'pin': pin,
+      if (currentPin != null && currentPin.isNotEmpty) 'current_pin': currentPin,
+    });
+    await _fetchMe();
+    notifyListeners();
+  }
+
+  /// الخطوات اللي بتحصل بعد أي دخول ناجح — **مصدر واحد** للدخول والتسجيل.
+  ///
+  /// قبل كده كانت الأربع خطوات دي مكتوبة **مرتين** (في `verifyOtp` و`register`). أي خطوة
+  /// تتضاف لواحد وتتنسى في التاني = فني داخل بنص حالة (مثلاً بلا تسجيل جهاز push، فمايوصلهوش
+  /// أي عرض طلب خالص وهو فاكر إنه شغّال).
+  Future<void> _adoptTokenPair(Map<String, dynamic> data) async {
+    _accessToken = data['access_token'] as String;
     await _persistRefreshToken(data['refresh_token'] as String);
     await _fetchMe();
     _registerPushDeviceInBackground();

@@ -207,7 +207,7 @@ Future<String?> pickCustomerCancellationReasonId() async {
 }
 
 /// رقم موبايل فريد لكل تشغيلة — الأرقام المشتركة بتخلّي ملفين متوازيين يتعاركوا على نفس حصة
-/// الـthrottle (٥ طلبات OTP في الدقيقة بالرقم).
+/// الـthrottle (بيتعقّب بالرقم في `IdentityThrottlerGuard`).
 String uniquePhone([int seq = 0]) {
   final micros = DateTime.now().microsecondsSinceEpoch;
   final mixed = (_phoneRandom.nextInt(1000000) ^ (micros & 0xFFFFF)) % 1000000;
@@ -216,16 +216,31 @@ String uniquePhone([int seq = 0]) {
 
 final Random _phoneRandom = Random.secure();
 
-/// تسجيل عميل جديد بالكامل عبر مسار OTP الحقيقي؛ بيرجّع `access_token`.
+/// **رمز الدخول الموحّد لكل الاختبارات الحية** (ADR-0109).
+///
+/// مش متسلسل ومش كله نفس الرقم عشان يعدّي `isWeakPin` في الباك-إند. لازم يطابق نفس الثابت في
+/// `apps/customer-app/test_live/_live_support.dart` و`DEV_SEED_PIN` في سكربتات الـseed.
+const String kLiveTestPin = '417253';
+
+/// تسجيل عميل جديد بالكامل عبر مسار رمز الدخول الحقيقي؛ بيرجّع `access_token`.
+///
+/// **قبل ADR-0109** كان: طلب OTP → استنى ٦٠٠ مللي → اقرا آخر ٢ ميجا من لوج الباك-إند → استخرج
+/// الكود → تحقق. أربع نقاط فشل مالهاش أي علاقة بالحاجة المُختبَرة. دلوقتي نداء واحد.
 Future<String> registerCustomer(String phoneNumber, {String fullName = 'عميل اختبار حي'}) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'register'});
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  final otp = await latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/register', body: {
+  final tokens = await apiRequest('POST', '/auth/pin/register', body: {
     'phone_number': phoneNumber,
-    'otp_code': otp,
+    'pin': kLiveTestPin,
     'full_name': fullName,
     'user_type': 'customer',
+  });
+  return tokens!['access_token'] as String;
+}
+
+/// تسجيل دخول برمز لحساب موجود بالفعل (فني أو عميل).
+Future<String> loginWithPin(String phoneNumber, {String pin = kLiveTestPin}) async {
+  final tokens = await apiRequest('POST', '/auth/pin/login', body: {
+    'phone_number': phoneNumber,
+    'pin': pin,
   });
   return tokens!['access_token'] as String;
 }
