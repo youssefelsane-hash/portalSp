@@ -16,6 +16,7 @@ import { MfaPolicyService } from './mfa-policy.service';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { WebAuthnService } from './webauthn.service';
 import { Wallet } from '../payments/entities/wallet.entity';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * **وضع اختبار الـOTP لفترة Google Play** (docs/08 §173).
@@ -130,6 +131,9 @@ async function buildAuth(overrides: Record<string, unknown>): Promise<Harness> {
       { provide: DataSource, useValue: createFakeDataSource(otpCodes) },
       { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
       { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+      // ADR-0109 — `auth.login_method`. السبيكات دي بتختبر مسار الـOTP، فالـstub بيرجّع 'otp'
+      // عشان سلوكها يفضل زي ما هو بالحرف بعد ما البوابة اتحطت على `requestOtp`.
+      { provide: SettingsService, useValue: { getString: async () => 'otp' } },
       { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
     ],
   }).compile();

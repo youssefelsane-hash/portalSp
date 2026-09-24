@@ -23,6 +23,7 @@ import { SessionsController } from './sessions.controller';
 import { StepUpService } from './step-up.service';
 import { WebAuthnController } from './webauthn.controller';
 import { WebAuthnService } from './webauthn.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { WebAuthnService } from './webauthn.service';
     NotificationsModule, // NotificationRoutingService — تنبيه super_admin عند استخدام استرجاع MFA
     AuditModule, // AuditLogService — تسجيل عملية admin_mfa.reset (ADR-0011 §6)
     SmsModule, // SMS_DISPATCHER — بوابة تسليم كود التحقق (المزوّد بيتحدد من SMS_PROVIDER)
+    SettingsModule, // SettingsService — مفتاح `auth.login_method` (ADR-0109 §7). مفيش دورة: SettingsModule مابيستوردش AuthModule.
   ],
   controllers: [AuthController, WebAuthnController, SessionsController, AdminMfaController],
   providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService],

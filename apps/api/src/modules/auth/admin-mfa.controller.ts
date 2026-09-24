@@ -44,4 +44,41 @@ export class AdminMfaController {
     });
     return null;
   }
+
+  /**
+   * **استرجاع رمز الدخول** (ADR-0109 §6-ب) — الدعم بيعمله بعد ما يتأكد من هوية العميل
+   * في مكالمة. ده المسار الوحيد لعميل نسي رمزه، لأن مفيش SMS بعد التبديل.
+   *
+   * القرارات المقصودة:
+   * - **بيمسح الرمز، مابيحطّش واحد جديد.** لو الأدمن اختار الرمز، يبقى فيه بني آدم تاني يعرف
+   *   سر دخول العميل ولازم يتقال في مكالمة — تسريب بالتصميم. بدل كده الحساب بيرجع «بلا رمز»
+   *   والعميل بيحط رمزه بنفسه من شاشة الدخول.
+   * - **بيلغي كل الجلسات القايمة** (جوّه `adminResetPin`). لو الحساب كان متسرّب فعلاً،
+   *   الاسترجاع بيقفل اللي واخده برّه بدل ما يسيبه جوّه.
+   * - **صلاحية مستقلة** `users.reset_pin` مش `customers.manage`: ده إجراء **بيفك قفل حساب**،
+   *   مش تعديل بيانات. موظف بيعدّل عناوين مالوش لازمة يقدر يفتح حسابات.
+   * - **step-up + سجل تدقيق**: مفيش إثبات تقني لهوية العميل في مكالمة تليفون، فالسجل هو الأثر
+   *   الوحيد اللي بيخلي الإجراء قابل للمراجعة — مين عمله، لمين، وإمتى.
+   */
+  @Post(':id/pin/reset')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('users.reset_pin')
+  @RequireStepUp()
+  async resetPin(
+    @CurrentUser() actor: JwtPayload,
+    @Param('id', ParseUUIDPipe) targetUserId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const result = await this.authService.adminResetPin(targetUserId, actor.sub);
+    await this.auditLog.record({
+      actorUserId: actor.sub,
+      actorRole: actor.userType,
+      action: 'user.pin_reset',
+      entityType: 'user',
+      entityId: targetUserId,
+      newValues: { pin_cleared: true, sessions_revoked: true },
+      meta: audit,
+    });
+    return result;
+  }
 }

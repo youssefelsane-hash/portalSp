@@ -47,7 +47,9 @@ export class RefreshToken {
   // إزاي المستخدم أثبت هويته وقت إصدار الجلسة دي (ADR-0011) — بينتقل لكل access token جديد وقت
   // refresh() بدل ما يضيع.
   @Column({ type: 'jsonb', default: () => `'["otp"]'` })
-  amr: ('otp' | 'webauthn')[];
+  // `'pin'` اتضاف مع ADR-0109. العمود `jsonb` فمفيش migration مطلوبة — الصفوف القديمة
+  // بقيمها زي ما هي، وأي كود بيقرا `amr` بيشوف طريقة الدخول الحقيقية للجلسة.
+  amr: ('otp' | 'pin' | 'webauthn')[];
 
   @Column({ name: 'is_revoked', type: 'boolean', default: false })
   isRevoked: boolean;

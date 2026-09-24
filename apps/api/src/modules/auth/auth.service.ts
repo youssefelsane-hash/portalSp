@@ -1,4 +1,12 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  lockoutMinutesFor,
+  lockRemainingTextAr,
+  shouldLock,
+  validatePinFormat,
+} from './login-pin.policy';
+import { PinLoginDto } from './dto/pin-login.dto';
+import { PinRegisterDto } from './dto/pin-register.dto';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -39,6 +47,7 @@ import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { readOtpTestMode, usesFixedOtp } from './otp-test-mode';
+import { SettingsService } from '../settings/settings.service';
 
 export interface TokenPair {
   access_token: string;
@@ -85,11 +94,23 @@ export class AuthService {
     private readonly mfaPolicy: MfaPolicyService,
     private readonly webAuthn: WebAuthnService,
     private readonly notificationRouting: NotificationRoutingService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
 
   async requestOtp(dto: RequestOtpDto, requestIp: string | null): Promise<{ expires_in_seconds: number }> {
+    // **بوابة التكلفة** (ADR-0109 §7): لما وسيلة الدخول تبقى `pin`، المسار ده بيتقفل هنا —
+    // قبل توليد أي كود وقبل أي نداء للمزوّد. ده اللي بيخلي تكلفة الـSMS **صفر** فعليًا، مش
+    // مجرد إن الواجهات بطّلت تناديه (أي حد يقدر ينادي مسار عام).
+    const loginMethod = await this.settingsService.getString('auth.login_method', 'pin');
+    if (loginMethod !== 'otp') {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الدخول بقى برمز الدخول مش بكود الرسايل',
+        HttpStatus.GONE,
+      );
+    }
     // **وضع اختبار Google Play** (docs/08 §173، `otp-test-mode.ts`) — النقطة **الوحيدة** في
     // المشروع اللي الوضع ده بيأثر فيها. بيغيّر حاجتين وبس: الكود المولَّد، وإرسال الـSMS.
     // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
@@ -368,32 +389,11 @@ export class AuthService {
 
     // Baseline records are already durable. Existing listeners remain idempotent compatibility hooks;
     // secondary welcome/referral effects are emitted only after the account transaction commits.
-    this.events.emit(
-      USER_REGISTERED_EVENT,
-      new UserRegisteredEvent(user.id, user.userType, user.phoneNumber, user.fullName),
-    );
-    if (referrer) {
-      this.events.emit(REFERRAL_REGISTERED_EVENT, new ReferralRegisteredEvent(referrer.id, user.id));
-    }
-    // ترشيح QR فني (docs/11 §1) — نظام منفصل تمامًا عن referral_code فوق. الفحص/الربط الفعلي
-    // بيحصل جوّه technician-referrals module (حدود الموديولات)، هنا بس بنصدر الحدث.
-    if (dto.technician_referral_code) {
-      this.events.emit(
-        TECHNICIAN_REFERRAL_CAPTURED_EVENT,
-        new TechnicianReferralCapturedEvent(user.id, dto.technician_referral_code),
-      );
-    }
-    // إسناد تسويقي (ADR-0082) — «العميل ده جه من أنهي إعلان». نفس أسلوب السطور اللي فوق
-    // بالحرف: `auth` بيصدّر الحدث بس، والفحص والربط جوّه موديول `marketing`.
-    if (dto.marketing_code) {
-      this.events.emit(
-        MARKETING_SOURCE_CAPTURED_EVENT,
-        new MarketingSourceCapturedEvent(user.id, dto.marketing_code),
-      );
-    }
-    if (dto.promo_link_code) {
-      this.events.emit(PROMO_LINK_CAPTURED_EVENT, new PromoLinkCapturedEvent(user.id, dto.promo_link_code));
-    }
+    //
+    // **مصدر واحد للمسارين** (ADR-0109): الأحداث الخمسة اتطلّعت لـ`emitRegistrationEffects()`
+    // عشان مستحيل يتضاف حدث لمسار ويتنسى في التاني — ده كان هيخلي قناة إسناد (إعلانات/ترشيح/
+    // ترحيب) تموت بصمت لنص المستخدمين حسب طريقة تسجيلهم.
+    this.emitRegistrationEffects(user, referrer, dto);
 
     return tokens;
   }
@@ -542,7 +542,7 @@ export class AuthService {
   private async issueTokenPair(
     user: User,
     ip: string | null,
-    amr: ('otp' | 'webauthn')[],
+    amr: ('otp' | 'pin' | 'webauthn')[],
     device?: DeviceMetadataDto,
     manager?: EntityManager,
   ): Promise<TokenPair> {
@@ -666,6 +666,256 @@ export class AuthService {
   }
 
   /** بيتنضف دورياً (BullMQ cron) — مش جزء من مسار الطلب الحي. */
+  // ── رمز الدخول (PIN) — ADR-0109 ──────────────────────────────────────
+  //
+  // بديل الـOTP. الأنماط هنا **مطابقة** لمسار الـOTP عمدًا (bcrypt، قفل متشائم، عدّاد محاولات،
+  // رسايل ماتسرّبش وجود الحساب) — مش نمط جديد، نفس النمط على credential تاني.
+
+  /**
+   * **الرد الموحّد للفشل** — نفس النص بالظبط لـ«الرقم مش مسجّل» و«الرمز غلط».
+   *
+   * ده مش إهمال في الرسالة: لو فرّقنا، أي حد يقدر يجرّب أرقام بالجملة ويعرف مين مسجّل عندنا
+   * ومين لأ (user enumeration) — قايمة عملاء جاهزة لأي منافس أو محتال. مسار الـOTP نفسه بيعمل
+   * نفس الحاجة بالحرف.
+   */
+  private invalidPinCredentials(): ApiException {
+    return new ApiException(
+      ErrorCode.AUTH_003,
+      'رقم الموبايل أو رمز الدخول غلط',
+      HttpStatus.UNAUTHORIZED,
+    );
+  }
+
+  /** بيرمي بالرسالة الصح لو الشكل مرفوض — مصدر القاعدة `login-pin.policy.ts`. */
+  private assertPinFormat(pin: string): void {
+    const failure = validatePinFormat(pin);
+    if (failure) throw new ApiException(ErrorCode.VAL_001, failure.messageAr, failure.status);
+  }
+
+  /**
+   * تسجيل حساب جديد برمز دخول.
+   *
+   * **مطابق لـ`register()` بالحرف** ما عدا مصدر التوثيق (رمز بدل OTP) و`phoneVerifiedAt`.
+   * كل حاجة تانية — البروفايل، المحفظة، كود الترشيح، والخمس أحداث — بتمر من نفس الدوال
+   * بالظبط، عشان أي مستهلك (إعلانات، ترشيح، ترحيب) ماياخدش باله إن فيه مسار تاني أصلاً.
+   */
+  async registerWithPin(dto: PinRegisterDto, ip: string | null): Promise<TokenPair> {
+    this.assertPinFormat(dto.pin);
+    const pinHash = await bcrypt.hash(dto.pin, 10);
+
+    const registration = await this.dataSource.transaction(async (manager) => {
+      const users = manager.getRepository(User);
+      const existing = await users.findOne({ where: { phoneNumber: dto.phone_number } });
+      if (existing) {
+        throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مسجل قبل كده، سجّل دخول بدل كده', HttpStatus.CONFLICT);
+      }
+
+      let referrer: User | null = null;
+      if (dto.referral_code) {
+        referrer = await users.findOne({ where: { referralCode: dto.referral_code.toUpperCase() } });
+        if (!referrer) {
+          throw new ApiException(ErrorCode.VAL_001, 'كود الترشيح غير صحيح', HttpStatus.BAD_REQUEST);
+        }
+      }
+      const referralCode = await this.generateUniqueReferralCode(manager);
+      const user = users.create({
+        phoneNumber: dto.phone_number,
+        // **مقصود إنها تفضل null** (ADR-0109 §4): الرمز بيثبت إن صاحب الحساب يعرف السر، مش إن
+        // الرقم ملكه. التوثيق الحقيقي بيحصل لما يحصل تواصل ناجح فعلي على الرقم.
+        phoneVerifiedAt: null,
+        fullName: dto.full_name,
+        userType: dto.user_type,
+        preferredLanguage: 'ar',
+        isActive: true,
+        isBlocked: false,
+        referralCode,
+        referredByUserId: referrer?.id ?? null,
+        pinHash,
+        pinSetAt: new Date(),
+      });
+      await users.save(user);
+      await this.provisionAccountBaseline(user, manager);
+      const tokens = await this.issueTokenPair(user, ip, ['pin'], dto, manager);
+      return { user, referrer, tokens };
+    });
+
+    const { user, referrer, tokens } = registration;
+    this.emitRegistrationEffects(user, referrer, dto);
+    return tokens;
+  }
+
+  /**
+   * الأحداث اللي بتتصدر بعد أي تسجيل ناجح — **مصدر واحد للمسارين** (OTP والرمز).
+   *
+   * كانت مكتوبة جوّه `register()`. اتطلّعت هنا عشان مستحيل يحصل انحراف: أي حدث يتضاف لمسار
+   * ويتنسى في التاني معناه قناة إسناد (إعلانات/ترشيح/ترحيب) بتموت بصمت لنص المستخدمين.
+   */
+  private emitRegistrationEffects(
+    user: User,
+    referrer: User | null,
+    dto: { technician_referral_code?: string; marketing_code?: string; promo_link_code?: string },
+  ): void {
+    this.events.emit(
+      USER_REGISTERED_EVENT,
+      new UserRegisteredEvent(user.id, user.userType, user.phoneNumber, user.fullName),
+    );
+    if (referrer) {
+      this.events.emit(REFERRAL_REGISTERED_EVENT, new ReferralRegisteredEvent(referrer.id, user.id));
+    }
+    if (dto.technician_referral_code) {
+      this.events.emit(
+        TECHNICIAN_REFERRAL_CAPTURED_EVENT,
+        new TechnicianReferralCapturedEvent(user.id, dto.technician_referral_code),
+      );
+    }
+    if (dto.marketing_code) {
+      this.events.emit(
+        MARKETING_SOURCE_CAPTURED_EVENT,
+        new MarketingSourceCapturedEvent(user.id, dto.marketing_code),
+      );
+    }
+    if (dto.promo_link_code) {
+      this.events.emit(PROMO_LINK_CAPTURED_EVENT, new PromoLinkCapturedEvent(user.id, dto.promo_link_code));
+    }
+  }
+
+  /**
+   * دخول برقم + رمز.
+   *
+   * بيرجّع **نفس شكل `login()` بالحرف** — بما فيه فرع `mfa_required`، فالأدمن بيكمّل على
+   * Passkey زي ما هو (ADR-0011) ومفيش سطر واحد في مسار الـMFA محتاج يتغيّر.
+   *
+   * كل القراءة والكتابة تحت `pessimistic_write` على صف المستخدم: من غير القفل، خمس محاولات
+   * متوازية بنفس الرمز الغلط كانت تقرا `pinFailedAttempts` القديمة كلها وتكتب `+1` واحدة —
+   * فالعدّاد يقف والقفل ما يجيش أبدًا. نفس السبب اللي `consumeOtpLocked()` اتكتبت عشانه.
+   */
+  async loginWithPin(dto: PinLoginDto, ip: string | null): Promise<LoginResult> {
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const user = await manager
+        .createQueryBuilder(User, 'u')
+        .addSelect('u.pinHash')
+        .setLock('pessimistic_write')
+        .where('u.phoneNumber = :phone', { phone: dto.phone_number })
+        .andWhere('u.deletedAt IS NULL')
+        .getOne();
+
+      // رقم مش مسجّل، أو حساب قديم لسه مالوش رمز: **نفس الرد** بتاع الرمز الغلط. الفرق بينهم
+      // معلومة عن وجود الحساب — شوف `invalidPinCredentials()`.
+      if (!user || !user.pinHash) return { error: this.invalidPinCredentials() };
+
+      if (user.pinLockedUntil && user.pinLockedUntil.getTime() > Date.now()) {
+        return {
+          error: new ApiException(
+            ErrorCode.AUTH_004,
+            `حاولت كتير — جرّب تاني بعد ${lockRemainingTextAr(user.pinLockedUntil)}`,
+            HttpStatus.TOO_MANY_REQUESTS,
+          ),
+        };
+      }
+
+      const matches = await bcrypt.compare(dto.pin, user.pinHash);
+      if (!matches) {
+        user.pinFailedAttempts += 1;
+        if (shouldLock(user.pinFailedAttempts)) {
+          user.pinLockedUntil = new Date(Date.now() + lockoutMinutesFor(user.pinFailedAttempts) * 60_000);
+        }
+        await manager.save(user);
+        return { error: this.invalidPinCredentials() };
+      }
+
+      // الحساب المقفول/الموقوف بيترفض **بعد** ما الرمز يتأكد — عشان الرسالة الواضحة («الحساب
+      // موقوف») ماتتقالش لحد بيخمّن أرقام.
+      this.assertUserAvailable(user);
+
+      user.pinFailedAttempts = 0;
+      user.pinLockedUntil = null;
+      user.lastLoginAt = new Date();
+      user.lastLoginIp = ip;
+      await manager.save(user);
+      return { user };
+    });
+
+    if ('error' in outcome) throw outcome.error;
+    const { user } = outcome;
+
+    if (await this.mfaPolicy.userRequiresMfa(user.id)) {
+      const hasCredential = await this.webAuthn.hasAnyCredential(user.id);
+      return {
+        mfa_required: true,
+        ceremony: hasCredential ? 'authentication' : 'registration',
+        mfa_session_token: await this.issueMfaPendingToken(user.id),
+      };
+    }
+
+    return this.issueTokenPair(user, ip, ['pin'], dto);
+  }
+
+  /**
+   * تعيين أو تغيير الرمز لمستخدم **متوثّق** — مسار هجرة المستخدمين الحاليين (ADR-0109 §6-أ).
+   *
+   * أول تعيين مابيطلبش رمز حالي (مفيش واحد أصلاً)، والتغيير بيطلبه. الفرق بيتحدد من حالة
+   * الحساب مش من اللي العميل باعته — وإلا أي حد معاه توكن مسروق كان يقدر يغيّر الرمز ويقفل
+   * صاحب الحساب برّه.
+   */
+  async setPin(userId: string, dto: { pin: string; current_pin?: string }): Promise<{ pin_set: boolean }> {
+    this.assertPinFormat(dto.pin);
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager
+        .createQueryBuilder(User, 'u')
+        .addSelect('u.pinHash')
+        .setLock('pessimistic_write')
+        .where('u.id = :id', { id: userId })
+        .getOne();
+      if (!user) throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير موجود', HttpStatus.NOT_FOUND);
+      this.assertUserAvailable(user);
+
+      if (user.pinHash) {
+        if (!dto.current_pin) {
+          throw new ApiException(ErrorCode.VAL_001, 'اكتب رمز الدخول الحالي عشان تغيّره', HttpStatus.BAD_REQUEST);
+        }
+        if (!(await bcrypt.compare(dto.current_pin, user.pinHash))) {
+          throw new ApiException(ErrorCode.AUTH_003, 'رمز الدخول الحالي غلط', HttpStatus.UNAUTHORIZED);
+        }
+      }
+
+      user.pinHash = await bcrypt.hash(dto.pin, 10);
+      user.pinSetAt = new Date();
+      user.pinFailedAttempts = 0;
+      user.pinLockedUntil = null;
+      await manager.save(user);
+      return { pin_set: true };
+    });
+  }
+
+  /**
+   * استرجاع إداري — بيمسح الرمز فيرجع الحساب لحالة «مالوش رمز» (ADR-0109 §6-ب).
+   *
+   * **مابيحطّش رمز جديد عمدًا**: لو الأدمن اختار الرمز، يبقى فيه بني آدم تاني يعرف سر الدخول،
+   * ولازم يتقال للعميل في مكالمة (تسريب). بدل كده الحساب بيرجع «بلا رمز»، والعميل بيحط رمزه
+   * بنفسه من شاشة الدخول — واللي بيحميه ساعتها إن الأدمن **بيلغي كل الجلسات القايمة** هنا،
+   * فحتى لو حد تاني وصل للحساب، اتقفل برّه.
+   */
+  async adminResetPin(userId: string, adminUserId: string): Promise<{ pin_cleared: boolean }> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
+
+    await this.users.update(
+      { id: userId },
+      { pinHash: null, pinSetAt: null, pinFailedAttempts: 0, pinLockedUntil: null },
+    );
+    await this.revokeAllUserTokens(userId, `استرجاع رمز الدخول بواسطة الأدمن ${adminUserId}`);
+    return { pin_cleared: true };
+  }
+
+  /** هل الحساب ليه رمز دخول؟ الواجهة بتستخدمها عشان تعرف تطلب تعيينه. */
+  async hasPin(userId: string): Promise<boolean> {
+    const [row] = await this.users.query<{ has: boolean }[]>(
+      'SELECT (pin_hash IS NOT NULL) AS has FROM users WHERE id = $1',
+      [userId],
+    );
+    return row?.has ?? false;
+  }
+
   async purgeExpiredOtps(): Promise<number> {
     const result = await this.otpCodes.delete({ expiresAt: LessThan(new Date()) });
     return result.affected ?? 0;
@@ -756,6 +1006,13 @@ export class AuthService {
                 avatar_url = NULL,
                 avatar_storage_key = NULL,
                 password_hash = NULL,
+                -- **رمز الدخول لازم يتمسح مع الحساب** (ADR-0109): من غير السطر ده، صف معمّى
+                -- بيفضل شايل hash لسر حقيقي كان العميل بيستخدمه — بيانات اعتماد بتعيش بعد
+                -- طلب حذف صريح. وكمان قيد chk_users_pin_state بيمنع حالة «مقفول بلا رمز».
+                pin_hash = NULL,
+                pin_set_at = NULL,
+                pin_failed_attempts = 0,
+                pin_locked_until = NULL,
                 last_login_ip = NULL,
                 referral_code = NULL,
                 metadata = '{}'::jsonb,

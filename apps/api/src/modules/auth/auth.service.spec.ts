@@ -16,6 +16,7 @@ import { WebAuthnService } from './webauthn.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { SettingsService } from '../settings/settings.service';
 
 // ريبوزيتوري وهمي في الذاكرة بديل TypeORM — كفاية عشان نختبر منطق auth.service لوحده
 class FakeRepository<T extends { id?: string }> {
@@ -200,7 +201,10 @@ describe('AuthService', () => {
         // userRequiresMfa بترجع false دايمًا وlogin() بيكمل مسار OTP العادي القديم زي ما هو.
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
-        { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
+        // ADR-0109 — `auth.login_method`. السبيكات دي بتختبر مسار الـOTP، فالـstub بيرجّع 'otp'
+      // عشان سلوكها يفضل زي ما هو بالحرف بعد ما البوابة اتحطت على `requestOtp`.
+      { provide: SettingsService, useValue: { getString: async () => 'otp' } },
+      { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
 
@@ -317,6 +321,7 @@ describe('AuthService', () => {
         },
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: SettingsService, useValue: { getString: async () => 'otp' } },
         { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
@@ -370,6 +375,7 @@ describe('AuthService', () => {
         },
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: SettingsService, useValue: { getString: async () => 'otp' } },
         { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();

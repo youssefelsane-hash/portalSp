@@ -9,6 +9,9 @@ import { RegisterDto } from './dto/register.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { PinLoginDto } from './dto/pin-login.dto';
+import { PinRegisterDto } from './dto/pin-register.dto';
+import { SetPinDto } from './dto/set-pin.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { toUserResponseDto } from './dto/user-response.dto';
 import { JwtPayload } from './types/authenticated-request';
@@ -53,6 +56,38 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   recoveryVerify(@Body() dto: RecoveryVerifyDto, @Req() req: Request) {
     return this.authService.recoveryLogin(dto, clientIp(req));
+  }
+
+  // ── الدخول برمز (ADR-0109) ───────────────────────────────────────────
+  // نفس حدود الـthrottle بتاعت مساري الـOTP بالحرف — الحماية مش أضعف لمجرد إن الـcredential
+  // اتغيّر. وفوقها القفل المتدرّج على مستوى الحساب نفسه (`login-pin.policy.ts`).
+
+  @Public()
+  @Post('pin/register')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  registerWithPin(@Body() dto: PinRegisterDto, @Req() req: Request) {
+    return this.authService.registerWithPin(dto, clientIp(req));
+  }
+
+  @Public()
+  @Post('pin/login')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  loginWithPin(@Body() dto: PinLoginDto, @Req() req: Request) {
+    return this.authService.loginWithPin(dto, clientIp(req));
+  }
+
+  /**
+   * تعيين/تغيير الرمز — **مسار متوثّق** (مفيش `@Public()`).
+   *
+   * ده مسار هجرة المستخدمين الحاليين (ADR-0109 §6-أ): اللي لسه داخل بيحط رمزه من جوّه التطبيق.
+   * كونه متوثّق هو اللي بيمنع الاستيلاء — مستحيل حد ياخد حساب حد بمجرد إنه يعرف رقمه.
+   */
+  @Post('pin')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  setPin(@CurrentUser() user: JwtPayload, @Body() dto: SetPinDto) {
+    return this.authService.setPin(user.sub, dto);
   }
 
   @Public()

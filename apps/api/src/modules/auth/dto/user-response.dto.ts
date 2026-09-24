@@ -6,6 +6,15 @@ export interface UserResponseDto {
   id: string;
   phone_number: string;
   phone_verified: boolean;
+
+  /**
+   * هل الحساب ليه رمز دخول؟ (ADR-0109)
+   *
+   * الواجهة بتستخدمها عشان تعرف تطلب من المستخدم القديم يحط رمزه — من غيرها كانت هتحتاج نداء
+   * زيادة على كل فتح للتطبيق. **مش سر**: بتقول «فيه رمز» مش الرمز نفسه، وبتترد للمستخدم
+   * صاحب الحساب بس (مسار `/auth/me` متوثّق).
+   */
+  pin_set: boolean;
   email: string | null;
   full_name: string;
   avatar_url: string | null;
@@ -19,6 +28,7 @@ export function toUserResponseDto(user: User): UserResponseDto {
     id: user.id,
     phone_number: user.phoneNumber,
     phone_verified: user.phoneVerifiedAt !== null,
+    pin_set: user.pinSetAt !== null,
     email: user.email,
     full_name: user.fullName,
     avatar_url: user.avatarUrl,

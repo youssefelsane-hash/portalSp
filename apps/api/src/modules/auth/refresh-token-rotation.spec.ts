@@ -58,6 +58,9 @@ describe('AuthService.refresh() — تدوير refresh token ذرّي تحت ت�
       {} as never,
       {} as never,
       {} as never,
+      // ADR-0109 — `auth.login_method`. الـspecs دي مكتوبة على مسار الـOTP، فالـstub
+      // بيرجّع 'otp' عشان سلوكها يفضل زي ما هو بالحرف.
+      { getString: async () => 'otp' } as never,
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

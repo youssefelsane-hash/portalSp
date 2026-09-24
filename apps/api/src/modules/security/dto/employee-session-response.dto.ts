@@ -12,7 +12,8 @@ export interface EmployeeSessionResponseDto {
   ipAddress: string | null;
   lastSeenAt: string | null;
   lastActivityAt: string | null;
-  amr: ('otp' | 'webauthn')[];
+  // `'pin'` مع ADR-0109 — شاشة جلسات الموظف بتعرض طريقة الدخول الحقيقية زي ما هي.
+  amr: ('otp' | 'pin' | 'webauthn')[];
   isRevoked: boolean;
   revokedAt: string | null;
   revokedReason: string | null;

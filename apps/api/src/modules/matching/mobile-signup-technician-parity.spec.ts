@@ -269,6 +269,8 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       { userRequiresMfa: jest.fn().mockResolvedValue(false) } as never,
       { hasAnyCredential: jest.fn().mockResolvedValue(false) } as never,
       { routeToRole: jest.fn() } as never,
+      // ADR-0109 — `auth.login_method`؛ السبيك ده على مسار الـOTP فبيفضل زي ما هو.
+      { getString: async () => 'otp' } as never,
     );
     techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),

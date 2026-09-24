@@ -35,6 +35,28 @@ export class User {
   @Column({ name: 'password_hash', type: 'varchar', length: 255, nullable: true, select: false })
   passwordHash: string | null;
 
+  /**
+   * **رمز الدخول (ADR-0109)** — bcrypt، عمره ما يتخزّن خام.
+   *
+   * `select: false` زي `passwordHash` بالظبط: أي `find()` عادي مابيجيبوش، فمستحيل يتسرّب في
+   * رد API بالغلط. المسارات اللي محتاجاه بتطلبه صراحةً (`addSelect`).
+   *
+   * `null` = الحساب لسه مالوش PIN — مستخدم قديم من قبل التبديل، بيتطلب منه يحطه وهو متوثّق.
+   */
+  @Column({ name: 'pin_hash', type: 'varchar', length: 255, nullable: true, select: false })
+  pinHash: string | null;
+
+  @Column({ name: 'pin_set_at', type: 'timestamptz', nullable: true })
+  pinSetAt: Date | null;
+
+  /** محاولات غلط متراكمة — بتترجع صفر مع أول دخول ناجح. */
+  @Column({ name: 'pin_failed_attempts', type: 'smallint', default: 0 })
+  pinFailedAttempts: number;
+
+  /** قفل مؤقت متدرّج. `null` = مش مقفول. مفيش قفل دائم (شوف `lockoutMinutesFor`). */
+  @Column({ name: 'pin_locked_until', type: 'timestamptz', nullable: true })
+  pinLockedUntil: Date | null;
+
   @Column({ name: 'full_name', type: 'varchar', length: 120 })
   fullName: string;
 
