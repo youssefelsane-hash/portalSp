@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  PIN_BCRYPT_ROUNDS,
   isWeakPin,
   lockoutMinutesFor,
   lockRemainingTextAr,
@@ -90,6 +93,25 @@ describe('سياسة رمز الدخول (ADR-0109)', () => {
     });
     it('قفل خلص بيتقال «دلوقتي» مش رقم سالب', () => {
       expect(lockRemainingTextAr(new Date('2026-09-24T09:00:00Z'), now)).toBe('دلوقتي');
+    });
+  });
+
+  describe('تكلفة bcrypt', () => {
+    it('١٢ على الأقل — الـPIN دائم و٦ أرقام، فمساحته كلها قابلة للمسح لو القاعدة اتسربت', () => {
+      expect(PIN_BCRYPT_ROUNDS).toBeGreaterThanOrEqual(12);
+    });
+
+    /**
+     * السكربتات JS مش بتقدر تستورد TypeScript، فتكلفة الـbcrypt مكتوبة تاني في
+     * `scripts/lib/pin-constants.js`. الاختبار ده هو اللي بيمنع القيمتين يفترقوا: من غيره حد
+     * يرفع التكلفة هنا ويفضل `seed-dev-accounts.js` بيولّد هاشات أضعف **بصمت**.
+     */
+    it('مطابقة للقيمة المكتوبة في scripts/lib/pin-constants.js', () => {
+      const file = join(__dirname, '../../../../../scripts/lib/pin-constants.js');
+      const source = readFileSync(file, 'utf8');
+      const match = /PIN_BCRYPT_ROUNDS:\s*(\d+)/.exec(source);
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBe(PIN_BCRYPT_ROUNDS);
     });
   });
 });

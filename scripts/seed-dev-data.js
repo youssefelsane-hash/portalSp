@@ -38,7 +38,14 @@
  * مستندات حقيقية؛ وصولها لقاعدة إنتاج معناه حسابات مفتوحة بلا تحقق.
  */
 const { Client } = require('pg');
+const bcrypt = require('bcryptjs');
 const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
+const { PIN_BCRYPT_ROUNDS } = require('./lib/pin-constants');
+
+// **رمز الدخول لحسابات التطوير (ADR-0109)** — نفس قيمة `scripts/seed-dev-accounts.js`
+// و`kLiveTestPin` في `test_live/`. مش سر: حسابات وهمية في قاعدة محلية، والسكربت نفسه بيرفض
+// يشتغل على `production`/`staging` (شوف أول `main()`).
+const DEV_SEED_PIN = process.env.DEV_SEED_PIN || '417253';
 
 const DB_URL = resolveApiDatabaseUrl();
 
@@ -61,15 +68,25 @@ const ZONE_BOX = { minLng: 31.10, minLat: 29.95, maxLng: 31.40, maxLat: 30.15 };
  * فحص-ثم-إدخال هنا أوضح، ومفيش سباق يخاف منه في سكريبت تطوير بيتشغّل يدويًا.
  */
 async function upsertUser(q, { phone, name, type }) {
+  // `COALESCE` مقصود: مايلغيش رمز حد غيّره بإيده. والقفل/المحاولات بيترجعوا صفر عشان حساب
+  // تطوير مقفول من اختبار تخمين مايسقّطش كل اللي بعده.
+  const pinHash = await bcrypt.hash(DEV_SEED_PIN, PIN_BCRYPT_ROUNDS);
   const [existing] = await q(`SELECT id FROM users WHERE phone_number = $1 AND deleted_at IS NULL`, [phone]);
   if (existing) {
-    await q(`UPDATE users SET is_active = true, user_type = $2, full_name = $3 WHERE id = $1`, [existing.id, type, name]);
+    await q(
+      `UPDATE users
+          SET is_active = true, user_type = $2, full_name = $3,
+              pin_hash = COALESCE(pin_hash, $4), pin_set_at = COALESCE(pin_set_at, now()),
+              pin_failed_attempts = 0, pin_locked_until = NULL
+        WHERE id = $1`,
+      [existing.id, type, name, pinHash],
+    );
     return existing.id;
   }
   const [created] = await q(
-    `INSERT INTO users (phone_number, full_name, user_type, is_active, phone_verified_at)
-     VALUES ($1, $2, $3, true, now()) RETURNING id`,
-    [phone, name, type],
+    `INSERT INTO users (phone_number, full_name, user_type, is_active, phone_verified_at, pin_hash, pin_set_at)
+     VALUES ($1, $2, $3, true, now(), $4, now()) RETURNING id`,
+    [phone, name, type, pinHash],
   );
   return created.id;
 }
@@ -188,8 +205,8 @@ async function main() {
   console.log('\n\x1b[32m✅ بيانات التطوير جاهزة\x1b[0m\n');
   for (const [label, value] of done) console.log(`   ${pad(label, 22)} ${value}`);
   console.log(`
-   \x1b[2mالدخول بالـOTP: اطلب الكود من التطبيق/اللوحة، وهتلاقيه مطبوع في لوج الـAPI:
-     tail -f .dev-logs/api.log | grep OTP\x1b[0m
+   \x1b[2mالدخول (ADR-0109): رقم الموبايل + رمز الدخول ${DEV_SEED_PIN} — مفيش كود SMS خلاص.
+     غيّره بـ DEV_SEED_PIN=xxxxxx node scripts/seed-dev-data.js\x1b[0m
 `);
 }
 

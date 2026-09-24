@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  PIN_BCRYPT_ROUNDS,
   lockoutMinutesFor,
   lockRemainingTextAr,
   shouldLock,
@@ -701,7 +702,7 @@ export class AuthService {
    */
   async registerWithPin(dto: PinRegisterDto, ip: string | null): Promise<TokenPair> {
     this.assertPinFormat(dto.pin);
-    const pinHash = await bcrypt.hash(dto.pin, 10);
+    const pinHash = await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS);
 
     const registration = await this.dataSource.transaction(async (manager) => {
       const users = manager.getRepository(User);
@@ -878,7 +879,7 @@ export class AuthService {
         }
       }
 
-      user.pinHash = await bcrypt.hash(dto.pin, 10);
+      user.pinHash = await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS);
       user.pinSetAt = new Date();
       user.pinFailedAttempts = 0;
       user.pinLockedUntil = null;

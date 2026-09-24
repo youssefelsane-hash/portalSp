@@ -4,39 +4,20 @@
 // بنفسه** (خدمة formula + 4 حقول + 3 قواعد تسعير عبر /admin) بدل ما يعتمد على id ثابت من سيشن
 // تانية — أكتر استقرارًا عبر السيشنز المختلفة اللي بتشتغل بالتبادل على المشروع ده.
 // شغّله بـ: flutter test test_live/pricing_engine_order_creation_live_test.dart --dart-define=API_BASE_URL=http://localhost:3000/api/v1
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/core/api_client.dart';
 import '_live_support.dart';
 
-Future<String> _latestOtpFor(String phoneNumber, File log) async {
-  final lines = await log.readAsLines();
-  final match = lines.lastWhere((line) => line.contains('OTP') && line.contains(phoneNumber));
-  return match.split('→').last.trim();
-}
-
-Future<String> _loginAs(String phoneNumber, File log) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final otp = await _latestOtpFor(phoneNumber, log);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': otp,
-  });
-  return tokens!['access_token'] as String;
-}
-
 void main() {
   test('عميل حقيقي يحجز خدمة formula-priced، السعر الفعلي للطلب يطابق evaluate-price بالظبط', () async {
-    // مسار اللوج بيتحدد وقت التشغيل؛ `--dart-define=API_LOG_PATH=...` بيتجاوزه صراحةً.
-    final serverLog = resolveApiLogFile() ??
-        (throw StateError('مالقيتش لوج الباك-إند — شغّل الـAPI ومخرجاته في apps/api/.dev-logs/api.out'));
-
-    // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الـOTP بيرجّع `mfa_required` من غير
+    // MFA بقى إجباري لحسابات الأدمن (ADR-0011)، فمسار الدخول بيرجّع `mfa_required` من غير
     // توكن. التوقيع المحلي هو نفس الطريقة المعتمدة في اختبارات الأدمن الحية — تفاصيل في
     // `_live_support.dart`.
     final adminToken = await devAdminToken('+201000000098');
-    final customerToken = await _loginAs('+201000000101', serverLog);
+    // **ADR-0109**: كان بيدخل برقم عميل ثابت مُجهّز من سيشن تانية — رقم زي ده ممكن مايكونش
+    // موجود في قاعدة نضيفة، ودلوقتي كمان ممكن يكون موجود ومالوش رمز دخول. عميل جديد بالكامل
+    // متسق مع فلسفة الملف ده نفسه (بيبني fixture الخدمة بإيده بدل id ثابت).
+    final customerToken = await registerCustomer(uniquePhone(), fullName: 'عميل اختبار محرك التسعير');
 
     // إنشاء خدمة formula حقيقية جديدة بمثال المحارة من docs/08 §1.8 بالحرف — مساحة×سعر_المتر
     // + 15% لو السمك 3سم + 500 قرش لو الدور>5.

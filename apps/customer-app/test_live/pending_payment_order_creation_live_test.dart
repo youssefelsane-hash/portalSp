@@ -9,33 +9,10 @@ import 'package:customer_app/core/api_client.dart';
 import 'package:customer_app/core/api_exception.dart';
 import '_live_support.dart';
 
-// مسار اللوج بيتحدد وقت التشغيل (`_live_support.dart`) — كان مكتوب بالإيد لسيشن قديمة فمات معاها.
-Future<String> _latestOtpFor(String phoneNumber) => latestOtpFor(phoneNumber);
-
-// رقم فريد كل تشغيلة (بدل رقم عميل تجريبي ثابت مُجهّز مسبقًا من سيشن تانية — القاعدة هنا فريش)
-// عشان نضمن عميل حقيقي جديد بلا اعتماد على بيانات موجودة مسبقًا.
-Future<String> _registerAndLogin() async {
-  final suffix = (DateTime.now().millisecondsSinceEpoch % 100000000).toString().padLeft(8, '0');
-  final phoneNumber = '+2010$suffix';
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'register'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final registerOtp = await _latestOtpFor(phoneNumber);
-  await apiRequest('POST', '/auth/register', body: {
-    'phone_number': phoneNumber,
-    'otp_code': registerOtp,
-    'full_name': 'عميل اختبار حي دفع مسبق',
-    'user_type': 'customer',
-  });
-
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 500));
-  final loginOtp = await _latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
-    'phone_number': phoneNumber,
-    'otp_code': loginOtp,
-  });
-  return tokens!['access_token'] as String;
-}
+// **ADR-0109** — التسجيل بقى نداء واحد بلا لوج وبلا انتظار. النسخة القديمة كانت بتنسخ
+// الهارنس بالإيد، وجابت معاها بَقّة الأرقام المتصادمة اللي `uniquePhone()` اتعملت عشانها
+// (`millisecondsSinceEpoch % 100000000` بتتغيّر مرة كل ١٠٠ مللي، والملفات بتشتغل بالتوازي).
+Future<String> _registerAndLogin() => registerCustomer(uniquePhone(), fullName: 'عميل اختبار حي دفع مسبق');
 
 void main() {
   test('عميل حقيقي يختار دفع قبل التوزيع (كارت وInstaPay) وقت إنشاء الطلب', () async {

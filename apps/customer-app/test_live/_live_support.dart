@@ -87,14 +87,22 @@ String uniquePhone([int seq = 0]) {
 
 final Random _phoneRandom = Random.secure();
 
-/// تسجيل عميل جديد بالكامل عبر مسار OTP الحقيقي؛ بيرجّع `access_token`.
+/// **رمز الدخول الموحّد لكل الاختبارات الحية** (ADR-0109).
+///
+/// مش متسلسل ومش كله نفس الرقم عشان يعدّي `isWeakPin` في الباك-إند. ثابت واحد مشترك: كل حساب
+/// اختبار بيتعمل برقم فريد (`uniquePhone()`) فالرمز المشترك مالوش أي أثر أمني، وفي المقابل
+/// بيخلّي `loginCustomer(phone)` تفضل بنفس التوقيع بالظبط اللي كل الملفات بتنادي بيه.
+const String kLiveTestPin = '417253';
+
+/// تسجيل عميل جديد بالكامل عبر مسار رمز الدخول الحقيقي؛ بيرجّع `access_token`.
+///
+/// **قبل ADR-0109** كان: طلب OTP → استنى ٦٠٠ مللي → اقرا آخر ٢ ميجا من لوج الباك-إند → استخرج
+/// الكود → تحقق. أربع نقاط فشل مالهاش أي علاقة بالحاجة المُختبَرة (اللوج مش موجود، مش بيتكتب
+/// فيه، الـ٦٠٠ مللي مش كفاية، حصة الـthrottle خلصت). دلوقتي نداء واحد بلا لوج وبلا انتظار.
 Future<String> registerCustomer(String phoneNumber, {String fullName = 'عميل اختبار حي'}) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'register'});
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  final otp = await latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/register', body: {
+  final tokens = await apiRequest('POST', '/auth/pin/register', body: {
     'phone_number': phoneNumber,
-    'otp_code': otp,
+    'pin': kLiveTestPin,
     'full_name': fullName,
     'user_type': 'customer',
   });
@@ -102,13 +110,10 @@ Future<String> registerCustomer(String phoneNumber, {String fullName = 'عميل
 }
 
 /// تسجيل دخول لحساب موجود بالفعل.
-Future<String> loginCustomer(String phoneNumber) async {
-  await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
-  await Future<void>.delayed(const Duration(milliseconds: 600));
-  final otp = await latestOtpFor(phoneNumber);
-  final tokens = await apiRequest('POST', '/auth/otp/verify', body: {
+Future<String> loginCustomer(String phoneNumber, {String pin = kLiveTestPin}) async {
+  final tokens = await apiRequest('POST', '/auth/pin/login', body: {
     'phone_number': phoneNumber,
-    'otp_code': otp,
+    'pin': pin,
   });
   return tokens!['access_token'] as String;
 }
@@ -124,10 +129,10 @@ Future<String> loginCustomer(String phoneNumber) async {
 /// خالص من غير الوصول للسر المحلي (يعني مالوش أي معنى خارج جهاز التطوير).
 Future<String> devAdminToken(String phoneNumber) => _devTokenFor(phoneNumber, 'admin');
 
-/// نفس الفكرة لحساب فني — بس السبب هنا **مش** MFA: الفنيين مش high-privilege فالـOTP بيشتغل
-/// معاهم عادي. السبب إن تمن ملفات اختبار بتسجّل دخول بنفس رقم الفني، والـthrottle بيتعقّب
-/// بالرقم (٥ طلبات OTP/دقيقة) ⇒ «حاولت كتير في وقت قصير». الملفات اللي **مسار الـOTP نفسه**
-/// هو المُختبَر فيها (زي `technician_orders_live_test.dart`) بتفضل على الـOTP الحقيقي عمدًا.
+/// نفس الفكرة لحساب فني — بس السبب هنا **مش** MFA: الفنيين مش high-privilege فمسار الدخول
+/// العادي بيشتغل معاهم. السبب إن تمن ملفات اختبار بتسجّل دخول بنفس رقم الفني، والـthrottle
+/// بيتعقّب بالرقم ⇒ «حاولت كتير في وقت قصير». الملفات اللي **مسار الدخول نفسه** هو المُختبَر
+/// فيها بتفضل على المسار الحقيقي عمدًا.
 Future<String> devTechnicianToken(String phoneNumber) => _devTokenFor(phoneNumber, 'technician');
 
 Future<String> _devTokenFor(String phoneNumber, String userType) async {
