@@ -40,6 +40,7 @@ import {
   PieChart,
   Gauge,
   Filter,
+  TrendingUp,
   Wallet,
   UsersRound,
   QrCode,
@@ -166,7 +167,15 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/analytics/funnel', label: 'رحلة الحجز', icon: Filter, permission: 'analytics.view' },
       { href: '/analytics/money', label: 'لوحة المال', icon: Wallet, permission: 'analytics.financial.view' },
       { href: '/analytics/workforce', label: 'القوى العاملة', icon: UsersRound, permission: 'analytics.view' },
+      // CAC لكل قناة + إدخال مصروف الإعلانات. الصلاحية `marketing.manage` مش
+      // `analytics.financial.view` لأنها **الأوسع** للصفحة دي: 0294/0310 بيشتقّوا
+      // financial.view → marketing_spend.manage → marketing.manage، فأي حد بيشوف المال
+      // بياخدها، ومدير التسويق بياخدها من غير ما يشوف المال. الأجزاء المالية جوّه الصفحة
+      // بتتخفي لوحدها.
+      { href: '/analytics/marketing', label: 'أداء القنوات (CAC)', icon: TrendingUp, permission: 'marketing.manage' },
       { href: '/reports', label: 'التقارير', icon: PieChart, permission: 'reports.view' },
+      // ADR-0114 — حالة النظام وأخطاء الواجهة. `operations.view` مطابقة للـendpoint بالظبط.
+      { href: '/ops', label: 'حالة النظام', icon: Activity, permission: 'operations.view' },
     ],
   },
   {

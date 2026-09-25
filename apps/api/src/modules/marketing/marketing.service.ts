@@ -443,6 +443,31 @@ export class MarketingService {
       byChannel.set(row.channel, current);
     }
 
+    /**
+     * **قناة فيها صرف وملهاش أي مصدر مسجّل لازم تبان** — دي مش حالة حدّية، دي الحالة الأسوأ
+     * اللي القرار كله بيتوقف عليها: «بندفع في القناة دي ومش جايبة ولا طلب». الحلقة فوق بتبني
+     * من `perSource` بس، فالصف ده كان **بيتساقط بالكامل**: الأدمن يدخل مصروف فيسجَّل فعلاً في
+     * `marketing_spend`، والجدول يفضل فاضي فيستنتج إن الإدخال مابيعملش حاجة (اتلقطت حيًا في
+     * تحقق 2026-09-25 — POST رجّع 201 والقنوات رجعت `[]`).
+     */
+    for (const [channel, spend] of spendByChannel) {
+      if (spend > 0 && !byChannel.has(channel)) {
+        byChannel.set(channel, {
+          channel: channel as MarketingChannelRow['channel'],
+          sources: 0,
+          hits: 0,
+          signups: 0,
+          orders: 0,
+          completed_orders: 0,
+          gross_revenue_cents: 0,
+          platform_revenue_cents: 0,
+          spend_cents: 0,
+          cac_cents: null,
+          average_order_cents: null,
+        });
+      }
+    }
+
     for (const [channel, row] of byChannel) {
       row.spend_cents = spendByChannel.get(channel) ?? 0;
       const customers = convertingByChannel.get(channel) ?? 0;
@@ -453,7 +478,10 @@ export class MarketingService {
         row.completed_orders > 0 ? Math.round(row.gross_revenue_cents / row.completed_orders) : null;
     }
 
-    return [...byChannel.values()].sort((a, b) => b.completed_orders - a.completed_orders);
+    // الترتيب الثاني بالصرف: قناة بصفر طلبات وصرف كبير لازم تطلع فوق القنوات الفاضية تمامًا.
+    return [...byChannel.values()].sort(
+      (a, b) => b.completed_orders - a.completed_orders || b.spend_cents - a.spend_cents,
+    );
   }
 }
 

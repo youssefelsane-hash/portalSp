@@ -55,6 +55,9 @@ const VIEW_PERMISSIONS = [
   'orders.view', 'technicians.view', 'catalog.view', 'customers.view', 'payments.view',
   'analytics.view', 'operations.view', 'geo.view', 'employees.view', 'audit.view',
   'complaints.view', 'settings.view', 'reports.view', 'promotions.view', 'roles.view',
+  // ADR-0114 + شاشة CAC: من غيرهم الصفحتين الجديدتين بيترسموا كـ«ماعندكش صلاحية» — يعني
+  // اللقطة بتثبت الحارس وماتقولش حاجة عن الشاشة نفسها.
+  'marketing.manage', 'analytics.financial.view', 'analytics.marketing_spend.manage',
 ];
 
 const VIEWPORTS = [
@@ -168,6 +171,8 @@ async function main() {
       { name: 'analytics-funnel', url: '/analytics/funnel' },
       { name: 'analytics-money', url: '/analytics/money' },
       { name: 'analytics-workforce', url: '/analytics/workforce' },
+      { name: 'analytics-marketing', url: '/analytics/marketing' },
+      { name: 'ops', url: '/ops' },
       { name: 'branding', url: '/branding' },
       { name: 'buildings', url: '/buildings' },
       { name: 'campaigns', url: '/campaigns' },
