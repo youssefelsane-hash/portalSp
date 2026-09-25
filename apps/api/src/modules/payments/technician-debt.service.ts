@@ -11,6 +11,12 @@ import { DebtSettlementMethod, TechnicianDebtSettlement } from './entities/techn
 import { assessTechnicianDebt, DebtAssessment, DEFAULT_DEBT_POLICY } from './technician-debt-status';
 import { WalletsService } from './wallets.service';
 
+/** صف في قايمة المديونية العامة — نفس العرض الفردي زائد هوية الفني. */
+export interface TechnicianDebtListItem extends TechnicianDebtView {
+  fullName: string | null;
+  phoneNumber: string | null;
+}
+
 export interface TechnicianDebtView extends DebtAssessment {
   technicianId: string;
   balanceCents: number;
@@ -211,15 +217,29 @@ export class TechnicianDebtService {
    * استعلام واحد بيجيب الأرصدة السالبة، وبعدين بيتحسب عمر كل دَين. العدد المتوقع صغير (فنيين
    * مديونين، مش كل الفنيين)، فالحساب لكل صف مقبول هنا بعكس قايمة الطلبات.
    */
-  async listTechniciansInDebt(): Promise<TechnicianDebtView[]> {
-    interface Row { technician_id: string }
+  /**
+   * قايمة الفنيين المديونين — **مع الاسم والرقم**.
+   *
+   * الرد كان معرّفات بس. طابور شغل بمعرّفات UUID مالوش أي قيمة عملية: موظف المالية محتاج
+   * يعرف مين ويكلّمه إزاي، فكان لازم يفتح كل فني على حدة عشان يشوف اسمه — وهو نفس اللي
+   * الطابور اتعمل عشان يلغيه.
+   */
+  async listTechniciansInDebt(): Promise<TechnicianDebtListItem[]> {
+    interface Row { technician_id: string; full_name: string | null; phone_number: string | null }
     const rows = await this.dataSource.query<Row[]>(
-      `SELECT tp.id AS technician_id
+      `SELECT tp.id AS technician_id, u.full_name, u.phone_number
          FROM wallets w
          JOIN technician_profiles tp ON tp.user_id = w.owner_user_id
+         JOIN users u ON u.id = tp.user_id
         WHERE w.balance_cents < 0 AND w.deleted_at IS NULL AND tp.deleted_at IS NULL
         ORDER BY w.balance_cents ASC`,
     );
-    return Promise.all(rows.map((r) => this.getDebtView(r.technician_id)));
+    return Promise.all(
+      rows.map(async (r) => ({
+        ...(await this.getDebtView(r.technician_id)),
+        fullName: r.full_name,
+        phoneNumber: r.phone_number,
+      })),
+    );
   }
 }

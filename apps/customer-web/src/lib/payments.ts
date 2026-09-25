@@ -30,6 +30,35 @@ export const payWithCard = (authedFetch: AuthedFetch, orderId: string) =>
     headers: { 'Idempotency-Key': crypto.randomUUID() },
   });
 
+export interface FawryReferenceResponseDto {
+  payment: PaymentResponseDto;
+  reference_number: string;
+  expires_at: string | null;
+}
+
+/**
+ * **الدفع بكود مرجعي في منافذ فوري** (ADR-0013).
+ *
+ * الـendpoint شغّال من زمان والتطبيق بيستخدمه، والويب كان **بيخفي الوسيلة بالكامل** من قايمة
+ * الدفع عن قصد («فوري والتقسيط ليهم مسارات مالهاش واجهة هنا لسه») — وده كان الصح وقتها، لأن
+ * عرض وسيلة بلا صفحة بتوصّل العميل لطريق مسدود. دلوقتي الصفحة موجودة فالوسيلة اتفتحت.
+ *
+ * مفيش تحويل لبوابة خارجية هنا: الرد نفسه هو الكود اللي العميل بياخده للمنفذ.
+ */
+export const payWithFawryReference = (authedFetch: AuthedFetch, orderId: string) =>
+  authedFetch<FawryReferenceResponseDto>(`/orders/${orderId}/pay-with-fawry-reference`, {
+    method: 'POST',
+    // **مفتاح مشتق من الطلب مش `randomUUID()`** — وده الفرق بين صفحة سليمة ودفعتين لنفس الطلب.
+    //
+    // صفحة الكارت بتولّد مفتاح جديد كل ضغطة وده صح هناك: العميل بيروح لبوابة خارجية ومابيرجعش
+    // للصفحة. الصفحة دي عنوان ثابت العميل بيفتحه تاني وتالت (بيقفل الصفحة ويرجع يدوّر على
+    // الكود قبل ما يروح المنفذ). مفتاح جديد كل مرة = دفعة جديدة كل refresh.
+    //
+    // بالمفتاح الثابت الباك-إند بيرجّع `cached_result` — **نفس الكود المرجعي** — من غير أي
+    // إنشاء جديد (`payments.service.ts`: `findOne({ where: { idempotencyKey } })`).
+    headers: { 'Idempotency-Key': `fawry-${orderId}` },
+  });
+
 /**
  * الدفع من رصيد المحفظة (docs/08 §165).
  *

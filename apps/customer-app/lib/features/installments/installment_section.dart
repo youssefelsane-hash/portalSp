@@ -1,3 +1,4 @@
+import '../payments/payment_policy.dart';
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -36,7 +37,7 @@ class InstallmentSection extends StatefulWidget {
 class _InstallmentSectionState extends State<InstallmentSection> {
   InstallmentOptions? _options;
   InstallmentPlan? _selectedPlan;
-  List<InstallmentPolicy> _policies = [];
+  List<PaymentPolicy> _policies = [];
   List<SavedPaymentMethod> _paymentMethods = [];
   String? _selectedPaymentMethodId;
   bool _accepted = false;

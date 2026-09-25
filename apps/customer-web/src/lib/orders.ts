@@ -22,7 +22,9 @@ export interface CreateOrderBody {
   promo_code?: string;
   field_values?: Record<string, PricingFieldValue>;
   /** الدفع قبل التوزيع فقط. `payment_method` القديم ما زال مقبولاً من الـAPI مؤقتًا. */
-  prepayment_method?: 'card' | 'instapay';
+  // `fawry_reference` اتضافت لما الويب بقى عنده صفحة الكود المرجعي — الباك-إند بيقبل التلاتة
+  // من زمان (`create-order.dto.ts`)، والويب كان بيضيّق النوع لأن الوسيلة مكانش ليها واجهة.
+  prepayment_method?: 'card' | 'instapay' | 'fawry_reference';
   /**
    * العميل اختار يدفع الطلب **كامل** بدل العربون (طلب مالك 2026-09-11).
    *

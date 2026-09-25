@@ -19,6 +19,7 @@ import {
   type BookingMatchPreviewDto,
   type PreviewOrderResponseDto,
 } from '@/lib/orders';
+import { recordServiceIntent } from '@/lib/campaigns';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
@@ -105,6 +106,9 @@ function hasPricingFieldValue(value: PricingFieldValue | undefined): boolean {
  * **كل الروابط القديمة بـUUID بتفضل شغّالة زي ما هي** (`ServiceCard` مااتغيّرش) — ده اللي خلّى
  * ده أخف من إعادة تسمية المسار وعمل تحويلات.
  */
+/** وسائل الدفع اللي الويب بيعرف يكمّلها فعلاً + «الدفع بعد الخدمة». */
+type PrepaymentChoice = 'later' | 'card' | 'instapay' | 'fawry_reference';
+
 export function BookingFlow({ serviceId }: { serviceId: string }) {
   const id = serviceId;
   const router = useRouter();
@@ -233,7 +237,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   // (`effectivePaymentMethod`) بدل ما يتخزّن — تخزينه كان بيحتاج `useEffect` يكتب حالة، وده
   // ممنوع بقاعدة `react-hooks/set-state-in-effect` عندنا، وبيعمل رندر متسلسل بلا داعي.
   // `later` = كاش/محفظة بعد الشغل (غياب دفع مقدّم). الباقي وسائل دفع مسبق حقيقية.
-  const [paymentChoice, setPaymentChoice] = useState<'later' | 'card' | 'instapay' | null>(null);
+  const [paymentChoice, setPaymentChoice] = useState<PrepaymentChoice | null>(null);
   // العميل اختار يدفع الطلب كامل بدل العربون (طلب مالك 2026-09-11) — نفس اختيار التطبيق.
   const [payFullInsteadOfDeposit, setPayFullInsteadOfDeposit] = useState(false);
 
@@ -283,6 +287,21 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       .then(setPostpaidPolicies)
       .catch(() => setPostpaidPolicies([]));
   }, [id]);
+
+  /**
+   * **إشارة «بدأ حجز»** لمحرك استرجاع الحجز المتروك (ADR-0046 §5).
+   *
+   * تطبيق العميل بيبعتها من زمان (`catalog_navigation.dart`)، والموقع مكانش بيبعتها خالص —
+   * يعني كل زائر بيبدأ حجز من الويب ويسيبه كان بيضيع من المحرك بالكامل، والحملة تفضل بتدوّر
+   * على مرشّحين مش موجودين.
+   *
+   * اللحظة دي بالظبط هي المقابل الصح: الشاشة دي آخر خطوة قبل التأكيد، ودخولها = نية حقيقية.
+   * والمحرك نفسه بيستبعد اللي حجز فعلاً بعد كده (`NOT EXISTS … orders`)، فمفيش تذكير غلط.
+   */
+  useEffect(() => {
+    if (authLoading) return;
+    recordServiceIntent(authedFetch, isAuthenticated, id, 'started_booking');
+  }, [authLoading, authedFetch, isAuthenticated, id]);
 
   useEffect(() => {
     fetchService(id)
@@ -730,6 +749,15 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         router.replace(`/orders/${order.id}/instapay`);
         return;
       }
+      // فوري: صفحة كود مرجعي جوّه الموقع، نفس منطق InstaPay بالظبط — مفيش بوابة خارجية.
+      if (
+        !effectiveRequestRemoteQuote &&
+        remoteAssessmentFeeDueCents === 0 &&
+        effectivePaymentMethod === 'fawry_reference'
+      ) {
+        router.replace(`/orders/${order.id}/fawry`);
+        return;
+      }
       if (remoteAssessmentFeeDueCents > 0 || (!effectiveRequestRemoteQuote && effectivePaymentMethod === 'card')) {
         const cardResult = await payWithCard(authedFetch, order.id);
         // `assign()` مش `location.href = ...`: قاعدة react-hooks/immutability بتعتبر الإسناد
@@ -932,12 +960,18 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   /**
    * وسائل الدفع المقدّم المتاحة، **بترتيب السيرفر زي ما جه** (InstaPay فوق ثم الكاش ثم الباقي).
    *
-   * بنفلتر على اللي الويب بيعرف يكمّلها فعلاً: البطاقة (تحويلة لبوابة) وInstaPay (صفحة تحويل
-   * جوّه الموقع). فوري والتقسيط ليهم مسارات مالهاش واجهة هنا لسه — عرضهم كان هيوصّل العميل
-   * لطريق مسدود، وده أسوأ من عدم عرضهم.
+   * بنفلتر على اللي الويب بيعرف يكمّلها فعلاً: البطاقة (تحويلة لبوابة)، وInstaPay وفوري
+   * (صفحتين جوّه الموقع). **فوري اتفتحت لما بقى ليها صفحة** (`/orders/:id/fawry`) — قبل كده
+   * كانت مخفية عن قصد لأن عرض وسيلة بلا صفحة بيوصّل العميل لطريق مسدود.
+   *
+   * **التقسيط لسه مستبعد من هنا وده مش نقص**: التقسيط في المنصة كلها (ويب وتطبيق) بيتقدّم
+   * **بعد** إنشاء الطلب ومحتاج مراجعة إدارة — مش دفع مقدّم وقت الحجز. والويب عنده الواجهة دي
+   * فعلاً في `orders/[id]/installment-section.tsx`.
    */
   const prepaymentOptions = (paymentChannels ?? []).filter(
-    (channel) => channel.is_available && (channel.method === 'instapay' || channel.method === 'card'),
+    (channel) =>
+      channel.is_available &&
+      (channel.method === 'instapay' || channel.method === 'card' || channel.method === 'fawry_reference'),
   );
 
   /**
@@ -967,13 +1001,13 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     ...prepaymentOptions.map((channel) => channel.method),
     ...(cashAfterWorkAllowed ? ['later'] : []),
   ]);
-  const effectivePaymentMethod: 'later' | 'card' | 'instapay' =
+  const effectivePaymentMethod: PrepaymentChoice =
     paymentChoice && selectableMethods.has(paymentChoice)
       ? paymentChoice
       : cashAfterWorkAllowed
         ? 'later'
         : ((prepaymentOptions.find((channel) => channel.is_recommended) ?? prepaymentOptions[0])
-            ?.method as 'card' | 'instapay' | undefined) ?? 'later';
+            ?.method as Exclude<PrepaymentChoice, 'later'> | undefined) ?? 'later';
 
   const canSubmit =
     !!selectedAddressId &&

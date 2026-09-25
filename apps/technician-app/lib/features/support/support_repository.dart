@@ -60,4 +60,33 @@ class SupportRepository {
     );
     return ComplaintAttachment.fromJson(data!);
   }
+
+  // ── تذاكر الدعم (نفس صلاحيات العميل بالظبط) ────────────────────────────────
+
+  Future<List<SupportTicket>> listTickets() async {
+    final items = await auth.authedRequestList('/support-tickets');
+    return items.map(SupportTicket.fromJson).toList();
+  }
+
+  Future<SupportTicket> createTicket({
+    required String subject,
+    required String category,
+  }) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/support-tickets',
+      // `channel: 'app'` ثابت — التذكرة اتفتحت من التطبيق فعلاً، والدعم بيرتّب أولوياته بيه.
+      body: {'subject': subject, 'category': category, 'channel': 'app'},
+    );
+    return SupportTicket.fromJson(data!);
+  }
+
+  Future<SupportTicket> rateTicket(String ticketId, int rating) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/support-tickets/$ticketId/satisfaction',
+      body: {'satisfaction_rating': rating},
+    );
+    return SupportTicket.fromJson(data!);
+  }
 }

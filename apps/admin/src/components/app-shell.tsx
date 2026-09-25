@@ -41,6 +41,8 @@ import {
   Gauge,
   Filter,
   TrendingUp,
+  FileCheck,
+  HandCoins,
   Wallet,
   UsersRound,
   QrCode,
@@ -143,6 +145,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'المالية',
     items: [
+      // migration 0177 — الشروط اللي بتوقف الحجز فعليًا لحد ما العميل يوافق. كانت بلا أي
+      // شاشة رغم إن الباك-إند بيفرضها على كل طلب.
+      { href: '/payment-policies', label: 'سياسات الدفع', icon: FileCheck, permission: 'payment_policies.manage' },
+      // ADR-0041 — `debt/outstanding` اتعمل كـ«شاشة متابعة واحدة» وماكانش ليه شاشة أصلاً.
+      { href: '/technician-debt', label: 'مديونية الفنيين', icon: HandCoins, permission: 'wallets.view' },
       { href: '/earnings-policy', label: 'سياسة المستحقات', icon: Coins, permission: 'earnings_policy.view' },
       { href: '/projects', label: 'المشروعات', icon: Building2, permission: 'projects.view' },
       { href: '/warranty-plans', label: 'خطط الضمان', icon: ShieldCheck, permission: 'warranty.manage' },

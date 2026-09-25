@@ -58,6 +58,7 @@ const VIEW_PERMISSIONS = [
   // ADR-0114 + شاشة CAC: من غيرهم الصفحتين الجديدتين بيترسموا كـ«ماعندكش صلاحية» — يعني
   // اللقطة بتثبت الحارس وماتقولش حاجة عن الشاشة نفسها.
   'marketing.manage', 'analytics.financial.view', 'analytics.marketing_spend.manage',
+  'payment_policies.manage',
 ];
 
 const VIEWPORTS = [
@@ -173,6 +174,7 @@ async function main() {
       { name: 'analytics-workforce', url: '/analytics/workforce' },
       { name: 'analytics-marketing', url: '/analytics/marketing' },
       { name: 'ops', url: '/ops' },
+      { name: 'payment-policies', url: '/payment-policies' },
       { name: 'branding', url: '/branding' },
       { name: 'buildings', url: '/buildings' },
       { name: 'campaigns', url: '/campaigns' },

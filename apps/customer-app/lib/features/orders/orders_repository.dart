@@ -221,6 +221,14 @@ class OrdersRepository {
     ///
     /// مالوش أي أثر لو الخدمة مافيهاش عربون أصلاً — الباك-إند بيتجاهله وقتها.
     bool payFullAmount = false,
+
+    /// **معرّفات نسخ شروط الدفع اللي العميل قبلها** (migration 0177).
+    ///
+    /// كانت ناقصة بالكامل من التطبيق: الباك-إند بيفرض السياسات الإجبارية من نوع
+    /// `postpaid_service` على أي طلب **مش مدفوع مقدّمًا**، والويب بيبعتها من زمان. يعني تفعيل
+    /// سياسة إجبارية واحدة من الأدمن كان بيخلّي الحجز من الموقع ينجح ومن التطبيق **يترفض** —
+    /// اختلاف سلوك بين قناتين على نفس الطلب.
+    List<String>? acceptedPolicyVersionIds,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -263,6 +271,9 @@ class OrdersRepository {
         'scheduled_at_range_end': ?scheduledAtRangeEnd,
         'repeat_frequency': ?repeatFrequency,
         'original_order_id': ?originalOrderId,
+        if (acceptedPolicyVersionIds != null &&
+            acceptedPolicyVersionIds.isNotEmpty)
+          'accepted_policy_version_ids': acceptedPolicyVersionIds,
       },
     );
     return Order.fromJson(data!);
