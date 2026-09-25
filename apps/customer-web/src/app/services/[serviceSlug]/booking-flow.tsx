@@ -19,6 +19,7 @@ import {
   type BookingMatchPreviewDto,
   type PreviewOrderResponseDto,
 } from '@/lib/orders';
+import { recordServiceIntent } from '@/lib/campaigns';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import { LiveAmount } from '@/components/live-amount';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
@@ -283,6 +284,21 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       .then(setPostpaidPolicies)
       .catch(() => setPostpaidPolicies([]));
   }, [id]);
+
+  /**
+   * **إشارة «بدأ حجز»** لمحرك استرجاع الحجز المتروك (ADR-0046 §5).
+   *
+   * تطبيق العميل بيبعتها من زمان (`catalog_navigation.dart`)، والموقع مكانش بيبعتها خالص —
+   * يعني كل زائر بيبدأ حجز من الويب ويسيبه كان بيضيع من المحرك بالكامل، والحملة تفضل بتدوّر
+   * على مرشّحين مش موجودين.
+   *
+   * اللحظة دي بالظبط هي المقابل الصح: الشاشة دي آخر خطوة قبل التأكيد، ودخولها = نية حقيقية.
+   * والمحرك نفسه بيستبعد اللي حجز فعلاً بعد كده (`NOT EXISTS … orders`)، فمفيش تذكير غلط.
+   */
+  useEffect(() => {
+    if (authLoading) return;
+    recordServiceIntent(authedFetch, isAuthenticated, id, 'started_booking');
+  }, [authLoading, authedFetch, isAuthenticated, id]);
 
   useEffect(() => {
     fetchService(id)

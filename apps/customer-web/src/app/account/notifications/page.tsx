@@ -3,6 +3,7 @@
 import { AccountRow, AccountSection } from '@/components/account-section';
 import { fetchNotifications, markAllNotificationsRead } from '@/lib/account';
 import { useAuth } from '@/lib/auth-context';
+import { MarketingPreferenceCard } from '@/components/marketing-preference-card';
 
 /**
  * الإشعار بيوصّل لمكانه الحقيقي — إشعار مش بيوديك لحاجة نصف إشعار.
@@ -27,6 +28,8 @@ export default function NotificationsPage() {
     <AccountSection title="الإشعارات" load={fetchNotifications} emptyText="مفيش إشعارات لسه">
       {(notifications, reload) => (
         <>
+          {/* فوق القايمة عن قصد: ده إعداد بيتدوّر عليه، والقايمة ممكن تبقى طويلة. */}
+          <MarketingPreferenceCard />
           {notifications.some((n) => n.read_at === null) && (
             <button
               type="button"
