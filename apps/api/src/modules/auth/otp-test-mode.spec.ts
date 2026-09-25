@@ -309,6 +309,9 @@ describe('وضع Closed Beta OTP — حارس الإقلاع (docs/08 §173)', (
   const baseEnv = {
     JWT_ACCESS_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
+    // مطلوب في البيئات الإنتاجية بعد تصليب الـPIN بالـpepper (`AUTH_PIN_PEPPER`، main 61acc31d).
+    // غيابه كان بيخلي Joi يفشل عليه **الأول**، فتأكيدات الحارس تحت مكانتش بتوصل أصلاً.
+    AUTH_PIN_PEPPER: 'p'.repeat(64),
     SETTINGS_ENCRYPTION_KEY: 'c'.repeat(40),
     PII_ENCRYPTION_KEY: 'd'.repeat(40),
     DATABASE_URL: 'postgres://u:p@localhost:5432/db',

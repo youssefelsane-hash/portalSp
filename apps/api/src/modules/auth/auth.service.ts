@@ -1,6 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  PIN_BCRYPT_ROUNDS,
   hashPin,
   pinHashNeedsUpgrade,
   pinDummyHash,
