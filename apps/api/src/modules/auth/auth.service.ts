@@ -4,8 +4,6 @@ import {
   hashPin,
   pinHashNeedsUpgrade,
   pinDummyHash,
-  PIN_RESET_CODE_LENGTH,
-  PIN_RESET_CODE_TTL_MINUTES,
   PIN_RESET_MAX_ATTEMPTS,
   lockoutMinutesFor,
   lockRemainingTextAr,
@@ -21,7 +19,7 @@ import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { DataSource, EntityManager, IsNull, LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { isProductionLikeEnv } from '../../config/env.validation';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
@@ -41,6 +39,7 @@ import { PROMO_LINK_CAPTURED_EVENT, PromoLinkCapturedEvent } from '../../common/
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { PinResetToken } from './entities/pin-reset-token.entity';
+import { issuePinSetupCode } from './pin-setup';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
 import { AccountRole } from './entities/user-role-grant.entity';
@@ -1132,27 +1131,9 @@ export class AuthService {
     // **الكود ده هو اللي بيقفل الفجوة.** مسح الرمز لوحده كان بيسيب المستخدم في طريق مسدود تام:
     // مايقدرش يدخل (مفيش رمز)، ومايقدرش يستخدم `POST /auth/pin` (محتاج جلسة، وكل جلساته
     // اتلغت في نفس السطر تحت)، ومفيش SMS خلاص. الاسترجاع كان بيقفل الحساب بدل ما يفتحه.
-    const code = Array.from({ length: PIN_RESET_CODE_LENGTH }, () => randomInt(0, 10)).join('');
-    const expiresAt = new Date(Date.now() + PIN_RESET_CODE_TTL_MINUTES * 60_000);
-
-    await this.dataSource.transaction(async (manager) => {
-      await manager.update(
-        User,
-        { id: userId },
-        { pinHash: null, pinSetAt: null, pinFailedAttempts: 0, pinLockedUntil: null },
-      );
-      // إصدار كود جديد **بيبطّل** كل الأكواد الحية القديمة — مايبقاش فيه تصريحين حيين على نفس
-      // الحساب، وإلا كود قديم من مكالمة سابقة يفضل صالح بلا علم حد.
-      await manager.softDelete(PinResetToken, { userId, usedAt: IsNull() });
-      await manager.save(
-        manager.create(PinResetToken, {
-          userId,
-          codeHash: await bcrypt.hash(code, PIN_BCRYPT_ROUNDS),
-          expiresAt,
-          issuedByUserId: adminUserId,
-        }),
-      );
-    });
+    const { code, expiresAt } = await this.dataSource.transaction((manager) =>
+      issuePinSetupCode(manager, { userId, issuedByUserId: adminUserId, clearExistingPin: true }),
+    );
 
     await this.revokeAllUserTokens(userId, `استرجاع رمز الدخول بواسطة الأدمن ${adminUserId}`);
     // الكود بيرجع **مرة واحدة** للأدمن عشان يقوله للعميل في المكالمة. نفس نمط أكواد استرجاع

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError } from '@/lib/api-client';
 import { ApiEnvelope } from '@/lib/api-types';
 import { PinField, localPinError } from '@/components/pin-field';
+import { SupportContactLinks } from '@/components/support-contact-links';
 
 /**
  * **استرجاع رمز الدخول** (ADR-0109 §6-ب).
@@ -66,9 +67,13 @@ function PinResetForm() {
   return (
     <div className="mx-auto max-w-sm px-4 py-16">
       <h1 className="mb-2 text-center text-2xl font-bold">استرجاع رمز الدخول</h1>
-      <p className="mb-6 text-center text-sm text-muted">
+      <p className="mb-3 text-center text-sm text-muted">
         كلّم خدمة العملاء، وهيدّوك كود استرجاع في المكالمة. اكتبه هنا واختار رمز دخول جديد.
       </p>
+      {/* **بيانات الدعم لازم تبان هنا** (ADR-0111 §6): الصفحة بتقول «كلّم خدمة العملاء»، والعميل
+          المقفول برّه حسابه مايقدرش يوصل لصفحة الدعم جوّه حسابه عشان يجيب الرقم — فكانت بتطلب
+          منه حاجة مفيش طريقة يعملها. المصدر `GET /settings/support-contact` وهو عام أصلاً. */}
+      <SupportContactLinks />
 
       <form onSubmit={submit} className="space-y-4">
         <label className="block">

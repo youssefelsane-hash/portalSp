@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, Copy } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { OneTimeCodeDialog } from '@/components/one-time-code-dialog';
 
 interface ResetPinResult {
   pin_cleared: boolean;
@@ -60,43 +60,22 @@ export function ResetPinButton({ userId, userLabel }: { userId: string; userLabe
         }
       />
 
-      <Dialog open={result !== null}>
-        <DialogContent
-          showCloseButton={false}
-          onInteractOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <DialogHeader>
-            <DialogTitle>كود الاسترجاع</DialogTitle>
-            <DialogDescription>
-              قول الكود ده للعميل في المكالمة دلوقتي. صالح لمدة 15 دقيقة ولمرة واحدة بس، ومش
-              هتقدر تشوفه تاني بعد ما تقفل الرسالة دي. العميل بيكتبه في التطبيق أو الموقع من
-              «نسيت رمز الدخول؟» **ويختار رمزه بنفسه** — إنت مش هتعرفه.
-            </DialogDescription>
-          </DialogHeader>
-          <div
-            className="rounded-md bg-muted p-4 text-center font-mono text-2xl tracking-[0.3em]"
-            dir="ltr"
-            data-testid="reset-pin-code"
-          >
-            {result?.reset_code}
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (result) void navigator.clipboard.writeText(result.reset_code).then(
-                  () => toast.success('اتنسخ'),
-                  () => toast.error('المتصفح رفض النسخ — اقرا الكود من الشاشة'),
-                );
-              }}
-            >
-              <Copy className="size-4" /> انسخ
-            </Button>
-            <Button onClick={() => setResult(null)}>قلت الكود للعميل</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OneTimeCodeDialog
+        open={result !== null}
+        title="كود الاسترجاع"
+        code={result?.reset_code ?? null}
+        testId="reset-pin-code"
+        description={
+          <>
+            قول الكود ده للعميل في المكالمة دلوقتي. صالح لمدة 15 دقيقة ولمرة واحدة بس، ومش هتقدر
+            تشوفه تاني بعد ما تقفل الرسالة دي. العميل بيكتبه في التطبيق أو الموقع من «نسيت رمز
+            الدخول؟» <b>ويختار رمزه بنفسه</b> — إنت مش هتعرفه.
+          </>
+        }
+        confirmLabel="قلت الكود للعميل"
+        onConfirm={() => setResult(null)}
+      />
+
     </>
   );
 }

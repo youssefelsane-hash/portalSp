@@ -15,6 +15,12 @@ export const MFA_REQUIRED_PERMISSIONS = [
   'orders.approve_price_increase',
   'orders.waive_fees',
   'roles.manage',
+  // **اتضافوا في ADR-0111** — التفاوت كان حقيقي: `employees.manage` بتعمل حساب
+  // `user_type='admin'` (توسيع دايرة الموظفين) و`users.reset_pin` بتفتح حساب مقفول، والاتنين
+  // مكانوش مطالبين بـMFA رغم إن `roles.manage` (منح الصلاحيات للحساب الجديد) مطالبة بيها.
+  // النتيجة: أخطر خطوة في السلسلة كانت محميّة، وأول خطوة فيها لأ.
+  'employees.manage',
+  'users.reset_pin',
   'roles.grant_unrestricted',
   'settings.manage',
   // تأكيد استلام دفعة InstaPay يدويًا (ADR-0013 §7) — تحكم مباشر في فلوس حقيقية (بيسوّي الدفعة

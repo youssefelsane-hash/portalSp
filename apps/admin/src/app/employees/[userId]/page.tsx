@@ -28,6 +28,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ErrorNotice } from '@/components/notice';
+import { EmployeeActivationCodeButton } from '@/components/employee-activation-code-button';
 
 const PRESENCE_LABELS: Record<string, string> = { active: 'نشط الآن', idle: 'خامل', offline: 'غير متصل' };
 const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'> = {
@@ -265,10 +266,13 @@ export default function EmployeeDetailPage() {
                 {employee.phone_number}
               </p>
             </CardContent>
-            <CardFooter className="gap-2">
+            <CardFooter className="flex-wrap gap-2">
               <Button type="submit" disabled={isSaving}>
                 {isSaving ? 'جاري الحفظ…' : 'حفظ التعديلات'}
               </Button>
+              {/* **كود التنشيط** (ADR-0111) — المخرج الوحيد لموظف مالوش رمز دخول. غيابه من
+                  الشاشة دي كان بيخلي الأدمن مالوش أي طريقة يكتشف المسار من الواجهة. */}
+              <EmployeeActivationCodeButton userId={userId} userLabel={employee.full_name} />
               {employee.is_blocked ? (
                 <Button type="button" variant="outline" disabled={isSaving} onClick={handleUnblock}>
                   إلغاء الحظر

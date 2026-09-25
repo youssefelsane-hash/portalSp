@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserType } from '../auth/entities/user.entity';
@@ -18,14 +19,43 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 export class AdminEmployeesController {
   constructor(private readonly employeesService: AdminEmployeesService) {}
 
+  /**
+   * **إنشاء موظف** — بيرجّع **كود تنشيط لمرة واحدة** (ADR-0111).
+   *
+   * **`@RequireStepUp()` كانت ناقصة** وده كان تفاوت حقيقي: النداء ده بيعمل حساب
+   * `user_type = 'admin'`، يعني بيوسّع دايرة الموظفين — بينما **استرجاع** رمز حساب موجود
+   * (`POST /admin/users/:id/pin/reset`) كان بيطلب step-up. إنشاء حساب إداري مش أقل خطورة من
+   * استرجاع واحد موجود، فبقى عليه نفس الشرط.
+   */
   @Post()
   @RequirePermission('employees.manage')
+  @RequireStepUp()
   create(
     @CurrentUser() admin: JwtPayload,
     @Body() dto: CreateEmployeeDto,
     @AuditContext() audit: AuditMeta,
   ) {
     return this.employeesService.create(admin.sub, dto, audit);
+  }
+
+  /**
+   * **إعادة إصدار كود التنشيط** (ADR-0111) — الكود عمره ١٥ دقيقة، فموظف ما لحقش يستخدمه
+   * محتاج واحد جديد بدل ما يفضل مقفول برّه.
+   *
+   * **مابيمسحش الرمز الحالي**: لو الموظف حط رمزه بالفعل، إصدار كود بالغلط مايقفلهوش برّه —
+   * الرمز بيتغيّر بس لما الكود يتستهلك فعلاً. الإجراء اللي بيمسح فورًا هو
+   * `POST /admin/users/:id/pin/reset` وده استرجاع مقصود.
+   */
+  @Post(':userId/activation-code')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('employees.manage')
+  @RequireStepUp()
+  reissueActivationCode(
+    @CurrentUser() admin: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.employeesService.reissueActivationCode(admin.sub, userId, audit);
   }
 
   @Get()
