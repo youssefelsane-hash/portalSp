@@ -27,6 +27,8 @@ import { OrderStatusHistory } from '../orders/entities/order-status-history.enti
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
+import { AccountRolesService } from '../auth/account-roles.service';
+import { UserRoleGrant } from '../auth/entities/user-role-grant.entity';
 
 // اختبار حي — إعادة إنتاج مسار التسجيل الحقيقي بالكامل (تسجيل → OTP → تصريح فئة → موافقة أدمن
 // → منطقة → موقع → اعتماد) بجنب فني "fixture" (INSERT خام، بالظبط زي كل specs المشروع التانية)،
@@ -154,6 +156,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
       entities: [
+        UserRoleGrant,
         User,
         OtpCode,
         RefreshToken,
@@ -271,6 +274,9 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       { routeToRole: jest.fn() } as never,
       // ADR-0109 — `auth.login_method`؛ السبيك ده على مسار الـOTP فبيفضل زي ما هو.
       { getString: async () => 'otp' } as never,
+      // ADR-0110 — خدمة حقيقية على نفس الـdataSource: مسار التسجيل بيمنح دور فعلاً، وstub
+      // فاضي كان هيخلي الاختبار يعدّي على حساب بلا منحة (وهو حساب مايعرفش يدخل تاني).
+      new AccountRolesService(dataSource.getRepository(UserRoleGrant), dataSource),
     );
     techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),

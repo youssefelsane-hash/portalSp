@@ -43,6 +43,8 @@ import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { PinResetToken } from './entities/pin-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
+import { AccountRole } from './entities/user-role-grant.entity';
+import { AccountRolesService, consumerRoleOf, ResolvedActiveRole } from './account-roles.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -104,6 +106,7 @@ export class AuthService {
     private readonly webAuthn: WebAuthnService,
     private readonly notificationRouting: NotificationRoutingService,
     private readonly settingsService: SettingsService,
+    private readonly accountRoles: AccountRolesService,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
@@ -415,7 +418,15 @@ export class AuthService {
       });
       await users.save(user);
       await this.provisionAccountBaseline(user, manager);
-      const tokens = await this.issueTokenPair(user, ip, ['otp'], undefined, manager);
+      const role = consumerRoleOf(user.userType);
+      const tokens = await this.issueTokenPair(
+        user,
+        ip,
+        ['otp'],
+        undefined,
+        manager,
+        role ? { activeRole: role, grantedRoles: [role] } : undefined,
+      );
       return { user, referrer, tokens };
     });
     if ('error' in registration) throw registration.error;
@@ -448,6 +459,13 @@ export class AuthService {
       walletOwnerType = WalletOwnerType.TECHNICIAN;
     }
     await manager.getRepository(Wallet).save({ ownerUserId: user.id, ownerType: walletOwnerType });
+
+    // **منحة الدور جوّه نفس الدالة** (ADR-0110): كل مسارات التسجيل (OTP والرمز) بتمر من هنا،
+    // فحساب جديد بلا منحة مستحيل — وهو اللي كان هيخلي أول دخول بعد التسجيل يترفض.
+    const role = consumerRoleOf(user.userType);
+    if (role) {
+      await this.accountRoles.grantRole(user, role, { reason: 'registration', manager });
+    }
   }
 
   private assertUserAvailable(user: User): void {
@@ -469,6 +487,12 @@ export class AuthService {
     user.lastLoginIp = ip;
     await this.users.save(user);
 
+    // نفس قرار الدور بالظبط اللي `loginWithPin` بياخده (ADR-0110) — مسار الـOTP مايبقاش باب
+    // خلفي بيتخطّى فحص المنحة.
+    const role = await this.accountRoles.resolveActiveRole(user, dto.role, {
+      autoProvision: (granted, manager) => this.provisionRoleBaseline(user, granted, manager),
+    });
+
     // MFA إجباري لأي حساب High-Privilege (ADR-0011، docs/08 §14) — فحص حي، صفر تغيير سلوكي
     // لأي حساب تاني (الغالبية العظمى). لو مطلوب، التوكن النهائي ميتصدرش هنا خالص.
     if (await this.mfaPolicy.userRequiresMfa(user.id)) {
@@ -480,7 +504,7 @@ export class AuthService {
       };
     }
 
-    return this.issueTokenPair(user, ip, ['otp'], dto);
+    return this.issueTokenPair(user, ip, ['otp'], dto, undefined, role);
   }
 
   // ── MFA (ADR-0011) ───────────────────────────────────────────────────
@@ -581,16 +605,27 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  /**
+   * @param role الدور النشط للجلسة (ADR-0110). `undefined` = استخدم `user.userType` — ده مسار
+   *   الموظفين ولوحة التحكم، وكمان أي مسار دخول مش استهلاكي (Passkey، استعادة). التوكن ساعتها
+   *   مطابق حرفيًا لسلوك ما قبل ADR-0110.
+   */
   private async issueTokenPair(
     user: User,
     ip: string | null,
     amr: ('otp' | 'pin' | 'webauthn')[],
     device?: DeviceMetadataDto,
     manager?: EntityManager,
+    role?: ResolvedActiveRole,
   ): Promise<TokenPair> {
     const accessExpiresIn = this.config.get<string>('jwt.accessExpiresIn')!;
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, userType: user.userType, amr },
+      {
+        sub: user.id,
+        userType: role?.activeRole ?? user.userType,
+        ...(role ? { roles: [...role.grantedRoles] } : {}),
+        amr,
+      },
       { secret: this.config.get<string>('jwt.accessSecret'), expiresIn: accessExpiresIn },
     );
 
@@ -608,6 +643,7 @@ export class AuthService {
       devicePlatform: device?.device_platform ?? null,
       lastSeenAt: now,
       amr,
+      activeRole: role?.activeRole ?? null,
       isRevoked: false,
       expiresAt: new Date(Date.now() + parseDurationToMs(refreshExpiresIn)),
     });
@@ -666,9 +702,26 @@ export class AuthService {
       existing.lastSeenAt = new Date();
       await manager.save(existing);
 
+      // **التدوير مابيوسّعش الصلاحية** (ADR-0110 §5): الجلسة بترجع بنفس الدور النشط بالظبط،
+      // و**المنحة بتتأكد تاني** — فسحب دور من الأدمن بيسقط الجلسة من أول تدوير بدل ما يستنى
+      // انتهاء التوكن. من غير ده، مستخدم عنده الدورين يدوّر جلسة تطبيق العميل ويرجع بدور
+      // الصنايعي حسب `users.user_type`.
+      let role: ResolvedActiveRole | undefined;
+      if (existing.activeRole) {
+        const grantedRoles = await this.accountRoles.listRoles(user.id, manager);
+        if (!grantedRoles.includes(existing.activeRole)) {
+          throw new ApiException(
+            ErrorCode.AUTH_001,
+            'الدور بتاع الجلسة دي مبقى متاح للحساب، سجّل دخول تاني',
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        role = { activeRole: existing.activeRole, grantedRoles };
+      }
+
       // amr بيتنقل من الجلسة القديمة (ADR-0011) — لو المستخدم أثبت هويته بـwebauthn قبل كده،
       // الجلسات الجديدة الناتجة من refresh() تفضل عارفة ده مش ترجع لـotp بس بصمت.
-      return this.issueTokenPair(user, ip, existing.amr, device, manager);
+      return this.issueTokenPair(user, ip, existing.amr, device, manager, role);
     });
   }
 
@@ -781,7 +834,15 @@ export class AuthService {
       });
       await users.save(user);
       await this.provisionAccountBaseline(user, manager);
-      const tokens = await this.issueTokenPair(user, ip, ['pin'], dto, manager);
+      const role = consumerRoleOf(user.userType);
+      const tokens = await this.issueTokenPair(
+        user,
+        ip,
+        ['pin'],
+        dto,
+        manager,
+        role ? { activeRole: role, grantedRoles: [role] } : undefined,
+      );
       return { user, referrer, tokens };
     });
 
@@ -934,6 +995,12 @@ export class AuthService {
     if ('error' in outcome) throw outcome.error;
     const { user } = outcome;
 
+    // **الدور بيتحدد بعد ما الرمز يتأكد** (ADR-0110): التطبيق أعلن هو مين، والسيرفر بيتحقق.
+    // الترتيب مهم — لو الفحص قبل الرمز، «الحساب ده إداري» كانت هتبقى أوراكل لأي حد بيخمّن أرقام.
+    const role = await this.accountRoles.resolveActiveRole(user, dto.role, {
+      autoProvision: (granted, manager) => this.provisionRoleBaseline(user, granted, manager),
+    });
+
     if (await this.mfaPolicy.userRequiresMfa(user.id)) {
       const hasCredential = await this.webAuthn.hasAnyCredential(user.id);
       return {
@@ -943,7 +1010,60 @@ export class AuthService {
       };
     }
 
-    return this.issueTokenPair(user, ip, ['pin'], dto);
+    return this.issueTokenPair(user, ip, ['pin'], dto, undefined, role);
+  }
+
+  /**
+   * منح دور صريح لحساب موجود — مسار «عميل عايز يبقى صنايعي» (ADR-0110 §7-ب).
+   *
+   * الدور ده **بيتحقّق منه** (KYC، مستندات، اعتماد أدمن) فمابيتمنحش تلقائيًا زي دور العميل:
+   * النداء ده بينشئ بروفايل فني `pending` ويبدأ التوثيق. الجلسة الحالية **مابتتوسّعش** — التوكن
+   * الجاي لسه بدور العميل، والمستخدم لازم يعمل دخول من تطبيق الفني عشان ياخد جلسة بالدور الجديد.
+   * كده منح الدور وتفعيله خطوتين منفصلتين، وتوكن مسروق مايترقّاش نفسه.
+   */
+  async requestConsumerRole(userId: string, role: AccountRole): Promise<{ role: AccountRole; granted: boolean }> {
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, { where: { id: userId } });
+      if (!user) throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
+      this.assertUserAvailable(user);
+
+      if (await this.accountRoles.hasRole(userId, role, manager)) {
+        return { role, granted: false };
+      }
+      await this.accountRoles.grantRole(user, role, { reason: 'self_service', manager });
+      await this.provisionRoleBaseline(user, role, manager);
+      return { role, granted: true };
+    });
+  }
+
+  /**
+   * بينشئ السجلات الأساسية للدور الجديد لو مش موجودة — بروفايل الدور والمحفظة.
+   *
+   * **المحفظة واحدة للشخص** مهما كان عنده دور واحد أو الدورين (ADR-0110 §8): هي فلوسه، والفصل
+   * على مستوى الدور مش على مستوى الرصيد. فلو عنده محفظة بالفعل مابنعملش تانية.
+   */
+  private async provisionRoleBaseline(user: User, role: AccountRole, manager: EntityManager): Promise<void> {
+    if (role === AccountRole.CUSTOMER) {
+      const profiles = manager.getRepository(CustomerProfile);
+      if (!(await profiles.findOne({ where: { userId: user.id } }))) {
+        await profiles.save({ userId: user.id });
+      }
+    } else {
+      const profiles = manager.getRepository(TechnicianProfile);
+      if (!(await profiles.findOne({ where: { userId: user.id } }))) {
+        const [{ next_technician_code: technicianCode }] = await manager.query<{ next_technician_code: string }[]>(
+          'SELECT next_technician_code()',
+        );
+        await profiles.save({ userId: user.id, technicianCode });
+      }
+    }
+    const wallets = manager.getRepository(Wallet);
+    if (!(await wallets.findOne({ where: { ownerUserId: user.id } }))) {
+      await wallets.save({
+        ownerUserId: user.id,
+        ownerType: role === AccountRole.CUSTOMER ? WalletOwnerType.CUSTOMER : WalletOwnerType.TECHNICIAN,
+      });
+    }
   }
 
   /**

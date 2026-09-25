@@ -199,7 +199,11 @@ class AuthRepository extends ChangeNotifier {
     final data = await apiRequest(
       'POST',
       '/auth/pin/login',
-      body: {'phone_number': phoneNumber, 'pin': pin},
+      // **`role` بيقول للسيرفر التطبيق ده مين** (ADR-0110). الحساب الواحد ممكن يكون عميل
+      // وصنايعي بنفس الرقم، والجلسة لازم تبقى بدور التطبيق اللي فاتح — من غير الحقل ده الجلسة
+      // كانت بتاخد `users.user_type` فيبقى التطبيق نص شغّال. السيرفر **بيتحقق** من المنحة،
+      // فالقيمة دي طلب مش صلاحية.
+      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'customer'},
     );
     await _adoptTokenPair(data!);
   }

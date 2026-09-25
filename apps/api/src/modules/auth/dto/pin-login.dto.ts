@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsPhoneNumber, IsString, Length } from 'class-validator';
+import { IsEnum, IsOptional, IsPhoneNumber, IsString, Length } from 'class-validator';
 import { normalizePhoneNumber } from '../../../common/utils/phone-number';
+import { AccountRole } from '../entities/user-role-grant.entity';
 import { DeviceMetadataDto } from './device-metadata.dto';
 import { LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH } from '../login-pin.policy';
 
@@ -18,4 +19,16 @@ export class PinLoginDto extends DeviceMetadataDto {
   @IsString()
   @Length(LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH)
   pin: string;
+
+  /**
+   * الدور اللي التطبيق ده بيدخل بيه (ADR-0110). `customer` من تطبيق العميل، `technician` من
+   * تطبيق الفني.
+   *
+   * **طلب، مش حقيقة**: السيرفر بيتحقق من المنحة قبل ما يوقّع التوكن (`resolveActiveRole`).
+   * اختياري عمدًا — النسخ المنشورة على Google Play مابتبعتوش، فبتاخد دور `user_type` زي
+   * ما كانت بالظبط.
+   */
+  @IsOptional()
+  @IsEnum(AccountRole)
+  role?: AccountRole;
 }

@@ -9,6 +9,8 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
+import { AccountRolesService } from './account-roles.service';
+import { UserRoleGrant } from './entities/user-role-grant.entity';
 
 /**
  * §106 — بلاغ المالك «الكود بيظهر في الترمينال بس التطبيق بيقول منتهي/غير صالح».
@@ -84,7 +86,7 @@ describe('OTP failure diagnostics (§106, real PostgreSQL)', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, Wallet],
+      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, Wallet, UserRoleGrant],
     });
     await dataSource.initialize();
 
@@ -104,6 +106,9 @@ describe('OTP failure diagnostics (§106, real PostgreSQL)', () => {
       // ADR-0109 — `auth.login_method`. الـspecs دي مكتوبة على مسار الـOTP، فالـstub
       // بيرجّع 'otp' عشان سلوكها يفضل زي ما هو بالحرف.
       { getString: async () => 'otp' } as never,
+      // ADR-0110 — خدمة حقيقية على نفس الـdataSource: مسار التسجيل بيمنح دور فعلاً، وstub
+      // فاضي كان هيخلي الاختبار يعدّي على حساب بلا منحة (وهو حساب مايعرفش يدخل تاني).
+      new AccountRolesService(dataSource.getRepository(UserRoleGrant), dataSource),
     );
   });
 

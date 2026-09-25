@@ -22,6 +22,8 @@ import { NotificationRoutingService } from '../notifications/notification-routin
 import { WebAuthnService } from './webauthn.service';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { SettingsService } from '../settings/settings.service';
+import { AccountRolesService } from './account-roles.service';
+import { AccountRole } from './entities/user-role-grant.entity';
 
 /**
  * **وضع اختبار الـOTP لفترة Google Play** (docs/08 §173).
@@ -142,6 +144,20 @@ async function buildAuth(overrides: Record<string, unknown>): Promise<Harness> {
       // ADR-0109 — `auth.login_method`. السبيكات دي بتختبر مسار الـOTP، فالـstub بيرجّع 'otp'
       // عشان سلوكها يفضل زي ما هو بالحرف بعد ما البوابة اتحطت على `requestOtp`.
       { provide: SettingsService, useValue: { getString: async () => 'otp' } },
+      // ADR-0110 — الـspecs دي بتقيس سلوك الـOTP/الرمز نفسه، فالدور بيرجع ممنوح على طول.
+      // `resolveActiveRole` الحقيقي مختبَر لوحده في `account-roles.spec.ts` ضد قاعدة حقيقية.
+      {
+        provide: AccountRolesService,
+        useValue: {
+          resolveActiveRole: async (user: { userType: AccountRole }) => ({
+            activeRole: user.userType,
+            grantedRoles: [user.userType],
+          }),
+          listRoles: async (_id: string) => [AccountRole.CUSTOMER, AccountRole.TECHNICIAN],
+          hasRole: async () => true,
+          grantRole: async () => undefined,
+        },
+      },
       { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
     ],
   }).compile();

@@ -16,6 +16,7 @@ import { SetPinDto } from './dto/set-pin.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { toUserResponseDto } from './dto/user-response.dto';
 import { JwtPayload } from './types/authenticated-request';
+import { AccountRole } from './entities/user-role-grant.entity';
 
 function clientIp(req: Request): string | null {
   return req.ip ?? req.socket.remoteAddress ?? null;
@@ -124,9 +125,30 @@ export class AuthController {
     return null;
   }
 
+  /**
+   * **«عايز أبقى صنايعي»** — طلب دور الفني لحساب موجود (ADR-0110 §7-ب).
+   *
+   * متوثّق عمدًا: صاحب الحساب هو اللي بيطلب، مش أي حد يعرف رقمه. والجلسة الحالية **مابتتوسّعش**
+   * — الدور بيتمنح وبيتعمل بروفايل `pending`، والمستخدم لازم يعمل دخول من تطبيق الفني عشان
+   * ياخد جلسة بالدور الجديد. فتوكن مسروق مايقدرش يرقّي نفسه لصلاحيات فني في نفس النداء.
+   *
+   * دور العميل **مالوش نداء هنا** عن قصد: مالوش أي تحقّق، فأول دخول من تطبيق العميل بيمنحه
+   * تلقائيًا (ADR-0110 §7-أ). نداء زيادة كان هيبقى عرقلة بلا مقابل أمني.
+   */
+  @Post('roles/technician')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  requestTechnicianRole(@CurrentUser() user: JwtPayload) {
+    return this.authService.requestConsumerRole(user.sub, AccountRole.TECHNICIAN);
+  }
+
   @Get('me')
   async getMe(@CurrentUser() user: JwtPayload) {
-    return toUserResponseDto(await this.authService.getMe(user.sub));
+    // سياق الجلسة من التوكن — `user_type` في الرد = الدور النشط (ADR-0110)، مش عمود القاعدة.
+    return toUserResponseDto(await this.authService.getMe(user.sub), {
+      activeRole: user.userType,
+      roles: user.roles as AccountRole[] | undefined,
+    });
   }
 
   @Patch('me')
