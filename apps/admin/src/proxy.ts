@@ -25,6 +25,18 @@ export function proxy(req: NextRequest) {
   return NextResponse.next();
 }
 
+/**
+ * **الملفات الساكنة مستثناة — بَقّة حقيقية اتلقطت بصريًا (2026-09-25).**
+ *
+ * الاستثناء كان `favicon.ico` بس، فأي أصل تاني بيطلبه متصفح **مش مسجّل دخول** كان بياخد تحويل
+ * ٣٠٧ للّوجن ويرجع HTML مكان الصورة. النتيجة اللي اتشافت في لقطة حقيقية: **لوجو مكسور في نص
+ * شاشة الدخول** (`<img src="/icon.svg">` في `app/login/page.tsx`) — أول حاجة أي أدمن بيشوفها.
+ *
+ * الاستثناء دلوقتي بالامتداد مش بالاسم: أي طلب لملف بامتداد معروف مايعدّيش على الحارس. ده آمن
+ * لأن مفيش **صفحة** في اللوحة بتنتهي بأي من الامتدادات دي — كلها مسارات بلا امتداد.
+ */
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    '/((?!api|_next/static|_next/image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|txt|xml|json|webmanifest|woff|woff2)$).*)',
+  ],
 };
