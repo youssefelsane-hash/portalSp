@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { SMS_DISPATCHER_PROVIDERS } from '../../common/notifications/sms-dispatcher.provider';
+import { SMS_DISPATCHER } from '../../common/notifications/sms-dispatcher';
 import { AuthService } from './auth.service';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -292,7 +293,13 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
-        ...SMS_DISPATCHER_PROVIDERS,
+        // **بوابة SMS مُجهّزة صراحةً** (ADR-0109): البوابة غير المُجهّزة بقت ترفض الطلب في
+        // البيئات الإنتاجية بدل ما ترجّع نجاح كداب. الاختبارين دول بيقيسوا **إن الكود مايتسجلش
+        // في اللوج**، فمحتاجين يوصلوا لمسار الإرسال أصلاً.
+        {
+          provide: SMS_DISPATCHER,
+          useValue: { isConfigured: true, providerName: 'cequens', send: jest.fn().mockResolvedValue({ delivered: true, failureReason: null }) },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,
@@ -346,7 +353,13 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
-        ...SMS_DISPATCHER_PROVIDERS,
+        // **بوابة SMS مُجهّزة صراحةً** (ADR-0109): البوابة غير المُجهّزة بقت ترفض الطلب في
+        // البيئات الإنتاجية بدل ما ترجّع نجاح كداب. الاختبارين دول بيقيسوا **إن الكود مايتسجلش
+        // في اللوج**، فمحتاجين يوصلوا لمسار الإرسال أصلاً.
+        {
+          provide: SMS_DISPATCHER,
+          useValue: { isConfigured: true, providerName: 'cequens', send: jest.fn().mockResolvedValue({ delivered: true, failureReason: null }) },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,

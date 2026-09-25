@@ -52,7 +52,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { isAllowedOtpTestPhone, readOtpTestMode, usesFixedOtp } from './otp-test-mode';
+import { readOtpTestMode, usesFixedOtp } from './otp-test-mode';
 import { SettingsService } from '../settings/settings.service';
 
 export interface TokenPair {
@@ -122,18 +122,6 @@ export class AuthService {
     // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
     // القرار كله من بيئة السيرفر — مفيش أي حاجة الـclient بيبعتها بتدخل في الحساب ده.
     const testMode = readOtpTestMode(this.config);
-    const productionBetaMode = testMode.enabled && isProductionLikeEnv(this.config.get<string>('nodeEnv'));
-    // في Production Beta لا نسمح بسقوط الرقم خارج الـwhitelist لمسار SMS العادي: CEQUENS
-    // غير مُجهّز عمدًا في هذه الفترة، والأهم ألا يصبح الـOTP الثابت متاحًا لرقم غير مصرّح له.
-    // الفحص قبل hash/transaction يضمن عدم إنشاء challenge ولا محاولة إرسال لهذا الرقم.
-    if (productionBetaMode && !isAllowedOtpTestPhone(testMode, dto.phone_number)) {
-      throw new ApiException(
-        ErrorCode.AUTH_007,
-        'التسجيل والدخول متاحان حاليًا للمختبرين المصرّح لهم فقط. تواصل مع فريق أسطى لإضافة رقمك إلى الاختبار.',
-        HttpStatus.FORBIDDEN,
-        'closed_beta',
-      );
-    }
     const useFixedCode = usesFixedOtp(testMode, dto.phone_number);
     const code = useFixedCode
       ? testMode.fixedCode
@@ -204,6 +192,31 @@ export class AuthService {
         `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}).`,
       );
       return { expires_in_seconds: expiryMinutes * 60 };
+    }
+
+    // **بوابة مش مُجهّزة = فشل صريح، مش نجاح كداب.**
+    //
+    // قبل كده لو المزوّد مش مُجهّز، `send()` كانت بترجّع `delivered: false`، والدالة دي بتسجّل
+    // تحذير في اللوج و**بترجّع نجاح للمستخدم**. المستخدم بيقعد يستنى كود عمره ما هيوصل، والشاشة
+    // بتقوله «بعتنالك كود». الحارس القديم في `env.validation` كان بيغطّي ده بمنع الإقلاع أصلاً لو
+    // المزوّد ناقص في الإنتاج — بس الحارس ده اتشال مع ADR-0109 لأن الدخول مابقاش محتاج SMS،
+    // وسيبانه كان هيمنع إقلاع منصة قرّرت عن قصد إنها ماتستخدمش مزوّد SMS.
+    //
+    // فالحماية نزلت لنقطة الاستخدام، وهي أدق: الخطأ بيطلع **بس** لما حد يشغّل الدخول بالـOTP
+    // فعلاً (`auth.login_method = 'otp'`) على بيئة مالهاش مزوّد — الحالة الوحيدة اللي الفشل
+    // فيها حقيقي.
+    // **الفشل مقصور على البيئات الإنتاجية.** في التطوير المحلي بوابة الـSMS مش مُجهّزة أبدًا،
+    // والمطوّر بياخد الكود من اللوج فوق — ده مسار العمل الموثّق، ورميه كان هيقفل مسار الـOTP
+    // محليًا بالكامل. في الإنتاج بس هو اللي بيبقى ثقب حقيقي.
+    if (!this.smsDispatcher.isConfigured && isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
+      this.logger.error(
+        `بوابة SMS مش مُجهّزة ومسار الـOTP مطلوب — الطلب اترفض بدل ما يرجّع نجاح كداب (${dto.purpose}).`,
+      );
+      throw new ApiException(
+        ErrorCode.SYS_001,
+        'إرسال كود التحقق متوقف حاليًا. الدخول برمز الدخول شغّال عادي.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
 
     const result = await this.smsDispatcher.send({

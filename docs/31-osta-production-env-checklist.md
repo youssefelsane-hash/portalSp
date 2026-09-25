@@ -24,11 +24,15 @@
 | `WEBAUTHN_ORIGIN` | مطلوب، وممنوع `http://localhost:3001` → `https://admin.ostahome.com` |
 | `STORAGE_PROVIDER` | لازم `s3` (الـ`local` مرفوض — ملف بيتمسح مع كل نشر) |
 | `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | مطلوبين مع `STORAGE_PROVIDER=s3` (حارس 2026-09-10) |
-| `OTP_TEST_MODE` | افتراضيًا `false`. للـClosed Beta فقط يمكن `true` بشرط `OTP_TEST_MODE_PHONES` غير فارغ و`OTP_TEST_MODE_CODE` سري من ٦ أرقام وغير `111111`. أي رقم خارج القائمة يُرفض بلا OTP أو SMS. |
-| بوابة الـSMS للمزوّد المختار | `SMS_PROVIDER=cequens` → `CEQUENS_SENDER_NAME` + (`CEQUENS_API_KEY` **أو** الأربعة `CEQUENS_CLIENT_ID/CLIENT_SECRET/USERNAME/PASSWORD`). `SMS_PROVIDER=twilio` → `TWILIO_ACCOUNT_SID`+`TWILIO_AUTH_TOKEN`+`TWILIO_SMS_FROM_NUMBER` |
+| `OTP_TEST_MODE` | **لازم `false` (أو مشيل)** — أي قيمة `true` بترفض الإقلاع، مفيش استثناء. استثناء الـClosed Beta اتشال مع ADR-0109: الدخول بقى برقم + رمز فالمختبِر بيدخل برمزه زي أي مستخدم. |
+| بوابة الـSMS | **بقت اختيارية** (ADR-0109 — الدخول مابقاش بيعتمد عليها). سيبها فاضية خالص = قناة الإشعارات بترجع log-only والسيرفر بيقلع عادي. بس **التجهيز الناقص** بيرفض الإقلاع: `cequens` يستلزم `CEQUENS_SENDER_NAME` + (`CEQUENS_API_KEY` أو الأربعة)، و`twilio` يستلزم التلاتة. |
 
 كل واحد فيهم لو ناقص، السيرفر **يرفض يقلع** برسالة بتقول الناقص بالاسم. ده متعمّد: البديل هو
-سيرفر بيقول "healthy" وهو مش قادر يبعت كود تحقق ولا يخزّن صورة.
+سيرفر بيقول "healthy" وهو مش قادر يخزّن صورة ولا يوقّع توكن.
+
+**ملحوظة على الـSMS** (ADR-0109): الدخول بقى برقم + رمز، فبوابة الـSMS مابقيتش شرط إقلاع. اللي
+بقى شرط هو **الاتساق**: يا فاضية كلها يا كاملة. ولو حد رجّع الدخول بالـOTP من الإعدادات بلا مزوّد
+مُجهّز، `POST /auth/otp/request` بيرفض بـ503 برسالة واضحة بدل ما يرجّع نجاح والكود عمره ما يوصل.
 
 ## ٢. مطلوبة للإطلاق لكن مش بتوقف الإقلاع
 
