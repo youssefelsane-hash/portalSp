@@ -21,6 +21,15 @@ export interface UserResponseDto {
   id: string;
   phone_number: string;
   phone_verified: boolean;
+
+  /**
+   * هل الحساب ليه رمز دخول؟ (ADR-0109)
+   *
+   * `false` لمستخدم قديم اتسجّل بالـOTP قبل التبديل — الصفحة بتطلب منه يحط رمزه وهو داخل
+   * بالفعل. اختياري في النوع عمدًا: نسخة API أقدم مالهاش الحقل، والتعامل بيكون «مش موجود =
+   * مافيش داعي نزنّق المستخدم».
+   */
+  pin_set?: boolean;
   email: string | null;
   full_name: string;
   avatar_url: string | null;

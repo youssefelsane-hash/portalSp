@@ -27,10 +27,15 @@ import { normalizePhoneNumber } from '../../common/utils/phone-number';
  *
  * ### الحارس
  *
- * في التطوير، القائمة الفاضية ممكن تفتح الوضع لكل الأرقام على قاعدة منفصلة. في
- * `production|staging` الحارس يفرض قائمة E.164 غير فارغة وكودًا غير افتراضي؛ وأي رقم خارج
- * القائمة يُرفض قبل إنشاء OTP أو محاولة SMS. بذلك يمكن تشغيل Closed Beta على بنية Production
- * حقيقية من غير فتح باب الدخول للعامة.
+ * `env.validation.ts` بيمنع الإقلاع أصلاً لو `NODE_ENV=production|staging` والوضع مفعّل.
+ * فالفصل بين الاختبار والإنتاج مفروض عند الإقلاع، مش متروك لمراجعة بشرية.
+ *
+ * **ليه الحارس رجع صلب** (ADR-0109): الاستثناء اللي كان بيسمح بالوضع ده في الإنتاج اتعمل عشان
+ * Closed Beta وقت ما الدخول كان بالـOTP ومزوّد الـSMS مش مُجهّز. الدخول بقى برقم + رمز،
+ * فالمختبِر بيدخل برمزه زي أي مستخدم ومفيش أي حاجة محتاجة كود ثابت في الإنتاج.
+ *
+ * القائمة (`OTP_TEST_MODE_PHONES`) بتفضل للتطوير المحلي: فاضية = الوضع لكل الأرقام على القاعدة
+ * المحلية، ومملياة = لأرقام بعينها بس (مفيد لو بتختبر مسار حقيقي ومسار ثابت جنب بعض).
  */
 export interface OtpTestMode {
   readonly enabled: boolean;
@@ -63,12 +68,6 @@ export function readOtpTestMode(config: ConfigService): OtpTestMode {
 export function usesFixedOtp(mode: OtpTestMode, phoneNumber: string): boolean {
   if (!mode.enabled || !mode.fixedCode) return false;
   if (mode.allowedPhones.length === 0) return true;
-  return isAllowedOtpTestPhone(mode, phoneNumber);
-}
-
-/** هل الرقم موجود صراحةً في قائمة مختبري الـClosed Beta؟ */
-export function isAllowedOtpTestPhone(mode: OtpTestMode, phoneNumber: string): boolean {
-  if (!mode.enabled || !mode.fixedCode || mode.allowedPhones.length === 0) return false;
   const normalized = normalizePhoneNumber(phoneNumber);
   return mode.allowedPhones.includes(typeof normalized === 'string' ? normalized : phoneNumber);
 }

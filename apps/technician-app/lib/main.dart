@@ -12,6 +12,7 @@ import 'design/branded_loading_screen.dart';
 import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
+import 'features/auth/set_pin_screen.dart';
 import 'features/onboarding/location_capture.dart';
 import 'features/onboarding/onboarding_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
@@ -202,6 +203,13 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
       return const BiometricUnlockScreen();
     }
     if (!auth.isAuthenticated) return const LoginScreen();
+    // **هجرة الـOTP → رمز الدخول (ADR-0109 §6-أ)**: فني داخل بجلسة محفوظة من قبل التبديل
+    // مالوش رمز. الشاشة دي **بتقفل** لأن الحساب في اللحظة دي مالوش **أي** credential: أول ما
+    // الجلسة تنتهي يبقى مقفول برّه حسابه وبرّه أرباحه ومحتاج استرجاع من الأدمن. بتتفحص **قبل**
+    // بوابة الاعتماد: الرمز حاجة الحساب نفسه، ومالهاش علاقة بحالة KYC.
+    if (auth.user?.pinSet == false) {
+      return const SetPinScreen(mode: SetPinMode.migration);
+    }
     // مزوّد خدمة واحد موحّد (ADR-0031) — صفر تفرّع بعد الدخول حسب نوع حساب: كل فني (بما فيهم
     // الشغالة/المربية، بقت تسجّل بنفس المسار بالظبط) بيعدّي نفس بوابة الاعتماد (KYC كامل).
     return const _VerificationGate();

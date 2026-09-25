@@ -80,7 +80,7 @@ void main() {
         'POST',
         '/orders',
         accessToken: customerToken,
-        body: {'service_id': serviceId, 'address_id': addressId, 'problem_description': 'اختبار رسوم الإلغاء — طلب ١'},
+        body: {'service_id': serviceId, 'scheduled_at': bookableScheduledAt(), 'address_id': addressId, 'problem_description': 'اختبار رسوم الإلغاء — طلب ١'},
       );
       final orderId = order!['id'] as String;
       final totalCents = order['total_amount_cents'] as int;
@@ -105,7 +105,7 @@ void main() {
         'POST',
         '/orders',
         accessToken: customerToken,
-        body: {'service_id': serviceId, 'address_id': addressId, 'problem_description': 'اختبار رفض سبب الفني — طلب ٢'},
+        body: {'service_id': serviceId, 'scheduled_at': bookableScheduledAt(), 'address_id': addressId, 'problem_description': 'اختبار رفض سبب الفني — طلب ٢'},
       );
       final order2Id = order2!['id'] as String;
       await expectLater(

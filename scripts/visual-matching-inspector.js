@@ -16,12 +16,12 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const bcrypt = require('/home/user/portalSp/node_modules/bcryptjs');
 const { chromium } = require('/home/user/portalSp/node_modules/playwright-core');
 const { LiveHarness } = require('./lib/live-harness');
 
 const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:3001';
-const KNOWN_OTP = '123456';
+/** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 const args = process.argv.slice(2);
 const OUT_DIR = args.indexOf('--out') === -1 ? '/tmp/inspector-shots' : args[args.indexOf('--out') + 1];
 
@@ -87,15 +87,10 @@ async function main() {
     await page.goto(`${ADMIN_URL}/login`, { waitUntil: 'networkidle' });
     await page.locator('#phone_number').click();
     await page.locator('#phone_number').pressSequentially(adminUser.phone_number, { delay: 15 });
-    await page.locator('button[type=submit]').first().click();
-    await page.waitForSelector('#otp_code', { timeout: 30_000 });
-    // الكود متهشّر في القاعدة، فبنحطّ مكانه هاش كود معروف (المفتاح `phone_number` مش `user_id`).
-    await h.q(`UPDATE otp_codes SET code_hash = $2, attempts_count = 0, is_used = false WHERE phone_number = $1`, [
-      adminUser.phone_number,
-      bcrypt.hashSync(KNOWN_OTP, 10),
-    ]);
-    await page.locator('#otp_code').click();
-    await page.locator('#otp_code').pressSequentially(KNOWN_OTP, { delay: 15 });
+    // **ADR-0109 — خطوة واحدة**: الرقم والرمز مع بعض، والرمز جاي من الـseed. قبل كده كان لازم
+    // يطلب OTP، يستنى خانة الكود، ويستبدل الهاش في `otp_codes` — كل ده اتشال.
+    await page.locator('#pin').click();
+    await page.locator('#pin').pressSequentially(LOGIN_PIN, { delay: 15 });
     await page.locator('button[type=submit]').first().click();
     await page.waitForURL((u) => !u.pathname.includes('/login'), { timeout: 30_000 });
 

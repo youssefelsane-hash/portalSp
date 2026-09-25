@@ -85,6 +85,9 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
       { userRequiresMfa: jest.fn().mockResolvedValue(false) } as never,
       { hasAnyCredential: jest.fn().mockResolvedValue(false) } as never,
       { routeToRole: jest.fn() } as never,
+      // ADR-0109 — `auth.login_method`. الـspecs دي مكتوبة على مسار الـOTP، فالـstub
+      // بيرجّع 'otp' عشان سلوكها يفضل زي ما هو بالحرف.
+      { getString: async () => 'otp' } as never,
     );
   });
 

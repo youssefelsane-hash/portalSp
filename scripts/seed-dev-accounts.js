@@ -11,12 +11,20 @@
 //
 // الاستخدام:  node scripts/seed-dev-geo.js && node scripts/seed-dev-accounts.js
 const { Client } = require('pg');
+const bcrypt = require('bcryptjs');
 const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
+const { PIN_BCRYPT_ROUNDS } = require('./lib/pin-constants');
 
 const DATABASE_URL = resolveApiDatabaseUrl();
 
-// الأرقام دي **مش أسرار** — أرقام وهمية في قاعدة تطوير محلية، والدخول بيها بيتم بكود OTP
-// بيتطبع في لوج التطوير بس (الإنتاج مابيطبعهوش). مافيش أي كلمة سر أو توكن متخزّن هنا.
+// الأرقام دي **مش أسرار** — أرقام وهمية في قاعدة تطوير محلية.
+//
+// **رمز الدخول (ADR-0109)**: الدخول بقى برمز مش بكود SMS، فالحسابات دي محتاجة رمز وإلا
+// `POST /auth/pin/login` بيرفضها وكل اختبار بيستخدمها بيسقط. الرمز بيتقرا من `DEV_SEED_PIN`
+// وله قيمة افتراضية للتطوير المحلي — **مش سر**: بيتحط على حسابات وهمية في قاعدة محلية،
+// ومالوش أي وجود في الإنتاج (الحسابات دي مش موجودة هناك أصلاً). لازم يطابق `kLiveTestPin` في
+// `test_live/_live_support.dart` بتاع التطبيقين.
+const DEV_SEED_PIN = process.env.DEV_SEED_PIN || '417253';
 const CUSTOMERS = [
   ['+201000009999', 'عميل التطوير الرئيسي'],
   ['+201000000101', 'عميل تطوير ١٠١'],
@@ -69,15 +77,30 @@ async function main() {
 
     /** بيرجّع id المستخدم، وبيعمله لو مش موجود. `users.phone_number` مالهاش unique constraint
      *  فـ`ON CONFLICT` مش متاحة — الفحص بيتعمل صراحةً. */
+    // الهاش بيتحسب **مرة واحدة** لكل التشغيلة: تكلفة bcrypt ١٢ ضربتها في ٢٥ حساب كانت
+    // بتخلّي السكربت ياخد تقريبًا ٧ ثواني بلا أي داعي — نفس الرمز نفس الهاش.
+    const seedPinHash = await bcrypt.hash(DEV_SEED_PIN, PIN_BCRYPT_ROUNDS);
+
     async function upsertUser(phone, fullName, userType) {
       const [existing] = await q(`SELECT id FROM users WHERE phone_number = $1 AND deleted_at IS NULL LIMIT 1`, [phone]);
       if (existing) {
-        await q(`UPDATE users SET user_type = $2, is_active = true WHERE id = $1`, [existing.id, userType]);
+        // `pin_hash IS NULL` شرط مقصود: السكربت idempotent ومابيلغيش رمز حد غيّره بإيده
+        // وهو بيختبر. بيفكّ القفل والمحاولات برضه — حساب تطوير مقفول بعد اختبار تخمين
+        // كان بيسقّط كل اللي بعده لسبب مالوش علاقة بالكود.
+        await q(
+          `UPDATE users
+              SET user_type = $2, is_active = true,
+                  pin_hash = COALESCE(pin_hash, $3), pin_set_at = COALESCE(pin_set_at, now()),
+                  pin_failed_attempts = 0, pin_locked_until = NULL
+            WHERE id = $1`,
+          [existing.id, userType, seedPinHash],
+        );
         return { id: existing.id, created: false };
       }
       const [row] = await q(
-        `INSERT INTO users (phone_number, full_name, user_type, is_active) VALUES ($1,$2,$3,true) RETURNING id`,
-        [phone, fullName, userType],
+        `INSERT INTO users (phone_number, full_name, user_type, is_active, pin_hash, pin_set_at)
+         VALUES ($1,$2,$3,true,$4,now()) RETURNING id`,
+        [phone, fullName, userType, seedPinHash],
       );
       return { id: row.id, created: true };
     }

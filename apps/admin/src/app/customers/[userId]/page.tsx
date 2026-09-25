@@ -27,6 +27,7 @@ import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
 import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/order-labels';
 import { ErrorNotice } from '@/components/notice';
+import { ResetPinButton } from '@/components/reset-pin-button';
 import { DataList, DataRow } from '@/components/data-list';
 import { COMPLAINT_SEVERITY_LABELS, COMPLAINT_STATUS_LABELS } from '@/lib/support-labels';
 
@@ -292,9 +293,13 @@ export default function CustomerDetailPage() {
           </span>
         }
         actions={
-          <Button variant="outline" onClick={goBack}>
-            رجوع للقايمة
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* ADR-0109 §6-ب — المخرج الوحيد لعميل نسي رمزه وهو مش داخل. */}
+            <ResetPinButton userId={userId} userLabel={detail.full_name} />
+            <Button variant="outline" onClick={goBack}>
+              رجوع للقايمة
+            </Button>
+          </div>
         }
       />
 

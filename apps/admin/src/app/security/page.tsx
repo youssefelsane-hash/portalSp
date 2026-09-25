@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ErrorNotice } from '@/components/notice';
+import { ChangePinCard } from '@/components/change-pin-card';
 import { KeyRound, Laptop } from 'lucide-react';
 
 // إدارة Passkeys والأجهزة/الجلسات (ADR-0011 §5/§21) — تسجيل Passkey جديد بيحصل بس جوّه مسار
@@ -74,11 +75,14 @@ export default function SecurityPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الأمان والأجهزة" description={`إدارة Passkeys والجلسات المفتوحة لحساب ${user?.full_name ?? ''}`} />
+      <PageHeader title="الأمان والأجهزة" description={`رمز الدخول وPasskeys والجلسات المفتوحة لحساب ${user?.full_name ?? ''}`} />
 
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {/* ADR-0109 — الرمز أول عامل، والـPasskey فوقه. الترتيب بيعكس ده. */}
+        <ChangePinCard />
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">

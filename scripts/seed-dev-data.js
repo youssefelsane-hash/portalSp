@@ -38,7 +38,14 @@
  * مستندات حقيقية؛ وصولها لقاعدة إنتاج معناه حسابات مفتوحة بلا تحقق.
  */
 const { Client } = require('pg');
+const bcrypt = require('bcryptjs');
 const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
+const { PIN_BCRYPT_ROUNDS } = require('./lib/pin-constants');
+
+// **رمز الدخول لحسابات التطوير (ADR-0109)** — نفس قيمة `scripts/seed-dev-accounts.js`
+// و`kLiveTestPin` في `test_live/`. مش سر: حسابات وهمية في قاعدة محلية، والسكربت نفسه بيرفض
+// يشتغل على `production`/`staging` (شوف أول `main()`).
+const DEV_SEED_PIN = process.env.DEV_SEED_PIN || '417253';
 
 const DB_URL = resolveApiDatabaseUrl();
 
@@ -61,15 +68,25 @@ const ZONE_BOX = { minLng: 31.10, minLat: 29.95, maxLng: 31.40, maxLat: 30.15 };
  * فحص-ثم-إدخال هنا أوضح، ومفيش سباق يخاف منه في سكريبت تطوير بيتشغّل يدويًا.
  */
 async function upsertUser(q, { phone, name, type }) {
+  // `COALESCE` مقصود: مايلغيش رمز حد غيّره بإيده. والقفل/المحاولات بيترجعوا صفر عشان حساب
+  // تطوير مقفول من اختبار تخمين مايسقّطش كل اللي بعده.
+  const pinHash = await bcrypt.hash(DEV_SEED_PIN, PIN_BCRYPT_ROUNDS);
   const [existing] = await q(`SELECT id FROM users WHERE phone_number = $1 AND deleted_at IS NULL`, [phone]);
   if (existing) {
-    await q(`UPDATE users SET is_active = true, user_type = $2, full_name = $3 WHERE id = $1`, [existing.id, type, name]);
+    await q(
+      `UPDATE users
+          SET is_active = true, user_type = $2, full_name = $3,
+              pin_hash = COALESCE(pin_hash, $4), pin_set_at = COALESCE(pin_set_at, now()),
+              pin_failed_attempts = 0, pin_locked_until = NULL
+        WHERE id = $1`,
+      [existing.id, type, name, pinHash],
+    );
     return existing.id;
   }
   const [created] = await q(
-    `INSERT INTO users (phone_number, full_name, user_type, is_active, phone_verified_at)
-     VALUES ($1, $2, $3, true, now()) RETURNING id`,
-    [phone, name, type],
+    `INSERT INTO users (phone_number, full_name, user_type, is_active, phone_verified_at, pin_hash, pin_set_at)
+     VALUES ($1, $2, $3, true, now(), $4, now()) RETURNING id`,
+    [phone, name, type, pinHash],
   );
   return created.id;
 }
@@ -139,6 +156,32 @@ async function main() {
         [techUserId, CAIRO.lng, CAIRO.lat],
       );
     }
+    /**
+     * **لازم تبقى فيه خدمة واحدة على الأقل بتقبل «نفس اليوم»** (`allows_emergency`).
+     *
+     * الفجوة اللي القسم ده بيقفلها: كل خدمات كتالوج التطوير كانت `allows_emergency = false`،
+     * فأي طلب لنفس اليوم بيترفض بـ«الخدمة دي مش متاحة لنفس اليوم». والمشكلة إن ده بيقفل **مسار
+     * التوزيع بالعرض والقبول** بالكامل في بيئة التطوير: الطلب المجدول بيتثبّت على أنسب فني فورًا
+     * بلا جولة عرض (`autoConfirmScheduledOrder`, migration 0351)، فمفيش أي طريقة تختبر بيها
+     * «الفني بياخد عرض وبيقبله» — وخمس اختبارات حية في تطبيق الفني بتقيس ده بالتحديد.
+     *
+     * الاختيار مش عشوائي: خدمة زي «تسليك مواسير» بتقبل نفس اليوم **في الواقع** — ده أقرب تمثيل
+     * للإنتاج مش حيلة للاختبارات. لو مفيش خدمة بالاسم ده، بناخد أول خدمة بلا حقول تسعير إجبارية.
+     */
+    const [sameDayService] = await q(
+      `UPDATE services SET allows_emergency = true, updated_at = now()
+        WHERE id = COALESCE(
+                (SELECT id FROM services WHERE name_ar = 'تسليك مواسير' AND deleted_at IS NULL LIMIT 1),
+                (SELECT s.id FROM services s
+                  WHERE s.deleted_at IS NULL AND s.is_active
+                    AND NOT EXISTS (
+                      SELECT 1 FROM service_pricing_fields f
+                       WHERE f.service_id = s.id AND f.is_required AND f.deleted_at IS NULL)
+                  ORDER BY s.created_at LIMIT 1))
+        RETURNING name_ar`,
+    );
+    if (sameDayService) done.push(['خدمة نفس اليوم', sameDayService.name_ar]);
+
     // مؤهّل لكل الخدمات الموجودة + شغّال في النطاق — من غير الاتنين دول التوزيع مالقاش حد.
     await q(
       `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)
@@ -188,8 +231,8 @@ async function main() {
   console.log('\n\x1b[32m✅ بيانات التطوير جاهزة\x1b[0m\n');
   for (const [label, value] of done) console.log(`   ${pad(label, 22)} ${value}`);
   console.log(`
-   \x1b[2mالدخول بالـOTP: اطلب الكود من التطبيق/اللوحة، وهتلاقيه مطبوع في لوج الـAPI:
-     tail -f .dev-logs/api.log | grep OTP\x1b[0m
+   \x1b[2mالدخول (ADR-0109): رقم الموبايل + رمز الدخول ${DEV_SEED_PIN} — مفيش كود SMS خلاص.
+     غيّره بـ DEV_SEED_PIN=xxxxxx node scripts/seed-dev-data.js\x1b[0m
 `);
 }
 

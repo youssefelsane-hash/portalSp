@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { SMS_DISPATCHER_PROVIDERS } from '../../common/notifications/sms-dispatcher.provider';
+import { SMS_DISPATCHER } from '../../common/notifications/sms-dispatcher';
 import { AuthService } from './auth.service';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -16,6 +17,7 @@ import { WebAuthnService } from './webauthn.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { SettingsService } from '../settings/settings.service';
 
 // ريبوزيتوري وهمي في الذاكرة بديل TypeORM — كفاية عشان نختبر منطق auth.service لوحده
 class FakeRepository<T extends { id?: string }> {
@@ -200,7 +202,10 @@ describe('AuthService', () => {
         // userRequiresMfa بترجع false دايمًا وlogin() بيكمل مسار OTP العادي القديم زي ما هو.
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
-        { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
+        // ADR-0109 — `auth.login_method`. السبيكات دي بتختبر مسار الـOTP، فالـstub بيرجّع 'otp'
+      // عشان سلوكها يفضل زي ما هو بالحرف بعد ما البوابة اتحطت على `requestOtp`.
+      { provide: SettingsService, useValue: { getString: async () => 'otp' } },
+      { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
 
@@ -288,7 +293,13 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
-        ...SMS_DISPATCHER_PROVIDERS,
+        // **بوابة SMS مُجهّزة صراحةً** (ADR-0109): البوابة غير المُجهّزة بقت ترفض الطلب في
+        // البيئات الإنتاجية بدل ما ترجّع نجاح كداب. الاختبارين دول بيقيسوا **إن الكود مايتسجلش
+        // في اللوج**، فمحتاجين يوصلوا لمسار الإرسال أصلاً.
+        {
+          provide: SMS_DISPATCHER,
+          useValue: { isConfigured: true, providerName: 'cequens', send: jest.fn().mockResolvedValue({ delivered: true, failureReason: null }) },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,
@@ -317,6 +328,7 @@ describe('AuthService', () => {
         },
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: SettingsService, useValue: { getString: async () => 'otp' } },
         { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
@@ -341,7 +353,13 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
-        ...SMS_DISPATCHER_PROVIDERS,
+        // **بوابة SMS مُجهّزة صراحةً** (ADR-0109): البوابة غير المُجهّزة بقت ترفض الطلب في
+        // البيئات الإنتاجية بدل ما ترجّع نجاح كداب. الاختبارين دول بيقيسوا **إن الكود مايتسجلش
+        // في اللوج**، فمحتاجين يوصلوا لمسار الإرسال أصلاً.
+        {
+          provide: SMS_DISPATCHER,
+          useValue: { isConfigured: true, providerName: 'cequens', send: jest.fn().mockResolvedValue({ delivered: true, failureReason: null }) },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,
@@ -370,6 +388,7 @@ describe('AuthService', () => {
         },
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: SettingsService, useValue: { getString: async () => 'otp' } },
         { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();

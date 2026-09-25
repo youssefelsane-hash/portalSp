@@ -1,11 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_config.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import 'pin_reset_screen.dart';
 import '../../design/app_theme.dart';
 import '../../design/adaptive_text_action.dart';
 import '../catalog/branding_repository.dart';
@@ -33,124 +32,100 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController(text: '+20');
-  final _otpController = TextEditingController();
+  // ADR-0109 — الخانة بقت رمز دخول بدل كود SMS. الاسم اتغيّر عشان مايفضلش يكدب.
+  final _pinController = TextEditingController();
+  // تأكيد الرمز وقت **التسجيل بس**: غلطة كتابة هنا معناها المستخدم مقفول برّه حسابه ومحتاج
+  // استرجاع من الأدمن — تكلفة عالية جدًا لخانة واحدة زيادة.
+  final _pinConfirmController = TextEditingController();
   final _fullNameController = TextEditingController();
   final _referralCodeController = TextEditingController();
   final _technicianReferralCodeController = TextEditingController();
 
   /// **طلب مالك صريح (docs/08 §77-B2)**: «أول ما يدوس التالي عايز أوتوماتيك الكيبورد يطلع…
   /// ويبقى البوينتر محطوط أوتوماتيك جوه الخانة». `autofocus` لوحده ما ينفعش هنا لأن الحقل
-  /// بيتبنى في نفس الإطار اللي `_otpSent` بيتغيّر فيه — الحل `FocusNode` بيتطلب التركيز بعد
+  /// بيتبنى في نفس الإطار اللي `_pinStep` بيتغيّر فيه — الحل `FocusNode` بيتطلب التركيز بعد
   /// ما الإطار يخلص.
-  final _otpFocusNode = FocusNode();
+  final _pinFocusNode = FocusNode();
 
-  bool _otpSent = false;
+  /// وصلنا لخطوة الرمز؟ (كانت `_pinStep` — دلوقتي مفيش إرسال أصلاً، الانتقال محلي بالكامل
+  /// وبلا أي نداء شبكة، وده أسرع خطوة دخول في التطبيق كله.)
+  bool _pinStep = false;
   bool _isSubmitting = false;
   String? _error;
-  // تسجيل عميل جديد (كانت فجوة موثّقة صراحة) — نفس الشاشة، مود مختلف بس. الفرق: OTP بـ
-  // purpose=register بدل login، وخطوة إضافية للاسم الكامل، ونداء register() بدل verifyOtp().
-  bool _isRegisterMode = false;
-  // لو العميل حاول "دخول" برقم مش مسجّل، الباك-إند بيرفض برسالة واضحة — بدل ما نسيبه يعلق،
-  // نعرضله اقتراح مباشر يحوّله لمود التسجيل بنفس الرقم من غير ما يكتبه تاني.
-  bool _suggestRegister = false;
 
-  /// §106 — «ابعت الكود تاني» بعدّاد تنازلي. قبل كده خطوة الكود مكانش فيها إعادة إرسال خالص:
-  /// أي كود بايظ/منتهي (والسيرفر بيلغي القديم أول ما يتصدر جديد) كان بيحوّل الشاشة لطريق
-  /// مسدود، والمخرج الوحيد «رقم الموبايل غلط؟ رجّع خطوة» — رسالة محدش هيدوس عليها والرقم صح.
-  int _resendSeconds = 0;
-  Timer? _resendTimer;
+  /// **محاولات فاشلة في الجلسة الحالية — عدّاد محلي بالكامل.**
+  ///
+  /// السيرفر **مابيقولش** إن الحساب اتقفل، وده مقصود: رسالة أو كود حالة مختلف للحساب المقفول
+  /// مستحيل يتقال إلا لحساب **موجود**، فبيبقى تعداد حسابات مؤكّد (اتقاس فعليًا: مسجّل ⇒ 429،
+  /// مش مسجّل ⇒ 401). التنبيه هنا بيرجّع المعلومة للمستخدم من غير أي oracle على السيرفر، لأن
+  /// الرقم ده محاولات **الجهاز ده** مش حالة الحساب.
+  int _failedAttempts = 0;
+  // تسجيل عميل جديد — نفس الشاشة، مود مختلف بس. الفرق: خطوة إضافية للاسم الكامل، وتأكيد
+  // الرمز، ونداء `registerWithPin()` بدل `loginWithPin()`.
+  bool _isRegisterMode = false;
+
+  /// **اقتراح التسجيل بعد فشل دخول** — بيتعرض على **كل** فشل دخول بلا استثناء.
+  ///
+  /// قبل ADR-0109 كان بيتعرض بس لما الباك-إند يقول «الرقم مش مسجّل». الرد الجديد **مايفرّقش**
+  /// بين رقم مش مسجّل ورمز غلط (نفس الرسالة بالحرف — منع تعداد الحسابات، ADR-0109 §5)، فربط
+  /// الاقتراح بالسبب بقى مستحيل. عرضه دايمًا **مايسرّبش حاجة** لأنه مستقل تمامًا عن وجود
+  /// الحساب، وفي نفس الوقت بيمنع المستخدم الجديد من إنه يتحاصر في شاشة رمز مالوش رمز فيها.
+  bool _suggestRegister = false;
 
   @override
   void dispose() {
-    _resendTimer?.cancel();
     _phoneController.dispose();
-    _otpController.dispose();
+    _pinController.dispose();
+    _pinConfirmController.dispose();
     _fullNameController.dispose();
     _referralCodeController.dispose();
     _technicianReferralCodeController.dispose();
-    _otpFocusNode.dispose();
+    _pinFocusNode.dispose();
     super.dispose();
   }
 
-  /// مهلة بين طلبين — الباك-إند نفسه بيقفل عند ٥ طلبات/دقيقة (`@Throttle` على
-  /// `POST /auth/otp/request`)، فالعدّاد هنا بيمنع المستخدم يوصل للحظر أصلاً بدل ما يتفاجئ بيه.
-  void _startResendCooldown() {
-    _resendTimer?.cancel();
-    setState(() => _resendSeconds = 30);
-    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      setState(() => _resendSeconds -= 1);
-      if (_resendSeconds <= 0) timer.cancel();
-    });
-  }
-
-  Future<void> _resendOtp() async {
-    setState(() {
-      _isSubmitting = true;
-      _error = null;
-      _suggestRegister = false;
-    });
-    try {
-      await context.read<AuthRepository>().requestOtp(
-        _phoneController.text.trim(),
-        purpose: _isRegisterMode ? 'register' : 'login',
-      );
-      if (!mounted) return;
-      // الكود القديم بقى ملغي فعليًا على السيرفر — لازم الخانة تتفضّى، وإلا المستخدم هيضغط
-      // «دخول» على كود ميت ويحرق محاولة من الخمسة بلا داعي.
-      _otpController.clear();
-      _startResendCooldown();
-      _otpFocusNode.requestFocus();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي'),
-        ),
-      );
-    } catch (errRaw) {
-      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
-      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
-      final err = ApiException.from(errRaw);
-      if (mounted) setState(() => _error = err.message);
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+  /// **الانتقال لخطوة الرمز — بلا أي نداء شبكة** (ADR-0109).
+  ///
+  /// كانت `_requestOtp()` بتنادي السيرفر عشان يبعت SMS ويستنى الرد. دلوقتي مفيش حاجة تتبعت
+  /// خالص: التحقق محلي والانتقال فوري. ده أكبر فرق بيحسّه المستخدم في التغيير كله.
+  void _goToPinStep() {
+    final phone = _phoneController.text.trim();
+    if (phone.replaceAll(RegExp(r'[^0-9]'), '').length < 10) {
+      setState(() => _error = 'اكتب رقم موبايل صحيح');
+      return;
     }
-  }
-
-  Future<void> _requestOtp() async {
     if (_isRegisterMode && _fullNameController.text.trim().length < 2) {
       setState(() => _error = 'اكتب اسمك الكامل الأول');
       return;
     }
     setState(() {
-      _isSubmitting = true;
+      _pinStep = true;
       _error = null;
       _suggestRegister = false;
     });
-    try {
-      await context.read<AuthRepository>().requestOtp(
-        _phoneController.text.trim(),
-        purpose: _isRegisterMode ? 'register' : 'login',
-      );
-      setState(() => _otpSent = true);
-      _startResendCooldown();
-      // بعد ما الإطار اللي بيبني حقل الكود يخلص — قبل كده الحقل لسه مش موجود في الشجرة.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _otpFocusNode.requestFocus();
-      });
-    } catch (errRaw) {
-      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
-      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
-      final err = ApiException.from(errRaw);
-      setState(() => _error = err.message);
-    } finally {
-      setState(() => _isSubmitting = false);
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pinFocusNode.requestFocus();
+    });
   }
 
-  Future<void> _verifyOtp() async {
+  Future<void> _submitPin() async {
+    final pin = _pinController.text.trim();
+    // فحص محلي قبل أي نداء — نفس قواعد `login-pin.policy.ts` في الباك-إند. الباك-إند هو
+    // مصدر الحقيقة وبيفحص تاني؛ ده بس عشان المستخدم ياخد رد فوري بدل رحلة شبكة.
+    if (pin.length < 4) {
+      setState(() => _error = 'رمز الدخول لازم يكون من 4 لـ6 أرقام');
+      return;
+    }
+    if (_isRegisterMode) {
+      if (_isWeakPin(pin)) {
+        setState(() => _error = 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+        return;
+      }
+      if (_pinConfirmController.text.trim() != pin) {
+        setState(() => _error = 'الرمزين مش زي بعض — اكتب نفس الرمز في الخانتين');
+        return;
+      }
+    }
     setState(() {
       _isSubmitting = true;
       _error = null;
@@ -159,69 +134,77 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final auth = context.read<AuthRepository>();
       if (_isRegisterMode) {
-        await auth.register(
+        await auth.registerWithPin(
           _phoneController.text.trim(),
-          _otpController.text.trim(),
+          pin,
           _fullNameController.text.trim(),
           referralCode: _referralCodeController.text.trim(),
           technicianReferralCode: _technicianReferralCodeController.text.trim(),
         );
       } else {
-        await auth.verifyOtp(
-          _phoneController.text.trim(),
-          _otpController.text.trim(),
-        );
+        await auth.loginWithPin(_phoneController.text.trim(), pin);
       }
-      // في الوضع المشروط لازم نرجّع للرحلة اللي فتحتنا. في الوضع الجذري `_AuthGate` بيتكفّل.
       if (widget.isModal && mounted) Navigator.of(context).pop(true);
     } catch (errRaw) {
-      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
-      // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
+      // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة — مايتسابش يهرب فيسيب
+      // الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
-      // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
-      final suggestRegister = !_isRegisterMode && err.statusCode == 404;
-      // الخانة بتتفضّى وتاخد التركيز تاني — الكود اللي اترفض مش هينفع تاني مهما اتبعت، وسيبانه
-      // مكتوب بيخلي `onChanged` (اللي بيبعت أوتوماتيك عند ٦ أرقام) عاجز يشتغل لحد ما المستخدم
-      // يمسح بنفسه، ودي كانت أسرع طريقة يستهلك بيها محاولاته الخمسة.
-      _otpController.clear();
+      // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب بيخلي المستخدم يضغط
+      // «دخول» على نفس الرمز الغلط ويحرق محاولة من الخمسة بلا داعي.
+      _pinController.clear();
       setState(() {
         _error = err.message;
-        _suggestRegister = suggestRegister;
+        _suggestRegister = !_isRegisterMode;
+        _failedAttempts += 1;
       });
-      if (!suggestRegister) _otpFocusNode.requestFocus();
+      _pinFocusNode.requestFocus();
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  /// الرجوع لخطوة الرقم بيوقف العدّاد — تايمر دوري بيعمل rebuild كل ثانية لخطوة مش ظاهرة أصلاً.
+  /// نفس قاعدة `isWeakPin` في الباك-إند بالحرف — كله نفس الرقم، أو تسلسل صاعد/نازل.
+  static bool _isWeakPin(String pin) {
+    if (pin.split('').toSet().length == 1) return true;
+    final d = pin.split('').map(int.parse).toList();
+    var asc = true, desc = true;
+    for (var i = 1; i < d.length; i++) {
+      if (d[i] != d[i - 1] + 1) asc = false;
+      if (d[i] != d[i - 1] - 1) desc = false;
+    }
+    return asc || desc;
+  }
+
+  /// الرجوع لخطوة الرقم. الرمز بيتفضّى: رمز مكتوب لرقم اتغيّر هو أسوأ حالة ممكنة — محاولة
+  /// محروقة على حساب حد تاني.
   void _backToPhoneStep() {
-    _resendTimer?.cancel();
     setState(() {
-      _otpSent = false;
-      _resendSeconds = 0;
+      _pinStep = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
+      _error = null;
+      // رقم جديد = محاولات جديدة. العدّاد ده عن «الرمز اللي بتجرّبه على الرقم ده».
+      _failedAttempts = 0;
     });
   }
 
   void _switchToRegister() {
-    _resendTimer?.cancel();
     setState(() {
-      _resendSeconds = 0;
       _isRegisterMode = true;
-      _otpSent = false;
-      _otpController.clear();
+      _pinStep = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
       _error = null;
       _suggestRegister = false;
     });
   }
 
   void _toggleMode() {
-    _resendTimer?.cancel();
     setState(() {
-      _resendSeconds = 0;
       _isRegisterMode = !_isRegisterMode;
-      _otpSent = false;
-      _otpController.clear();
+      _pinStep = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
       _fullNameController.clear();
       _referralCodeController.clear();
       _technicianReferralCodeController.clear();
@@ -264,18 +247,23 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _otpSent
-                          ? 'بعتنالك كود على ${_phoneController.text.trim()}'
-                          : 'اكتب رقم موبايلك وهنبعتلك كود تأكيد',
+                      _pinStep
+                          ? (_isRegisterMode
+                              ? 'اختار رمز دخول لحسابك — هتستخدمه لو سجّلت من جديد'
+                              : 'اكتب رمز الدخول بتاعك')
+                          : (_isRegisterMode
+                              ? 'اكتب بياناتك وهتختار رمز دخول في الخطوة الجاية'
+                              : 'اكتب رقم موبايلك ورمز دخولك'),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 24),
-                    if (!_otpSent) ...[
+                    if (!_pinStep) ...[
                       if (_isRegisterMode) ...[
                         TextField(
+                          key: const ValueKey('login-full-name-field'),
                           controller: _fullNameController,
                           textCapitalization: TextCapitalization.words,
                           decoration: const InputDecoration(
@@ -286,12 +274,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                       ],
                       TextField(
+                        key: const ValueKey('login-phone-field'),
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
                         textDirection: TextDirection.ltr,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) =>
-                            _isSubmitting ? null : _requestOtp(),
+                            _isSubmitting ? null : _goToPinStep(),
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
                           hintText: '+201001234567',
@@ -301,6 +290,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (_isRegisterMode) ...[
                         const SizedBox(height: 12),
                         TextField(
+                          key: const ValueKey('login-referral-field'),
                           controller: _referralCodeController,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
@@ -311,6 +301,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
+                          key: const ValueKey('login-technician-referral-field'),
                           controller: _technicianReferralCodeController,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
@@ -322,45 +313,66 @@ class _LoginScreenState extends State<LoginScreen> {
                       ],
                     ] else ...[
                       TextField(
-                        key: const ValueKey('otp-field'),
-                        controller: _otpController,
-                        focusNode: _otpFocusNode,
+                        key: const ValueKey('login-pin-field'),
+                        controller: _pinController,
+                        focusNode: _pinFocusNode,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                        ],
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         textDirection: TextDirection.ltr,
                         textAlign: TextAlign.center,
                         maxLength: 6,
-                        // ملء تلقائي من رسالة الـSMS على أندرويد/iOS — العميل ما بيخرجش من
-                        // التطبيق أصلاً. مجاني بالكامل: سطر واحد والنظام بيتكفّل.
-                        autofillHints: const [AutofillHints.oneTimeCode],
+                        // **مخفي**: رمز دائم مش كود بيموت بعد دقايق — حد واقف جنبك مايقراهوش.
+                        obscureText: true,
+                        // مفيش `autofillHints.oneTimeCode` — ده مش كود من SMS، والنظام
+                        // مايعرضش اقتراحات غلط على خانة رمز دائم.
                         style: const TextStyle(
                           fontSize: 24,
                           letterSpacing: 8,
                           fontWeight: FontWeight.w700,
                         ),
-                        // الإرسال بمجرد اكتمال الأرقام الستة — من غير ما يدوّر على الزرار.
-                        onChanged: (value) {
-                          if (value.length == 6 && !_isSubmitting) _verifyOtp();
-                        },
-                        onSubmitted: (_) => _isSubmitting ? null : _verifyOtp(),
-                        decoration: const InputDecoration(
-                          labelText: 'كود التحقق',
+                        // مفيش إرسال تلقائي عند ٦ أرقام: الرمز ممكن يكون ٤ أو ٥ أو ٦، فالإرسال
+                        // التلقائي كان هيبعت رمز ناقص ويحرق محاولة. المستخدم بيضغط بنفسه.
+                        onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
+                        decoration: InputDecoration(
+                          labelText: _isRegisterMode ? 'اختار رمز دخول (4–6 أرقام)' : 'رمز الدخول',
                           counterText: '',
                         ),
                       ),
+                      if (_isRegisterMode) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const ValueKey('login-pin-confirm-field'),
+                          controller: _pinConfirmController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          textDirection: TextDirection.ltr,
+                          textAlign: TextAlign.center,
+                          maxLength: 6,
+                          obscureText: true,
+                          style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.w700),
+                          onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
+                          decoration: const InputDecoration(labelText: 'أكّد الرمز', counterText: ''),
+                        ),
+                      ],
+                      // **المخرج الوحيد لمستخدم نسي رمزه** (ADR-0109 §6-ب) — مفيش SMS بعد
+                      // التبديل، فالاسترجاع بيمرّ على الدعم. لازم يبقى ظاهر هنا بالذات: ده
+                      // المكان اللي المستخدم بيكتشف فيه إنه نسي.
                       AdaptiveTextAction(
-                        key: const ValueKey('otp-resend'),
-                        onPressed: (_isSubmitting || _resendSeconds > 0)
+                        key: const ValueKey('login-forgot-pin'),
+                        onPressed: _isSubmitting
                             ? null
-                            : _resendOtp,
-                        icon: Icons.refresh_rounded,
-                        label: _resendSeconds > 0
-                            ? 'تقدر تطلب كود جديد بعد $_resendSeconds ثانية'
-                            : 'ما وصلكش الكود؟ ابعته تاني',
+                            : () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => PinResetScreen(
+                                      initialPhone: _phoneController.text.trim(),
+                                    ),
+                                  ),
+                                ),
+                        icon: Icons.help_outline_rounded,
+                        label: 'نسيت رمز الدخول؟',
                       ),
                       AdaptiveTextAction(
+                        key: const ValueKey('login-back-to-phone'),
                         onPressed: _isSubmitting ? null : _backToPhoneStep,
                         icon: Icons.edit_outlined,
                         label: 'رقم الموبايل غلط؟ رجّع خطوة',
@@ -370,22 +382,37 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 8),
                       Text(
                         _error!,
+                        key: const ValueKey('login-error-text'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    ],
+                    // بعد ٥ محاولات (نفس رصيد `PIN_MAX_ATTEMPTS` في الباك-إند) الحساب بيبقى
+                    // مقفول مؤقتًا فعلاً — والسيرفر مابيقولش، فبنقوله إحنا من عندنا.
+                    if (_failedAttempts >= 5) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'جرّبت كتير — الحساب بيتقفل مؤقتًا بعد محاولات غلط متتالية. '
+                        'استنى شوية وجرّب تاني، أو استخدم «نسيت رمز الدخول؟».',
+                        key: const ValueKey('login-too-many-attempts'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ],
                     if (_suggestRegister) ...[
                       const SizedBox(height: 4),
                       AdaptiveTextAction(
+                        key: const ValueKey('login-suggest-register'),
                         onPressed: _isSubmitting ? null : _switchToRegister,
-                        label: 'سجّل حساب جديد بنفس الرقم',
+                        label: 'معندكش حساب؟ سجّل بنفس الرقم',
                       ),
                     ],
                     const SizedBox(height: 16),
                     FilledButton(
+                      key: const ValueKey('login-submit'),
                       onPressed: _isSubmitting
                           ? null
-                          : (_otpSent ? _verifyOtp : _requestOtp),
+                          : (_pinStep ? _submitPin : _goToPinStep),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                       ),
@@ -399,14 +426,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             )
                           : Text(
-                              _otpSent
+                              _pinStep
                                   ? (_isRegisterMode ? 'إنشاء الحساب' : 'دخول')
-                                  : 'ابعت كود التحقق',
+                                  // مفيش كود بيتبعت خلاص — الزرار بيوصف الخطوة الجاية بس.
+                                  : 'التالي',
                             ),
                     ),
-                    if (!_otpSent) ...[
+                    if (!_pinStep) ...[
                       const SizedBox(height: 8),
                       AdaptiveTextAction(
+                        key: const ValueKey('login-toggle-mode'),
                         onPressed: _isSubmitting ? null : _toggleMode,
                         label: _isRegisterMode
                             ? 'عندك حساب؟ سجّل دخول'

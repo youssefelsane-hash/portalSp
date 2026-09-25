@@ -75,15 +75,24 @@ describe('envValidationSchema — docs/08 §19 بند 16 (fail-fast للإعدا
     expect(error!.message).toContain('S3_ACCESS_KEY_ID');
   });
 
-  it('مفيش أي بيانات اعتماد CEQUENS في الإنتاج يترفض — القناة الوحيدة لتسليم كود OTP', () => {
+  /**
+   * **الشرط ده انقلب مع ADR-0109 — بقصد.**
+   *
+   * الاختبار القديم كان بيتوقّع رفض لو مفيش بيانات CEQUENS، وحجته في اسمه: «القناة الوحيدة
+   * لتسليم كود OTP». الحجة دي **مابقيتش صحيحة**: الدخول بقى برقم + رمز ومفيش SMS في مساره.
+   *
+   * وإبقاء الشرط كان هيمنع إقلاع الإنتاج على منصة قرّرت عن قصد إنها ماتعتمدش على مزوّد SMS —
+   * وده الهدف اللي ADR-0109 اتعمل عشانه أصلاً.
+   */
+  it('غياب بيانات CEQUENS بالكامل في الإنتاج بيعدّي — الـSMS بقى قناة إشعارات اختيارية', () => {
     const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
     delete (env as Record<string, unknown>).CEQUENS_API_KEY;
     delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
-    expect(error).toBeDefined();
-    expect(error!.message).toContain('CEQUENS');
+    expect(error).toBeUndefined();
   });
 
+  /** أما التجهيز **الناقص** فغلطة محدش بيقصدها، ونتيجتها أسوأ من الغياب: إعداد يبان مظبوط والرسايل تروح للوج. */
   it('CEQUENS بمفتاح API بلا اسم مُرسِل يترفض — الرسالة نفسها بترفض من المزوّد من غير Sender ID معتمد', () => {
     const env = { ...MINIMAL_VALID_PRODUCTION_ENV };
     delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
@@ -131,13 +140,25 @@ describe('envValidationSchema — docs/08 §19 بند 16 (fail-fast للإعدا
     expect(error!.message).toContain('TWILIO');
   });
 
-  it('SMS_PROVIDER=twilio بلا أي بيانات Twilio **مايعدّيش** حتى لو CEQUENS مُعدّ — الحارس بيتبع المزوّد المختار', () => {
+  /**
+   * **الحارس بيتبع المزوّد المختار** — ده لسه صح. اللي اتغيّر (ADR-0109) هو إن الغياب الكامل
+   * بقى مسموح، فالرفض بقى على التجهيز **الناقص** بس.
+   */
+  it('SMS_PROVIDER=twilio بلا أي بيانات Twilio بيعدّي — غياب كامل = قرار واعٍ بعدم استخدام SMS', () => {
     const { error } = envValidationSchema.validate(
       { ...MINIMAL_VALID_PRODUCTION_ENV, SMS_PROVIDER: 'twilio' },
       { allowUnknown: true },
     );
+    expect(error).toBeUndefined();
+  });
+
+  it('SMS_PROVIDER=twilio بـSID لوحده يترفض — التجهيز الناقص غلطة، ونتيجتها رسايل بتروح للوج بصمت', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_PRODUCTION_ENV, SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'sid-only' },
+      { allowUnknown: true },
+    );
     expect(error).toBeDefined();
-    expect(error!.message).toContain('TWILIO');
+    expect(error!.message).toContain('نصّ تجهيز');
   });
 
   it('SMS_PROVIDER بقيمة مش معروفة يترفض — بدل ما يقع بصمت على الافتراضي', () => {
@@ -202,13 +223,20 @@ describe('envValidationSchema — staging لازم يتفحص بنفس صرام�
     expect(error!.message).toContain('STORAGE_PROVIDER');
   });
 
-  it('مفيش بيانات اعتماد بوابة SMS في staging يترفض — نفس فحص production بالحرف', () => {
+  it('تجهيز بوابة SMS الناقص في staging يترفض — نفس فحص production بالحرف (ADR-0109)', () => {
     const env = { ...MINIMAL_VALID_STAGING_ENV };
-    delete (env as Record<string, unknown>).CEQUENS_API_KEY;
     delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
     const { error } = envValidationSchema.validate(env, { allowUnknown: true });
     expect(error).toBeDefined();
     expect(error!.message).toContain('CEQUENS');
+  });
+
+  it('وغيابها الكامل في staging بيعدّي — القناة بترجع log-only', () => {
+    const env = { ...MINIMAL_VALID_STAGING_ENV };
+    delete (env as Record<string, unknown>).CEQUENS_API_KEY;
+    delete (env as Record<string, unknown>).CEQUENS_SENDER_NAME;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeUndefined();
   });
 
   it('JWT secrets قصيرة/افتراضية في staging يترفضوا — نفس فحص production بالحرف', () => {

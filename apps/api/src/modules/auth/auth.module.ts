@@ -14,6 +14,7 @@ import { AdminMfaRecoveryCode } from './entities/admin-mfa-recovery-code.entity'
 import { OtpCode } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { StepUpToken } from './entities/step-up-token.entity';
+import { PinResetToken } from './entities/pin-reset-token.entity';
 import { User } from './entities/user.entity';
 import { WebAuthnChallenge } from './entities/webauthn-challenge.entity';
 import { WebAuthnCredential } from './entities/webauthn-credential.entity';
@@ -23,6 +24,7 @@ import { SessionsController } from './sessions.controller';
 import { StepUpService } from './step-up.service';
 import { WebAuthnController } from './webauthn.controller';
 import { WebAuthnService } from './webauthn.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { WebAuthnService } from './webauthn.service';
       WebAuthnChallenge,
       AdminMfaRecoveryCode,
       StepUpToken,
+      PinResetToken,
       Wallet,
     ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -42,6 +45,7 @@ import { WebAuthnService } from './webauthn.service';
     NotificationsModule, // NotificationRoutingService — تنبيه super_admin عند استخدام استرجاع MFA
     AuditModule, // AuditLogService — تسجيل عملية admin_mfa.reset (ADR-0011 §6)
     SmsModule, // SMS_DISPATCHER — بوابة تسليم كود التحقق (المزوّد بيتحدد من SMS_PROVIDER)
+    SettingsModule, // SettingsService — مفتاح `auth.login_method` (ADR-0109 §7). مفيش دورة: SettingsModule مابيستوردش AuthModule.
   ],
   controllers: [AuthController, WebAuthnController, SessionsController, AdminMfaController],
   providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService],

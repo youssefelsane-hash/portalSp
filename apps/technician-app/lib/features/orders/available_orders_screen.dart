@@ -294,8 +294,19 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         _error = firstError;
       });
     }
+    // **الشاشة اتقفلت؟ بلاش نداءات جديدة.**
+    //
+    // التلات نداءات دول متسلسلين، وكل واحد فيهم كان بيفحص `mounted` **قبل `setState` بس** — مش
+    // قبل ما يطلق النداء. يعني لو المستخدم قفل الشاشة وهو في نص السلسلة، الشاشة الميتة تفضل
+    // تضرب الشبكة لآخر السلسلة: شغل مهدور على موبايل المستخدم وعلى السيرفر بلا أي مستهلك.
+    //
+    // اتلقط في `all_screens_smoke_live_test`: بعد تخريب شجرة الشاشة كان لسه فيه مؤقت انتهاء مهلة
+    // (٣٠ ثانية) حي لنداء `work-opportunities/crew` — نداء **اتطلق بعد ما الشاشة اختفت**.
+    if (!mounted) return;
     await _loadTeamAssigned();
+    if (!mounted) return;
     await _loadWorkOpportunities();
+    if (!mounted) return;
     await _loadCrewOpportunities();
   }
 

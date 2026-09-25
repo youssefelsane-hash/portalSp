@@ -145,6 +145,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.stale_payment_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة تظهر الدفعة pending أو processing أو manual_review في فحص التسوية للمراجعة البشرية. لا ينشئ النظام محاولة تحصيل بديلة تلقائيًا.' },
   'payments.stale_refund_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة يظهر الاسترداد العالق عند بوابة الدفع في فحص التسوية للمراجعة البشرية. لا يعيد النظام الاسترداد ولا يخرج أي أموال تلقائيًا.' },
   'orders.payment_timeout_minutes': { type: 'number', default: 15, group: 'limits', description: 'إلغاء تلقائي لطلب PENDING_PAYMENT لو الدفع ماتمش' },
+  // **مفتاح الرجوع الفوري لأخطر تغيير في النظام** (ADR-0109 §7). `pin` = الدخول برمز، و
+  // `otp/request` بيترفض فورًا فمفيش أي مسار بيوصل لمزوّد الـSMS ⇒ **صفر تكلفة**. `otp` =
+  // الرجوع للسلوك القديم بتغيير إعداد واحد، مش نشر نسخة جديدة. نفس فلسفة OTP_TEST_MODE (§173).
+  'auth.login_method': { type: 'string', default: 'pin', group: 'security', description: 'وسيلة الدخول: pin (رمز دخول، الافتراضي) أو otp (كود SMS — بيرجّع تكلفة المزوّد).' },
   'payouts.auto_approve_limit_cents': { type: 'number', default: 100000, group: 'limits', description: 'أقصى مبلغ صرف بدون مراجعة بشرية' },
   'payouts.min_amount_cents': { type: 'number', default: 20000, group: 'limits', description: 'أقل مبلغ صرف مسموح' },
 

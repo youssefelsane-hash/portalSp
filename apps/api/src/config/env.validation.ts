@@ -1,7 +1,6 @@
 import * as Joi from 'joi';
 // مصدر واحد لأسماء المزوّدات — الـJoi هنا واللي بيختار وقت التركيب بيقروا نفس القايمة.
 import { SMS_PROVIDERS } from '../common/notifications/sms-dispatcher';
-import { parseTestModePhones } from '../modules/auth/otp-test-mode';
 
 // Script 2 Part M (finding #63، اتكشفت أثناء مراجعة Part G) — بَقّة أمنية حقيقية وخطيرة: كل
 // فحوصات fail-fast تحت دي كانت بتتفحص ضد 'production' بس. النشر الفعلي الحقيقي (Railway) شغال
@@ -83,9 +82,10 @@ export const envValidationSchema = Joi.object({
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
-  // ── وضع اختبار الـOTP (مؤقت — Google Play Closed Testing، docs/08 §173) ─────────
-  // في الإنتاج يسمح به الحارس فقط كـClosed Beta بقائمة أرقام صريحة وكود غير افتراضي. الوضع
-  // بيغيّر **الكود المولَّد** ويوقف إرسال SMS؛ مسار التحقق نفسه لا يتغير.
+  // ── وضع اختبار الـOTP (تطوير محلي بس، docs/08 §173) ─────────────────────────────
+  // **مرفوض تمامًا في staging/production** بالحارس تحت. الشرح الكامل في
+  // `modules/auth/otp-test-mode.ts` — الوضع بيغيّر **الكود المولَّد** وبيوقف إرسال SMS، ومسار
+  // التحقق مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية زي ما هي.
   OTP_TEST_MODE: Joi.boolean().default(false),
   // ٦ أرقام زي الكود الحقيقي — أي طول تاني بيخلي شاشة الإدخال في التطبيق مستحيل تتملى.
   OTP_TEST_MODE_CODE: Joi.string().length(6).pattern(/^[0-9]{6}$/).default('111111'),
@@ -229,61 +229,86 @@ export const envValidationSchema = Joi.object({
     }
     return value;
   })
+  /**
+   * **بوابة الـSMS: غيابها الكامل مسموح، وتجهيزها الناقص لأ** (ADR-0109).
+   *
+   * ### الشرط القديم مات مع الـOTP
+   *
+   * الحارس القديم كان بيمنع الإقلاع في الإنتاج لو مزوّد الـSMS مش مُجهّز، وحجته مكتوبة في
+   * رسالته: «بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل
+   * دخول». الحجة دي **مابقيتش صحيحة**: الدخول بقى برقم + رمز (ADR-0109) ومفيش أي SMS في مساره.
+   *
+   * وإبقاؤه كان هيبقى أسوأ من عدم اللزوم: كان **هيمنع إقلاع الإنتاج** على منصة قرّرت عن قصد
+   * إنها ماتعتمدش على مزوّد SMS — وده بالظبط الهدف اللي ADR-0109 اتعمل عشانه.
+   *
+   * ### والفرق اللي الحارس الجديد بيحرسه
+   *
+   * الـSMS بقى **قناة إشعارات اختيارية**، و`CompositeNotificationDispatcher` بيرجّعها لـ
+   * `LogOnlyNotificationDispatcher` لو مش مُجهّزة — تدهور رشيق مقصود.
+   *
+   * بس فيه فرق جوهري بين حالتين الحارس ده بيميّز بينهم:
+   *
+   * - **غياب كامل** ⇒ قرار واعٍ بعدم استخدام SMS. مسموح، والقناة تبقى log-only.
+   * - **تجهيز ناقص** (مثلاً `CEQUENS_API_KEY` موجود و`CEQUENS_SENDER_NAME` ناقص) ⇒ **غلطة**،
+   *   محدش بيقصدها. والنتيجة أسوأ من الغياب: الإعداد **يبان** مظبوط في اللوحة، والرسايل بتروح
+   *   للوج بصمت. الحارس بيحوّل الغلطة دي لفشل إقلاع صوته عالي.
+   */
   .custom((value: Record<string, unknown>, helpers) => {
-    const productionLike = isProductionLikeEnv(value.NODE_ENV as string | undefined);
-    const closedBetaOtp = productionLike && value.OTP_TEST_MODE === true;
-    if (productionLike && !closedBetaOtp) {
-      const provider = (value.SMS_PROVIDER as string | undefined) ?? 'cequens';
-      if (provider === 'twilio') {
-        const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
-        if (!hasTwilioSms) {
-          return helpers.message({
-            custom:
-              'SMS_PROVIDER=twilio يستلزم TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER التلاتة في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
-          });
-        }
-      } else {
-        // CEQUENS بيقبل مسارين للمصادقة: مفتاح API جاهز، أو تبادل OAuth2 بالأربع قيم.
-        const hasApiKey = Boolean(value.CEQUENS_API_KEY);
-        const hasOauth = Boolean(
-          value.CEQUENS_CLIENT_ID && value.CEQUENS_CLIENT_SECRET && value.CEQUENS_USERNAME && value.CEQUENS_PASSWORD,
-        );
-        if (!(hasApiKey || hasOauth) || !value.CEQUENS_SENDER_NAME) {
-          return helpers.message({
-            custom:
-              'SMS_PROVIDER=cequens يستلزم CEQUENS_SENDER_NAME + إمّا CEQUENS_API_KEY أو (CEQUENS_CLIENT_ID/CEQUENS_CLIENT_SECRET/CEQUENS_USERNAME/CEQUENS_PASSWORD) في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
-          });
-        }
+    if (!isProductionLikeEnv(value.NODE_ENV as string | undefined)) return value;
+    const provider = (value.SMS_PROVIDER as string | undefined) ?? 'cequens';
+
+    if (provider === 'twilio') {
+      const parts = [value.TWILIO_ACCOUNT_SID, value.TWILIO_AUTH_TOKEN, value.TWILIO_SMS_FROM_NUMBER];
+      const present = parts.filter(Boolean).length;
+      if (present > 0 && present < parts.length) {
+        return helpers.message({
+          custom:
+            'TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER مجهّزين نصّ تجهيز — سيبهم كلهم فاضيين (قناة SMS تبقى log-only) أو املاهم كلهم. التجهيز الناقص بيخلي الرسايل تروح للوج وإنت فاكرها اتبعتت',
+        });
       }
+      return value;
+    }
+
+    // CEQUENS بيقبل مسارين للمصادقة: مفتاح API جاهز، أو تبادل OAuth2 بالأربع قيم.
+    const hasApiKey = Boolean(value.CEQUENS_API_KEY);
+    const oauthParts = [value.CEQUENS_CLIENT_ID, value.CEQUENS_CLIENT_SECRET, value.CEQUENS_USERNAME, value.CEQUENS_PASSWORD];
+    const oauthPresent = oauthParts.filter(Boolean).length;
+    const hasOauth = oauthPresent === oauthParts.length;
+    const anyCequens = hasApiKey || oauthPresent > 0 || Boolean(value.CEQUENS_SENDER_NAME);
+
+    if (anyCequens && !((hasApiKey || hasOauth) && value.CEQUENS_SENDER_NAME)) {
+      return helpers.message({
+        custom:
+          'إعداد CEQUENS ناقص — لازم CEQUENS_SENDER_NAME مع (CEQUENS_API_KEY أو الأربع قيم CLIENT_ID/CLIENT_SECRET/USERNAME/PASSWORD). سيبهم كلهم فاضيين لو مش عايز SMS (القناة تبقى log-only)، أو كمّلهم — التجهيز الناقص بيخلي الرسايل تروح للوج وإنت فاكرها اتبعتت',
+      });
     }
     return value;
   })
   /**
-   * **حارس Closed Beta OTP للإنتاج** (docs/08 §173).
+   * **الحارس اللي بيمنع تسريب وضع الاختبار للإنتاج** (docs/08 §173).
    *
-   * السماح لا يعني فتح الكود الثابت للجميع: لا بد من whitelist صريحة بصيغة E.164 وكود غير
-   * افتراضي. `AuthService` يرفض أي رقم خارجها قبل إنشاء OTP أو محاولة SMS. الشرط ينطبق على
-   * staging أيضًا لأنها بنية تخدم مستخدمين حقيقيين وليست بيئة بيانات وهمية.
+   * لو `OTP_TEST_MODE=true` وصل لبيئة إنتاجية، كود الدخول بيبقى **متوقّع لكل الأرقام**. متغيّر
+   * بيئة منسي في لوحة الاستضافة سيناريو واقعي جدًا، فالفصل مابيتسابش لمراجعة بشرية: السيرفر
+   * **مابيقلعش** أصلاً. فشل الإقلاع صوته عالي وبيتصلّح في دقيقة؛ بايباس صامت في الإنتاج ممكن
+   * يفضل شهور.
+   *
+   * مقصود إنه `isProductionLikeEnv` مش `=== 'production'`: النشر الحقيقي شغّال بـ`staging`
+   * (شوف التعليق فوق) — الفحص ضد 'production' لوحدها كان هيخلي الحارس ده بلا أثر بالظبط في
+   * البيئة اللي بتخدم مستخدمين حقيقيين.
+   *
+   * ### ليه رجع صلب بعد ما كان اتفتح لـClosed Beta
+   *
+   * الاستثناء اتعمل عشان يشغّل Closed Beta على بنية إنتاج **وقت ما الدخول كان بالـOTP** ومزوّد
+   * الـSMS مش مُجهّز. مع ADR-0109 الدخول بقى برقم + رمز، فالمختبِر بيدخل برمزه العادي زي أي
+   * مستخدم — **مفيش أي حاجة محتاجة كود ثابت في الإنتاج خلاص**. والاستثناء كان بيسيب أخطر حاجة
+   * ممكنة (كود دخول متوقّع) واقفة على صحة قائمة أرقام في متغيّر بيئة.
    */
   .custom((value: Record<string, unknown>, helpers) => {
     if (isProductionLikeEnv(value.NODE_ENV as string | undefined) && value.OTP_TEST_MODE === true) {
-      const phones = parseTestModePhones(value.OTP_TEST_MODE_PHONES as string | undefined);
-      if (phones.length === 0) {
-        return helpers.message({
-          custom:
-            'OTP_TEST_MODE=true في staging/production يتطلب OTP_TEST_MODE_PHONES غير فارغ بأرقام المختبرين فقط — القائمة الفارغة قد تفتح الكود الثابت لكل الأرقام',
-        });
-      }
-      if (phones.some((phone) => !/^\+[1-9]\d{7,14}$/.test(phone))) {
-        return helpers.message({
-          custom: 'OTP_TEST_MODE_PHONES يجب أن يحتوي أرقام مختبرين صحيحة بصيغة E.164، مفصولة بفواصل',
-        });
-      }
-      if (value.OTP_TEST_MODE_CODE === '111111') {
-        return helpers.message({
-          custom: 'OTP_TEST_MODE_CODE لا يمكن أن يكون 111111 في staging/production — اختر كود اختبار سريًا من 6 أرقام',
-        });
-      }
+      return helpers.message({
+        custom:
+          'OTP_TEST_MODE=true ممنوع مع NODE_ENV=staging/production — ده بيخلي كود الدخول متوقّعًا. الدخول بقى برقم + رمز (ADR-0109) فمفيش أي داعي للوضع ده في الإنتاج: شيل المتغيّر أو سيبه false',
+      });
     }
     return value;
   });

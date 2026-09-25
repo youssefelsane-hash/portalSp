@@ -5,6 +5,8 @@ import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RecoveryVerifyDto } from './dto/recovery-verify.dto';
+import { PinLoginDto } from './dto/pin-login.dto';
+import { PinResetRedeemDto } from './dto/pin-reset-redeem.dto';
 import { UserType } from './entities/user.entity';
 
 describe('Auth phone identity normalization', () => {
@@ -12,7 +14,10 @@ describe('Auth phone identity normalization', () => {
     [RequestOtpDto, { phone_number: '+20 100 123 4567', purpose: OtpPurpose.LOGIN }],
     [RegisterDto, { phone_number: '+20 100 123 4567', otp_code: '123456', full_name: 'Test User', user_type: UserType.CUSTOMER }],
     [VerifyOtpDto, { phone_number: '+20 100 123 4567', otp_code: '123456' }],
-    [RecoveryVerifyDto, { phone_number: '+20 100 123 4567', otp_code: '123456', recovery_code: 'AAAA-BBBB-CCCC' }],
+    // ADR-0109 — العامل الأول في الاسترجاع بقى `pin` بدل `otp_code`.
+    [RecoveryVerifyDto, { phone_number: '+20 100 123 4567', pin: '417253', recovery_code: 'AAAA-BBBB-CCCC' }],
+    [PinLoginDto, { phone_number: '+20 100 123 4567', pin: '417253' }],
+    [PinResetRedeemDto, { phone_number: '+20 100 123 4567', reset_code: '0123456789', pin: '417253' }],
   ])('%p canonicalizes equivalent phone formatting before validation', async (Dto, input) => {
     const dto = plainToInstance(Dto as new () => { phone_number: string }, input);
     expect(await validate(dto)).toHaveLength(0);

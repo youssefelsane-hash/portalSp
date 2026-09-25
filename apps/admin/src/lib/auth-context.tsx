@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
-import type { ApiEnvelope, ApiMeta, LoginResult, MfaRequiredResponse, OtpPurpose, UserResponseDto } from '@baytak/shared-types';
+import type { ApiEnvelope, ApiMeta, LoginResult, MfaRequiredResponse, UserResponseDto } from '@baytak/shared-types';
 import { isMfaRequiredResponse } from '@baytak/shared-types';
 import { apiFetch, apiFetchPaginated, ApiError } from './api-client';
 import { StepUpDialog } from '@/components/step-up-dialog';
@@ -18,11 +18,14 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  requestOtp: (phoneNumber: string, purpose: OtpPurpose) => Promise<void>;
+  // ADR-0109 — الدخول بقى رقم + رمز. **مفيش خطوة أولى بتنادي السيرفر خالص**.
   // ADR-0011 — لو الحساب High-Privilege، مبيكملش تسجيل دخول فورًا؛ بيرجّع MfaRequiredResponse
   // بدل كده والكولر (شاشة /login) هو اللي يقرر يعرض إيه (enrollPasskey أو authenticateWithPasskey).
-  verifyOtp: (phoneNumber: string, otpCode: string) => Promise<LoginResult>;
-  verifyRecoveryCode: (phoneNumber: string, otpCode: string, recoveryCode: string) => Promise<MfaRequiredResponse>;
+  loginWithPin: (phoneNumber: string, pin: string) => Promise<LoginResult>;
+  /** استرجاع MFA — الرمز + كود الاسترجاع مع بعض، عاملين مستقلين (ADR-0011 §6). */
+  verifyRecoveryCode: (phoneNumber: string, pin: string, recoveryCode: string) => Promise<MfaRequiredResponse>;
+  /** تعيين/تغيير الرمز لأدمن **داخل بالفعل** — مسار هجرة الأدمنز القدام (ADR-0109 §6-أ). */
+  setPin: (pin: string, currentPin?: string) => Promise<void>;
   // تسجيل Passkey جديد جوّه مسار MFA بس (مفيش "ضيف Passkey تاني" لمستخدم داخل بالفعل — قيد
   // الباك-إند الحالي، Phase 1). بيكمّل تسجيل الدخول فعليًا ويرجّع أكواد الاسترجاع (مرة واحدة بس).
   enrollPasskey: (mfaSessionToken: string, deviceLabel?: string) => Promise<string[] | null>;
@@ -64,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // مصدر الحقيقة الفعلي لـaccessToken وقت الاستخدام الفوري (requestStepUp) — state بتتحدّث
   // async، والـref ده بيتحدّث sync في نفس اللحظة اللي setAccessToken بيتنادى فيها (راجع doRefresh
-  // وverifyOtp/authenticateWithPasskey تحت)، فمفيش خطر إن Step-Up يستخدم توكن قديم لو حصل
+  // وloginWithPin/authenticateWithPasskey تحت)، فمفيش خطر إن Step-Up يستخدم توكن قديم لو حصل
   // refresh لحظة قبله بالظبط.
   const accessTokenRef = useRef<string | null>(null);
   const setAccessTokenBoth = useCallback((token: string | null) => {
@@ -137,15 +140,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requestOtp = useCallback(async (phoneNumber: string, purpose: OtpPurpose) => {
-    await callLocalAuthRoute('/api/auth/otp/request', { phone_number: phoneNumber, purpose });
-  }, []);
-
-  const verifyOtp = useCallback(async (phoneNumber: string, otpCode: string): Promise<LoginResult> => {
-    const result = await callLocalAuthRoute<LoginResult>('/api/auth/otp/verify', {
+  const loginWithPin = useCallback(async (phoneNumber: string, pin: string): Promise<LoginResult> => {
+    const result = await callLocalAuthRoute<LoginResult>('/api/auth/pin/login', {
       phone_number: phoneNumber,
-      otp_code: otpCode,
+      pin,
     });
+    // **الـMFA زي ما هو بالحرف**: الرمز عامل أول بس. الحساب High-Privilege بيرجّع
+    // `mfa_required` ومابياخدش جلسة لحد ما الـPasskey تخلص.
     if (isMfaRequiredResponse(result)) {
       return result;
     }
@@ -155,14 +156,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchMe, setAccessTokenBoth]);
 
   const verifyRecoveryCode = useCallback(
-    async (phoneNumber: string, otpCode: string, recoveryCode: string): Promise<MfaRequiredResponse> => {
+    async (phoneNumber: string, pin: string, recoveryCode: string): Promise<MfaRequiredResponse> => {
       return callLocalAuthRoute<MfaRequiredResponse>('/api/auth/recovery/verify', {
         phone_number: phoneNumber,
-        otp_code: otpCode,
+        pin,
         recovery_code: recoveryCode,
       });
     },
     [],
+  );
+
+  const setPin = useCallback(
+    async (pin: string, currentPin?: string) => {
+      // مسار متوثّق، فالهيدر لازم يتبعت بالإيد — `callLocalAuthRoute` مالهاش توكن.
+      const res = await fetch('/api/auth/pin/set', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessTokenRef.current ? { Authorization: `Bearer ${accessTokenRef.current}` } : {}),
+        },
+        body: JSON.stringify({ pin, ...(currentPin ? { current_pin: currentPin } : {}) }),
+      });
+      const envelope = (await res.json()) as ApiEnvelope<unknown>;
+      if (!res.ok || !envelope.success) {
+        throw new ApiError(envelope.error?.code ?? 'UNKNOWN', envelope.error?.message ?? 'حصل خطأ غير متوقع', res.status);
+      }
+      // `pin_set` في `/auth/me` بيتغيّر والشاشات بتقرا منه، فلازم نعيد الجلب.
+      if (accessTokenRef.current) await fetchMe(accessTokenRef.current);
+    },
+    [fetchMe],
   );
 
   const enrollPasskey = useCallback(
@@ -352,8 +374,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       permissions,
-      requestOtp,
-      verifyOtp,
+      loginWithPin,
+      setPin,
       verifyRecoveryCode,
       enrollPasskey,
       authenticateWithPasskey,
@@ -367,8 +389,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       permissions,
-      requestOtp,
-      verifyOtp,
+      loginWithPin,
+      setPin,
       verifyRecoveryCode,
       enrollPasskey,
       authenticateWithPasskey,

@@ -22,7 +22,8 @@ const { execFileSync } = require('child_process');
 const SP = process.env.SWEEP_OUT || '/tmp/baytak-sweep';
 require('fs').mkdirSync(SP, { recursive: true });
 const PHONE = process.env.ADMIN_PHONE || '+201555000999';
-const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2'; // = 123456
+/** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 
 // اسم قاعدة البيانات كان مكتوب بالإيد (`baytak_main`) — الأداة كانت بتفشل من أول استعلام على
 // أي جهاز اسم قاعدته مختلف (الجهاز ده اسمها `baytak`). بيتقرا من البيئة دلوقتي.
@@ -48,36 +49,22 @@ const sql = (q) => execFileSync('psql', ['-h','localhost','-U','baytak','-d',DB,
   // بنمسحه عشان الفلو يعدّي على التسجيل من أوله في كل مرة.
   sql(`DELETE FROM webauthn_credentials WHERE user_id IN (SELECT id FROM users WHERE phone_number='${PHONE}')`);
   await page.goto('http://localhost:3001/login', { waitUntil: 'networkidle', timeout: 45000 });
+  // **ADR-0109 — خطوة واحدة**: الرقم والرمز مع بعض.
+  //
+  // اللي اتشال مع الـOTP: تحديث هاش **كل** صفوف `otp_codes` الصالحة (كان لازم بسبب سباق حقيقي
+  // — الواجهة ممكن تطلب كود تاني بعد ما نحدّث الهاش فالصف المعدَّل مايكونش اللي السيرفر بيقارن
+  // بيه)، والحارس اللي كان بيكتشف إن الأدمن بيكلّم API على قاعدة تانية. الرمز بيتحط على الحساب
+  // من `scripts/seed-dev-accounts.js` فمفيش أي تلاعب في القاعدة هنا خلاص.
   await page.fill('#phone_number', PHONE);
-  await page.click('button[type="submit"]');
-  await page.waitForSelector('#otp_code', { timeout: 20000 });
-  // **كل** الصفوف الصالحة للرقم ده، مش الأحدث بس. السبب سباق حقيقي اتلقط: الواجهة ممكن
-  // تطلب OTP تاني (إعادة إرسال/إعادة رندر) **بعد** ما نحدّث الهاش، فالصف اللي عدّلناه يبقى
-  // مش اللي السيرفر بيتحقق منه — والدخول بيفشل بشكل متقطّع بلا سبب ظاهر. تحديث كل الصفوف
-  // الصالحة بيخلّي النتيجة واحدة مهما كان الصف اللي هيتقارن بيه.
-  sql(`UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false WHERE phone_number='${PHONE}' AND expires_at > now()`);
-  // حارس صريح: لو مفيش صف OTP صالح بعد ما شاشة الكود ظهرت، يبقى الواجهة بتكلّم **API تاني**
-  // غير اللي إحنا بنعدّل قاعدته (شائع لما تفضل عمليات dev قديمة ماسكة بورت 3000). الرسالة دي
-  // بتوفّر نص ساعة تشخيص: الفشل بيبان كأنه «كود غلط» وهو أصلاً «إحنا بنعدّل قاعدة تانية».
-  const otpRows = Number(sql(`SELECT count(*) FROM otp_codes WHERE phone_number='${PHONE}' AND expires_at > now()`));
-  if (otpRows === 0) {
-    console.log('❌ مفيش صف OTP صالح في قاعدة البيانات دي رغم إن شاشة الكود ظهرت.');
-    console.log('   يعني الأدمن بيكلّم API تاني (بورت 3000 ماسكه process قديم؟) أو قاعدة تانية.');
-    console.log('   اتأكد: DATABASE_URL بتاع الـAPI الشغّال فعلاً = القاعدة اللي السكربت بيعدّلها.');
-    await browser.close();
-    return;
-  }
-  await page.fill('#otp_code', '123456');
+  await page.fill('#pin', LOGIN_PIN);
   await page.click('button[type="submit"]');
   await page.waitForTimeout(4500);
-  await page.screenshot({ path: `${SP}/admin-after-otp.png` });
+  await page.screenshot({ path: `${SP}/admin-after-login.png` });
   // خطوة MFA: تسجيل Passkey (المصادق الافتراضي بيوافق تلقائيًا) ثم إقرار حفظ أكواد الاسترجاع.
   //
   // **الضغط بالاسم الصريح مش `.first()`** — النسخة القديمة كانت بتضغط أول زرار في الصفحة أيًا
-  // كان. لو الفلو كان لسه على خطوة الـOTP (أو رجعلها)، أول زرار هو «دخول» — فالحلقة كانت
-  // بتعيد طلب OTP جديد كل دورة (٣ أكواد لتسجيل دخول واحد)، والهاش اللي حطيناه يبقى على صف
-  // قديم، والدخول يفشل بسبب **الأداة نفسها** مش بسبب التطبيق. اتلقطت لما عدّ صفوف `otp_codes`
-  // طلع ٣ لتشغيلة واحدة.
+  // كان، فلو الفلو كان لسه على خطوة الدخول (أو رجعلها) بتدوس «دخول» تاني بدل زرار الـMFA
+  // والحلقة تلف على نفسها. الفشل كان بيبان كأنه عيب في التطبيق وهو عيب في الأداة.
   for (let i = 0; i < 4; i++) {
     if (!page.url().includes('/login')) break;
 

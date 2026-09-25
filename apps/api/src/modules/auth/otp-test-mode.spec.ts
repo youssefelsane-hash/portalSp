@@ -9,7 +9,6 @@ import { envValidationSchema } from '../../config/env.validation';
 import { SMS_DISPATCHER, SmsDispatcher } from '../../common/notifications/sms-dispatcher';
 import { AuthService } from './auth.service';
 import {
-  isAllowedOtpTestPhone,
   OTP_TEST_MODE_DISABLED,
   OtpTestMode,
   parseTestModePhones,
@@ -22,6 +21,7 @@ import { MfaPolicyService } from './mfa-policy.service';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { WebAuthnService } from './webauthn.service';
 import { Wallet } from '../payments/entities/wallet.entity';
+import { SettingsService } from '../settings/settings.service';
 
 /**
  * **وضع اختبار الـOTP لفترة Google Play** (docs/08 §173).
@@ -112,7 +112,10 @@ interface Harness {
 async function buildAuth(overrides: Record<string, unknown>): Promise<Harness> {
   const otpCodes = new FakeRepository<OtpCode>();
   const smsSend = jest.fn().mockResolvedValue({ delivered: true, failureReason: null });
-  const sms: SmsDispatcher = { isConfigured: true, providerName: 'cequens', send: smsSend };
+  // `smsConfigured` مفتاح للهارنس نفسه مش قيمة إعداد — بيتشال من `values` تحت عشان مايوصلش
+  // لـ`ConfigService` كمفتاح مش موجود.
+  const { smsConfigured = true, ...configOverrides } = overrides as { smsConfigured?: boolean };
+  const sms: SmsDispatcher = { isConfigured: smsConfigured, providerName: 'cequens', send: smsSend };
   const values: Record<string, unknown> = {
     nodeEnv: 'test',
     'otp.expiryMinutes': 5,
@@ -120,7 +123,7 @@ async function buildAuth(overrides: Record<string, unknown>): Promise<Harness> {
     'otp.testMode': OTP_TEST_MODE_DISABLED,
     'jwt.accessSecret': 'test-access-secret-0123456789',
     'jwt.refreshSecret': 'test-refresh-secret-0123456789',
-    ...overrides,
+    ...configOverrides,
   };
   const moduleRef = await Test.createTestingModule({
     providers: [
@@ -136,6 +139,9 @@ async function buildAuth(overrides: Record<string, unknown>): Promise<Harness> {
       { provide: DataSource, useValue: createFakeDataSource(otpCodes) },
       { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
       { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+      // ADR-0109 — `auth.login_method`. السبيكات دي بتختبر مسار الـOTP، فالـstub بيرجّع 'otp'
+      // عشان سلوكها يفضل زي ما هو بالحرف بعد ما البوابة اتحطت على `requestOtp`.
+      { provide: SettingsService, useValue: { getString: async () => 'otp' } },
       { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
     ],
   }).compile();
@@ -222,28 +228,30 @@ describe('وضع اختبار الـOTP — السلوك (docs/08 §173)', () =>
     expect(otp.id).toBe(otpCodes.rows[1].id);
   });
 
-  it('Production Beta: الرقم خارج القائمة يُرفض قبل إنشاء OTP أو محاولة SMS', async () => {
-    const { service, smsSend, otpCodes } = await buildAuth({
-      nodeEnv: 'production',
-      'otp.testMode': { enabled: true, fixedCode: '111111', allowedPhones: ['+201009998887'] },
-    });
-    await expect(service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null)).rejects.toMatchObject({
-      code: 'AUTH_007',
-      reason: 'closed_beta',
-    });
-    expect(otpCodes.rows).toHaveLength(0);
+  /**
+   * **بوابة مش مُجهّزة = فشل صريح** (ADR-0109).
+   *
+   * قبل كده كانت الدالة بترجّع نجاح والمستخدم يقعد يستنى كود عمره ما هيوصل. الحارس اللي كان
+   * بيغطّي ده (منع الإقلاع لو المزوّد ناقص في الإنتاج) اتشال لأن الدخول مابقاش محتاج SMS —
+   * فالحماية نزلت لنقطة الاستخدام، وهي أدق: الخطأ بيطلع بس لما حد يشغّل الـOTP فعلاً بلا مزوّد.
+   */
+  it('بوابة SMS مش مُجهّزة في بيئة إنتاجية ⇒ الطلب بيترفض بدل ما يرجّع نجاح كداب', async () => {
+    const { service, smsSend } = await buildAuth({ smsConfigured: false, nodeEnv: 'production' });
+    await expect(
+      service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null),
+    ).rejects.toMatchObject({ code: 'SYS_001' });
     expect(smsSend).not.toHaveBeenCalled();
   });
 
-  it('Production Beta: الرقم الموجود في القائمة يأخذ الكود الثابت بلا SMS', async () => {
-    const { service, smsSend } = await buildAuth({
-      nodeEnv: 'production',
-      'otp.testMode': { enabled: true, fixedCode: '111111', allowedPhones: [PHONE] },
-    });
-    await service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null);
-    expect(smsSend).not.toHaveBeenCalled();
-    expect((await consume(service, '111111')).isUsed).toBe(true);
+  /** وفي التطوير المحلي البوابة عمرها ما بتكون مُجهّزة والمطوّر بياخد الكود من اللوج — المسار ده لازم يفضل شغّال. */
+  it('نفس الحالة في التطوير بتعدّي — الكود بيتقرا من اللوج، وده مسار العمل الموثّق', async () => {
+    const { service, otpCodes } = await buildAuth({ smsConfigured: false, nodeEnv: 'development' });
+    await expect(
+      service.requestOtp({ phone_number: PHONE, purpose: OtpPurpose.LOGIN }, null),
+    ).resolves.toMatchObject({ expires_in_seconds: 300 });
+    expect(otpCodes.rows).toHaveLength(1);
   });
+
 });
 
 describe('وضع اختبار الـOTP — قرار التفعيل (دوال نقية)', () => {
@@ -256,12 +264,6 @@ describe('وضع اختبار الـOTP — قرار التفعيل (دوال ن
     const scoped: OtpTestMode = { enabled: true, fixedCode: '111111', allowedPhones: ['+201009998887'] };
     expect(usesFixedOtp(scoped, PHONE)).toBe(false);
     expect(usesFixedOtp(scoped, '+201009998887')).toBe(true);
-  });
-
-  it('فحص الـallowlist الصريح لا يفتح القائمة الفارغة لأي رقم', () => {
-    expect(isAllowedOtpTestPhone(TEST_MODE_ON, PHONE)).toBe(false);
-    const scoped: OtpTestMode = { enabled: true, fixedCode: '111111', allowedPhones: [PHONE] };
-    expect(isAllowedOtpTestPhone(scoped, PHONE)).toBe(true);
   });
 
   it('المقارنة بعد التطبيع — نفس الرقم بصيغة تانية بيتعرف', () => {
@@ -318,42 +320,59 @@ describe('وضع Closed Beta OTP — حارس الإقلاع (docs/08 §173)', (
   const validate = (env: Record<string, unknown>) =>
     (envValidationSchema as Joi.ObjectSchema).validate(env, { allowUnknown: true, abortEarly: false });
 
-  const productionBetaEnv = (nodeEnv: 'production' | 'staging') => {
-    const env: Record<string, unknown> = {
-      ...baseEnv,
-      NODE_ENV: nodeEnv,
-      OTP_TEST_MODE: 'true',
-      OTP_TEST_MODE_CODE: '483927',
-      OTP_TEST_MODE_PHONES: PHONE,
-    };
+  /**
+   * **الحارس رجع صلب** (ADR-0109). الاستثناء اللي كان بيسمح بوضع الاختبار في الإنتاج اتعمل عشان
+   * Closed Beta وقت ما الدخول كان بالـOTP ومزوّد الـSMS مش مُجهّز. الدخول بقى برقم + رمز،
+   * فالمختبِر بيدخل برمزه زي أي مستخدم — مفيش أي حاجة محتاجة كود ثابت في الإنتاج.
+   */
+  const testModeEnv = (nodeEnv: 'production' | 'staging', extra: Record<string, unknown> = {}) => ({
+    ...baseEnv,
+    NODE_ENV: nodeEnv,
+    OTP_TEST_MODE: 'true',
+    ...extra,
+  });
+
+  it('٥) production + وضع الاختبار ⇒ **مايقلعش** ولو القائمة والكود مظبوطين', () => {
+    const { error } = validate(testModeEnv('production', { OTP_TEST_MODE_CODE: '483927', OTP_TEST_MODE_PHONES: PHONE }));
+    expect(error?.message).toContain('OTP_TEST_MODE=true ممنوع');
+  });
+
+  it('٥-ب) staging نفس المنع بالظبط — هي البيئة اللي بتخدم مستخدمين حقيقيين فعلاً', () => {
+    const { error } = validate(testModeEnv('staging', { OTP_TEST_MODE_CODE: '483927', OTP_TEST_MODE_PHONES: PHONE }));
+    expect(error?.message).toContain('OTP_TEST_MODE=true ممنوع');
+  });
+
+  it('٥-ج) قائمة أرقام فاضية مابتغيّرش حاجة — المنع مطلق مش مشروط', () => {
+    const { error } = validate(testModeEnv('production', { OTP_TEST_MODE_PHONES: '' }));
+    expect(error?.message).toContain('OTP_TEST_MODE=true ممنوع');
+  });
+
+  /**
+   * **غياب مزوّد الـSMS بالكامل بقى مسموح** — الدخول مابقاش بيعتمد عليه (ADR-0109)، والقناة
+   * بترجع log-only. الحارس القديم كان هيمنع إقلاع منصة قرّرت عن قصد إنها ماتستخدمش SMS.
+   */
+  it('٥-د) production بلا أي مزوّد SMS بيقلع عادي — القناة تبقى log-only', () => {
+    const env: Record<string, unknown> = { ...baseEnv, NODE_ENV: 'production' };
     delete env.CEQUENS_API_KEY;
     delete env.CEQUENS_SENDER_NAME;
-    return env;
-  };
-
-  it('٥) Production Beta بقائمة صريحة يعدّي بلا CEQUENS — لأن SMS لن يُستدعى', () => {
-    const { error } = validate(productionBetaEnv('production'));
+    const { error } = validate(env);
     expect(error).toBeUndefined();
   });
 
-  it('٥-ب) staging يخضع لنفس Closed Beta الصارم', () => {
-    const { error } = validate(productionBetaEnv('staging'));
-    expect(error).toBeUndefined();
+  /** أما **التجهيز الناقص** فغلطة محدش بيقصدها، ونتيجتها أسوأ من الغياب: إعداد يبان مظبوط والرسايل تروح للوج. */
+  it('٥-هـ) مزوّد SMS مجهّز نصّ تجهيز ⇒ فشل إقلاع صوته عالي', () => {
+    const env: Record<string, unknown> = { ...baseEnv, NODE_ENV: 'production' };
+    delete env.CEQUENS_SENDER_NAME;
+    const { error } = validate(env);
+    expect(error?.message).toContain('إعداد CEQUENS ناقص');
   });
 
-  it('٥-ج) Production Beta بقائمة فارغة يرفض الإقلاع بدل فتح الكود الثابت للجميع', () => {
-    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_PHONES: '' });
-    expect(error?.message).toContain('OTP_TEST_MODE_PHONES غير فارغ');
-  });
-
-  it('٥-د) Production Beta يرفض كود 111111 الافتراضي', () => {
-    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_CODE: '111111' });
-    expect(error?.message).toContain('OTP_TEST_MODE_CODE');
-  });
-
-  it('٥-هـ) Production Beta يرفض رقمًا غير صالح في القائمة', () => {
-    const { error } = validate({ ...productionBetaEnv('production'), OTP_TEST_MODE_PHONES: '00201009998887' });
-    expect(error?.message).toContain('OTP_TEST_MODE_PHONES');
+  it('٥-و) Twilio مجهّز نصّ تجهيز ⇒ نفس الرفض', () => {
+    const { error } = validate({
+      ...baseEnv, NODE_ENV: 'production', SMS_PROVIDER: 'twilio',
+      TWILIO_ACCOUNT_SID: 'sid', CEQUENS_API_KEY: undefined, CEQUENS_SENDER_NAME: undefined,
+    });
+    expect(error?.message).toContain('نصّ تجهيز');
   });
 
   it('production بلا الوضع بيعدّي عادي — الحارس مابيكسرش الإنتاج', () => {

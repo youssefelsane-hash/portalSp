@@ -759,11 +759,19 @@ class _ScheduleHeader extends StatelessWidget {
                           color: scheme.primary,
                         ),
                         const SizedBox(width: 5),
-                        Text(
-                          'ضمان $warrantyDays يوم على الخدمة',
-                          style: textTheme.labelMedium?.copyWith(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w700,
+                        // **`Flexible` مش `Text` عريان** — النص كان بيطلب عرضه الطبيعي كامل
+                        // والـ`Row` بـ`MainAxisSize.min` بتحترم الطلب، فبيطلع **تجاوز ١٠٤ بكسل**
+                        // على شاشة ٣٢٠ عرض: بعد حشوة الكارت (٣٢) وأيقونة التقويم (٤٤) والمسافة
+                        // (١٢) بيفضل ~٢٣٢ بكسل، والنص أطول منهم. `Flexible` بتخلّي النص يلتزم
+                        // بالعرض المتاح ويلف سطر تاني بدل ما يخرج بره الشاشة.
+                        // (اتلقط بـ`all_screens_smoke_live_test` على ٣٢٠×٦٤٠ و٤١٢×٩١٥.)
+                        Flexible(
+                          child: Text(
+                            'ضمان $warrantyDays يوم على الخدمة',
+                            style: textTheme.labelMedium?.copyWith(
+                              color: scheme.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ],

@@ -11,6 +11,7 @@ import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
 import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
+import 'features/auth/set_pin_screen.dart';
 import 'features/shell/customer_shell.dart';
 import 'features/notifications/floating_notification_alert.dart';
 import 'features/ratings/pending_rating_prompt.dart';
@@ -98,6 +99,14 @@ class _AuthGate extends StatelessWidget {
     // البصمة مفعّلة على الجهاز ده.
     if (auth.biometricUnlockPending) {
       return const BiometricUnlockScreen();
+    }
+    // **هجرة الـOTP → رمز الدخول (ADR-0109 §6-أ)**: مستخدم داخل بجلسة محفوظة من قبل التبديل
+    // مالوش رمز. الشاشة دي **بتقفل** لأن الحساب في اللحظة دي مالوش **أي** credential: أول ما
+    // الجلسة تنتهي يبقى مقفول برّه حسابه ومحتاج استرجاع من الأدمن. شاشة مرة واحدة أرخص من
+    // تذكرة دعم لكل مستخدم قديم. الزائر مايشوفهاش (`isAuthenticated` شرط)، والحسابات الجديدة
+    // بتخرج من التسجيل ومعاها رمز أصلاً فمابتشوفهاش خالص.
+    if (auth.isAuthenticated && auth.user?.pinSet == false) {
+      return const SetPinScreen(mode: SetPinMode.migration);
     }
     // **الزائر بيدخل عادي (docs/08 §77-B1، طلب مالك صريح)**: «مش لازم يعمل لوج إن أول ما يخش.
     // عادي الكاستمر بيخش يتفرج ويدوس على الكاتيجوريز».

@@ -49,7 +49,11 @@ void main() {
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': await pickBookableServiceId(),
+        'service_id': await pickBookableServiceId(servedByTechnicianToken: await devTechnicianToken('+201000000045'), sameDayCapable: true),
+        // **نفس اليوم مقصود** — الاختبار ده بيقيس دورة العرض والقبول، وطلب **مجدول** بيتثبّت
+        // على أنسب فني فورًا بلا أي جولة عرض (`autoConfirmScheduledOrder`, migration 0351).
+        // الشرح الكامل في `urgentScheduledAt()`.
+        'scheduled_at': urgentScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار حي لاسترجاع الطلب النشط',
       },
@@ -59,9 +63,23 @@ void main() {
     // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
     // `claimOrderAsTechnician`، §148).
     technicianToken = await claimOrderAsTechnician(orderId, '+201000000045');
-    final afterAccept = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
-    expect(afterAccept!['id'], orderId);
+
+    // **الفصل المقصود بين «مؤكّد قدامي» و«نشط دلوقتي»** (docs/08 §165) — والاختبار بقى بيثبته
+    // صراحةً بدل ما يفترض غيابه.
+    //
+    // طلب **مجدول** بعد القبول مكانه `upcoming-confirmed`، ومابيدخلش `/active` غير أول ما الفني
+    // يتحرّك (`technician_on_way`) — `findActiveOrdersForTechnician` فرعه الأول شرطه
+    // `scheduledAt IS NULL` بالظبط عشان كده. الاختبار كان بيسأل `/active` بعد القبول وكان بيعدّي
+    // بس لأن الطلبات القديمة مكانش ليها موعد؛ مع الموعد الإجباري (migration 0340) بقى مجدول فعلاً.
+    final upcoming = await apiRequestList('/technician/orders/upcoming-confirmed', accessToken: technicianToken);
+    final afterAccept = upcoming.firstWhere((o) => o['id'] == orderId, orElse: () => <String, dynamic>{});
+    expect(afterAccept['id'], orderId, reason: 'الطلب المجدول المقبول لازم يظهر في «الشغل المؤكّد قدامي»');
     expect(afterAccept['order_status'], 'accepted');
+    expect(
+      await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken),
+      isNull,
+      reason: 'ولازم **ما يظهرش** في «النشط دلوقتي» قبل ما الفني يتحرّك — ده جوهر الفصل في §165',
+    );
 
     await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);
     final afterDepart = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);

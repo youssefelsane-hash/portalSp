@@ -13,12 +13,18 @@ void main() {
     // عميل جديد لكل تشغيلة بدل رقم ثابت مشترك — الـthrottle بيتعقّب بالرقم (٥ OTP/دقيقة)
     // فملفات متعددة على نفس الرقم كانت بتاكل حصة بعض. (تدقيق §148)
     final customerToken = await registerCustomer(uniquePhone());
+    // توكن الفني **قبل** إنشاء الطلب: اختيار الخدمة محتاجه عشان يتأكد إن الفني ده بيخدمها.
+    var technicianToken = await devTechnicianToken('+201000000042');
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': await pickBookableServiceId(),
+        'service_id': await pickBookableServiceId(servedByTechnicianToken: technicianToken, sameDayCapable: true),
+        // **نفس اليوم مقصود** — الاختبار ده بيقيس دورة العرض والقبول، وطلب **مجدول** بيتثبّت
+        // على أنسب فني فورًا بلا أي جولة عرض (`autoConfirmScheduledOrder`, migration 0351).
+        // الشرح الكامل في `urgentScheduledAt()`.
+        'scheduled_at': urgentScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار حي لدورة تنفيذ الفني',
       },
@@ -26,17 +32,29 @@ void main() {
     final orderId = order!['id'] as String;
     expect(order['order_status'], 'searching_technician');
 
-    var technicianToken = await devTechnicianToken('+201000000042');
-
-    final available = await apiRequestList('/technician/orders/available', accessToken: technicianToken);
-    expect(available.any((a) => a['order_id'] == orderId), isTrue,
-        reason: 'الطلب المُنشأ لازم يظهر في قايمة الفني المتاح في نفس النطاق');
+    // **التأكيد القديم اتشال**: كان بيتوقّع إن الطلب يظهر في قايمة عروض `+201000000042`
+    // بالتحديد، بحجة إن «الفني ده بس المتاح في النطاق». الافتراض ده مات أول ما البذور ضافت
+    // فنيين كتير لنفس النطاق — القياس: **١٠ عروض** اتبعتت في الجولة الأولى ومحدش منهم كان
+    // الفني ده. التأكيد كان بيختبر **تفضيلات محرك المطابقة**، وهو مش موضوع الاختبار ده أصلاً.
+    //
+    // `claimOrderAsTechnician` تحت بتغطّي اللي محتاجينه فعلاً: بتجرّب الفني المفضّل، ولو العرض
+    // راح لحد تاني بتلاقيه وتكمّل بيه، وبترمي رسالة واضحة لو التوزيع نفسه مااشتغلش.
 
     // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
     // `claimOrderAsTechnician`، §148).
     technicianToken = await claimOrderAsTechnician(orderId, '+201000000042');
-    final accepted = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
-    expect(accepted!['order_status'], 'accepted');
+    // **الطلب المجدول المقبول مكانه «الشغل المؤكّد قدامي» مش «الطلب النشط»** (docs/08 §165).
+    //
+    // `GET /technician/orders/active` بيستثني عمدًا الطلبات اللي ليها `scheduled_at` ولسه الفني
+    // ما اتحرّكش ليها (`findActiveOrdersForTechnician` — الفرع الأول شرطه `scheduledAt IS NULL`).
+    // الطلب بيدخل «النشط» أول ما يبقى `technician_on_way` أو بعدها.
+    //
+    // الاختبار كان بيسأل `/active` بعد القبول على طول، وكان بيعدّي بس لأن الطلبات القديمة مكانش
+    // ليها موعد أصلاً. مع الموعد الإجباري (migration 0340) الطلب بقى مجدول فعلاً، فبنسأله من
+    // مكانه الصح.
+    final upcoming = await apiRequestList('/technician/orders/upcoming-confirmed', accessToken: technicianToken);
+    final accepted = upcoming.firstWhere((o) => o['id'] == orderId, orElse: () => <String, dynamic>{});
+    expect(accepted['order_status'], 'accepted');
 
     final departed =
         await apiRequest('POST', '/technician/orders/$orderId/depart', accessToken: technicianToken);

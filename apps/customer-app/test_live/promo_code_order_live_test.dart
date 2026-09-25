@@ -56,7 +56,7 @@ void main() {
       // **وصف مميز لكل طلب**: حارس تكرار الطلب بيرجّع **نفس الصف** لطلبين متطابقين في نفس
       // النافذة الزمنية. من غير ده، «المحاولة التانية» كانت بترجع الطلب الأول بنجاح، فحد
       // الاستخدام لكل مستخدم ماكانش بيتختبر أصلاً — الاختبار بيعدّي وهو مش بيقيس حاجة (§148).
-      body: {'service_id': serviceId, 'address_id': addressId, 'promo_code': code, 'problem_description': 'اختبار كود خصم — محاولة أولى'},
+      body: {'service_id': serviceId, 'scheduled_at': bookableScheduledAt(), 'address_id': addressId, 'promo_code': code, 'problem_description': 'اختبار كود خصم — محاولة أولى'},
     );
     expect(order, isNotNull);
     expect(order!['discount_amount_cents'], 5000);
@@ -72,7 +72,7 @@ void main() {
         'POST',
         '/orders',
         accessToken: customerToken,
-        body: {'service_id': serviceId, 'address_id': addressId, 'promo_code': code, 'problem_description': 'اختبار كود خصم — محاولة تانية مرفوضة'},
+        body: {'service_id': serviceId, 'scheduled_at': bookableScheduledAt(), 'address_id': addressId, 'promo_code': code, 'problem_description': 'اختبار كود خصم — محاولة تانية مرفوضة'},
       );
     } on ApiException catch (err) {
       secondAttemptError = err;
