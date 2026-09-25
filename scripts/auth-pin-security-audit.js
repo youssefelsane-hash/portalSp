@@ -140,11 +140,11 @@ async function main() {
     check('رد الدخول نفسه مافيهوش أي هاش', !JSON.stringify(session.body).includes('$2'));
 
     const [hashRow] = await h.q(`SELECT pin_hash FROM users WHERE id = $1`, [a.userId]);
-    check('الرمز متخزّن مهشّر (bcrypt) مش خام',
-      String(hashRow?.pin_hash ?? '').startsWith('$2') && !String(hashRow?.pin_hash).includes(LIVE_TEST_PIN));
+    check('الرمز متخزّن مهشّر (HMAC pepper + bcrypt) مش خام',
+      String(hashRow?.pin_hash ?? '').startsWith('v2$$2') && !String(hashRow?.pin_hash).includes(LIVE_TEST_PIN));
     check('تكلفة الهاش ١٢ على الأقل — الرمز دائم و٦ أرقام فمساحته كلها قابلة للمسح',
-      Number(String(hashRow?.pin_hash ?? '').split('$')[2] ?? 0) >= 12,
-      `cost=${String(hashRow?.pin_hash ?? '').split('$')[2]}`);
+      Number(String(hashRow?.pin_hash ?? '').slice(3).split('$')[2] ?? 0) >= 12,
+      `cost=${String(hashRow?.pin_hash ?? '').slice(3).split('$')[2]}`);
 
     // ═══ ٤) تغيير الرمز ══════════════════════════════════════════════════
     console.log(`\n${B}٤) تعيين/تغيير الرمز${O}`);
@@ -160,7 +160,7 @@ async function main() {
     });
     check('رمز حالي غلط بيترفض', wrongCurrent.status >= 400, `HTTP=${wrongCurrent.status}`);
 
-    for (const [weak, why] of [['1111', 'كله نفس الرقم'], ['1234', 'تسلسل صاعد'], ['4321', 'تسلسل نازل']]) {
+    for (const [weak, why] of [['111111', 'كله نفس الرقم'], ['123456', 'تسلسل صاعد'], ['654321', 'تسلسل نازل']]) {
       const res = await h.api('/auth/pin', {
         method: 'POST', token, body: { pin: weak, current_pin: LIVE_TEST_PIN },
       });

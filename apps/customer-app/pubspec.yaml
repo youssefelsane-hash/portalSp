@@ -44,13 +44,14 @@ dependencies:
   url_launcher: ^6.3.2
   webview_flutter: ^4.13.0
   firebase_core: ^4.13.0
-  firebase_messaging: ^16.5.0
+  firebase_messaging: ^16.7.0
   flutter_local_notifications: ^19.4.2
   geolocator: ^13.0.2
   local_auth: ^2.3.0
   mobile_scanner: ^7.4.0
   flutter_svg: ^2.3.0
   cached_network_image: ^3.4.1
+  firebase_crashlytics: ^5.4.0
 
 dev_dependencies:
   flutter_test:

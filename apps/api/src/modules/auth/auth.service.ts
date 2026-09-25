@@ -1,6 +1,8 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   PIN_BCRYPT_ROUNDS,
+  hashPin,
+  pinHashNeedsUpgrade,
   pinDummyHash,
   PIN_RESET_CODE_LENGTH,
   PIN_RESET_CODE_TTL_MINUTES,
@@ -9,6 +11,7 @@ import {
   lockRemainingTextAr,
   shouldLock,
   validatePinFormat,
+  verifyPinHash,
 } from './login-pin.policy';
 import { PinLoginDto } from './dto/pin-login.dto';
 import { PinRegisterDto } from './dto/pin-register.dto';
@@ -725,6 +728,10 @@ export class AuthService {
     );
   }
 
+  private pinPepper(): string {
+    return this.config.get<string>('auth.pinPepper') ?? '';
+  }
+
   /** بيرمي بالرسالة الصح لو الشكل مرفوض — مصدر القاعدة `login-pin.policy.ts`. */
   private assertPinFormat(pin: string): void {
     const failure = validatePinFormat(pin);
@@ -740,7 +747,7 @@ export class AuthService {
    */
   async registerWithPin(dto: PinRegisterDto, ip: string | null): Promise<TokenPair> {
     this.assertPinFormat(dto.pin);
-    const pinHash = await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS);
+    const pinHash = await hashPin(dto.pin, this.pinPepper());
 
     const registration = await this.dataSource.transaction(async (manager) => {
       const users = manager.getRepository(User);
@@ -893,7 +900,7 @@ export class AuthService {
         return { error: this.invalidPinCredentials() };
       }
 
-      const matches = await bcrypt.compare(pin, user.pinHash);
+      const matches = await verifyPinHash(pin, user.pinHash, this.pinPepper());
       if (!matches) {
         user.pinFailedAttempts += 1;
         if (shouldLock(user.pinFailedAttempts)) {
@@ -909,6 +916,9 @@ export class AuthService {
 
       user.pinFailedAttempts = 0;
       user.pinLockedUntil = null;
+      if (pinHashNeedsUpgrade(user.pinHash)) {
+        user.pinHash = await hashPin(pin, this.pinPepper());
+      }
       if (touchLogin) {
         user.lastLoginAt = new Date();
         user.lastLoginIp = ip;
@@ -945,7 +955,7 @@ export class AuthService {
    */
   async setPin(userId: string, dto: { pin: string; current_pin?: string }): Promise<{ pin_set: boolean }> {
     this.assertPinFormat(dto.pin);
-    return this.dataSource.transaction(async (manager) => {
+    const outcome = await this.dataSource.transaction(async (manager) => {
       const user = await manager
         .createQueryBuilder(User, 'u')
         .addSelect('u.pinHash')
@@ -959,18 +969,29 @@ export class AuthService {
         if (!dto.current_pin) {
           throw new ApiException(ErrorCode.VAL_001, 'اكتب رمز الدخول الحالي عشان تغيّره', HttpStatus.BAD_REQUEST);
         }
-        if (!(await bcrypt.compare(dto.current_pin, user.pinHash))) {
-          throw new ApiException(ErrorCode.AUTH_003, 'رمز الدخول الحالي غلط', HttpStatus.UNAUTHORIZED);
+        if (user.pinLockedUntil && user.pinLockedUntil.getTime() > Date.now()) {
+          await bcrypt.compare(dto.current_pin, await pinDummyHash());
+          return { error: this.invalidPinCredentials() };
+        }
+        if (!(await verifyPinHash(dto.current_pin, user.pinHash, this.pinPepper()))) {
+          user.pinFailedAttempts += 1;
+          if (shouldLock(user.pinFailedAttempts)) {
+            user.pinLockedUntil = new Date(Date.now() + lockoutMinutesFor(user.pinFailedAttempts) * 60_000);
+          }
+          await manager.save(user);
+          return { error: this.invalidPinCredentials() };
         }
       }
 
-      user.pinHash = await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS);
+      user.pinHash = await hashPin(dto.pin, this.pinPepper());
       user.pinSetAt = new Date();
       user.pinFailedAttempts = 0;
       user.pinLockedUntil = null;
       await manager.save(user);
-      return { pin_set: true };
+      return { pin_set: true as const };
     });
+    if ('error' in outcome) throw outcome.error;
+    return outcome;
   }
 
   /**
@@ -1087,7 +1108,7 @@ export class AuthService {
         User,
         { id: user.id },
         {
-          pinHash: await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS),
+          pinHash: await hashPin(dto.pin, this.pinPepper()),
           pinSetAt: new Date(),
           pinFailedAttempts: 0,
           pinLockedUntil: null,

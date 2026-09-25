@@ -58,13 +58,19 @@ export default () => ({
     trustedProxyHops: parseInt(process.env.TRUSTED_PROXY_HOPS ?? '1', 10),
   },
 
+  auth: {
+    // سر مستقل عن JWT وقاعدة البيانات. الـAPI بيعمل HMAC للـPIN قبل bcrypt، وبالتالي نسخة DB
+    // مسروقة لوحدها ماتكفيش لمسح مساحة الأرقام.
+    pinPepper: process.env.AUTH_PIN_PEPPER ?? '',
+  },
+
   otp: {
     expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES ?? '5', 10),
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),
 
     // **مؤقت — فترة Google Play Closed Testing وبس** (docs/08 §173، `auth/otp-test-mode.ts`).
-    // في production/staging لا يقبل الحارس الوضع إلا بقائمة أرقام صريحة؛ خارج القائمة لا
-    // يُنشأ OTP ولا تُحاول SMS، فتظل البنية Production من غير فتح التسجيل للعامة.
+    // توافق اختبارات OTP المحلية القديمة فقط. حارس البيئة يرفض الوضع كله في production/staging؛
+    // رحلة التسجيل الحالية مفتوحة لكل رقم عبر PIN ولا تقرأ القائمة دي أصلًا.
     testMode: {
       enabled: process.env.OTP_TEST_MODE === 'true',
       fixedCode: process.env.OTP_TEST_MODE_CODE ?? '111111',

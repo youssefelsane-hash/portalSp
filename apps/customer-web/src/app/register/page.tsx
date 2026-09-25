@@ -83,7 +83,7 @@ function RegisterForm() {
 
         <PinField
           id="register-pin"
-          label="اختار رمز دخول (4–6 أرقام)"
+          label="اختار رمز دخول (6 أرقام)"
           value={pin}
           onChange={setPin}
           autoComplete="new-password"

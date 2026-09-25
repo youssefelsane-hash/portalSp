@@ -32,7 +32,7 @@ function LoginForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const localError = localPinError(pin, { requireStrong: false });
+    const localError = localPinError(pin, { requireStrong: false, allowLegacy: true });
     if (localError) {
       setError(localError);
       return;
@@ -80,6 +80,7 @@ function LoginForm() {
           value={pin}
           onChange={setPin}
           autoComplete="current-password"
+          allowLegacy
         />
 
         {/*

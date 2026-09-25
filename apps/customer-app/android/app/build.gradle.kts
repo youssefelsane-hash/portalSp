@@ -157,4 +157,5 @@ flutter {
 // من غير أي تعديل تاني.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
 }

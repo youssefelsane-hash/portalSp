@@ -25,11 +25,13 @@ function PinInput({
   label,
   value,
   onChange,
+  allowLegacy = false,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (next: string) => void;
+  allowLegacy?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -40,7 +42,7 @@ function PinInput({
         type="password"
         inputMode="numeric"
         maxLength={6}
-        minLength={4}
+        minLength={allowLegacy ? 4 : 6}
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
         required
@@ -74,8 +76,8 @@ export function ChangePinCard() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (newPin.length < 4 || newPin.length > 6) {
-      setError('رمز الدخول لازم يكون من 4 لـ6 أرقام');
+    if (newPin.length !== 6) {
+      setError('رمز الدخول لازم يكون 6 أرقام');
       return;
     }
     if (isWeakPin(newPin)) {
@@ -116,9 +118,9 @@ export function ChangePinCard() {
       <CardContent>
         <form onSubmit={submit} className="flex max-w-xs flex-col gap-4">
           {hasPin && (
-            <PinInput id="current-pin" label="الرمز الحالي" value={currentPin} onChange={setCurrentPin} />
+            <PinInput id="current-pin" label="الرمز الحالي" value={currentPin} onChange={setCurrentPin} allowLegacy />
           )}
-          <PinInput id="new-pin" label="رمز جديد (4–6 أرقام)" value={newPin} onChange={setNewPin} />
+          <PinInput id="new-pin" label="رمز جديد (6 أرقام)" value={newPin} onChange={setNewPin} />
           <PinInput id="confirm-pin" label="أكّد الرمز" value={confirmPin} onChange={setConfirmPin} />
           {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
           <Button type="submit" data-testid="save-pin" disabled={busy}>

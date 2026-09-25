@@ -79,9 +79,9 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('login-phone-field')), '+201000000003');
     await _tapKey(tester, 'login-submit');
 
-    // `1234` تسلسل صاعد — مرفوض بنفس قاعدة `isWeakPin` في الباك-إند بالحرف.
-    await tester.enterText(find.byKey(const ValueKey('login-pin-field')), '1234');
-    await tester.enterText(find.byKey(const ValueKey('login-pin-confirm-field')), '1234');
+    // `123456` تسلسل صاعد — مرفوض بنفس قاعدة `isWeakPin` في الباك-إند بالحرف.
+    await tester.enterText(find.byKey(const ValueKey('login-pin-field')), '123456');
+    await tester.enterText(find.byKey(const ValueKey('login-pin-confirm-field')), '123456');
     await _tapKey(tester, 'login-submit');
 
     expect(

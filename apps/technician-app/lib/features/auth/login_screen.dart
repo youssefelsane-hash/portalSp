@@ -94,17 +94,26 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submitPin() async {
     final pin = _pinController.text.trim();
-    if (pin.length < 4) {
-      setState(() => _error = 'رمز الدخول لازم يكون من 4 لـ6 أرقام');
+    if (pin.length < (_isRegisterMode ? 6 : 4)) {
+      setState(
+        () => _error = _isRegisterMode
+            ? 'رمز الدخول لازم يكون 6 أرقام'
+            : 'رمز الدخول لازم يكون من 4 لـ6 أرقام',
+      );
       return;
     }
     if (_isRegisterMode) {
       if (_isWeakPin(pin)) {
-        setState(() => _error = 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+        setState(
+          () => _error =
+              'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم',
+        );
         return;
       }
       if (_pinConfirmController.text.trim() != pin) {
-        setState(() => _error = 'الرمزين مش زي بعض — اكتب نفس الرمز في الخانتين');
+        setState(
+          () => _error = 'الرمزين مش زي بعض — اكتب نفس الرمز في الخانتين',
+        );
         return;
       }
     }
@@ -229,7 +238,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         keyboardType: TextInputType.phone,
                         textDirection: TextDirection.ltr,
                         textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => _isSubmitting ? null : _goToPinStep(),
+                        onSubmitted: (_) =>
+                            _isSubmitting ? null : _goToPinStep(),
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
                           hintText: '+201001234567',
@@ -241,7 +251,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _pinController,
                         focusNode: _pinFocusNode,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         textDirection: TextDirection.ltr,
                         textAlign: TextAlign.center,
                         maxLength: 6,
@@ -257,7 +269,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         // التلقائي كان هيبعت رمز ناقص ويحرق محاولة.
                         onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
                         decoration: InputDecoration(
-                          labelText: _isRegisterMode ? 'اختار رمز دخول (4–6 أرقام)' : 'رمز الدخول',
+                          labelText: _isRegisterMode
+                              ? 'اختار رمز دخول (6 أرقام)'
+                              : 'رمز الدخول',
                           counterText: '',
                         ),
                       ),
@@ -267,14 +281,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           key: const ValueKey('login-pin-confirm-field'),
                           controller: _pinConfirmController,
                           keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           textDirection: TextDirection.ltr,
                           textAlign: TextAlign.center,
                           maxLength: 6,
                           obscureText: true,
-                          style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.w700),
-                          onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
-                          decoration: const InputDecoration(labelText: 'أكّد الرمز', counterText: ''),
+                          style: const TextStyle(
+                            fontSize: 24,
+                            letterSpacing: 8,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          onSubmitted: (_) =>
+                              _isSubmitting ? null : _submitPin(),
+                          decoration: const InputDecoration(
+                            labelText: 'أكّد الرمز',
+                            counterText: '',
+                          ),
                         ),
                       ],
                       // **المخرج الوحيد لمستخدم نسي رمزه** (ADR-0109 §6-ب) — مفيش SMS بعد
@@ -285,12 +309,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _isSubmitting
                             ? null
                             : () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => PinResetScreen(
-                                      initialPhone: _phoneController.text.trim(),
-                                    ),
+                                MaterialPageRoute(
+                                  builder: (_) => PinResetScreen(
+                                    initialPhone: _phoneController.text.trim(),
                                   ),
                                 ),
+                              ),
                         icon: Icons.help_outline_rounded,
                         label: 'نسيت رمز الدخول؟',
                       ),
@@ -320,7 +344,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         'استنى شوية وجرّب تاني، أو استخدم «نسيت رمز الدخول؟».',
                         key: const ValueKey('login-too-many-attempts'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                     if (_suggestRegister) ...[

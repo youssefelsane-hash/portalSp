@@ -81,11 +81,12 @@ export default function SecurityPage() {
             value={currentPin}
             onChange={setCurrentPin}
             autoComplete="current-password"
+            allowLegacy
           />
         )}
         <PinField
           id="security-new-pin"
-          label="رمز الدخول الجديد (4–6 أرقام)"
+          label="رمز الدخول الجديد (6 أرقام)"
           value={newPin}
           onChange={setNewPin}
           autoFocus={!hasPin}

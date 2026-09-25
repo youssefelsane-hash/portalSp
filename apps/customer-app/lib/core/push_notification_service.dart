@@ -11,7 +11,8 @@ import 'deep_link_router.dart';
 
 const _defaultChannelId = 'order_updates';
 
-final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+final FlutterLocalNotificationsPlugin _localNotifications =
+    FlutterLocalNotificationsPlugin();
 
 // docs/08 §19 بند 11 — كانت فجوة موثّقة صراحة: onMessage/onMessageOpenedApp/getInitialMessage/
 // background handler كانوا صفر خالص، يعني (أ) إشعار وصل والتطبيق مفتوح (foreground) كان بيختفي
@@ -38,13 +39,20 @@ class PushNotificationService {
   static const _storage = FlutterSecureStorage();
   static bool _firebaseReady = false;
 
+  /// لازم يتسجّل قبل `runApp` حتى Android يقدر يفتح الـbackground isolate لو الإشعار وصل
+  /// والتطبيق مقفول تمامًا. تسجيله بعد تسجيل الدخول فقط كان يترك الإقلاع البارد غير مضمون.
+  static void installBackgroundHandler() {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
+
   static Future<String> _getOrCreateDeviceId() async {
     final existing = await _storage.read(key: _deviceIdKey);
     if (existing != null) return existing;
     final random = Random.secure();
-    final id = List<int>.generate(16, (_) => random.nextInt(256))
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final id = List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     await _storage.write(key: _deviceIdKey, value: id);
     return id;
   }
@@ -54,19 +62,24 @@ class PushNotificationService {
     const iosInit = DarwinInitializationSettings();
     await _localNotifications.initialize(
       const InitializationSettings(android: androidInit, iOS: iosInit),
-      onDidReceiveNotificationResponse: (response) => handleDeepLink(response.payload),
+      onDidReceiveNotificationResponse: (response) =>
+          handleDeepLink(response.payload),
     );
 
-    final androidPlugin =
-        _localNotifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await androidPlugin?.requestNotificationsPermission();
-    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
-      _defaultChannelId,
-      'تحديثات الطلبات',
-      description: 'إشعارات حالة الطلب، الشات، والتذكيرات',
-      importance: Importance.high,
-      playSound: true,
-    ));
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _defaultChannelId,
+        'تحديثات الطلبات',
+        description: 'إشعارات حالة الطلب، الشات، والتذكيرات',
+        importance: Importance.high,
+        playSound: true,
+      ),
+    );
   }
 
   // FCM مابيعرضش notification tray تلقائي لما التطبيق مفتوح (foreground) — لازم نبنيه يدوي بمكتبة
@@ -95,8 +108,12 @@ class PushNotificationService {
 
   /// دالة الطلب المُصادَق عليه، متخزّنة من آخر `registerCurrentDevice` — تأكيد الاستلام
   /// (تدقيق L-7) بيحصل جوّه مستمعي الرسايل اللي مالهمش أي وسيلة توصل بيها للـauth context.
-  static Future<Map<String, dynamic>?> Function(String method, String path, {Map<String, dynamic>? body})?
-      _authedRequest;
+  static Future<Map<String, dynamic>?> Function(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  })?
+  _authedRequest;
 
   /// تأكيد وصول الإشعار للجهاز فعليًا. نجاح FCM معناه إن جوجل **قبل** الرسالة، مش إنها وصلت —
   /// فحالة `delivered` في الباك-إند مالهاش مصدر غير الجهاز نفسه. فشل التأكيد مالوش أي أثر على
@@ -106,24 +123,32 @@ class PushNotificationService {
     final request = _authedRequest;
     if (notificationId == null || request == null) return;
     try {
-      await request('POST', '/notifications/delivered', body: {
-        'notification_ids': [notificationId],
-      });
+      await request(
+        'POST',
+        '/notifications/delivered',
+        body: {
+          'notification_ids': [notificationId],
+        },
+      );
     } catch (err) {
       debugPrint('[push] تعذّر تأكيد استلام الإشعار $notificationId: $err');
     }
   }
 
   static Future<void> registerCurrentDevice(
-    Future<Map<String, dynamic>?> Function(String method, String path, {Map<String, dynamic>? body}) authedRequest,
+    Future<Map<String, dynamic>?> Function(
+      String method,
+      String path, {
+      Map<String, dynamic>? body,
+    })
+    authedRequest,
   ) async {
     _authedRequest = authedRequest;
     try {
       if (!_firebaseReady) {
-        await Firebase.initializeApp();
+        if (Firebase.apps.isEmpty) await Firebase.initializeApp();
         _firebaseReady = true;
         await _initLocalNotifications();
-        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
         FirebaseMessaging.onMessage.listen((message) {
           _showForegroundNotification(message);
           _acknowledgeDelivery(message);
@@ -142,11 +167,17 @@ class PushNotificationService {
       if (token == null) return;
 
       final deviceId = await _getOrCreateDeviceId();
-      await authedRequest('POST', '/devices', body: {
-        'device_id': deviceId,
-        'fcm_token': token,
-        'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
-      });
+      await authedRequest(
+        'POST',
+        '/devices',
+        body: {
+          'device_id': deviceId,
+          'fcm_token': token,
+          'platform': defaultTargetPlatform == TargetPlatform.iOS
+              ? 'ios'
+              : 'android',
+        },
+      );
 
       // التطبيق كان مقفول تمامًا (cold start) والمستخدم فتحه بالضغط على إشعار — لازم يتفحص بعد
       // ما التوكن يتسجّل عشان نضمن التطبيق شغال فعلاً (getInitialMessage بترجع null لو مفيش
@@ -157,7 +188,9 @@ class PushNotificationService {
         handleDeepLink(initialMessage.data['deep_link'] as String?);
       }
     } catch (err) {
-      debugPrint('[push] فشل تسجيل جهاز إشعارات push (متوقع من غير إعداد Firebase حقيقي): $err');
+      debugPrint(
+        '[push] فشل تسجيل جهاز إشعارات push (متوقع من غير إعداد Firebase حقيقي): $err',
+      );
     }
   }
 }

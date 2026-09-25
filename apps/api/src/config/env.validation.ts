@@ -35,6 +35,13 @@ export const envValidationSchema = Joi.object({
     .invalid(Joi.ref('JWT_ACCESS_SECRET')) // نفس السر لـaccess وrefresh يلغي فائدة فصلهم بالكامل
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-refresh-secret') }),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
+  AUTH_PIN_PEPPER: Joi.string()
+    .allow('')
+    .optional()
+    .when('NODE_ENV', {
+      is: PRODUCTION_LIKE_ENV,
+      then: Joi.string().min(32).required().invalid('change-me-pin-pepper'),
+    }),
   SETTINGS_ENCRYPTION_KEY: Joi.string()
     .min(32)
     .allow('')

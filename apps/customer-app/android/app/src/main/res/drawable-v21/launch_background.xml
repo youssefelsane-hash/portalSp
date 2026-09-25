@@ -2,4 +2,9 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- لون واحد بيتبدّل تلقائيًا بين values/ وvalues-night/ حسب وضع الجهاز. -->
     <item android:drawable="@color/splash_background" />
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/osta_splash_logo" />
+    </item>
 </layer-list>

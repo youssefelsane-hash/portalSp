@@ -1,5 +1,5 @@
 import { HttpStatus } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 
 /**
@@ -9,9 +9,14 @@ import * as bcrypt from 'bcryptjs';
  * الإداري بلا تكرار. نفس فلسفة `otp-test-mode.ts`: القرار في مكان واحد مسمّى.
  */
 
-/** ٤ أرقام أضعف من اللازم لحساب فيه فلوس، و٦ هو سقف شاشات الإدخال الموجودة. */
-export const PIN_MIN_LENGTH = 4;
-export const PIN_MAX_LENGTH = 6;
+/**
+ * كل رمز **جديد** ست أرقام. الدخول يفضل يقبل ٤–٦ مؤقتًا عشان المستخدمين اللي عملوا رمز قبل
+ * التصليب يقدروا يدخلوا ويغيّروه بدل ما نقفلهم برّه حساباتهم فجأة.
+ */
+export const PIN_LENGTH = 6;
+export const PIN_MIN_LENGTH = PIN_LENGTH;
+export const PIN_MAX_LENGTH = PIN_LENGTH;
+export const LEGACY_PIN_MIN_LENGTH = 4;
 
 /** نفس رصيد `otp_codes.max_attempts` بالظبط — المستخدم اتعوّد عليه. */
 export const PIN_MAX_ATTEMPTS = 5;
@@ -27,16 +32,37 @@ export const PIN_MAX_ATTEMPTS = 5;
  * الحد الأعلى مش عشوائي: التكلفة دي بتتدفع **مرة واحدة على الدخول** مش على كل request، ويوزر
  * بيستنى ربع ثانية مرة كل كام أسبوع (الـrefresh token هو الروتين، مش الـPIN).
  *
- * ### فجوة موثّقة صراحة: مفيش pepper
- *
- * الحماية الكاملة ضد التكسير بعد تسريب القاعدة هي **pepper** — سر في متغيّر بيئة بيتعمل بيه
- * HMAC للـPIN قبل الـbcrypt، فمن غير السر ده المليون احتمال مالوش أي معنى. مش مطبّق هنا عمدًا:
- * ضياع الـpepper = **كل** الـPINات تموت في نفس اللحظة بلا أي طريقة استرجاع غير reset إداري
- * لكل مستخدم. اللي بيقلّل خطورة الغياب ده إن الهجوم المتاح **online** بس، وسلّم القفل
- * (`PIN_LOCKOUT_LADDER_MINUTES`) بيقتله. لو اتقرر يتطبّق: لازم بادئة إصدار في `pin_hash`
- * (`v2$…`) عشان الهاشات القديمة والجديدة يتعايشوا والتدوير يبقى ممكن.
+ * قبل التصليب كان bcrypt بيستقبل الرقم الخام، وده يخلي قاعدة البيانات المسروقة كافية لبدء مسح
+ * مساحة الأرقام. الإصدار `v2$` بيعمل HMAC-SHA256 بسر خارج القاعدة قبل bcrypt. الهاشات القديمة
+ * تفضل قابلة للتحقق وتتحدث تلقائيًا بعد أول دخول صحيح، فلا نكسر المستخدمين الحاليين.
  */
 export const PIN_BCRYPT_ROUNDS = 12;
+export const PIN_HASH_PREFIX = 'v2$';
+
+function pepperedPin(pin: string, pepper: string): string {
+  return createHmac('sha256', pepper).update(pin, 'utf8').digest('hex');
+}
+
+/** هاش الإصدار الحالي؛ الـpepper لا يدخل قاعدة البيانات ولا اللوج. */
+export async function hashPin(pin: string, pepper: string): Promise<string> {
+  const hash = await bcrypt.hash(pepperedPin(pin, pepper), PIN_BCRYPT_ROUNDS);
+  return `${PIN_HASH_PREFIX}${hash}`;
+}
+
+/**
+ * يدعم هاشات bcrypt القديمة عشان الهجرة تكون بلا logout جماعي. نجاح هاش قديم يتبعه rehash
+ * داخل نفس transaction في `AuthService`.
+ */
+export async function verifyPinHash(pin: string, storedHash: string, pepper: string): Promise<boolean> {
+  if (storedHash.startsWith(PIN_HASH_PREFIX)) {
+    return bcrypt.compare(pepperedPin(pin, pepper), storedHash.slice(PIN_HASH_PREFIX.length));
+  }
+  return bcrypt.compare(pin, storedHash);
+}
+
+export function pinHashNeedsUpgrade(storedHash: string): boolean {
+  return !storedHash.startsWith(PIN_HASH_PREFIX);
+}
 
 /**
  * القفل بيطوّل مع التكرار بدل ما يبقى ثابت: ٥ محاولات ⇒ دقيقة، وبعدين ٥ ⇒ ٥ دقايق، وهكذا.
@@ -71,15 +97,22 @@ export interface PinValidationFailure {
  * الرسايل موجّهة للمستخدم بالعامية زي باقي المنتج، وبتقول **إيه المطلوب** مش «قيمة غير صالحة».
  */
 export function validatePinFormat(pin: unknown): PinValidationFailure | null {
-  if (typeof pin !== 'string' || pin.length < PIN_MIN_LENGTH || pin.length > PIN_MAX_LENGTH) {
+  if (typeof pin !== 'string' || pin.length === 0) {
     return {
       code: 'length',
-      messageAr: `رمز الدخول لازم يكون من ${PIN_MIN_LENGTH} لـ${PIN_MAX_LENGTH} أرقام`,
+      messageAr: `رمز الدخول لازم يكون ${PIN_LENGTH} أرقام`,
       status: HttpStatus.BAD_REQUEST,
     };
   }
   if (!/^[0-9]+$/.test(pin)) {
     return { code: 'digits', messageAr: 'رمز الدخول أرقام بس', status: HttpStatus.BAD_REQUEST };
+  }
+  if (pin.length !== PIN_LENGTH) {
+    return {
+      code: 'length',
+      messageAr: `رمز الدخول لازم يكون ${PIN_LENGTH} أرقام`,
+      status: HttpStatus.BAD_REQUEST,
+    };
   }
   if (isWeakPin(pin)) {
     return {

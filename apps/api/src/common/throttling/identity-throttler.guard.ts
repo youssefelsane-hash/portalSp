@@ -5,6 +5,30 @@ import { createHash } from 'crypto';
 
 type ThrottledRequest = Partial<Request> & { body?: unknown };
 
+function requestPath(req: ThrottledRequest): string {
+  const candidate = req.originalUrl ?? req.path ?? '';
+  return candidate.split('?')[0] ?? '';
+}
+
+export function throttleIdentityForRequest(req: ThrottledRequest): string {
+  const ip = req?.ip ?? 'unknown';
+
+  // التسجيل بالـPIN مفتوح لأي رقم، لذلك الرقم نفسه لا يصلح كحد ضد إنشاء حسابات جماعي:
+  // المهاجم يغيّره في كل طلب. المسار ده وحده يتحاسب بالـIP؛ الدخول يظل محسوبًا بالرقم حتى
+  // تغيير الشبكة لا يفتح للمهاجم رصيد تخمين جديد على نفس الحساب.
+  if (requestPath(req).endsWith('/auth/pin/register')) {
+    return `registration-ip:${ip}`;
+  }
+
+  const body = req?.body;
+  const phone = body && typeof body === 'object' ? (body as Record<string, unknown>).phone_number : undefined;
+  if (typeof phone === 'string' && phone.length > 0) {
+    return `phone:${createHash('sha256').update(phone).digest('hex').slice(0, 32)}`;
+  }
+
+  return `ip:${ip}`;
+}
+
 /**
  * **مين اللي بيتعدّ في الـrate limit؟** (تدقيق `docs/29` P0-2)
  *
@@ -18,10 +42,11 @@ type ThrottledRequest = Partial<Request> & { body?: unknown };
  *
  * القاعدة هنا: **اتعقّب بأدق هوية متاحة**، والـIP آخر حل مش أول حل.
  *
- * - مسار فيه `phone_number` في الـbody (OTP، تسجيل، استرداد) ⇒ `phone:<hash(الرقم)>`.
+ * - مسار فيه `phone_number` في الـbody (OTP، دخول، استرداد) ⇒ `phone:<hash(الرقم)>`.
  *   ده **أدق أمنيًا** من الـIP كمان: الهدف الحقيقي من تحديد OTP هو منع قصف رقم بعينه برسايل،
  *   والقياس بالرقم بيمنع ده حرفيًا، بينما القياس بالـIP بيقفل على ناس بريئة على نفس الـCGNAT
  *   ويسيب المهاجم اللي بيغيّر IP يعدّي.
+ * - تسجيل PIN المفتوح ⇒ الـIP، حتى تغيير الرقم في كل طلب مايفتحش رصيد إنشاء حسابات جديد.
  * - غير كده ⇒ الـIP — وهو دلوقتي **العميل الحقيقي** لأن `trust proxy` اتظبط.
  *
  * الرقم بيتخزّن **مهشوش** — مفاتيح الـthrottle بتروح Redis وبتفضل في الذاكرة، وأرقام الموبايل
@@ -41,13 +66,6 @@ type ThrottledRequest = Partial<Request> & { body?: unknown };
 @Injectable()
 export class IdentityThrottlerGuard extends ThrottlerGuard {
   protected async getTracker(req: ThrottledRequest, _context?: ExecutionContext): Promise<string> {
-    const body = req?.body;
-    const phone = body && typeof body === 'object' ? (body as Record<string, unknown>).phone_number : undefined;
-    if (typeof phone === 'string' && phone.length > 0) {
-      return `phone:${createHash('sha256').update(phone).digest('hex').slice(0, 32)}`;
-    }
-
-    // الـIP هنا بيبقى العميل الحقيقي لأن `trust proxy` مضبوط في `configureHttpLayer`.
-    return `ip:${req?.ip ?? 'unknown'}`;
+    return throttleIdentityForRequest(req);
   }
 }

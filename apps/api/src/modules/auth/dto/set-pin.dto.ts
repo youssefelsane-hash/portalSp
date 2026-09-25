@@ -1,5 +1,5 @@
 import { IsOptional, IsString, Length } from 'class-validator';
-import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../login-pin.policy';
+import { LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '../login-pin.policy';
 
 /**
  * تعيين/تغيير رمز الدخول لمستخدم **متوثّق بالفعل** (ADR-0109 §6-أ).
@@ -17,6 +17,6 @@ export class SetPinDto {
 
   @IsOptional()
   @IsString()
-  @Length(PIN_MIN_LENGTH, PIN_MAX_LENGTH)
+  @Length(LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH)
   current_pin?: string;
 }

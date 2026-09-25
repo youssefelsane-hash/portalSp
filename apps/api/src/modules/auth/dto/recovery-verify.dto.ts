@@ -1,6 +1,7 @@
 import { IsPhoneNumber, IsString, Length } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { normalizePhoneNumber } from '../../../common/utils/phone-number';
+import { LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH } from '../login-pin.policy';
 
 // استرجاع MFA (ADR-0011 §6) — لازم **رمز الدخول + كود استرجاع** مع بعض، عاملين مستقلين.
 //
@@ -13,7 +14,7 @@ export class RecoveryVerifyDto {
   phone_number: string;
 
   @IsString()
-  @Length(4, 6)
+  @Length(LEGACY_PIN_MIN_LENGTH, PIN_MAX_LENGTH)
   pin: string;
 
   @IsString()

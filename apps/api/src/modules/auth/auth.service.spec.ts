@@ -230,6 +230,30 @@ describe('AuthService', () => {
     expect(users.rows[0].phoneNumber).toBe('+201001234567');
   });
 
+  it('يسمح لأي رقم صحيح وغير مستخدم بالتسجيل برمز الدخول من غير قائمة أرقام أو OTP', async () => {
+    const phoneNumber = '+201559876543';
+
+    const tokens = await service.registerWithPin(
+      {
+        phone_number: phoneNumber,
+        pin: '274905',
+        full_name: 'مستخدم تسجيل مفتوح',
+        user_type: UserType.CUSTOMER,
+      },
+      '127.0.0.1',
+    );
+
+    expect(tokens.access_token).toEqual(expect.any(String));
+    expect(tokens.refresh_token).toHaveLength(96);
+    expect(users.rows).toHaveLength(1);
+    expect(users.rows[0]).toMatchObject({
+      phoneNumber,
+      phoneVerifiedAt: null,
+      userType: UserType.CUSTOMER,
+    });
+    expect(users.rows[0].pinHash).toEqual(expect.stringMatching(/^v2\$/));
+  });
+
   it('يرفض كود OTP غلط بخطأ AUTH_003', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => undefined);
     await service.requestOtp({ phone_number: '+201001234567', purpose: OtpPurpose.REGISTER }, null);

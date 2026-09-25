@@ -23,8 +23,9 @@ class PinResetScreen extends StatefulWidget {
 }
 
 class _PinResetScreenState extends State<PinResetScreen> {
-  late final TextEditingController _phoneController =
-      TextEditingController(text: widget.initialPhone ?? '+20');
+  late final TextEditingController _phoneController = TextEditingController(
+    text: widget.initialPhone ?? '+20',
+  );
   final _codeController = TextEditingController();
   final _pinController = TextEditingController();
   final _confirmController = TextEditingController();
@@ -58,12 +59,15 @@ class _PinResetScreenState extends State<PinResetScreen> {
       setState(() => _error = 'كود الاسترجاع 10 أرقام');
       return;
     }
-    if (pin.length < 4) {
-      setState(() => _error = 'رمز الدخول لازم يكون من 4 لـ6 أرقام');
+    if (pin.length != 6) {
+      setState(() => _error = 'رمز الدخول لازم يكون 6 أرقام');
       return;
     }
     if (_isWeakPin(pin)) {
-      setState(() => _error = 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+      setState(
+        () => _error =
+            'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم',
+      );
       return;
     }
     if (_confirmController.text.trim() != pin) {
@@ -76,10 +80,10 @@ class _PinResetScreenState extends State<PinResetScreen> {
     });
     try {
       await context.read<AuthRepository>().redeemPinResetCode(
-            _phoneController.text.trim(),
-            _codeController.text.trim(),
-            pin,
-          );
+        _phoneController.text.trim(),
+        _codeController.text.trim(),
+        pin,
+      );
       if (!mounted) return;
       // مفيش جلسة بترجع — المستخدم بيدخل بالرمز الجديد من شاشة الدخول العادية.
       Navigator.of(context).pop(true);
@@ -125,7 +129,9 @@ class _PinResetScreenState extends State<PinResetScreen> {
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
                     textDirection: TextDirection.ltr,
-                    decoration: const InputDecoration(labelText: 'رقم الموبايل'),
+                    decoration: const InputDecoration(
+                      labelText: 'رقم الموبايل',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -145,7 +151,7 @@ class _PinResetScreenState extends State<PinResetScreen> {
                   _PinBox(
                     fieldKey: const ValueKey('pin-reset-new-field'),
                     controller: _pinController,
-                    label: 'رمز الدخول الجديد (4–6 أرقام)',
+                    label: 'رمز الدخول الجديد (6 أرقام)',
                   ),
                   const SizedBox(height: 12),
                   _PinBox(
@@ -166,12 +172,17 @@ class _PinResetScreenState extends State<PinResetScreen> {
                   FilledButton(
                     key: const ValueKey('pin-reset-submit'),
                     onPressed: _isSubmitting ? null : _submit,
-                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                    ),
                     child: _isSubmitting
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Text('احفظ الرمز الجديد'),
                   ),
@@ -186,7 +197,11 @@ class _PinResetScreenState extends State<PinResetScreen> {
 }
 
 class _PinBox extends StatelessWidget {
-  const _PinBox({required this.fieldKey, required this.controller, required this.label});
+  const _PinBox({
+    required this.fieldKey,
+    required this.controller,
+    required this.label,
+  });
 
   final Key fieldKey;
   final TextEditingController controller;
@@ -203,7 +218,11 @@ class _PinBox extends StatelessWidget {
       textAlign: TextAlign.center,
       maxLength: 6,
       obscureText: true,
-      style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.w700),
+      style: const TextStyle(
+        fontSize: 24,
+        letterSpacing: 8,
+        fontWeight: FontWeight.w700,
+      ),
       decoration: InputDecoration(labelText: label, counterText: ''),
     );
   }

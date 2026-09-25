@@ -40,12 +40,17 @@ class _LoginScreenState extends State<LoginScreen> {
   final _fullNameController = TextEditingController();
   final _referralCodeController = TextEditingController();
   final _technicianReferralCodeController = TextEditingController();
+  final _fullNameFocusNode = FocusNode();
+  final _phoneFocusNode = FocusNode();
+  final _referralFocusNode = FocusNode();
+  final _technicianReferralFocusNode = FocusNode();
 
   /// **طلب مالك صريح (docs/08 §77-B2)**: «أول ما يدوس التالي عايز أوتوماتيك الكيبورد يطلع…
   /// ويبقى البوينتر محطوط أوتوماتيك جوه الخانة». `autofocus` لوحده ما ينفعش هنا لأن الحقل
   /// بيتبنى في نفس الإطار اللي `_pinStep` بيتغيّر فيه — الحل `FocusNode` بيتطلب التركيز بعد
   /// ما الإطار يخلص.
   final _pinFocusNode = FocusNode();
+  final _pinConfirmFocusNode = FocusNode();
 
   /// وصلنا لخطوة الرمز؟ (كانت `_pinStep` — دلوقتي مفيش إرسال أصلاً، الانتقال محلي بالكامل
   /// وبلا أي نداء شبكة، وده أسرع خطوة دخول في التطبيق كله.)
@@ -80,7 +85,12 @@ class _LoginScreenState extends State<LoginScreen> {
     _fullNameController.dispose();
     _referralCodeController.dispose();
     _technicianReferralCodeController.dispose();
+    _fullNameFocusNode.dispose();
+    _phoneFocusNode.dispose();
+    _referralFocusNode.dispose();
+    _technicianReferralFocusNode.dispose();
     _pinFocusNode.dispose();
+    _pinConfirmFocusNode.dispose();
     super.dispose();
   }
 
@@ -112,17 +122,26 @@ class _LoginScreenState extends State<LoginScreen> {
     final pin = _pinController.text.trim();
     // فحص محلي قبل أي نداء — نفس قواعد `login-pin.policy.ts` في الباك-إند. الباك-إند هو
     // مصدر الحقيقة وبيفحص تاني؛ ده بس عشان المستخدم ياخد رد فوري بدل رحلة شبكة.
-    if (pin.length < 4) {
-      setState(() => _error = 'رمز الدخول لازم يكون من 4 لـ6 أرقام');
+    if (pin.length < (_isRegisterMode ? 6 : 4)) {
+      setState(
+        () => _error = _isRegisterMode
+            ? 'رمز الدخول لازم يكون 6 أرقام'
+            : 'رمز الدخول لازم يكون من 4 لـ6 أرقام',
+      );
       return;
     }
     if (_isRegisterMode) {
       if (_isWeakPin(pin)) {
-        setState(() => _error = 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+        setState(
+          () => _error =
+              'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم',
+        );
         return;
       }
       if (_pinConfirmController.text.trim() != pin) {
-        setState(() => _error = 'الرمزين مش زي بعض — اكتب نفس الرمز في الخانتين');
+        setState(
+          () => _error = 'الرمزين مش زي بعض — اكتب نفس الرمز في الخانتين',
+        );
         return;
       }
     }
@@ -249,11 +268,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     Text(
                       _pinStep
                           ? (_isRegisterMode
-                              ? 'اختار رمز دخول لحسابك — هتستخدمه لو سجّلت من جديد'
-                              : 'اكتب رمز الدخول بتاعك')
+                                ? 'اختار رمز دخول لحسابك — هتستخدمه لو سجّلت من جديد'
+                                : 'اكتب رمز الدخول بتاعك')
                           : (_isRegisterMode
-                              ? 'اكتب بياناتك وهتختار رمز دخول في الخطوة الجاية'
-                              : 'اكتب رقم موبايلك ورمز دخولك'),
+                                ? 'اكتب بياناتك وهتختار رمز دخول في الخطوة الجاية'
+                                : 'اكتب رقم موبايلك ورمز دخولك'),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -265,7 +284,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextField(
                           key: const ValueKey('login-full-name-field'),
                           controller: _fullNameController,
+                          focusNode: _fullNameFocusNode,
+                          autofocus: true,
                           textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.next,
+                          onSubmitted: (_) => _phoneFocusNode.requestFocus(),
                           decoration: const InputDecoration(
                             labelText: 'الاسم الكامل',
                             prefixIcon: Icon(Icons.person_outline_rounded),
@@ -276,11 +299,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextField(
                         key: const ValueKey('login-phone-field'),
                         controller: _phoneController,
+                        focusNode: _phoneFocusNode,
+                        autofocus: !_isRegisterMode,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                          LengthLimitingTextInputFormatter(16),
+                        ],
                         textDirection: TextDirection.ltr,
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) =>
-                            _isSubmitting ? null : _goToPinStep(),
+                        textInputAction: _isRegisterMode
+                            ? TextInputAction.next
+                            : TextInputAction.done,
+                        onSubmitted: (_) {
+                          if (_isSubmitting) return;
+                          if (_isRegisterMode) {
+                            _referralFocusNode.requestFocus();
+                          } else {
+                            _goToPinStep();
+                          }
+                        },
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
                           hintText: '+201001234567',
@@ -292,8 +329,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextField(
                           key: const ValueKey('login-referral-field'),
                           controller: _referralCodeController,
+                          focusNode: _referralFocusNode,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
+                          textInputAction: TextInputAction.next,
+                          onSubmitted: (_) =>
+                              _technicianReferralFocusNode.requestFocus(),
                           decoration: const InputDecoration(
                             labelText: 'كود ترشيح صديق (اختياري)',
                             prefixIcon: Icon(Icons.card_giftcard_outlined),
@@ -301,10 +342,16 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 12),
                         TextField(
-                          key: const ValueKey('login-technician-referral-field'),
+                          key: const ValueKey(
+                            'login-technician-referral-field',
+                          ),
                           controller: _technicianReferralCodeController,
+                          focusNode: _technicianReferralFocusNode,
                           textCapitalization: TextCapitalization.characters,
                           textDirection: TextDirection.ltr,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) =>
+                              _isSubmitting ? null : _goToPinStep(),
                           decoration: const InputDecoration(
                             labelText: 'كود ترشيح فني (اختياري، من QR)',
                             prefixIcon: Icon(Icons.qr_code_2_outlined),
@@ -317,10 +364,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _pinController,
                         focusNode: _pinFocusNode,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         textDirection: TextDirection.ltr,
                         textAlign: TextAlign.center,
                         maxLength: 6,
+                        textInputAction: _isRegisterMode
+                            ? TextInputAction.next
+                            : TextInputAction.done,
                         // **مخفي**: رمز دائم مش كود بيموت بعد دقايق — حد واقف جنبك مايقراهوش.
                         obscureText: true,
                         // مفيش `autofillHints.oneTimeCode` — ده مش كود من SMS، والنظام
@@ -332,9 +384,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         // مفيش إرسال تلقائي عند ٦ أرقام: الرمز ممكن يكون ٤ أو ٥ أو ٦، فالإرسال
                         // التلقائي كان هيبعت رمز ناقص ويحرق محاولة. المستخدم بيضغط بنفسه.
-                        onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
+                        onSubmitted: (_) {
+                          if (_isSubmitting) return;
+                          if (_isRegisterMode) {
+                            _pinConfirmFocusNode.requestFocus();
+                          } else {
+                            _submitPin();
+                          }
+                        },
                         decoration: InputDecoration(
-                          labelText: _isRegisterMode ? 'اختار رمز دخول (4–6 أرقام)' : 'رمز الدخول',
+                          labelText: _isRegisterMode
+                              ? 'اختار رمز دخول (6 أرقام)'
+                              : 'رمز الدخول',
                           counterText: '',
                         ),
                       ),
@@ -343,15 +404,27 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextField(
                           key: const ValueKey('login-pin-confirm-field'),
                           controller: _pinConfirmController,
+                          focusNode: _pinConfirmFocusNode,
                           keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           textDirection: TextDirection.ltr,
                           textAlign: TextAlign.center,
                           maxLength: 6,
                           obscureText: true,
-                          style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.w700),
-                          onSubmitted: (_) => _isSubmitting ? null : _submitPin(),
-                          decoration: const InputDecoration(labelText: 'أكّد الرمز', counterText: ''),
+                          textInputAction: TextInputAction.done,
+                          style: const TextStyle(
+                            fontSize: 24,
+                            letterSpacing: 8,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          onSubmitted: (_) =>
+                              _isSubmitting ? null : _submitPin(),
+                          decoration: const InputDecoration(
+                            labelText: 'أكّد الرمز',
+                            counterText: '',
+                          ),
                         ),
                       ],
                       // **المخرج الوحيد لمستخدم نسي رمزه** (ADR-0109 §6-ب) — مفيش SMS بعد
@@ -362,12 +435,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: _isSubmitting
                             ? null
                             : () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => PinResetScreen(
-                                      initialPhone: _phoneController.text.trim(),
-                                    ),
+                                MaterialPageRoute(
+                                  builder: (_) => PinResetScreen(
+                                    initialPhone: _phoneController.text.trim(),
                                   ),
                                 ),
+                              ),
                         icon: Icons.help_outline_rounded,
                         label: 'نسيت رمز الدخول؟',
                       ),
@@ -396,7 +469,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         'استنى شوية وجرّب تاني، أو استخدم «نسيت رمز الدخول؟».',
                         key: const ValueKey('login-too-many-attempts'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                     if (_suggestRegister) ...[

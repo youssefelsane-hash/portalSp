@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
+import 'crash_reporting.dart';
 import 'funnel_tracker.dart';
 
 // الباك-إند بيرفض أي ملف Content-Type مش image/jpeg|png|webp صراحة — MultipartFile.fromBytes
@@ -113,12 +115,41 @@ const Duration apiRequestTimeout = Duration(seconds: 30);
 // أي فشل تاني (انقطاع الشبكة، CORS على الويب، timeout، رد مش JSON صالح) كان بيرمي استثناء
 // محدّش بيمسكه، فالشاشة تفضل عالقة على loading spinner للأبد. الإصلاح: أي استثناء غير
 // `ApiException` بيتحوّل هنا لـ`ApiException` واضح — نقطة واحدة بدل تعديل كل شاشة لوحدها.
-Future<T> _guardNetworkError<T>(Future<T> Function() action) async {
+Future<T> _guardNetworkError<T>(
+  Future<T> Function() action, {
+  required String method,
+  required String path,
+}) async {
   try {
     return await action();
-  } on ApiException {
+  } on ApiException catch (error, stack) {
+    // أخطاء المستخدم العادية (رمز غلط/تحقق ناقص) ليست أعطالًا. نسجل فقط فشل الشبكة أو
+    // السيرفر حتى لوحة المراقبة لا تمتلئ بضوضاء 4xx متوقعة.
+    if (error.statusCode == 0 || error.statusCode >= 500) {
+      unawaited(
+        CrashReporting.recordApiFailure(
+          method: method,
+          path: path,
+          error: error,
+          stack: stack,
+          statusCode: error.statusCode,
+          errorCode: error.code,
+          requestId: error.requestId,
+        ),
+      );
+    }
     rethrow;
-  } catch (err) {
+  } catch (err, stack) {
+    unawaited(
+      CrashReporting.recordApiFailure(
+        method: method,
+        path: path,
+        error: err,
+        stack: stack,
+        statusCode: 0,
+        errorCode: 'NETWORK_ERROR',
+      ),
+    );
     throw ApiException(
       code: 'NETWORK_ERROR',
       message: 'تعذر الاتصال بالخادم — تأكد من اتصالك بالإنترنت وحاول تاني',
@@ -139,46 +170,53 @@ Future<({dynamic data, Map<String, dynamic> meta})> _apiRequestEnvelope(
   String? accessToken,
   Map<String, String>? extraHeaders,
 }) async {
-  return _guardNetworkError(() async {
-    final response = await _sendRequest(
-      method,
-      path,
-      body: body,
-      accessToken: accessToken,
-      extraHeaders: extraHeaders,
-    );
-    final Object? parsed;
-    try {
-      parsed = jsonDecode(utf8.decode(response.bodyBytes));
-    } catch (_) {
-      throw ApiException(
-        code: 'BAD_RESPONSE',
-        message: 'رد السيرفر غير مفهوم — حاول تاني',
-        statusCode: response.statusCode,
+  return _guardNetworkError(
+    () async {
+      final response = await _sendRequest(
+        method,
+        path,
+        body: body,
+        accessToken: accessToken,
+        extraHeaders: extraHeaders,
       );
-    }
-    if (parsed is! Map<String, dynamic>) {
-      throw ApiException(
-        code: 'BAD_RESPONSE',
-        message: 'رد السيرفر غير مفهوم — حاول تاني',
-        statusCode: response.statusCode,
-      );
-    }
-    final decoded = parsed;
-    final success = decoded['success'] as bool? ?? false;
+      final Object? parsed;
+      try {
+        parsed = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        throw ApiException(
+          code: 'BAD_RESPONSE',
+          message: 'رد السيرفر غير مفهوم — حاول تاني',
+          statusCode: response.statusCode,
+        );
+      }
+      if (parsed is! Map<String, dynamic>) {
+        throw ApiException(
+          code: 'BAD_RESPONSE',
+          message: 'رد السيرفر غير مفهوم — حاول تاني',
+          statusCode: response.statusCode,
+        );
+      }
+      final decoded = parsed;
+      final success = decoded['success'] as bool? ?? false;
 
-    if (!success) {
-      final error = decoded['error'] as Map<String, dynamic>?;
-      throw ApiException(
-        code: error?['code'] as String? ?? 'UNKNOWN',
-        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-        statusCode: response.statusCode,
-        requestId: decoded['request_id'] as String?,
-      );
-    }
+      if (!success) {
+        final error = decoded['error'] as Map<String, dynamic>?;
+        throw ApiException(
+          code: error?['code'] as String? ?? 'UNKNOWN',
+          message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+          statusCode: response.statusCode,
+          requestId: decoded['request_id'] as String?,
+        );
+      }
 
-    return (data: decoded['data'], meta: decoded['meta'] as Map<String, dynamic>? ?? const {});
-  });
+      return (
+        data: decoded['data'],
+        meta: decoded['meta'] as Map<String, dynamic>? ?? const {},
+      );
+    },
+    method: method,
+    path: path,
+  );
 }
 
 // بيفكّ الـ envelope (docs/02-data-dictionary.md §13) ويرمي ApiException لو success=false،
@@ -203,7 +241,9 @@ Future<dynamic> _apiRequestRaw(
 /// خطأ «الشكل اللي رجع مش اللي متوقّع» — بيتعرض للمستخدم كرسالة، مش بيعلّق الشاشة.
 ApiException _unexpectedShape(String path, String expected, Object? got) {
   // السبب الحقيقي لازم يوصل للمطوّر، والرسالة العامة بس هي اللي توصل للمستخدم.
-  debugPrint('عقد الرد اتغيّر على $path — المتوقّع $expected، اللي رجع ${got.runtimeType}');
+  debugPrint(
+    'عقد الرد اتغيّر على $path — المتوقّع $expected، اللي رجع ${got.runtimeType}',
+  );
   return ApiException(
     code: 'BAD_RESPONSE',
     message: 'رد السيرفر غير متوقع — حاول تاني',
@@ -227,7 +267,9 @@ Future<Map<String, dynamic>?> apiRequest(
     extraHeaders: extraHeaders,
   );
   if (data == null) return null;
-  if (data is! Map<String, dynamic>) throw _unexpectedShape(path, 'object', data);
+  if (data is! Map<String, dynamic>) {
+    throw _unexpectedShape(path, 'object', data);
+  }
   return data;
 }
 
@@ -246,11 +288,12 @@ Future<List<Map<String, dynamic>>> apiRequestList(
 ///
 /// لازم يتستخدم لأي endpoint الكونترولر بيرجّع منه `{items, meta}`؛ `apiRequest()` هيرمي
 /// `BAD_RESPONSE` معاه لأن `data` بتبقى قايمة مش Map.
-Future<ApiPage> apiRequestPage(
-  String path, {
-  String? accessToken,
-}) async {
-  final envelope = await _apiRequestEnvelope('GET', path, accessToken: accessToken);
+Future<ApiPage> apiRequestPage(String path, {String? accessToken}) async {
+  final envelope = await _apiRequestEnvelope(
+    'GET',
+    path,
+    accessToken: accessToken,
+  );
   final data = envelope.data;
   if (data is! List<dynamic>) throw _unexpectedShape(path, 'page', data);
   return ApiPage(items: data.cast<Map<String, dynamic>>(), meta: envelope.meta);
@@ -265,37 +308,41 @@ Future<Map<String, dynamic>?> apiUpload(
   Map<String, String> fields = const {},
   String? accessToken,
 }) async {
-  return _guardNetworkError(() async {
-    final uri = Uri.parse('$apiBaseUrl$path');
-    final request = http.MultipartRequest('POST', uri)
-      ..fields.addAll(fields)
-      ..files.add(
-        http.MultipartFile.fromBytes(
-          'file',
-          fileBytes,
-          filename: filename,
-          contentType: _mediaTypeForFilename(filename),
-        ),
-      );
-    if (accessToken != null) {
-      request.headers['Authorization'] = 'Bearer $accessToken';
-    }
-    final streamedResponse = await request.send().timeout(apiRequestTimeout);
-    final response = await http.Response.fromStream(streamedResponse);
-    final decoded =
-        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-    final success = decoded['success'] as bool? ?? false;
+  return _guardNetworkError(
+    () async {
+      final uri = Uri.parse('$apiBaseUrl$path');
+      final request = http.MultipartRequest('POST', uri)
+        ..fields.addAll(fields)
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            fileBytes,
+            filename: filename,
+            contentType: _mediaTypeForFilename(filename),
+          ),
+        );
+      if (accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $accessToken';
+      }
+      final streamedResponse = await request.send().timeout(apiRequestTimeout);
+      final response = await http.Response.fromStream(streamedResponse);
+      final decoded =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final success = decoded['success'] as bool? ?? false;
 
-    if (!success) {
-      final error = decoded['error'] as Map<String, dynamic>?;
-      throw ApiException(
-        code: error?['code'] as String? ?? 'UNKNOWN',
-        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-        statusCode: response.statusCode,
-        requestId: decoded['request_id'] as String?,
-      );
-    }
+      if (!success) {
+        final error = decoded['error'] as Map<String, dynamic>?;
+        throw ApiException(
+          code: error?['code'] as String? ?? 'UNKNOWN',
+          message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+          statusCode: response.statusCode,
+          requestId: decoded['request_id'] as String?,
+        );
+      }
 
-    return decoded['data'] as Map<String, dynamic>?;
-  });
+      return decoded['data'] as Map<String, dynamic>?;
+    },
+    method: 'POST',
+    path: path,
+  );
 }

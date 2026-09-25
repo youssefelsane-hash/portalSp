@@ -105,7 +105,7 @@ function PinResetForm() {
 
         <PinField
           id="pin-reset-new"
-          label="رمز الدخول الجديد (4–6 أرقام)"
+          label="رمز الدخول الجديد (6 أرقام)"
           value={pin}
           onChange={setPin}
           autoComplete="new-password"

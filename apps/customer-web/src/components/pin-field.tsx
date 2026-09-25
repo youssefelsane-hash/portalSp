@@ -17,6 +17,7 @@ export function PinField({
   onChange,
   autoFocus = false,
   autoComplete = 'off',
+  allowLegacy = false,
 }: {
   id: string;
   label: string;
@@ -24,6 +25,8 @@ export function PinField({
   onChange: (next: string) => void;
   autoFocus?: boolean;
   autoComplete?: 'off' | 'current-password' | 'new-password';
+  /** الدخول فقط يقبل الرموز القديمة ٤–٥ أرقام؛ أي رمز جديد ستة أرقام بالضبط. */
+  allowLegacy?: boolean;
 }) {
   return (
     <label className="block">
@@ -35,7 +38,7 @@ export function PinField({
         inputMode="numeric"
         pattern="[0-9]*"
         required
-        minLength={4}
+        minLength={allowLegacy ? 4 : 6}
         maxLength={6}
         autoFocus={autoFocus}
         autoComplete={autoComplete}
@@ -62,8 +65,13 @@ export function isWeakPin(pin: string): boolean {
 }
 
 /** نفس نصوص `login-pin.policy.ts` بالحرف عشان المستخدم مايشوفش رسالتين مختلفتين لنفس السبب. */
-export function localPinError(pin: string, { requireStrong }: { requireStrong: boolean }): string | null {
-  if (pin.length < 4 || pin.length > 6) return 'رمز الدخول لازم يكون من 4 لـ6 أرقام';
+export function localPinError(
+  pin: string,
+  { requireStrong, allowLegacy = false }: { requireStrong: boolean; allowLegacy?: boolean },
+): string | null {
+  if (pin.length > 6 || pin.length < (allowLegacy ? 4 : 6)) {
+    return allowLegacy ? 'رمز الدخول لازم يكون من 4 لـ6 أرقام' : 'رمز الدخول لازم يكون 6 أرقام';
+  }
   if (requireStrong && isWeakPin(pin)) {
     return 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم';
   }

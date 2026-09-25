@@ -2,23 +2,26 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   PIN_BCRYPT_ROUNDS,
+  PIN_HASH_PREFIX,
+  hashPin,
   isWeakPin,
   lockoutMinutesFor,
   lockRemainingTextAr,
   PIN_MAX_ATTEMPTS,
   shouldLock,
   validatePinFormat,
+  verifyPinHash,
 } from './login-pin.policy';
 
 describe('سياسة رمز الدخول (ADR-0109)', () => {
   describe('الشكل', () => {
-    it('بيقبل ٤ و٦ أرقام سليمة', () => {
-      expect(validatePinFormat('1357')).toBeNull();
+    it('بيقبل ٦ أرقام سليمة فقط للرموز الجديدة', () => {
       expect(validatePinFormat('194736')).toBeNull();
     });
 
     it('بيرفض الأقصر والأطول', () => {
       expect(validatePinFormat('135')?.code).toBe('length');
+      expect(validatePinFormat('1357')?.code).toBe('length');
       expect(validatePinFormat('1947361')?.code).toBe('length');
       expect(validatePinFormat('')?.code).toBe('length');
     });
@@ -99,6 +102,14 @@ describe('سياسة رمز الدخول (ADR-0109)', () => {
   describe('تكلفة bcrypt', () => {
     it('١٢ على الأقل — الـPIN دائم و٦ أرقام، فمساحته كلها قابلة للمسح لو القاعدة اتسربت', () => {
       expect(PIN_BCRYPT_ROUNDS).toBeGreaterThanOrEqual(12);
+    });
+
+    it('الهاش الجديد versioned ومش قابل للتحقق من غير الـpepper الصحيح', async () => {
+      const hash = await hashPin('194736', 'production-pepper-that-is-long-enough');
+      expect(hash.startsWith(PIN_HASH_PREFIX)).toBe(true);
+      expect(hash).not.toContain('194736');
+      await expect(verifyPinHash('194736', hash, 'production-pepper-that-is-long-enough')).resolves.toBe(true);
+      await expect(verifyPinHash('194736', hash, 'wrong-pepper')).resolves.toBe(false);
     });
 
     /**

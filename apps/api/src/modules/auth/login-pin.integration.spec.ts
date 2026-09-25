@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import * as bcrypt from 'bcryptjs';
+import { hashPin, PIN_HASH_PREFIX, verifyPinHash } from './login-pin.policy';
 
 /**
  * تستات حية على Postgres حقيقي للسلوك اللي ADR-0109 بيعد بيه — على مستوى القاعدة.
@@ -13,7 +13,7 @@ describe('رمز الدخول — ثوابت القاعدة (ADR-0109)', () => {
   const made: string[] = [];
 
   const mkUser = async (label: string, pin: string | null) => {
-    const hash = pin === null ? null : await bcrypt.hash(pin, 4);
+    const hash = pin === null ? null : await hashPin(pin, '');
     const [row] = await ds.query(
       `INSERT INTO users (phone_number, full_name, user_type, pin_hash, pin_set_at)
        VALUES ($1,$2,'customer',$3,$4) RETURNING id`,
@@ -40,8 +40,8 @@ describe('رمز الدخول — ثوابت القاعدة (ADR-0109)', () => {
     const id = await mkUser('a', '1357');
     const [row] = await ds.query(`SELECT pin_hash FROM users WHERE id=$1`, [id]);
     expect(row.pin_hash).not.toContain('1357');
-    expect(row.pin_hash.startsWith('$2')).toBe(true);
-    expect(await bcrypt.compare('1357', row.pin_hash)).toBe(true);
+    expect(row.pin_hash.startsWith(PIN_HASH_PREFIX)).toBe(true);
+    expect(await verifyPinHash('1357', row.pin_hash, '')).toBe(true);
   });
 
   it('**مستحيل** حساب يتقفل وهو مالوش رمز أصلاً (chk_users_pin_state)', async () => {

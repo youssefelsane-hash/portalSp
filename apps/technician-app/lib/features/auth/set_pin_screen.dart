@@ -59,12 +59,15 @@ class _SetPinScreenState extends State<SetPinScreen> {
 
   Future<void> _submit() async {
     final pin = _pinController.text.trim();
-    if (pin.length < 4) {
-      setState(() => _error = 'رمز الدخول لازم يكون من 4 لـ6 أرقام');
+    if (pin.length != 6) {
+      setState(() => _error = 'رمز الدخول لازم يكون 6 أرقام');
       return;
     }
     if (_isWeakPin(pin)) {
-      setState(() => _error = 'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+      setState(
+        () => _error =
+            'الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم',
+      );
       return;
     }
     if (_confirmController.text.trim() != pin) {
@@ -77,16 +80,16 @@ class _SetPinScreenState extends State<SetPinScreen> {
     });
     try {
       await context.read<AuthRepository>().setPin(
-            pin,
-            currentPin: _isMigration ? null : _currentPinController.text.trim(),
-          );
+        pin,
+        currentPin: _isMigration ? null : _currentPinController.text.trim(),
+      );
       if (!mounted) return;
       // في وضع الهجرة `_AuthGate` بيعيد البناء لوحده أول ما `pinSet` يبقى true — مفيش pop.
       if (!_isMigration) {
         Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('رمز الدخول اتغيّر')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('رمز الدخول اتغيّر')));
       }
     } catch (errRaw) {
       final err = ApiException.from(errRaw);
@@ -103,7 +106,9 @@ class _SetPinScreenState extends State<SetPinScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         // وضع الهجرة مالوش appBar عمدًا: مفيش زرار رجوع لأن مفيش مكان يرجع له.
-        appBar: _isMigration ? null : AppBar(title: const Text('تغيير رمز الدخول')),
+        appBar: _isMigration
+            ? null
+            : AppBar(title: const Text('تغيير رمز الدخول')),
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -123,14 +128,16 @@ class _SetPinScreenState extends State<SetPinScreen> {
                     Text(
                       _isMigration ? 'اختار رمز دخول لحسابك' : 'رمز دخول جديد',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       _isMigration
                           ? 'بقيت تدخل بالرمز ده بدل كود الرسايل — أسرع وما بيحتاجش انتظار. '
-                              'خزّنه في مكان تفتكره: هو اللي هيرجّعك لحسابك وأرباحك لو سجّلت '
-                              'خروج أو غيّرت موبايلك.'
+                                'خزّنه في مكان تفتكره: هو اللي هيرجّعك لحسابك وأرباحك لو سجّلت '
+                                'خروج أو غيّرت موبايلك.'
                           : 'اكتب رمزك الحالي والرمز الجديد.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -149,7 +156,7 @@ class _SetPinScreenState extends State<SetPinScreen> {
                     _PinField(
                       fieldKey: const ValueKey('set-pin-field'),
                       controller: _pinController,
-                      label: 'رمز الدخول (4–6 أرقام)',
+                      label: 'رمز الدخول (6 أرقام)',
                       autofocus: _isMigration,
                     ),
                     const SizedBox(height: 12),
@@ -171,12 +178,17 @@ class _SetPinScreenState extends State<SetPinScreen> {
                     FilledButton(
                       key: const ValueKey('set-pin-submit'),
                       onPressed: _isSubmitting ? null : _submit,
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                      ),
                       child: _isSubmitting
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : Text(_isMigration ? 'تأكيد الرمز' : 'حفظ'),
                     ),
@@ -218,7 +230,11 @@ class _PinField extends StatelessWidget {
       textAlign: TextAlign.center,
       maxLength: 6,
       obscureText: true,
-      style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.w700),
+      style: const TextStyle(
+        fontSize: 24,
+        letterSpacing: 8,
+        fontWeight: FontWeight.w700,
+      ),
       onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
       decoration: InputDecoration(labelText: label, counterText: ''),
     );

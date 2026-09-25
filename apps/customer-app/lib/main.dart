@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/api_config.dart';
 import 'core/auth_repository.dart';
+import 'core/crash_reporting.dart';
 import 'core/deep_link_router.dart';
 import 'core/feature_flags.dart';
+import 'core/push_notification_service.dart';
 import 'features/catalog/branding_repository.dart';
 import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
@@ -17,12 +19,31 @@ import 'features/notifications/floating_notification_alert.dart';
 import 'features/ratings/pending_rating_prompt.dart';
 
 void main() {
-  assertProductionApiConfig();
-  // تسخين كاش البراند من أول لحظة: اللوجو بيتجاب مرة واحدة بالتوازي مع إقلاع الواجهة، فأي
-  // شاشة بتعرضه (الدخول، شاشة التحميل، الرئيسية) بتلاقيه جاهز بدل ما تعرض بديل وتبدّله
-  // قدام عين المستخدم. فشله متجاهَل عمدًا — البديل المرسوم بالكود شغّال بلا شبكة أصلاً.
-  unawaited(BrandingRepository().fetchPrimaryLogo().catchError((_) => null));
-  runApp(const BaytakApp());
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      assertProductionApiConfig();
+      await CrashReporting.initialize();
+      PushNotificationService.installBackgroundHandler();
+      // تسخين كاش البراند من أول لحظة: اللوجو بيتجاب مرة واحدة بالتوازي مع إقلاع الواجهة، فأي
+      // شاشة بتعرضه (الدخول، شاشة التحميل، الرئيسية) بتلاقيه جاهز بدل ما تعرض بديل وتبدّله
+      // قدام عين المستخدم. فشله متجاهَل عمدًا — البديل المرسوم بالكود شغّال بلا شبكة أصلاً.
+      unawaited(
+        BrandingRepository().fetchPrimaryLogo().catchError((_) => null),
+      );
+      runApp(const BaytakApp());
+    },
+    (error, stack) {
+      unawaited(
+        CrashReporting.recordError(
+          error,
+          stack,
+          fatal: true,
+          reason: 'uncaught zone error',
+        ),
+      );
+    },
+  );
 }
 
 class BaytakApp extends StatelessWidget {
@@ -45,7 +66,10 @@ class BaytakApp extends StatelessWidget {
         // docs/08 §108-E — بيخلي الزرار العايم للإشعارات يختفي مؤقتًا لما أي dialog/bottom-sheet
         // يفتح، بدل ما يتغطى فوقها أو يغطّي زرار "موافق" بتاعتها. راجع
         // NotificationAlertPopupObserver في floating_notification_alert.dart.
-        navigatorObservers: [NotificationAlertPopupObserver()],
+        navigatorObservers: [
+          CrashReportingNavigatorObserver(),
+          NotificationAlertPopupObserver(),
+        ],
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
