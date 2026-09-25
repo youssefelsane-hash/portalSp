@@ -21,6 +21,14 @@ function LoginForm() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * **محاولات فاشلة في الصفحة دي — عدّاد محلي بالكامل.**
+   *
+   * السيرفر **مابيقولش** إن الحساب اتقفل: رسالة أو كود حالة مختلف للحساب المقفول مستحيل يتقال
+   * إلا لحساب **موجود**، فبيبقى تعداد حسابات مؤكّد (اتقاس فعليًا: مسجّل ⇒ 429، مش مسجّل ⇒ 401).
+   * العدّاد ده عن محاولات المتصفح ده، فمالوش أي علاقة بحالة الحساب على السيرفر.
+   */
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,6 +47,7 @@ function LoginForm() {
       // «دخول» على نفس الرمز الغلط ويحرق محاولة من الخمسة بلا داعي.
       setPin('');
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+      setFailedAttempts((n) => n + 1);
     } finally {
       setBusy(false);
     }
@@ -73,6 +82,16 @@ function LoginForm() {
           autoComplete="current-password"
         />
 
+        {/*
+          بعد ٥ محاولات (نفس رصيد `PIN_MAX_ATTEMPTS` في الباك-إند) الحساب بيبقى مقفول مؤقتًا
+          فعلاً — والسيرفر مابيقولش، فبنقوله إحنا من عندنا.
+        */}
+        {failedAttempts >= 5 && (
+          <p className="text-sm text-muted" data-testid="login-too-many-attempts">
+            جرّبت كتير — الحساب بيتقفل مؤقتًا بعد محاولات غلط متتالية. استنى شوية وجرّب تاني، أو
+            استخدم «نسيت رمز الدخول؟».
+          </p>
+        )}
         {error && (
           <div className="text-sm text-danger" data-testid="login-error">
             <p>{error}</p>

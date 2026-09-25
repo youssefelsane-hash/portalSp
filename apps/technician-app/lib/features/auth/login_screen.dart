@@ -30,6 +30,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _pinStep = false;
   bool _isSubmitting = false;
   String? _error;
+
+  /// **محاولات فاشلة في الجلسة الحالية — عدّاد محلي بالكامل.**
+  ///
+  /// السيرفر **مابيقولش** إن الحساب اتقفل، وده مقصود: رسالة أو كود حالة مختلف للحساب المقفول
+  /// مستحيل يتقال إلا لحساب **موجود**، فبيبقى تعداد حسابات مؤكّد (اتقاس فعليًا: مسجّل ⇒ 429،
+  /// مش مسجّل ⇒ 401). التنبيه هنا بيرجّع المعلومة للمستخدم من غير أي oracle على السيرفر، لأن
+  /// الرقم ده محاولات **الجهاز ده** مش حالة الحساب.
+  int _failedAttempts = 0;
   bool _isRegisterMode = false;
 
   /// **اقتراح التسجيل بعد فشل دخول** — بيتعرض على **كل** فشل دخول بلا استثناء.
@@ -126,6 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _error = err.message;
         _suggestRegister = !_isRegisterMode;
+        _failedAttempts += 1;
       });
       _pinFocusNode.requestFocus();
     } finally {
@@ -141,6 +150,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _pinController.clear();
       _pinConfirmController.clear();
       _error = null;
+      // رقم جديد = محاولات جديدة. العدّاد ده عن «الرمز اللي بتجرّبه على الرقم ده».
+      _failedAttempts = 0;
     });
   }
 
@@ -298,6 +309,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.error,
                         ),
+                      ),
+                    ],
+                    // بعد ٥ محاولات (نفس رصيد `PIN_MAX_ATTEMPTS` في الباك-إند) الحساب بيبقى
+                    // مقفول مؤقتًا فعلاً — والسيرفر مابيقولش، فبنقوله إحنا من عندنا.
+                    if (_failedAttempts >= 5) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'جرّبت كتير — الحساب بيتقفل مؤقتًا بعد محاولات غلط متتالية. '
+                        'استنى شوية وجرّب تاني، أو استخدم «نسيت رمز الدخول؟».',
+                        key: const ValueKey('login-too-many-attempts'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ],
                     if (_suggestRegister) ...[

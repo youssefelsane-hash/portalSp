@@ -39,6 +39,11 @@ function LoginForm() {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /**
+   * **محاولات فاشلة في الصفحة دي — عدّاد محلي بالكامل.** السيرفر مابيقولش إن الحساب اتقفل، لأن
+   * رسالة/كود حالة مختلف للحساب المقفول مستحيل يتقال إلا لحساب **موجود** ⇒ تعداد حسابات مؤكّد.
+   */
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
   // ADR-0011 — الحساب ده High-Privilege ومحتاج Passkey. mfaSessionToken محدود العمر (10 دقايق)
   // وبيتستهلك مرة واحدة جوّه registration/authentication verify.
@@ -68,6 +73,7 @@ function LoginForm() {
       // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب بيحرق محاولة من الخمسة.
       setPin('');
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+      setFailedAttempts((n) => n + 1);
     } finally {
       setIsSubmitting(false);
     }
@@ -179,6 +185,12 @@ function LoginForm() {
                 />
               </div>
               {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
+              {failedAttempts >= 5 && (
+                <p className="text-sm text-muted-foreground" data-testid="login-too-many-attempts">
+                  جرّبت كتير — الحساب بيتقفل مؤقتًا بعد محاولات غلط متتالية. استنى شوية وجرّب تاني،
+                  أو كلّم أدمن تاني يعمل لك استرجاع.
+                </p>
+              )}
             </CardContent>
             <CardFooter className="pt-6">
               <Button type="submit" data-testid="login-submit" className="w-full" disabled={isSubmitting}>

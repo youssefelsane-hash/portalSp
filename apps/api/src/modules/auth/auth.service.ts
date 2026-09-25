@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   PIN_BCRYPT_ROUNDS,
+  pinDummyHash,
   PIN_RESET_CODE_LENGTH,
   PIN_RESET_CODE_TTL_MINUTES,
   PIN_RESET_MAX_ATTEMPTS,
@@ -830,18 +831,41 @@ export class AuthService {
         .andWhere('u.deletedAt IS NULL')
         .getOne();
 
-      // رقم مش مسجّل، أو حساب قديم لسه مالوش رمز: **نفس الرد** بتاع الرمز الغلط. الفرق بينهم
-      // معلومة عن وجود الحساب — شوف `invalidPinCredentials()`.
-      if (!user || !user.pinHash) return { error: this.invalidPinCredentials() };
+      // **رقم مش مسجّل، أو حساب قديم لسه مالوش رمز.**
+      //
+      // الرد نفس رد الرمز الغلط بالحرف — بس الرسالة الموحّدة لوحدها **مكانت مابتحمي حاجة**،
+      // لأن المسار ده كان بيرجع من غير ما يشغّل `bcrypt` خالص. القياس على API حقيقي:
+      //
+      //     رقم مسجّل + رمز غلط : وسيط 331 مللي
+      //     رقم مش مسجّل        : وسيط   6 مللي   ← فرق ×55
+      //
+      // يعني نداء واحد بساعة بيقول لأي حد لو رقم معيّن عنده حساب على المنصة. المقارنة الوهمية
+      // تحت بتدفع **نفس** التكلفة الحسابية بالظبط فالزمنين بيبقوا في نفس النطاق.
+      //
+      // النتيجة بتتجاهل عمدًا — `bcrypt.compare` على `pinDummyHash()` بترجّع `false` دايمًا،
+      // والغرض هو الزمن مش النتيجة. (`void` صريح عشان `no-floating-promises` ما يعديش على
+      // وعد مش مستنى — الانتظار هنا **هو** الحماية.)
+      if (!user || !user.pinHash) {
+        await bcrypt.compare(pin, await pinDummyHash());
+        return { error: this.invalidPinCredentials() };
+      }
 
+      // **الحساب مقفول — بنفس الرد بالحرف بتاع الرمز الغلط.**
+      //
+      // رسالة زي «مقفول لمدة كذا» أو حتى **كود حالة مختلف** (429 بدل 401) مستحيل يتقال إلا
+      // لحساب **موجود**، فأي واحد منهم تعداد حسابات مؤكّد: خمس محاولات على أي رقم، ولو الرد
+      // اتغيّر يبقى الحساب موجود. اتقيس فعليًا قبل الإصلاح: مسجّل ⇒ 429، مش مسجّل ⇒ 401.
+      //
+      // **التنازل المقبول**: المستخدم الحقيقي مابيعرفش إنه مقفول ولا لمدة قد إيه. مقبول لأن
+      // (أ) فلتر الاستثناءات بيستبدل أي رسالة 429 برسالة عامة أصلاً فالتفصيل مكانش بيوصله،
+      // و(ب) الواجهة عارفة عدد محاولاتها هي، فبتعرض التنبيه من عندها بلا أي oracle على السيرفر.
+      // المدة الفاضلة بتفضل متاحة للسجلات والتشخيص عبر `lockRemainingTextAr`.
       if (user.pinLockedUntil && user.pinLockedUntil.getTime() > Date.now()) {
-        return {
-          error: new ApiException(
-            ErrorCode.AUTH_004,
-            `حاولت كتير — جرّب تاني بعد ${lockRemainingTextAr(user.pinLockedUntil)}`,
-            HttpStatus.TOO_MANY_REQUESTS,
-          ),
-        };
+        this.logger.warn(
+          `محاولة دخول على حساب مقفول ${user.id} — فاضل ${lockRemainingTextAr(user.pinLockedUntil)}`,
+        );
+        await bcrypt.compare(pin, await pinDummyHash());
+        return { error: this.invalidPinCredentials() };
       }
 
       const matches = await bcrypt.compare(pin, user.pinHash);
@@ -993,10 +1017,20 @@ export class AuthService {
       );
 
     const outcome = await this.dataSource.transaction(async (manager) => {
+      // **كل مسار رفض هنا بيدفع نفس تكلفة `bcrypt`.**
+      //
+      // نفس فئة البَقّة اللي اتقاست على الدخول (فرق ×55 بين رقم مسجّل ومش مسجّل): الرجوع بلا
+      // hash معناه إن الزمن بيقول «مفيش حساب» أو «مفيش استرجاع حاصل دلوقتي» — والتانية أخطر،
+      // لأنها بتقول للمهاجم إن دلوقتي بالتحديد فيه حساب **بلا رمز** مستنّي حد يحطّه.
+      const bailOut = async () => {
+        await bcrypt.compare(dto.reset_code, await pinDummyHash());
+        return { error: invalid() };
+      };
+
       const user = await manager.findOne(User, {
         where: { phoneNumber: dto.phone_number },
       });
-      if (!user) return { error: invalid() };
+      if (!user) return bailOut();
 
       const token = await manager
         .createQueryBuilder(PinResetToken, 't')
@@ -1008,9 +1042,9 @@ export class AuthService {
         .orderBy('t.createdAt', 'DESC')
         .getOne();
 
-      if (!token) return { error: invalid() };
-      if (token.expiresAt.getTime() <= Date.now()) return { error: invalid() };
-      if (token.failedAttempts >= PIN_RESET_MAX_ATTEMPTS) return { error: invalid() };
+      if (!token) return bailOut();
+      if (token.expiresAt.getTime() <= Date.now()) return bailOut();
+      if (token.failedAttempts >= PIN_RESET_MAX_ATTEMPTS) return bailOut();
 
       if (!(await bcrypt.compare(dto.reset_code, token.codeHash))) {
         token.failedAttempts += 1;
