@@ -44,6 +44,7 @@ export interface ServiceResponseDto {
   slug: string;
   short_description_ar: string | null;
   safety_guidance_ar: string | null;
+  seo_content_ar: string | null;
   // Script 6 Part 1-2 — service.iconUrl موجود في الـschema/DTO الأدمن من زمان بس مش معروض
   // للعميل — كانت فجوة موثّقة صراحة، اتقفلت (كارت/صف الخدمة بقى يقدر يعرض صورة حقيقية).
   icon_url: string | null;
@@ -105,6 +106,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     slug: service.slug,
     short_description_ar: service.shortDescriptionAr,
     safety_guidance_ar: service.safetyGuidanceAr,
+    seo_content_ar: service.seoContentAr,
     icon_url: service.iconUrl,
     featured_icon_url: service.featuredIconUrl,
     featured_name_ar: service.featuredNameAr,

@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -33,8 +34,12 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // `activated=1` جاي من `/activate` بعد نجاح التفعيل — رسالة تطمين بس، مالهاش أي أثر أمني.
+  const justActivated = searchParams.get('activated') === '1';
   const [step, setStep] = useState<Step>('credentials');
-  const [phoneNumber, setPhoneNumber] = useState('');
+  // الرقم بيتعبّى من `?phone=` اللي `/activate` بيبعته — الموظف كتبه للتو، فطلبه تاني احتكاك
+  // بلا داعي. القيمة الابتدائية بس: بعد كده الخانة ملك المستخدم.
+  const [phoneNumber, setPhoneNumber] = useState(() => searchParams.get('phone') ?? '');
   const [pin, setPin] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +143,10 @@ function LoginForm() {
           </div>
           <CardTitle className="text-xl">تسجيل الدخول للوحة الإدارة</CardTitle>
           <CardDescription>
-            {step === 'credentials' && 'ادخل رقم موبايلك ورمز الدخول بتاعك'}
+            {step === 'credentials' &&
+              (justActivated
+                ? 'الحساب اتفعّل — ادخل برمز الدخول اللي اخترته'
+                : 'ادخل رقم موبايلك ورمز الدخول بتاعك')}
             {step === 'mfa' && ceremony === 'registration' && 'الحساب ده محتاج تسجيل Passkey (بصمة/Face ID/مفتاح أمان) قبل ما تكمل'}
             {step === 'mfa' && ceremony === 'authentication' && 'أكّد هويتك بالـPasskey المسجّل قبل كده'}
             {step === 'recovery' && 'ادخل رمز دخولك مع كود الاسترجاع اللي اتحفظ وقت تسجيل الـPasskey'}
@@ -192,10 +200,21 @@ function LoginForm() {
                 </p>
               )}
             </CardContent>
-            <CardFooter className="pt-6">
+            <CardFooter className="flex flex-col gap-3 pt-6">
               <Button type="submit" data-testid="login-submit" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? 'جاري الدخول…' : 'دخول'}
               </Button>
+              {/* **المدخل اللي كان ناقص** (ADR-0111): الموظف الجديد بياخد كود تنشيط من الـSuper
+                  Admin، وقبل الرابط ده مكانش فيه أي مكان في اللوحة يستهلكه فيه — فكان لازم يروح
+                  موقع العملاء يفعّل حساب إداري. ونفس الشاشة بتخدم اللي نسي رمزه كمان: الفرق بين
+                  الحالتين هو **مين أصدر الكود** بس، مش المسار. */}
+              <Link
+                href="/activate"
+                className="text-sm text-muted-foreground hover:underline"
+                data-testid="login-activate-link"
+              >
+                أول مرة تدخل أو نسيت رمز الدخول؟ فعّل حسابك بكود التنشيط
+              </Link>
             </CardFooter>
           </form>
         )}

@@ -65,6 +65,7 @@ export interface AdminServiceResponseDto extends ServiceAssessmentPolicyFields {
   short_description_ar: string | null;
   full_description_ar: string | null;
   safety_guidance_ar: string | null;
+  seo_content_ar: string | null;
   icon_url: string | null;
   featured_icon_url: string | null;
   featured_name_ar: string | null;
@@ -172,6 +173,7 @@ export interface CreateServiceBody extends Partial<ServiceAssessmentPolicyFields
   short_description_ar?: string;
   full_description_ar?: string;
   safety_guidance_ar?: string | null;
+  seo_content_ar?: string | null;
   icon_url?: string;
   featured_icon_url?: string | null;
   featured_name_ar?: string | null;

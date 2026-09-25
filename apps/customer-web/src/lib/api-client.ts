@@ -1,5 +1,7 @@
 import { ApiEnvelope } from './api-types';
 import { funnelHeaders } from './funnel';
+import { reportClientError } from './error-reporter';
+import { notifyNetworkFailure, notifyNetworkSuccess } from './connectivity';
 
 export class ApiError extends Error {
   code: string;
@@ -20,7 +22,52 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1
 
 export async function apiFetch<T>(path: string, accessToken: string | null, options: RequestInit = {}): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-  const res = await fetch(`${API_URL}${path}`, {
+  let res: Response;
+  try {
+    res = await rawFetch(path, accessToken, options, isFormData);
+  } catch (networkError) {
+    // **فشل شبكة قبل أي رد** — مفيش status ومفيش envelope. ده اللي المستخدم بيسمّيه «الموقع مش
+    // بيفتح»، وكان بيضيع بالكامل: الاستثناء بيطلع لواجهة الاستدعاء وخلاص.
+    notifyNetworkFailure();
+    reportClientError({
+      kind: 'network',
+      errorName: networkError instanceof Error ? networkError.name : 'NetworkError',
+      errorMessage: networkError instanceof Error ? networkError.message : String(networkError),
+      apiPath: path,
+    });
+    throw new ApiError('NETWORK', 'مفيش اتصال بالسيرفر — اتأكد من الإنترنت وحاول تاني', 0);
+  }
+
+  // وصل رد = الشبكة والسيرفر واصلين، مهما كان كود الرد. الشريط بيختفي من غير أي تدخل.
+  notifyNetworkSuccess();
+  const envelope = await readEnvelope<T>(res, path);
+
+  if (!res.ok || !envelope.success) {
+    // **5xx و0 بس بيتبلّغوا** — 4xx غالبًا سلوك متوقّع (تحقق، صلاحية، مفيش نتيجة)، وتسجيله
+    // بيغرق الإشارة الحقيقية في ضوضاء. الاستثناء المقصود: 429 و408 (ضغط/بطء) بيدخلوا لأنهم
+    // بيقولوا حاجة عن حالة النظام مش عن المستخدم.
+    if (res.status >= 500 || res.status === 429 || res.status === 408) {
+      reportClientError({
+        kind: 'api',
+        errorName: envelope.error?.code ?? 'ApiError',
+        errorMessage: envelope.error?.message ?? `HTTP ${res.status}`,
+        apiPath: path,
+        apiStatus: res.status,
+      });
+    }
+    throw new ApiError(envelope.error?.code ?? 'UNKNOWN', envelope.error?.message ?? 'حصل خطأ غير متوقع', res.status);
+  }
+
+  return envelope.data as T;
+}
+
+function rawFetch(
+  path: string,
+  accessToken: string | null,
+  options: RequestInit,
+  isFormData: boolean,
+): Promise<Response> {
+  return fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
@@ -32,14 +79,6 @@ export async function apiFetch<T>(path: string, accessToken: string | null, opti
       ...options.headers,
     },
   });
-
-  const envelope = await readEnvelope<T>(res);
-
-  if (!res.ok || !envelope.success) {
-    throw new ApiError(envelope.error?.code ?? 'UNKNOWN', envelope.error?.message ?? 'حصل خطأ غير متوقع', res.status);
-  }
-
-  return envelope.data as T;
 }
 
 /**
@@ -48,10 +87,13 @@ export async function apiFetch<T>(path: string, accessToken: string | null, opti
  * رد HTML من proxy/captive portal كان بيرمي `SyntaxError` خام — الصفحة بتفضل على حالة التحميل
  * بلا رسالة، بالظبط زي فئة البَقّة اللي في `apps/customer-app/lib/core/api_client.dart`.
  */
-async function readEnvelope<T>(res: Response): Promise<ApiEnvelope<T>> {
+async function readEnvelope<T>(res: Response, path: string): Promise<ApiEnvelope<T>> {
   try {
     return (await res.json()) as ApiEnvelope<T>;
   } catch {
+    // رد مش JSON = proxy أو صفحة خطأ من طبقة تحتنا. بيتبلّغ لأنه **مش** خطأ تطبيق وماحدش
+    // هيشوفه في لوجات الـAPI أصلاً.
+    reportClientError({ kind: 'api', errorName: 'BadResponse', errorMessage: 'رد غير JSON', apiPath: path, apiStatus: res.status });
     throw new ApiError('BAD_RESPONSE', 'رد السيرفر غير مفهوم — حاول تاني', res.status);
   }
 }
@@ -70,17 +112,31 @@ export async function apiFetchPage<T>(
   accessToken: string | null = null,
   options: RequestInit = {},
 ): Promise<{ items: T[]; meta: Record<string, unknown> }> {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...funnelHeaders(),
-      ...options.headers,
-    },
-  });
-  const envelope = await readEnvelope<T[]>(res);
+  let res: Response;
+  try {
+    res = await rawFetch(path, accessToken, options, false);
+  } catch (networkError) {
+    notifyNetworkFailure();
+    reportClientError({
+      kind: 'network',
+      errorName: networkError instanceof Error ? networkError.name : 'NetworkError',
+      errorMessage: networkError instanceof Error ? networkError.message : String(networkError),
+      apiPath: path,
+    });
+    throw new ApiError('NETWORK', 'مفيش اتصال بالسيرفر — اتأكد من الإنترنت وحاول تاني', 0);
+  }
+  notifyNetworkSuccess();
+  const envelope = await readEnvelope<T[]>(res, path);
   if (!res.ok || !envelope.success) {
+    if (res.status >= 500 || res.status === 429 || res.status === 408) {
+      reportClientError({
+        kind: 'api',
+        errorName: envelope.error?.code ?? 'ApiError',
+        errorMessage: envelope.error?.message ?? `HTTP ${res.status}`,
+        apiPath: path,
+        apiStatus: res.status,
+      });
+    }
     throw new ApiError(envelope.error?.code ?? 'UNKNOWN', envelope.error?.message ?? 'حصل خطأ غير متوقع', res.status);
   }
   return {

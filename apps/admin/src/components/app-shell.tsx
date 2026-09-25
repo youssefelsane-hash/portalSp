@@ -40,6 +40,7 @@ import {
   PieChart,
   Gauge,
   Filter,
+  TrendingUp,
   Wallet,
   UsersRound,
   QrCode,
@@ -63,6 +64,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api-client';
+import { PRE_AUTH_ROUTES } from '@/lib/public-routes';
 
 type NavItem = { href: string; label: string; icon: LucideIcon; permission?: string };
 type NavGroup = { label: string; items: NavItem[] };
@@ -165,7 +167,15 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/analytics/funnel', label: 'رحلة الحجز', icon: Filter, permission: 'analytics.view' },
       { href: '/analytics/money', label: 'لوحة المال', icon: Wallet, permission: 'analytics.financial.view' },
       { href: '/analytics/workforce', label: 'القوى العاملة', icon: UsersRound, permission: 'analytics.view' },
+      // CAC لكل قناة + إدخال مصروف الإعلانات. الصلاحية `marketing.manage` مش
+      // `analytics.financial.view` لأنها **الأوسع** للصفحة دي: 0294/0310 بيشتقّوا
+      // financial.view → marketing_spend.manage → marketing.manage، فأي حد بيشوف المال
+      // بياخدها، ومدير التسويق بياخدها من غير ما يشوف المال. الأجزاء المالية جوّه الصفحة
+      // بتتخفي لوحدها.
+      { href: '/analytics/marketing', label: 'أداء القنوات (CAC)', icon: TrendingUp, permission: 'marketing.manage' },
       { href: '/reports', label: 'التقارير', icon: PieChart, permission: 'reports.view' },
+      // ADR-0114 — حالة النظام وأخطاء الواجهة. `operations.view` مطابقة للـendpoint بالظبط.
+      { href: '/ops', label: 'حالة النظام', icon: Activity, permission: 'operations.view' },
     ],
   },
   {
@@ -198,8 +208,14 @@ const NAV_GROUPS: NavGroup[] = [
 // الصفحات ممكن تسيب `<AppShell>` بتاعتها أو تشيلها بعدين — الاتنين شغالين.
 const AppShellMountedContext = createContext(false);
 
-/** المسارات اللي بتترسم من غير شِل (شاشة الدخول — مفيش قايمة جانبية قبل تسجيل الدخول). */
-const BARE_ROUTES = new Set(['/login']);
+/**
+ * المسارات اللي بتترسم من غير شِل — مفيش قايمة جانبية قبل تسجيل الدخول.
+ *
+ * **نفس مجموعة ما قبل الدخول** (`lib/public-routes.ts`) مش نسخة تانية: القايمة كانت مكتوبة
+ * بنص حرفي هنا وفي `proxy.ts`، وإضافة `/activate` في واحد بس كانت بتطلّع صفحة تفعيل بشِل
+ * إداري كامل لموظف لسه مالوش حساب.
+ */
+const BARE_ROUTES = PRE_AUTH_ROUTES;
 
 /**
  * حفظ/استرجاع مكان الـscroll لكل مسار (docs/08 §63.ب6).

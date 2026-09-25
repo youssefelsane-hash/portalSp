@@ -56,6 +56,7 @@ import { BrandingModule } from './modules/branding/branding.module';
 import { TechnicianProductivityModule } from './modules/technician-productivity/technician-productivity.module';
 import { SecurityModule } from './modules/security/security.module';
 import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validator';
+import { SeoModule } from './modules/seo/seo.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { AdminRouteRbacValidator } from './common/rbac/admin-route-rbac.validato
     DatabaseModule,
     AuthModule,
     GeoModule,
+    SeoModule, // ADR-0113 — صفحات الخدمة × المنطقة للظهور في البحث
     CustomersModule,
     TechniciansModule,
     CatalogModule,

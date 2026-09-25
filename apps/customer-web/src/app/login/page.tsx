@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { PhoneField } from '@/components/phone-field';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { PinField, localPinError } from '@/components/pin-field';
@@ -58,21 +59,7 @@ function LoginForm() {
       <h1 className="mb-6 text-center text-2xl font-bold">تسجيل الدخول</h1>
 
       <form onSubmit={submit} className="space-y-4">
-        <label className="block">
-          <span className="mb-1 block text-sm text-muted">رقم الموبايل</span>
-          <input
-            id="login-phone"
-            data-testid="login-phone"
-            type="tel"
-            required
-            autoComplete="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+2010xxxxxxxx"
-            dir="ltr"
-            className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left outline-none focus:border-primary"
-          />
-        </label>
+        <PhoneField id="login-phone" value={phone} onChange={setPhone} autoFocus />
 
         <PinField
           id="login-pin"

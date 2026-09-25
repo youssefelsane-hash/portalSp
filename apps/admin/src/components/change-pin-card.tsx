@@ -6,52 +6,10 @@ import { Lock } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { ErrorNotice } from '@/components/notice';
-
-/** نفس قاعدة `isWeakPin` في `login-pin.policy.ts` بالحرف — الباك-إند بيفحص تاني. */
-function isWeakPin(pin: string): boolean {
-  if (new Set(pin).size === 1) return true;
-  const digits = [...pin].map(Number);
-  const ascending = digits.every((d, i) => i === 0 || d === digits[i - 1] + 1);
-  const descending = digits.every((d, i) => i === 0 || d === digits[i - 1] - 1);
-  return ascending || descending;
-}
-
-function PinInput({
-  id,
-  label,
-  value,
-  onChange,
-  allowLegacy = false,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  allowLegacy?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        data-testid={id}
-        type="password"
-        inputMode="numeric"
-        maxLength={6}
-        minLength={allowLegacy ? 4 : 6}
-        value={value}
-        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-        required
-        dir="ltr"
-        autoComplete="new-password"
-      />
-    </div>
-  );
-}
+import { PinInput } from '@/components/pin-input';
+import { localPinError } from '@/lib/pin-policy';
 
 /**
  * **تعيين/تغيير رمز الدخول للأدمن** (ADR-0109).
@@ -76,12 +34,9 @@ export function ChangePinCard() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (newPin.length !== 6) {
-      setError('رمز الدخول لازم يكون 6 أرقام');
-      return;
-    }
-    if (isWeakPin(newPin)) {
-      setError('الرمز ده سهل التخمين — اختار رمز مش متسلسل ومش كله نفس الرقم');
+    const pinError = localPinError(newPin);
+    if (pinError) {
+      setError(pinError);
       return;
     }
     if (confirmPin !== newPin) {

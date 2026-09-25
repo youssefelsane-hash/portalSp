@@ -7,6 +7,7 @@ import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
 import { fetchHeroBackground, fetchHomeBanner, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
 import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
 import { CategoryTile } from '@/components/catalog/category-tile';
+import { UnsupportedAreaNotice } from '@/components/unsupported-area-notice';
 import { useCatalogZone } from '@/lib/catalog-zone';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
@@ -183,13 +184,12 @@ export default function HomePage() {
   const activeCatalogKey = catalogZone.zoneId ?? 'public';
   const catalogCurrent = catalogZone.canLoadCatalog && catalogLoadKey === activeCatalogKey;
   const visibleCategories = catalogZone.canLoadCatalog ? (catalogCurrent ? categories : null) : [];
-  const visibleError = catalogZone.canLoadCatalog
-    ? catalogCurrent
-      ? error
-      : null
-    : catalogZone.isReady
-      ? 'أضف عنوانًا داخل منطقة خدمة عشان نعرض لك الخدمات المتاحة'
-      : null;
+  const visibleError = catalogZone.canLoadCatalog ? (catalogCurrent ? error : null) : null;
+  /**
+   * «منطقة مش مخدومة» **مش** خطأ تحميل، فمالهاش نفس الخانة: «إعادة المحاولة» عليها بتعيد نفس
+   * النتيجة للأبد. الحالة دي محتاجة خطوة (عنوان تاني) مش محاولة.
+   */
+  const areaUnsupported = catalogZone.isReady && !catalogZone.canLoadCatalog;
   const featured = catalogCurrent ? mostRequested : [];
   const shownCategories = visibleCategories
     ? showAllCategories
@@ -358,6 +358,8 @@ export default function HomePage() {
               </svg>
             </Link>
           </div>
+
+          {areaUnsupported && <UnsupportedAreaNotice />}
 
           {visibleError ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger" role="alert">

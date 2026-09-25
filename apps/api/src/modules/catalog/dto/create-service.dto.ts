@@ -51,6 +51,17 @@ export class CreateServiceDto {
   @MaxLength(5000)
   safety_guidance_ar?: string | null;
 
+  /**
+   * محتوى صفحة الخدمة للظهور في البحث (ADR-0113). **وجوده = الصفحة منشورة.**
+   *
+   * السقف أكبر من الإرشادات (٥٠٠٠) لأن ده مقال تسويقي كامل مش تنبيه، بس مش مفتوح: نص بلا حد
+   * بيتحوّل لصفحة تقيلة على الزاحف وعلى الزائر.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000)
+  seo_content_ar?: string | null;
+
   @IsOptional()
   @IsString()
   icon_url?: string;
