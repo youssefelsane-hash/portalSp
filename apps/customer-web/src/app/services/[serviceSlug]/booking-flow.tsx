@@ -1476,7 +1476,24 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               ) : technicians === null ? (
                 <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
               ) : technicians.length === 0 ? (
-                <p className="text-sm text-muted">مفيش فنيين متاحين في منطقتك دلوقتي للخدمة دي</p>
+                /* **طريق مسدود قبل كده**: الرسالة كانت بتقف هنا بلا أي خطوة، والعميل اللي وصل
+                   لآخر خطوة في الحجز بيسيب. البديلين الحقيقيين الوحيدين: معاد تاني، أو نختار
+                   إحنا (اللي بيوسّع البحث لأنه مش مربوط بفني بعينه). */
+                <div className="rounded-xl border border-border bg-surface p-4" data-testid="no-technicians-state">
+                  <p className="text-sm font-semibold">مفيش فني متاح في الموعد ده</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                    كل الفنيين المؤهلين للخدمة دي في منطقتك مشغولين في الوقت اللي اخترته. جرّب
+                    معاد تاني، أو سيبنا نختار أقرب فني متاح.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => changeTechnicianChoiceMode('auto')}
+                    className="motion-press mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground"
+                    data-testid="no-technicians-auto"
+                  >
+                    اختاروا لي أقرب فني متاح
+                  </button>
+                </div>
               ) : (
                 technicians.map((t) =>
                   t.is_company ? (

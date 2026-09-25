@@ -48,7 +48,10 @@ export async function buildServiceSeoMetadata(slug: string, areaSlug?: string): 
       ...BRAND_SERVICE_KEYWORDS,
     ],
     alternates: { canonical },
+    // الصورة مش مكرّرة هنا: بتتورث من `app/layout.tsx` (كارت البراند). تكرارها معناه مكانين
+    // يتحدّثوا مع أي تغيير في الأصل، وواحد منهم هينسى.
     openGraph: { title, description, url: canonical, type: 'website', locale: 'ar_EG', siteName: 'أسطى' },
+    twitter: { card: 'summary_large_image', title, description },
   };
 }
 

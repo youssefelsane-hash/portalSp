@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { fetchServices, searchServices } from '@/lib/catalog';
 import { ServiceDto } from '@/lib/api-types';
+import { UnsupportedAreaNotice } from '@/components/unsupported-area-notice';
 import { useCatalogZone } from '@/lib/catalog-zone';
 import { ServiceCard } from '@/components/catalog/service-card';
 
@@ -159,7 +160,7 @@ function SearchResults() {
 
       <div className="mt-5">
         {catalogUnavailable ? (
-          <p className="text-center text-danger">أضف عنوانًا داخل منطقة خدمة عشان نعرض لك الخدمات المتاحة</p>
+          <UnsupportedAreaNotice />
         ) : visible === null ? (
           <div className="grid gap-4 sm:grid-cols-2">
             {Array.from({ length: 4 }).map((_, i) => (
