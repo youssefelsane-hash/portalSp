@@ -73,7 +73,8 @@ export interface MfaRequiredResponse {
 
 export type LoginResult = TokenPair | MfaRequiredResponse;
 
-const OTP_CODE_LENGTH = 6;
+/** متصدّر عشان DTOs التحقّق تقيس بنفس الرقم — تكرار `6` في مكانين هو إزاي طول يتغيّر في واحد بس. */
+export const OTP_CODE_LENGTH = 6;
 // §106 — كام كود ملغي بنراجعه عشان نقول للمستخدم «ده كود قديم» بدل «كود غلط».
 const SUPERSEDED_OTP_LOOKBACK = 3;
 const BCRYPT_SALT_ROUNDS = 10;
@@ -121,12 +122,31 @@ export class AuthService {
         HttpStatus.GONE,
       );
     }
+    return this.issueOtpCode(dto.phone_number, dto.purpose, requestIp);
+  }
+
+  /**
+   * **نواة إصدار كود الـOTP** — القفل، إبطال الأقدم، الحفظ، اللوج، والإرسال.
+   *
+   * اتطلّعت من `requestOtp` عشان `PhoneVerificationService` (ADR-0112) يستخدم **نفس** الدورة
+   * بالحرف بلا ما يعيد أي جزء منها. الفرق الوحيد بين المسارين هو **البوابة قبل النداء ده**:
+   *   - `requestOtp` (عام): بوابة `auth.login_method` — بترفض بـ`410` لما الدخول بقى بالرمز.
+   *   - التحقّق من الرقم: بوابة مفتاح الأدمن + إن الحساب محتاج تحقّق فعلاً.
+   *
+   * **المسار العام مافتحش**: `POST /auth/otp/request` لسه مقفول زي ما هو. النداء ده داخلي
+   * (`public` عشان خدمة في نفس الموديول تشوفه)، فمفيش سطح هجوم جديد اتضاف.
+   */
+  async issueOtpCode(
+    phoneNumber: string,
+    purpose: OtpPurpose,
+    requestIp: string | null,
+  ): Promise<{ expires_in_seconds: number }> {
     // **وضع اختبار Google Play** (docs/08 §173، `otp-test-mode.ts`) — النقطة **الوحيدة** في
     // المشروع اللي الوضع ده بيأثر فيها. بيغيّر حاجتين وبس: الكود المولَّد، وإرسال الـSMS.
     // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
     // القرار كله من بيئة السيرفر — مفيش أي حاجة الـclient بيبعتها بتدخل في الحساب ده.
     const testMode = readOtpTestMode(this.config);
-    const useFixedCode = usesFixedOtp(testMode, dto.phone_number);
+    const useFixedCode = usesFixedOtp(testMode, phoneNumber);
     const code = useFixedCode
       ? testMode.fixedCode
       : String(randomInt(0, 1_000_000)).padStart(OTP_CODE_LENGTH, '0');
@@ -138,18 +158,18 @@ export class AuthService {
       // Serialize resends for the same challenge so two concurrent requests cannot
       // both leave a valid code behind. Only the newest issued code remains usable.
       await manager.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-        dto.phone_number,
-        dto.purpose,
+        phoneNumber,
+        purpose,
       ]);
       const otpCodes = manager.getRepository(OtpCode);
       await otpCodes.update(
-        { phoneNumber: dto.phone_number, purpose: dto.purpose, isUsed: false },
+        { phoneNumber: phoneNumber, purpose: purpose, isUsed: false },
         { isUsed: true, usedAt: new Date() },
       );
       const otp = otpCodes.create({
-        phoneNumber: dto.phone_number,
+        phoneNumber: phoneNumber,
         codeHash,
-        purpose: dto.purpose,
+        purpose: purpose,
         attemptsCount: 0,
         maxAttempts,
         isUsed: false,
@@ -178,10 +198,10 @@ export class AuthService {
       // إضافة بتتحط قبل السهم مش بعده.
       const validUntil = new Date(Date.now() + expiryMinutes * 60_000).toISOString().slice(11, 19);
       // eslint-disable-next-line no-console
-      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
+      console.log(`[OTP] ${phoneNumber} (${purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
     } else {
-      const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
-      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
+      const masked = phoneNumber.length > 7 ? `${phoneNumber.slice(0, 5)}***${phoneNumber.slice(-2)}` : '***';
+      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${purpose})`);
     }
 
     // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة SMS حقيقية اتبنت
@@ -193,7 +213,7 @@ export class AuthService {
     // هنا هو الضمان: مفيش مسار بديل بيوصل للمزوّد.
     if (useFixedCode) {
       this.logger.warn(
-        `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}).`,
+        `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${purpose}).`,
       );
       return { expires_in_seconds: expiryMinutes * 60 };
     }
@@ -214,7 +234,7 @@ export class AuthService {
     // محليًا بالكامل. في الإنتاج بس هو اللي بيبقى ثقب حقيقي.
     if (!this.smsDispatcher.isConfigured && isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
       this.logger.error(
-        `بوابة SMS مش مُجهّزة ومسار الـOTP مطلوب — الطلب اترفض بدل ما يرجّع نجاح كداب (${dto.purpose}).`,
+        `بوابة SMS مش مُجهّزة ومسار الـOTP مطلوب — الطلب اترفض بدل ما يرجّع نجاح كداب (${purpose}).`,
       );
       throw new ApiException(
         ErrorCode.SYS_001,
@@ -244,7 +264,7 @@ export class AuthService {
       titleAr: 'أسطى',
       bodyAr: `كود التحقق: ${code} — صالح ${expiryMinutes} دقايق. متشاركوش الكود مع حد.`,
       deepLink: null,
-      targets: [dto.phone_number],
+      targets: [phoneNumber],
       notificationType: 'otp',
     });
     if (!result.delivered) {
@@ -253,14 +273,15 @@ export class AuthService {
       // فوق؛ لو السطر ده احتوى على "OTP" برضه هيتطابق بالغلط بدل السطر الصح (مفيش "→" فيه أصلاً)
       // ويرجّع كود فاضي. بَقّة حقيقية اتلقطت واتصلحت أثناء بناء شاشة الشكاوى (اختبار bash فشل
       // فجأة في استخراج الكود من اللوج بعد ما الميزة دي اتضافت).
-      this.logger.warn(`فشل إرسال كود التحقق بـ SMS لـ ${dto.phone_number}: ${result.failureReason}`);
+      this.logger.warn(`فشل إرسال كود التحقق بـ SMS لـ ${phoneNumber}: ${result.failureReason}`);
     }
 
     return { expires_in_seconds: expiryMinutes * 60 };
   }
 
   /** بيتحقق من الكود، يزوّد العدّاد، ويرجّع صف الـ OTP المطابق أو يرمي AUTH_003/AUTH_004. */
-  private async consumeOtp(phoneNumber: string, code: string, purpose: OtpPurpose): Promise<OtpCode> {
+  /** `public` عشان `PhoneVerificationService` يستهلك كود التحقّق بنفس العدّاد والقفل بالظبط. */
+  async consumeOtp(phoneNumber: string, code: string, purpose: OtpPurpose): Promise<OtpCode> {
     const result = await this.dataSource.transaction((manager) =>
       this.consumeOtpLocked(phoneNumber, code, purpose, manager),
     );

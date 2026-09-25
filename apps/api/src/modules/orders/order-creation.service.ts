@@ -15,6 +15,12 @@ import { assessmentRouteRejection } from './assessment-route-guard';
 import { BookingAvailabilityGuard } from './booking-availability.guard';
 import { GeoService } from '../geo/geo.service';
 import { SettingsService } from '../settings/settings.service';
+import { User } from '../auth/entities/user.entity';
+import {
+  needsPhoneVerification,
+  phoneVerificationRequiredError,
+  REQUIRE_PHONE_VERIFICATION_SETTING,
+} from '../auth/phone-verification.policy';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
@@ -185,6 +191,9 @@ export class OrderCreationService {
 
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    // بوابة تحقّق الرقم (ADR-0112) محتاجة `phone_verified_at` وبس — قراءة بالمفتاح الأساسي،
+    // ومابتحصلش خالص لو المفتاح مقفول.
+    @InjectRepository(User) private readonly users: Repository<User>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly addressesService: AddressesService,
@@ -508,6 +517,25 @@ export class OrderCreationService {
     }
   }
 
+  /**
+   * بيرفض إنشاء الطلب لو المفتاح مفعّل والرقم لسه مش متحقَّق منه (ADR-0112).
+   *
+   * الشرط نفسه في `phone-verification.policy.ts` — **مصدر واحد** يشاركه مسار التحقّق في موديول
+   * `auth`، عشان يستحيل الواجهة تسأل في حالة والبوابة ترفض في حالة تانية.
+   *
+   * **قراءة المفتاح الأول**: مقفول (الافتراضي) ⇒ بنرجع فورًا بلا أي استعلام على `users`، فالمسار
+   * الحالي مايتحملش أي تكلفة إضافية لحد ما الأدمن يفعّل الخاصية.
+   */
+  private async assertPhoneVerifiedForFirstOrder(userId: string): Promise<void> {
+    const enabled = await this.settingsService.getBoolean(REQUIRE_PHONE_VERIFICATION_SETTING, false);
+    if (!enabled) return;
+
+    const user = await this.users.findOne({ where: { id: userId }, select: ['id', 'phoneVerifiedAt'] });
+    if (needsPhoneVerification(user?.phoneVerifiedAt ?? null, enabled)) {
+      throw phoneVerificationRequiredError();
+    }
+  }
+
   async create(
     userId: string,
     dto: CreateOrderDto,
@@ -534,6 +562,19 @@ export class OrderCreationService {
     // قافل الحجز وقت حادثة، الرفض هنا بيوفّر كل الشغل اللي وراه — وده مقصود: لو سبب الإيقاف
     // أصلاً ضغط على القاعدة، فحص متأخر كان هيزوّد الحمل بدل ما يخفّفه.
     await this.bookingAvailability.assertNewBookingsAllowed(!!recurringIdentity);
+
+    // **تحقّق رقم العميل عند أول طلب** (ADR-0112) — مفتاح أدمن، مقفول افتراضيًا.
+    //
+    // مكانها هنا مقصود: **قبل أي تسعير أو مطابقة أو دفع**. لو التحقق بعد الدفع، أي فشل بيخلّف
+    // دفعة محتاجة استرجاع. والأهم إنها نقطة خنق **على السيرفر**، فتطبيق العميل والويب وأي كلاينت
+    // جاي كلهم مغطّيين — بوابة في الواجهة بس كان أي حد بينادي الـAPI مباشرةً بيتخطاها.
+    //
+    // **استثناءان**: الطلب الدوري (اتفق عليه عند إنشاء الخطة، ومفيش مستخدم حاضر يكتب كود) ومركز
+    // الاتصال (الموظف كلّم العميل على الرقم فعلاً، والعميل مش قصاد شاشة). الاتنين **مابيعلّموش**
+    // الرقم متحقَّق منه، فأول طلب ذاتي للعميل هيسأله عادي.
+    if (!recurringIdentity && !callCenterContext) {
+      await this.assertPhoneVerifiedForFirstOrder(userId);
+    }
 
     if (!recurringIdentity) {
       await this.assertBookingDateWindow(dto.scheduled_at, dto.scheduled_at_range_end);

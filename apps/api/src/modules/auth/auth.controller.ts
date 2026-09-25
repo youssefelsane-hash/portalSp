@@ -17,6 +17,10 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { toUserResponseDto } from './dto/user-response.dto';
 import { JwtPayload } from './types/authenticated-request';
 import { AccountRole } from './entities/user-role-grant.entity';
+import { ConfirmPhoneVerificationDto, RequestPhoneVerificationDto } from './dto/phone-verification.dto';
+import { PhoneVerificationService } from './phone-verification.service';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
+import { registrationThrottleLimit } from './login-pin.policy';
 
 function clientIp(req: Request): string | null {
   return req.ip ?? req.socket.remoteAddress ?? null;
@@ -24,7 +28,10 @@ function clientIp(req: Request): string | null {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly phoneVerification: PhoneVerificationService,
+  ) {}
 
   @Public()
   @Post('otp/request')
@@ -66,7 +73,9 @@ export class AuthController {
 
   @Public()
   @Post('pin/register')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  // السقف بالـIP (main 61acc31d) — قابل للرفع في الاختبار بس، والإنتاج مقفول على ٥ بالبناء.
+  // الشرح الكامل في `registrationThrottleLimit`.
+  @Throttle({ default: { limit: registrationThrottleLimit(), ttl: 60_000 } })
   registerWithPin(@Body() dto: PinRegisterDto, @Req() req: Request) {
     return this.authService.registerWithPin(dto, clientIp(req));
   }
@@ -140,6 +149,46 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   requestTechnicianRole(@CurrentUser() user: JwtPayload) {
     return this.authService.requestConsumerRole(user.sub, AccountRole.TECHNICIAN);
+  }
+
+  // ── تأكيد رقم الموبايل عند أول طلب (ADR-0112) ─────────────────────────
+  //
+  // **التلاتة متوثّقين** — مفيش `@Public()` على أي واحد. المسار ده مش دخول: العميل داخل بالفعل
+  // بالرمز، والمطلوب إثبات إن رقمه واصل قبل أول طلب.
+
+  /** حالة التحقّق — التطبيق بيسأل قبل ما يعرض الشاشة بدل ما يستنى رفض إنشاء الطلب. */
+  @Get('phone/verification')
+  phoneVerificationStatus(@CurrentUser() user: JwtPayload) {
+    return this.phoneVerification.status(user.sub);
+  }
+
+  /**
+   * إصدار الكود. `new_phone_number` + `pin` = تصحيح الرقم (عاملين مستقلين، ADR-0112 §5).
+   *
+   * **الـthrottle أضيق من الدخول**: كل نداء هنا = رسالة SMS بتكلّف فلوس فعلاً، والمستخدم محتاج
+   * محاولة أو اتنين مش عشرة. (٣/دقيقة مقابل ١٠ للدخول.)
+   */
+  @Post('phone/verification/request')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  requestPhoneVerification(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: RequestPhoneVerificationDto,
+    @Req() req: Request,
+  ) {
+    return this.phoneVerification.requestCode(user.sub, dto, clientIp(req));
+  }
+
+  /** تأكيد الكود (وتغيير الرقم لو كان ده المطلوب) — معاملة واحدة. */
+  @Post('phone/verification/confirm')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  confirmPhoneVerification(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ConfirmPhoneVerificationDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.phoneVerification.confirm(user.sub, dto, audit);
   }
 
   @Get('me')

@@ -61,10 +61,13 @@ import { BookingMatchPreview } from './entities/booking-match-preview.entity';
 import { BookingMatchPreviewService } from './booking-match-preview.service';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
+import { User } from '../auth/entities/user.entity';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      // ADR-0112 — بوابة تحقّق رقم العميل عند أول طلب بتقرا `users.phone_verified_at`.
+      User,
       Order,
       OrderStatusHistory,
       OrderMedia,

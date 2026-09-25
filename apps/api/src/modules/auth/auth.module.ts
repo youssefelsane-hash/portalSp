@@ -27,6 +27,7 @@ import { StepUpService } from './step-up.service';
 import { WebAuthnController } from './webauthn.controller';
 import { WebAuthnService } from './webauthn.service';
 import { SettingsModule } from '../settings/settings.module';
+import { PhoneVerificationService } from './phone-verification.service';
 
 @Module({
   imports: [
@@ -51,9 +52,9 @@ import { SettingsModule } from '../settings/settings.module';
     SettingsModule, // SettingsService — مفتاح `auth.login_method` (ADR-0109 §7). مفيش دورة: SettingsModule مابيستوردش AuthModule.
   ],
   controllers: [AuthController, WebAuthnController, SessionsController, AdminMfaController],
-  providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService, AccountRolesService],
+  providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService, AccountRolesService, PhoneVerificationService],
   // StepUpService لازم يتصدّر — StepUpGuard مسجّل كـAPP_GUARD عالمي في AppModule نفسه (زي
   // PermissionsGuard/PermissionsService)، فمحتاج يلاقي الـprovider ده في سياق موديول متصدّر.
-  exports: [AuthService, StepUpService, AccountRolesService],
+  exports: [AuthService, StepUpService, AccountRolesService, PhoneVerificationService],
 })
 export class AuthModule {}

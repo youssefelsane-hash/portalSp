@@ -219,6 +219,14 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
     // كل سيناريو بيبدأ من جدول فاضي — عشان النتيجة تخص السيناريو نفسه مش تراكم اللي قبله.
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
+    // **محادثة الطلب لازم تتمسح الأول** — الطلب اللي بيرسي على فني بيتولّد له `chat_threads`
+    // (مستمع حدث غير متزامن)، والحذف المباشر للطلب بيقع على `chat_threads_order_id_fkey`.
+    // بيحصل تحت الحمل الكامل بس (لما التوزيع يلحق يشتغل قبل التنظيف) فكان بيبان كـflake.
+    await q(
+      `DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`,
+      [orderIds],
+    );
+    await q(`DELETE FROM chat_threads WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
     orderIds.length = 0;
@@ -227,6 +235,14 @@ describe('سيناريوهات الجدولة والقبول — تحقق حي (
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
+    // **محادثة الطلب لازم تتمسح الأول** — الطلب اللي بيرسي على فني بيتولّد له `chat_threads`
+    // (مستمع حدث غير متزامن)، والحذف المباشر للطلب بيقع على `chat_threads_order_id_fkey`.
+    // بيحصل تحت الحمل الكامل بس (لما التوزيع يلحق يشتغل قبل التنظيف) فكان بيبان كـflake.
+    await q(
+      `DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`,
+      [orderIds],
+    );
+    await q(`DELETE FROM chat_threads WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
     await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.techProfile]);
