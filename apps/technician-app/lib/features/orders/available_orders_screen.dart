@@ -23,6 +23,7 @@ import '../schedule/schedule_screen.dart';
 import '../skills/skills_screen.dart';
 import '../legal/legal_links_screen.dart';
 import '../support/complaints_screen.dart';
+import '../support/support_tickets_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order.dart';
@@ -1646,6 +1647,15 @@ class _TechnicianDrawer extends StatelessWidget {
                 icon: Icons.report_problem_outlined,
                 label: 'شكاويّي',
                 builder: (_) => const ComplaintsScreen(),
+              ),
+              // الباك-إند بيدي الفني نفس حقوق العميل في التذاكر من زمان
+              // (`@Roles(CUSTOMER, TECHNICIAN)`) والتطبيق مكانش فيه أي واجهة ليها.
+              // **مش مكرّرة مع «شكاويّي»**: الشكوى على **طلب بعينه**، والتذكرة لأي حاجة تانية
+              // (حسابي، أرباحي، التطبيق واقع) — والتسمية تحت بتقول ده صراحةً.
+              _DrawerItem(
+                icon: Icons.support_agent_outlined,
+                label: 'تذاكر الدعم',
+                builder: (_) => const SupportTicketsScreen(),
               ),
               const Divider(height: 1),
               _DrawerItem(

@@ -105,3 +105,63 @@ class ComplaintAttachment {
         fileType: json['file_type'] as String?,
       );
 }
+
+/// **تذاكر الدعم** — نفس عقد `apps/api/src/modules/support/support-tickets.controller.ts`
+/// اللي بيدي الفني والعميل **نفس الحقوق** (`@Roles(CUSTOMER, TECHNICIAN)`).
+///
+/// كانت فجوة: الباك-إند شايف الفني طرف كامل من زمان (يفتح تذكرة، يشوف تذاكره، يقيّم الدعم)،
+/// وتطبيق الفني مكانش فيه غير **الشكاوى** — وهي حاجة تانية خالص: الشكوى على **طلب بعينه**،
+/// والتذكرة لأي حاجة تانية (حسابي، فلوسي، التطبيق واقع).
+
+const Map<String, String> supportTicketStatusLabelsAr = {
+  'open': 'مفتوحة',
+  'in_progress': 'قيد المتابعة',
+  'resolved': 'اتحلّت',
+  'closed': 'مقفولة',
+};
+
+const Map<String, String> supportTicketCategoryLabelsAr = {
+  'account': 'الحساب وتسجيل الدخول',
+  'payment': 'الأرباح والمدفوعات',
+  'technical': 'مشكلة في التطبيق',
+  'general': 'استفسار عام',
+  'other': 'حاجة تانية',
+};
+
+class SupportTicket {
+  final String id;
+  final String ticketNumber;
+  final String subject;
+  final String category;
+  final String priority;
+  final String ticketStatus;
+  final int? satisfactionRating;
+  final DateTime createdAt;
+
+  SupportTicket({
+    required this.id,
+    required this.ticketNumber,
+    required this.subject,
+    required this.category,
+    required this.priority,
+    required this.ticketStatus,
+    required this.satisfactionRating,
+    required this.createdAt,
+  });
+
+  /// التقييم متاح بعد ما الدعم يخلّص بس — تقييم تذكرة لسه مفتوحة مالوش معنى.
+  bool get canRate =>
+      satisfactionRating == null &&
+      (ticketStatus == 'resolved' || ticketStatus == 'closed');
+
+  factory SupportTicket.fromJson(Map<String, dynamic> json) => SupportTicket(
+        id: json['id'] as String,
+        ticketNumber: json['ticket_number'] as String,
+        subject: json['subject'] as String,
+        category: json['category'] as String,
+        priority: json['priority'] as String? ?? 'normal',
+        ticketStatus: json['ticket_status'] as String,
+        satisfactionRating: json['satisfaction_rating'] as int?,
+        createdAt: DateTime.parse(json['created_at'] as String),
+      );
+}
