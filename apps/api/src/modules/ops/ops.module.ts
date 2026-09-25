@@ -8,6 +8,10 @@ import { TECHNICIAN_STATS_QUEUE } from '../technicians/technician-stats.queue';
 import { QueueWatchdogService } from './queue-watchdog.service';
 import { OpsMetricsService } from './ops-metrics.service';
 import { AdminOpsController } from './admin-ops.controller';
+import { ClientErrorsController } from './client-errors.controller';
+import { ClientErrorsService } from './client-errors.service';
+import { ClientErrorsRetentionService } from './client-errors-retention.service';
+import { JwtModule } from '@nestjs/jwt';
 import { DatabaseModule } from '../../database/database.module';
 import { ObservabilityModule } from '../../common/observability/observability.module';
 
@@ -28,8 +32,11 @@ import { ObservabilityModule } from '../../common/observability/observability.mo
     // إشارات مطلوبة في `OpsMetricsService`، وكل واحد عايش في موديوله الأصلي مش متكرر هنا.
     DatabaseModule,
     ObservabilityModule,
+    // للتحقق من توكن **اختياري** على مسار استقبال أخطاء الواجهة (ADR-0114 §4.4): الأسرار
+    // بتتمرر لحظة التحقق مش هنا، فالتسجيل ده بلا حالة ومش بيشارك أي إعداد مع AuthModule.
+    JwtModule.register({}),
   ],
-  controllers: [AdminOpsController],
-  providers: [QueueWatchdogService, OpsMetricsService],
+  controllers: [AdminOpsController, ClientErrorsController],
+  providers: [QueueWatchdogService, OpsMetricsService, ClientErrorsService, ClientErrorsRetentionService],
 })
 export class OpsModule {}

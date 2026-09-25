@@ -11,6 +11,7 @@ import { ASSISTANT_MATCHING_QUEUE } from '../assistant-matching/assistant-matchi
 import { CUSTOMER_STATS_QUEUE } from '../customers/customer-stats.queue';
 import { TECHNICIAN_STATS_QUEUE } from '../technicians/technician-stats.queue';
 import { SettingsService } from '../settings/settings.service';
+import { ClientErrorsService } from './client-errors.service';
 
 /**
  * **لوحة الإشارات الواحدة للمراقبة الخارجية (ج-٧).**
@@ -58,6 +59,11 @@ const DEFAULTS = {
   failedPaymentsPerHour: 10,
   stuckSearchingMinutes: 30,
   memoryRssMb: 1_500,
+  // أخطاء الواجهة في الساعة (ADR-0114). **عدد مش نسبة** هنا عن قصد، بخلاف الـ5xx: مفيش مقام
+  // موثوق — عدد الزيارات اللي **ماحصلهاش** خطأ مش بيوصلنا من المتصفح أصلاً، فنسبة مبنية على
+  // مقام ناقص بتكون أسوأ من رقم صريح.
+  clientErrorsPerHour: 25,
+  clientErrorsPerHourCritical: 150,
 };
 
 @Injectable()
@@ -73,6 +79,7 @@ export class OpsMetricsService {
     private readonly pool: DbPoolMonitorService,
     private readonly requests: RequestMetricsService,
     private readonly settings: SettingsService,
+    private readonly clientErrors: ClientErrorsService,
   ) {
     this.queues = [
       { name: MATCHING_ROUNDS_QUEUE, queue: matching },
@@ -87,15 +94,18 @@ export class OpsMetricsService {
   }
 
   async collect() {
-    const [requests, queues, business, thresholds] = await Promise.all([
+    const [requests, queues, business, thresholds, clientErrors] = await Promise.all([
       Promise.resolve(this.requests.snapshot()),
       this.queueSnapshots(),
       this.businessSignals(),
       this.thresholds(),
+      // أخطاء **متصفح** المستخدم — الإشارة الوحيدة اللي مصدرها بره السيرفر. لوحة الإشارات لازم
+      // تشوفها هي كمان، وإلا بيبقى عندنا مكانين نبصّ فيهم وده اللي ج-٧ اتعمل عشان يقفله.
+      this.clientErrors.countLastHour().catch(() => ({ total: 0, visitors: 0 })),
     ]);
     const pool = this.pool.snapshot();
     const process_ = processSnapshot();
-    const alerts = this.evaluate({ requests, queues, business, pool, process: process_, thresholds });
+    const alerts = this.evaluate({ requests, queues, business, pool, process: process_, thresholds, clientErrors });
 
     return {
       status: worst(alerts),
@@ -105,6 +115,7 @@ export class OpsMetricsService {
       requests,
       queues,
       business,
+      clientErrors,
       database: { pool },
       process: process_,
       thresholds,
@@ -180,9 +191,26 @@ export class OpsMetricsService {
     pool: ReturnType<DbPoolMonitorService['snapshot']>;
     process: ReturnType<typeof processSnapshot>;
     thresholds: Record<keyof typeof DEFAULTS, number>;
+    clientErrors: { total: number; visitors: number };
   }): OpsAlert[] {
-    const { requests, queues, business, pool, process: proc, thresholds } = input;
+    const { requests, queues, business, pool, process: proc, thresholds, clientErrors } = input;
     const alerts: OpsAlert[] = [];
+
+    // **عدد الزوّار المتأثرين في الرسالة مش عدد الأحداث بس**: مية خطأ من زائر واحد صفحة مكسورة
+    // لواحد، ومية خطأ من مية زائر عطل عام. الاتنين نفس العدد وقرارهم مختلف تمامًا.
+    if (clientErrors.total >= thresholds.clientErrorsPerHourCritical) {
+      alerts.push({
+        key: 'client_errors',
+        severity: 'critical',
+        message: `${clientErrors.total} خطأ في واجهة المستخدم خلال آخر ساعة (${clientErrors.visitors} زائر متأثر، الحد الحرج ${thresholds.clientErrorsPerHourCritical})`,
+      });
+    } else if (clientErrors.total >= thresholds.clientErrorsPerHour) {
+      alerts.push({
+        key: 'client_errors',
+        severity: 'warn',
+        message: `${clientErrors.total} خطأ في واجهة المستخدم خلال آخر ساعة (${clientErrors.visitors} زائر متأثر، الحد ${thresholds.clientErrorsPerHour})`,
+      });
+    }
 
     // **نسبة مش عدد**: عشرة أعطال في مليون طلب مش نفس عشرة في خمسين. النسبة بتخلّي نفس العتبة
     // صالحة على أي حجم شغل.

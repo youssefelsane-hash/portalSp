@@ -243,6 +243,11 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'ops.alert_failed_payments_per_hour': { type: 'number', default: 10, group: 'ops', description: 'عدد عمليات الدفع الفاشلة في الساعة اللي بعده يترفع إنذار حرج' },
   'ops.alert_stuck_searching_minutes': { type: 'number', default: 30, group: 'ops', description: 'مدة بقاء الطلب بيدوّر على فني بالدقايق اللي بعدها يعتبر عالق' },
   'ops.alert_memory_rss_mb': { type: 'number', default: 1500, group: 'ops', description: 'استهلاك الذاكرة بالميجابايت اللي بعده يترفع تحذير' },
+  // ADR-0114 — أخطاء واجهة المستخدم. **عدد مش نسبة** بخلاف الـ5xx: عدد الزيارات اللي ماحصلهاش
+  // خطأ مش بيوصل من المتصفح أصلاً، فنسبة بمقام ناقص أسوأ من رقم صريح.
+  'ops.alert_client_errors_per_hour': { type: 'number', default: 25, group: 'ops', description: 'عدد أخطاء واجهة المستخدم في الساعة اللي بعده يترفع تحذير' },
+  'ops.alert_client_errors_per_hour_critical': { type: 'number', default: 150, group: 'ops', description: 'عدد أخطاء واجهة المستخدم في الساعة اللي بعده يترفع إنذار حرج' },
+  'ops.client_errors_retention_days': { type: 'number', default: 30, group: 'ops', description: 'ADR-0114: كام يوم نحتفظ بأخطاء الواجهة قبل التنظيف التلقائي — جدول بيكبر بلا حد بيبقى هو نفسه مشكلة مراقبة' },
   'analytics.funnel_retention_days': { type: 'number', default: 180, group: 'ops', description: 'ADR-0081 §4: كام يوم نحتفظ بأحداث رحلة الحجز الخام. الأقدم من كده بيتمسح بعد ما يكون اتجمّع في booking_funnel_daily — التقارير التاريخية بتقرا من التجميع مش من الخام. الحد الأدنى المسموح ٧ أيام مهما كان الرقم المدخل.' },
   'ops.queue_watchdog_check_interval_minutes': { type: 'number', default: 2, group: 'ops', description: 'كل قد إيه (بالدقايق) الـwatchdog بيفحص الطوابير' },
   'ops.queue_watchdog_enabled': { type: 'boolean', default: true, group: 'ops', description: 'تفعيل/تعطيل مراقبة تعليق طوابير BullMQ (matching-rounds/customer-stats/technician-stats) — لو اتعطّل، مفيش exit تلقائي للـprocess حتى لو طابور معلّق' },

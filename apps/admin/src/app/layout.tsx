@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { AdminRealtimeProvider } from "@/lib/admin-realtime-context";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
+import { GlobalErrorReporting } from "@/components/global-error-reporting";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +31,8 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full">
+        {/* ADR-0114 — أخطاء الـwindow والوعود المرفوضة: فئة Next مابيلقطهاش في أي `error.tsx`. */}
+        <GlobalErrorReporting />
         <AuthProvider>
           {/* docs/08 §63.ب4 — الشِل هنا عشان يتركّب **مرة واحدة** ويعيش عبر كل التنقّلات.
               الصفحات اللي لسه بتلفّ محتواها بـ<AppShell> بتعدّي pass-through (شوف app-shell.tsx). */}
