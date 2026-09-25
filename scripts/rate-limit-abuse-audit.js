@@ -64,28 +64,32 @@ async function run() {
   //
   // لو السيرفر شغّال بـ`THROTTLE_LIMIT` عالي (بيحصل في تدقيقات تانية)، كل فحص تحت هيفشل ويقول
   // «مفيش حد» وهو أصلاً معطّل بالإعداد مش بالكود. لازم نعرف الفرق.
-  const otpPhone = h.nextPhone();
-  const probe = await hammer('/auth/otp/request', {
+  // **ADR-0109**: المسار المقيس بقى `pin/login` بدل `otp/request` (اللي بيرفض بـ410 دلوقتي،
+  // والـ410 مش 429 فالفحص كله كان هيطلع «مفيش حد» وهو أصلاً مسار مقفول). الرمز المبعوت غلط
+  // عمدًا — إحنا بنقيس الـthrottle مش الدخول، والرد بيكون 400 لحد ما الحد يضرب.
+  const loginPhone = h.nextPhone();
+  const probe = await hammer('/auth/pin/login', {
     method: 'POST',
-    body: { phone_number: otpPhone, user_type: 'customer' },
-    times: 12,
+    body: { phone_number: loginPhone, pin: '905142' },
+    times: 16,
   });
   h.record(
     'ص-٠ الـthrottle مفعّل فعلاً في السيرفر اللي بنقيسه (مش معطّل بمتغيّر بيئة)',
     probe.firstBlockedAt !== null,
     probe.firstBlockedAt
       ? `أول رفض عند النداء رقم ${probe.firstBlockedAt}`
-      : `١٢ نداء عدّوا كلهم — شغّل السيرفر بلا THROTTLE_LIMIT عالي ❗`,
+      : `١٦ نداء عدّوا كلهم — شغّل السيرفر بلا THROTTLE_LIMIT عالي ❗`,
   );
   if (probe.firstBlockedAt === null) return finish();
 
-  // ---- ص-١: OTP — أضيق مسار في النظام ----
+  // ---- ص-١: الدخول — أضيق مسار في النظام ----
   //
-  // OTP بيكلّف فلوس حقيقية (SMS) وبيقصف تليفون شخص حقيقي. السقف المعلن ٥/دقيقة
-  // (`docs/01-master-plan.md §7.3`).
+  // **ADR-0109 بدّل طبيعة الخطر هنا، ومابيقللهوش**: الـOTP كان بيكلّف فلوس (SMS) وبيقصف تليفون
+  // شخص حقيقي، فالسقف كان ٥/دقيقة. الدخول بالرمز مبيكلّفش SMS، بس بقى **مسار تخمين credential
+  // دائم من ٤–٦ أرقام** — والسقف (١٠/دقيقة) هو خط الدفاع الأول قبل القفل المتدرّج على الحساب.
   h.record(
-    'ص-١/أ OTP بيقف عند سقف ضيّق (≤٦ نداءات) مش عند الافتراضي العام (٦٠)',
-    probe.firstBlockedAt <= 6,
+    'ص-١/أ الدخول بيقف عند سقف ضيّق (≤١١ نداء) مش عند الافتراضي العام (٦٠)',
+    probe.firstBlockedAt <= 11,
     `اتقفل بعد ${probe.firstBlockedAt} نداء`,
   );
   h.record(
@@ -99,9 +103,9 @@ async function run() {
   // بيقفلوا التسجيل على كل اللي على نفس الـIP، والمهاجم اللي بيغيّر IP بيعدّي. عكس المطلوب
   // تمامًا في الاتجاهين.
   const otherPhone = h.nextPhone();
-  const otherPhoneRes = await h.api('/auth/otp/request', {
+  const otherPhoneRes = await h.api('/auth/pin/login', {
     method: 'POST',
-    body: { phone_number: otherPhone, user_type: 'customer' },
+    body: { phone_number: otherPhone, pin: '905142' },
   });
   h.record(
     'ص-١/ج رقم تاني من نفس الـIP لسه شغّال — الحد على الرقم مش على الـIP (CGNAT)',
@@ -110,9 +114,9 @@ async function run() {
   );
 
   // والعكس: نفس الرقم المقفول يفضل مقفول (مش بيتصفّر بتغيير أي حاجة تانية في الحمولة).
-  const sameBlocked = await h.api('/auth/otp/request', {
+  const sameBlocked = await h.api('/auth/pin/login', {
     method: 'POST',
-    body: { phone_number: otpPhone, user_type: 'technician' },
+    body: { phone_number: loginPhone, pin: '738295' },
   });
   h.record(
     'ص-١/د الرقم المقفول يفضل مقفول حتى لو باقي الحمولة اتغيّرت',
@@ -124,9 +128,9 @@ async function run() {
 
   // ---- ص-٢: التسجيل ----
   const regPhone = h.nextPhone();
-  const reg = await hammer('/auth/register', {
+  const reg = await hammer('/auth/pin/register', {
     method: 'POST',
-    body: { phone_number: regPhone, full_name: 'تدقيق المعدّل', user_type: 'customer' },
+    body: { phone_number: regPhone, pin: '417253', full_name: 'تدقيق المعدّل', user_type: 'customer' },
     times: 12,
   });
   h.record(

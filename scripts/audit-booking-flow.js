@@ -33,10 +33,14 @@ const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
 const API = process.env.API_BASE || 'http://localhost:3000/api/v1';
 const DB_URL = resolveApiDatabaseUrl();
 const QUICK = process.argv.includes('--quick');
-// المسار بيتحل وقت التشغيل — `.dev-logs/api.log` في الجذر مكانش موجود أصلاً (الـharness
-// بيكتب في `apps/api/.dev-logs/api.out`)، فالأداة كانت بتقف على «مش لاقي كود OTP».
-const { resolveApiLog } = require('./lib/resolve-api-log');
-const API_LOG = process.env.API_LOG || resolveApiLog() || `${__dirname}/../.dev-logs/api.log`;
+/**
+ * رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في `scripts/seed-dev-accounts.js`.
+ * مش سر: حسابات وهمية في قاعدة محلية.
+ *
+ * **اللي اتشال معاه**: قراءة لوج الباك-إند بالكامل. الأداة دي كانت بتقف على «مش لاقي كود OTP»
+ * لأن مسار اللوج كان بيتحل وقت التشغيل وممكن مايلاقيهوش — سبب سقوط مالوش أي علاقة بالمقيس.
+ */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 
 const G = '\x1b[32m', R = '\x1b[31m', Y = '\x1b[33m', D = '\x1b[2m', B = '\x1b[1m', O = '\x1b[0m';
 
@@ -63,16 +67,16 @@ async function api(path, { method = 'GET', token, body } = {}) {
 }
 
 /**
- * دخول بالـOTP.
+ * **دخول برمز** (ADR-0109).
  *
- * الكود متخزّن **مهشّر** في `otp_codes` (زي ما المفروض)، فالمصدر الوحيد للنص الصريح في بيئة
- * التطوير هو لوج الـAPI: `[OTP] <رقم> (<غرض>) [...] → <كود>`. السكريبت بيقرا آخر سطر مطابق
- * بعد ما يطلب الكود — نفس اللي المطوّر بيعمله بإيده مع `tail -f | grep OTP`.
+ * قبل كده كان الدخول بالـOTP: اطلب كود، ودوّر عليه في لوج الـAPI بـ٤٠ محاولة على مدى ١٠ ثواني
+ * (`[OTP] <رقم> (<غرض>) … → <كود>`)، لأن الكود متخزّن مهشّر فمفيش مصدر تاني للنص الصريح. دلوقتي
+ * نداء واحد بلا لوج وبلا انتظار — ومعاه اتشال أكبر سبب لسقوط التدقيق ده بلا أي علاقة بالمقيس.
+ *
+ * **الكاش لسه له معنى**: الدخول وراه throttle حقيقي (١٠/دقيقة بالرقم)، والتدقيق بيتشغّل كذا
+ * مرة ورا بعض وقت الإصلاح.
  */
-async function login(phone, logPath) {
-  // **كاش للتوكن بين التشغيلات.** طلب الـOTP وراه throttle حقيقي (429 بعد محاولات قليلة)،
-  // والتدقيق بيتشغّل كذا مرة ورا بعض وقت الإصلاح. التوكن المحفوظ بيتجرّب الأول، وبس لو مرفوض
-  // بنطلب كود جديد.
+async function login(phone) {
   const cachePath = `${require('node:os').tmpdir()}/baytak-audit-token-${phone.replace(/\D/g, '')}.txt`;
   const fs = require('node:fs');
   try {
@@ -83,46 +87,26 @@ async function login(phone, logPath) {
     }
   } catch { /* مفيش كاش */ }
 
-  const token = await freshLogin(phone, logPath);
+  const token = await freshLogin(phone);
   try { fs.writeFileSync(cachePath, token, { mode: 0o600 }); } catch { /* الكاش تحسين مش شرط */ }
   return token;
 }
 
-async function freshLogin(phone, logPath) {
-  const before = readLogSize(logPath);
-  const req = await api('/auth/otp/request', { method: 'POST', body: { phone_number: phone, purpose: 'login' } });
-  if (req.status >= 400) throw new Error(`طلب OTP لـ${phone} رجّع ${req.status}: ${JSON.stringify(req.body?.error)}`);
-
-  let code = null;
-  for (let i = 0; i < 40 && !code; i++) {
-    await new Promise((r) => setTimeout(r, 250));
-    const tail = readLogFrom(logPath, before);
-    const matches = [...tail.matchAll(/\[OTP\] (\+?[0-9]+) \(login\).*?→ ([0-9]{4,8})/g)]
-      .filter((m) => m[1] === phone);
-    code = matches.length ? matches[matches.length - 1][2] : null;
+async function freshLogin(phone) {
+  const res = await api('/auth/pin/login', {
+    method: 'POST',
+    body: { phone_number: phone, pin: LOGIN_PIN },
+  });
+  const token = res.body?.data?.access_token;
+  if (!token) {
+    throw new Error(
+      `فشل دخول ${phone}: ${JSON.stringify(res.body)} — ` +
+      'شغّلت `node scripts/seed-dev-accounts.js`؟ هو اللي بيحط رمز الدخول على حسابات التطوير.',
+    );
   }
-  if (!code) throw new Error(`مش لاقي كود OTP لـ${phone} في ${logPath} — الـAPI شغّال في وضع تطوير؟`);
-
-  const verify = await api('/auth/otp/verify', { method: 'POST', body: { phone_number: phone, otp_code: code } });
-  const token = verify.body?.data?.access_token ?? verify.body?.data?.tokens?.access_token;
-  if (!token) throw new Error(`فشل تسجيل دخول ${phone}: ${JSON.stringify(verify.body)}`);
   return token;
 }
 
-function readLogSize(p) {
-  try { return require('node:fs').statSync(p).size; } catch { return 0; }
-}
-function readLogFrom(p, from) {
-  try {
-    const fs = require('node:fs');
-    const fd = fs.openSync(p, 'r');
-    const size = fs.fstatSync(fd).size;
-    const buf = Buffer.alloc(Math.max(0, size - from));
-    fs.readSync(fd, buf, 0, buf.length, from);
-    fs.closeSync(fd);
-    return buf.toString('utf8');
-  } catch { return ''; }
-}
 
 /**
  * بينشئ (أو بيرجّع) حساب أدمن التدقيق ودوره. idempotent بالكامل، ومقصور على صلاحيتين.
@@ -252,8 +236,8 @@ async function main() {
     if (!admin) throw new Error('مفيش حساب أدمن بصلاحية كاملة');
     if (!customer) throw new Error('مفيش عميل بعنوان محفوظ');
 
-    const adminToken = await login(admin.phone_number, API_LOG);
-    const customerToken = await login(customer.phone_number, API_LOG);
+    const adminToken = await login(admin.phone_number);
+    const customerToken = await login(customer.phone_number);
     console.log(`${D}أدمن: ${admin.phone_number} · عميل: ${customer.phone_number}${O}\n`);
 
     const [category] = (await db.query(

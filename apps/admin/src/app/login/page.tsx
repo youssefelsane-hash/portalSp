@@ -21,16 +21,21 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-type Step = 'phone' | 'otp' | 'mfa' | 'recovery';
+/**
+ * **ADR-0109**: خطوة `'otp'` اتشالت. كانت لازمة لأن الخطوة اللي قبلها بتبعت SMS وتستنى؛ دلوقتي
+ * الرقم والرمز في فورم واحد، فالدخول بقى خطوة واحدة والـMFA (خطوتين `'mfa'`/`'recovery'`) زي
+ * ما هو بالحرف فوقه.
+ */
+type Step = 'credentials' | 'mfa' | 'recovery';
 
 function LoginForm() {
-  const { requestOtp, verifyOtp, verifyRecoveryCode, enrollPasskey, authenticateWithPasskey } = useAuth();
+  const { loginWithPin, verifyRecoveryCode, enrollPasskey, authenticateWithPasskey } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [step, setStep] = useState<Step>('phone');
+  const [step, setStep] = useState<Step>('credentials');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [otpCode, setOtpCode] = useState('');
+  const [pin, setPin] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,26 +51,12 @@ function LoginForm() {
     router.push(searchParams.get('next') ?? '/');
   }
 
-  async function handleRequestOtp(e: FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
     try {
-      await requestOtp(phoneNumber, 'login');
-      setStep('otp');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleVerifyOtp(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      const result = await verifyOtp(phoneNumber, otpCode);
+      const result = await loginWithPin(phoneNumber, pin);
       if (isMfaRequiredResponse(result)) {
         setMfaSessionToken(result.mfa_session_token);
         setCeremony(result.ceremony);
@@ -74,6 +65,8 @@ function LoginForm() {
       }
       goToApp();
     } catch (err) {
+      // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب بيحرق محاولة من الخمسة.
+      setPin('');
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
       setIsSubmitting(false);
@@ -85,7 +78,7 @@ function LoginForm() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await verifyRecoveryCode(phoneNumber, otpCode, recoveryCode);
+      const result = await verifyRecoveryCode(phoneNumber, pin, recoveryCode);
       // استرجاع MFA دايمًا بيرجع ceremony=registration (كل الـPasskeys القديمة اتمسحت، لازم
       // Passkey جديد كليًا — راجع auth.service.ts recoveryLogin()).
       setMfaSessionToken(result.mfa_session_token);
@@ -139,73 +132,57 @@ function LoginForm() {
           </div>
           <CardTitle className="text-xl">تسجيل الدخول للوحة الإدارة</CardTitle>
           <CardDescription>
-            {step === 'phone' && 'ادخل رقم موبايلك عشان نبعتلك كود التحقق'}
-            {step === 'otp' && `اتبعت كود لـ ${phoneNumber}`}
+            {step === 'credentials' && 'ادخل رقم موبايلك ورمز الدخول بتاعك'}
             {step === 'mfa' && ceremony === 'registration' && 'الحساب ده محتاج تسجيل Passkey (بصمة/Face ID/مفتاح أمان) قبل ما تكمل'}
             {step === 'mfa' && ceremony === 'authentication' && 'أكّد هويتك بالـPasskey المسجّل قبل كده'}
-            {step === 'recovery' && 'ادخل كود الاسترجاع اللي اتحفظ وقت تسجيل الـPasskey'}
+            {step === 'recovery' && 'ادخل رمز دخولك مع كود الاسترجاع اللي اتحفظ وقت تسجيل الـPasskey'}
           </CardDescription>
         </CardHeader>
 
-        {step === 'phone' && (
-          <form onSubmit={handleRequestOtp}>
+        {step === 'credentials' && (
+          <form onSubmit={handleLogin}>
             <CardContent className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="phone_number">رقم الموبايل</Label>
                 <Input
                   id="phone_number"
+                  data-testid="login-phone"
                   type="tel"
                   placeholder="+201001234567"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   required
                   dir="ltr"
+                  autoComplete="tel"
                   autoFocus
                 />
               </div>
-              {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
-            </CardContent>
-            <CardFooter className="pt-6">
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? 'جاري الإرسال…' : 'ابعت كود التحقق'}
-              </Button>
-            </CardFooter>
-          </form>
-        )}
-
-        {step === 'otp' && (
-          <form onSubmit={handleVerifyOtp}>
-            <CardContent className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="otp_code">كود التحقق (6 أرقام)</Label>
+                <Label htmlFor="pin">رمز الدخول</Label>
+                {/*
+                  `type="password"` مقصود: الرمز **دائم** مش كود بيموت بعد دقايق، واللوحة دي
+                  بتتفتح في مكاتب — حد واقف جنبك مايقراهوش. وبلا `autocomplete="one-time-code"`
+                  لأن ده مش كود من SMS.
+                */}
                 <Input
-                  id="otp_code"
+                  id="pin"
+                  data-testid="login-pin"
+                  type="password"
                   inputMode="numeric"
                   maxLength={6}
-                  placeholder="000000"
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
                   required
+                  minLength={4}
                   dir="ltr"
-                  autoFocus
+                  autoComplete="current-password"
                 />
               </div>
               {error && <ErrorNotice className="mb-0">{error}</ErrorNotice>}
-              <button
-                type="button"
-                className="text-sm text-muted-foreground underline underline-offset-4 text-start"
-                onClick={() => {
-                  setStep('phone');
-                  setOtpCode('');
-                  setError(null);
-                }}
-              >
-                رقم موبايل غلط؟ رجّع خطوة
-              </button>
             </CardContent>
             <CardFooter className="pt-6">
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? 'جاري التحقق…' : 'دخول'}
+              <Button type="submit" data-testid="login-submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? 'جاري الدخول…' : 'دخول'}
               </Button>
             </CardFooter>
           </form>
@@ -240,10 +217,33 @@ function LoginForm() {
         {step === 'recovery' && (
           <form onSubmit={handleRecoverySubmit}>
             <CardContent className="flex flex-col gap-4">
+              {/*
+                **عاملين مستقلين لازمين مع بعض (ADR-0011 §6)**: رمز الدخول + كود الاسترجاع.
+                الرمز بيتطلب تاني هنا عمدًا — المستخدم ممكن يكون وصل للخطوة دي من شاشة الـMFA
+                بعد ما دخل رمزه، لكن الخانة بتتفضّى بعد أي فشل، والاسترجاع بيمسح كل الـPasskeys
+                فمينفعش يمشي على قيمة قديمة في الحالة.
+              */}
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="recovery_pin">رمز الدخول</Label>
+                <Input
+                  id="recovery_pin"
+                  data-testid="recovery-pin"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  required
+                  minLength={4}
+                  dir="ltr"
+                  autoComplete="current-password"
+                />
+              </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="recovery_code">كود الاسترجاع</Label>
                 <Input
                   id="recovery_code"
+                  data-testid="recovery-code"
                   placeholder="XXXX-XXXX-XXXX"
                   value={recoveryCode}
                   onChange={(e) => setRecoveryCode(e.target.value)}

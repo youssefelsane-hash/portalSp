@@ -62,6 +62,18 @@ export interface UserResponseDto {
   id: string;
   phone_number: string;
   phone_verified: boolean;
+
+  /**
+   * هل الحساب ليه رمز دخول؟ (ADR-0109)
+   *
+   * الواجهة بتستخدمها عشان تعرف تطلب من المستخدم القديم يحط رمزه — من غيرها كانت هتحتاج نداء
+   * زيادة. **مش سر**: بتقول «فيه رمز» مش الرمز نفسه، وبتترد لصاحب الحساب بس (`/auth/me`
+   * متوثّق).
+   *
+   * اختياري عمدًا: نسخة API أقدم مالهاش الحقل، والتعامل الصح هو «مش موجود ⇒ مافيش داعي نزنّق
+   * المستخدم بشاشة مالهاش لازمة» مش «مالوش رمز».
+   */
+  pin_set?: boolean;
   email: string | null;
   full_name: string;
   avatar_url: string | null;

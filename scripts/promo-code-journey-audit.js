@@ -25,9 +25,7 @@
  */
 'use strict';
 
-const fs = require('node:fs');
 const { LiveHarness, sleep } = require('./lib/live-harness');
-const { resolveApiLog } = require('./lib/resolve-api-log');
 
 const KEEP = process.argv.includes('--keep');
 const h = new LiveHarness('pj');
@@ -56,35 +54,12 @@ async function follow(code, userAgent) {
  * `PROMO_LINK_CAPTURED_EVENT`، وإدخال صف `users` مباشرةً كان هيتخطّاه فالفحص يعدّي وهو فاضي.
  */
 async function registerCustomer(promoLinkCode) {
-  const phone = h.nextPhone();
-  const otpRes = await h.api('/auth/otp/request', {
-    method: 'POST',
-    body: { phone_number: phone, purpose: 'register' },
+  const reg = await h.registerCustomerWithPin({
+    fullName: `عميل كوبون ${h.nextTag()}`,
+    ...(promoLinkCode ? { promo_link_code: promoLinkCode } : {}),
   });
-  if (otpRes.status !== 200 && otpRes.status !== 201) {
-    return { error: `طلب OTP فشل: HTTP=${otpRes.status} ${messageOf(otpRes.body)}` };
-  }
-  await sleep(400);
-  const apiLog = resolveApiLog();
-  if (!apiLog) return { error: 'مالقيناش لوج الباك-إند — مرّر API_LOG_PATH' };
-  const log = fs.readFileSync(apiLog, 'utf8');
-  const match = [...log.matchAll(new RegExp(`\\[OTP\\] \\${phone} .*→ (\\d{6})`, 'g'))].pop();
-  if (!match) return { error: `مالقيناش كود OTP في لوج التطوير (${apiLog})` };
-
-  const res = await h.api('/auth/register', {
-    method: 'POST',
-    body: {
-      phone_number: phone,
-      otp_code: match[1],
-      full_name: `عميل كوبون ${h.nextTag()}`,
-      user_type: 'customer',
-      ...(promoLinkCode ? { promo_link_code: promoLinkCode } : {}),
-    },
-  });
-  if (res.status !== 201 && res.status !== 200) return { error: `HTTP=${res.status} ${messageOf(res.body)}` };
-  const [row] = await h.q(`SELECT id FROM users WHERE phone_number = $1`, [phone]);
-  if (row) h.created.users.push(row.id);
-  return { userId: row?.id, token: row ? h.token(row.id) : null };
+  if (reg.error) return { error: reg.error };
+  return { userId: reg.userId, token: reg.token };
 }
 
 /** بيوصّل طلب لحالة `completed` بالمسار الحقيقي (تنفيذ الفني + دفع العميل). */

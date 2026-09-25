@@ -14,6 +14,7 @@ import { AdminMfaRecoveryCode } from './entities/admin-mfa-recovery-code.entity'
 import { OtpCode } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { StepUpToken } from './entities/step-up-token.entity';
+import { PinResetToken } from './entities/pin-reset-token.entity';
 import { User } from './entities/user.entity';
 import { WebAuthnChallenge } from './entities/webauthn-challenge.entity';
 import { WebAuthnCredential } from './entities/webauthn-credential.entity';
@@ -35,6 +36,7 @@ import { SettingsModule } from '../settings/settings.module';
       WebAuthnChallenge,
       AdminMfaRecoveryCode,
       StepUpToken,
+      PinResetToken,
       Wallet,
     ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),

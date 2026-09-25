@@ -251,6 +251,21 @@ class AuthRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// **استهلاك كود استرجاع رمز الدخول** (ADR-0109 §6-ب).
+  ///
+  /// المخرج الوحيد للمستخدم اللي نسي رمزه وهو **مش داخل**: بيكلّم الدعم، الدعم بيتأكد من هويته
+  /// ويدّيه كود في المكالمة، وهو بيكتبه هنا **ويختار رمزه بنفسه** (الأدمن عمره ما يعرف الرمز).
+  ///
+  /// **مابيرجّعش جلسة عمدًا** — الكود تصريح لتعيين رمز مش تسجيل دخول. المستخدم بيدخل بالرمز
+  /// الجديد من شاشة الدخول العادية، فمسار الدخول يفضل واحد لكل الحالات.
+  Future<void> redeemPinResetCode(String phoneNumber, String resetCode, String pin) async {
+    await apiRequest('POST', '/auth/pin/reset/redeem', body: {
+      'phone_number': phoneNumber,
+      'reset_code': resetCode,
+      'pin': pin,
+    });
+  }
+
   /// حذف الحساب نهائيًا (بوابة P0-1 في docs/23، ADR-0053).
   ///
   /// Google Play بيطلب **مسار حذف جوّه التطبيق** مش رابط ويب بس. الباك-إند بيرفض الحذف لو فيه

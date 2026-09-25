@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import 'pin_reset_screen.dart';
 import '../../design/adaptive_text_action.dart';
 
 /// شاشة دخول/تسجيل الفني — **رقم موبايل + رمز دخول** (ADR-0109).
@@ -265,6 +266,23 @@ class _LoginScreenState extends State<LoginScreen> {
                           decoration: const InputDecoration(labelText: 'أكّد الرمز', counterText: ''),
                         ),
                       ],
+                      // **المخرج الوحيد لمستخدم نسي رمزه** (ADR-0109 §6-ب) — مفيش SMS بعد
+                      // التبديل، فالاسترجاع بيمرّ على الدعم. لازم يبقى ظاهر هنا بالذات: ده
+                      // المكان اللي المستخدم بيكتشف فيه إنه نسي.
+                      AdaptiveTextAction(
+                        key: const ValueKey('login-forgot-pin'),
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => PinResetScreen(
+                                      initialPhone: _phoneController.text.trim(),
+                                    ),
+                                  ),
+                                ),
+                        icon: Icons.help_outline_rounded,
+                        label: 'نسيت رمز الدخول؟',
+                      ),
                       AdaptiveTextAction(
                         key: const ValueKey('login-back-to-phone'),
                         onPressed: _isSubmitting ? null : _backToPhoneStep,

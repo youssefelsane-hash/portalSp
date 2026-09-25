@@ -16,7 +16,7 @@
  *   ADMIN_URL      الافتراضي http://localhost:3001
  *   API_URL        الافتراضي http://localhost:3000/api/v1
  *   ADMIN_PHONE    رقم أدمن **بلا مفتاح مرور (passkey)** — الافتراضي +201000000077
- *   API_LOG        مسار لوج الباك-إند اللي بيتقرا منه كود الـOTP (مطلوب)
+ *   ADMIN_PIN      رمز دخول الأدمن — الافتراضي نفس `DEV_SEED_PIN` بتاع سكربتات الـseed
  *   CHROMIUM       مسار المتصفح — الافتراضي /opt/pw-browsers/chromium
  *   SHOTS_DIR      مجلد اللقطات — الافتراضي مجلد مؤقت
  *
@@ -26,23 +26,21 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import jwt from 'jsonwebtoken';
-import { createRequire } from 'node:module';
-
-// `scripts/lib/resolve-api-log.js` بـCommonJS — `createRequire` بيخليه متاح من ملف ESM.
-const { resolveApiLog } = createRequire(import.meta.url)('../../../scripts/lib/resolve-api-log.js');
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:3001';
 const API_URL = process.env.API_URL ?? 'http://localhost:3000/api/v1';
 const ADMIN_PHONE = process.env.ADMIN_PHONE ?? '+201000000077';
-const API_LOG = process.env.API_LOG;
+// نفس قيمة `DEV_SEED_PIN` في سكربتات الـseed — الحساب ده وهمي في قاعدة محلية، والسكربت ده أداة
+// تطوير/CI عن قصد (بيسجّل توكن بسر التطوير المحلي، فمالوش أي معنى خارج جهاز التطوير).
+const ADMIN_PIN = process.env.ADMIN_PIN ?? '417253';
 const CHROMIUM = process.env.CHROMIUM ?? '/opt/pw-browsers/chromium';
 const SHOTS_DIR = process.env.SHOTS_DIR ?? mkdtempSync(join(tmpdir(), 'ops-e2e-'));
 
@@ -106,38 +104,7 @@ function signDevAdminToken(phone) {
     { env: { ...process.env, PGPASSWORD: 'baytak' }, encoding: 'utf8' },
   ).trim();
   if (!userId) throw new Error(`مفيش مستخدم بالرقم ${phone} — اعمله الأول`);
-  return jwt.sign({ sub: userId, userType: 'admin', amr: ['otp'] }, secret, { expiresIn: '60m' });
-}
-
-/**
- * مسار اللوج بقى **بيتحلّ لوحده** بدل ما يكون `API_LOG` إجباري من الكولر. الملف ده بيوعد في
- * أول سطر فيه إن «أي سيشن جاية تقدر تثبت إن الشاشات لسه شغالة **بأمر واحد**» — والوعد ده
- * كان مكسور: `node test/operations-center.e2e.mjs` لوحده بيرمي «API_LOG مطلوب». نفس
- * `resolve-api-log` اللي باقي الأدوات بتستعمله (وتعليقه بيوصف نفس الفئة دي بالحرف).
- * `API_LOG` لسه بيشتغل كتجاوز صريح. (تدقيق §148، المرحلة ١٣)
- *
- * وبنقرا **آخر ٢ ميجا بس**: لوج التطوير وصل ٦٩٧ ميجا قبل كده، و`readFileSync` عليه كان
- * بيحمّله كله في الذاكرة.
- */
-const OTP_TAIL_BYTES = 2 * 1024 * 1024;
-
-function latestOtp(phone) {
-  const logPath = API_LOG ?? resolveApiLog();
-  if (!logPath) throw new Error('مالقيتش لوج الباك-إند — حدّد API_LOG صراحةً');
-  const { size } = statSync(logPath);
-  const start = size > OTP_TAIL_BYTES ? size - OTP_TAIL_BYTES : 0;
-  const fd = openSync(logPath, 'r');
-  let log;
-  try {
-    const buf = Buffer.alloc(size - start);
-    readSync(fd, buf, 0, buf.length, start);
-    log = buf.toString('utf8');
-  } finally {
-    closeSync(fd);
-  }
-  const matches = [...log.matchAll(new RegExp(`OTP\\] \\${phone} .*?→ (\\d{6})`, 'g'))];
-  if (matches.length === 0) throw new Error(`مالقيتش كود OTP لـ${phone} في ${logPath}`);
-  return matches[matches.length - 1][1];
+  return jwt.sign({ sub: userId, userType: 'admin', amr: ['pin'] }, secret, { expiresIn: '60m' });
 }
 
 /**
@@ -212,24 +179,22 @@ async function main() {
   //    فالحقن مستحيل أصلاً — والدخول الحقيقي بيغطّي القشرة والحراسة كمان.
   clearPasskeys(ADMIN_PHONE);
   await goto('/login');
+  // **ADR-0109 — خطوة واحدة**: الرقم والرمز مع بعض. قبل كده كانت خطوتين لأن الأولى بتبعت SMS.
   await page.fill('#phone_number', ADMIN_PHONE);
+  await page.fill('#pin', ADMIN_PIN);
   await page.click('button[type="submit"]');
-  // لو خطوة الرقم ما عدّتش، **الرسالة اللي على الشاشة هي التشخيص الحقيقي**. من غير السطور دي
-  // الفشل بيطلع «Timeout waiting for #otp_code» وهو عرض لأي سبب تاني خالص (رقم مرفوض، throttle،
-  // تحدّي passkey) — وده ضيّع وقت فعلي في التدقيق. (§148، المرحلة ١٣)
+  // لو الدخول ما عدّاش، **الرسالة اللي على الشاشة هي التشخيص الحقيقي**. من غير السطور دي الفشل
+  // بيطلع Timeout على عنصر MFA وهو عرض لأي سبب تاني خالص (رقم مرفوض، رمز غلط، حساب مقفول،
+  // throttle) — وده ضيّع وقت فعلي في التدقيق. (§148، المرحلة ١٣)
   try {
-    await page.waitForSelector('#otp_code', { timeout: 30_000 });
-  } catch (err) {
+    await page.getByRole('button', { name: /سجّل Passkey دلوقتي|تأكيد بـ ?Passkey/ }).waitFor({ timeout: 30_000 });
+  } catch {
     const body = (await page.innerText('body')).replace(/\n+/g, ' | ').slice(0, 400);
     await page.screenshot({ path: join(SHOTS_DIR, 'login-stuck.png'), fullPage: true }).catch(() => {});
-    throw new Error(`خطوة الرقم ما عدّتش (اللقطة: ${join(SHOTS_DIR, 'login-stuck.png')}) — الشاشة: ${body}`);
+    throw new Error(`الدخول بالرمز ما عدّاش (اللقطة: ${join(SHOTS_DIR, 'login-stuck.png')}) — الشاشة: ${body}`);
   }
-  await new Promise((r) => setTimeout(r, 1200));
-  await page.fill('#otp_code', latestOtp(ADMIN_PHONE));
-  await page.click('button[type="submit"]');
   // خطوة MFA: تسجيل Passkey (المصادق الافتراضي بيوافق تلقائيًا) ثم إقرار أكواد الاسترجاع.
-  // نفس منطق `scripts/sweep-admin.js` بالحرف — بالاسم الصريح مش `.first()`، عشان ماندوسش
-  // «دخول» بالغلط ونطلب OTP جديد فيبطل الكود اللي حطّيناه.
+  // نفس منطق `scripts/sweep-admin.js` بالحرف — بالاسم الصريح مش `.first()`.
   for (let i = 0; i < 4 && page.url().includes('/login'); i++) {
     if (await page.locator('#ack').count()) {
       await page.check('#ack');

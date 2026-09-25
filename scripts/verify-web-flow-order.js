@@ -17,12 +17,12 @@
  */
 'use strict';
 
-const bcrypt = require('/home/user/portalSp/node_modules/bcryptjs');
 const { chromium } = require('/home/user/portalSp/node_modules/playwright-core');
 const { LiveHarness } = require('./lib/live-harness');
 
 const WEB = process.env.WEB_URL || 'http://localhost:3002';
-const OTP = '123456';
+/** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 const ok = (pass, label, extra = '') => console.log(`${pass ? '✅' : '❌'} ${label}${extra ? `\n     ${extra}` : ''}`);
 
 async function main() {
@@ -62,20 +62,13 @@ async function main() {
       if (req.url().includes('booking-slots')) slotCalls.push(req.url());
     });
 
-    // دخول بالمسار الحقيقي (تليفون + OTP) — نفس أسلوب `sweep-customer.js`.
+    // دخول بالمسار الحقيقي (تليفون + رمز) — نفس أسلوب `sweep-customer.js` (ADR-0109).
     await page.goto(`${WEB}/login`, { waitUntil: 'networkidle' });
-    await page.locator('input[type="tel"], #phone, #phone_number').first().click();
-    await page.locator('input[type="tel"], #phone, #phone_number').first().pressSequentially(phone, { delay: 15 });
-    await page.locator('button[type=submit]').first().click();
-    await page.waitForTimeout(1500);
-    await h.q(
-      `UPDATE otp_codes SET code_hash = $2, attempts_count = 0, is_used = false WHERE phone_number = $1`,
-      [phone, await bcrypt.hash(OTP, 10)],
-    );
-    const otpInput = page.locator('input[inputmode="numeric"], #otp, #otp_code').first();
-    await otpInput.click();
-    await otpInput.pressSequentially(OTP, { delay: 15 });
-    await page.locator('button[type=submit]').first().click();
+    await page.getByTestId('login-phone').click();
+    await page.getByTestId('login-phone').pressSequentially(phone, { delay: 15 });
+    await page.getByTestId('login-pin').click();
+    await page.getByTestId('login-pin').pressSequentially(LOGIN_PIN, { delay: 15 });
+    await page.getByTestId('login-submit').click();
     await page.waitForFunction(() => !window.location.pathname.includes('login'), { timeout: 30_000 });
 
     await page.goto(`${WEB}/services/${serviceId}`, { waitUntil: 'domcontentloaded' });

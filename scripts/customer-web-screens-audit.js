@@ -19,7 +19,8 @@ const path = require('path');
 const { chromium } = require('/home/user/portalSp/node_modules/playwright-core');
 
 const WEB = process.env.WEB_BASE_URL || 'http://localhost:3002';
-const { resolveApiLog } = require('./lib/resolve-api-log');
+/** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 
 const VIEWPORTS = [
   { name: 'موبايل 390×844', width: 390, height: 844 },
@@ -40,34 +41,6 @@ const STATIC_ROUTES = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * الملف ده كان بيقرا مسارين مكتوبين بالإيد، واحد منهم scratchpad سيشن قديمة — فالتسجيل بيفشل
- * بـ«مالقيتش OTP» وهو مالوش أي علاقة باللي بيتقاس. المسار بيتحل من `resolve-api-log` زي باقي
- * الأدوات (التعليق فيه بيوصف نفس البَقّة دي بالظبط — الملف ده بس كان فاتها). (تدقيق §148/١٠)
- *
- * وبنقرا **آخر ٢ ميجا بس**: لوج التطوير وصل ٦٩٧ ميجا قبل كده، و`readFileSync` عليه كان
- * بيحمّله كله في الذاكرة في كل نداء OTP.
- */
-const OTP_TAIL_BYTES = 2 * 1024 * 1024;
-
-function latestOtp(phone) {
-  const logPath = resolveApiLog();
-  if (logPath) {
-    const { size } = fs.statSync(logPath);
-    const start = size > OTP_TAIL_BYTES ? size - OTP_TAIL_BYTES : 0;
-    const fd = fs.openSync(logPath, 'r');
-    try {
-      const buf = Buffer.alloc(size - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-      const lines = buf.toString('utf8').split('\n').filter((l) => l.includes('[OTP]') && l.includes(phone));
-      if (lines.length) return lines[lines.length - 1].split('→').pop().trim();
-    } finally {
-      fs.closeSync(fd);
-    }
-  }
-  throw new Error(`مالقيتش OTP لـ${phone} في لوج الباك-إند (${logPath ?? 'مفيش لوج اتلاقى'})`);
-}
-
 async function api(pathname, options = {}) {
   const res = await fetch(`http://localhost:3000/api/v1${pathname}`, {
     method: options.method || 'GET',
@@ -80,11 +53,12 @@ async function api(pathname, options = {}) {
 /** عميل حقيقي معاه عنوان وطلب — عشان الصفحات الديناميكية يبقى ليها محتوى فعلي. */
 async function seed() {
   const phone = `+2012${String(Date.now() % 100000000).padStart(8, '0')}`;
-  await api('/auth/otp/request', { method: 'POST', body: { phone_number: phone, purpose: 'register' } });
-  await sleep(700);
-  const reg = await api('/auth/register', {
+  // **ADR-0109 — نداء واحد.** قبل كده كان: اطلب OTP، استنى ٧٠٠ مللي، اقرا آخر ٢ ميجا من لوج
+  // الباك-إند ودوّر على `[OTP]`. الأداة كانت بتسقط بـ«مالقيتش OTP» لأسباب مالهاش أي علاقة
+  // باللي بتقيسه (اللوج مش موجود، أو وصل ٦٩٧ ميجا).
+  const reg = await api('/auth/pin/register', {
     method: 'POST',
-    body: { phone_number: phone, otp_code: latestOtp(phone), full_name: 'مسح صفحات الويب', user_type: 'customer' },
+    body: { phone_number: phone, pin: LOGIN_PIN, full_name: 'مسح صفحات الويب', user_type: 'customer' },
   });
   if (reg.status >= 400) throw new Error(`فشل التسجيل: ${JSON.stringify(reg.body)}`);
   const token = reg.body.data.access_token;
@@ -130,25 +104,23 @@ async function login(page, phone) {
   // صحيحة». الفشل ده **مضلّل تمامًا**: مالوش أي علاقة بالرقم ولا بالباك-إند (نفس الرقم بالظبط
   // بيعدّي 200 من curl ومن الكتابة الحقيقية). اتقاس بالتجربة: `fill` ⇒ 400، `pressSequentially`
   // ⇒ 200. (تدقيق §148، المرحلة ١٠)
-  const phoneInput = page.locator('input[type="tel"]').first();
+  const phoneInput = page.getByTestId('login-phone');
   await phoneInput.waitFor({ state: 'visible', timeout: 15000 });
+  // **ADR-0109 — فورم واحد**: الرقم والرمز مع بعض ودوسة واحدة.
+  // `pressSequentially` مش `fill` لأن الحقول متحكَّم فيها من React.
   await phoneInput.click();
   await phoneInput.pressSequentially(phone, { delay: 20 });
-  await page.getByRole('button', { name: /كود|إرسال|ابعت/ }).first().click();
-  await sleep(900);
-  // لو الصفحة ما انتقلتش لخطوة الكود، الرسالة اللي عليها هي التشخيص الحقيقي — من غيرها الفحص
-  // بيفشل بـ«زرار مش موجود» وهو عرض لسبب تاني خالص.
-  const onCodeStep = await page.getByRole('button', { name: /^دخول$/ }).count();
-  if (!onCodeStep) {
-    const text = (await page.innerText('body')).replace(/\n+/g, ' | ').slice(0, 300);
-    throw new Error(`تسجيل الدخول وقف على خطوة الرقم: ${text}`);
-  }
-  const otp = latestOtp(phone);
-  const otpInput = page.locator('input').last();
-  await otpInput.click();
-  await otpInput.pressSequentially(otp, { delay: 20 }); // نفس سبب الرقم فوق — الحقل متحكَّم فيه
-  await page.getByRole('button', { name: /دخول|تأكيد|تمام|سجّل/ }).first().click();
+  const pinInput = page.getByTestId('login-pin');
+  await pinInput.click();
+  await pinInput.pressSequentially(LOGIN_PIN, { delay: 20 });
+  await page.getByTestId('login-submit').click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 }).catch(() => {});
+  // لو لسه على صفحة الدخول، الرسالة اللي عليها هي التشخيص الحقيقي — من غيرها الفحص بيفشل
+  // بـ«عنصر مش موجود» في صفحة تانية خالص وهو عرض لسبب تاني.
+  if (page.url().includes('/login')) {
+    const text = (await page.innerText('body')).replace(/\n+/g, ' | ').slice(0, 300);
+    throw new Error(`تسجيل الدخول ما عدّاش: ${text}`);
+  }
 }
 
 /**

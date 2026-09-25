@@ -1,6 +1,9 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   PIN_BCRYPT_ROUNDS,
+  PIN_RESET_CODE_LENGTH,
+  PIN_RESET_CODE_TTL_MINUTES,
+  PIN_RESET_MAX_ATTEMPTS,
   lockoutMinutesFor,
   lockRemainingTextAr,
   shouldLock,
@@ -14,7 +17,7 @@ import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { isProductionLikeEnv } from '../../config/env.validation';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
@@ -33,6 +36,7 @@ import {
 import { PROMO_LINK_CAPTURED_EVENT, PromoLinkCapturedEvent } from '../../common/events/promo-link-captured.event';
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
+import { PinResetToken } from './entities/pin-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
 import { RequestOtpDto } from './dto/request-otp.dto';
@@ -502,14 +506,22 @@ export class AuthService {
    * "مفيش Passkey" العادي (mfa_required + ceremony=registration) — إعادة استخدام كاملة لمسار
    * enrollment الموجود، مفيش رد جديد منفصل.
    */
-  async recoveryLogin(dto: RecoveryVerifyDto, _ip: string | null): Promise<MfaRequiredResponse> {
-    await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.LOGIN);
-
-    const user = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });
-    if (!user) {
-      throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مش مسجل', HttpStatus.NOT_FOUND);
-    }
-    this.assertUserAvailable(user);
+  /**
+   * **استرجاع حساب عليه MFA** — رمز الدخول + كود استرجاع **مع بعض** (ADR-0011 §6).
+   *
+   * قبل ADR-0109 كان العامل الأول OTP («حاجة معاك» — ملكية الرقم). دلوقتي بقى الرمز («حاجة
+   * تعرفها»). العدد **ماتغيّرش**: لسه عاملين مستقلين لازمين مع بعض، وكود الاسترجاع لوحده
+   * مايكفيش.
+   *
+   * التحقق من الرمز بيمرّ على **نفس** `verifyPinExclusively` بتاعت الدخول العادي بالظبط —
+   * بنفس القفل المتشائم وعدّاد المحاولات وسلّم القفل. ده مقصود: أي مسار بيتأكد من رمز بلا
+   * العدّاد بيبقى oracle لتخمين الرمز بلا حد، والاسترجاع كان أخطر مكان يحصل فيه ده لأن نجاحه
+   * بيمسح كل الـPasskeys.
+   */
+  async recoveryLogin(dto: RecoveryVerifyDto, ip: string | null): Promise<MfaRequiredResponse> {
+    const outcome = await this.verifyPinExclusively(dto.phone_number, dto.pin, { touchLogin: false, ip });
+    if ('error' in outcome) throw outcome.error;
+    const { user } = outcome;
 
     const recoveryValid = await this.webAuthn.consumeRecoveryCode(user.id, dto.recovery_code);
     if (!recoveryValid) {
@@ -790,13 +802,31 @@ export class AuthService {
    * متوازية بنفس الرمز الغلط كانت تقرا `pinFailedAttempts` القديمة كلها وتكتب `+1` واحدة —
    * فالعدّاد يقف والقفل ما يجيش أبدًا. نفس السبب اللي `consumeOtpLocked()` اتكتبت عشانه.
    */
-  async loginWithPin(dto: PinLoginDto, ip: string | null): Promise<LoginResult> {
-    const outcome = await this.dataSource.transaction(async (manager) => {
+  /**
+   * **التحقق من الرمز — نواة واحدة لكل مسار بيتأكد من رمز دخول.**
+   *
+   * بيرجّع المستخدم أو الخطأ بدل ما يرمي، عشان المُنادي يقرّر التوقيت (الرمي جوّه transaction
+   * بيلف الـrollback في مسار استثناء بلا داعي).
+   *
+   * ليه مستخرجة: `loginWithPin` و`recoveryLogin` **الاتنين** بيتأكدوا من نفس الرمز. لو
+   * التحقق اتنسخ في التاني، أي طبقة حماية هنا (القفل المتشائم، عدّاد المحاولات، سلّم القفل،
+   * الرسالة اللي مابتفرّقش) كانت هتبقى موجودة في مسار وناقصة في التاني — والمسار الناقص يبقى
+   * **oracle لتخمين الرمز بلا أي حد**.
+   *
+   * `touchLogin` بيفرّق بين دخول فعلي (بيحدّث `last_login_at/ip`) والاسترجاع (مش دخول — الجلسة
+   * لسه مش مكتملة، لازم ceremony الـPasskey تخلص الأول).
+   */
+  private async verifyPinExclusively(
+    phoneNumber: string,
+    pin: string,
+    { touchLogin, ip }: { touchLogin: boolean; ip: string | null },
+  ): Promise<{ user: User } | { error: ApiException }> {
+    return this.dataSource.transaction(async (manager) => {
       const user = await manager
         .createQueryBuilder(User, 'u')
         .addSelect('u.pinHash')
         .setLock('pessimistic_write')
-        .where('u.phoneNumber = :phone', { phone: dto.phone_number })
+        .where('u.phoneNumber = :phone', { phone: phoneNumber })
         .andWhere('u.deletedAt IS NULL')
         .getOne();
 
@@ -814,7 +844,7 @@ export class AuthService {
         };
       }
 
-      const matches = await bcrypt.compare(dto.pin, user.pinHash);
+      const matches = await bcrypt.compare(pin, user.pinHash);
       if (!matches) {
         user.pinFailedAttempts += 1;
         if (shouldLock(user.pinFailedAttempts)) {
@@ -830,11 +860,17 @@ export class AuthService {
 
       user.pinFailedAttempts = 0;
       user.pinLockedUntil = null;
-      user.lastLoginAt = new Date();
-      user.lastLoginIp = ip;
+      if (touchLogin) {
+        user.lastLoginAt = new Date();
+        user.lastLoginIp = ip;
+      }
       await manager.save(user);
       return { user };
     });
+  }
+
+  async loginWithPin(dto: PinLoginDto, ip: string | null): Promise<LoginResult> {
+    const outcome = await this.verifyPinExclusively(dto.phone_number, dto.pin, { touchLogin: true, ip });
 
     if ('error' in outcome) throw outcome.error;
     const { user } = outcome;
@@ -896,16 +932,116 @@ export class AuthService {
    * بنفسه من شاشة الدخول — واللي بيحميه ساعتها إن الأدمن **بيلغي كل الجلسات القايمة** هنا،
    * فحتى لو حد تاني وصل للحساب، اتقفل برّه.
    */
-  async adminResetPin(userId: string, adminUserId: string): Promise<{ pin_cleared: boolean }> {
+  async adminResetPin(
+    userId: string,
+    adminUserId: string,
+  ): Promise<{ pin_cleared: boolean; reset_code: string; expires_at: string }> {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
 
-    await this.users.update(
-      { id: userId },
-      { pinHash: null, pinSetAt: null, pinFailedAttempts: 0, pinLockedUntil: null },
-    );
+    // **الكود ده هو اللي بيقفل الفجوة.** مسح الرمز لوحده كان بيسيب المستخدم في طريق مسدود تام:
+    // مايقدرش يدخل (مفيش رمز)، ومايقدرش يستخدم `POST /auth/pin` (محتاج جلسة، وكل جلساته
+    // اتلغت في نفس السطر تحت)، ومفيش SMS خلاص. الاسترجاع كان بيقفل الحساب بدل ما يفتحه.
+    const code = Array.from({ length: PIN_RESET_CODE_LENGTH }, () => randomInt(0, 10)).join('');
+    const expiresAt = new Date(Date.now() + PIN_RESET_CODE_TTL_MINUTES * 60_000);
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.update(
+        User,
+        { id: userId },
+        { pinHash: null, pinSetAt: null, pinFailedAttempts: 0, pinLockedUntil: null },
+      );
+      // إصدار كود جديد **بيبطّل** كل الأكواد الحية القديمة — مايبقاش فيه تصريحين حيين على نفس
+      // الحساب، وإلا كود قديم من مكالمة سابقة يفضل صالح بلا علم حد.
+      await manager.softDelete(PinResetToken, { userId, usedAt: IsNull() });
+      await manager.save(
+        manager.create(PinResetToken, {
+          userId,
+          codeHash: await bcrypt.hash(code, PIN_BCRYPT_ROUNDS),
+          expiresAt,
+          issuedByUserId: adminUserId,
+        }),
+      );
+    });
+
     await this.revokeAllUserTokens(userId, `استرجاع رمز الدخول بواسطة الأدمن ${adminUserId}`);
-    return { pin_cleared: true };
+    // الكود بيرجع **مرة واحدة** للأدمن عشان يقوله للعميل في المكالمة. نفس نمط أكواد استرجاع
+    // الـMFA بالظبط — بعد الرد ده مفيش طريقة تقراه تاني من أي مكان.
+    return { pin_cleared: true, reset_code: code, expires_at: expiresAt.toISOString() };
+  }
+
+  /**
+   * **استهلاك كود الاسترجاع وتعيين رمز جديد** (ADR-0109 §6-ب) — المسار العام اللي العميل
+   * بيستخدمه من شاشة الدخول بعد مكالمة الدعم.
+   *
+   * المسار ده هو **الاستثناء الوحيد** لقاعدة «ممنوع حد مالوش رمز يحط واحد من شاشة الدخول»
+   * (ADR-0109 §6-أ)، وهو استثناء مشروط بحاجة المهاجم مايعرفهاش: كود من ١٠ أرقام أصدره أدمن
+   * **بعد** ما تأكد من هوية العميل، عمره ١٥ دقيقة، ولمرة واحدة.
+   *
+   * ### ليه الرد مايفرّقش بين «كود غلط» و«مفيش استرجاع للرقم ده»
+   *
+   * نفس سبب `invalidPinCredentials()`: الفرق بينهم بيقول لأي حد إن فيه استرجاع حاصل على حساب
+   * معيّن دلوقتي — وده بالظبط الوقت اللي الحساب فيه بلا رمز، يعني بيوجّه المهاجم للحظة الأضعف.
+   */
+  async redeemPinResetCode(dto: { phone_number: string; reset_code: string; pin: string }): Promise<{ pin_set: true }> {
+    this.assertPinFormat(dto.pin);
+    const invalid = () =>
+      new ApiException(
+        ErrorCode.AUTH_003,
+        'كود الاسترجاع غلط أو انتهى — كلّم الدعم يبعتلك واحد جديد',
+        HttpStatus.BAD_REQUEST,
+      );
+
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, {
+        where: { phoneNumber: dto.phone_number },
+      });
+      if (!user) return { error: invalid() };
+
+      const token = await manager
+        .createQueryBuilder(PinResetToken, 't')
+        .addSelect('t.codeHash')
+        .setLock('pessimistic_write')
+        .where('t.userId = :userId', { userId: user.id })
+        .andWhere('t.usedAt IS NULL')
+        .andWhere('t.deletedAt IS NULL')
+        .orderBy('t.createdAt', 'DESC')
+        .getOne();
+
+      if (!token) return { error: invalid() };
+      if (token.expiresAt.getTime() <= Date.now()) return { error: invalid() };
+      if (token.failedAttempts >= PIN_RESET_MAX_ATTEMPTS) return { error: invalid() };
+
+      if (!(await bcrypt.compare(dto.reset_code, token.codeHash))) {
+        token.failedAttempts += 1;
+        await manager.save(token);
+        return { error: invalid() };
+      }
+
+      // الحساب الموقوف بيترفض **بعد** ما الكود يتأكد — عشان الرسالة الواضحة ماتتقالش لحد
+      // بيخمّن أكواد.
+      this.assertUserAvailable(user);
+
+      token.usedAt = new Date();
+      await manager.save(token);
+      await manager.update(
+        User,
+        { id: user.id },
+        {
+          pinHash: await bcrypt.hash(dto.pin, PIN_BCRYPT_ROUNDS),
+          pinSetAt: new Date(),
+          pinFailedAttempts: 0,
+          pinLockedUntil: null,
+        },
+      );
+      return { userId: user.id };
+    });
+
+    if ('error' in outcome) throw outcome.error;
+    // **مفيش توكن بيترجع هنا عمدًا.** الكود تصريح لتعيين رمز، مش تسجيل دخول — العميل بيدخل
+    // بالرمز الجديد من شاشة الدخول العادية. ده بيخلّي الكود عديم القيمة لوحده لو اتسرّب بعد
+    // الاستهلاك، وبيخلّي مسار الدخول واحد لكل الحالات.
+    return { pin_set: true };
   }
 
   /** هل الحساب ليه رمز دخول؟ الواجهة بتستخدمها عشان تعرف تطلب تعيينه. */

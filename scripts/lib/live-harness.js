@@ -17,6 +17,8 @@ const { spawn } = require('node:child_process');
 // only existed in one development machine, so every local financial audit failed elsewhere.
 const { Client } = require('pg');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { PIN_BCRYPT_ROUNDS } = require('./pin-constants');
 
 const ROOT = path.resolve(__dirname, '../..');
 const API = process.env.API_BASE_URL ?? 'http://localhost:3000/api/v1';
@@ -35,6 +37,29 @@ function envFromFile() {
 const ENV = envFromFile();
 const DATABASE_URL = process.env.DATABASE_URL ?? ENV.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_ACCESS_SECRET ?? ENV.JWT_ACCESS_SECRET;
+
+/**
+ * **رمز الدخول الموحّد لكل السكربتات الحية** (ADR-0109).
+ *
+ * مش متسلسل ومش كله نفس الرقم عشان يعدّي `isWeakPin` في الباك-إند. لازم يطابق `DEV_SEED_PIN`
+ * في سكربتات الـseed و`kLiveTestPin` في `test_live/` بتاع التطبيقين. مش سر: بيتحط على حسابات
+ * وهمية في قاعدة تطوير محلية.
+ */
+const LIVE_TEST_PIN = process.env.DEV_SEED_PIN || '417253';
+
+/**
+ * **هاش الرمز، محسوب مرة واحدة لكل عملية.** كل المستخدمين اللي الهارنس بيعملهم بياخدوا نفس
+ * الرمز، وتكلفة bcrypt ١٢ مضروبة في عدد المستخدمين كانت بتضيف ثواني حقيقية على كل تشغيلة.
+ *
+ * **ليه المستخدمين المُدخلين مباشرةً محتاجين رمز أصلاً؟** لأن أدوات زي `verify-web-flow-order`
+ * و`sweep-customer` بتعمل المستخدم بالـSQL وبعدين **بتسجّل دخول بالمتصفح** بيه. من غير رمز
+ * شاشة الدخول بترفضه، والأداة بتفشل لسبب مالوش أي علاقة باللي بتقيسه.
+ */
+let cachedPinHash = null;
+function livePinHash() {
+  cachedPinHash ??= bcrypt.hashSync(LIVE_TEST_PIN, PIN_BCRYPT_ROUNDS);
+  return cachedPinHash;
+}
 
 class LiveHarness {
   /** `prefix` بيميّز بيانات التدقيق ده عن غيره في التنظيف (مثلاً `sm` لآلة الحالة). */
@@ -168,11 +193,60 @@ class LiveHarness {
   }
 
   /**
-   * توقيع التوكن محليًا بدل دورة OTP كاملة لكل مستخدم — ده بيختصر الإعداد بس، الطلب نفسه
+   * توقيع التوكن محليًا بدل دورة دخول كاملة لكل مستخدم — ده بيختصر الإعداد بس، الطلب نفسه
    * بيعدّي على كل الحُرّاس زي أي مستخدم حقيقي.
    */
   token(userId, userType = 'customer') {
-    return jwt.sign({ sub: userId, userType, amr: ['otp'] }, JWT_SECRET, { expiresIn: '60m' });
+    return jwt.sign({ sub: userId, userType, amr: ['pin'] }, JWT_SECRET, { expiresIn: '60m' });
+  }
+
+  /**
+   * **تسجيل عميل بالمسار الحقيقي** (`POST /auth/pin/register`) — مصدر واحد لكل السكربتات.
+   *
+   * ### إيه اللي اتشال هنا (ADR-0109)
+   *
+   * كل سكربت كان بينسخ نفس التسع خطوات بالإيد: اطلب OTP → استنى ٤٠٠ مللي → حلّ مسار لوج
+   * الباك-إند → اقراه كله → دوّر على `[OTP] <رقم> … → <كود>` بـregex → لو ملقيتوش اطلع بخطأ →
+   * سجّل. أربع نقاط فشل مالهاش أي علاقة بالحاجة المقيسة، **في تسع ملفات**. دلوقتي نداء واحد
+   * بلا لوج وبلا انتظار.
+   *
+   * `extra` بيتدمج في الجسم زي ما هو، فأي حقل إسناد (`marketing_code`، `referral_code`،
+   * `promo_link_code`، `technician_referral_code`) بيتبعت **بنفس المسار الحقيقي** — وده كان
+   * جوهر الفحوص دي أصلاً: إدخال صف `users` مباشرةً بيتخطّى الـDTO والأحداث اللي بعده.
+   *
+   * بيرجّع `{ userId, token, phone }` أو `{ error }` — نفس شكل الرد اللي السكربتات متوقعاه.
+   */
+  async registerCustomerWithPin({ fullName, phone = this.nextPhone(), ...extra } = {}) {
+    const res = await this.api('/auth/pin/register', {
+      method: 'POST',
+      body: {
+        phone_number: phone,
+        pin: LIVE_TEST_PIN,
+        full_name: fullName ?? `عميل اختبار ${this.nextTag()}`,
+        user_type: 'customer',
+        ...extra,
+      },
+    });
+    if (res.status !== 201 && res.status !== 200) {
+      const message = res.body?.error?.message ?? res.body?.message ?? '';
+      return { error: `HTTP=${res.status} ${message}`, phone };
+    }
+    const [row] = await this.q(`SELECT id FROM users WHERE phone_number = $1`, [phone]);
+    if (row) this.created.users.push(row.id);
+    return { userId: row?.id, token: row ? this.token(row.id) : null, phone };
+  }
+
+  /** دخول برمز لحساب موجود — بيرجّع `{ accessToken }` أو `{ error }`. */
+  async loginWithPin(phone, pin = LIVE_TEST_PIN) {
+    const res = await this.api('/auth/pin/login', {
+      method: 'POST',
+      body: { phone_number: phone, pin },
+    });
+    if (res.status !== 200 && res.status !== 201) {
+      const message = res.body?.error?.message ?? res.body?.message ?? '';
+      return { error: `HTTP=${res.status} ${message}` };
+    }
+    return { accessToken: res.body?.data?.access_token };
   }
 
   nextPhone() {
@@ -373,8 +447,9 @@ class LiveHarness {
     const level = opts.level ?? 'premium';
     const runId = this.nextTag();
     const [user] = await this.q(
-      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`,
-      [this.nextPhone(), `فني ${prefix} ${label} ${runId}`],
+      `INSERT INTO users (phone_number, full_name, user_type, pin_hash, pin_set_at)
+       VALUES ($1,$2,'technician',$3,now()) RETURNING id`,
+      [this.nextPhone(), `فني ${prefix} ${label} ${runId}`, livePinHash()],
     );
     this.created.users.push(user.id);
     const [tech] = await this.q(
@@ -401,8 +476,9 @@ class LiveHarness {
     const { prefix } = this;
     const runId = this.nextTag();
     const [user] = await this.q(
-      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
-      [this.nextPhone(), `عميل ${prefix} ${label} ${runId}`],
+      `INSERT INTO users (phone_number, full_name, user_type, pin_hash, pin_set_at)
+       VALUES ($1,$2,'customer',$3,now()) RETURNING id`,
+      [this.nextPhone(), `عميل ${prefix} ${label} ${runId}`, livePinHash()],
     );
     this.created.users.push(user.id);
     const [profile] = await this.q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [user.id]);
@@ -418,8 +494,9 @@ class LiveHarness {
     const { prefix } = this;
     const runId = this.nextTag();
     const [user] = await this.q(
-      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,
-      [this.nextPhone(), `أدمن ${prefix} ${runId}`],
+      `INSERT INTO users (phone_number, full_name, user_type, pin_hash, pin_set_at)
+       VALUES ($1,$2,'admin',$3,now()) RETURNING id`,
+      [this.nextPhone(), `أدمن ${prefix} ${runId}`, livePinHash()],
     );
     this.created.users.push(user.id);
     let [role] = await this.q(`SELECT id FROM roles WHERE is_super_admin = true AND deleted_at IS NULL LIMIT 1`);
@@ -451,8 +528,9 @@ class LiveHarness {
     const { prefix } = this;
     const runId = this.nextTag();
     const [user] = await this.q(
-      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,
-      [this.nextPhone(), `موظف ${prefix} ${label} ${runId}`],
+      `INSERT INTO users (phone_number, full_name, user_type, pin_hash, pin_set_at)
+       VALUES ($1,$2,'admin',$3,now()) RETURNING id`,
+      [this.nextPhone(), `موظف ${prefix} ${label} ${runId}`, livePinHash()],
     );
     this.created.users.push(user.id);
     const [role] = await this.q(
@@ -674,4 +752,4 @@ class LiveHarness {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-module.exports = { LiveHarness, sleep, ROOT, API, ENV, DATABASE_URL, JWT_SECRET };
+module.exports = { LiveHarness, sleep, ROOT, API, ENV, DATABASE_URL, JWT_SECRET, LIVE_TEST_PIN };

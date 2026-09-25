@@ -11,8 +11,9 @@
  * ### إزاي بيسجّل دخول
  *
  * التوكن في الأدمن في الذاكرة بس (والتحديث في كوكي httpOnly)، فمفيش حقن في `localStorage`.
- * فالسكربت بيمشي على المسار الحقيقي: بيطلب OTP، وبعدين **بيستبدل الهاش في القاعدة** بهاش كود
- * معروف (`bcrypt`)، وبيدخّله في الشاشة. ده أصدق من أي bypass: نفس الشاشة اللي الأدمن بيشوفها.
+ * فالسكربت بيمشي على المسار الحقيقي: بيكتب الرقم ورمز الدخول في نفس الشاشة اللي الأدمن بيشوفها
+ * (ADR-0109). قبل التبديل كان لازم يطلب OTP و**يستبدل الهاش في القاعدة** بهاش كود معروف — خطوة
+ * اتشالت بالكامل، والرمز بيتحط على الحساب من `scripts/seed-dev-accounts.js`.
  *
  *   node scripts/admin-visual.js [--out <dir>] [--keep]
  */
@@ -20,12 +21,15 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const bcrypt = require('/home/user/portalSp/node_modules/bcryptjs');
 const { chromium } = require('/home/user/portalSp/node_modules/playwright-core');
 const { LiveHarness } = require('./lib/live-harness');
 
 const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:3001';
-const KNOWN_OTP = '123456';
+/**
+ * رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في `scripts/seed-dev-accounts.js`.
+ * مش سر: حساب وهمي في قاعدة محلية.
+ */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 const args = process.argv.slice(2);
 const argValue = (name, fallback) => {
   const i = args.indexOf(name);
@@ -218,21 +222,18 @@ async function main() {
         if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 200));
       });
 
-      // الـOTP بيتولّد متهشّر، فبنستبدل الهاش بهاش كود معروف بعد الطلب.
-      // **`pressSequentially` مش `fill`**: الحقل مربوط بـ`useState` في React، و`fill` بيحط
+      // **ADR-0109 — خطوة واحدة**: الرقم والرمز مع بعض. قبل كده كان لازم يطلب OTP، يستنى خانة
+      // الكود تظهر، يستبدل الهاش في `otp_codes` بهاش كود معروف، وبعدين يكتبه. الرمز بيتحط على
+      // الحساب من الـseed فمفيش أي تلاعب في القاعدة هنا خلاص.
+      //
+      // **`pressSequentially` مش `fill`**: الحقول مربوطة بـ`useState` في React، و`fill` بيحط
       // القيمة ويدوس فورًا قبل ما الـstate تتحدّث — فالطلب كان بيتبعت برقم ناقص ويرجع 400.
       // اتلقط فعليًا أول تشغيل.
       await page.goto(`${ADMIN_URL}/login`, { waitUntil: 'networkidle' });
       await page.locator('#phone_number').click();
       await page.locator('#phone_number').pressSequentially(phone, { delay: 15 });
-      await page.locator('button[type=submit]').first().click();
-      await page.waitForSelector('#otp_code', { timeout: 20_000 });
-      // الكود متهشّر في القاعدة، فبنحلّ مكانه هاش كود معروف.
-      await h.q(`UPDATE otp_codes SET code_hash = $2, attempts_count = 0, is_used = false WHERE phone_number = $1`, [
-        phone,
-        await bcrypt.hash(KNOWN_OTP, 10),
-      ]);
-      await page.locator('#otp_code').pressSequentially(KNOWN_OTP, { delay: 15 });
+      await page.locator('#pin').click();
+      await page.locator('#pin').pressSequentially(LOGIN_PIN, { delay: 15 });
       await page.locator('button[type=submit]').first().click();
       await page.waitForFunction(() => !window.location.pathname.startsWith('/login'), { timeout: 30_000 });
 
@@ -279,7 +280,7 @@ async function main() {
     }
 
     if (KEEP_DATA) {
-      console.log(`\nℹ️  البيانات متسيبة (--keep). تليفون الأدمن: ${phone} / كود: ${KNOWN_OTP}`);
+      console.log(`\nℹ️  البيانات متسيبة (--keep). تليفون الأدمن: ${phone} / رمز الدخول: ${LOGIN_PIN}`);
     }
   } finally {
     await browser?.close();

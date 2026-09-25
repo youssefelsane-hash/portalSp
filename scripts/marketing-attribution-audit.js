@@ -19,13 +19,7 @@
  */
 'use strict';
 
-const fs = require('node:fs');
 const { LiveHarness, sleep } = require('./lib/live-harness');
-
-/** لوج التطوير — المصدر الوحيد لكود الـOTP (متخزّن مهشّر في القاعدة). */
-// مسار اللوج بيتحل وقت التشغيل — كان مكتوب بالإيد لـscratchpad سيشن قديمة، فالتدقيق
-// كان بيرسب على «مالقيناش كود OTP» في أي تشغيلة تانية.
-const { resolveApiLog } = require('./lib/resolve-api-log');
 
 const KEEP = process.argv.includes('--keep');
 const h = new LiveHarness('mk');
@@ -44,37 +38,14 @@ const UA = {
  * وإدخال صف `users` مباشرةً بيتخطاهم بالكامل فالفحص كان هيعدّي وهو فاضي.
  */
 async function registerCustomer(marketingCode) {
-  const phone = h.nextPhone();
-  // الكود متخزّن مهشّر (bcrypt) فمينفعش يتقرا من القاعدة. في التطوير الباك-إند بيطبعه في
-  // اللوج (`[OTP] …`)، وده المصدر الوحيد المتاح لتشغيل المسار الحقيقي بلا تزييف.
-  const otpRes = await h.api('/auth/otp/request', {
-    method: 'POST',
-    body: { phone_number: phone, purpose: 'register' },
+  // **ADR-0109** — نداء واحد. قبل كده كانت تسع خطوات: اطلب OTP، استنى ٤٠٠ مللي، حلّ مسار لوج
+  // الباك-إند، اقراه كله، دوّر على الكود بـregex، سجّل. أربع نقاط فشل مالهاش علاقة بالمقيس.
+  const reg = await h.registerCustomerWithPin({
+    fullName: `عميل تسويق ${h.nextTag()}`,
+    ...(marketingCode ? { marketing_code: marketingCode } : {}),
   });
-  if (otpRes.status !== 200 && otpRes.status !== 201) {
-    return { error: `طلب OTP فشل: HTTP=${otpRes.status} ${messageOf(otpRes.body)}` };
-  }
-  await sleep(400);
-  const apiLog = resolveApiLog();
-  if (!apiLog) return { error: 'مالقيناش لوج الباك-إند — مرّر API_LOG_PATH' };
-  const log = fs.readFileSync(apiLog, 'utf8');
-  const match = [...log.matchAll(new RegExp(`\\[OTP\\] \\${phone} .*→ (\\d{6})`, 'g'))].pop();
-  if (!match) return { error: `مالقيناش كود OTP في لوج التطوير (${apiLog})` };
-
-  const res = await h.api('/auth/register', {
-    method: 'POST',
-    body: {
-      phone_number: phone,
-      otp_code: match[1],
-      full_name: `عميل تسويق ${h.nextTag()}`,
-      user_type: 'customer',
-      ...(marketingCode ? { marketing_code: marketingCode } : {}),
-    },
-  });
-  if (res.status !== 201 && res.status !== 200) return { error: `HTTP=${res.status} ${messageOf(res.body)}` };
-  const [row] = await h.q(`SELECT id FROM users WHERE phone_number = $1`, [phone]);
-  if (row) h.created.users.push(row.id);
-  return { userId: row?.id, token: row ? h.token(row.id) : null };
+  if (reg.error) return { error: reg.error };
+  return { userId: reg.userId, token: reg.token };
 }
 
 /** بيتابع الرابط القصير **من غير** ما يتبع التحويل — إحنا بنقيس الوجهة نفسها. */

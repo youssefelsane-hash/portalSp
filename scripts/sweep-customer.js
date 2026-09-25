@@ -24,7 +24,8 @@ const WEB = process.env.WEB_URL || 'http://localhost:3002';
 const API = process.env.API_URL || 'http://localhost:3000';
 const PHONE = process.env.CUSTOMER_PHONE || '+201000000777';
 // bcrypt لـ"123456" — نفس الهاش المستخدم في sweep-admin.js بالظبط.
-const OTP_HASH = '$2a$10$PoWE4iYX5toQG0ZL6pQo8eiCMWo4jIRewyXxmehAefIs/uKGwvPJ2';
+/** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
+const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 // اسم قاعدة البيانات بيتقرا من البيئة — كان مكتوب بالإيد في sweep-admin.js وبيفشل على أي جهاز
 // اسم قاعدته مختلف.
 // اسم القاعدة بيتقرا من نفس المصدر اللي الـAPI بيقلع بيه — التخمين هنا كان بيخلّي
@@ -130,18 +131,11 @@ async function ensureCustomerExists() {
     return { ok: res.ok, body: await res.json().catch(() => null) };
   };
 
-  const requested = await post('/auth/otp/request', { phone_number: PHONE, purpose: 'register' });
-  if (!requested.ok) {
-    console.log(`⚠️  مقدرناش نطلب OTP لتسجيل حساب الاختبار — الزحف هيكمل كزائر`);
-    return false;
-  }
-  sql(
-    `UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false
-     WHERE id=(SELECT id FROM otp_codes WHERE phone_number='${PHONE}' ORDER BY created_at DESC LIMIT 1)`,
-  );
-  const registered = await post('/auth/register', {
+  // **ADR-0109 — نداء واحد**. قبل كده: اطلب OTP، ثم استبدل الهاش في `otp_codes` بهاش كود معروف،
+  // ثم سجّل بالكود. اتشال كله؛ الرمز بيتبعت في نفس النداء.
+  const registered = await post('/auth/pin/register', {
     phone_number: PHONE,
-    otp_code: '123456',
+    pin: LOGIN_PIN,
     full_name: 'عميل زحف الويب',
     user_type: 'customer',
   });
@@ -172,16 +166,13 @@ async function ensureCustomerExists() {
     const page = await ctx.newPage();
 
     // ── دخول العميل بالواجهة الحقيقية (مش حقن توكن) ─────────────────────────────
+    // **ADR-0109 — فورم واحد**: الرقم والرمز مع بعض ودوسة واحدة، بلا أي تلاعب في القاعدة بينهم.
+    // `data-testid` مش `placeholder`: الـplaceholder نص معروض للمستخدم وبيتغيّر مع أي تحرير
+    // للنسخ، فربط الأداة بيه بيخلّيها تسقط على تغيير تجميلي.
     await page.goto(`${WEB}/login`, { waitUntil: 'networkidle', timeout: 45000 });
-    await page.fill('input[placeholder="+2010xxxxxxxx"]', PHONE);
-    await page.getByRole('button', { name: /إرسال|كود|تسجيل/ }).first().click();
-    await page.waitForTimeout(2500);
-    sql(
-      `UPDATE otp_codes SET code_hash='${OTP_HASH}', attempts_count=0, is_used=false
-       WHERE id=(SELECT id FROM otp_codes WHERE phone_number='${PHONE}' ORDER BY created_at DESC LIMIT 1)`,
-    );
-    await page.fill('input[placeholder="كود التحقق"]', '123456');
-    await page.getByRole('button', { name: /دخول|تأكيد|تحقق/ }).first().click();
+    await page.getByTestId('login-phone').fill(PHONE);
+    await page.getByTestId('login-pin').fill(LOGIN_PIN);
+    await page.getByTestId('login-submit').click();
     await page.waitForTimeout(3500);
     const loggedIn = !page.url().includes('/login');
     console.log(`\n[${label}] دخول العميل: ${loggedIn ? '✅' : '❌ فشل — الزحف هيكمل كزائر'}`);

@@ -3,16 +3,17 @@ import type { ApiEnvelope, LoginResult } from '@baytak/shared-types';
 import { isMfaRequiredResponse } from '@baytak/shared-types';
 import { backendUrl, REFRESH_TOKEN_COOKIE } from '@/lib/backend';
 
-// تسجيل الدخول: الـ refresh_token بيتحط httpOnly (مايوصلش لجافاسكريبت العميل خالص، أهم دفاع
-// ضد سرقة الـ token عبر XSS) — الـ access_token بس (قصير العمر، 15 دقيقة) بيرجع في الـ body
-// عشان الـ client يحطه في الذاكرة ويستخدمه في نداءات الـ API مباشرة.
+// **الدخول برقم + رمز** (ADR-0109) — بديل `otp/verify`. الـrefresh_token بيتحط httpOnly
+// (مايوصلش لجافاسكريبت العميل خالص، أهم دفاع ضد سرقة الـtoken عبر XSS) — الـaccess_token بس
+// (قصير العمر، ١٥ دقيقة) بيرجع في الـbody عشان الـclient يحطه في الذاكرة.
 //
-// حساب High-Privilege (ADR-0011) بيرجّع mfa_required بدل TokenPair — مفيش كوكي يتحط هنا خالص،
-// تسجيل الدخول لسه مش مكتمل لحد ما ceremony الـPasskey (registration/authentication) تخلص عبر
-// /api/auth/webauthn/*/verify.
+// **الـMFA زي ما هو بالحرف (ADR-0011)**: حساب High-Privilege بيرجّع `mfa_required` بدل
+// `TokenPair`، ومفيش كوكي يتحط هنا خالص — تسجيل الدخول لسه مش مكتمل لحد ما ceremony الـPasskey
+// (registration/authentication) تخلص عبر /api/auth/webauthn/*/verify. الرمز **مابيستبدلش**
+// الـPasskey؛ هو بس بيحل مكان الـOTP كعامل أول.
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const res = await fetch(backendUrl('/auth/otp/verify'), {
+  const res = await fetch(backendUrl('/auth/pin/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

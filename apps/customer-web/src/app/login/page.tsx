@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { PinField, localPinError } from '@/components/pin-field';
@@ -14,10 +14,10 @@ import { PinField, localPinError } from '@/components/pin-field';
  * دلوقتي مفيش حاجة تتبعت، فالخطوتين اتحوّلوا لفورم **واحد** — الرقم والرمز مع بعض ودوسة واحدة.
  * ده أقصر مسار دخول ممكن، وكان مستحيل مع الـOTP.
  */
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const { loginWithPin } = useAuth();
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(useSearchParams().get('phone') ?? '');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,6 +101,21 @@ export default function LoginPage() {
         </button>
       </form>
 
+      {/*
+        **المخرج الوحيد لمستخدم نسي رمزه** (ADR-0109 §6-ب) — مفيش SMS بعد التبديل، فالاسترجاع
+        بيمرّ على الدعم. لازم يبقى ظاهر على شاشة الدخول نفسها، وإلا المستخدم اللي محتاجه مش
+        هيعرف إنه موجود أصلاً.
+      */}
+      <p className="mt-4 text-center text-sm">
+        <Link
+          href={`/pin-reset?phone=${encodeURIComponent(phone)}`}
+          data-testid="login-forgot-pin"
+          className="text-muted underline-offset-4 hover:text-primary hover:underline"
+        >
+          نسيت رمز الدخول؟
+        </Link>
+      </p>
+
       <p className="mt-6 text-center text-sm text-muted">
         مستخدم جديد؟{' '}
         <Link href="/register" className="text-primary hover:underline">
@@ -108,5 +123,15 @@ export default function LoginPage() {
         </Link>
       </p>
     </div>
+  );
+}
+
+// `useSearchParams()` محتاج Suspense boundary وقت الـstatic prerendering، وإلا `next build`
+// بيفشل على الصفحة دي.
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

@@ -10,6 +10,7 @@ import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { PinLoginDto } from './dto/pin-login.dto';
+import { PinResetRedeemDto } from './dto/pin-reset-redeem.dto';
 import { PinRegisterDto } from './dto/pin-register.dto';
 import { SetPinDto } from './dto/set-pin.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
@@ -88,6 +89,24 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   setPin(@CurrentUser() user: JwtPayload, @Body() dto: SetPinDto) {
     return this.authService.setPin(user.sub, dto);
+  }
+
+  /**
+   * **استهلاك كود استرجاع رمز الدخول** (ADR-0109 §6-ب).
+   *
+   * عام عمدًا: العميل هنا **مش داخل** — ده المسار الوحيد اللي بيرجّعه لحسابه بعد ما نسي رمزه
+   * وعمل logout. الاستثناء مشروط بكود من ١٠ أرقام أصدره أدمن بعد ما تأكد من هويته، عمره ١٥
+   * دقيقة، ولمرة واحدة.
+   *
+   * **الـthrottle أضيق من الدخول (٥ مش ١٠)**: الدخول العادي ممكن الواحد يغلط فيه وهو فاكر رمزه؛
+   * كود الاسترجاع مكتوب قصاده وهو بيكتبه، فمحاولات كتير عليه = تخمين مش نسيان.
+   */
+  @Public()
+  @Post('pin/reset/redeem')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  redeemPinResetCode(@Body() dto: PinResetRedeemDto) {
+    return this.authService.redeemPinResetCode(dto);
   }
 
   @Public()
