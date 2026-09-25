@@ -63,6 +63,7 @@ void onBackgroundNotificationResponse(NotificationResponse response) {
 class PushNotificationService {
   static const _deviceIdKey = 'baytak_device_id';
   static bool _firebaseReady = false;
+  static bool _tokenRefreshListenerRegistered = false;
 
   // معرّف جهاز ثابت لكل تثبيت (مش توكن FCM نفسه — ده بيتغيّر من وقت للتاني، واستخدامه كمعرّف
   // كان هيعمل صفوف مكررة في user_devices بدل تحديث نفس الصف زي ما الباك-إند متوقّع).
@@ -185,13 +186,17 @@ class PushNotificationService {
 
       final token = await messaging.getToken();
       if (token == null) return;
+      await _registerToken(authedRequest, token);
 
-      final deviceId = await _getOrCreateDeviceId();
-      await authedRequest('POST', '/devices', body: {
-        'device_id': deviceId,
-        'fcm_token': token,
-        'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
-      });
+      // FCM can rotate the token after app/device changes; keep the API record current.
+      if (!_tokenRefreshListenerRegistered) {
+        _tokenRefreshListenerRegistered = true;
+        messaging.onTokenRefresh.listen((refreshedToken) {
+          unawaited(_registerToken(authedRequest, refreshedToken).catchError((err) {
+            debugPrint('[push] فشل تحديث FCM token على الخادم: $err');
+          }));
+        });
+      }
 
       // التطبيق كان مقفول تمامًا (cold start) والفني فتحه بالضغط على إشعار OS-drawn عادي.
       final initialMessage = await messaging.getInitialMessage();
@@ -201,6 +206,18 @@ class PushNotificationService {
     } catch (err) {
       debugPrint('[push] فشل تسجيل جهاز إشعارات push (متوقع من غير إعداد Firebase حقيقي): $err');
     }
+  }
+
+  static Future<void> _registerToken(
+    Future<Map<String, dynamic>?> Function(String method, String path, {Map<String, dynamic>? body}) authedRequest,
+    String token,
+  ) async {
+    final deviceId = await _getOrCreateDeviceId();
+    await authedRequest('POST', '/devices', body: {
+      'device_id': deviceId,
+      'fcm_token': token,
+      'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+    });
   }
 }
 

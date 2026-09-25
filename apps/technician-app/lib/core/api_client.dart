@@ -247,7 +247,33 @@ Future<Map<String, dynamic>?> apiUpload(
   return _guardNetworkError(() async {
     final streamedResponse = await request.send().timeout(apiRequestTimeout);
     final response = await http.Response.fromStream(streamedResponse);
-    final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    // Nginx may reject a large upload before it reaches NestJS, returning HTML
+    // instead of the normal API envelope. This is not a connection failure.
+    if (response.statusCode == 413) {
+      throw ApiException(
+        code: 'FILE_TOO_LARGE',
+        message: 'الصورة أكبر من الحجم المسموح. اختَر صورة أصغر ثم حاول تاني.',
+        statusCode: response.statusCode,
+      );
+    }
+    final Object? parsed;
+    try {
+      parsed = jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      throw ApiException(
+        code: 'BAD_UPLOAD_RESPONSE',
+        message: 'تعذر رفع الملف بسبب رد غير متوقع من الخادم — حاول تاني.',
+        statusCode: response.statusCode,
+      );
+    }
+    if (parsed is! Map<String, dynamic>) {
+      throw ApiException(
+        code: 'BAD_UPLOAD_RESPONSE',
+        message: 'تعذر رفع الملف بسبب رد غير متوقع من الخادم — حاول تاني.',
+        statusCode: response.statusCode,
+      );
+    }
+    final decoded = parsed;
     final success = decoded['success'] as bool? ?? false;
 
     if (!success) {

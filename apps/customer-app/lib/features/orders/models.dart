@@ -139,6 +139,8 @@ class Order {
   // الوحيد عن شرط الظهور (order-state-machine.ts's TECHNICIAN_CONTACT_VISIBLE_STATUSES).
   final String? technicianName;
   final String? technicianPhone;
+  /// اسم الشركة المنفذة فعليًا، وليس مجرد الشركة التي ينتمي لها الفني.
+  final String? assignedCompanyName;
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده، مايسوّيش الطلب لوحده.
   final String? customerCashConfirmedAt;
   final String? technicianCashNotReceivedAt;
@@ -190,6 +192,7 @@ class Order {
     this.requestedTechnicianId,
     this.technicianName,
     this.technicianPhone,
+    this.assignedCompanyName,
     this.customerCashConfirmedAt,
     this.technicianCashNotReceivedAt,
     this.scheduledAt,
@@ -251,6 +254,7 @@ class Order {
     requestedTechnicianId: json['requested_technician_id'] as String?,
     technicianName: json['technician_name'] as String?,
     technicianPhone: json['technician_phone'] as String?,
+    assignedCompanyName: json['assigned_company_name'] as String?,
     customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
     technicianCashNotReceivedAt:
         json['technician_cash_not_received_at'] as String?,

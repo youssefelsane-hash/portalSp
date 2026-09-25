@@ -1680,6 +1680,21 @@ class _JobBriefCard extends StatelessWidget {
               order.serviceNameAr ?? 'طلب خدمة',
               style: theme.textTheme.titleLarge,
             ),
+            if (order.assignedCompanyName != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(Icons.business_outlined, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'الطلب تابع لشركة: ${order.assignedCompanyName}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 4),
             Row(
               children: [

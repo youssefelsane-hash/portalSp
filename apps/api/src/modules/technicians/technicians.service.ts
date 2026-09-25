@@ -180,6 +180,19 @@ export class TechniciansService {
     return profile;
   }
 
+  /**
+   * اسم جهة التنفيذ الفعلية للطلب، لا شركة انتساب الفني الشخصية.
+   *
+   * `orders.assigned_company_id` يتثبت فقط عندما يقع التنفيذ على شركة؛ لذلك لا نأخذ
+   * `technician_profiles.company_id` هنا حتى لا يظهر اسم شركة على طلب فردي بالخطأ. نقرأ
+   * الشركات المؤرشفة أيضاً كي يظل الطلب التاريخي مفهومًا للعميل والفني بعد تعطيل الشركة.
+   */
+  async findCompanyNameForOrder(companyId: string | null | undefined): Promise<string | null> {
+    if (!companyId) return null;
+    const company = await this.technicianCompanies.findOne({ where: { id: companyId }, withDeleted: true });
+    return company?.name ?? null;
+  }
+
   // بَقّة حقيقية اتلقطت واتصلحت: TypeORM بيسقط أي خاصية قيمتها JS null من findOne({where})
   // بدل ما يولّد "id IS NULL" — يعني findOne({where:{id: null}}) كان بيرجّع صف عشوائي (أول
   // صف بترتيب فحص الفهرس، مش الأقدم إنشاءً) بدل ما يرجع فاضي. الفحص الصريح ده بيمنع أي استدعاء

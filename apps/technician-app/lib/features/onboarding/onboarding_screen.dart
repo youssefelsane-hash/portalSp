@@ -85,7 +85,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // بعض المستندات صور، بعضها ممكن يكون PDF (فيش وتشبيه غالبًا) — image_picker بيغطي الحالة
     // الأشيع (تصوير/اختيار صورة) وده كافي للـMVP، رفع PDF من الجهاز مباشرة برّه نطاق الشاشة دي
     // دلوقتي (نفس نطاق ALLOWED_DOCUMENT_MIME_TYPES بس بواجهة أبسط).
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    // Camera photos are much larger than screenshots; resize on-device before upload.
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 80,
+    );
     if (picked == null) return;
 
     setState(() {

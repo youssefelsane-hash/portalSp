@@ -69,6 +69,7 @@ class NetworkImageBox extends StatelessWidget {
             ? _placeholder(context)
             : CachedNetworkImage(
                 imageUrl: resolveCachedRemoteImageUrl(url),
+                cacheKey: remoteImageCacheKey(url),
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,

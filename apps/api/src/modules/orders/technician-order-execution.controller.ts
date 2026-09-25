@@ -68,7 +68,7 @@ export class TechnicianOrderExecutionController {
     // تحصيل الكاش أو النزاع بعد العمل. هذه ليست مرآة لرقم الفني عند العميل: العميل يُخفى عنه
     // رقم الفني فور انتهاء التنفيذ، بينما الفني قد يحتاج رقم العميل لمسار مالي مفتوح.
     const contactVisible = TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
-    const [address, money, customerContact, serviceNameAr] = await Promise.all([
+    const [address, money, customerContact, serviceNameAr, assignedCompanyName] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
       // docs/08 §60.2 (طلب مالك صريح) — الصورة المالية المفلترة بدل التفصيل الكامل. الفلترة في
       // الباك-إند مش في التطبيق: لو الأرقام خرجت على السلك، أي حد بتوكن فني يقراها من الـAPI
@@ -88,12 +88,16 @@ export class TechnicianOrderExecutionController {
       // بَقّة حقيقية (docs/08 §64.أ): كانت findServiceOrThrow() اللي بتفلتر is_active=true —
       // فأي طلب خدمته اتوقفت بعد إنشائه كان بيرمي 404 يفضّي شاشة الفني بالكامل ويمنع تنفيذ الشغل.
       this.catalogService.findServiceForDisplay(order.serviceId).then((service) => service?.nameAr ?? null),
+      order.assignedCompanyId
+        ? this.techniciansService.findCompanyNameForOrder(order.assignedCompanyId)
+        : Promise.resolve(null),
     ]);
     return toTechnicianOrderResponseDto(
       toOrderResponseDto(order, address, null, {
         customerContact,
         serviceNameAr,
         isNewForTechnician: order.technicianViewedAt === null,
+        assignedCompanyName,
       }),
       money,
     );

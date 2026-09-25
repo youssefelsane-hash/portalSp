@@ -24,7 +24,7 @@
 | `WEBAUTHN_ORIGIN` | مطلوب، وممنوع `http://localhost:3001` → `https://admin.ostahome.com` |
 | `STORAGE_PROVIDER` | لازم `s3` (الـ`local` مرفوض — ملف بيتمسح مع كل نشر) |
 | `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | مطلوبين مع `STORAGE_PROVIDER=s3` (حارس 2026-09-10) |
-| `OTP_TEST_MODE` | **لازم `false` أو غير موجود.** `true` + `NODE_ENV=staging/production` ⇒ السيرفر **بيرفض يقلع** (docs/08 §173) |
+| `OTP_TEST_MODE` | افتراضيًا `false`. للـClosed Beta فقط يمكن `true` بشرط `OTP_TEST_MODE_PHONES` غير فارغ و`OTP_TEST_MODE_CODE` سري من ٦ أرقام وغير `111111`. أي رقم خارج القائمة يُرفض بلا OTP أو SMS. |
 | بوابة الـSMS للمزوّد المختار | `SMS_PROVIDER=cequens` → `CEQUENS_SENDER_NAME` + (`CEQUENS_API_KEY` **أو** الأربعة `CEQUENS_CLIENT_ID/CLIENT_SECRET/USERNAME/PASSWORD`). `SMS_PROVIDER=twilio` → `TWILIO_ACCOUNT_SID`+`TWILIO_AUTH_TOKEN`+`TWILIO_SMS_FROM_NUMBER` |
 
 كل واحد فيهم لو ناقص، السيرفر **يرفض يقلع** برسالة بتقول الناقص بالاسم. ده متعمّد: البديل هو
@@ -60,20 +60,21 @@
 CEQUENS بيحتاج ~٣٠ يوم تحقّق على الدومين. خلال النافذة دي الـSMS مش بيوصل، والـSMS هي **القناة
 الوحيدة** لتسليم كود الدخول — يعني من غير الإعداد ده مفيش مختبر يقدر يفتح التطبيق أصلاً.
 
-| المتغيّر | بيئة الاختبار | الإنتاج |
+| المتغيّر | بيئة الاختبار | Production Beta مغلق |
 |---|---|---|
 | `NODE_ENV` | `development` | `staging` أو `production` |
-| `OTP_TEST_MODE` | `true` | **`false` أو محذوف** (الحارس بيمنع الإقلاع) |
-| `OTP_TEST_MODE_CODE` | `111111` (أو أي ٦ أرقام) | — |
-| `OTP_TEST_MODE_PHONES` | فاضي لو قاعدة الاختبار منفصلة؛ أرقام المختبرين بصيغة E.164 لو بتشارك الإنتاج | — |
-| `SMS_PROVIDER` + `CEQUENS_*` | مش لازمين (مفيش نداء للبوابة أصلاً) | مطلوبين |
+| `OTP_TEST_MODE` | `true` | `true` مؤقتًا، ثم `false` عند تفعيل CEQUENS |
+| `OTP_TEST_MODE_CODE` | `111111` (أو أي ٦ أرقام) | ٦ أرقام سرية وغير `111111` |
+| `OTP_TEST_MODE_PHONES` | فاضي لو قاعدة الاختبار منفصلة؛ أرقام المختبرين بصيغة E.164 لو بتشارك الإنتاج | **إلزامي وغير فارغ**؛ أرقام المختبرين فقط بصيغة E.164 |
+| `SMS_PROVIDER` + `CEQUENS_*` | مش لازمين (مفيش نداء للبوابة أصلاً) | غير لازم أثناء الـBeta؛ لازم قبل إيقاف `OTP_TEST_MODE` |
 
 **مهم**: الوضع ده **مش بايباس** — بيغيّر الكود المولَّد بس ومابيبعتش SMS؛ الصلاحية وعدّاد المحاولات
 وإلغاء الكود الأقدم والـrate limiting كلهم شغالين زي أي كود عادي. التطبيقات ما اتغيّرتش ولا سطر
 والـclient مايقدرش يفعّله.
 
-**بعد ما CEQUENS يشتغل**: شيل التلات متغيّرات، وامسح الميزة من الكود (خطوات الحذف في
-`apps/api/src/modules/auth/README.md`). الحارس حماية مؤقتة — الضمان النهائي هو الحذف.
+**بعد ما CEQUENS يشتغل**: أضف إعدادات CEQUENS أولًا، ثم اجعل `OTP_TEST_MODE=false` وأعد تشغيل
+الخدمة. وقتها يعود الـSMS الحقيقي لكل الأرقام تلقائيًا. حذف الميزة من الكود لاحقًا يظل أفضل
+ضمان نهائي (الخطوات في `apps/api/src/modules/auth/README.md`).
 
 ## ٤. النطاقات (§13)
 
@@ -83,8 +84,10 @@ CEQUENS بيحتاج ~٣٠ يوم تحقّق على الدومين. خلال ا�
 | الـAPI | `api.ostahome.com` |
 | لوحة الأدمن | `admin.ostahome.com` |
 
-`CORS_ORIGIN` المفروض يبقى `https://ostahome.com,https://admin.ostahome.com` (بلا مسافات، مفصول
-بفاصلة). أي مثال قديم بـ`baytak.com` اتشال من `.env.example` والتعليقات والاختبارات.
+`CORS_ORIGIN` المفروض يبقى
+`https://ostahome.com,https://www.ostahome.com,https://admin.ostahome.com` (بلا مسافات، مفصول
+بفاصلة). وجود `www` ضروري طالما الموقع يستقبله؛ بدونه الصفحة تفتح لكن نداءات المتصفح للـAPI
+تُحجب بواسطة CORS. أي مثال قديم بـ`baytak.com` اتشال من `.env.example` والتعليقات والاختبارات.
 
 ---
 

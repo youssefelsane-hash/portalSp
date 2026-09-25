@@ -22,7 +22,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { Client } = require('/home/user/portalSp/node_modules/pg');
+// Resolve pg through this checkout's dependency tree instead of a developer-machine path.
+const { Client } = require('pg');
 const { LiveHarness, sleep, ROOT, DATABASE_URL } = require('./lib/live-harness');
 
 const h = new LiveHarness('mg');

@@ -40,7 +40,7 @@ export class CatalogController {
   @Get('service-categories')
   async listCategories(@Query() query: CatalogZoneQueryDto) {
     const categories = await this.catalogService.findActiveCategories(query.zone_id);
-    return categories.map(toServiceCategoryResponseDto);
+    return Promise.all(categories.map((category) => toServiceCategoryResponseDto(category, this.storage)));
   }
 
   /**
@@ -55,7 +55,7 @@ export class CatalogController {
   @Get('service-categories/most-requested')
   async listMostRequestedCategories(@Query() query: CatalogZoneQueryDto) {
     const categories = await this.catalogService.findMostRequestedCategories(8, query.zone_id);
-    return categories.map(toServiceCategoryResponseDto);
+    return Promise.all(categories.map((category) => toServiceCategoryResponseDto(category, this.storage)));
   }
 
   @Public()

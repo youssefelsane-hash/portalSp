@@ -64,6 +64,11 @@ describe('تغطية إعدادات أنواع الإشعارات (docs/08 §148
       for (const match of content.matchAll(/notificationType:\s*'([a-z0-9_.]+)'/g)) {
         emitted.add(match[1]);
       }
+      // الحملات مثلًا تمرّر ثابتًا إلى `notificationType`، ففحص القيم المكتوبة داخل النداء
+      // وحده لا يراها. أي ثابت اسمه *_NOTIFICATION_TYPE هو جزء من نفس العقد ولازم يتغطى.
+      for (const match of content.matchAll(/\b[A-Z0-9_]+_NOTIFICATION_TYPE\s*=\s*'([a-z0-9_.]+)'/g)) {
+        emitted.add(match[1]);
+      }
     }
     // حارس على الحارس: لو الـregex بطل يلاقي حاجة (تغيّر شكل النداء مثلاً)، الاختبار كان
     // هيعدّي بصمت وهو مش بيقيس أي حاجة.

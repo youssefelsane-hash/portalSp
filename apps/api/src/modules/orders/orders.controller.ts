@@ -136,7 +136,7 @@ export class OrdersController {
   // بيختفوا من الشاشة فورًا بعد أي فعل (مش بس تسليم الكاش) لحد ما العميل يعمل refresh يدوي.
   // الحل: helper واحد بيجيب نفس الإثراء اللي getOne() بيعمله، يتستخدم بعد كل mutation.
   private async enrichedResponse(userId: string, order: Order): Promise<OrderResponseDto> {
-    const [address, technicianContact, customerNotices, service, collection] = await Promise.all([
+    const [address, technicianContact, customerNotices, service, collection, assignedCompanyName] = await Promise.all([
       this.addressesService.findOwnedOrThrow(userId, order.addressId),
       order.technicianId && CUSTOMER_TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
         ? this.techniciansService.findContactInfoOrThrow(order.technicianId)
@@ -148,11 +148,15 @@ export class OrdersController {
       // يفضل يعرض إرشاداته بعد الإغلاق أو حتى بعد خروج الخدمة من الكتالوج.
       this.catalogService.findServiceForDisplay(order.serviceId),
       this.paymentsService.getCollectionBreakdownForOrder(order),
+      order.assignedCompanyId
+        ? this.techniciansService.findCompanyNameForOrder(order.assignedCompanyId)
+        : Promise.resolve(null),
     ]);
     return {
       ...toOrderResponseDto(order, address, technicianContact, {
         customerNotices,
         safetyGuidanceAr: service?.safetyGuidanceAr ?? null,
+        assignedCompanyName,
       }),
       amount_due_now_cents: collection.amountDueToTechnicianCents,
     };

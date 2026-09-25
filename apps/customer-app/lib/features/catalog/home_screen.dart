@@ -98,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
   BrandingLogo? _heroBackground;
+
   /// بانر الشاشة الرئيسية (ADR-0095). `null` أو `isDefault` ⇒ القسم مابيترسمش أصلاً.
   BrandingLogo? _homeBanner;
   ImageProvider<Object>? _legacyHeroImageProvider;
@@ -150,7 +151,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (banner != null && !banner.isDefault && banner.url.isNotEmpty) {
             // نفس الحماية اللي على صور الـhero بالظبط: التحميل المسبق بيمنع «الفراغ الأبيض
             // بعدين الصورة تنطّ» أول ما القسم يوصل للشاشة.
-            unawaited(_precacheHeroImage(cachedRemoteImageProvider(banner.url)));
+            unawaited(
+              _precacheHeroImage(cachedRemoteImageProvider(banner.url)),
+            );
           }
         })
         .catchError((_) {});
@@ -332,6 +335,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: CachedNetworkImage(
                     imageUrl: resolveCachedRemoteImageUrl(_brandingLogo!.url),
+                    cacheKey: remoteImageCacheKey(_brandingLogo!.url),
                     fit: BoxFit.contain,
                     useOldImageOnUrlChange: true,
                     fadeInDuration: const Duration(milliseconds: 160),
@@ -685,7 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: 190,
+            height: 286,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _tips.length,
@@ -694,40 +698,56 @@ class _HomeScreenState extends State<HomeScreen> {
                 final tip = _tips[index];
                 final imageUrl = tip.imageUrl;
                 return SizedBox(
-                  width: 220,
+                  width: 252,
                   child: Card(
                     clipBehavior: Clip.antiAlias,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (imageUrl != null && imageUrl.isNotEmpty)
-                          CachedNetworkImage(
-                            imageUrl: resolveCachedRemoteImageUrl(imageUrl),
-                            height: 80,
-                            fit: BoxFit.cover,
-                            memCacheHeight:
-                                (80 *
-                                        (MediaQuery.maybeDevicePixelRatioOf(
-                                              context,
-                                            ) ??
-                                            1.0))
-                                    .round(),
-                            maxHeightDiskCache:
-                                (80 *
-                                        (MediaQuery.maybeDevicePixelRatioOf(
-                                              context,
-                                            ) ??
-                                            1.0))
-                                    .round(),
-                            fadeInDuration: const Duration(milliseconds: 180),
-                            placeholder: (_, _) => _tipFallback(context, index),
-                            errorWidget: (_, _, _) =>
-                                _tipFallback(context, index),
-                          )
-                        else
-                          _tipFallback(context, index),
-                        // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 190)` ثابت،
-                        // والصورة بتاخد 80 منهم. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
+                        SizedBox(
+                          height: 142,
+                          child: imageUrl != null && imageUrl.isNotEmpty
+                              ? ColoredBox(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest,
+                                  child: CachedNetworkImage(
+                                    imageUrl: resolveCachedRemoteImageUrl(
+                                      imageUrl,
+                                    ),
+                                    cacheKey: remoteImageCacheKey(imageUrl),
+                                    width: double.infinity,
+                                    // صور النصائح غالبًا فيها كتابة وعناصر قرب الحواف. cover
+                                    // كان بيقص نصف الصورة داخل شريط 80px؛ contain يعرض التصميم
+                                    // كاملًا، والخلفية الهادئة تمتص أي فرق في النسبة.
+                                    fit: BoxFit.contain,
+                                    memCacheHeight:
+                                        (142 *
+                                                (MediaQuery.maybeDevicePixelRatioOf(
+                                                      context,
+                                                    ) ??
+                                                    1.0))
+                                            .round(),
+                                    maxHeightDiskCache:
+                                        (142 *
+                                                (MediaQuery.maybeDevicePixelRatioOf(
+                                                      context,
+                                                    ) ??
+                                                    1.0))
+                                            .round(),
+                                    fadeInDuration: const Duration(
+                                      milliseconds: 180,
+                                    ),
+                                    placeholder: (_, _) =>
+                                        _tipFallback(context, index),
+                                    errorWidget: (_, _, _) =>
+                                        _tipFallback(context, index),
+                                  ),
+                                )
+                              : _tipFallback(context, index),
+                        ),
+                        // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 286)` ثابت،
+                        // والصورة بتاخد الجزء العلوي. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
                         // سطور كانت بتطلع أطول من الفاضل وترمي `RenderFlex overflowed by N pixels
                         // on the bottom` كل frame (اتلقطت في كونسول المالك، docs/08 §59). كده
                         // النص بياخد الفاضل بالظبط ويتقص بأدب مهما كان مقياس الخط عند المستخدم.
@@ -774,7 +794,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _tipFallback(BuildContext context, int index) {
     final color = _tipFallbackColors[index % _tipFallbackColors.length];
     return Container(
-      height: 80,
+      height: 142,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: AlignmentDirectional.topStart,

@@ -1,9 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatGateway } from './chat.gateway';
@@ -20,6 +21,7 @@ export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly chatGateway: ChatGateway,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get('orders/:orderId/thread')
@@ -38,7 +40,7 @@ export class ChatController {
   @Get('threads/:id/messages')
   async listMessages(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const messages = await this.chatService.listMessages(user.sub, id);
-    return messages.map(toMessageResponseDto);
+    return Promise.all(messages.map((message) => toMessageResponseDto(message, this.storage)));
   }
 
   @Post('threads/:id/messages')
@@ -47,7 +49,7 @@ export class ChatController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SendMessageDto,
   ) {
-    return toMessageResponseDto(await this.chatService.sendMessage(user.sub, id, dto));
+    return toMessageResponseDto(await this.chatService.sendMessage(user.sub, id, dto), this.storage);
   }
 
   // نفس نمط POST /technician/orders/:id/media بالظبط — multipart مباشر، مش presigned URL.
@@ -73,7 +75,7 @@ export class ChatController {
     assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_MIME_TYPES);
 
     const message = await this.chatService.sendImageMessage(user.sub, id, file);
-    const dto = toMessageResponseDto(message);
+    const dto = await toMessageResponseDto(message, this.storage);
     this.chatGateway.server.to(`thread:${id}`).emit('chat:message_received', dto);
     return dto;
   }

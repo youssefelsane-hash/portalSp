@@ -10,7 +10,8 @@ function withZone(path: string, zoneId?: string): string {
 }
 
 export const fetchCategories = (zoneId?: string) =>
-  apiFetchList<ServiceCategoryDto>(withZone('/service-categories', zoneId));
+  // الكتالوج يتغير من لوحة الإدارة؛ لا نسمح لنسخة متصفح قديمة أن تخفي فئات مضافة حديثًا.
+  apiFetchList<ServiceCategoryDto>(withZone('/service-categories', zoneId), null, { cache: 'no-store' });
 
 export const fetchServices = (categoryId?: string, zoneId?: string) => {
   const query = new URLSearchParams();
@@ -21,7 +22,7 @@ export const fetchServices = (categoryId?: string, zoneId?: string) => {
 };
 
 export const fetchMostRequestedServices = (zoneId?: string) =>
-  apiFetchList<ServiceDto>(withZone('/services/most-requested', zoneId));
+  apiFetchList<ServiceDto>(withZone('/services/most-requested', zoneId), null, { cache: 'no-store' });
 
 export const fetchService = (id: string, zoneId?: string) =>
   apiFetch<ServiceDto>(withZone(`/services/${id}`, zoneId), null);

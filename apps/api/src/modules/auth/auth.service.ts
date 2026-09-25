@@ -52,7 +52,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { readOtpTestMode, usesFixedOtp } from './otp-test-mode';
+import { isAllowedOtpTestPhone, readOtpTestMode, usesFixedOtp } from './otp-test-mode';
 import { SettingsService } from '../settings/settings.service';
 
 export interface TokenPair {
@@ -122,6 +122,18 @@ export class AuthService {
     // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
     // القرار كله من بيئة السيرفر — مفيش أي حاجة الـclient بيبعتها بتدخل في الحساب ده.
     const testMode = readOtpTestMode(this.config);
+    const productionBetaMode = testMode.enabled && isProductionLikeEnv(this.config.get<string>('nodeEnv'));
+    // في Production Beta لا نسمح بسقوط الرقم خارج الـwhitelist لمسار SMS العادي: CEQUENS
+    // غير مُجهّز عمدًا في هذه الفترة، والأهم ألا يصبح الـOTP الثابت متاحًا لرقم غير مصرّح له.
+    // الفحص قبل hash/transaction يضمن عدم إنشاء challenge ولا محاولة إرسال لهذا الرقم.
+    if (productionBetaMode && !isAllowedOtpTestPhone(testMode, dto.phone_number)) {
+      throw new ApiException(
+        ErrorCode.AUTH_007,
+        'التسجيل والدخول متاحان حاليًا للمختبرين المصرّح لهم فقط. تواصل مع فريق أسطى لإضافة رقمك إلى الاختبار.',
+        HttpStatus.FORBIDDEN,
+        'closed_beta',
+      );
+    }
     const useFixedCode = usesFixedOtp(testMode, dto.phone_number);
     const code = useFixedCode
       ? testMode.fixedCode
@@ -189,7 +201,7 @@ export class AuthService {
     // هنا هو الضمان: مفيش مسار بديل بيوصل للمزوّد.
     if (useFixedCode) {
       this.logger.warn(
-        `[OTP] وضع الاختبار مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}). ممنوع في staging/production بحارس env.validation.`,
+        `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}).`,
       );
       return { expires_in_seconds: expiryMinutes * 60 };
     }

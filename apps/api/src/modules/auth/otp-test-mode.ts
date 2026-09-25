@@ -27,8 +27,10 @@ import { normalizePhoneNumber } from '../../common/utils/phone-number';
  *
  * ### الحارس
  *
- * `env.validation.ts` بيمنع الإقلاع أصلاً لو `NODE_ENV=production|staging` والوضع مفعّل.
- * فالفصل بين الاختبار والإنتاج مفروض عند الإقلاع، مش متروك لمراجعة بشرية.
+ * في التطوير، القائمة الفاضية ممكن تفتح الوضع لكل الأرقام على قاعدة منفصلة. في
+ * `production|staging` الحارس يفرض قائمة E.164 غير فارغة وكودًا غير افتراضي؛ وأي رقم خارج
+ * القائمة يُرفض قبل إنشاء OTP أو محاولة SMS. بذلك يمكن تشغيل Closed Beta على بنية Production
+ * حقيقية من غير فتح باب الدخول للعامة.
  */
 export interface OtpTestMode {
   readonly enabled: boolean;
@@ -61,6 +63,12 @@ export function readOtpTestMode(config: ConfigService): OtpTestMode {
 export function usesFixedOtp(mode: OtpTestMode, phoneNumber: string): boolean {
   if (!mode.enabled || !mode.fixedCode) return false;
   if (mode.allowedPhones.length === 0) return true;
+  return isAllowedOtpTestPhone(mode, phoneNumber);
+}
+
+/** هل الرقم موجود صراحةً في قائمة مختبري الـClosed Beta؟ */
+export function isAllowedOtpTestPhone(mode: OtpTestMode, phoneNumber: string): boolean {
+  if (!mode.enabled || !mode.fixedCode || mode.allowedPhones.length === 0) return false;
   const normalized = normalizePhoneNumber(phoneNumber);
   return mode.allowedPhones.includes(typeof normalized === 'string' ? normalized : phoneNumber);
 }

@@ -64,7 +64,8 @@ class _BrandedLoadingScreenState extends State<BrandedLoadingScreen> {
                 child: logoUrl != null
                     ? CachedNetworkImage(
                         imageUrl: resolveCachedRemoteImageUrl(logoUrl),
-                        key: ValueKey(logoUrl),
+                        cacheKey: remoteImageCacheKey(logoUrl),
+                        key: ValueKey(remoteImageCacheKey(logoUrl)),
                         height: 96,
                         fit: BoxFit.contain,
                         useOldImageOnUrlChange: true,

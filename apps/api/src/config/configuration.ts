@@ -62,9 +62,9 @@ export default () => ({
     expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES ?? '5', 10),
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),
 
-    // **مؤقت — فترة Google Play Testing وبس** (docs/08 §173، `auth/otp-test-mode.ts`).
-    // الإقلاع بيترفض لو الوضع ده مفعّل مع `NODE_ENV=production|staging` (env.validation.ts)،
-    // فالفصل بين الاختبار والإنتاج مفروض عند الإقلاع مش بمراجعة بشرية.
+    // **مؤقت — فترة Google Play Closed Testing وبس** (docs/08 §173، `auth/otp-test-mode.ts`).
+    // في production/staging لا يقبل الحارس الوضع إلا بقائمة أرقام صريحة؛ خارج القائمة لا
+    // يُنشأ OTP ولا تُحاول SMS، فتظل البنية Production من غير فتح التسجيل للعامة.
     testMode: {
       enabled: process.env.OTP_TEST_MODE === 'true',
       fixedCode: process.env.OTP_TEST_MODE_CODE ?? '111111',

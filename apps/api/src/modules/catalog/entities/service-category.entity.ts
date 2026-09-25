@@ -23,11 +23,18 @@ export class ServiceCategory {
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 
+  // المفتاح الدائم لصورة مرفوعة. iconUrl يظل fallback لروابط الفئات القديمة أو اليدوية.
+  @Column({ name: 'icon_storage_key', type: 'text', nullable: true })
+  iconStorageKey: string | null;
+
   // Script 6 Part 1-2 — عمود موجود في الـschema من البداية (migration 0006) بس مش متوصّل بأي
   // DTO/واجهة أدمن/شاشة عميل خالص لحد دلوقتي. صورة غلاف فعلية للكارت (أبعاد أكبر من الأيقونة)
   // — كانت فجوة موثّقة صراحة، اتقفلت.
   @Column({ name: 'cover_image_url', type: 'text', nullable: true })
   coverImageUrl: string | null;
+
+  @Column({ name: 'cover_image_storage_key', type: 'text', nullable: true })
+  coverImageStorageKey: string | null;
 
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;

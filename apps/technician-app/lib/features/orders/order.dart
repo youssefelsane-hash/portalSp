@@ -168,6 +168,8 @@ class Order {
   final String? customerName;
   final String? customerPhone;
   final String? serviceNameAr;
+  /// اسم الشركة صاحبة الطلب عندما يكون التنفيذ مسندًا لشركة فعليًا.
+  final String? assignedCompanyName;
   // "جديد عليك" (docs/08 §56 بند 2) — الفني لسه ما فتحش تفاصيل الطلب ولا مرة. بيتحسب في
   // الباك-إند (orders.technician_viewed_at) مش محليًا، فبيفضل صح بعد إعادة تثبيت أو جهاز تاني.
   final bool isNewForTechnician;
@@ -223,6 +225,7 @@ class Order {
     this.customerName,
     this.customerPhone,
     this.serviceNameAr,
+    this.assignedCompanyName,
     this.isNewForTechnician = false,
     this.orderType = 'standard',
   });
@@ -265,6 +268,7 @@ class Order {
     customerName: json['customer_name'] as String?,
     customerPhone: json['customer_phone'] as String?,
     serviceNameAr: json['service_name_ar'] as String?,
+    assignedCompanyName: json['assigned_company_name'] as String?,
     isNewForTechnician: json['is_new_for_technician'] as bool? ?? false,
   );
 }

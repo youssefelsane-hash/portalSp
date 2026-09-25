@@ -2,7 +2,7 @@ import { IsIn, IsUUID } from 'class-validator';
 
 /**
  * خانة صورة الفئة (docs/08 §98) — `icon` أيقونة صغيرة جنب الاسم، `cover` صورة الكارت الكبيرة.
- * الخانتين نفس الأعمدة الموجودة أصلاً (`icon_url` / `cover_image_url`) — صفر عمود جديد.
+ * الرابط القديم محفوظ للتوافق، والمفتاح الدائم المقابل (`*_storage_key`) هو مصدر الصورة المرفوعة.
  */
 export class CategoryMediaSlotParamDto {
   @IsUUID()

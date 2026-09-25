@@ -4,7 +4,6 @@
 // شبكة**. الاختبار ده بيشتغل تحت `TestWidgetsFlutterBinding`، واللي بيرجّع 400 لأي HTTP
 // request — فلو الانتقال لخطوة الرمز عمل أي نداء (زي `POST /auth/otp/request` قبل كده)،
 // الخطوة مش هتظهر خالص وهنشوف رسالة خطأ مكانها. ظهورها هي **الإثبات** إن مفيش شبكة اتلمست.
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';

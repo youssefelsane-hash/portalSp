@@ -91,7 +91,7 @@ export async function apiFetchPage<T>(
 
 // لـendpoints عامة (كتالوج/بحث) بترجع قايمة خام مش envelope مُقسّم صفحات — مطابق لعقد
 // service-response.dto.ts (راجع apps/customer-app's apiRequestList لنفس النمط بالضبط).
-export async function apiFetchList<T>(path: string, accessToken: string | null = null): Promise<T[]> {
-  const data = await apiFetch<unknown>(path, accessToken);
+export async function apiFetchList<T>(path: string, accessToken: string | null = null, options: RequestInit = {}): Promise<T[]> {
+  const data = await apiFetch<unknown>(path, accessToken, options);
   return (data as T[]) ?? [];
 }

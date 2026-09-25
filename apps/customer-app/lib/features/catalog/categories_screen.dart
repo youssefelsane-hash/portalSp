@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/cached_remote_image.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'catalog_repository.dart';
@@ -34,7 +37,17 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       final categories = await _repository.fetchCategories(
         zoneId: widget.zoneId,
       );
-      if (mounted) setState(() => _categories = categories);
+      if (mounted) {
+        setState(() => _categories = categories);
+        unawaited(
+          precacheRemoteImages(
+            context,
+            categories.map((category) => category.cardImageUrl),
+            logicalWidth: 180,
+            concurrency: 4,
+          ),
+        );
+      }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.

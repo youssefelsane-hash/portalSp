@@ -18277,10 +18277,10 @@ localhost — نفس فلسفة `WEBAUTHN_ORIGIN`)، ومعاه تلات تست�
 
 ### المرحلة ١ — الباك-إند ✅
 
-- **migration 0358**: `pin_hash` / `pin_set_at` / `pin_failed_attempts` / `pin_locked_until`
+- **migration 0360**: `pin_hash` / `pin_set_at` / `pin_failed_attempts` / `pin_locked_until`
   + فهرس `idx_users_phone_active` + قيد `chk_users_pin_state` (**مستحيل** حساب يتقفل وهو مالوش
   رمز) + صف الإعداد `auth.login_method`.
-- **migration 0359**: صلاحية `users.reset_pin` مربوطة بـsuper_admin.
+- **migration 0361**: صلاحية `users.reset_pin` مربوطة بـsuper_admin.
 - `login-pin.policy.ts` — وحدة نقية: الطول، أرقام بس، رفض الضعيف (كله نفس الرقم أو تسلسل)،
   والقفل المتدرّج ١ ← ٥ ← ١٥ ← ٦٠ ← ٢٤٠ دقيقة بلا قفل دائم.
 - المسارات: `POST /auth/pin/register` · `POST /auth/pin/login` · `POST /auth/pin` (متوثّق) ·
@@ -18321,7 +18321,7 @@ credential دلوقتي، فأول ما الجلسة تنتهي يبقى مقف�
 **١) الاسترجاع كان بيقفل الحساب بدل ما يفتحه.** مسح الرمز + إلغاء كل الجلسات كان بيسيب المستخدم
 في **طريق مسدود تام**: مايقدرش يدخل (مفيش رمز)، ومايقدرش ينادي `POST /auth/pin` (محتاج جلسة، وكل
 جلساته اتلغت في نفس الإجراء)، ومفيش SMS، و§6-أ بيرفض إن أي حد مالوش رمز يحطّ واحد من شاشة الدخول.
-⇒ `pin_reset_tokens` (**migration 0360**) + `POST /auth/pin/reset/redeem`: كود لمرة واحدة (١٠
+⇒ `pin_reset_tokens` (**migration 0362**) + `POST /auth/pin/reset/redeem`: كود لمرة واحدة (١٠
 أرقام، ١٥ دقيقة) الأدمن بيقوله في المكالمة، والعميل **يختار رمزه بنفسه**. الكود مش رمز دخول —
 مايفتحش جلسة ومايرجّعش توكن. شاشة/صفحة «نسيت رمز الدخول؟» في التطبيقين وفي الويب.
 

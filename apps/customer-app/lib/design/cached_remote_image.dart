@@ -14,11 +14,50 @@ String resolveCachedRemoteImageUrl(String value) {
       : resolveApiAssetUrl(url);
 }
 
+/// مفتاح ثابت للصورة حتى لو تغيّر توقيع رابط R2 المؤقت.
+///
+/// السيرفر يولّد `X-Amz-*` جديدًا عند كل قراءة لحماية الـbucket الخاص. استخدام الرابط كاملًا
+/// كمفتاح كان يجعل نفس الملف يبدو للكاش كأنه صورة جديدة في كل فتح للتطبيق. نزيل معاملات
+/// التوقيع المتغيرة فقط، ونُبقي أي query عادية لأنها قد تختار نسخة مختلفة فعلًا من الصورة.
+String remoteImageCacheKey(String value) {
+  final resolved = resolveCachedRemoteImageUrl(value);
+  final uri = Uri.tryParse(resolved);
+  if (uri == null || !uri.hasScheme) return resolved;
+
+  final volatileKeys = <String>{
+    'awsaccesskeyid',
+    'signature',
+    'expires',
+    'security-token',
+  };
+  final stableQuery = <String, List<String>>{};
+  var removedSigningValue = false;
+  for (final entry in uri.queryParametersAll.entries) {
+    final normalized = entry.key.toLowerCase();
+    if (normalized.startsWith('x-amz-') || volatileKeys.contains(normalized)) {
+      removedSigningValue = true;
+      continue;
+    }
+    stableQuery[entry.key] = entry.value;
+  }
+
+  if (!removedSigningValue) return resolved;
+  return Uri(
+    scheme: uri.scheme,
+    userInfo: uri.userInfo,
+    host: uri.host,
+    port: uri.hasPort ? uri.port : null,
+    path: uri.path,
+    queryParameters: stableQuery.isEmpty ? null : stableQuery,
+  ).toString();
+}
+
 ImageProvider<Object> cachedRemoteImageProvider(
   String value, {
   int? maxWidth,
 }) => CachedNetworkImageProvider(
   resolveCachedRemoteImageUrl(value),
+  cacheKey: remoteImageCacheKey(value),
   maxWidth: maxWidth,
 );
 

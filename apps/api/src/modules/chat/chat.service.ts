@@ -250,7 +250,7 @@ export class ChatService {
   async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
     const thread = await this.getThreadForParticipant(userId, threadId);
     this.assertThreadOpen(thread);
-    const message = await this.saveMessageAndNotify(thread, userId, ChatMessageType.TEXT, dto.content, null, dto.content);
+    const message = await this.saveMessageAndNotify(thread, userId, ChatMessageType.TEXT, dto.content, null, null, dto.content);
 
     await this.emitIfSupportMessageFromCustomer(thread, userId, dto.content);
 
@@ -268,7 +268,7 @@ export class ChatService {
 
     const key = `chat/${threadId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
     const message = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
-      return this.saveMessageAndNotify(thread, userId, ChatMessageType.IMAGE, null, fileUrl, 'صورة جديدة');
+      return this.saveMessageAndNotify(thread, userId, ChatMessageType.IMAGE, null, fileUrl, key, 'صورة جديدة');
     });
 
     await this.emitIfSupportMessageFromCustomer(thread, userId, '📷 صورة');
@@ -282,6 +282,7 @@ export class ChatService {
     messageType: ChatMessageType,
     content: string | null,
     fileUrl: string | null,
+    storageKey: string | null,
     preview: string,
   ): Promise<ChatMessage> {
     return this.messages.manager.transaction(async (manager) => {
@@ -301,6 +302,7 @@ export class ChatService {
         messageType,
         content,
         fileUrl,
+        storageKey,
         isRead: false,
         isFlagged: content ? containsLikelyContactInfo(content) : false,
       });
