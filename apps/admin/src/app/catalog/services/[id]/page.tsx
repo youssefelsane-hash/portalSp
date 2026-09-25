@@ -528,6 +528,11 @@ export default function ServiceDetailPage() {
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
       full_description_ar: (form.get('full_description_ar') as string) || undefined,
       safety_guidance_ar: (form.get('safety_guidance_ar') as string).trim() || null,
+      // ADR-0113 — **الحقل ده كان الجزء الوحيد الناقص من تنفيذ الـSEO**: العمود والـDTO
+      // والصفحات العامة والـsitemap كلهم اتعملوا، وخانة التحكم وقعت من كوميت `2480b06e`.
+      // النص فاضي ⇒ `null` مش `''`: **وجود المحتوى هو مفتاح النشر**، فسلسلة فاضية كانت
+      // هتسيب الصفحة العامة منشورة بمحتوى فاضي بدل ما تلغي نشرها.
+      seo_content_ar: (form.get('seo_content_ar') as string).trim() || null,
       icon_url: (form.get('icon_url') as string) || undefined,
       featured_icon_url: (form.get('featured_icon_url') as string) || null,
       featured_name_ar: (form.get('featured_name_ar') as string) || null,
@@ -833,6 +838,28 @@ export default function ServiceDetailPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   يظهر النص داخل تفاصيل كل طلب لهذه الخدمة طوال التنفيذ وبعد اكتماله. اكتب تعليمات عملية ومحايدة تحمي العميل ومقدم الخدمة.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1 rounded-xl border border-sky-200/70 bg-sky-50/40 p-4">
+                <Label htmlFor="svc_seo_content">محتوى صفحة الظهور في البحث</Label>
+                <Textarea
+                  id="svc_seo_content"
+                  name="seo_content_ar"
+                  defaultValue={service.seo_content_ar ?? ''}
+                  rows={10}
+                  maxLength={20000}
+                  placeholder="اكتب هنا شرح كامل للخدمة زي ما العميل بيدوّر عليها في جوجل: إيه اللي بنعمله بالظبط، إمتى يحتاجها، إيه اللي بيحدد السعر، وإيه اللي بيميّزنا…"
+                />
+                <p className="text-xs text-muted-foreground">
+                  بمجرد إضافة محتوى هنا، يتم نشر صفحة عامة للخدمة تلقائيًا، ويتم إنشاء صفحات
+                  للمناطق المُطلقة أيضًا. مسح المحتوى بالكامل يلغي نشر صفحات SEO للخدمة.
+                </p>
+                {/* الفرق بين ده وبين «كلمات البحث» تحت مش واضح من الاسم، والخلط بينهم بيخلّي
+                    واحد منهم يتكتب في مكان التاني: ده مقال **للزوّار وجوجل** على صفحة عامة،
+                    وده كلمات **لمحرك البحث الداخلي** في تطبيق العميل. */}
+                <p className="text-xs text-muted-foreground">
+                  ده غير «كلمات البحث» تحت: الكلمات دي لمحرك البحث <strong>جوّه التطبيق</strong>،
+                  أما النص ده فصفحة كاملة بتتقري من جوجل ومن الزائر.
                 </p>
               </div>
               <div className="flex flex-col gap-1">
