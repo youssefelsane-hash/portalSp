@@ -41,6 +41,7 @@ import {
   Gauge,
   Filter,
   TrendingUp,
+  FileCheck,
   Wallet,
   UsersRound,
   QrCode,
@@ -143,6 +144,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'المالية',
     items: [
+      // migration 0177 — الشروط اللي بتوقف الحجز فعليًا لحد ما العميل يوافق. كانت بلا أي
+      // شاشة رغم إن الباك-إند بيفرضها على كل طلب.
+      { href: '/payment-policies', label: 'سياسات الدفع', icon: FileCheck, permission: 'payment_policies.manage' },
       { href: '/earnings-policy', label: 'سياسة المستحقات', icon: Coins, permission: 'earnings_policy.view' },
       { href: '/projects', label: 'المشروعات', icon: Building2, permission: 'projects.view' },
       { href: '/warranty-plans', label: 'خطط الضمان', icon: ShieldCheck, permission: 'warranty.manage' },
