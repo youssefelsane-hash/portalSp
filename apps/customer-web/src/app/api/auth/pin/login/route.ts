@@ -16,7 +16,10 @@ export async function POST(req: NextRequest) {
   const res = await fetch(backendUrl('/auth/pin/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    // **الدور بيتحدد هنا، مش من المتصفح** (ADR-0110): ده موقع العميل، فالجلسة عميل دايمًا.
+    // لو الدور جه من الـbody، صفحة متلاعب فيها كانت تقدر تطلب دور الصنايعي — والسيرفر بيتحقق
+    // من المنحة أصلاً، بس مفيش أي سبب نوصّل طلب من المتصفح لحاجة الخادم ده عارفها يقينًا.
+    body: JSON.stringify({ ...body, role: 'customer' }),
   });
   const data = (await res.json()) as ApiEnvelope<TokenPair>;
 

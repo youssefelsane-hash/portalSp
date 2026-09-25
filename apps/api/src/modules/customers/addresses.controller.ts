@@ -1,11 +1,33 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AddressesService } from './addresses.service';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { toAddressResponseDto } from './dto/address-response.dto';
 
+/**
+ * **العناوين مقصورة على دور العميل** (ADR-0110).
+ *
+ * الحارس ده كان **ناقص**، وهو السبب المكانيكي لبلاغ المالك: «الصنايعي بيدخل تطبيق العميل بنفس
+ * رقمه ويعدّي كأن الحساب موجود، لكن أول ما يطلب أي خدمة بيتصدّ». `/orders` كانت عليها
+ * `@Roles(CUSTOMER)` وهنا مفيش، فالفني كان بيضيف عنوان بنجاح وبعدين يتصدّم في الحجز — **نصّ
+ * شغّال**، وهو أسوأ من المقفول لأنه بيخلي المستخدم يفتكر إن حسابه سليم.
+ *
+ * **مش بيمنع الفني من إنه يبقى عميل**: الحارس بيقرا **الدور النشط** في الجلسة، فالفني الداخل من
+ * تطبيق العميل دوره النشط `customer` وبيعدّي عادي. اللي بيمنعه هو استخدام **جلسة الفني** على
+ * مسار عميل — وده هو المطلوب بالظبط.
+ *
+ * الجاران اللي بلا `@Roles` (`notifications`, `me/referrals`, `loyalty`) **مقصود** إنهم كده
+ * وموثّق في كل واحد فيهم: خصائص شخصية بحتة مقيّدة بـ`user_id` ومحتاجة تشتغل للدورين. العناوين
+ * مش كده — بيتربطوا بـ`orders.address_id` وهي علاقة عميل صِرفة.
+ *
+ * لوحة الأدمن **مابتتأثرش**: بتقرا عناوين العميل من `/admin/customers/:userId/addresses`
+ * (`AdminCustomersController`)، مسار تاني خالص عليه `@Roles(ADMIN)`.
+ */
+@Roles(UserType.CUSTOMER)
 @Controller('addresses')
 export class AddressesController {
   constructor(private readonly addressesService: AddressesService) {}

@@ -5,9 +5,10 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User, UserType } from '../auth/entities/user.entity';
+import { issuePinSetupCode } from '../auth/pin-setup';
 import { BlockEmployeeDto } from './dto/block-employee.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
-import { EmployeeResponseDto, toEmployeeResponseDto } from './dto/employee-response.dto';
+import { CreatedEmployeeResponseDto, EmployeeResponseDto, toEmployeeResponseDto } from './dto/employee-response.dto';
 import { ListEmployeesQueryDto } from './dto/list-employees-query.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { EmployeeProfile } from './entities/employee-profile.entity';
@@ -61,7 +62,7 @@ export class AdminEmployeesService {
     }
   }
 
-  async create(createdByUserId: string, dto: CreateEmployeeDto, meta?: AuditActorMeta): Promise<EmployeeResponseDto> {
+  async create(createdByUserId: string, dto: CreateEmployeeDto, meta?: AuditActorMeta): Promise<CreatedEmployeeResponseDto> {
     const existingUser = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });
     if (existingUser) {
       throw new ApiException(ErrorCode.VAL_001, 'رقم الهاتف ده مسجل بحساب موجود بالفعل', HttpStatus.CONFLICT);
@@ -70,7 +71,7 @@ export class AdminEmployeesService {
       await this.assertManagerIsAdmin(dto.manager_user_id);
     }
 
-    const { user, profile } = await this.dataSource.transaction(async (manager) => {
+    const { user, profile, activation } = await this.dataSource.transaction(async (manager) => {
       const user = manager.create(User, {
         phoneNumber: dto.phone_number,
         // بيتضاف يدوياً من Super Admin موثوق — بيتحسب متحقق فوراً، عكس تسجيل العميل/الفني الذاتي
@@ -95,7 +96,22 @@ export class AdminEmployeesService {
         createdByUserId,
       });
       await manager.save(profile);
-      return { user, profile };
+
+      // **كود التنشيط جوّه نفس المعاملة** (ADR-0111).
+      //
+      // قبل كده الموظف كان بيتعمل بـ`pin_hash = NULL` و**خلاص** — وده كان طريق مسدود تام،
+      // مقيس حياً: الدخول برمز 401 (مفيش رمز)، طلب كود SMS 410 (`auth.login_method = 'pin'`)،
+      // تسجيل حساب جديد بنفس الرقم 409، و`POST /auth/pin` 401 (محتاج جلسة، والموظف مش قادر
+      // يعمل واحدة). يعني موظف اتعمل = حساب **مستحيل** يُستخدم.
+      //
+      // الكود بيتولّد هنا مش في نداء تاني عشان يستحيل يبقى فيه موظف بلا مدخل: لو الإصدار فشل،
+      // الحساب نفسه مابيتعملش.
+      const activation = await issuePinSetupCode(manager, {
+        userId: user.id,
+        issuedByUserId: createdByUserId,
+        clearExistingPin: false,
+      });
+      return { user, profile, activation };
     });
 
     await this.auditLog.record({
@@ -104,7 +120,14 @@ export class AdminEmployeesService {
       action: 'employee.created',
       entityType: 'user',
       entityId: user.id,
-      newValues: { phone_number: user.phoneNumber, full_name: user.fullName, department: profile.department },
+      newValues: {
+        phone_number: user.phoneNumber,
+        full_name: user.fullName,
+        department: profile.department,
+        // **الكود نفسه مش بيتكتب في السجل** — السجل بيتقرا من شاشة، وكتابة credential حي فيه
+        // بتحوّله لمكان تسريب. اللي بيتسجّل هو إن تصريح اتصدر وإمتى بيموت.
+        activation_code_expires_at: activation.expiresAt.toISOString(),
+      },
       meta,
     });
 
@@ -114,7 +137,47 @@ export class AdminEmployeesService {
       await this.permissionsService.assignRole(createdByUserId, user.id, dto.initial_role_name, meta);
     }
 
-    return toEmployeeResponseDto(profile, user);
+    // **الكود بيرجع مرة واحدة بس** — نفس نمط كود الاسترجاع وأكواد استرجاع الـMFA بالظبط. بعد
+    // الرد ده مفيش أي طريقة تقراه من أي مكان، والأدمن لازم يوصّله للموظف فورًا.
+    return {
+      ...toEmployeeResponseDto(profile, user),
+      activation_code: activation.code,
+      activation_code_expires_at: activation.expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * **إعادة إصدار كود التنشيط** (ADR-0111) — الكود عمره ١٥ دقيقة، فموظف ما لحقش يستخدمه محتاج
+   * واحد جديد. نفس الدالة بالظبط، فمفيش سياسة تانية.
+   *
+   * بيشتغل كمان لو الموظف حط رمزه وبعدين نسيه: `clearExistingPin: false` معناها الرمز الحالي
+   * **مايتمسحش** لحد ما الكود يتستهلك فعلاً — فإصدار كود بالغلط مايقفلش موظف شغّال برّه حسابه.
+   * (اللي بيمسح الرمز فورًا هو `POST /admin/users/:id/pin/reset`، وده إجراء استرجاع مقصود.)
+   */
+  async reissueActivationCode(
+    actorUserId: string,
+    targetUserId: string,
+    meta?: AuditActorMeta,
+  ): Promise<{ activation_code: string; activation_code_expires_at: string }> {
+    const profile = await this.profiles.findOne({ where: { userId: targetUserId } });
+    if (!profile) throw new ApiException(ErrorCode.VAL_001, 'الموظف غير موجود', HttpStatus.NOT_FOUND);
+
+    const activation = await this.dataSource.transaction((manager) =>
+      issuePinSetupCode(manager, { userId: targetUserId, issuedByUserId: actorUserId, clearExistingPin: false }),
+    );
+    await this.auditLog.record({
+      actorUserId,
+      actorRole: 'admin',
+      action: 'employee.activation_code_reissued',
+      entityType: 'user',
+      entityId: targetUserId,
+      newValues: { activation_code_expires_at: activation.expiresAt.toISOString() },
+      meta,
+    });
+    return {
+      activation_code: activation.code,
+      activation_code_expires_at: activation.expiresAt.toISOString(),
+    };
   }
 
   async list(query: ListEmployeesQueryDto): Promise<{ items: EmployeeResponseDto[]; meta: { page: number; per_page: number; total: number } }> {

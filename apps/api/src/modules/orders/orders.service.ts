@@ -58,6 +58,7 @@ import { CrewShortageEscalationService } from './crew-shortage-escalation.servic
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { PromoCodesService } from '../promotions/promo-codes.service';
+import { User } from '../auth/entities/user.entity';
 import {
 } from './booking-match-context';
 
@@ -213,6 +214,12 @@ export class OrdersService {
   private get creationFlow(): OrderCreationService {
     return (this.creationFlowInstance ??= new OrderCreationService(
       this.orders,
+      // بوابة تحقّق الرقم عند أول طلب (ADR-0112) — محتاجة `users.phone_verified_at`.
+      //
+      // **من الـ`dataSource` الموجود أصلاً، مش باراميتر جديد في الـconstructor**: ٢٣ سبيك بتبني
+      // `OrdersService` بالترتيب، فإضافة باراميتر كانت بتكسرهم كلهم على تفصيلة مالهاش علاقة
+      // باللي بيقيسوه. الـrepository هنا مجاني — نفس الـconnection.
+      this.dataSource.getRepository(User),
       this.dataSource,
       this.customerProfiles,
       this.addressesService,

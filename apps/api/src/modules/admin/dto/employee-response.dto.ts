@@ -1,6 +1,18 @@
 import { User } from '../../auth/entities/user.entity';
 import { EmployeeProfile } from '../entities/employee-profile.entity';
 
+/**
+ * **رد إنشاء الموظف** (ADR-0111) — نفس رد الموظف العادي + كود التنشيط.
+ *
+ * منفصل عن `EmployeeResponseDto` عمدًا: الكود بيرجع في **رد الإنشاء وإعادة الإصدار بس**،
+ * فلو كان حقلًا اختياريًا على النوع العادي كان أي `GET /admin/employees` هيبان كأنه ممكن
+ * يحمله — وده بالظبط نوع اللبس اللي بيخلي حد يفكر إنه يقدر يقراه تاني بعدين (مش ممكن).
+ */
+export interface CreatedEmployeeResponseDto extends EmployeeResponseDto {
+  activation_code: string;
+  activation_code_expires_at: string;
+}
+
 export interface EmployeeResponseDto {
   user_id: string;
   employee_code: string;

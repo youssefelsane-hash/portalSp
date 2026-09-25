@@ -577,3 +577,35 @@ Future<List<String>> _psql(String sql) async {
   return (result.stdout as String).trim().split('\n').where((line) => line.trim().isNotEmpty).toList();
 }
 
+
+/// محادثة الطلب بعد ما فني يقبله — **بانتظار محدود**، مش نداء واحد.
+///
+/// **بَقّة اختبار حقيقية اتلقطت تحت حمل كامل (2026-09-25)**: `chat_live_test` و
+/// `chat_image_live_test` كانوا بيتأكدوا إن حالة الطلب بقت `accepted` وبعدها **فورًا** بيجيبوا
+/// المحادثة. بس المحادثة بيعملها **مستمع حدث** بيتفاعل مع القبول — يعني أثر جانبي
+/// eventually-consistent، مش جزء من نفس الـtransaction. القبول بيكون متثبّت في القاعدة والمستمع
+/// لسه ما اشتغلش، فالنداء بيرجع `404 «مفيش محادثة للطلب ده لسه»`.
+///
+/// الملفين كانوا بيعدّوا لوحدهم وبيسقطوا بالتبادل في التشغيلة الكاملة (١٢٣ اختبار) — علامة
+/// سباق توقيت، مش كسر حقيقي. نفس النمط المستخدم في `technician_profile_live_test` للتوزيع.
+///
+/// **ملحوظة للتطبيق نفسه**: نفس الـ404 ممكن يشوفه عميل حقيقي بيدوس على «محادثة» بعد ثانية من
+/// ما شاف «اتقبل». الشاشة لازم تتعامل معاه كـ«جاري التحضير» مش كخطأ.
+Future<Map<String, dynamic>> waitForOrderChatThread(
+  String orderId,
+  String accessToken, {
+  int attempts = 25,
+  Duration interval = const Duration(milliseconds: 400),
+}) async {
+  Object? lastError;
+  for (var attempt = 0; attempt < attempts; attempt++) {
+    try {
+      final thread = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: accessToken);
+      if (thread != null) return thread;
+    } catch (err) {
+      lastError = err;
+    }
+    await Future<void>.delayed(interval);
+  }
+  throw StateError('محادثة الطلب $orderId ما اتعملتش خلال ${attempts * interval.inMilliseconds}ms: $lastError');
+}

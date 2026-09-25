@@ -13,6 +13,13 @@ import { Label } from '@/components/ui/label';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { ErrorNotice } from '@/components/notice';
+import { OneTimeCodeDialog } from '@/components/one-time-code-dialog';
+
+/** رد الإنشاء بيحمل كود التنشيط كمان (ADR-0111) — بيرجع مرة واحدة وبس. */
+type CreatedEmployee = EmployeeResponseDto & {
+  activation_code: string;
+  activation_code_expires_at: string;
+};
 
 export default function NewEmployeePage() {
   const { authedFetch, isLoading } = useAuth();
@@ -29,6 +36,7 @@ export default function NewEmployeePage() {
   // يمنحه دور من فورم منفصل).
   const [allRoles, setAllRoles] = useState<RoleResponseDto[] | null>(null);
   const [initialRoleName, setInitialRoleName] = useState('');
+  const [created, setCreated] = useState<CreatedEmployee | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -49,11 +57,14 @@ export default function NewEmployeePage() {
       const body: CreateEmployeeBody = { ...form };
       if (!body.title) delete body.title;
       if (initialRoleName) body.initial_role_name = initialRoleName;
-      const employee = await authedFetch<EmployeeResponseDto>('/admin/employees', {
+      const employee = await authedFetch<CreatedEmployee>('/admin/employees', {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      router.push(`/employees/${employee.user_id}`);
+      // **الكود لازم يتعرض قبل الانتقال** (ADR-0111): بيرجع **مرة واحدة** ومتخزّن مجزّأ، فالانتقال
+      // المباشر للصفحة التفصيلية كان بيضيّعه — والموظف ساعتها مالوش أي طريقة يدخل بيها غير إن
+      // الأدمن يصدر كود تاني. الانتقال بيحصل بعد ما الأدمن يأكّد إنه بعت الكود.
+      setCreated(employee);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -63,9 +74,26 @@ export default function NewEmployeePage() {
 
   return (
     <AppShell>
+      <OneTimeCodeDialog
+        open={created !== null}
+        title="كود تنشيط الموظف"
+        code={created?.activation_code ?? null}
+        testId="employee-activation-code"
+        description={
+          <>
+            الحساب اتعمل، بس الموظف <b>لسه مالوش رمز دخول</b>. ابعتله الكود ده دلوقتي — بيكتبه من
+            شاشة الدخول ← «نسيت رمز الدخول؟» ويختار رمزه بنفسه. صالح ١٥ دقيقة ولمرة واحدة، ومش
+            هتقدر تشوفه تاني. لو ضاع، تقدر تصدر واحد جديد من صفحة الموظف.
+          </>
+        }
+        confirmLabel="بعتّ الكود — كمّل"
+        onConfirm={() => {
+          if (created) router.push(`/employees/${created.user_id}`);
+        }}
+      />
       <PageHeader
         title="إضافة موظف"
-        description="الحساب بيتفعّل فورًا بالدور اللي تختاره — الصلاحيات كلها جاية من الدور مش من الحساب."
+        description="بعد الحفظ هيطلع كود تنشيط تبعته للموظف عشان يحط رمز دخوله بنفسه. الصلاحيات كلها جاية من الدور مش من الحساب."
       />
       <Card className="max-w-lg">
         <form onSubmit={handleSubmit}>

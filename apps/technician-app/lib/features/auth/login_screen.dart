@@ -47,6 +47,9 @@ class _LoginScreenState extends State<LoginScreen> {
   /// ADR-0109 §5)، فربط الاقتراح بالسبب بقى مستحيل. عرضه دايمًا مايسرّبش حاجة لأنه مستقل
   /// تمامًا عن وجود الحساب، وبيمنع الفني الجديد من إنه يتحاصر في شاشة رمز مالوش رمز فيها.
   bool _suggestRegister = false;
+  /// الحساب موجود كعميل ومالوش دور فني (`AUTH_008`) — العرض هنا «ضيف دور الصنايعي»، مش
+  /// «سجّل حساب جديد» (اللي كان بيفشل بـ«الرقم ده مسجل قبل كده»).
+  bool _suggestAddTechnicianRole = false;
 
   @override
   void dispose() {
@@ -73,6 +76,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _pinStep = true;
       _error = null;
       _suggestRegister = false;
+      _suggestAddTechnicianRole = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _pinFocusNode.requestFocus();
@@ -121,6 +125,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _isSubmitting = true;
       _error = null;
       _suggestRegister = false;
+      _suggestAddTechnicianRole = false;
     });
     try {
       final auth = context.read<AuthRepository>();
@@ -140,10 +145,46 @@ class _LoginScreenState extends State<LoginScreen> {
       // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب أسرع طريقة يستهلك بيها
       // الفني محاولاته الخمسة بلا فايدة.
       _pinController.clear();
+      // **`AUTH_008` مش «رمز غلط»** (ADR-0110): الرقم والرمز صح، بس الحساب مالوش دور فني.
+      // فمابنعدّش محاولة (المحاولات للرمز الغلط) ومابنعرضش «سجّل حساب جديد» — بنعرض المخرج الصح.
+      final needsRole = err.code == 'AUTH_008';
       setState(() {
         _error = err.message;
-        _suggestRegister = !_isRegisterMode;
-        _failedAttempts += 1;
+        _suggestAddTechnicianRole = needsRole;
+        _suggestRegister = !_isRegisterMode && !needsRole;
+        if (!needsRole) _failedAttempts += 1;
+      });
+      _pinFocusNode.requestFocus();
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  /// **«عندي حساب عميل وعايز أبقى صنايعي»** (ADR-0110 §7-ب).
+  ///
+  /// الرمز لسه في الخانة لأن `AUTH_008` مش رفض للرمز — فمفيش داعي يكتبه تاني. الباقي في
+  /// `AuthRepository.addTechnicianRole`.
+  Future<void> _addTechnicianRole() async {
+    final pin = _pinController.text.trim();
+    if (pin.isEmpty) {
+      setState(() => _error = 'اكتب رمز الدخول الأول');
+      return;
+    }
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
+    try {
+      await context.read<AuthRepository>().addTechnicianRole(
+            _phoneController.text.trim(),
+            pin,
+          );
+    } catch (errRaw) {
+      final err = ApiException.from(errRaw);
+      _pinController.clear();
+      setState(() {
+        _error = err.message;
+        _suggestAddTechnicianRole = false;
       });
       _pinFocusNode.requestFocus();
     } finally {
@@ -172,6 +213,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _pinConfirmController.clear();
       _error = null;
       _suggestRegister = false;
+      _suggestAddTechnicianRole = false;
     });
   }
 
@@ -184,6 +226,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _fullNameController.clear();
       _error = null;
       _suggestRegister = false;
+      _suggestAddTechnicianRole = false;
     });
   }
 
@@ -347,6 +390,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
+                      ),
+                    ],
+                    if (_suggestAddTechnicianRole) ...[
+                      const SizedBox(height: 4),
+                      AdaptiveTextAction(
+                        key: const ValueKey('login-add-technician-role'),
+                        onPressed: _isSubmitting ? null : _addTechnicianRole,
+                        label: 'عندك حساب عميل بنفس الرقم — ضيف دور الصنايعي عليه',
                       ),
                     ],
                     if (_suggestRegister) ...[

@@ -212,3 +212,31 @@ export const PIN_RESET_MAX_ATTEMPTS = 5;
  * مليارات احتمال، فالتخمين بلا معنى حتى قبل عدّاد المحاولات.
  */
 export const PIN_RESET_CODE_LENGTH = 10;
+
+/**
+ * **سقف تسجيل الحسابات الجديدة لكل IP في الدقيقة** — الافتراضي ٥.
+ *
+ * `POST /auth/pin/register` بقى محسوبًا بالـ**IP** مش بالرقم (تصليب main 61acc31d): التسجيل مفتوح
+ * لأي رقم، فالرقم مايصلحش حد ضد إنشاء حسابات جماعي لأن المهاجم بيغيّره كل طلب. القرار ده صح
+ * ومقصود.
+ *
+ * **بس هو كسر الاختبارات الحية**: كل ملف اختبار حي بيسجّل عميل جديد (عن قصد — عشان مايتشاركوش
+ * حصة throttle على الدخول، تدقيق §148)، والسويت فيها +٢٠ ملف كلهم من `localhost` = **IP واحد**.
+ * فالسويت بتستهلك الخمسة في أول تانيتين وباقي الملفات بتاخد 429 لأسباب مالهاش علاقة باللي
+ * بتقيسه. (`THROTTLE_LIMIT` العام **مابيتخطّاش** سقف الديكوريتور على المسار.)
+ *
+ * الحل: السقف قابل للرفع بمتغيّر بيئة **بره الإنتاج بس**. الدالة نفسها بتفرض ده — البيئات
+ * الإنتاجية بتاخد ٥ دايمًا مهما كانت قيمة المتغيّر، فمفيش طريقة يتسبب ضعف في الإنتاج لا بالغلط
+ * ولا بمتغيّر بيئة مظبوط غلط.
+ */
+export const REGISTRATION_THROTTLE_LIMIT_DEFAULT = 5;
+
+export function registrationThrottleLimit(nodeEnv = process.env.NODE_ENV): number {
+  if (nodeEnv === 'production' || nodeEnv === 'staging') return REGISTRATION_THROTTLE_LIMIT_DEFAULT;
+  const raw = Number(process.env.AUTH_REGISTRATION_THROTTLE_LIMIT);
+  // القيمة الأقل من الافتراضي بتتجاهل عمدًا: المتغيّر ده **للرفع في الاختبار** بس، والتشديد
+  // الحقيقي مكانه الافتراضي نفسه.
+  return Number.isFinite(raw) && raw > REGISTRATION_THROTTLE_LIMIT_DEFAULT
+    ? Math.floor(raw)
+    : REGISTRATION_THROTTLE_LIMIT_DEFAULT;
+}

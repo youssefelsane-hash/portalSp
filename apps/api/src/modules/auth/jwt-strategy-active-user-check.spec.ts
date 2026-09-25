@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from './entities/user.entity';
+import { UserRoleGrant } from './entities/user-role-grant.entity';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة أمنية حقيقية كانت موثّقة صراحة في
 // admin/README.md (مراجعة أمان شاملة 2026-08-13، بند P0-6 في docs/12): JwtStrategy.validate()
@@ -18,14 +19,14 @@ describe('JwtStrategy.validate() — حظر/تعطيل/حذف الحساب يب�
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User],
+      entities: [User, UserRoleGrant],
     });
     await dataSource.initialize();
 
     const configStub = {
       get: (key: string) => (key === 'jwt.accessSecret' ? 'test-access-secret-0123456789' : undefined),
     } as unknown as ConfigService;
-    strategy = new JwtStrategy(configStub, dataSource.getRepository(User));
+    strategy = new JwtStrategy(configStub, dataSource.getRepository(User), dataSource.getRepository(UserRoleGrant));
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const mk = async (label: string, extraCols: string, extraVals: unknown[]) => {

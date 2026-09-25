@@ -45,8 +45,9 @@ void main() {
     // (تفاصيل كاملة فوق `claimOrderAsTechnician`، §148).
     final technicianToken = await claimOrderAsTechnician(orderId, '+201000000015');
 
-    final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: customerToken);
-    final threadId = threadResponse!['id'] as String;
+    // نفس السباق بالظبط (الشرح في `waitForOrderChatThread`).
+    final threadResponse = await waitForOrderChatThread(orderId, customerToken);
+    final threadId = threadResponse['id'] as String;
 
     final socketBaseUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
     final technicianSocket = socket_io.io(

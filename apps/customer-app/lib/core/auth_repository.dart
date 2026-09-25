@@ -199,7 +199,11 @@ class AuthRepository extends ChangeNotifier {
     final data = await apiRequest(
       'POST',
       '/auth/pin/login',
-      body: {'phone_number': phoneNumber, 'pin': pin},
+      // **`role` بيقول للسيرفر التطبيق ده مين** (ADR-0110). الحساب الواحد ممكن يكون عميل
+      // وصنايعي بنفس الرقم، والجلسة لازم تبقى بدور التطبيق اللي فاتح — من غير الحقل ده الجلسة
+      // كانت بتاخد `users.user_type` فيبقى التطبيق نص شغّال. السيرفر **بيتحقق** من المنحة،
+      // فالقيمة دي طلب مش صلاحية.
+      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'customer'},
     );
     await _adoptTokenPair(data!);
   }
@@ -294,6 +298,39 @@ class AuthRepository extends ChangeNotifier {
   }
 
   // نداء API موثّق — لو access_token منتهي (401)، يجرّب refresh (single-flight) مرة واحدة ويعيد المحاولة.
+  // ── تأكيد رقم الموبايل عند أول طلب (ADR-0112) ───────────────────────────
+  //
+  // المفتاح مقفول افتراضيًا، فالمسارات دي عمرها ما بتتنادى لحد ما الأدمن يفعّل الخاصية —
+  // والتطبيق بيعرف ده من رفض `AUTH_009` على إنشاء الطلب، مش من فحص مسبق على كل حجز.
+
+  /// بيطلب كود التأكيد. `newPhoneNumber` + `pin` = العميل بيصحّح رقمه (عاملين مستقلين).
+  /// بيرجّع الرقم اللي الكود اتبعت له فعلاً عشان الشاشة تعرضه.
+  Future<String> requestPhoneVerification({String? newPhoneNumber, String? pin}) async {
+    final data = await authedRequest(
+      'POST',
+      '/auth/phone/verification/request',
+      body: {
+        'new_phone_number': ?newPhoneNumber,
+        'pin': ?pin,
+      },
+    );
+    return (data?['target_phone_number'] as String?) ?? '';
+  }
+
+  /// بيأكّد الكود. لو `newPhoneNumber` موجود، رقم الحساب بيتغيّر في نفس العملية.
+  /// بعد النجاح `/auth/me` بيتحدّث عشان الشاشات تشوف الرقم الجديد فورًا.
+  Future<void> confirmPhoneVerification({required String otpCode, String? newPhoneNumber}) async {
+    await authedRequest(
+      'POST',
+      '/auth/phone/verification/confirm',
+      body: {
+        'otp_code': otpCode,
+        'new_phone_number': ?newPhoneNumber,
+      },
+    );
+    await _fetchMe();
+  }
+
   Future<Map<String, dynamic>?> authedRequest(
     String method,
     String path, {

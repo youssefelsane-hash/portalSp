@@ -29,6 +29,7 @@ import 'orders_repository.dart';
 import 'qr_code_scan_screen.dart';
 import '../technicians/technicians_repository.dart';
 import 'schedule_selection_screen.dart';
+import '../auth/phone_verification_sheet.dart';
 
 class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
@@ -1127,6 +1128,29 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
+
+      // **تأكيد الرقم قبل أول طلب** (ADR-0112): ده **مش خطأ في الحجز** — البيانات كلها سليمة،
+      // والسيرفر بس عايز يتأكد إن الرقم واصل. فبدل ما نعرض رسالة رفض، بنفتح الـsheet على نفس
+      // الشاشة (الحجز محفوظ وراها) ونعيد المحاولة بعد التأكيد.
+      //
+      // إعادة المحاولة بنفس `_orderIdempotencyKey` **سليمة**: الرفض حصل **قبل** أي كتابة
+      // (البوابة أول فحص في `OrderCreationService.create`)، فمفيش طلب اتعمل ولا نسخة بتتولّد.
+      if (err.code == 'AUTH_009' && mounted) {
+        final verified = await PhoneVerificationSheet.show(
+          context,
+          currentPhone: context.read<AuthRepository>().user?.phoneNumber ?? '',
+        );
+        if (!mounted) return;
+        if (verified) {
+          setState(() => _submitting = false);
+          await _submit();
+          return;
+        }
+        // قفلها من غير تأكيد — رسالة واضحة إن الحجز مستنّي خطوة واحدة، مش فشل.
+        setState(() => _error = 'محتاجين تأكيد رقم موبايلك قبل أول طلب — جرّب تاني لما تكون جاهز.');
+        return;
+      }
+
       if (mounted) setState(() => _error = err.message);
     } finally {
       if (mounted) setState(() => _submitting = false);

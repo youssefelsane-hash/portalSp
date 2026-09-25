@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
+import { AccountRolesService } from './account-roles.service';
+import { UserRoleGrant } from './entities/user-role-grant.entity';
 
 /**
  * Script 7 Phase 1 — إدارة الحساب الذاتية (GET/PATCH/DELETE /auth/me، POST /auth/logout،
@@ -32,7 +34,7 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, RefreshToken, Wallet],
+      entities: [User, RefreshToken, Wallet, UserRoleGrant],
     });
     await dataSource.initialize();
 
@@ -65,6 +67,9 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
       // ADR-0109 — `auth.login_method`. الـspecs دي مكتوبة على مسار الـOTP، فالـstub
       // بيرجّع 'otp' عشان سلوكها يفضل زي ما هو بالحرف.
       { getString: async () => 'otp' } as never,
+      // ADR-0110 — خدمة حقيقية على نفس الـdataSource: مسار التسجيل بيمنح دور فعلاً، وstub
+      // فاضي كان هيخلي الاختبار يعدّي على حساب بلا منحة (وهو حساب مايعرفش يدخل تاني).
+      new AccountRolesService(dataSource.getRepository(UserRoleGrant), dataSource),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

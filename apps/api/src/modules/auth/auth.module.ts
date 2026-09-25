@@ -15,6 +15,8 @@ import { OtpCode } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { StepUpToken } from './entities/step-up-token.entity';
 import { PinResetToken } from './entities/pin-reset-token.entity';
+import { UserRoleGrant } from './entities/user-role-grant.entity';
+import { AccountRolesService } from './account-roles.service';
 import { User } from './entities/user.entity';
 import { WebAuthnChallenge } from './entities/webauthn-challenge.entity';
 import { WebAuthnCredential } from './entities/webauthn-credential.entity';
@@ -25,6 +27,7 @@ import { StepUpService } from './step-up.service';
 import { WebAuthnController } from './webauthn.controller';
 import { WebAuthnService } from './webauthn.service';
 import { SettingsModule } from '../settings/settings.module';
+import { PhoneVerificationService } from './phone-verification.service';
 
 @Module({
   imports: [
@@ -38,6 +41,7 @@ import { SettingsModule } from '../settings/settings.module';
       StepUpToken,
       PinResetToken,
       Wallet,
+      UserRoleGrant,
     ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}), // الأسرار والصلاحية بيتحددوا لحظة التوقيع في AuthService، مش هنا
@@ -48,9 +52,9 @@ import { SettingsModule } from '../settings/settings.module';
     SettingsModule, // SettingsService — مفتاح `auth.login_method` (ADR-0109 §7). مفيش دورة: SettingsModule مابيستوردش AuthModule.
   ],
   controllers: [AuthController, WebAuthnController, SessionsController, AdminMfaController],
-  providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService],
+  providers: [AuthService, JwtStrategy, MfaPolicyService, WebAuthnService, StepUpService, AccountRolesService, PhoneVerificationService],
   // StepUpService لازم يتصدّر — StepUpGuard مسجّل كـAPP_GUARD عالمي في AppModule نفسه (زي
   // PermissionsGuard/PermissionsService)، فمحتاج يلاقي الـprovider ده في سياق موديول متصدّر.
-  exports: [AuthService, StepUpService],
+  exports: [AuthService, StepUpService, AccountRolesService, PhoneVerificationService],
 })
 export class AuthModule {}

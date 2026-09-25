@@ -10,6 +10,8 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
+import { AccountRolesService } from './account-roles.service';
+import { UserRoleGrant } from './entities/user-role-grant.entity';
 
 describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
   let dataSource: DataSource;
@@ -68,7 +70,7 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, Wallet],
+      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, Wallet, UserRoleGrant],
     });
     await dataSource.initialize();
 
@@ -88,6 +90,9 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
       // ADR-0109 — `auth.login_method`. الـspecs دي مكتوبة على مسار الـOTP، فالـstub
       // بيرجّع 'otp' عشان سلوكها يفضل زي ما هو بالحرف.
       { getString: async () => 'otp' } as never,
+      // ADR-0110 — خدمة حقيقية على نفس الـdataSource: مسار التسجيل بيمنح دور فعلاً، وstub
+      // فاضي كان هيخلي الاختبار يعدّي على حساب بلا منحة (وهو حساب مايعرفش يدخل تاني).
+      new AccountRolesService(dataSource.getRepository(UserRoleGrant), dataSource),
     );
   });
 

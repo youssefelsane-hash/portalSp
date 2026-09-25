@@ -197,9 +197,35 @@ class AuthRepository extends ChangeNotifier {
     final data = await apiRequest(
       'POST',
       '/auth/pin/login',
-      body: {'phone_number': phoneNumber, 'pin': pin},
+      // **`role` بيقول للسيرفر التطبيق ده مين** (ADR-0110). الحساب الواحد ممكن يكون عميل
+      // وصنايعي بنفس الرقم، والجلسة لازم تبقى بدور التطبيق اللي فاتح — من غير الحقل ده الجلسة
+      // كانت بتاخد `users.user_type` فيبقى التطبيق نص شغّال. السيرفر **بيتحقق** من المنحة،
+      // فالقيمة دي طلب مش صلاحية.
+      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'technician'},
     );
     await _adoptTokenPair(data!);
+  }
+
+  /// **إضافة دور الصنايعي لحساب عميل موجود** (ADR-0110 §7-ب).
+  ///
+  /// ده مسار «أنا عميل عندكم وعايز أشتغل صنايعي». الباك-إند رفض الدخول بـ`AUTH_008` لأن الحساب
+  /// موجود بس مالوش دور فني، والشاشة بتعرض الاختيار ده بدل «سجّل حساب جديد» (اللي كان بيفشل
+  /// بـ«الرقم ده مسجل قبل كده» — طريق مسدود).
+  ///
+  /// تلات خطوات، كلها متحقَّق منها من السيرفر:
+  ///   ١) دخول بدور **العميل** — نفس الرمز اللي المستخدم كتبه للتو، فمفيش أي ثقة جديدة بتتمنح.
+  ///   ٢) `POST /auth/roles/technician` — بينشئ بروفايل `pending` ويبدأ التوثيق.
+  ///   ٣) دخول تاني بدور **الصنايعي**، وهو اللي بيطلّع جلسة بالدور الجديد.
+  ///
+  /// الخطوة (٣) منفصلة عمدًا: منح الدور مابيوسّعش جلسة قايمة، فتوكن مسروق مايرقّي نفسه.
+  Future<void> addTechnicianRole(String phoneNumber, String pin) async {
+    await apiRequest(
+      'POST',
+      '/auth/pin/login',
+      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'customer'},
+    ).then((data) => _adoptTokenPair(data!));
+    await apiRequest('POST', '/auth/roles/technician', accessToken: _accessToken);
+    await loginWithPin(phoneNumber, pin);
   }
 
   /// تسجيل فني جديد برمز.

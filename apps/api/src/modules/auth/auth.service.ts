@@ -1,11 +1,8 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  PIN_BCRYPT_ROUNDS,
   hashPin,
   pinHashNeedsUpgrade,
   pinDummyHash,
-  PIN_RESET_CODE_LENGTH,
-  PIN_RESET_CODE_TTL_MINUTES,
   PIN_RESET_MAX_ATTEMPTS,
   lockoutMinutesFor,
   lockRemainingTextAr,
@@ -21,7 +18,7 @@ import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { DataSource, EntityManager, IsNull, LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { isProductionLikeEnv } from '../../config/env.validation';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
@@ -41,8 +38,11 @@ import { PROMO_LINK_CAPTURED_EVENT, PromoLinkCapturedEvent } from '../../common/
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { PinResetToken } from './entities/pin-reset-token.entity';
+import { issuePinSetupCode } from './pin-setup';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
+import { AccountRole } from './entities/user-role-grant.entity';
+import { AccountRolesService, consumerRoleOf, ResolvedActiveRole } from './account-roles.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -73,7 +73,8 @@ export interface MfaRequiredResponse {
 
 export type LoginResult = TokenPair | MfaRequiredResponse;
 
-const OTP_CODE_LENGTH = 6;
+/** متصدّر عشان DTOs التحقّق تقيس بنفس الرقم — تكرار `6` في مكانين هو إزاي طول يتغيّر في واحد بس. */
+export const OTP_CODE_LENGTH = 6;
 // §106 — كام كود ملغي بنراجعه عشان نقول للمستخدم «ده كود قديم» بدل «كود غلط».
 const SUPERSEDED_OTP_LOOKBACK = 3;
 const BCRYPT_SALT_ROUNDS = 10;
@@ -104,6 +105,7 @@ export class AuthService {
     private readonly webAuthn: WebAuthnService,
     private readonly notificationRouting: NotificationRoutingService,
     private readonly settingsService: SettingsService,
+    private readonly accountRoles: AccountRolesService,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
@@ -120,12 +122,31 @@ export class AuthService {
         HttpStatus.GONE,
       );
     }
+    return this.issueOtpCode(dto.phone_number, dto.purpose, requestIp);
+  }
+
+  /**
+   * **نواة إصدار كود الـOTP** — القفل، إبطال الأقدم، الحفظ، اللوج، والإرسال.
+   *
+   * اتطلّعت من `requestOtp` عشان `PhoneVerificationService` (ADR-0112) يستخدم **نفس** الدورة
+   * بالحرف بلا ما يعيد أي جزء منها. الفرق الوحيد بين المسارين هو **البوابة قبل النداء ده**:
+   *   - `requestOtp` (عام): بوابة `auth.login_method` — بترفض بـ`410` لما الدخول بقى بالرمز.
+   *   - التحقّق من الرقم: بوابة مفتاح الأدمن + إن الحساب محتاج تحقّق فعلاً.
+   *
+   * **المسار العام مافتحش**: `POST /auth/otp/request` لسه مقفول زي ما هو. النداء ده داخلي
+   * (`public` عشان خدمة في نفس الموديول تشوفه)، فمفيش سطح هجوم جديد اتضاف.
+   */
+  async issueOtpCode(
+    phoneNumber: string,
+    purpose: OtpPurpose,
+    requestIp: string | null,
+  ): Promise<{ expires_in_seconds: number }> {
     // **وضع اختبار Google Play** (docs/08 §173، `otp-test-mode.ts`) — النقطة **الوحيدة** في
     // المشروع اللي الوضع ده بيأثر فيها. بيغيّر حاجتين وبس: الكود المولَّد، وإرسال الـSMS.
     // مسار التحقق تحت مافيهوش ولا فرع ليه، فكل حمايات الـOTP بتفضل سارية بالبناء.
     // القرار كله من بيئة السيرفر — مفيش أي حاجة الـclient بيبعتها بتدخل في الحساب ده.
     const testMode = readOtpTestMode(this.config);
-    const useFixedCode = usesFixedOtp(testMode, dto.phone_number);
+    const useFixedCode = usesFixedOtp(testMode, phoneNumber);
     const code = useFixedCode
       ? testMode.fixedCode
       : String(randomInt(0, 1_000_000)).padStart(OTP_CODE_LENGTH, '0');
@@ -137,18 +158,18 @@ export class AuthService {
       // Serialize resends for the same challenge so two concurrent requests cannot
       // both leave a valid code behind. Only the newest issued code remains usable.
       await manager.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
-        dto.phone_number,
-        dto.purpose,
+        phoneNumber,
+        purpose,
       ]);
       const otpCodes = manager.getRepository(OtpCode);
       await otpCodes.update(
-        { phoneNumber: dto.phone_number, purpose: dto.purpose, isUsed: false },
+        { phoneNumber: phoneNumber, purpose: purpose, isUsed: false },
         { isUsed: true, usedAt: new Date() },
       );
       const otp = otpCodes.create({
-        phoneNumber: dto.phone_number,
+        phoneNumber: phoneNumber,
         codeHash,
-        purpose: dto.purpose,
+        purpose: purpose,
         attemptsCount: 0,
         maxAttempts,
         isUsed: false,
@@ -177,10 +198,10 @@ export class AuthService {
       // إضافة بتتحط قبل السهم مش بعده.
       const validUntil = new Date(Date.now() + expiryMinutes * 60_000).toISOString().slice(11, 19);
       // eslint-disable-next-line no-console
-      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
+      console.log(`[OTP] ${phoneNumber} (${purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
     } else {
-      const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
-      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
+      const masked = phoneNumber.length > 7 ? `${phoneNumber.slice(0, 5)}***${phoneNumber.slice(-2)}` : '***';
+      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${purpose})`);
     }
 
     // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة SMS حقيقية اتبنت
@@ -192,7 +213,7 @@ export class AuthService {
     // هنا هو الضمان: مفيش مسار بديل بيوصل للمزوّد.
     if (useFixedCode) {
       this.logger.warn(
-        `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${dto.purpose}).`,
+        `[OTP] وضع اختبار OTP مفعّل — كود ثابت اتصدر بلا SMS (${purpose}).`,
       );
       return { expires_in_seconds: expiryMinutes * 60 };
     }
@@ -213,7 +234,7 @@ export class AuthService {
     // محليًا بالكامل. في الإنتاج بس هو اللي بيبقى ثقب حقيقي.
     if (!this.smsDispatcher.isConfigured && isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
       this.logger.error(
-        `بوابة SMS مش مُجهّزة ومسار الـOTP مطلوب — الطلب اترفض بدل ما يرجّع نجاح كداب (${dto.purpose}).`,
+        `بوابة SMS مش مُجهّزة ومسار الـOTP مطلوب — الطلب اترفض بدل ما يرجّع نجاح كداب (${purpose}).`,
       );
       throw new ApiException(
         ErrorCode.SYS_001,
@@ -243,7 +264,7 @@ export class AuthService {
       titleAr: 'أسطى',
       bodyAr: `كود التحقق: ${code} — صالح ${expiryMinutes} دقايق. متشاركوش الكود مع حد.`,
       deepLink: null,
-      targets: [dto.phone_number],
+      targets: [phoneNumber],
       notificationType: 'otp',
     });
     if (!result.delivered) {
@@ -252,14 +273,15 @@ export class AuthService {
       // فوق؛ لو السطر ده احتوى على "OTP" برضه هيتطابق بالغلط بدل السطر الصح (مفيش "→" فيه أصلاً)
       // ويرجّع كود فاضي. بَقّة حقيقية اتلقطت واتصلحت أثناء بناء شاشة الشكاوى (اختبار bash فشل
       // فجأة في استخراج الكود من اللوج بعد ما الميزة دي اتضافت).
-      this.logger.warn(`فشل إرسال كود التحقق بـ SMS لـ ${dto.phone_number}: ${result.failureReason}`);
+      this.logger.warn(`فشل إرسال كود التحقق بـ SMS لـ ${phoneNumber}: ${result.failureReason}`);
     }
 
     return { expires_in_seconds: expiryMinutes * 60 };
   }
 
   /** بيتحقق من الكود، يزوّد العدّاد، ويرجّع صف الـ OTP المطابق أو يرمي AUTH_003/AUTH_004. */
-  private async consumeOtp(phoneNumber: string, code: string, purpose: OtpPurpose): Promise<OtpCode> {
+  /** `public` عشان `PhoneVerificationService` يستهلك كود التحقّق بنفس العدّاد والقفل بالظبط. */
+  async consumeOtp(phoneNumber: string, code: string, purpose: OtpPurpose): Promise<OtpCode> {
     const result = await this.dataSource.transaction((manager) =>
       this.consumeOtpLocked(phoneNumber, code, purpose, manager),
     );
@@ -415,7 +437,15 @@ export class AuthService {
       });
       await users.save(user);
       await this.provisionAccountBaseline(user, manager);
-      const tokens = await this.issueTokenPair(user, ip, ['otp'], undefined, manager);
+      const role = consumerRoleOf(user.userType);
+      const tokens = await this.issueTokenPair(
+        user,
+        ip,
+        ['otp'],
+        undefined,
+        manager,
+        role ? { activeRole: role, grantedRoles: [role] } : undefined,
+      );
       return { user, referrer, tokens };
     });
     if ('error' in registration) throw registration.error;
@@ -448,6 +478,13 @@ export class AuthService {
       walletOwnerType = WalletOwnerType.TECHNICIAN;
     }
     await manager.getRepository(Wallet).save({ ownerUserId: user.id, ownerType: walletOwnerType });
+
+    // **منحة الدور جوّه نفس الدالة** (ADR-0110): كل مسارات التسجيل (OTP والرمز) بتمر من هنا،
+    // فحساب جديد بلا منحة مستحيل — وهو اللي كان هيخلي أول دخول بعد التسجيل يترفض.
+    const role = consumerRoleOf(user.userType);
+    if (role) {
+      await this.accountRoles.grantRole(user, role, { reason: 'registration', manager });
+    }
   }
 
   private assertUserAvailable(user: User): void {
@@ -469,6 +506,12 @@ export class AuthService {
     user.lastLoginIp = ip;
     await this.users.save(user);
 
+    // نفس قرار الدور بالظبط اللي `loginWithPin` بياخده (ADR-0110) — مسار الـOTP مايبقاش باب
+    // خلفي بيتخطّى فحص المنحة.
+    const role = await this.accountRoles.resolveActiveRole(user, dto.role, {
+      autoProvision: (granted, manager) => this.provisionRoleBaseline(user, granted, manager),
+    });
+
     // MFA إجباري لأي حساب High-Privilege (ADR-0011، docs/08 §14) — فحص حي، صفر تغيير سلوكي
     // لأي حساب تاني (الغالبية العظمى). لو مطلوب، التوكن النهائي ميتصدرش هنا خالص.
     if (await this.mfaPolicy.userRequiresMfa(user.id)) {
@@ -480,7 +523,7 @@ export class AuthService {
       };
     }
 
-    return this.issueTokenPair(user, ip, ['otp'], dto);
+    return this.issueTokenPair(user, ip, ['otp'], dto, undefined, role);
   }
 
   // ── MFA (ADR-0011) ───────────────────────────────────────────────────
@@ -581,16 +624,27 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  /**
+   * @param role الدور النشط للجلسة (ADR-0110). `undefined` = استخدم `user.userType` — ده مسار
+   *   الموظفين ولوحة التحكم، وكمان أي مسار دخول مش استهلاكي (Passkey، استعادة). التوكن ساعتها
+   *   مطابق حرفيًا لسلوك ما قبل ADR-0110.
+   */
   private async issueTokenPair(
     user: User,
     ip: string | null,
     amr: ('otp' | 'pin' | 'webauthn')[],
     device?: DeviceMetadataDto,
     manager?: EntityManager,
+    role?: ResolvedActiveRole,
   ): Promise<TokenPair> {
     const accessExpiresIn = this.config.get<string>('jwt.accessExpiresIn')!;
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, userType: user.userType, amr },
+      {
+        sub: user.id,
+        userType: role?.activeRole ?? user.userType,
+        ...(role ? { roles: [...role.grantedRoles] } : {}),
+        amr,
+      },
       { secret: this.config.get<string>('jwt.accessSecret'), expiresIn: accessExpiresIn },
     );
 
@@ -608,6 +662,7 @@ export class AuthService {
       devicePlatform: device?.device_platform ?? null,
       lastSeenAt: now,
       amr,
+      activeRole: role?.activeRole ?? null,
       isRevoked: false,
       expiresAt: new Date(Date.now() + parseDurationToMs(refreshExpiresIn)),
     });
@@ -666,9 +721,26 @@ export class AuthService {
       existing.lastSeenAt = new Date();
       await manager.save(existing);
 
+      // **التدوير مابيوسّعش الصلاحية** (ADR-0110 §5): الجلسة بترجع بنفس الدور النشط بالظبط،
+      // و**المنحة بتتأكد تاني** — فسحب دور من الأدمن بيسقط الجلسة من أول تدوير بدل ما يستنى
+      // انتهاء التوكن. من غير ده، مستخدم عنده الدورين يدوّر جلسة تطبيق العميل ويرجع بدور
+      // الصنايعي حسب `users.user_type`.
+      let role: ResolvedActiveRole | undefined;
+      if (existing.activeRole) {
+        const grantedRoles = await this.accountRoles.listRoles(user.id, manager);
+        if (!grantedRoles.includes(existing.activeRole)) {
+          throw new ApiException(
+            ErrorCode.AUTH_001,
+            'الدور بتاع الجلسة دي مبقى متاح للحساب، سجّل دخول تاني',
+            HttpStatus.UNAUTHORIZED,
+          );
+        }
+        role = { activeRole: existing.activeRole, grantedRoles };
+      }
+
       // amr بيتنقل من الجلسة القديمة (ADR-0011) — لو المستخدم أثبت هويته بـwebauthn قبل كده،
       // الجلسات الجديدة الناتجة من refresh() تفضل عارفة ده مش ترجع لـotp بس بصمت.
-      return this.issueTokenPair(user, ip, existing.amr, device, manager);
+      return this.issueTokenPair(user, ip, existing.amr, device, manager, role);
     });
   }
 
@@ -781,7 +853,15 @@ export class AuthService {
       });
       await users.save(user);
       await this.provisionAccountBaseline(user, manager);
-      const tokens = await this.issueTokenPair(user, ip, ['pin'], dto, manager);
+      const role = consumerRoleOf(user.userType);
+      const tokens = await this.issueTokenPair(
+        user,
+        ip,
+        ['pin'],
+        dto,
+        manager,
+        role ? { activeRole: role, grantedRoles: [role] } : undefined,
+      );
       return { user, referrer, tokens };
     });
 
@@ -934,6 +1014,12 @@ export class AuthService {
     if ('error' in outcome) throw outcome.error;
     const { user } = outcome;
 
+    // **الدور بيتحدد بعد ما الرمز يتأكد** (ADR-0110): التطبيق أعلن هو مين، والسيرفر بيتحقق.
+    // الترتيب مهم — لو الفحص قبل الرمز، «الحساب ده إداري» كانت هتبقى أوراكل لأي حد بيخمّن أرقام.
+    const role = await this.accountRoles.resolveActiveRole(user, dto.role, {
+      autoProvision: (granted, manager) => this.provisionRoleBaseline(user, granted, manager),
+    });
+
     if (await this.mfaPolicy.userRequiresMfa(user.id)) {
       const hasCredential = await this.webAuthn.hasAnyCredential(user.id);
       return {
@@ -943,7 +1029,60 @@ export class AuthService {
       };
     }
 
-    return this.issueTokenPair(user, ip, ['pin'], dto);
+    return this.issueTokenPair(user, ip, ['pin'], dto, undefined, role);
+  }
+
+  /**
+   * منح دور صريح لحساب موجود — مسار «عميل عايز يبقى صنايعي» (ADR-0110 §7-ب).
+   *
+   * الدور ده **بيتحقّق منه** (KYC، مستندات، اعتماد أدمن) فمابيتمنحش تلقائيًا زي دور العميل:
+   * النداء ده بينشئ بروفايل فني `pending` ويبدأ التوثيق. الجلسة الحالية **مابتتوسّعش** — التوكن
+   * الجاي لسه بدور العميل، والمستخدم لازم يعمل دخول من تطبيق الفني عشان ياخد جلسة بالدور الجديد.
+   * كده منح الدور وتفعيله خطوتين منفصلتين، وتوكن مسروق مايترقّاش نفسه.
+   */
+  async requestConsumerRole(userId: string, role: AccountRole): Promise<{ role: AccountRole; granted: boolean }> {
+    return this.dataSource.transaction(async (manager) => {
+      const user = await manager.findOne(User, { where: { id: userId } });
+      if (!user) throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
+      this.assertUserAvailable(user);
+
+      if (await this.accountRoles.hasRole(userId, role, manager)) {
+        return { role, granted: false };
+      }
+      await this.accountRoles.grantRole(user, role, { reason: 'self_service', manager });
+      await this.provisionRoleBaseline(user, role, manager);
+      return { role, granted: true };
+    });
+  }
+
+  /**
+   * بينشئ السجلات الأساسية للدور الجديد لو مش موجودة — بروفايل الدور والمحفظة.
+   *
+   * **المحفظة واحدة للشخص** مهما كان عنده دور واحد أو الدورين (ADR-0110 §8): هي فلوسه، والفصل
+   * على مستوى الدور مش على مستوى الرصيد. فلو عنده محفظة بالفعل مابنعملش تانية.
+   */
+  private async provisionRoleBaseline(user: User, role: AccountRole, manager: EntityManager): Promise<void> {
+    if (role === AccountRole.CUSTOMER) {
+      const profiles = manager.getRepository(CustomerProfile);
+      if (!(await profiles.findOne({ where: { userId: user.id } }))) {
+        await profiles.save({ userId: user.id });
+      }
+    } else {
+      const profiles = manager.getRepository(TechnicianProfile);
+      if (!(await profiles.findOne({ where: { userId: user.id } }))) {
+        const [{ next_technician_code: technicianCode }] = await manager.query<{ next_technician_code: string }[]>(
+          'SELECT next_technician_code()',
+        );
+        await profiles.save({ userId: user.id, technicianCode });
+      }
+    }
+    const wallets = manager.getRepository(Wallet);
+    if (!(await wallets.findOne({ where: { ownerUserId: user.id } }))) {
+      await wallets.save({
+        ownerUserId: user.id,
+        ownerType: role === AccountRole.CUSTOMER ? WalletOwnerType.CUSTOMER : WalletOwnerType.TECHNICIAN,
+      });
+    }
   }
 
   /**
@@ -1012,27 +1151,9 @@ export class AuthService {
     // **الكود ده هو اللي بيقفل الفجوة.** مسح الرمز لوحده كان بيسيب المستخدم في طريق مسدود تام:
     // مايقدرش يدخل (مفيش رمز)، ومايقدرش يستخدم `POST /auth/pin` (محتاج جلسة، وكل جلساته
     // اتلغت في نفس السطر تحت)، ومفيش SMS خلاص. الاسترجاع كان بيقفل الحساب بدل ما يفتحه.
-    const code = Array.from({ length: PIN_RESET_CODE_LENGTH }, () => randomInt(0, 10)).join('');
-    const expiresAt = new Date(Date.now() + PIN_RESET_CODE_TTL_MINUTES * 60_000);
-
-    await this.dataSource.transaction(async (manager) => {
-      await manager.update(
-        User,
-        { id: userId },
-        { pinHash: null, pinSetAt: null, pinFailedAttempts: 0, pinLockedUntil: null },
-      );
-      // إصدار كود جديد **بيبطّل** كل الأكواد الحية القديمة — مايبقاش فيه تصريحين حيين على نفس
-      // الحساب، وإلا كود قديم من مكالمة سابقة يفضل صالح بلا علم حد.
-      await manager.softDelete(PinResetToken, { userId, usedAt: IsNull() });
-      await manager.save(
-        manager.create(PinResetToken, {
-          userId,
-          codeHash: await bcrypt.hash(code, PIN_BCRYPT_ROUNDS),
-          expiresAt,
-          issuedByUserId: adminUserId,
-        }),
-      );
-    });
+    const { code, expiresAt } = await this.dataSource.transaction((manager) =>
+      issuePinSetupCode(manager, { userId, issuedByUserId: adminUserId, clearExistingPin: true }),
+    );
 
     await this.revokeAllUserTokens(userId, `استرجاع رمز الدخول بواسطة الأدمن ${adminUserId}`);
     // الكود بيرجع **مرة واحدة** للأدمن عشان يقوله للعميل في المكالمة. نفس نمط أكواد استرجاع

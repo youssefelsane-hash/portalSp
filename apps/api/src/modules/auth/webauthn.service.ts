@@ -69,7 +69,26 @@ export class WebAuthnService {
       attestationType: 'none',
       // discoverable credential (resident key) — عشان الدخول السريع اليومي بـPasskey بس
       // (بدون OTP الأول) يبقى ممكن، السيرفر يقدر يعرف هوية المستخدم من الـcredential نفسه.
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: {
+        // `residentKey: 'required'` = discoverable credential. ده اللي بيخلّي **الدخول من موبايل
+        // بمسح QR** يشتغل (hybrid transport) وكمان الدخول السريع بلا كتابة رقم.
+        residentKey: 'required',
+        // **`'required'` مش `'preferred'`** (ADR-0111).
+        //
+        // `'preferred'` كانت بتقول للمتصفح «التحقق من المستخدم اختياري»، بينما
+        // `verifyRegistrationResponse` بيفرض `requireUserVerification: true` **افتراضيًا** في
+        // @simplewebauthn/server v13. النتيجة تفاوت حقيقي: على أي جهاز/متصفح بياخد
+        // `'preferred'` بمعنى «اتخطاه»، السيريمونى بتخلص عند العميل وبعدين **السيرفر يرفضها**
+        // برسالة عامة «فشل التحقق من الـPasskey» ومفيش أي مخرج مفهوم للمستخدم. وده بالظبط
+        // «الباسكي مش شغال على الأجهزة الضعيفة».
+        //
+        // مع `'required'` المتصفح **بيطلب البصمة/الـPIN من الأول**، فالسلوك مطابق للي السيرفر
+        // بيفرضه، والأدمن عالي الصلاحية مايقدرش يسجّل Passkey بلمسة بس.
+        //
+        // **مش بيقفل الأجهزة الضعيفة**: مفيش `authenticatorAttachment` مقيّد، فجهاز بلا بصمة
+        // لسه بيقدر يستخدم (أ) QR لموبايل والبصمة تحصل على الموبايل، أو (ب) مفتاح أمان بـPIN.
+        userVerification: 'required',
+      },
       excludeCredentials: existingCredentials.map((c) => ({ id: c.credentialId, transports: c.transports ?? undefined })),
     });
 
@@ -85,6 +104,9 @@ export class WebAuthnService {
       expectedChallenge: challenge,
       expectedOrigin: this.origin,
       expectedRPID: this.rpId,
+      // **صريحة مش اعتمادًا على الافتراضي**: v13 افتراضيها `true`، بس ترقية مكتبة تقدر تغيّرها
+      // وساعتها Passkey بلا بصمة يبقى مقبول في صمت — وده أسوأ نوع انحدار أمني.
+      requireUserVerification: true,
     });
 
     if (!verification.verified || !verification.registrationInfo) {
@@ -129,7 +151,10 @@ export class WebAuthnService {
     const options = await generateAuthenticationOptions({
       rpID: this.rpId,
       allowCredentials,
-      userVerification: 'preferred',
+      // **`'required'`** — نفس السبب بالحرف بتاع التسجيل فوق: `verifyAuthenticationResponse`
+      // بيفرض `requireUserVerification: true` افتراضيًا، فـ`'preferred'` كانت بتسمح للعميل
+      // يتخطى البصمة وبعدين السيرفر يرفض. البصمة (أو QR من الموبايل) بقت مطلوبة من الأول.
+      userVerification: 'required',
     });
 
     await this.saveChallenge(userId, WebAuthnCeremonyType.AUTHENTICATION, options.challenge);
@@ -162,6 +187,8 @@ export class WebAuthnService {
         counter: credential.signCount,
         transports: credential.transports ?? undefined,
       },
+      // صريحة لنفس سبب التسجيل — انحدار صامت في الافتراضي ماينفعش يعدّي.
+      requireUserVerification: true,
     });
 
     if (!verification.verified) {

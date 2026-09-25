@@ -1,4 +1,5 @@
 import { User } from '../entities/user.entity';
+import { AccountRole } from '../entities/user-role-grant.entity';
 
 // كل استجابات الـ API لازم تكون snake_case (زي كل الـ DTOs في الموديول ده) —
 // TypeORM entity بره الموديول ده لازم يتحول هنا، مايتسربش زي ما هو (camelCase) للعميل أبداً.
@@ -18,12 +19,28 @@ export interface UserResponseDto {
   email: string | null;
   full_name: string;
   avatar_url: string | null;
+  /**
+   * **الدور النشط في الجلسة** (ADR-0110) — مش عمود `users.user_type` الخام.
+   *
+   * لمستخدم عنده دور واحد (الغالبية العظمى) القيمتين متطابقتين، فمفيش أي تغيير في السلوك. لمستخدم
+   * عنده الدورين، التطبيق لازم يشوف الدور اللي هو فاتح بيه — لو شاف الدور التاني كان هيرسم شاشات
+   * الدور الغلط ويقع على أول نداء محمي، وهي **بالظبط** البَقّة اللي ADR-0110 اتكتب لها.
+   */
   user_type: string;
+  /** كل الأدوار الممنوحة للحساب — التطبيق بيستخدمها يعرض «بدّل لتطبيق الصنايعي» أو يخفيها. */
+  roles?: AccountRole[];
   preferred_language: string;
   created_at: string;
 }
 
-export function toUserResponseDto(user: User): UserResponseDto {
+/**
+ * @param session سياق الجلسة (ADR-0110). لو مش موجود، `user_type` بيرجع عمود القاعدة الخام —
+ *   وده الصح لكل المستهلكين اللي مالهمش جلسة (لوحة الأدمن بتقرا مستخدمين تانيين).
+ */
+export function toUserResponseDto(
+  user: User,
+  session?: { activeRole?: string; roles?: AccountRole[] },
+): UserResponseDto {
   return {
     id: user.id,
     phone_number: user.phoneNumber,
@@ -32,7 +49,8 @@ export function toUserResponseDto(user: User): UserResponseDto {
     email: user.email,
     full_name: user.fullName,
     avatar_url: user.avatarUrl,
-    user_type: user.userType,
+    user_type: session?.activeRole ?? user.userType,
+    ...(session?.roles ? { roles: session.roles } : {}),
     preferred_language: user.preferredLanguage,
     created_at: user.createdAt.toISOString(),
   };

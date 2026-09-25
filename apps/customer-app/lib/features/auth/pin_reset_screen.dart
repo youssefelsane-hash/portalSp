@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 import 'package:provider/provider.dart';
+import '../../core/api_client.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 
@@ -31,6 +35,27 @@ class _PinResetScreenState extends State<PinResetScreen> {
   final _confirmController = TextEditingController();
   bool _isSubmitting = false;
   String? _error;
+  // بيانات تواصل الدعم — **لازم تتعرض هنا** (ADR-0111 §6): الشاشة دي بتقول «كلّم خدمة العملاء»،
+  // والمستخدم المقفول برّه حسابه **مايقدرش** يوصل لشاشة الدعم جوّه التطبيق عشان يجيب الرقم. فكانت
+  // بتطلب منه حاجة مفيش طريقة يعملها. المصدر `GET /settings/support-contact` وهو عام أصلاً
+  // (تعليق الـcontroller بيقول بالحرف إن العميل محتاجه «قبل أي تسجيل دخول»).
+  Map<String, dynamic>? _support;
+
+  @override
+  void initState() {
+    super.initState();
+    // فشل الجلب **مابيكسرش الشاشة**: الاسترجاع نفسه شغّال من غير بيانات الدعم، والقسم بيتخفى بس.
+    unawaited(_loadSupport());
+  }
+
+  Future<void> _loadSupport() async {
+    try {
+      final data = await apiRequest('GET', '/settings/support-contact');
+      if (mounted && data != null && data['enabled'] == true) setState(() => _support = data);
+    } catch (_) {
+      // متجاهل عمدًا — مفيش داعي نعرض خطأ على حاجة مساعدة.
+    }
+  }
 
   @override
   void dispose() {
@@ -123,6 +148,7 @@ class _PinResetScreenState extends State<PinResetScreen> {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  _supportSection(theme),
                   const SizedBox(height: 20),
                   TextField(
                     key: const ValueKey('pin-reset-phone-field'),
@@ -207,6 +233,38 @@ class _PinResetScreenState extends State<PinResetScreen> {
       ),
     );
   }
+
+  /// قسم «كلّم الدعم» — بأرقام حقيقية قابلة للدوس، مش نص بيقول «كلّم الدعم» وبس.
+  Widget _supportSection(ThemeData theme) {
+    final s = _support;
+    if (s == null) return const SizedBox.shrink();
+    final phone = s['phone_number'] as String?;
+    final whatsappUrl = s['whatsapp_url'] as String?;
+    final rows = <Widget>[
+      if (phone != null && phone.isNotEmpty)
+        _supportRow(Icons.phone_rounded, 'اتصل بالدعم', phone, 'tel:$phone'),
+      if (whatsappUrl != null && whatsappUrl.isNotEmpty)
+        _supportRow(Icons.chat_rounded, 'واتساب الدعم', s['whatsapp_number'] as String? ?? 'واتساب', whatsappUrl),
+    ];
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+    );
+  }
+
+  Widget _supportRow(IconData icon, String label, String value, String url) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: OutlinedButton.icon(
+        key: ValueKey('pin-reset-support-$label'),
+        onPressed: () => unawaited(launchUrlString(url)),
+        icon: Icon(icon, size: 18),
+        label: Text('$label — $value', textDirection: TextDirection.ltr),
+      ),
+    );
+  }
+
 }
 
 class _PinBox extends StatelessWidget {
@@ -245,4 +303,5 @@ class _PinBox extends StatelessWidget {
       decoration: InputDecoration(labelText: label, counterText: ''),
     );
   }
+
 }

@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import { AccountRole } from './user-role-grant.entity';
 
 export enum DevicePlatform {
   IOS = 'ios',
@@ -50,6 +51,14 @@ export class RefreshToken {
   // `'pin'` اتضاف مع ADR-0109. العمود `jsonb` فمفيش migration مطلوبة — الصفوف القديمة
   // بقيمها زي ما هي، وأي كود بيقرا `amr` بيشوف طريقة الدخول الحقيقية للجلسة.
   amr: ('otp' | 'pin' | 'webauthn')[];
+
+  /**
+   * الدور النشط اللي الجلسة دي اتصدرت بيه (ADR-0110 §5). التدوير بيحافظ عليه **وبيعيد التحقق
+   * من المنحة** — فسحب دور من الأدمن بيسقط الجلسة من أول تدوير، مش بعد ما التوكن ينتهي لوحده.
+   * NULL = جلسة اتعملت قبل ADR-0110 أو جلسة موظف.
+   */
+  @Column({ name: 'active_role', type: 'varchar', length: 20, nullable: true })
+  activeRole: AccountRole | null;
 
   @Column({ name: 'is_revoked', type: 'boolean', default: false })
   isRevoked: boolean;
