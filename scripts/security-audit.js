@@ -357,6 +357,11 @@ async function run() {
     // الإعدادات بس عمرها ما بتيجي من الطلب فمفيش open redirect. throttle 120/د، والـuser-agent
     // متقصوص على 512 حرف قبل أي فحص.
     'modules/technician-referrals/technician-referral-link.controller.ts',
+    // ADR-0113 — صفحات الخدمة × المنطقة للظهور في البحث. **عام بالضرورة**: الزاحف (جوجل/أدوات
+    // الـAI) مالوش حساب ولا توكن. الحمولة كلها معلَنة عمدًا: اسم خدمة، محتوى كتبه الأدمن **للنشر**،
+    // وأسماء مناطق مُطلَقة. صفر بيانات شخصية، وصفر كتابة — قراءة بس، وthrottle 120/د لأن الزحف
+    // بيسحب دفعات.
+    'modules/seo/seo.controller.ts',
   ]);
   const unexpected = publicList.filter((f) => !EXPECTED_PUBLIC.has(f));
   h.record(

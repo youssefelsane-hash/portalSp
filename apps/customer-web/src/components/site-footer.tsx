@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { fetchLegalEntity } from '@/lib/legal-content';
 import { fetchSupportContactServer } from '@/lib/public-info';
 import { SOCIAL_LABELS_AR, fetchSocialLinks } from '@/lib/social-links';
+import { fetchSeoServices } from '@/lib/seo';
+import { FooterServices } from '@/components/seo/footer-services';
 import { SocialIcon } from '@/components/social-icons';
 
 /**
@@ -31,6 +33,9 @@ import { SocialIcon } from '@/components/social-icons';
  * القنوات المشروطة (واتساب، الاتصال، البريد) بتختفي بالكامل لو الإدارة ما ملّتش قيمتها.
  */
 
+/** عنوان عمود الخدمات — مسمّى عشان الربط مع `FooterServices` مايتفكّش لو العنوان اتغيّر. */
+const SERVICES_COLUMN_TITLE = 'الخدمات';
+
 const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
   {
     title: 'أسطى',
@@ -42,7 +47,7 @@ const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
     ],
   },
   {
-    title: 'الخدمات',
+    title: SERVICES_COLUMN_TITLE,
     links: [
       { href: '/search', label: 'كل الخدمات' },
       { href: '/technicians', label: 'الفنيون' },
@@ -72,10 +77,12 @@ const LEGAL_LINKS = [
 
 export async function SiteFooter() {
   // التلاتة بالتوازي: الفوتر بيتعرض على كل صفحة، فتسلسلهم كان هيضيف رحلتين شبكة لكل طلب.
-  const [entity, support, socialLinks] = await Promise.all([
+  const [entity, support, socialLinks, seoServices] = await Promise.all([
     fetchLegalEntity(),
     fetchSupportContactServer(),
     fetchSocialLinks(),
+    // خدمات الظهور في البحث (ADR-0113) — فشلها بيرجّع قايمة فاضية فالقسم يختفي والفوتر يفضل شغّال.
+    fetchSeoServices(),
   ]);
   const year = new Date().getFullYear();
 
@@ -167,6 +174,10 @@ export async function SiteFooter() {
                     </li>
                   ))}
                 </ul>
+                {/* **صفحات الخدمات المنشورة** (ADR-0113) — تحت عمود الخدمات بالتحديد، وهو
+                    المكان اللي المالك طلبه. خمسة ظاهرين و«عرض المزيد» بيكشف خمسة كل دوسة،
+                    والباقي موجود في الـHTML للزاحف. */}
+                {column.title === SERVICES_COLUMN_TITLE && <FooterServices services={seoServices} />}
               </div>
             ))}
           </nav>

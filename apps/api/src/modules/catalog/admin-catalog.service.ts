@@ -322,6 +322,7 @@ export class AdminCatalogService {
       shortDescriptionAr: dto.short_description_ar ?? null,
       fullDescriptionAr: dto.full_description_ar ?? null,
       safetyGuidanceAr: dto.safety_guidance_ar?.trim() || null,
+      seoContentAr: dto.seo_content_ar?.trim() || null,
       iconUrl: dto.icon_url ?? null,
       featuredIconUrl: dto.featured_icon_url ?? null,
       featuredNameAr: dto.featured_name_ar ?? null,
@@ -505,6 +506,7 @@ export class AdminCatalogService {
       base_price_cents: service.basePriceCents,
       is_active: service.isActive,
       safety_guidance_ar: service.safetyGuidanceAr,
+      seo_content_ar: service.seoContentAr,
     };
 
     if (dto.category_id !== undefined) {
@@ -517,6 +519,9 @@ export class AdminCatalogService {
     if (dto.short_description_ar !== undefined) service.shortDescriptionAr = dto.short_description_ar;
     if (dto.full_description_ar !== undefined) service.fullDescriptionAr = dto.full_description_ar;
     if (dto.safety_guidance_ar !== undefined) service.safetyGuidanceAr = dto.safety_guidance_ar?.trim() || null;
+    // `trim() || null` مقصود: نص مسافات بيتحوّل NULL، فالصفحة تتشال بمسح المحتوى بدل ما تفضل
+    // منشورة على محتوى فاضي.
+    if (dto.seo_content_ar !== undefined) service.seoContentAr = dto.seo_content_ar?.trim() || null;
     if (dto.icon_url !== undefined) service.iconUrl = dto.icon_url;
     if (dto.featured_icon_url !== undefined) service.featuredIconUrl = dto.featured_icon_url;
     if (dto.featured_name_ar !== undefined) service.featuredNameAr = dto.featured_name_ar;
@@ -580,6 +585,7 @@ export class AdminCatalogService {
         base_price_cents: service.basePriceCents,
         is_active: service.isActive,
         safety_guidance_ar: service.safetyGuidanceAr,
+        seo_content_ar: service.seoContentAr,
       },
       meta,
     });

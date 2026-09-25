@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
@@ -95,8 +95,18 @@ function hasPricingFieldValue(value: PricingFieldValue | undefined): boolean {
   return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== '';
 }
 
-export default function ServiceBookingPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+/**
+ * **فلو الحجز** — كان `app/services/[id]/page.tsx`، بقى مكوّن بياخد `serviceId` كـprop (ADR-0113).
+ *
+ * السبب: `/services/[id]` و`/services/[serviceSlug]` **مستحيل** يتعايشوا — Next بيرفض قطعتين
+ * ديناميكيتين في نفس المستوى («Ambiguous app routes»). فبقى مسار واحد `[serviceSlug]` بيفرّق
+ * بالشكل: UUID ⇒ فلو الحجز، غير كده ⇒ صفحة الظهور في البحث.
+ *
+ * **كل الروابط القديمة بـUUID بتفضل شغّالة زي ما هي** (`ServiceCard` مااتغيّرش) — ده اللي خلّى
+ * ده أخف من إعادة تسمية المسار وعمل تحويلات.
+ */
+export function BookingFlow({ serviceId }: { serviceId: string }) {
+  const id = serviceId;
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading, authedFetch } = useAuth();
 

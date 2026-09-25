@@ -71,6 +71,15 @@ export class Service {
   @Column({ name: 'safety_guidance_ar', type: 'text', nullable: true })
   safetyGuidanceAr: string | null;
 
+  /**
+   * محتوى صفحة الخدمة العامة للظهور في البحث (ADR-0113).
+   *
+   * **وجوده هو مفتاح النشر** — فاضي/NULL = مفيش صفحة على `/services/{slug}`. مفيش علم منفصل
+   * عشان خدمة اختبار مايتفتحش عليها صفحة بالغلط: المحتوى بيتكتب بإيد الأدمن.
+   */
+  @Column({ name: 'seo_content_ar', type: 'text', nullable: true })
+  seoContentAr: string | null;
+
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 
