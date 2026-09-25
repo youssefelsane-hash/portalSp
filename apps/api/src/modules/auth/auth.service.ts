@@ -42,7 +42,7 @@ import { issuePinSetupCode } from './pin-setup';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
 import { AccountRole } from './entities/user-role-grant.entity';
-import { AccountRolesService, consumerRoleOf, ResolvedActiveRole } from './account-roles.service';
+import { AccountRolesService, consumerRoleOf, isEmployeeUserType, ResolvedActiveRole } from './account-roles.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -727,15 +727,40 @@ export class AuthService {
       // الصنايعي حسب `users.user_type`.
       let role: ResolvedActiveRole | undefined;
       if (existing.activeRole) {
-        const grantedRoles = await this.accountRoles.listRoles(user.id, manager);
-        if (!grantedRoles.includes(existing.activeRole)) {
-          throw new ApiException(
-            ErrorCode.AUTH_001,
-            'الدور بتاع الجلسة دي مبقى متاح للحساب، سجّل دخول تاني',
-            HttpStatus.UNAUTHORIZED,
-          );
+        /**
+         * **الموظف بيتحقّق بـ`user_type` مش بالمنح** — وده مش استثناء، ده نفس القاعدة اللي
+         * `resolveActiveRole` ماشية عليها وقت الدخول بالحرف.
+         *
+         * بَقّة حقيقية اتلقطت في متصفح حقيقي (2026-09-25): `user_role_grants` **عمدًا** مالهاش
+         * أي صف لحسابات الموظفين (`grantRole` بترفض حساب موظف صراحةً، ADR-0110 §3)، فالتحقق
+         * بالمنح كان بيرجّع `[]` **دايمًا** لكل أدمن. النتيجة: كل جلسة أدمن بتموت عند **أول**
+         * تدوير — يعني أول إعادة تحميل كاملة للصفحة أو بعد انتهاء توكن الوصول بربع ساعة —
+         * والواجهة كانت بتفضل مفتوحة بصلاحيات صفر: قايمة جانبية شبه فاضية و«ماعندكش صلاحية»
+         * في كل شاشة، من غير ما ترجّع المستخدم للّوجن أصلاً.
+         *
+         * الضمانة الأمنية محفوظة: لو `user_type` بتاع الحساب اتغيّر (موظف اتحوّل أو اتسحبت
+         * صفته)، الدور المخزّن في الجلسة مابقاش بيطابقه والجلسة بتسقط زي ما المفروض.
+         */
+        if (isEmployeeUserType(user.userType)) {
+          if ((existing.activeRole as unknown as UserType) !== user.userType) {
+            throw new ApiException(
+              ErrorCode.AUTH_001,
+              'الدور بتاع الجلسة دي مبقى متاح للحساب، سجّل دخول تاني',
+              HttpStatus.UNAUTHORIZED,
+            );
+          }
+          role = { activeRole: existing.activeRole, grantedRoles: [] };
+        } else {
+          const grantedRoles = await this.accountRoles.listRoles(user.id, manager);
+          if (!grantedRoles.includes(existing.activeRole)) {
+            throw new ApiException(
+              ErrorCode.AUTH_001,
+              'الدور بتاع الجلسة دي مبقى متاح للحساب، سجّل دخول تاني',
+              HttpStatus.UNAUTHORIZED,
+            );
+          }
+          role = { activeRole: existing.activeRole, grantedRoles };
         }
-        role = { activeRole: existing.activeRole, grantedRoles };
       }
 
       // amr بيتنقل من الجلسة القديمة (ADR-0011) — لو المستخدم أثبت هويته بـwebauthn قبل كده،
