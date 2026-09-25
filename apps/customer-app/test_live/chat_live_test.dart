@@ -47,9 +47,9 @@ void main() {
     final accepted = await apiRequest('GET', '/orders/$orderId', accessToken: customerToken);
     expect(accepted!['order_status'], 'accepted');
 
-    final threadResponse = await apiRequest('GET', '/chat/orders/$orderId/thread', accessToken: customerToken);
-    expect(threadResponse, isNotNull);
-    expect(threadResponse!['order_id'], orderId);
+    // انتظار محدود — إنشاء المحادثة أثر جانبي غير متزامن للقبول (الشرح في `waitForOrderChatThread`).
+    final threadResponse = await waitForOrderChatThread(orderId, customerToken);
+    expect(threadResponse['order_id'], orderId);
     final threadId = threadResponse['id'] as String;
 
     final socketBaseUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
