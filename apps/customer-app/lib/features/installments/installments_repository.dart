@@ -1,3 +1,4 @@
+import '../payments/payment_policy.dart';
 import '../../core/auth_repository.dart';
 
 // نموذج خطة التقسيط — مطابق لرد GET /installment-plans?service_id=
@@ -52,22 +53,6 @@ class InstallmentDocRequirement {
       InstallmentDocRequirement(
         docType: json['doc_type'] as String,
         labelAr: json['label_ar'] as String,
-      );
-}
-
-class InstallmentPolicy {
-  final String titleAr;
-  final String bodyAr;
-  final bool isRequired;
-  final String currentVersionId;
-
-  InstallmentPolicy({required this.titleAr, required this.bodyAr, required this.isRequired, required this.currentVersionId});
-
-  factory InstallmentPolicy.fromJson(Map<String, dynamic> json) => InstallmentPolicy(
-        titleAr: json['titleAr'] as String,
-        bodyAr: json['bodyAr'] as String,
-        isRequired: json['isRequired'] as bool? ?? true,
-        currentVersionId: json['currentVersionId'] as String,
       );
 }
 
@@ -128,10 +113,17 @@ class InstallmentRepository {
     return InstallmentOptions.fromJson(json ?? const {});
   }
 
-  Future<List<InstallmentPolicy>> fetchPolicies(String serviceId) async {
-    final items = await auth.authedRequestList(
-        '/checkout/payment-policies?applies_to=installment&service_id=$serviceId');
-    return items.map(InstallmentPolicy.fromJson).toList();
+  /// شروط التقسيط — **نفس الموديل والنداء** بتوع شروط «الدفع بعد الخدمة»
+  /// (`features/payments/payment_policy.dart`)، الفرق `applies_to` بس.
+  ///
+  /// كان فيه `InstallmentPolicy` هنا بنفس الحقول بالظبط؛ اتشال لما اتضح إن مسار الطلب العادي
+  /// محتاج نفس الحاجة — نسختين من نفس الشرط أول خطوة ناحية مسار بيقبل شرط ومسار بيتجاهله.
+  Future<List<PaymentPolicy>> fetchPolicies(String serviceId) async {
+    return fetchApplicablePaymentPolicies(
+      auth,
+      serviceId: serviceId,
+      appliesTo: 'installment',
+    );
   }
 
   /// تقديم طلب تقسيط على طلب موجود

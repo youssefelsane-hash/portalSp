@@ -21,6 +21,7 @@ import '../payments/card_payment_screen.dart';
 import '../payments/fawry_reference_screen.dart';
 import '../payments/instapay_reference_screen.dart';
 import '../payments/payments_repository.dart';
+import '../payments/payment_policy.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
@@ -119,6 +120,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _addressSectionKey = GlobalKey();
   final _pricingFieldsSectionKey = GlobalKey();
   final _scheduleSectionKey = GlobalKey();
+  final _policiesSectionKey = GlobalKey();
+
+  /// شروط «الدفع بعد الخدمة» المنطبقة على الخدمة دي (migration 0177).
+  List<PaymentPolicy> _postpaidPolicies = const [];
+  Set<String> _acceptedPolicyVersionIds = <String>{};
 
   /// نوع الكود اللي اتحقق منه بنجاح — `null` يعني لسه ما اتحققش أو الكود اتغيّر بعد التحقق.
   /// بيتحدد **من رد السيرفر** مش من شكل الكود: بنجرّب كود خصم، ولو مش موجود بنجرّب كود عمارة.
@@ -363,12 +369,44 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
     if (_selectedAddress != null) _refreshPreview();
     _loadCheckoutOptions();
+    _loadPostpaidPolicies();
     // نافذة اختيار الموعد (ADR-0097) — تحميل مستقل: فشله بيسيب الافتراضي شغّال والسيرفر
     // بيفضل هو الحارس، فمابيعطّلش الشاشة.
     BookingWindow.fetch().then((window) {
       if (mounted) setState(() => _bookingWindow = window);
     });
   }
+
+  Future<void> _loadPostpaidPolicies() async {
+    final policies = await fetchApplicablePaymentPolicies(
+      context.read<AuthRepository>(),
+      serviceId: widget.service.id,
+    );
+    if (mounted) setState(() => _postpaidPolicies = policies);
+  }
+
+  /// **وسيلة الدفع المقدّم الفعلية** اللي هتتبعت للسيرفر — `null` معناها «الدفع بعد الشغل».
+  ///
+  /// بتتحسب بنفس الدالة اللي `_submit()` بتبعت بيها بالظبط (`bookingPaymentMethod`) مش بمنطق
+  /// مكرّر: `_selectedPaymentMethod` وحده مش كافي، لأن «التقسيط» و«تقييم بالصور بلا رسم»
+  /// الاتنين بيطلعوا `null` برضه — وهما الحالتين اللي الشروط بتنطبق عليهم كمان.
+  String? get _effectivePrepaymentMethod => bookingPaymentMethod(
+        remoteQuote: _effectiveRemoteQuote,
+        remoteAssessmentFeeCents: _dueRemoteAssessmentFeeCents,
+        selected: _selectedPaymentMethod,
+      );
+
+  /// الشروط بتنطبق على الطلب ده ولا لأ — **نفس شرط الباك-إند بالحرف**
+  /// (`order-creation.service.ts`: `if (!prepaymentMethod && !originalOrder)`).
+  /// الطلب المدفوع مقدّمًا مستثنى لأن الشروط دي عن «الدفع لاحقًا» أصلاً.
+  bool get _postpaidPoliciesApply => _effectivePrepaymentMethod == null;
+
+  List<PaymentPolicy> get _visiblePostpaidPolicies =>
+      _postpaidPoliciesApply ? _postpaidPolicies : const [];
+
+  bool get _allRequiredPoliciesAccepted => _visiblePostpaidPolicies
+      .where((policy) => policy.isRequired)
+      .every((policy) => _acceptedPolicyVersionIds.contains(policy.currentVersionId));
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
   // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
@@ -1043,6 +1081,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _failValidation('حدد تاريخ ووقت بداية الخدمة', _scheduleSectionKey);
       return;
     }
+    // شروط الدفع بعد الخدمة (migration 0177) — الباك-إند بيرفض الطلب من غيرها برسالة بتسمّي
+    // الشروط الناقصة. الفحص هنا بيوقفها قبل رحلة الشبكة وبيوجّه العميل للقسم نفسه بدل رسالة
+    // حمرا تحت مش واضح مصدرها.
+    if (!_allRequiredPoliciesAccepted) {
+      _failValidation('لازم توافق على شروط الدفع الأول', _policiesSectionKey);
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -1105,6 +1150,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         idempotencyKey: _orderIdempotencyKey,
         // بند 12 — قفل السعر: نفس التذكرة اللي العميل شاف عليها الفني وسعره.
         matchPreviewId: effectiveMatchPreviewId,
+        // بيتبعت بس لما الشروط منطبقة فعلاً (دفع بعد الشغل) — الباك-إند بيتجاهلها في الطلب
+        // المدفوع مقدّمًا، وإرسالها هناك بيخزّن قبول لحاجة مالهاش لازمة على الطلب ده.
+        acceptedPolicyVersionIds:
+            _postpaidPoliciesApply ? _acceptedPolicyVersionIds.toList() : null,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
       // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.
@@ -2226,6 +2275,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ),
+            // شروط الدفع بعد الخدمة — **تحت قسم الدفع مباشرةً** لأن ظهورها نفسه نتيجة لاختيار
+            // «ادفع بعد الخدمة»: العميل يبدّل لبطاقة فتختفي، ويرجع فتظهر. مكان تاني كان
+            // هيخلّي الربط بين الاختيار والشروط غير مفهوم.
+            if (_visiblePostpaidPolicies.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Padding(
+                key: _policiesSectionKey,
+                padding: EdgeInsets.zero,
+                child: PaymentPoliciesSection(
+                  policies: _visiblePostpaidPolicies,
+                  acceptedVersionIds: _acceptedPolicyVersionIds,
+                  onChanged: (next) =>
+                      setState(() => _acceptedPolicyVersionIds = next),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             // النص القديم كان «وصف المشكلة (اختياري)» — بلاغ مالك صريح (docs/08 §76-هـ):
             // العميل مش عارف الكلام ده رايح لمين، فبيسيبه فاضي. التسمية دلوقتي بتقول الوجهة
