@@ -22,6 +22,15 @@ const WEB = process.env.WEB_BASE_URL || 'http://localhost:3002';
 /** رمز دخول حسابات التطوير (ADR-0109) — نفس `DEV_SEED_PIN` في سكربتات الـseed. */
 const LOGIN_PIN = process.env.DEV_SEED_PIN || '417253';
 
+/**
+ * موعد صالح للحجز — نفس منطق `LiveHarness.bookableScheduledAt` (الملف ده مش بيستخدم الهارنس).
+ * `08:00 UTC` = ١٠ أو ١١ صباحًا بالقاهرة حسب التوقيت الصيفي، والاتنين جوّه نافذة الحجز ٥ص–٧م.
+ */
+function bookableScheduledAt(daysAhead = 2) {
+  const n = new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + daysAhead, 8)).toISOString();
+}
+
 const VIEWPORTS = [
   { name: 'موبايل 390×844', width: 390, height: 844 },
   { name: 'تابلت 768×1024', width: 768, height: 1024 },
@@ -82,7 +91,8 @@ async function seed() {
   }
   const order = (await api('/orders', {
     method: 'POST', token,
-    body: { service_id: service.id, address_id: address.id, problem_description: 'مسح صفحات الويب' },
+    // migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول» فالموعد إجباري.
+    body: { service_id: service.id, address_id: address.id, scheduled_at: bookableScheduledAt(), problem_description: 'مسح صفحات الويب' },
   })).body.data;
 
   const technicians = (await api('/technicians?limit=1')).body.data;

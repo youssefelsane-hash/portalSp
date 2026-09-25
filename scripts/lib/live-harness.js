@@ -249,6 +249,22 @@ class LiveHarness {
     return { accessToken: res.body?.data?.access_token };
   }
 
+  /**
+   * **موعد صالح للحجز** — لازم يتبعت مع أي طلب لخدمة بدقة «يوم + ساعة وصول».
+   *
+   * migration 0340 خلّى `requires_start_time_only = true` هو الافتراضي لكل خدمات الكتالوج، فأي
+   * إنشاء طلب بلا `scheduled_at` بيترفض بـ«لازم تحدد معاد بداية الخدمة دي».
+   *
+   * تلات قيود لازم تتحقق مع بعض: اليوم مش فايت وفي حدود `orders.max_advance_booking_days`،
+   * والساعة جوّه نافذة الحجز (٥ص–٧م بالقاهرة)، والتوقيت الصيفي (+٢ أو +٣). `08:00 UTC` بتطلع
+   * `10:00` أو `11:00` بالقاهرة — الاتنين جوّه النافذة، فالقيمة صالحة طول السنة.
+   */
+  bookableScheduledAt(daysAhead = 2) {
+    const now = new Date();
+    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysAhead, 8));
+    return day.toISOString();
+  }
+
   nextPhone() {
     return `+2010${this.runNum}${String(this.phoneSeq++).padStart(3, '0')}`;
   }

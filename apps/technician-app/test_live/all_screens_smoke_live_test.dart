@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:technician_app/core/api_client.dart';
+import '_live_support.dart';
 import 'package:technician_app/core/auth_repository.dart';
 import 'package:technician_app/design/app_theme.dart';
 import 'package:technician_app/features/academy/academy_screen.dart';
@@ -135,11 +136,28 @@ Future<void> _pumpScreen(WidgetTester tester, Widget screen, Size size) async {
 
 Future<void> _disposeTree(WidgetTester tester) async {
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-  // شاشات ليها إعادة محاولة مؤجّلة مشروعة (مثال: التقاط موقع الفني بعد ٣ و٨ ثواني) —
-  // بنصرّف الزمن الوهمي عشان مؤقتاتها تنطلق وتلاقي `mounted == false` وتخرج. من غير كده
-  // الـbinding بيرمي `!timersPending` وهو عطل بنية اختبار مش عطل منتج.
-  for (var i = 0; i < 6; i++) {
+
+  // **١) وقت حقيقي الأول: نسيب النداءات اللي في الطريق تخلص فعلاً.**
+  //
+  // كل نداء شبكة بيسجّل مؤقت انتهاء مهلة (`apiRequestTimeout` = ٣٠ ثانية)، والمؤقت ده **وهمي**
+  // جوّه `testWidgets`. لو خرّبنا الشجرة والنداء لسه شغّال، المؤقت بيفضل معلّق والـbinding بيرمي
+  // `!timersPending` — على شاشة سليمة تمامًا.
+  //
+  // **وتصريف الزمن الوهمي لوحده مش حل، هو بيأذي**: تمرير ٣٠ ثانية بيفجّر المهلة نفسها، فالنداء
+  // بيفشل، والشاشة بتعيد المحاولة، وبيتولد مؤقت جديد — حلقة مالهاش آخر. اتقيس فعليًا: بعد
+  // تمرير ٣٦ ثانية طلع مؤقت جديد من `_loadCrewOpportunities` بدل اللي قبله.
+  //
+  // فالترتيب الصح: وقت **حقيقي** كفاية لنداءات الـlocalhost تكمّل (وهي بالمللي ثانية)، وبعدين
+  // زمن وهمي **أقل من المهلة** عشان المؤقتات المؤجّلة المشروعة بس تنطلق.
+  for (var i = 0; i < 8; i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 250)));
+    await tester.pump();
+  }
+
+  // **٢) زمن وهمي محدود**: شاشات ليها إعادة محاولة مؤجّلة مشروعة (التقاط موقع الفني بعد ٣ و٨
+  // ثواني) — بنصرّفه عشان مؤقتاتها تنطلق وتلاقي `mounted == false` وتخرج. مجموعه ١٥ ثانية:
+  // بيغطّي الـ٨ ثواني بهامش، وبيفضل **تحت** مهلة الـ٣٠ فمابيفجّرهاش.
+  for (var i = 0; i < 5; i++) {
     await tester.pump(const Duration(seconds: 3));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
   }
@@ -172,7 +190,12 @@ void main() {
       throw StateError('مالقيتش بذرة الفني في $_seedPath — شغّل scripts/seed-technician-screens.js الأول');
     }
     final seed = jsonDecode(seedFile.readAsStringSync()) as Map<String, dynamic>;
-    final token = seed['technicianToken'] as String;
+    // **التوكن بيتولّد طازة من معرّف المستخدم، مش بيتقرا من البذرة.**
+    //
+    // البذرة بتحفظ توكن عمره ساعة، فالاختبار كان بيسقط بـ«انتهت صلاحية التوكن» لو اتشغّل بعد
+    // ساعة من زرعها — يعدّي أو يسقط حسب الساعة اللي اتشغّل فيها، وهو مالوش أي علاقة بالشاشات
+    // اللي بيقيسها. البذرة بتحفظ **الهوية**؛ التوكن شغل وقت الاستعمال.
+    final token = devTokenForUserId(seed['technicianUserId'] as String);
     orderId = seed['orderId'] as String;
 
     final me = await apiRequest('GET', '/auth/me', accessToken: token);

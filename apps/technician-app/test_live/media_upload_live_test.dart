@@ -19,7 +19,11 @@ void main() {
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': await pickBookableServiceId(),
+        'service_id': await pickBookableServiceId(servedByTechnicianToken: await devTechnicianToken('+201000000043'), sameDayCapable: true),
+        // **نفس اليوم مقصود** — الاختبار ده بيقيس دورة العرض والقبول، وطلب **مجدول** بيتثبّت
+        // على أنسب فني فورًا بلا أي جولة عرض (`autoConfirmScheduledOrder`, migration 0351).
+        // الشرح الكامل في `urgentScheduledAt()`.
+        'scheduled_at': urgentScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار حي لرفع الصور',
       },
@@ -30,8 +34,11 @@ void main() {
     // الفني اللي العرض راح له فعلاً — المنصّة هي اللي بتوزّع (تفاصيل فوق
     // `claimOrderAsTechnician`، §148).
     technicianToken = await claimOrderAsTechnician(orderId, '+201000000043');
-    final accepted = await apiRequest('GET', '/technician/orders/active', accessToken: technicianToken);
-    expect(accepted!['order_status'], 'accepted');
+    // الطلب المجدول المقبول مكانه «الشغل المؤكّد قدامي» مش «الطلب النشط» (docs/08 §165) —
+    // `/active` بيستثني الطلبات اللي ليها موعد ولسه الفني ما اتحرّكش ليها.
+    final upcoming = await apiRequestList('/technician/orders/upcoming-confirmed', accessToken: technicianToken);
+    final accepted = upcoming.firstWhere((o) => o['id'] == orderId, orElse: () => <String, dynamic>{});
+    expect(accepted['order_status'], 'accepted');
 
     final imageBytes = await File('test_live/fixtures/test-1x1.png').readAsBytes();
 

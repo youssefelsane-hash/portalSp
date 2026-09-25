@@ -156,6 +156,32 @@ async function main() {
         [techUserId, CAIRO.lng, CAIRO.lat],
       );
     }
+    /**
+     * **لازم تبقى فيه خدمة واحدة على الأقل بتقبل «نفس اليوم»** (`allows_emergency`).
+     *
+     * الفجوة اللي القسم ده بيقفلها: كل خدمات كتالوج التطوير كانت `allows_emergency = false`،
+     * فأي طلب لنفس اليوم بيترفض بـ«الخدمة دي مش متاحة لنفس اليوم». والمشكلة إن ده بيقفل **مسار
+     * التوزيع بالعرض والقبول** بالكامل في بيئة التطوير: الطلب المجدول بيتثبّت على أنسب فني فورًا
+     * بلا جولة عرض (`autoConfirmScheduledOrder`, migration 0351)، فمفيش أي طريقة تختبر بيها
+     * «الفني بياخد عرض وبيقبله» — وخمس اختبارات حية في تطبيق الفني بتقيس ده بالتحديد.
+     *
+     * الاختيار مش عشوائي: خدمة زي «تسليك مواسير» بتقبل نفس اليوم **في الواقع** — ده أقرب تمثيل
+     * للإنتاج مش حيلة للاختبارات. لو مفيش خدمة بالاسم ده، بناخد أول خدمة بلا حقول تسعير إجبارية.
+     */
+    const [sameDayService] = await q(
+      `UPDATE services SET allows_emergency = true, updated_at = now()
+        WHERE id = COALESCE(
+                (SELECT id FROM services WHERE name_ar = 'تسليك مواسير' AND deleted_at IS NULL LIMIT 1),
+                (SELECT s.id FROM services s
+                  WHERE s.deleted_at IS NULL AND s.is_active
+                    AND NOT EXISTS (
+                      SELECT 1 FROM service_pricing_fields f
+                       WHERE f.service_id = s.id AND f.is_required AND f.deleted_at IS NULL)
+                  ORDER BY s.created_at LIMIT 1))
+        RETURNING name_ar`,
+    );
+    if (sameDayService) done.push(['خدمة نفس اليوم', sameDayService.name_ar]);
+
     // مؤهّل لكل الخدمات الموجودة + شغّال في النطاق — من غير الاتنين دول التوزيع مالقاش حد.
     await q(
       `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)

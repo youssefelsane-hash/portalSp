@@ -64,6 +64,8 @@ async function main() {
       body: {
         service_id: catalog.service.id,
         address_id: customer.addressId,
+        // migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول» فالموعد إجباري.
+        scheduled_at: h.bookableScheduledAt(),
         booking_mode: 'individual',
         problem_description: 'تسريب في المواسير — تقييم بالصور',
         request_remote_quote: true,

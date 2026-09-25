@@ -17,7 +17,11 @@ void main() {
       '/orders',
       accessToken: customerToken,
       body: {
-        'service_id': await pickBookableServiceId(),
+        'service_id': await pickBookableServiceId(servedByTechnicianToken: await devTechnicianToken('+201000000044'), sameDayCapable: true),
+        // **نفس اليوم مقصود** — الاختبار ده بيقيس دورة العرض والقبول، وطلب **مجدول** بيتثبّت
+        // على أنسب فني فورًا بلا أي جولة عرض (`autoConfirmScheduledOrder`, migration 0351).
+        // الشرح الكامل في `urgentScheduledAt()`.
+        'scheduled_at': urgentScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار حي لمسار عرض السعر',
       },

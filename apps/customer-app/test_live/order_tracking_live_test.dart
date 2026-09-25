@@ -22,6 +22,9 @@ void main() {
       accessToken: customerToken,
       body: {
         'service_id': await pickBookableServiceId(),
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'problem_description': 'اختبار تتبع لحظي ${DateTime.now().microsecondsSinceEpoch}',
       },

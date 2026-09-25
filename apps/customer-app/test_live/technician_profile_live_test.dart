@@ -60,39 +60,67 @@ void main() {
     // لسبب مالوش علاقة بالمُختبَر (إعادة الحجز). الفني المزروع مؤهّل لكل الخدمات النشطة،
     // فبناخد خدمة قابلة للحجز مباشرةً (§148).
     expect(profile['services'], isNotEmpty);
-    final serviceId = await pickBookableServiceId();
+    // **الخدمة لازم تكون من خدمات الفني ده بالتحديد.** التعليق فوق كان بيفترض إن «الفني المزروع
+    // مؤهّل لكل الخدمات النشطة» — الافتراض بيكسر أول ما أي أداة تانية تسيب خدمة اختبار في
+    // الكتالوج (`seed-technician-screens.js` بيعمل واحدة كل تشغيلة)، وساعتها الطلب بيتعمل على
+    // خدمة الفني مش مؤهّل ليها والعرض عمره ما يوصله.
+    final serviceId = await pickBookableServiceId(servedByTechnicianToken: technicianToken);
     final order = await apiRequest(
       'POST',
       '/orders',
       accessToken: customerToken,
       body: {
         'service_id': serviceId,
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': await ensureAddressFor(customerToken),
         'requested_technician_id': technicianId,
       },
     );
     expect(order!['order_status'], 'searching_technician');
 
-    // التوزيع بيتم **بشكل غير متزامن** بعد إنشاء الطلب، فالعرض ممكن ما يكونش اتبعت لسه لحظة
-    // ما الاختبار يدوس «اقبل» — وساعتها بيرجع «العرض ده مبقاش متاح» وهو مجرد سباق توقيت.
-    // بنعيد المحاولة لحد ما الجولة الأولى تخرج (وهي الجولة اللي بتعرض على الفني المطلوب
-    // حصريًا — ده اللي بنختبره أصلاً).
-    Map<String, dynamic>? accepted;
+    // **التوزيع بيتم بشكل غير متزامن، وله مسارين شرعيين** — الاختبار لازم يقبل الاتنين.
+    //
+    //  ١) **جولة عرض**: الفني بياخد عرض وبيدوس «اقبل» (الخدمات التقيلة).
+    //  ٢) **تأكيد مباشر**: خدمة من فئة `LIGHT` مع `requested_technician_id` بتتأكّد على الفني
+    //     **فورًا بلا جولة عرض** (`confirmTechnicianForOrder` — `matching.service.ts`).
+    //
+    // النسخة القديمة كانت بتفترض المسار الأول بس، وبتـ`expect` على نجاح نداء «اقبل» بتاعها هي.
+    // على خدمة `LIGHT` الطلب بيبقى متأكّد **قبل** ما النداء يوصل، فبيرجع 409 «الطلب اتاخد من فني
+    // تاني أو مبقاش متاح» — والاختبار بيسقط رغم إن النتيجة اللي بيقيسها **تحققت بالفعل وأقوى**.
+    //
+    // اللي بيتقاس فعلاً هو **إن الطلب رسى على الفني المطلوب حصريًا**، وده اللي بنتحقق منه تحت
+    // بغض النظر عن المسار اللي وصلنا بيه.
+    Map<String, dynamic>? settledOrder;
     Object? lastError;
-    for (var attempt = 0; attempt < 25 && accepted == null; attempt++) {
+    for (var attempt = 0; attempt < 25 && settledOrder == null; attempt++) {
       try {
-        accepted = await apiRequest(
+        await apiRequest(
           'POST',
           '/technician/orders/${order['id']}/accept',
           accessToken: technicianToken,
         );
       } catch (err) {
         lastError = err;
-        await Future<void>.delayed(const Duration(milliseconds: 400));
       }
+      final current = await apiRequest('GET', '/orders/${order['id']}', accessToken: customerToken);
+      if (current != null && current['technician_id'] != null) {
+        settledOrder = current;
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
     }
-    expect(accepted, isNotNull, reason: 'الجولة الأولى ما عرضتش على الفني المطلوب: $lastError');
-    expect(accepted!['technician_id'], technicianId);
+    expect(
+      settledOrder,
+      isNotNull,
+      reason: 'الطلب ما رساش على أي فني — الجولة الأولى ما عرضتش على الفني المطلوب: $lastError',
+    );
+    expect(
+      settledOrder!['technician_id'],
+      technicianId,
+      reason: 'الطلب رسى على فني غير المطلوب — الحصرية للفني المطلوب مكسورة',
+    );
 
     await apiRequest('POST', '/orders/${order['id']}/cancel', accessToken: customerToken, body: {'reason': 'اختبار حي', 'cancellation_reason_id': await pickCustomerCancellationReasonId()});
   });

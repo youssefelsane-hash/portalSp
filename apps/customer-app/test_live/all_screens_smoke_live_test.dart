@@ -277,6 +277,9 @@ void main() {
       accessToken: token,
       body: {
         'service_id': service.id,
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': address['id'],
         'problem_description': 'مسح الشاشات — طلب اختبار',
       },

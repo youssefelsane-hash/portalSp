@@ -87,6 +87,55 @@ String uniquePhone([int seq = 0]) {
 
 final Random _phoneRandom = Random.secure();
 
+/// **موعد صالح للحجز** — لازم يتبعت مع أي طلب لخدمة بدقة «يوم + ساعة وصول».
+///
+/// ### ليه موجود
+///
+/// migration 0340 (2026-09-15) خلّى `requires_start_time_only = true` هو الافتراضي لكل خدمات
+/// الكتالوج. من اللحظة دي، أي إنشاء طلب بلا `scheduled_at` بيترفض بـ«لازم تحدد معاد بداية
+/// الخدمة دي» — و**١٣ ملف اختبار حي** كانوا بيسقطوا على ده، كلهم مكتوبين قبل المايجريشن ومفترضين
+/// السلوك القديم (يوم كامل بلا ساعة). السقوط مكانش ليه أي علاقة باللي بيقيسوه.
+///
+/// ### ليه القيمة دي بالتحديد
+///
+/// تلات قيود حقيقية في الباك-إند لازم تتحقق مع بعض:
+///
+/// 1. **نافذة الأيام** (`bookingDateWindowViolation`): اليوم لازم مايكونش فات، وفي حدود
+///    `orders.max_advance_booking_days`. يومين قدام في النص تمامًا.
+/// 2. **نافذة ساعات الحجز** (`isWithinBookingWindow`): ٥ص–٧م بتوقيت القاهرة.
+/// 3. **التوقيت الصيفي**: القاهرة +٢ أو +٣ حسب الشهر، ومفيش مكتبة توقيتات في الاختبارات دي.
+///    `08:00 UTC` بتطلع `10:00` أو `11:00` بالقاهرة — **الاتنين** جوّه النافذة، فالقيمة صالحة
+///    طول السنة بلا أي حساب مناطق زمنية.
+String bookableScheduledAt({int daysAhead = 2}) {
+  final now = DateTime.now().toUtc();
+  final day = DateTime.utc(now.year, now.month, now.day).add(Duration(days: daysAhead));
+  return DateTime.utc(day.year, day.month, day.day, 8).toIso8601String();
+}
+
+/// **موعد «نفس اليوم» (طلب مستعجل)** — للاختبارات اللي بتقيس **دورة العرض والقبول**.
+///
+/// ### ليه لازم يبقى غير `bookableScheduledAt()`
+///
+/// الباك-إند بيفرّق بين مسارين للتوزيع:
+///
+///  - **طلب مجدول** (موعد في يوم جاي): `autoConfirmScheduledOrder` بتثبّت **أنسب فني فورًا بلا
+///    أي جولة عرض** لو حمله خفيف (`tier == 'LIGHT'`، migration 0351). الطلب عمره ما يظهر في
+///    `GET /technician/orders/available` لأي حد.
+///  - **طلب نفس اليوم** (`isSameDayUrgent` = تاريخ الموعد = النهارده): بيمشي على **جولات عرض**
+///    عادية، والفني بيقبل بنفسه.
+///
+/// الاختبارات اللي بتقيس القبول والتنفيذ لازم تستخدم الدالة دي. اتلقط بالقياس: طلب مجدول اتثبّت
+/// على فني تاني خلال ٠٫٧ ثانية و`available` رجعت فاضية — واللي كان بيبان للمختبِر هو «الطلب مش
+/// بيظهر في القايمة» وكأن التوزيع مكسور.
+///
+/// الساعة ١٠ صباحًا بتوقيت القاهرة تقريبًا (`08:00 UTC` = ١٠ أو ١١ حسب التوقيت الصيفي) — جوّه
+/// نافذة الحجز ٥ص–٧م في الحالتين. النافذة بتتفحص على **الوقت المختار** مش على الوقت الحالي،
+/// فالقيمة صالحة في أي ساعة الاختبار يتشغّل فيها.
+String urgentScheduledAt() {
+  final now = DateTime.now().toUtc();
+  return DateTime.utc(now.year, now.month, now.day, 8).toIso8601String();
+}
+
 /// **رمز الدخول الموحّد لكل الاختبارات الحية** (ADR-0109).
 ///
 /// مش متسلسل ومش كله نفس الرقم عشان يعدّي `isWeakPin` في الباك-إند. ثابت واحد مشترك: كل حساب
@@ -230,20 +279,49 @@ Future<String> ensureAddressFor(String accessToken) async {
 ///  • **دقة الموعد مش `start_time`** — وإلا بيترفض بـ«لازم تحدد معاد بداية الخدمة دي».
 /// الاتنين بيخلّوا الاختبار يفشل لسبب مالوش أي علاقة باللي بيختبره، والأسوأ إن النتيجة
 /// بتتغيّر حسب ترتيب الكتالوج فبتنجح لوحدها وتفشل في السويتة.
-Future<String> pickBookableServiceId() async {
+/// `sameDayCapable` بيطلب خدمة بتقبل «نفس اليوم» (`allows_emergency`) — لازم للاختبارات اللي
+/// بتقيس دورة العرض والقبول (شوف `urgentScheduledAt`). `scripts/seed-dev-data.js` بيضمن وجود
+/// واحدة على الأقل.
+Future<String> pickBookableServiceId({
+  String? servedByTechnicianToken,
+  bool sameDayCapable = false,
+}) async {
   final services = await apiRequestList('/services');
+
+  // **الخدمة لازم تكون في قايمة خدمات الفني كمان** (تدقيق 2026-09-25).
+  //
+  // البَقّة اللي القيد ده اتضاف عشانها: الدالة كانت بترجّع أول خدمة في الكتالوج بلا حقول تسعير
+  // إجبارية — و`GET /services` **مش مرتّب بتاريخ الإنشاء**، فأي خدمة اختبار سايبة من أداة تانية
+  // (زي `scripts/seed-technician-screens.js` اللي بيعمل خدمة جديدة كل تشغيلة) بتطلع في الأول.
+  // النتيجة: الطلب بيتعمل على خدمة الفني المطلوب **مش مؤهّل** ليها، والاختبار بيسقط بـ«الفني غير
+  // مؤهل للخدمة أو نطاق الطلب» — سبب مالوش أي علاقة باللي بيتقاس، و**ستة اختبارات** كانوا
+  // بيسقطوا عليه.
+  //
+  // القيد هنا هو العقد الحقيقي للدالة: «خدمة أقدر أكمّل عليها دورة تنفيذ بالفني ده».
+  Set<String>? technicianServiceIds;
+  if (servedByTechnicianToken != null) {
+    final own = await apiRequestList('/technician/services', accessToken: servedByTechnicianToken);
+    technicianServiceIds = own.map((e) => (e['service_id'] ?? e['id']) as String).toSet();
+  }
+
   String? fallback;
   for (final service in services) {
     final id = service['id'] as String;
+    if (technicianServiceIds != null && !technicianServiceIds.contains(id)) continue;
     final fields = await apiRequestList('/services/$id/pricing-fields');
     if (fields.any((f) => f['is_required'] == true)) continue;
     final detail = await apiRequest('GET', '/services/$id');
     if (detail == null) continue;
+    if (sameDayCapable && detail['allows_emergency'] != true) continue;
     fallback ??= id;
     if (detail['schedule_precision'] != 'start_time') return id;
   }
   if (fallback != null) return fallback;
-  throw StateError('مفيش خدمة نشطة بلا حقول تسعير إجبارية — شغّل بذور الكتالوج الأول');
+  throw StateError(
+    technicianServiceIds == null
+        ? 'مفيش خدمة نشطة بلا حقول تسعير إجبارية${sameDayCapable ? ' وبتقبل نفس اليوم' : ''} — شغّل scripts/seed-dev-data.js'
+        : 'مفيش خدمة نشطة بلا حقول تسعير إجبارية${sameDayCapable ? ' وبتقبل نفس اليوم' : ''} **والفني ده بيخدمها** — شغّل scripts/seed-dev-data.js وseed-dev-accounts.js',
+  );
 }
 
 /// أول سبب إلغاء متاح للعميل، أو `null` لو الأدمن مش معرّف أي سبب.
@@ -306,14 +384,22 @@ Future<String> completeOrderThroughTechnician(
   String technicianPhone = '+201000000011',
   String problemDescription = 'طلب اختبار حي — دورة تنفيذ كاملة',
 }) async {
+  // توكن الفني المفضّل **قبل** إنشاء الطلب: اختيار الخدمة محتاجه عشان يتأكد إن الفني ده بيخدمها.
+  // `devTechnicianToken` مش `loginWithPin` — توكن موقّع محليًا، فمفيش throttle ولا اعتماد على رمز.
+  final preferredTechnicianToken = await devTechnicianToken(technicianPhone);
   final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
-    'service_id': await pickBookableServiceId(),
+    'service_id': await pickBookableServiceId(servedByTechnicianToken: preferredTechnicianToken),
+    // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+    // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+    'scheduled_at': bookableScheduledAt(),
     'address_id': await ensureAddressFor(customerToken),
     // وصف فريد: حارس تكرار الطلب بيرجّع نفس الصف لطلبين متطابقين في نفس النافذة.
     'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
   });
   final orderId = order!['id'] as String;
 
+  // **التوكن الراجع مش بالضرورة بتاع `technicianPhone`**: لو العرض راح لفني تاني،
+  // `claimOrderAsTechnician` بتكمّل بيه وبترجّع توكنه. خطوات التنفيذ لازم تمشي بالتوكن ده.
   final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
   for (final step in ['depart', 'arrive', 'start']) {
     await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);
@@ -346,13 +432,21 @@ Future<String> completeOrderAwaitingPayment(
   String technicianPhone = '+201000000011',
   String problemDescription = 'طلب اختبار حي — بانتظار الدفع',
 }) async {
+  // توكن الفني المفضّل **قبل** إنشاء الطلب: اختيار الخدمة محتاجه عشان يتأكد إن الفني ده بيخدمها.
+  // `devTechnicianToken` مش `loginWithPin` — توكن موقّع محليًا، فمفيش throttle ولا اعتماد على رمز.
+  final preferredTechnicianToken = await devTechnicianToken(technicianPhone);
   final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
-    'service_id': await pickBookableServiceId(),
+    'service_id': await pickBookableServiceId(servedByTechnicianToken: preferredTechnicianToken),
+    // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+    // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+    'scheduled_at': bookableScheduledAt(),
     'address_id': await ensureAddressFor(customerToken),
     'problem_description': '$problemDescription ${DateTime.now().microsecondsSinceEpoch}',
   });
   final orderId = order!['id'] as String;
 
+  // **التوكن الراجع مش بالضرورة بتاع `technicianPhone`**: لو العرض راح لفني تاني،
+  // `claimOrderAsTechnician` بتكمّل بيه وبترجّع توكنه. خطوات التنفيذ لازم تمشي بالتوكن ده.
   final technicianToken = await claimOrderAsTechnician(orderId, technicianPhone);
   for (final step in ['depart', 'arrive', 'start']) {
     await apiRequest('POST', '/technician/orders/$orderId/$step', accessToken: technicianToken);

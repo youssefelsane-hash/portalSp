@@ -126,6 +126,9 @@ void main() {
     // POST /orders (OrdersRepository.create مع field_values — الإصلاح الفعلي محل الاختبار)
     final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {
       'service_id': serviceId,
+      // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+      // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+      'scheduled_at': bookableScheduledAt(),
       'address_id': addressId,
       'field_values': fieldValues,
     });
@@ -139,6 +142,9 @@ void main() {
     try {
       await apiRequest('POST', '/orders', accessToken: customerToken, body: {
         'service_id': serviceId,
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': addressId,
       });
     } catch (_) {

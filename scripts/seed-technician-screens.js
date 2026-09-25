@@ -30,6 +30,8 @@ const { LiveHarness } = require('./lib/live-harness');
       body: {
         service_id: h.catalog.service.id,
         address_id: customer.addressId,
+        // migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول» فالموعد إجباري.
+        scheduled_at: h.bookableScheduledAt(),
         problem_description: 'مسح شاشات الفني — طلب اختبار',
       },
     });

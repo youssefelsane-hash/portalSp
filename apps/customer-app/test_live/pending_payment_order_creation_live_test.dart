@@ -55,6 +55,9 @@ void main() {
       accessToken: accessToken,
       body: {
         'service_id': serviceId,
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': addressId,
         'problem_description': 'اختبار حي — دفع مسبق بالبطاقة',
         'payment_method': 'card',
@@ -93,6 +96,9 @@ void main() {
       accessToken: accessToken,
       body: {
         'service_id': serviceId,
+        // ADR-0060 §4 / migration 0340 — كل خدمات الكتالوج بقت بدقة «يوم + ساعة وصول»،
+        // فالموعد إجباري. القيمة من `bookableScheduledAt()` — الشرح هناك.
+        'scheduled_at': bookableScheduledAt(),
         'address_id': addressId,
         'problem_description': 'اختبار حي — دفع مسبق InstaPay',
         'payment_method': 'instapay',
