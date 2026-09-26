@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, MoreThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
@@ -33,6 +33,8 @@ export interface WorkforceSummaryRow {
 }
 
 const DEFAULT_IDLE_THRESHOLD_SECONDS = 300;
+const HEARTBEAT_INTERVAL_SECONDS = 300;
+const MAX_HEARTBEAT_GAP_SECONDS = 360;
 
 // جلسة الموظف = refresh_tokens (ADR-0016 §1) — صفر جدول "employee_sessions" جديد. الجديد الوحيد
 // هنا: heartbeat محسوب (active_seconds تراكمي)، وحالة حية (ACTIVE/IDLE/OFFLINE) مشتقة وقت
@@ -79,23 +81,21 @@ export class WorkforceActivityService {
   }
 
   /**
-   * بتتنادى من POST /admin/workforce/heartbeat — مرة كل دقيقة بالكتير من apps/admin أثناء التاب
-   * نشط بس. خوارزمية وقت العمل الفعلي (ADR-0016 §3): الفجوة من آخر heartbeat بتتضاف لـactive_seconds
-   * لو ≤ عتبة الـidle، وإلا بتتجاهل (كانت فترة idle حقيقية — مثال السكريبت بالحرف).
+   * بتتنادى من POST /admin/workforce/heartbeat بعد تفاعل حديث فقط. أول نبضة بعد الخمول
+   * تعيد نقطة القياس بلا رصيد؛ النبضات التالية لا تضيف أكثر من خمس دقائق مهما تأخر المؤقت.
    *
    * ملاحظة معمارية صريحة: الـaccess token (JwtPayload) مبيحملش session/refresh-token id (تصميم
    * موجود من قبل، ADR-0011) — إضافة claim جديد كانت هتلمس إصدار/تحقق التوكن في كل التطبيق. فبدل
    * كده: refresh_tokens.last_activity_at بيتحدّث لكل جلسات المستخدم النشطة (عادة جلسة واحدة أو
    * اتنين) بدل جلسة واحدة بعينها — تقريب معقول (لو فاتح جهازين، الاتنين على الأرجح نشطين قريب من
    * بعض)، مش دقة مثالية لكل جلسة على حدة. مصدر الحقيقة الفعلي لحالة ACTIVE/IDLE/وقت العمل هو
-   * employee_daily_activity (على مستوى المستخدم، مش الجلسة) — ده مظبوط 100%.
+   * employee_daily_activity (على مستوى المستخدم، مش الجلسة) — قياس تقريبي للتفاعل لا إثبات إنتاجية.
    */
-  async heartbeat(userId: string): Promise<void> {
-    const idleThreshold = await this.idleThresholdSeconds();
+  async heartbeat(userId: string, reset = false): Promise<void> {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
 
-    await this.refreshTokens.update({ userId, isRevoked: false }, { lastActivityAt: now });
+    await this.refreshTokens.update({ userId, isRevoked: false, expiresAt: MoreThan(now) }, { lastActivityAt: now });
 
     const existing = await this.dataSource.query<{ last_activity_at: string | null; activity_date: string }[]>(
       `SELECT last_activity_at, activity_date::text FROM employee_daily_activity WHERE user_id = $1 AND activity_date = $2`,
@@ -114,7 +114,7 @@ export class WorkforceActivityService {
 
     const lastActivityAt = existing[0].last_activity_at ? new Date(existing[0].last_activity_at) : null;
     const gapSeconds = lastActivityAt ? Math.max(0, (now.getTime() - lastActivityAt.getTime()) / 1000) : 0;
-    const contributesActive = lastActivityAt !== null && gapSeconds <= idleThreshold;
+    const contributesActive = !reset && lastActivityAt !== null && gapSeconds <= MAX_HEARTBEAT_GAP_SECONDS;
 
     await this.dataSource.query(
       `UPDATE employee_daily_activity
@@ -122,7 +122,7 @@ export class WorkforceActivityService {
            active_seconds = active_seconds + $4,
            updated_at = now()
        WHERE user_id = $1 AND activity_date = $2`,
-      [userId, today, now, contributesActive ? Math.round(gapSeconds) : 0],
+      [userId, today, now, contributesActive ? Math.min(Math.round(gapSeconds), HEARTBEAT_INTERVAL_SECONDS) : 0],
     );
   }
 
@@ -154,13 +154,13 @@ export class WorkforceActivityService {
   async getPresence(userId: string): Promise<EmployeePresence> {
     const idleThreshold = await this.idleThresholdSeconds();
     const activeSessions = await this.refreshTokens.count({
-      where: { userId, isRevoked: false },
+      where: { userId, isRevoked: false, expiresAt: MoreThan(new Date()) },
     });
     if (activeSessions === 0) {
       return { state: EmployeePresenceState.OFFLINE, last_activity_at: null, active_sessions_count: 0 };
     }
     const [row] = await this.dataSource.query<{ last_activity_at: string | null }[]>(
-      `SELECT last_activity_at FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      `SELECT last_activity_at FROM employee_daily_activity WHERE user_id = $1 AND activity_date = (now() AT TIME ZONE 'UTC')::date`,
       [userId],
     );
     const lastActivityAt = row?.last_activity_at ? new Date(row.last_activity_at) : null;
@@ -210,11 +210,11 @@ export class WorkforceActivityService {
          COALESCE(eda.sessions_count, 0) AS sessions_today,
          COALESCE(eda.actions_count, 0) AS actions_today,
          COALESCE(eda.denied_sensitive_count, 0) AS denied_sensitive_today,
-         (SELECT count(*) FROM refresh_tokens rt WHERE rt.user_id = u.id AND rt.is_revoked = false) AS active_sessions_count,
+         (SELECT count(*) FROM refresh_tokens rt WHERE rt.user_id = u.id AND rt.is_revoked = false AND rt.expires_at > now()) AS active_sessions_count,
          (SELECT count(*) FROM security_events se WHERE se.target_user_id = u.id AND se.status = 'open') AS open_alerts
        FROM users u
        JOIN employee_profiles ep ON ep.user_id = u.id
-       LEFT JOIN employee_daily_activity eda ON eda.user_id = u.id AND eda.activity_date = CURRENT_DATE
+       LEFT JOIN employee_daily_activity eda ON eda.user_id = u.id AND eda.activity_date = (now() AT TIME ZONE 'UTC')::date
        WHERE u.user_type = 'admin' AND u.deleted_at IS NULL
        ORDER BY u.full_name ASC`,
     );

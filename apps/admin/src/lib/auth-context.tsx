@@ -347,22 +347,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [doRefresh, requestStepUp, setAccessTokenBoth],
   );
 
-  // Heartbeat دوري (Script 5 — تتبع الحضور اللحظي ووقت العمل الفعلي، workforce-activity.service.ts
-  // §heartbeat). بيحدّث last_activity_at لكل جلسات المستخدم النشطة، مرة كل دقيقة وبس لما التاب يكون
-  // ظاهر فعليًا (Page Visibility API) — مفيش داعي نبعت من تاب في الخلفية أو مقفول، ده بيدّي "وقت
-  // عمل فعلي" وهمي. فشل الطلب (شبكة/مؤقتًا) بيتجاهل بصمت — مش عملية حرجة تستاهل toast للمستخدم.
+  // فترة الخمس دقائق بتتحسب لو حصل تفاعل فيها؛ مجرد ترك التبويب ظاهرًا لا يُحسب عملًا.
   useEffect(() => {
     if (!user) return;
-    function sendHeartbeat() {
-      if (document.visibilityState !== 'visible') return;
-      void authedFetch('/admin/workforce/heartbeat', { method: 'POST' }).catch(() => undefined);
+    let hadActivity = false;
+    let lastInteractionAt = 0;
+    let lastHeartbeatAt = 0;
+    let idle = false;
+    function sendHeartbeat(reset: boolean) {
+      lastHeartbeatAt = Date.now();
+      void authedFetch('/admin/workforce/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify({ reset }),
+      }).catch(() => undefined);
     }
-    sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 60_000);
-    document.addEventListener('visibilitychange', sendHeartbeat);
+    function onInteraction() {
+      if (document.visibilityState !== 'visible') return;
+      lastInteractionAt = Date.now();
+      hadActivity = true;
+      if (idle || Date.now() - lastHeartbeatAt > 360_000) {
+        idle = false;
+        sendHeartbeat(true);
+      }
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState !== 'visible') {
+        idle = true;
+        hadActivity = false;
+      }
+    }
+    function tick() {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastHeartbeatAt > 360_000) {
+        idle = true;
+        hadActivity = false;
+        return;
+      }
+      if (hadActivity && Date.now() - lastInteractionAt <= 300_000) {
+        sendHeartbeat(false);
+      } else {
+        idle = true;
+      }
+      hadActivity = false;
+    }
+    sendHeartbeat(true);
+    const interval = setInterval(tick, 300_000);
+    const events = ['pointermove', 'pointerdown', 'keydown', 'scroll', 'wheel', 'touchstart'] as const;
+    for (const event of events) document.addEventListener(event, onInteraction, { passive: true });
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       clearInterval(interval);
-      document.removeEventListener('visibilitychange', sendHeartbeat);
+      for (const event of events) document.removeEventListener(event, onInteraction);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [user, authedFetch]);
 

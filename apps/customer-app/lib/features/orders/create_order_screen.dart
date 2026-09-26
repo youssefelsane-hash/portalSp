@@ -313,6 +313,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // _requestedAt (اللي بيحمل اليوم بس من ScheduleSelectionScreen)، بيتدمجوا وقت الإرسال
   // (_combinedPreciseScheduledAt). المدة بقت ناتج معادلة، مش رقم بيدخّله العميل.
   TimeOfDay? _preciseTime;
+
   /// نافذة اختيار الموعد (ADR-0097) — بتتحمّل مع باقي بيانات الحجز، والافتراضي مطابق للسيرفر.
   BookingWindow _bookingWindow = BookingWindow.fallback;
   DurationEstimate? _durationEstimate;
@@ -391,10 +392,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// مكرّر: `_selectedPaymentMethod` وحده مش كافي، لأن «التقسيط» و«تقييم بالصور بلا رسم»
   /// الاتنين بيطلعوا `null` برضه — وهما الحالتين اللي الشروط بتنطبق عليهم كمان.
   String? get _effectivePrepaymentMethod => bookingPaymentMethod(
-        remoteQuote: _effectiveRemoteQuote,
-        remoteAssessmentFeeCents: _dueRemoteAssessmentFeeCents,
-        selected: _selectedPaymentMethod,
-      );
+    remoteQuote: _effectiveRemoteQuote,
+    remoteAssessmentFeeCents: _dueRemoteAssessmentFeeCents,
+    selected: _selectedPaymentMethod,
+  );
 
   /// الشروط بتنطبق على الطلب ده ولا لأ — **نفس شرط الباك-إند بالحرف**
   /// (`order-creation.service.ts`: `if (!prepaymentMethod && !originalOrder)`).
@@ -406,7 +407,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   bool get _allRequiredPoliciesAccepted => _visiblePostpaidPolicies
       .where((policy) => policy.isRequired)
-      .every((policy) => _acceptedPolicyVersionIds.contains(policy.currentVersionId));
+      .every(
+        (policy) => _acceptedPolicyVersionIds.contains(policy.currentVersionId),
+      );
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
   // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
@@ -760,9 +763,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // **المدخل التاني لنفس القاعدة** (ADR-0097): العميل يقدر يغيّر الساعة من شاشة التأكيد
     // كمان، فالحارس لازم يبقى في المكانين — وإلا فيه طريق بيوصل لوقت السيرفر بيرفضه.
     if (!_bookingWindow.allows(picked)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_bookingWindow.rejectionAr)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_bookingWindow.rejectionAr)));
       return;
     }
     setState(() => _preciseTime = picked);
@@ -997,7 +1000,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             technicianId: technicianId,
             technicianCompanyId: companyId,
             bookingMode: widget.bookingMode,
-            scheduledAt: widget.scheduleSlotId != null ? null : _scheduledAtToSend(),
+            scheduledAt: widget.scheduleSlotId != null
+                ? null
+                : _scheduledAtToSend(),
             // النطاق المرن جزء من البصمة (`scheduled_end_at`) — غيابه هنا كان بيخلّي إعادة
             // الإصدار تطلع بصمة مختلفة عن الإنشاء، فنفس رسالة «تفاصيل الحجز اتغيّرت» بترجع
             // من باب تاني على الحجوزات بنطاق أيام.
@@ -1152,8 +1157,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         matchPreviewId: effectiveMatchPreviewId,
         // بيتبعت بس لما الشروط منطبقة فعلاً (دفع بعد الشغل) — الباك-إند بيتجاهلها في الطلب
         // المدفوع مقدّمًا، وإرسالها هناك بيخزّن قبول لحاجة مالهاش لازمة على الطلب ده.
-        acceptedPolicyVersionIds:
-            _postpaidPoliciesApply ? _acceptedPolicyVersionIds.toList() : null,
+        acceptedPolicyVersionIds: _postpaidPoliciesApply
+            ? _acceptedPolicyVersionIds.toList()
+            : null,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
       // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.
@@ -1196,7 +1202,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           return;
         }
         // قفلها من غير تأكيد — رسالة واضحة إن الحجز مستنّي خطوة واحدة، مش فشل.
-        setState(() => _error = 'محتاجين تأكيد رقم موبايلك قبل أول طلب — جرّب تاني لما تكون جاهز.');
+        setState(
+          () => _error =
+              'محتاجين تأكيد رقم موبايلك قبل أول طلب — جرّب تاني لما تكون جاهز.',
+        );
         return;
       }
 
@@ -1240,6 +1249,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
   }
 
+  Widget _repeatOption({
+    required String? value,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final selected = _repeatFrequency == value;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: selected ? scheme.primaryContainer.withValues(alpha: 0.35) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: selected ? scheme.primary : scheme.outlineVariant,
+          width: selected ? 1.5 : 1,
+        ),
+      ),
+      child: RadioListTile<String?>(
+        value: value,
+        secondary: Icon(
+          icon,
+          color: selected ? scheme.primary : scheme.onSurfaceVariant,
+        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle),
+      ),
+    );
+  }
+
   Widget _paymentOption({
     required String method,
     required String title,
@@ -1276,7 +1315,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     return RadioListTile<String?>(
       value: method,
       enabled: available,
-      secondary: Icon(icon),
+      secondary: _PaymentOptionIcon(method: method, icon: icon),
       title: recommended && badgeText != null
           ? Row(
               children: [
@@ -1611,8 +1650,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         Text(_pricingFieldsError!, style: const TextStyle(color: Colors.red)),
       ];
     }
-    final sortedFields = [..._pricingFields]
-      ..sort(comparePricingFields);
+    final sortedFields = [..._pricingFields]..sort(comparePricingFields);
     return [
       const SizedBox(height: 16),
       Text(
@@ -2023,23 +2061,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               RadioGroup<String?>(
                 groupValue: _repeatFrequency,
                 onChanged: (value) => setState(() => _repeatFrequency = value),
-                child: Card(
-                  child: Column(
-                    children: [
-                      RadioListTile<String?>(
-                        value: null,
-                        title: Text('مرة واحدة'),
-                      ),
-                      RadioListTile<String?>(
-                        value: 'weekly',
-                        title: Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
-                      ),
-                      RadioListTile<String?>(
-                        value: 'monthly',
-                        title: Text('شهري — نفس اليوم كل شهر'),
-                      ),
-                    ],
-                  ),
+                child: Column(
+                  children: [
+                    _repeatOption(
+                      value: null,
+                      title: 'مرة واحدة',
+                      subtitle: 'حجز لمرة واحدة فقط',
+                      icon: Icons.event_available_outlined,
+                    ),
+                    _repeatOption(
+                      value: 'weekly',
+                      title: 'أسبوعي',
+                      subtitle: 'نفس اليوم والوقت كل أسبوع',
+                      icon: Icons.calendar_view_week_outlined,
+                    ),
+                    _repeatOption(
+                      value: 'monthly',
+                      title: 'شهري',
+                      subtitle: 'نفس اليوم كل شهر',
+                      icon: Icons.calendar_month_outlined,
+                    ),
+                  ],
                 ),
               ),
               if (_repeatFrequency != null)
@@ -2161,10 +2203,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               // مسارين مشروعين، فالقرار قراره.
               _DepositChoiceCard(
                 depositText: _formatEgp(_pricePreview!.depositAmountCents!),
-                remainingText: _formatEgp(_pricePreview!.remainingAmountCents ?? 0),
+                remainingText: _formatEgp(
+                  _pricePreview!.remainingAmountCents ?? 0,
+                ),
                 totalText: _formatEgp(_pricePreview!.totalAmountCents),
                 payFull: _payFullInsteadOfDeposit,
-                onChanged: (value) => setState(() => _payFullInsteadOfDeposit = value),
+                onChanged: (value) =>
+                    setState(() => _payFullInsteadOfDeposit = value),
               ),
               const SizedBox(height: 8),
             ] else if (!widget.service.cashAllowed) ...[
@@ -2229,7 +2274,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           !_requiresElectronicPayment &&
                           ((_paymentChannels['cash']?.available ?? false) ||
                               (_paymentChannels['wallet']?.available ?? false)),
-                      secondary: const Icon(Icons.payments_outlined),
+                      secondary: const _PaymentOptionIcon(
+                        method: 'cash',
+                        icon: Icons.payments_outlined,
+                      ),
                       title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
                       subtitle: Text(
                         _requiresElectronicPayment
@@ -2335,6 +2383,54 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
 /// حقل تاريخ واحد جوّه فترة الاشتراك (ADR-0050 §4) — عرض بس، الاختيار كله في `showDatePicker`.
 
+class _PaymentOptionIcon extends StatelessWidget {
+  const _PaymentOptionIcon({required this.method, required this.icon});
+
+  final String method;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 52,
+      height: 44,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: method == 'instapay'
+          ? Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Insta',
+                    style: TextStyle(color: scheme.onSurface),
+                  ),
+                  const TextSpan(
+                    text: 'Pay',
+                    style: TextStyle(color: Color(0xFFB04AAE)),
+                  ),
+                ],
+              ),
+              textDirection: TextDirection.ltr,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                fontStyle: FontStyle.italic,
+                letterSpacing: -0.5,
+              ),
+            )
+          : Icon(
+              method == 'cash' ? Icons.payments_rounded : icon,
+              color: scheme.primary,
+              size: 24,
+            ),
+    );
+  }
+}
+
 /// شارة «الأنسب» جنب وسيلة الدفع المرشّحة.
 ///
 /// نصها بييجي من الباك-إند مش مكتوب هنا (إعداد `payments.recommended_method`)، فالترشيح
@@ -2390,7 +2486,8 @@ class _RecommendedBadge extends StatelessWidget {
   required int? remoteAssessmentFeeDueCents,
   required int? previewTotalCents,
 }) {
-  final base = (remoteAssessmentFeeDueCents != null && remoteAssessmentFeeDueCents > 0)
+  final base =
+      (remoteAssessmentFeeDueCents != null && remoteAssessmentFeeDueCents > 0)
       ? remoteAssessmentFeeDueCents
       : previewTotalCents;
   // نفس قاعدة `eligibleInstaPayDiscountCents()` في الباك-إند بالحرف: خصم مساوي أو أكبر من
@@ -2417,7 +2514,9 @@ class _OnlineDiscountLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     // الخصم مش بيزيد على الإجمالي أبدًا (الباك-إند بيسقّفه) — الـclamp هنا حارس عرض بس.
-    final discounted = totalCents == null ? null : (totalCents! - discountCents).clamp(0, totalCents!);
+    final discounted = totalCents == null
+        ? null
+        : (totalCents! - discountCents).clamp(0, totalCents!);
     return Wrap(
       spacing: 6,
       runSpacing: 2,
@@ -2434,7 +2533,11 @@ class _OnlineDiscountLine extends StatelessWidget {
           ),
           Text(
             formatEgp(discounted),
-            style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w800, fontSize: 14),
+            style: TextStyle(
+              color: scheme.primary,
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+            ),
           ),
         ],
         if (labelAr != null && labelAr!.trim().isNotEmpty)
@@ -2493,7 +2596,9 @@ class _DepositChoiceCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
               child: Text(
                 'تحب تدفع كام دلوقتي؟',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             RadioGroup<bool>(
@@ -2505,13 +2610,17 @@ class _DepositChoiceCard extends StatelessWidget {
                     value: false,
                     contentPadding: EdgeInsets.zero,
                     title: Text('العربون دلوقتي — $depositText'),
-                    subtitle: Text('والباقي ($remainingText) تدفعه كاش للصنايعي بعد الشغل'),
+                    subtitle: Text(
+                      'والباقي ($remainingText) تدفعه كاش للصنايعي بعد الشغل',
+                    ),
                   ),
                   RadioListTile<bool>(
                     value: true,
                     contentPadding: EdgeInsets.zero,
                     title: Text('الطلب كامل دلوقتي — $totalText'),
-                    subtitle: const Text('تخلّص الدفع مرة واحدة ومش هيتبقى عليك حاجة بعد الشغل'),
+                    subtitle: const Text(
+                      'تخلّص الدفع مرة واحدة ومش هيتبقى عليك حاجة بعد الشغل',
+                    ),
                   ),
                 ],
               ),

@@ -20,8 +20,10 @@ export interface SecurityEventDto {
   severity: SecurityEventSeverity;
   status: SecurityEventStatus;
   actorUserId: string | null;
+  actorName?: string | null;
   actorRole: string | null;
   targetUserId: string | null;
+  targetName?: string | null;
   targetType: string | null;
   targetId: string | null;
   sessionId: string | null;

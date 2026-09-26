@@ -21,7 +21,7 @@ export function CategoryTile({ category }: { category: ServiceCategoryDto }) {
       className="motion-rise motion-press group flex flex-col gap-2 rounded-xl outline-offset-4"
     >
       <div className="overflow-hidden rounded-xl ring-1 ring-transparent transition-[transform,box-shadow] duration-200 group-hover:-translate-y-0.5 group-hover:ring-primary">
-        <CatalogImage src={image} aspect="1 / 1" rounded="rounded-xl" sizeHint="(max-width: 640px) 45vw, 160px" />
+        <CatalogImage src={image} aspect="1 / 1" rounded="rounded-xl" sizeHint="(max-width: 640px) 30vw, (max-width: 1024px) 22vw, 160px" />
       </div>
       {/* تلات أسطر كحد أقصى، نفس الأندرويد — بتستوعب اسم فئة وصفي من غير ما الصف يتكسر. */}
       <span className="line-clamp-3 text-center text-sm font-semibold leading-tight text-foreground group-hover:text-primary">

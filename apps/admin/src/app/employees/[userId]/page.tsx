@@ -29,6 +29,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/componen
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ErrorNotice } from '@/components/notice';
 import { EmployeeActivationCodeButton } from '@/components/employee-activation-code-button';
+import { auditActionLabel } from '@/lib/audit-labels';
 
 const PRESENCE_LABELS: Record<string, string> = { active: 'نشط الآن', idle: 'خامل', offline: 'غير متصل' };
 const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'> = {
@@ -432,7 +433,7 @@ export default function EmployeeDetailPage() {
                 <TableBody>
                   {detail.recent_activity.map((activity, i) => (
                     <TableRow key={i}>
-                      <TableCell>{activity.action}</TableCell>
+                      <TableCell title={activity.action}>{auditActionLabel(activity.action)}</TableCell>
                       <TableCell>{(formatDateTimeAr(activity.created_at) ?? '—')}</TableCell>
                     </TableRow>
                   ))}
@@ -445,7 +446,7 @@ export default function EmployeeDetailPage() {
         {sessions && sessions.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">الجلسات المفتوحة (Script 5)</CardTitle>
+            <CardTitle className="text-base">جلسات الموظف</CardTitle>
             </CardHeader>
             <CardContent>
               <Table>

@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,8 +18,9 @@ export class AdminWorkforceController {
   @Post('heartbeat')
   @AnyAdmin('كتابة ذاتية — الموظف بيسجّل نبضة حضوره هو، مش بيقرا ولا يعدّل حد تاني')
   @HttpCode(HttpStatus.OK)
-  async heartbeat(@CurrentUser() admin: JwtPayload) {
-    await this.workforce.heartbeat(admin.sub);
+  async heartbeat(@CurrentUser() admin: JwtPayload, @Body('reset') reset?: unknown) {
+    // الطلبات القديمة بلا reset لا تضيف وقتًا بعد نشر الـAPI قبل تحديث تبويبات الأدمن.
+    await this.workforce.heartbeat(admin.sub, reset !== false);
     return null;
   }
 

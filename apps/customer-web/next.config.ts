@@ -54,6 +54,12 @@ const CSP = [
 const nextConfig: NextConfig = {
   // تسريب نوع الستاك بلا أي فايدة — نفس قرار الأدمن.
   poweredByHeader: false,
+  images: {
+    // Public URLs are stable cache keys. R2 presigned URLs rotate and stay direct.
+    remotePatterns: [
+      { protocol: "https", hostname: "i.ibb.co" },
+    ],
+  },
   async headers() {
     return [
       {

@@ -25,6 +25,7 @@ import { TechnicianEarningsStatement } from '@/components/technician-earnings-st
 import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
 import { TechnicianInternalNotes } from '@/components/technician-internal-notes';
 import { PageHeader } from '@/components/page-header';
+import { ResetPinButton } from '@/components/reset-pin-button';
 import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { ProfileSummary } from '@/components/profile-summary';
 import { EmptyState } from '@/components/empty-state';
@@ -587,9 +588,12 @@ export default function TechnicianDetailPage() {
         }
         description={`كود ${detail.technician_code} · ${detail.technician_kind === 'assistant' ? 'مساعد' : 'فني'} · ${LEVEL_LABELS[detail.current_level]}`}
         actions={
-          <Button variant="outline" onClick={goBack}>
-            رجوع للقايمة
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <ResetPinButton userId={detail.user_id} userLabel={detail.full_name} userKind="الفني" />
+            <Button variant="outline" onClick={goBack}>
+              رجوع للقايمة
+            </Button>
+          </div>
         }
       />
 

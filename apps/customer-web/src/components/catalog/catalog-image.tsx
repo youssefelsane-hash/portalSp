@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { OptimizedPublicImage } from '@/components/optimized-public-image';
 
 /// نظير `apps/customer-app/lib/design/network_image_box.dart` على الويب.
 ///
@@ -29,9 +30,9 @@ export function CatalogImage({
   sizeHint?: string;
   icon?: 'category' | 'service';
 }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const showImage = Boolean(src) && !failed;
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const showImage = Boolean(src) && failedSrc !== src;
 
   return (
     <div
@@ -47,18 +48,17 @@ export function CatalogImage({
         <PlaceholderIcon kind={icon} />
       </div>
       {showImage && (
-        // eslint-disable-next-line @next/next/no-img-element -- رابط يحدده الأدمن وقت التشغيل، مش أصل معروف وقت البناء
-        <img
+        <OptimizedPublicImage
           src={src ?? ''}
           alt=""
+          fill
           loading="lazy"
-          decoding="async"
-          sizes={sizeHint}
-          onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
+          sizes={sizeHint ?? '100vw'}
+          onLoad={() => setLoadedSrc(src ?? null)}
+          onError={() => setFailedSrc(src ?? null)}
           className={`absolute inset-0 h-full w-full transition-opacity duration-300 ${
             fit === 'cover' ? 'object-cover' : 'object-contain'
-          } ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          } ${loadedSrc === src ? 'opacity-100' : 'opacity-0'}`}
         />
       )}
     </div>

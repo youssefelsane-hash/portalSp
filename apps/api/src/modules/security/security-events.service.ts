@@ -285,6 +285,23 @@ export class SecurityEventsService {
     return event;
   }
 
+  async getDetail(id: string): Promise<SecurityEvent & { actorName: string | null; targetName: string | null }> {
+    const event = await this.getOrThrow(id);
+    const ids = [event.actorUserId, event.targetUserId].filter((value): value is string => value !== null);
+    const users = ids.length
+      ? await this.dataSource.query<{ id: string; full_name: string }[]>(
+          `SELECT id, full_name FROM users WHERE id = ANY($1::uuid[])`,
+          [ids],
+        )
+      : [];
+    const names = new Map(users.map((user) => [user.id, user.full_name]));
+    return {
+      ...event,
+      actorName: event.actorUserId ? names.get(event.actorUserId) ?? null : null,
+      targetName: event.targetUserId ? names.get(event.targetUserId) ?? null : null,
+    };
+  }
+
   async listNotes(securityEventId: string): Promise<SecurityEventNote[]> {
     return this.notes.find({ where: { securityEventId }, order: { createdAt: 'ASC' } });
   }

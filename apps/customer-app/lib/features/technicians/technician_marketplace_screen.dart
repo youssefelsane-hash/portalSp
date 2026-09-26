@@ -401,8 +401,8 @@ class _TechnicianMarketplaceScreenState
                               t.serviceCompletedCount > 0
                                   ? '· ${t.serviceCompletedCount} طلب في الخدمة دي'
                                   : t.totalCompletedCount > 0
-                                        ? '· أول طلب في الخدمة دي · ${t.totalCompletedCount} طلب على المنصّة'
-                                        : '· أول طلب له على المنصّة',
+                                  ? '· أول طلب في الخدمة دي · ${t.totalCompletedCount} طلب على المنصّة'
+                                  : '· أول طلب له على المنصّة',
                             ),
                           ],
                         ),
@@ -448,29 +448,8 @@ class _TechnicianMarketplaceScreenState
                         if (t.punctuality != null) ...[
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
-                            child: Wrap(
-                              spacing: 4,
-                              children: [
-                                const Icon(
-                                  Icons.verified_outlined,
-                                  size: 14,
-                                  color: Colors.grey,
-                                ),
-                                Text(t.punctuality!.labelAr),
-                              ],
-                            ),
+                            child: Text(t.punctuality!.labelAr),
                           ),
-                          if (t.punctuality!.latenessLabelAr != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                t.punctuality!.latenessLabelAr!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ),
                         ],
                       ],
                     ),
@@ -818,26 +797,7 @@ class TrustBadge extends StatelessWidget {
   }
 }
 
-///
-/// مقصودة تكون هادية وصغيرة: الهدف تفسير الفرق مش الإعلان. علامة الشيك بتدّي إحساس
-/// شارة **سعر أعلى من الأساسي** (docs/08 §65.1، ومعدّلة في §153).
-///
-/// طلب المالك الأصلي (§65.1): «إحنا مش عايزين علامة صح… نحط كلمة Premium وجنبها أي لوجو خفيف
-/// قوي يدل إن premium دي هي رمز الفلوس… عايزين نشيل علامة الصح، لأن علامة الصح المفروض دي
-/// توثيق من الموقع… فمش عايزين نخلي فيه حاجتين علامة صح في نفس الوقت».
-///
-/// ### ليه النص اتغيّر من `Premium` (بلاغ مالك 2026-09-16)
-///
-/// المنصّة عندها **مستوى فني** اسمه `premium` كمان، فالفني اللي مستواه بريميوم كان بياخد
-/// الاتنين على نفس الكارت: شريحة المستوى «بريميوم» + شارة «Premium». نفس الكلمة مرتين
-/// بلغتين، وهي بالظبط اللي المالك وصفها بـ«عربي على إنجليزي… شكله مش نظيف».
-///
-/// والحل اللي بيحترم سبب §65.1 بدل حرفه: **الشارة بتقول اللي هي عنه فعلاً — السعر**. هدف
-/// المالك من الكلمة كان «رمز الفلوس»، والنص الصريح بيوصّل ده أقوى من كلمة إنجليزية بتتلبّس
-/// باسم مستوى. الأيقونة (ألماظة) والشكل زي ما هما.
-///
-/// القاعدة الحاكمة اللي **ما اتغيّرتش**: `Icons.verified` محجوزة حصريًا لعلامة التوثيق اللي
-/// الأدمن بيمنحها (ADR-0039). أي إشارة تانية ممنوع تستخدم علامة صح.
+/// شارة هادئة لفئة الفني الأعلى، بلا أي علامة تشبه شارة توثيق المنصة.
 class _PremiumBadge extends StatelessWidget {
   const _PremiumBadge();
 
@@ -856,13 +816,13 @@ class _PremiumBadge extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.diamond_outlined,
-              size: 11,
+              Icons.workspace_premium_outlined,
+              size: 13,
               color: scheme.onTertiaryContainer,
             ),
             const SizedBox(width: 3),
             Text(
-              'سعر أعلى',
+              'خبرة أعلى',
               style: TextStyle(
                 fontSize: 11,
                 color: scheme.onTertiaryContainer,

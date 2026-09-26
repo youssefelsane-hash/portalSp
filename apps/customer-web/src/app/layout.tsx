@@ -31,6 +31,11 @@ export const metadata: Metadata = {
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
   manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [{ url: '/icon.png', sizes: '512x512', type: 'image/png' }],
+    shortcut: '/favicon.ico',
+    apple: '/apple-icon.png',
+  },
   /**
    * **كارت المشاركة** (طلب مالك 2026-09-25): «لينك على واتساب يظهر كارت فيه صورة وعنوان مش
    * لينك أزرق». الصورة بتتولّد من الـbrand kit بـ`scripts/export-og-image.js`، والمقاس

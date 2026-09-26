@@ -11,8 +11,8 @@ export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://ostahome.c
  * **أسماء البراند البديلة** — طلب المالك بالنص: «لما حد يكتب Osta بس، الدومين يكون OstaHome…
  * تكون بتساوي أسطى بالعربي، أسطى هوم…».
  *
- * بتروح في `alternateName` جوّه JSON-LD `Organization` وفي `keywords`. ده اللي بيدي محركات البحث
- * وأدوات الـAI ربط صريح بين الأسماء الشايعة والدومين، بدل ما تستنتجه من النص لوحده.
+ * بتروح في `alternateName` جوّه JSON-LD `WebSite` و`Organization`. الاسم الأساسي «أسطى» بيتكتب
+ * في `name`، ومش بيتكرر هنا. وسم `meta keywords` مش عامل ترتيب في Google.
  *
  * **مصدر واحد**: تكرار القايمة في كل صفحة معناه إن إضافة اسم جديد بتتنسى في نص المواضع.
  */
@@ -20,7 +20,6 @@ export const BRAND_ALTERNATE_NAMES = [
   'Osta',
   'OstaHome',
   'Osta Home',
-  'أسطى',
   'اسطى',
   'أسطى هوم',
   'اسطى هوم',

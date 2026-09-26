@@ -25,11 +25,16 @@ const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'
   idle: 'secondary',
   offline: 'outline',
 };
+const DEPARTMENT_LABELS: Record<string, string> = {
+  operations: 'العمليات',
+  administration: 'الإدارة',
+  'finance & brand coordinator': 'المالية والعلامة التجارية',
+};
 
 function formatActiveTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours === 0 && minutes === 0) return '—';
+  if (hours === 0 && minutes === 0) return '0 دقيقة';
   if (hours === 0) return `${minutes} دقيقة`;
   return `${hours}س ${minutes}د`;
 }
@@ -41,9 +46,19 @@ export default function WorkforceDashboardPage() {
 
   useEffect(() => {
     if (isLoading) return;
-    authedFetch<WorkforceSummaryRowDto[]>('/admin/workforce/summary')
-      .then(setRows)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ملخص القوى العاملة'));
+    function load() {
+      if (document.visibilityState !== 'visible') return;
+      authedFetch<WorkforceSummaryRowDto[]>('/admin/workforce/summary')
+        .then((next) => { setRows(next); setError(null); })
+        .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ملخص القوى العاملة'));
+    }
+    load();
+    const interval = setInterval(load, 60_000);
+    document.addEventListener('visibilitychange', load);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', load);
+    };
   }, [isLoading, authedFetch]);
 
   const activeCount = rows?.filter((r) => r.state === 'active').length ?? 0;
@@ -52,7 +67,7 @@ export default function WorkforceDashboardPage() {
 
   return (
     <AppShell>
-      <PageHeader title="لوحة القوى العاملة" description="حضور لحظي ونشاط اليوم لكل الموظفين — Script 5." />
+      <PageHeader title="لوحة القوى العاملة" description="وقت التفاعل الفعلي اليوم، مش مدة بقاء الصفحة مفتوحة. يُرصد النشاط كل خمس دقايق." />
 
       {error && <ErrorNotice>{error}</ErrorNotice>}
 
@@ -90,7 +105,7 @@ export default function WorkforceDashboardPage() {
                   <TableHead>الموظف</TableHead>
                   <TableHead>القسم</TableHead>
                   <TableHead>الحضور</TableHead>
-                  <TableHead>وقت العمل الفعلي (النهارده)</TableHead>
+                  <TableHead>وقت التفاعل على النظام (النهارده)</TableHead>
                   <TableHead>عدد الأفعال</TableHead>
                   <TableHead>أفعال حساسة اترفضت</TableHead>
                   <TableHead>تنبيهات مفتوحة</TableHead>
@@ -104,7 +119,7 @@ export default function WorkforceDashboardPage() {
                         {row.full_name}
                       </Link>
                     </TableCell>
-                    <TableCell>{row.department ?? '—'}</TableCell>
+                    <TableCell>{row.department ? (DEPARTMENT_LABELS[row.department.toLowerCase()] ?? row.department) : '—'}</TableCell>
                     <TableCell>
                       <Badge variant={PRESENCE_BADGE_VARIANT[row.state]}>{PRESENCE_LABELS[row.state]}</Badge>
                     </TableCell>

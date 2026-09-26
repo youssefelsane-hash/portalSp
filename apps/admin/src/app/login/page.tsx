@@ -133,7 +133,7 @@ function LoginForm() {
           <div className="mb-3 flex items-center gap-3" aria-label="OSTA">
             {/* أصل static مقصود هنا: صفحة الدخول لازم تفضل متاحة حتى لو الـAPI واقع. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon.svg" alt="" className="size-11 rounded-xl bg-[#fff8f2] p-1.5" />
+            <img src="/icon.png" alt="" className="size-11 object-contain" />
             <div>
               <span className="block text-lg font-bold tracking-[0.12em]" dir="ltr">
                 OSTA

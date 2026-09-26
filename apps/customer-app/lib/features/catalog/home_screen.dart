@@ -707,42 +707,35 @@ class _HomeScreenState extends State<HomeScreen> {
                         SizedBox(
                           height: 142,
                           child: imageUrl != null && imageUrl.isNotEmpty
-                              ? ColoredBox(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.surfaceContainerHighest,
-                                  child: CachedNetworkImage(
-                                    imageUrl: resolveCachedRemoteImageUrl(
-                                      imageUrl,
-                                    ),
-                                    cacheKey: remoteImageCacheKey(imageUrl),
-                                    width: double.infinity,
-                                    // صور النصائح غالبًا فيها كتابة وعناصر قرب الحواف. cover
-                                    // كان بيقص نصف الصورة داخل شريط 80px؛ contain يعرض التصميم
-                                    // كاملًا، والخلفية الهادئة تمتص أي فرق في النسبة.
-                                    fit: BoxFit.contain,
-                                    memCacheHeight:
-                                        (142 *
-                                                (MediaQuery.maybeDevicePixelRatioOf(
-                                                      context,
-                                                    ) ??
-                                                    1.0))
-                                            .round(),
-                                    maxHeightDiskCache:
-                                        (142 *
-                                                (MediaQuery.maybeDevicePixelRatioOf(
-                                                      context,
-                                                    ) ??
-                                                    1.0))
-                                            .round(),
-                                    fadeInDuration: const Duration(
-                                      milliseconds: 180,
-                                    ),
-                                    placeholder: (_, _) =>
-                                        _tipFallback(context, index),
-                                    errorWidget: (_, _, _) =>
-                                        _tipFallback(context, index),
+                              ? CachedNetworkImage(
+                                  imageUrl: resolveCachedRemoteImageUrl(
+                                    imageUrl,
                                   ),
+                                  cacheKey: remoteImageCacheKey(imageUrl),
+                                  width: double.infinity,
+                                  height: 142,
+                                  fit: BoxFit.cover,
+                                  memCacheHeight:
+                                      (142 *
+                                              (MediaQuery.maybeDevicePixelRatioOf(
+                                                    context,
+                                                  ) ??
+                                                  1.0))
+                                          .round(),
+                                  maxHeightDiskCache:
+                                      (142 *
+                                              (MediaQuery.maybeDevicePixelRatioOf(
+                                                    context,
+                                                  ) ??
+                                                  1.0))
+                                          .round(),
+                                  fadeInDuration: const Duration(
+                                    milliseconds: 180,
+                                  ),
+                                  placeholder: (_, _) =>
+                                      _tipFallback(context, index),
+                                  errorWidget: (_, _, _) =>
+                                      _tipFallback(context, index),
                                 )
                               : _tipFallback(context, index),
                         ),

@@ -33,7 +33,7 @@ export class AdminSecurityController {
   @Get('events/:id')
   @RequirePermission('security.alerts.view')
   getOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.securityEvents.getOrThrow(id);
+    return this.securityEvents.getDetail(id);
   }
 
   @Get('events/:id/notes')

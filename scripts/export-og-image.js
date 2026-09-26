@@ -14,7 +14,7 @@ const path = require('node:path');
 const sharp = require('sharp');
 
 const root = path.resolve(__dirname, '..');
-const logo = path.join(root, 'brand/logo/svg/osta-logo-white.svg');
+const icon = path.join(root, 'apps/admin/public/brand/osta-customer-icon.png');
 const out = path.join(root, 'apps/customer-web/public/og.png');
 
 // المقاس القياسي اللي واتساب/فيسبوك/تويتر بيقصّوا عليه (1.91:1). أي مقاس تاني بيتقص عشوائيًا.
@@ -31,6 +31,7 @@ function textLayer() {
         </linearGradient>
       </defs>
       <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bg)"/>
+      <text x="${WIDTH / 2}" y="318" text-anchor="middle" fill="#fff8f2" font-family="sans-serif" font-size="52" font-weight="700">OSTA</text>
       <text x="${WIDTH / 2}" y="378" text-anchor="middle" fill="#fff8f2" font-size="64" font-weight="700" direction="rtl">صنعة تِطَمِّن</text>
       <text x="${WIDTH / 2}" y="446" text-anchor="middle" fill="#d9e7f7" font-size="32" direction="rtl">فنيين موثّقين · سعر واضح · متابعة من أول الطلب</text>
       <rect x="${WIDTH / 2 - 130}" y="500" width="260" height="66" rx="33" fill="#b54724"/>
@@ -39,9 +40,9 @@ function textLayer() {
 }
 
 async function main() {
-  const logoBuffer = await sharp(logo, { density: 384 }).resize(420).toBuffer();
+  const iconBuffer = await sharp(icon).resize(180).toBuffer();
   await sharp(textLayer())
-    .composite([{ input: logoBuffer, top: 150, left: Math.round((WIDTH - 420) / 2) }])
+    .composite([{ input: iconBuffer, top: 70, left: Math.round((WIDTH - 180) / 2) }])
     .png({ compressionLevel: 9 })
     .toFile(out);
   console.log(`✅ ${path.relative(root, out)}`);

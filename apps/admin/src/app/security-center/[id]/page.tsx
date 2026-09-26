@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorNotice } from '@/components/notice';
+import { auditActionLabel, auditActorRoleLabel } from '@/lib/audit-labels';
 
 // تفاصيل حدث أمني — Part 11 §23. الإجراءات (acknowledge/investigate/resolve/note) محتاجة
 // security.alerts.manage، القراءة بس محتاجة security.alerts.view (نفس فصل view/manage الموجود
@@ -140,16 +141,21 @@ export default function SecurityEventDetailPage() {
             </div>
             <div>
               <span className="text-muted-foreground">الفاعل: </span>
-              <span dir="ltr">{event.actorUserId ?? '—'}</span>
-              {event.actorRole && ` (${event.actorRole})`}
+              {event.actorName ?? (event.actorUserId ? 'حساب غير متاح' : 'غير معروف')}
+              {event.actorRole && ` (${auditActorRoleLabel(event.actorRole)})`}
+              {event.actorUserId && <span className="block text-xs text-muted-foreground" dir="ltr">{event.actorUserId}</span>}
             </div>
             <div>
               <span className="text-muted-foreground">الهدف: </span>
-              <span dir="ltr">{event.targetUserId ?? '—'}</span>
+              {event.targetName ?? (event.targetUserId ? 'حساب غير متاح' : '—')}
+              {event.targetUserId && <span className="block text-xs text-muted-foreground" dir="ltr">{event.targetUserId}</span>}
             </div>
             <div>
               <span className="text-muted-foreground">الفعل المحاول: </span>
-              {event.action ?? '—'}
+              {event.action?.startsWith('step_up:')
+                ? 'طلب تأكيد هوية إضافي قبل إجراء إداري'
+                : event.action ? auditActionLabel(event.action) : '—'}
+              {event.action && <span className="block text-xs text-muted-foreground" dir="ltr">{event.action}</span>}
             </div>
             <div>
               <span className="text-muted-foreground">IP: </span>
