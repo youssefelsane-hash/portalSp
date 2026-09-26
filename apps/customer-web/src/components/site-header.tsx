@@ -40,7 +40,7 @@ export function SiteHeader() {
   return (
     <header className="border-b border-border bg-surface sticky top-0 z-40">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href="/" className="flex shrink-0 items-center text-xl font-bold text-primary">
+        <Link href="/" className="flex items-center text-xl font-bold text-primary">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- لوجو مُدار من الأدمن، مش أصل ثابت معروف وقت الـbuild
             <img
@@ -50,7 +50,7 @@ export function SiteHeader() {
               loading="eager"
               fetchPriority="high"
               decoding="async"
-              className="block h-12 w-auto shrink-0 object-contain sm:h-14"
+              className="block h-auto w-auto max-h-12 max-w-[24vw] object-contain sm:max-h-14"
               onError={() => setLogoUrl(null)}
             />
           ) : (
