@@ -189,10 +189,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const enrollPasskey = useCallback(
     async (mfaSessionToken: string, deviceLabel?: string): Promise<string[] | null> => {
-      const optionsJSON = await apiFetch<PublicKeyCredentialCreationOptionsJSON>(
-        '/auth/webauthn/registration/options',
-        null,
-        { method: 'POST', body: JSON.stringify({ mfa_session_token: mfaSessionToken }) },
+      const optionsJSON = await callLocalAuthRoute<PublicKeyCredentialCreationOptionsJSON>(
+        '/api/auth/webauthn/registration/options',
+        { mfa_session_token: mfaSessionToken },
       );
       // لازم يتصدّر مباشرة من جوّه handler الضغطة (زرار "سجّل Passkey") من غير أي await قبله —
       // بعض المتصفحات (Safari خصوصًا) بترفض تفتح WebAuthn prompt لو مفيش "user gesture" حديث.
@@ -211,10 +210,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const authenticateWithPasskey = useCallback(
     async (mfaSessionToken: string): Promise<void> => {
-      const optionsJSON = await apiFetch<PublicKeyCredentialRequestOptionsJSON>(
-        '/auth/webauthn/authentication/options',
-        null,
-        { method: 'POST', body: JSON.stringify({ mfa_session_token: mfaSessionToken }) },
+      const optionsJSON = await callLocalAuthRoute<PublicKeyCredentialRequestOptionsJSON>(
+        '/api/auth/webauthn/authentication/options',
+        { mfa_session_token: mfaSessionToken },
       );
       const response = await startAuthentication({ optionsJSON });
       const result = await callLocalAuthRoute<{ access_token: string; expires_in_seconds: number }>(

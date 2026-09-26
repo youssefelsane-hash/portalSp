@@ -50,8 +50,7 @@ function LoginForm() {
    */
   const [failedAttempts, setFailedAttempts] = useState(0);
 
-  // ADR-0011 — الحساب ده High-Privilege ومحتاج Passkey. mfaSessionToken محدود العمر (10 دقايق)
-  // وبيتستهلك مرة واحدة جوّه registration/authentication verify.
+  // ADR-0011 — الحساب ده High-Privilege ومحتاج Passkey. mfaSessionToken محدود العمر (5 دقايق).
   const [mfaSessionToken, setMfaSessionToken] = useState<string | null>(null);
   const [ceremony, setCeremony] = useState<MfaCeremony | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
@@ -120,7 +119,15 @@ function LoginForm() {
         goToApp();
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'فشل تأكيد الـPasskey — اتأكد إن جهازك بيدعم بصمة/Face ID/مفتاح أمان');
+      if (err instanceof ApiError && err.code === 'AUTH_005') {
+        setMfaSessionToken(null);
+        setCeremony(null);
+        setPin('');
+        setStep('credentials');
+        setError('جلسة تأكيد الهوية انتهت. ادخل رمز الدخول من جديد للمتابعة.');
+      } else {
+        setError(err instanceof ApiError ? err.message : 'فشل تأكيد الـPasskey — اتأكد إن جهازك بيدعم بصمة/Face ID/مفتاح أمان');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -238,9 +245,20 @@ function LoginForm() {
               )}
             </CardContent>
             <CardFooter className="pt-2">
-              <Button type="button" className="w-full" disabled={isSubmitting} onClick={() => void handleMfaAction()}>
-                {isSubmitting ? 'جاري التأكيد…' : ceremony === 'registration' ? 'سجّل Passkey دلوقتي' : 'تأكيد بـ Passkey'}
-              </Button>
+              <div className="flex w-full flex-col gap-3">
+                <Button type="button" className="w-full" disabled={isSubmitting} onClick={() => void handleMfaAction()}>
+                  {isSubmitting ? 'جاري التأكيد…' : ceremony === 'registration' ? 'سجّل Passkey دلوقتي' : 'تأكيد بـ Passkey'}
+                </Button>
+                <Button type="button" variant="ghost" className="w-full" disabled={isSubmitting} onClick={() => {
+                  setMfaSessionToken(null);
+                  setCeremony(null);
+                  setPin('');
+                  setStep('credentials');
+                  setError(null);
+                }}>
+                  الرجوع لتسجيل الدخول
+                </Button>
+              </div>
             </CardFooter>
           </>
         )}
