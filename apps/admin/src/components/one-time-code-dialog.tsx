@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ export function OneTimeCodeDialog({
   title,
   description,
   code,
+  expiresAt,
   confirmLabel,
   onConfirm,
   testId,
@@ -26,10 +28,20 @@ export function OneTimeCodeDialog({
   title: string;
   description: React.ReactNode;
   code: string | null;
+  expiresAt?: string | null;
   confirmLabel: string;
   onConfirm: () => void;
   testId?: string;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!open || !expiresAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, expiresAt]);
+  const remainingSeconds = expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000)) : null;
+  const expired = remainingSeconds === 0;
+
   return (
     <Dialog open={open}>
       <DialogContent
@@ -46,11 +58,18 @@ export function OneTimeCodeDialog({
           dir="ltr"
           data-testid={testId}
         >
-          {code}
+          {expired ? 'انتهت صلاحية الكود' : code}
         </div>
+        {remainingSeconds !== null && !expired && (
+          <p className="text-center text-sm text-muted-foreground" role="timer">
+            متبقي {Math.floor(remainingSeconds / 60)}:{String(remainingSeconds % 60).padStart(2, '0')} دقيقة
+          </p>
+        )}
+        {expired && <p className="text-center text-sm text-destructive">اطلب كودًا جديدًا؛ الكود المعروض سابقًا لن يعمل.</p>}
         <DialogFooter className="gap-2">
           <Button
             variant="outline"
+            disabled={expired || !code}
             onClick={() => {
               if (code)
                 void navigator.clipboard.writeText(code).then(

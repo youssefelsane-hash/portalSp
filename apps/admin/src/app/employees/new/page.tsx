@@ -78,6 +78,7 @@ export default function NewEmployeePage() {
         open={created !== null}
         title="كود تنشيط الموظف"
         code={created?.activation_code ?? null}
+        expiresAt={created?.activation_code_expires_at ?? null}
         testId="employee-activation-code"
         description={
           <>

@@ -72,6 +72,7 @@ export function ResetPinButton({
         open={result !== null}
         title="كود الاسترجاع"
         code={result?.reset_code ?? null}
+        expiresAt={result?.expires_at ?? null}
         testId="reset-pin-code"
         description={
           <>

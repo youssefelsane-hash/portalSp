@@ -62,6 +62,7 @@ export function EmployeeActivationCodeButton({ userId, userLabel }: { userId: st
         open={result !== null}
         title="كود تنشيط الموظف"
         code={result?.activation_code ?? null}
+        expiresAt={result?.activation_code_expires_at ?? null}
         testId="employee-activation-code"
         description={
           <>
