@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/phone_number.dart';
 import 'pin_reset_screen.dart';
 import '../../design/adaptive_text_action.dart';
 
@@ -19,7 +20,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _phoneController = TextEditingController(text: '+20');
+  final _phoneController = TextEditingController();
   final _pinController = TextEditingController();
   // تأكيد الرمز وقت **التسجيل بس**: غلطة كتابة هنا معناها الفني مقفول برّه حسابه ومحتاج
   // استرجاع من الأدمن — تكلفة عالية جدًا لخانة واحدة زيادة.
@@ -47,6 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
   /// ADR-0109 §5)، فربط الاقتراح بالسبب بقى مستحيل. عرضه دايمًا مايسرّبش حاجة لأنه مستقل
   /// تمامًا عن وجود الحساب، وبيمنع الفني الجديد من إنه يتحاصر في شاشة رمز مالوش رمز فيها.
   bool _suggestRegister = false;
+
   /// الحساب موجود كعميل ومالوش دور فني (`AUTH_008`) — العرض هنا «ضيف دور الصنايعي»، مش
   /// «سجّل حساب جديد» (اللي كان بيفشل بـ«الرقم ده مسجل قبل كده»).
   bool _suggestAddTechnicianRole = false;
@@ -64,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
   /// **الانتقال لخطوة الرمز — بلا أي نداء شبكة** (ADR-0109).
   void _goToPinStep() {
     final phone = _phoneController.text.trim();
-    if (phone.replaceAll(RegExp(r'[^0-9]'), '').length < 10) {
+    if (!isValidPhoneInput(phone)) {
       setState(() => _error = 'اكتب رقم موبايل صحيح');
       return;
     }
@@ -176,9 +178,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await context.read<AuthRepository>().addTechnicianRole(
-            _phoneController.text.trim(),
-            pin,
-          );
+        _phoneController.text.trim(),
+        pin,
+      );
     } catch (errRaw) {
       final err = ApiException.from(errRaw);
       _pinController.clear();
@@ -279,13 +281,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         key: const ValueKey('login-phone-field'),
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                          LengthLimitingTextInputFormatter(16),
+                        ],
                         textDirection: TextDirection.ltr,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) =>
                             _isSubmitting ? null : _goToPinStep(),
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
-                          hintText: '+201001234567',
+                          hintText: '01012345678',
                         ),
                       ),
                     ] else ...[
@@ -397,7 +403,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       AdaptiveTextAction(
                         key: const ValueKey('login-add-technician-role'),
                         onPressed: _isSubmitting ? null : _addTechnicianRole,
-                        label: 'عندك حساب عميل بنفس الرقم — ضيف دور الصنايعي عليه',
+                        label:
+                            'عندك حساب عميل بنفس الرقم — ضيف دور الصنايعي عليه',
                       ),
                     ],
                     if (_suggestRegister) ...[

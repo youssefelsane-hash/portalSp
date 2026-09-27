@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/phone_number.dart';
 
 /// **تأكيد رقم الموبايل قبل أول طلب** (ADR-0112).
 ///
@@ -26,7 +27,10 @@ class PhoneVerificationSheet extends StatefulWidget {
   final String currentPhone;
 
   /// بترجّع `true` لو الرقم اتأكد فعلاً — المُنادي يكمّل الحجز ساعتها وبس.
-  static Future<bool> show(BuildContext context, {required String currentPhone}) async {
+  static Future<bool> show(
+    BuildContext context, {
+    required String currentPhone,
+  }) async {
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -34,7 +38,9 @@ class PhoneVerificationSheet extends StatefulWidget {
       // الحجز مايكملش غير مع `true`.
       builder: (sheetContext) => Padding(
         // الكيبورد بيغطّي خانة الكود على الشاشات الصغيرة من غير الحشو ده.
-        padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+        ),
         child: PhoneVerificationSheet(currentPhone: currentPhone),
       ),
     );
@@ -58,8 +64,8 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
   @override
   void initState() {
     super.initState();
-    _targetPhone = widget.currentPhone;
-    _phoneController.text = widget.currentPhone;
+    _targetPhone = phoneNumberForDisplay(widget.currentPhone);
+    _phoneController.text = phoneNumberForDisplay(widget.currentPhone);
   }
 
   @override
@@ -74,7 +80,7 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
 
   Future<void> _sendCode() async {
     final newPhone = _changingPhone ? _phoneController.text.trim() : null;
-    if (_changingPhone && (newPhone == null || newPhone.length < 10)) {
+    if (_changingPhone && (newPhone == null || !isValidPhoneInput(newPhone))) {
       setState(() => _error = 'اكتب رقم موبايل صحيح');
       return;
     }
@@ -96,7 +102,9 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
         _codeSent = true;
         // **الرقم اللي السيرفر بعت له فعلاً** مش اللي التطبيق افترضه — لو السيرفر طبّع الرقم
         // بشكل مختلف، العميل لازم يشوف اللي هو بعت له عشان يعرف يدوّر على الرسالة فين.
-        _targetPhone = target.isEmpty ? _targetPhone : target;
+        _targetPhone = target.isEmpty
+            ? _targetPhone
+            : phoneNumberForDisplay(target);
         _codeController.clear();
       });
     } catch (errRaw) {
@@ -142,14 +150,20 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('أكّد رقم موبايلك', style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            Text(
+              'أكّد رقم موبايلك',
+              style: theme.textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 8),
             Text(
               _codeSent
                   ? 'بعتنا كود على $_targetPhone — اكتبه هنا.'
                   : 'قبل أول طلب بنتأكد إن رقمك واصل. هنبعتلك كود على $_targetPhone.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             if (_changingPhone) ...[
@@ -157,8 +171,15 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
                 key: const ValueKey('phone-verify-new-phone'),
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                  LengthLimitingTextInputFormatter(16),
+                ],
                 textDirection: TextDirection.ltr,
-                decoration: const InputDecoration(labelText: 'رقم الموبايل الجديد'),
+                decoration: const InputDecoration(
+                  labelText: 'رقم الموبايل الجديد',
+                  hintText: '01012345678',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -166,7 +187,10 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
                 controller: _pinController,
                 obscureText: true,
                 keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'رمز الدخول الحالي',
                   helperText: 'بنطلبه عشان محدش غيرك يغيّر رقم حسابك',
@@ -180,8 +204,13 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
                 controller: _codeController,
                 keyboardType: TextInputType.number,
                 textDirection: TextDirection.ltr,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-                decoration: const InputDecoration(labelText: 'كود التأكيد (٦ أرقام)'),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'كود التأكيد (٦ أرقام)',
+                ),
               ),
               const SizedBox(height: 8),
             ],
@@ -197,9 +226,15 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
             FilledButton(
               key: const ValueKey('phone-verify-submit'),
               onPressed: _busy ? null : (_codeSent ? _confirm : _sendCode),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
               child: _busy
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : Text(_codeSent ? 'أكّد الكود' : 'ابعت الكود'),
             ),
             if (_codeSent)
@@ -213,14 +248,22 @@ class _PhoneVerificationSheetState extends State<PhoneVerificationSheet> {
               onPressed: _busy
                   ? null
                   : () => setState(() {
-                        _changingPhone = !_changingPhone;
-                        // الرجوع لتأكيد الرقم الحالي لازم يرجّع الخانة لقيمتها الأصلية، وإلا رقم
-                        // نص مكتوب بيفضل ظاهر وبيلبّس.
-                        if (!_changingPhone) _phoneController.text = widget.currentPhone;
-                        _codeSent = false;
-                        _error = null;
-                      }),
-              child: Text(_changingPhone ? 'أكّد رقمي الحالي بدل كده' : 'الرقم ده غلط؟ غيّره'),
+                      _changingPhone = !_changingPhone;
+                      // الرجوع لتأكيد الرقم الحالي لازم يرجّع الخانة لقيمتها الأصلية، وإلا رقم
+                      // نص مكتوب بيفضل ظاهر وبيلبّس.
+                      if (!_changingPhone) {
+                        _phoneController.text = phoneNumberForDisplay(
+                          widget.currentPhone,
+                        );
+                      }
+                      _codeSent = false;
+                      _error = null;
+                    }),
+              child: Text(
+                _changingPhone
+                    ? 'أكّد رقمي الحالي بدل كده'
+                    : 'الرقم ده غلط؟ غيّره',
+              ),
             ),
           ],
         ),

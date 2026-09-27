@@ -37,7 +37,7 @@ export class CreatePricingFieldDto {
 
   @IsOptional()
   @IsString()
-  @Length(1, 20)
+  @Length(1, 200)
   unit_ar?: string;
 
   @IsOptional()

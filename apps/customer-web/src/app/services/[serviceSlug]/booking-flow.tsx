@@ -2125,7 +2125,13 @@ function DynamicPricingField({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, string>>({});
-  const label = `${field.label_ar}${field.is_required ? ' *' : ''}${field.unit_ar ? ` (${field.unit_ar})` : ''}`;
+  const unit = field.unit_ar?.trim();
+  const longUnit = unit && unit.length > 24 ? `(${unit})` : null;
+  const label = `${field.label_ar}${field.is_required ? ' *' : ''}${unit && !longUnit ? ` (${unit})` : ''}`;
+  const fieldLabel = <>
+    {label}
+    {longUnit && <span className="mt-1 block break-words text-sm font-normal text-muted">{longUnit}</span>}
+  </>;
 
   if (field.field_type === 'image_upload') {
     const ids = typeof value === 'string' ? value.split(',').filter(Boolean) : [];
@@ -2133,7 +2139,7 @@ function DynamicPricingField({
     const maximum = field.max_files ?? 5;
     return (
       <div className="rounded-xl border border-border bg-surface p-4">
-        <p className="font-medium">{label}</p>
+        <p className="font-medium">{fieldLabel}</p>
         <p className={`mt-1 text-sm ${ids.length >= minimum ? 'text-muted' : 'text-danger'}`}>
           {minimum > 0 ? `ارفع من ${minimum} إلى ${maximum} صور` : `حتى ${maximum} صور`} ({ids.length}/{maximum})
         </p>
@@ -2200,14 +2206,14 @@ function DynamicPricingField({
     if (options.length === 0) {
       return (
         <div className="booking-field booking-field-warning" role="status">
-          <p className="font-semibold">{label}</p>
+          <p className="font-semibold">{fieldLabel}</p>
           <p className="mt-1 text-sm text-muted">لا توجد اختيارات مهيأة لهذا الحقل الآن. لن نطلب منك كتابة قيمة غير واضحة.</p>
         </div>
       );
     }
     return (
       <fieldset className="booking-field">
-        <legend className="booking-field-label">{label}</legend>
+        <legend className="booking-field-label">{fieldLabel}</legend>
         <p className="mb-3 text-sm text-muted">اختار إجابة واحدة</p>
         <div className="booking-choice-grid">
           {options.map((option) => {
@@ -2234,7 +2240,7 @@ function DynamicPricingField({
     if (options.length === 0) {
       return (
         <div className="booking-field booking-field-warning" role="status">
-          <p className="font-semibold">{label}</p>
+          <p className="font-semibold">{fieldLabel}</p>
           <p className="mt-1 text-sm text-muted">لا توجد اختيارات مهيأة لهذا الحقل الآن.</p>
         </div>
       );
@@ -2242,7 +2248,7 @@ function DynamicPricingField({
     const selectedValues = Array.isArray(value) ? value : [];
     return (
       <fieldset className="booking-field">
-        <legend className="booking-field-label">{label}</legend>
+        <legend className="booking-field-label">{fieldLabel}</legend>
         <p className="mb-3 text-sm text-muted">تقدر تختار أكثر من إجابة</p>
         <div className="booking-choice-grid">
           {options.map((option) => {
@@ -2277,7 +2283,7 @@ function DynamicPricingField({
       >
         <span className={`booking-toggle-mark ${checked ? 'booking-toggle-mark-selected' : ''}`}>{checked && <CheckIcon />}</span>
         <span className="flex-1 text-right">
-          <span className="block font-semibold">{label}</span>
+          <span className="block font-semibold">{fieldLabel}</span>
           <span className="mt-0.5 block text-sm font-normal text-muted">{checked ? 'تم الاختيار' : 'اضغط للاختيار'}</span>
         </span>
       </button>
@@ -2291,7 +2297,7 @@ function DynamicPricingField({
     return (
       <div className="booking-field">
         <div className="flex items-center justify-between gap-3">
-          <label htmlFor={`field-${field.id}`} className="booking-field-label">{label}</label>
+          <label htmlFor={`field-${field.id}`} className="booking-field-label min-w-0 break-words">{fieldLabel}</label>
           <output className="rounded-full bg-primary/8 px-3 py-1 text-sm font-bold text-primary">{current}</output>
         </div>
         <input
@@ -2312,7 +2318,7 @@ function DynamicPricingField({
   if (field.field_type === 'date' || field.field_type === 'time') {
     return (
       <label className="booking-field block">
-        <span className="booking-field-label">{label}</span>
+        <span className="booking-field-label">{fieldLabel}</span>
         <input
           type={field.field_type}
           value={(value as string) ?? ''}
@@ -2326,7 +2332,7 @@ function DynamicPricingField({
   if (!['number', 'area', 'length', 'volume'].includes(field.field_type)) {
     return (
       <div className="booking-field booking-field-warning" role="status">
-        <p className="font-semibold">{label}</p>
+        <p className="font-semibold">{fieldLabel}</p>
         <p className="mt-1 text-sm text-muted">هذا النوع من البيانات غير متاح على الويب حاليًا. تواصل معنا لنكمل الطلب بشكل صحيح.</p>
       </div>
     );
@@ -2334,7 +2340,7 @@ function DynamicPricingField({
 
   return (
     <label className="booking-field block">
-      <span className="booking-field-label">{label}</span>
+      <span className="booking-field-label">{fieldLabel}</span>
       <input
         type="number"
         value={(value as number) ?? ''}

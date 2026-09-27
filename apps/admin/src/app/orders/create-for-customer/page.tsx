@@ -465,6 +465,8 @@ function DynamicPricingField({
 }) {
   const label = `${field.label_ar}${field.is_required ? ' *' : ' (اختياري)'}`;
   const numericTypes = ['number', 'area', 'length', 'volume'];
+  const shortUnit = field.unit_ar && field.unit_ar.length <= 24 ? field.unit_ar : null;
+  const longUnit = field.unit_ar && field.unit_ar.length > 24 ? field.unit_ar : null;
 
   if (field.field_type === 'checkbox') {
     return (
@@ -527,8 +529,9 @@ function DynamicPricingField({
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor={`pricing-${field.id}`}>{label}</Label>
-          <span className="font-semibold">{current}{field.unit_ar ? ` ${field.unit_ar}` : ''}</span>
+          <span className="font-semibold">{current}{shortUnit ? ` ${shortUnit}` : ''}</span>
         </div>
+        {longUnit && <p className="break-words text-sm text-muted-foreground">({longUnit})</p>}
         <input
           id={`pricing-${field.id}`}
           type="range"
@@ -556,8 +559,9 @@ function DynamicPricingField({
             onChange={(event) => onChange(event.target.value === '' ? '' : Number(event.target.value))}
             dir="ltr"
           />
-          {field.unit_ar && <span className="shrink-0 text-sm text-muted-foreground">{field.unit_ar}</span>}
+          {shortUnit && <span className="shrink-0 text-sm text-muted-foreground">{shortUnit}</span>}
         </div>
+        {longUnit && <p className="break-words text-sm text-muted-foreground">({longUnit})</p>}
       </div>
     );
   }

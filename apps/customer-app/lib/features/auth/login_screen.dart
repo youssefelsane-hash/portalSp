@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_config.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/phone_number.dart';
 import 'pin_reset_screen.dart';
 import '../../design/app_theme.dart';
 import '../../design/adaptive_text_action.dart';
@@ -31,7 +32,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _phoneController = TextEditingController(text: '+20');
+  final _phoneController = TextEditingController();
   // ADR-0109 — الخانة بقت رمز دخول بدل كود SMS. الاسم اتغيّر عشان مايفضلش يكدب.
   final _pinController = TextEditingController();
   // تأكيد الرمز وقت **التسجيل بس**: غلطة كتابة هنا معناها المستخدم مقفول برّه حسابه ومحتاج
@@ -100,7 +101,7 @@ class _LoginScreenState extends State<LoginScreen> {
   /// خالص: التحقق محلي والانتقال فوري. ده أكبر فرق بيحسّه المستخدم في التغيير كله.
   void _goToPinStep() {
     final phone = _phoneController.text.trim();
-    if (phone.replaceAll(RegExp(r'[^0-9]'), '').length < 10) {
+    if (!isValidPhoneInput(phone)) {
       setState(() => _error = 'اكتب رقم موبايل صحيح');
       return;
     }
@@ -320,7 +321,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                         decoration: const InputDecoration(
                           labelText: 'رقم الموبايل',
-                          hintText: '+201001234567',
+                          hintText: '01012345678',
                           prefixIcon: Icon(Icons.phone_iphone_rounded),
                         ),
                       ),

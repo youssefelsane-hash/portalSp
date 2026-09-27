@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
 import 'biometric_auth_service.dart';
+import 'phone_number.dart';
 import 'push_notification_service.dart';
 
 class BaytakUser {
@@ -29,12 +30,12 @@ class BaytakUser {
   });
 
   factory BaytakUser.fromJson(Map<String, dynamic> json) => BaytakUser(
-        id: json['id'] as String,
-        phoneNumber: json['phone_number'] as String,
-        fullName: json['full_name'] as String,
-        userType: json['user_type'] as String,
-        pinSet: json['pin_set'] as bool? ?? true,
-      );
+    id: json['id'] as String,
+    phoneNumber: json['phone_number'] as String,
+    fullName: json['full_name'] as String,
+    userType: json['user_type'] as String,
+    pinSet: json['pin_set'] as bool? ?? true,
+  );
 }
 
 // إدارة الجلسة: refresh_token في flutter_secure_storage (Keychain على iOS، Keystore على
@@ -71,7 +72,9 @@ class AuthRepository extends ChangeNotifier {
   // التطبيق. الفحص محصور صراحة في statusCode==401 (رفض حقيقي من الباك-إند بعد رد HTTP فعلي) —
   // مش أي فشل شبكة، عشان انقطاع نت مؤقت ميسجّلش خروج الفني بالغلط.
   Future<String> _refresh() {
-    return (_inFlightRefresh ??= _doRefresh().whenComplete(() => _inFlightRefresh = null)).catchError((Object err) {
+    return (_inFlightRefresh ??= _doRefresh().whenComplete(
+      () => _inFlightRefresh = null,
+    )).catchError((Object err) {
       if (err is ApiException && err.statusCode == 401) {
         _accessToken = null;
         _user = null;
@@ -83,11 +86,21 @@ class AuthRepository extends ChangeNotifier {
   }
 
   Future<String> _doRefresh() async {
-    final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5));
+    final storedRefreshToken = await _secureStorage
+        .read(key: _refreshTokenKey)
+        .timeout(const Duration(seconds: 5));
     if (storedRefreshToken == null) {
-      throw ApiException(code: 'AUTH_NO_SESSION', message: 'مفيش جلسة', statusCode: 401);
+      throw ApiException(
+        code: 'AUTH_NO_SESSION',
+        message: 'مفيش جلسة',
+        statusCode: 401,
+      );
     }
-    final data = await apiRequest('POST', '/auth/refresh', body: {'refresh_token': storedRefreshToken});
+    final data = await apiRequest(
+      'POST',
+      '/auth/refresh',
+      body: {'refresh_token': storedRefreshToken},
+    );
     final newAccessToken = data!['access_token'] as String;
     final newRefreshToken = data['refresh_token'] as String;
     await _persistRefreshToken(newRefreshToken);
@@ -107,9 +120,13 @@ class AuthRepository extends ChangeNotifier {
   // حقيقي بعد 5 ثواني، يقع في نفس catch الموجود بالفعل.
   Future<void> _persistRefreshToken(String refreshToken) async {
     try {
-      await _secureStorage.write(key: _refreshTokenKey, value: refreshToken).timeout(const Duration(seconds: 5));
+      await _secureStorage
+          .write(key: _refreshTokenKey, value: refreshToken)
+          .timeout(const Duration(seconds: 5));
     } catch (e) {
-      debugPrint('فشل حفظ refresh_token بأمان — الجلسة الحالية سليمة، بس مش هتفضل بعد إعادة فتح التطبيق: $e');
+      debugPrint(
+        'فشل حفظ refresh_token بأمان — الجلسة الحالية سليمة، بس مش هتفضل بعد إعادة فتح التطبيق: $e',
+      );
     }
   }
 
@@ -119,7 +136,9 @@ class AuthRepository extends ChangeNotifier {
       // بيخلي read() يعلّق (hang) بدل ما يرمي استثناء — التطبيق كان بيقعد على شاشة تحميل للأبد
       // من غير أي طلب شبكة يتبعت خالص (init() مابيوصلش لـ_refresh() أصلاً). .timeout() هنا
       // بيضمن إن أسوأ حالة هي "الفني محتاج يسجّل دخول تاني" مش "التطبيق ميفتحش خالص".
-      final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5));
+      final storedRefreshToken = await _secureStorage
+          .read(key: _refreshTokenKey)
+          .timeout(const Duration(seconds: 5));
       if (storedRefreshToken == null) {
         _accessToken = null;
         _user = null;
@@ -149,7 +168,9 @@ class AuthRepository extends ChangeNotifier {
   /// حقيقي من `AuthService.refresh()` مش افتراض محلي) — الكولر (شاشة القفل) بيوجّه المستخدم
   /// لشاشة الدخول بالرقم + الرمز في الحالتين.
   Future<bool> unlockWithBiometrics() async {
-    final authenticated = await BiometricAuthService.authenticate(reason: 'افتح أسطى ببصمتك');
+    final authenticated = await BiometricAuthService.authenticate(
+      reason: 'افتح أسطى ببصمتك',
+    );
     if (!authenticated) return false;
 
     _biometricUnlockPending = false;
@@ -201,7 +222,11 @@ class AuthRepository extends ChangeNotifier {
       // وصنايعي بنفس الرقم، والجلسة لازم تبقى بدور التطبيق اللي فاتح — من غير الحقل ده الجلسة
       // كانت بتاخد `users.user_type` فيبقى التطبيق نص شغّال. السيرفر **بيتحقق** من المنحة،
       // فالقيمة دي طلب مش صلاحية.
-      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'technician'},
+      body: {
+        'phone_number': phoneNumberForApi(phoneNumber),
+        'pin': pin,
+        'role': 'technician',
+      },
     );
     await _adoptTokenPair(data!);
   }
@@ -222,9 +247,17 @@ class AuthRepository extends ChangeNotifier {
     await apiRequest(
       'POST',
       '/auth/pin/login',
-      body: {'phone_number': phoneNumber, 'pin': pin, 'role': 'customer'},
+      body: {
+        'phone_number': phoneNumberForApi(phoneNumber),
+        'pin': pin,
+        'role': 'customer',
+      },
     ).then((data) => _adoptTokenPair(data!));
-    await apiRequest('POST', '/auth/roles/technician', accessToken: _accessToken);
+    await apiRequest(
+      'POST',
+      '/auth/roles/technician',
+      accessToken: _accessToken,
+    );
     await loginWithPin(phoneNumber, pin);
   }
 
@@ -246,7 +279,7 @@ class AuthRepository extends ChangeNotifier {
       'POST',
       '/auth/pin/register',
       body: {
-        'phone_number': phoneNumber,
+        'phone_number': phoneNumberForApi(phoneNumber),
         'pin': pin,
         'full_name': fullName,
         'user_type': userType,
@@ -259,10 +292,15 @@ class AuthRepository extends ChangeNotifier {
   ///
   /// `currentPin` مطلوب بس لو الحساب ليه رمز. الباك-إند هو اللي بيفرض ده حسب حالة الحساب.
   Future<void> setPin(String pin, {String? currentPin}) async {
-    await authedRequest('POST', '/auth/pin', body: {
-      'pin': pin,
-      if (currentPin != null && currentPin.isNotEmpty) 'current_pin': currentPin,
-    });
+    await authedRequest(
+      'POST',
+      '/auth/pin',
+      body: {
+        'pin': pin,
+        if (currentPin != null && currentPin.isNotEmpty)
+          'current_pin': currentPin,
+      },
+    );
     await _fetchMe();
     notifyListeners();
   }
@@ -287,12 +325,20 @@ class AuthRepository extends ChangeNotifier {
   ///
   /// **مابيرجّعش جلسة عمدًا** — الكود تصريح لتعيين رمز مش تسجيل دخول. المستخدم بيدخل بالرمز
   /// الجديد من شاشة الدخول العادية، فمسار الدخول يفضل واحد لكل الحالات.
-  Future<void> redeemPinResetCode(String phoneNumber, String resetCode, String pin) async {
-    await apiRequest('POST', '/auth/pin/reset/redeem', body: {
-      'phone_number': phoneNumber,
-      'reset_code': resetCode,
-      'pin': pin,
-    });
+  Future<void> redeemPinResetCode(
+    String phoneNumber,
+    String resetCode,
+    String pin,
+  ) async {
+    await apiRequest(
+      'POST',
+      '/auth/pin/reset/redeem',
+      body: {
+        'phone_number': phoneNumberForApi(phoneNumber),
+        'reset_code': resetCode,
+        'pin': pin,
+      },
+    );
   }
 
   /// حذف الحساب نهائيًا (بوابة P0-1 في docs/23، ADR-0053).
@@ -311,10 +357,15 @@ class AuthRepository extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    final storedRefreshToken =
-        await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5), onTimeout: () => null);
+    final storedRefreshToken = await _secureStorage
+        .read(key: _refreshTokenKey)
+        .timeout(const Duration(seconds: 5), onTimeout: () => null);
     if (storedRefreshToken != null) {
-      await apiRequest('POST', '/auth/logout', body: {'refresh_token': storedRefreshToken}).catchError((_) => null);
+      await apiRequest(
+        'POST',
+        '/auth/logout',
+        body: {'refresh_token': storedRefreshToken},
+      ).catchError((_) => null);
     }
     await _secureStorage.delete(key: _refreshTokenKey);
     _accessToken = null;
@@ -323,9 +374,18 @@ class AuthRepository extends ChangeNotifier {
   }
 
   // نداء API موثّق — لو access_token منتهي (401)، يجرّب refresh (single-flight) مرة واحدة ويعيد المحاولة.
-  Future<Map<String, dynamic>?> authedRequest(String method, String path, {Map<String, dynamic>? body}) async {
+  Future<Map<String, dynamic>?> authedRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
     try {
-      return await apiRequest(method, path, body: body, accessToken: _accessToken);
+      return await apiRequest(
+        method,
+        path,
+        body: body,
+        accessToken: _accessToken,
+      );
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
@@ -346,14 +406,26 @@ class AuthRepository extends ChangeNotifier {
     required Map<String, String> fields,
   }) async {
     try {
-      return await apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: _accessToken);
+      return await apiUpload(
+        path,
+        fileBytes: fileBytes,
+        filename: filename,
+        fields: fields,
+        accessToken: _accessToken,
+      );
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
       if (err.statusCode == 401) {
         final newToken = await _refresh();
-        return apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: newToken);
+        return apiUpload(
+          path,
+          fileBytes: fileBytes,
+          filename: filename,
+          fields: fields,
+          accessToken: newToken,
+        );
       }
       rethrow;
     }
@@ -393,5 +465,4 @@ class AuthRepository extends ChangeNotifier {
       rethrow;
     }
   }
-
 }

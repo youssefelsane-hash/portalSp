@@ -613,13 +613,16 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   </SelectNative>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="pf_unit">الوحدة (اختياري)</Label>
-                  <Input
+                  <Label htmlFor="pf_unit">الوحدة أو شرح للعميل (اختياري)</Label>
+                  <Textarea
                     id="pf_unit"
                     value={fieldForm.unit_ar ?? ''}
                     onChange={(e) => setFieldForm((f) => ({ ...f, unit_ar: e.target.value || undefined }))}
-                    placeholder="مثال: م²"
+                    placeholder="مثال: م²، أو شرح مختصر لكيفية تنفيذ الجزء ده"
+                    maxLength={200}
+                    rows={3}
                   />
+                  <p className="text-xs text-muted-foreground">هيظهر للعميل بين قوسين تحت اسم الحقل إذا كان طويلًا. الحد الأقصى 200 حرف.</p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="pf_order">ترتيب العرض</Label>
@@ -1063,7 +1066,10 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   <div key={field.id} className="flex flex-col gap-1">
                     <Label htmlFor={`preview_${field.field_key}`}>
                       {field.label_ar}
-                      {field.unit_ar ? ` (${field.unit_ar})` : ''}
+                      {field.unit_ar && field.unit_ar.length <= 24 ? ` (${field.unit_ar})` : ''}
+                      {field.unit_ar && field.unit_ar.length > 24 && (
+                        <span className="mt-1 block break-words text-xs font-normal text-muted-foreground">({field.unit_ar})</span>
+                      )}
                     </Label>
                     {FIELD_TYPES_WITH_OPTIONS.includes(field.field_type) ? (
                       <SelectNative

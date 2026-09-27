@@ -46,7 +46,7 @@ export class ServicePricingField {
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;
 
-  @Column({ name: 'unit_ar', type: 'varchar', length: 20, nullable: true })
+  @Column({ name: 'unit_ar', type: 'varchar', length: 200, nullable: true })
   unitAr: string | null;
 
   @Column({ type: 'jsonb', nullable: true })

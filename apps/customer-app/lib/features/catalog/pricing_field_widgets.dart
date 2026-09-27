@@ -113,6 +113,16 @@ class _PricingImageFieldState extends State<_PricingImageField> {
             '${widget.field.labelAr}${widget.field.isRequired ? ' *' : ''}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
+          if (widget.field.unitAr?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 4),
+            Text(
+              '(${widget.field.unitAr!.trim()})',
+              softWrap: true,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             minimum > 0
@@ -234,9 +244,14 @@ Widget buildPricingFieldWidget(
     );
   }
 
-  final label = field.unitAr != null
-      ? '${field.labelAr} (${field.unitAr})'
+  final unit = field.unitAr?.trim();
+  final longUnit = unit != null && unit.length > 24 ? '($unit)' : null;
+  final label = unit != null && unit.isNotEmpty && longUnit == null
+      ? '${field.labelAr} ($unit)'
       : field.labelAr;
+  final descriptionStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+    color: Theme.of(context).colorScheme.onSurfaceVariant,
+  );
 
   switch (field.fieldType) {
     case 'image_upload':
@@ -257,6 +272,8 @@ Widget buildPricingFieldWidget(
           initialValue: fieldValues[field.fieldKey]?.toString(),
           decoration: InputDecoration(
             labelText: label,
+            helperText: longUnit,
+            helperMaxLines: 12,
             border: const OutlineInputBorder(),
           ),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -276,6 +293,8 @@ Widget buildPricingFieldWidget(
           isExpanded: true,
           decoration: InputDecoration(
             labelText: label,
+            helperText: longUnit,
+            helperMaxLines: 12,
             border: const OutlineInputBorder(),
           ),
           initialValue: fieldValues[field.fieldKey] as String?,
@@ -297,6 +316,8 @@ Widget buildPricingFieldWidget(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            if (longUnit != null)
+              Text(longUnit, softWrap: true, style: descriptionStyle),
             Wrap(
               spacing: 8,
               children: (field.options ?? [])
@@ -327,6 +348,9 @@ Widget buildPricingFieldWidget(
     case 'checkbox':
       return SwitchListTile(
         title: Text(label),
+        subtitle: longUnit == null
+            ? null
+            : Text(longUnit, softWrap: true, style: descriptionStyle),
         value: (fieldValues[field.fieldKey] as bool?) ?? false,
         onChanged: (value) => onChanged(field.fieldKey, value),
       );
@@ -344,6 +368,8 @@ Widget buildPricingFieldWidget(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('$label: ${current.toStringAsFixed(0)}'),
+            if (longUnit != null)
+              Text(longUnit, softWrap: true, style: descriptionStyle),
             Slider(
               min: min,
               max: max,
@@ -364,7 +390,14 @@ Widget buildPricingFieldWidget(
             side: BorderSide(color: Theme.of(context).dividerColor),
           ),
           title: Text(label),
-          subtitle: Text(currentValue ?? 'اختار تاريخ'),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (longUnit != null)
+                Text(longUnit, softWrap: true, style: descriptionStyle),
+              Text(currentValue ?? 'اختار تاريخ'),
+            ],
+          ),
           onTap: () async {
             final picked = await showDatePicker(
               context: context,
@@ -391,7 +424,14 @@ Widget buildPricingFieldWidget(
             side: BorderSide(color: Theme.of(context).dividerColor),
           ),
           title: Text(label),
-          subtitle: Text(currentValue ?? 'اختار وقت'),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (longUnit != null)
+                Text(longUnit, softWrap: true, style: descriptionStyle),
+              Text(currentValue ?? 'اختار وقت'),
+            ],
+          ),
           onTap: () async {
             final picked = await showTimePicker(
               context: context,

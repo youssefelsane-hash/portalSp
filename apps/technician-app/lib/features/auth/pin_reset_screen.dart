@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/phone_number.dart';
 
 /// **استرجاع رمز الدخول** (ADR-0109 §6-ب).
 ///
@@ -28,7 +29,7 @@ class PinResetScreen extends StatefulWidget {
 
 class _PinResetScreenState extends State<PinResetScreen> {
   late final TextEditingController _phoneController = TextEditingController(
-    text: widget.initialPhone ?? '+20',
+    text: phoneNumberForDisplay(widget.initialPhone ?? ''),
   );
   final _codeController = TextEditingController();
   final _pinController = TextEditingController();
@@ -51,7 +52,9 @@ class _PinResetScreenState extends State<PinResetScreen> {
   Future<void> _loadSupport() async {
     try {
       final data = await apiRequest('GET', '/settings/support-contact');
-      if (mounted && data != null && data['enabled'] == true) setState(() => _support = data);
+      if (mounted && data != null && data['enabled'] == true) {
+        setState(() => _support = data);
+      }
     } catch (_) {
       // متجاهل عمدًا — مفيش داعي نعرض خطأ على حاجة مساعدة.
     }
@@ -79,6 +82,10 @@ class _PinResetScreenState extends State<PinResetScreen> {
   }
 
   Future<void> _submit() async {
+    if (!isValidPhoneInput(_phoneController.text)) {
+      setState(() => _error = 'اكتب رقم موبايل صحيح');
+      return;
+    }
     final pin = _pinController.text.trim();
     if (_codeController.text.trim().length != 10) {
       setState(() => _error = 'كود الاسترجاع 10 أرقام');
@@ -154,9 +161,14 @@ class _PinResetScreenState extends State<PinResetScreen> {
                     key: const ValueKey('pin-reset-phone-field'),
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                      LengthLimitingTextInputFormatter(16),
+                    ],
                     textDirection: TextDirection.ltr,
                     decoration: const InputDecoration(
                       labelText: 'رقم الموبايل',
+                      hintText: '01012345678',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -231,12 +243,20 @@ class _PinResetScreenState extends State<PinResetScreen> {
       if (phone != null && phone.isNotEmpty)
         _supportRow(Icons.phone_rounded, 'اتصل بالدعم', phone, 'tel:$phone'),
       if (whatsappUrl != null && whatsappUrl.isNotEmpty)
-        _supportRow(Icons.chat_rounded, 'واتساب الدعم', s['whatsapp_number'] as String? ?? 'واتساب', whatsappUrl),
+        _supportRow(
+          Icons.chat_rounded,
+          'واتساب الدعم',
+          s['whatsapp_number'] as String? ?? 'واتساب',
+          whatsappUrl,
+        ),
     ];
     if (rows.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: rows,
+      ),
     );
   }
 
@@ -251,7 +271,6 @@ class _PinResetScreenState extends State<PinResetScreen> {
       ),
     );
   }
-
 }
 
 class _PinBox extends StatelessWidget {
@@ -284,5 +303,4 @@ class _PinBox extends StatelessWidget {
       decoration: InputDecoration(labelText: label, counterText: ''),
     );
   }
-
 }

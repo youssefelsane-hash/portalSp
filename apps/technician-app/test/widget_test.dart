@@ -70,6 +70,18 @@ void main() {
     expect(find.byKey(const ValueKey('login-error-text')), findsNothing);
   });
 
+  testWidgets('رقم 015 المحلي بينقل لخطوة الرمز من غير +20', (WidgetTester tester) async {
+    await tester.pumpWidget(const BaytakTechnicianApp());
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('login-phone-field')), '01512345678');
+    await tester.tap(find.byKey(const ValueKey('login-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('login-pin-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('login-error-text')), findsNothing);
+  });
+
   testWidgets('رقم ناقص بيترفض محليًا ومابيوصلش لخطوة الرمز', (WidgetTester tester) async {
     await tester.pumpWidget(const BaytakTechnicianApp());
     await tester.pumpAndSettle();
