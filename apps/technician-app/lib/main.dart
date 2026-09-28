@@ -6,6 +6,7 @@ import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
 import 'core/deep_link_router.dart';
 import 'core/feature_flags.dart';
+import 'core/startup_failure_app.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
@@ -21,7 +22,16 @@ import 'features/orders/available_orders_screen.dart';
 import 'features/tracking/tracking_client.dart';
 
 void main() {
-  assertProductionApiConfig();
+  // **أي فشل قبل `runApp` لازم يترسم** — مش يسيب الـsplash متجمّد لحد ما أندرويد يطلّع
+  // «التطبيق لا يستجيب». ده اللي حصل فعلاً في 1.0.7+8: السطر ده كان **الوحيد** قبل `runApp`
+  // ومن غير أي حماية، فرمى والشاشة فضلت فاضية. الشرح الكامل في `core/startup_failure_app.dart`.
+  try {
+    assertProductionApiConfig();
+  } catch (error) {
+    debugPrint('[startup] $error');
+    runApp(StartupFailureApp(error: error));
+    return;
+  }
   runApp(const BaytakTechnicianApp());
 }
 

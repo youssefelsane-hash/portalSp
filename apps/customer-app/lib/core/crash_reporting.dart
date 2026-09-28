@@ -17,7 +17,13 @@ class CrashReporting {
 
   static Future<void> initialize() async {
     try {
-      if (Firebase.apps.isEmpty) await Firebase.initializeApp();
+      // **مهلة أقل من حد الـANR (٥ ثواني)**: الإعداد ده بيتنادى بـ`await` قبل `runApp`، فأي
+      // تعليق فيه = نفس عَرَض 1.0.7+8 بالظبط (splash متجمّد ← «التطبيق لا يستجيب») من سبب تاني.
+      // انتهاء المهلة بيرمي `TimeoutException` فبيقع في الـcatch تحت: التطبيق بيفتح من غير
+      // مراقبة، وده أحسن ألف مرة من إنه مايفتحش.
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp().timeout(const Duration(seconds: 4));
+      }
       await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
         !kDebugMode,
       );

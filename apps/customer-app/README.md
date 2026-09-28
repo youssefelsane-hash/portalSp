@@ -948,11 +948,18 @@ NestJS. الموقع الحقيقي `ostahome.com` (docs/31 §النطاقات) 
 
 ### بناء Release لازم يبقى كده من دلوقتي
 
+**`scripts/build-play-release.sh`** من جذر المستودع — بيبني التطبيقين بالعنوان الصح وبيتحقق من
+الملف الناتج نفسه قبل ما تلمسه. التفاصيل وحادثة 1.0.7+8 في `docs/runbooks/release-verification.md`.
+يدويًا:
+
 ```bash
 flutter build appbundle --release \
   --dart-define=API_BASE_URL=https://api.ostahome.com/api/v1 \
   --dart-define=SITE_BASE_URL=https://ostahome.com
 ```
+
+من غير `API_BASE_URL` **حارس Gradle بيرفض البناء** (كانت النسخة بتتبني عادي وتعلّق على الـsplash
+عند العميل — ده اللي حصل في 1.0.7+8).
 
 (`SITE_BASE_URL` اختياري طول ما الـAPI على `api.<الموقع>` — الاشتقاق بيمسكها. لو النطاقات
 اتغيّرت لأي شكل تاني، بقى إجباري وإلا البناء بيرسب فورًا بدل ما يشحن روابط مكسورة.)

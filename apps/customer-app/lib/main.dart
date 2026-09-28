@@ -8,6 +8,7 @@ import 'core/crash_reporting.dart';
 import 'core/deep_link_router.dart';
 import 'core/feature_flags.dart';
 import 'core/push_notification_service.dart';
+import 'core/startup_failure_app.dart';
 import 'features/catalog/branding_repository.dart';
 import 'design/app_theme.dart';
 import 'design/branded_loading_screen.dart';
@@ -22,7 +23,16 @@ void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
-      assertProductionApiConfig();
+      // **أي فشل قبل `runApp` لازم يترسم** — مش يسيب الـsplash متجمّد لحد ما أندرويد يطلّع
+      // «التطبيق لا يستجيب». ده اللي حصل فعلاً في 1.0.7+8: الحارس ده رمى والشاشة فضلت فاضية.
+      // الشرح الكامل في `core/startup_failure_app.dart`.
+      try {
+        assertProductionApiConfig();
+      } catch (error) {
+        debugPrint('[startup] $error');
+        runApp(StartupFailureApp(error: error));
+        return;
+      }
       await CrashReporting.initialize();
       PushNotificationService.installBackgroundHandler();
       // تسخين كاش البراند من أول لحظة: اللوجو بيتجاب مرة واحدة بالتوازي مع إقلاع الواجهة، فأي

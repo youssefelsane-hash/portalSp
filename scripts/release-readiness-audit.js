@@ -52,15 +52,41 @@ function backendDeepLinks() {
     ],
     { encoding: 'utf8' },
   );
-  const links = new Set();
+  // نمط ← الملفات اللي بتبعته. المصدر مهم مش بس النمط: نفس الشكل ممكن يروح لعميل أو لموظف.
+  const sources = new Map();
   for (const line of out.split('\n')) {
     // بنمسك القوالب النصية (`/orders/${x}`) والنصوص الثابتة ('/warranties').
     const tpl = /deepLink:\s*[`'"]([^`'"]+)[`'"]/.exec(line);
     if (!tpl) continue;
     // تحويل `${...}` لعنصر مسار عام عشان المقارنة تبقى على **الشكل** مش القيمة.
-    links.add(tpl[1].replace(/\$\{[^}]*\}/g, ':id'));
+    const link = tpl[1].replace(/\$\{[^}]*\}/g, ':id');
+    if (!link.startsWith('/')) continue;
+    const file = line.slice(0, line.indexOf(':'));
+    if (!sources.has(link)) sources.set(link, new Set());
+    sources.get(link).add(file);
   }
-  return [...links].filter((l) => l.startsWith('/'));
+  return sources;
+}
+
+/**
+ * **نمط للموظفين بس** = كل مصدر بيبعته بيوزّع على **دور إداري** (`routeToRole`).
+ *
+ * الفلتر القديم كان بالبادئة بس (`/admin`، `/security-center`)، فإشعارات لوحة الأدمن اللي
+ * مساراتها من غير بادئة (`/warranty-claims`، `/support-tickets/:id`، `/instapay-confirmations`)
+ * كانت بتتحسب على **تطبيق العميل** ويطلع بلاغ كاذب «الإشعار هيتضغط وماينفتحش حاجة» — والعميل
+ * أصلاً عمره ما بيستلمها. فحص بيصرّخ على حاجة مش موجودة بيتعلّم الناس يتجاهلوه، وده أخطر من
+ * مفيش فحص. التصنيف بالمصدر الفعلي مش بشكل المسار.
+ */
+function isStaffOnlyLink(files) {
+  // **الشرطين مع بعض، ولكل ملف**: فيه ملفات بتبعت إشعار للعميل **و**بتوزّع على الموظفين في نفس
+  // الوقت (`order-created-notification.listener.ts` مثلاً). شرط `routeToRole` لوحده كان هيخلّي أي
+  // نمط عميل جديد في ملف زي ده يتصنّف «موظفين» ويختفي من الفحص بصمت. ملفات التوزيع على الأدوار
+  // لوحدها اسمها `*-routing.listener.ts` في المشروع كله، فالاسم هو اللي بيحسم.
+  return [...files].every(
+    (file) =>
+      file.endsWith('-routing.listener.ts') &&
+      (read(file.replace(ROOT + '/', '')) ?? '').includes('routeToRole('),
+  );
 }
 
 /** الأنماط اللي راوتر التطبيق بيعرف يتعامل معاها — مستخرجة من الكود نفسه. */
@@ -150,7 +176,9 @@ function main() {
   //
   // الباك-إند بيبعت `deep_link`؛ التطبيق بيوجّه بيه. نمط مبعوت والتطبيق مش عارفه = العميل
   // بيضغط الإشعار وماينفتحش حاجة. مفيش خطأ ومفيش لوج — عطل صامت بالكامل.
-  const links = backendDeepLinks();
+  const linkSources = backendDeepLinks();
+  const links = [...linkSources.keys()];
+  const staffOnlyLinks = new Set(links.filter((l) => isStaffOnlyLink(linkSources.get(l))));
   record('ك-٣/أ استخرجنا أنماط deep_link من الباك-إند', links.length > 0, `${links.length} نمط: ${links.join('، ')}`);
 
   for (const app of ['customer-app', 'technician-app']) {
@@ -165,7 +193,8 @@ function main() {
     // **مش كل نمط مفروض كل تطبيق يعرفه**: `/technician/...` للفني، و`/admin/...` و
     // `/security-center/...` بيروحوا **للوحة الأدمن على الويب** مش لأي تطبيق موبايل —
     // حسابهم على التطبيقات بيطلّع بلاغات كاذبة (اتلقط في أول تشغيلة).
-    const adminOnly = (l) => l.startsWith('/admin') || l.startsWith('/security-center');
+    const adminOnly = (l) =>
+      l.startsWith('/admin') || l.startsWith('/security-center') || staffOnlyLinks.has(l);
     const relevant = unhandled
       .filter((l) => !adminOnly(l))
       .filter((l) => (app === 'technician-app' ? l.startsWith('/technician') : !l.startsWith('/technician')));

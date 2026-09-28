@@ -539,3 +539,15 @@ cd apps/technician-app && flutter test test_live/all_screens_smoke_live_test.dar
 
 باقي الحالات كانت مؤقتات `socket_io_client` لإعادة الاتصال — اتقفلت في الاختبارات بـ
 `REALTIME_ENABLED=false` (مفتاح حقيقي، افتراضيه `true`)، مش بَقّة منتج.
+
+
+## بناء نسخة Google Play (حادثة 1.0.7+8، 2026-09-28)
+
+**`scripts/build-play-release.sh`** من جذر المستودع — مش `flutter build` يدوي. السبب: 1.0.7+8
+اتبنت من غير `--dart-define=API_BASE_URL`، و`main()` هنا كان فيه سطر واحد بس قبل `runApp`
+(`assertProductionApiConfig()`) من غير أي حماية، فرمى والـsplash فضل متجمّد لحد ما أندرويد طلّع
+«التطبيق لا يستجيب».
+
+دلوقتي: حارس Gradle بيرفض أي بناء release بلا عنوان إنتاج https، والسكربت بيتحقق إن العنوان
+متخبّز جوّه الكود المترجم، و`main()` بيرسم `StartupFailureApp` برسالة لو الإقلاع فشل بدل ما
+يسيب الشاشة فاضية. التفاصيل في `docs/runbooks/release-verification.md`.
