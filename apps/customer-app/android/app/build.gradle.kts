@@ -1,4 +1,5 @@
 import java.io.FileInputStream
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -104,7 +105,7 @@ val dartDefines: Map<String, String> =
         .filter { it.isNotBlank() }
         .mapNotNull { encoded ->
             val decoded = try {
-                String(java.util.Base64.getDecoder().decode(encoded), Charsets.UTF_8)
+                String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
             } catch (e: IllegalArgumentException) {
                 return@mapNotNull null
             }
