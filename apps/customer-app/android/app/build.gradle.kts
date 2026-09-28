@@ -83,6 +83,59 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// ── حارس عنوان الإنتاج — بَقّة حقيقية وصلت Google Play (1.0.7+8، 2026-09-28) ──────────────
+//
+// الإصداران اتبنوا **من غير** `--dart-define=API_BASE_URL`، فالقيمة فضلت عنوان محاكي أندرويد
+// (`http://10.0.2.2:3000/api/v1`). `assertProductionApiConfig()` في `main.dart` رمى `StateError`
+// زي ما هو مصمّم بالظبط — بس **قبل أول frame**، وFlutter بيمنع شبّاك أندرويد يترسم لحد أول frame.
+// النتيجة على الجهاز: الـsplash ثابت، وأول لمسة → «reagiert nicht» (ANR). على التطبيقين.
+//
+// الحماية الوقت-تشغيل كانت شغّالة وصح؛ المشكلة إنها **متأخرة**: بتكتشف الغلطة على موبايل
+// العميل بعد الرفع، مش على جهاز اللي بيبني. الحارس ده بينقل نفس الفحص لوقت البناء: أي
+// `assemble*Release`/`bundle*Release` من غير عنوان إنتاج https **بيرفض يبني أصلاً** — مهما
+// كان مين اللي بيبني (المالك، موديل تاني، CI).
+//
+// flutter_tools بيمرّر الـdefines كـ`-Pdart-defines=` قايمة مفصولة بفاصلة، كل عنصر
+// `base64("KEY=VALUE")` (`encodeDartDefines` في `flutter_tools/lib/src/build_info.dart`).
+val dartDefines: Map<String, String> =
+    (project.findProperty("dart-defines") as String?)
+        .orEmpty()
+        .split(",")
+        .filter { it.isNotBlank() }
+        .mapNotNull { encoded ->
+            val decoded = try {
+                String(java.util.Base64.getDecoder().decode(encoded), Charsets.UTF_8)
+            } catch (e: IllegalArgumentException) {
+                return@mapNotNull null
+            }
+            val separator = decoded.indexOf('=')
+            if (separator <= 0) null else decoded.substring(0, separator) to decoded.substring(separator + 1)
+        }
+        .toMap()
+
+gradle.taskGraph.whenReady {
+    val buildingRelease = allTasks.any {
+        (it.name.startsWith("assemble") || it.name.startsWith("bundle")) && it.name.contains("Release")
+    }
+    val apiBaseUrl = dartDefines["API_BASE_URL"].orEmpty()
+    val problem = when {
+        !buildingRelease -> null
+        apiBaseUrl.isBlank() -> "مفيش --dart-define=API_BASE_URL خالص"
+        listOf("10.0.2.2", "localhost", "127.0.0.1").any { apiBaseUrl.contains(it) } ->
+            "العنوان ($apiBaseUrl) عنوان تطوير محلي مايوصلش لحاجة من موبايل حقيقي"
+        !apiBaseUrl.startsWith("https://") -> "العنوان ($apiBaseUrl) مش https — أندرويد بيمنع الاتصال غير المشفّر"
+        else -> null
+    }
+    if (problem != null) {
+        throw GradleException(
+            "رفض بناء الإصدار: $problem. " +
+                "ابنِ بـ scripts/build-play-release.sh (بيمرّر العنوان الصح ويتحقق من الناتج)، أو يدويًا: " +
+                "flutter build appbundle --release --dart-define=API_BASE_URL=https://api.ostahome.com/api/v1 " +
+                "— نسخة من غيره بتعلّق على الـsplash وتطلّع «التطبيق لا يستجيب» عند كل العملاء.",
+        )
+    }
+}
+
 android {
     namespace = "com.ostahome.customer"
     // بَقّة CI حقيقية اتلقطت واتصلحت (2026-08-15): flutter.compileSdkVersion (36 حاليًا مع Flutter
