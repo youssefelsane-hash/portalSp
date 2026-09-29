@@ -39,8 +39,12 @@ val hasReleaseSigning = run {
 // الفشل ده مكانش بيبان غير وقت الرفع نفسه. الحارس ده بيفصل الحالتين بالظبط: بناء الـAAB
 // (`bundleRelease` = ناتج المتجر الوحيد) بيفشل فورًا وبرسالة واضحة، وباقي البناءات زي ما هي.
 gradle.taskGraph.whenReady {
+    // مهمة الـAAB في موديول التطبيق نفسه بس (`bundleRelease`). الشرط القديم (`startsWith("bundle")
+    // && contains("Release")`) كان بيمسك مهام الـplugins الداخلية زي `bundleLibRuntimeToJarRelease`
+    // اللي موجودة في **أي** بناء release — فـ`flutter build apk --release` كان بيترفض هو كمان
+    // (فحص R8 في الـCI وقع بسببه)، عكس اللي الحارس نفسه بيقوله فوق.
     val buildingStoreBundle = allTasks.any {
-        it.name.startsWith("bundle") && it.name.contains("Release")
+        it.project == project && Regex("^bundle\\w*Release$").matches(it.name)
     }
     if (buildingStoreBundle && !hasReleaseSigning) {
         throw GradleException(
