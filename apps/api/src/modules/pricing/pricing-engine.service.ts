@@ -6,7 +6,7 @@ import { Service } from '../catalog/entities/service.entity';
 import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { describeFormulaPayload, evaluateFormulaNodeWithTrace } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
-import { assertNumericPricingDefault } from './pricing-field-default';
+import { assertNumericPricingDefault, resolvePricingFieldDefault } from './pricing-field-default';
 import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
@@ -356,18 +356,10 @@ export class PricingEngineService {
    * منطقية نفترضها لرقم/نص اختياري بلا default مُعدّ).
    */
   private resolveDefaultValue(field: ServicePricingField): string | number | boolean | undefined {
-    if (field.defaultValue != null) {
-      assertNumericPricingDefault(field);
-      if (field.fieldType === PricingFieldType.CHECKBOX) return field.defaultValue === 'true';
-      if (field.fieldType === PricingFieldType.NUMBER || field.fieldType === PricingFieldType.SLIDER) {
-        const numeric = Number(field.defaultValue);
-        return Number.isFinite(numeric) ? numeric : field.defaultValue;
-      }
-      return field.defaultValue;
-    }
-    if (field.fieldType === PricingFieldType.CHECKBOX) return false;
-    if (field.fieldType === PricingFieldType.SLIDER) return Number(field.minValue ?? 0);
-    return undefined;
+    if (field.defaultValue != null) assertNumericPricingDefault(field);
+    // القاعدة نفسها في `pricing-field-default.ts` — نفس الدالة بتحدد «القيمة دي افتراضية؟»
+    // في snapshot اختيارات العميل (عرض بس)، فمايبقاش فيه نسختين من القاعدة تختلفوا مع الوقت.
+    return resolvePricingFieldDefault(field);
   }
 
   private validateAndNormalizeFieldValues(

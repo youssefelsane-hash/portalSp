@@ -2308,3 +2308,28 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 **الإثبات**: `order-team-recruiting.spec.ts` — «قائد مساعد بيدوّر على مساعد أعلى منه رتبة» بيغطي
 القراءة **والكتابة** في نفس التست. واختبار رفض الرتبة الأعلى للفني (`recruitMember`) لسه أخضر،
 فقاعدة خانة التنفيذ محفوظة.
+
+## بيانات عرض إضافية: اختيارات العميل وتفاصيل العنوان (docs/08 §185، 2026-09-29)
+
+**Additive بس — لا migration، لا تغيير في التسعير أو الحالة أو المطابقة.**
+
+- **`orders.customer_inputs`** (JSONB، snapshot وقت الحجز) — كل بند بقى عليه حقول **اختيارية**:
+  `field_type`، `is_required`، `is_default`، `integer_quantity`. بتتحسب في
+  `OrderCreationService.buildCustomerInputsSnapshot()`:
+  - `is_default` = `isPricingFieldDefaultValue()` — **نفس** قاعدة `resolvePricingFieldDefault()` اللي
+    المحرك بيستخدمها لحقل اختياري متلمسش (default صريح، أو false للـcheckbox، أو min للـslider). مفيش
+    نسخة موازية من القاعدة. تطبيق الفني بيخفي بيها «تيشيرتات: 0» و«نفس الخدمة الأساسية» — **مش**
+    بإخفاء الصفر بشكل أعمى (صفر في حقل إجباري أو من غير default بيفضل ظاهر).
+  - `integer_quantity` = slider حدوده أعداد صحيحة. القيمة المخزّنة **ماتتقربش** (تاريخ)؛ العرض بيقرّب.
+  - حقل اتمسح من الخدمة ⇒ الـmetadata `null` (مش false) عشان العرض مايخمّنش.
+  - طلبات قبل كده مالهاش الحقول دي خالص، وكل المستهلكين (أدمن/عميل/فني) شغالين من غيرها.
+- **`OrderAddressResponseDto`** — زاد `building_number`/`floor_number`/`apartment_number`/`delivery_notes`/
+  `contact_name`/`contact_phone` (موجودين في `addresses` من الأول). `toOrderAddressResponseDto(address, precise)`:
+  العميل والأدمن `precise=true`؛ مسارات الفني (`technician-order-execution` و`matching/technician-orders`)
+  بتمرّر `TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES.has(status)` — رقم الشقة وتليفون المستلم بيانات عميل
+  زي اسمه ورقمه بالظبط. برّه السياسة: الشارع والعلامة والإحداثيات بس (زي قبل).
+- اختبارات: `order-display-metadata.spec.ts` (قاعدة بيانات حقيقية للـsnapshot + سياسة الظهور)، وتحقق حي
+  `node scripts/verify-customer-inputs-display.js` (12 فحص عبر HTTP).
+- **فجوة معروفة (مش جزء من الجولة دي)**: نسخ تطبيق العميل ≤ 1.0.8 بتبعت slider كسري
+  (`1.9639…`)، والمحرك بيسعّر بيه زي ما هو. التطبيق الجديد بيبعت int من المصدر؛ تقريب في السيرفر =
+  تغيير تسعير محتاج قرار منفصل.

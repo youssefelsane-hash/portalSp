@@ -37,7 +37,7 @@ export class TechnicianOrdersController {
       this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
     ]);
     return toTechnicianOrderResponseDto(
-      toOrderResponseDto(order, address, null, { customerContact, serviceNameAr }),
+      toOrderResponseDto(order, address, null, { customerContact, serviceNameAr, preciseAddress: contactVisible }),
       money,
     );
   }

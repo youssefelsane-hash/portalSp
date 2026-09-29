@@ -1,5 +1,5 @@
 import { Address } from '../../customers/entities/address.entity';
-import { Order } from '../entities/order.entity';
+import { Order, OrderCustomerInput } from '../entities/order.entity';
 import { OrderCustomerNotice, OrderCustomerNoticeType } from '../entities/order-customer-notice.entity';
 
 export interface OrderAddressResponseDto {
@@ -7,6 +7,37 @@ export interface OrderAddressResponseDto {
   landmark: string | null;
   latitude: number;
   longitude: number;
+  /**
+   * تفاصيل الوصول (docs/08 §185) — additive: موجودة في الكيان من الأول ومكانتش بتطلع. `null` لو
+   * فاضية، أو لو العارض فني والطلب لسه برّه `TECHNICIAN_CUSTOMER_CONTACT_VISIBLE_STATUSES` —
+   * رقم الشقة وتليفون المستلم بيانات عميل بالظبط زي اسمه ورقمه، فبيتبعوا نفس سياسة الظهور.
+   */
+  building_number?: string | null;
+  floor_number?: string | null;
+  apartment_number?: string | null;
+  delivery_notes?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+}
+
+/**
+ * العنوان زي ما العارض مسموح له يشوفه. `precise=false` بيرجّع الشارع والعلامة والإحداثيات بس
+ * (اللي الفني المعيّن كان بياخدهم دايمًا للملاحة) ويصفّر تفاصيل الوصول وبيانات التواصل.
+ */
+export function toOrderAddressResponseDto(address: Address, precise: boolean): OrderAddressResponseDto {
+  const detail = (value: string | null | undefined) => (precise && value?.trim() ? value.trim() : null);
+  return {
+    street_name: address.streetName,
+    landmark: address.landmark,
+    longitude: address.location.coordinates[0],
+    latitude: address.location.coordinates[1],
+    building_number: detail(address.buildingNumber),
+    floor_number: detail(address.floorNumber),
+    apartment_number: detail(address.apartmentNumber),
+    delivery_notes: detail(address.deliveryNotes),
+    contact_name: detail(address.contactName),
+    contact_phone: detail(address.contactPhone),
+  };
 }
 
 export interface OrderResponseDto {
@@ -32,7 +63,7 @@ export interface OrderResponseDto {
    * إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات عربية محلولة، جاهزة
    * للعرض كسطر واحد. `null` = الخدمة مالهاش حقول ديناميكية أو الطلب اتعمل قبل migration 0201.
    */
-  customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
+  customer_inputs: OrderCustomerInput[] | null;
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
@@ -205,6 +236,11 @@ export function toOrderResponseDto(
     safetyGuidanceAr?: string | null;
     /** جهة التنفيذ المثبتة على الطلب، وتظل ظاهرة للطلب التاريخي حتى لو الشركة توقفت لاحقًا. */
     assignedCompanyName?: string | null;
+    /**
+     * تفاصيل الوصول في العنوان (العمارة/الدور/الشقة/ملاحظات/المستلم). افتراضيها `true` لأن
+     * العميل صاحب العنوان والأدمن بيشوفوها؛ مسارات الفني بتمرّر شرط ظهور بيانات العميل.
+     */
+    preciseAddress?: boolean;
   },
 ): OrderResponseDto {
   return {
@@ -287,14 +323,7 @@ export function toOrderResponseDto(
     required_assistants: order.requiredAssistants,
     estimated_duration_days: order.estimatedDurationDays,
     pricing_quantity: order.pricingQuantity == null ? null : Number(order.pricingQuantity),
-    address: address
-      ? {
-          street_name: address.streetName,
-          landmark: address.landmark,
-          longitude: address.location.coordinates[0],
-          latitude: address.location.coordinates[1],
-        }
-      : undefined,
+    address: address ? toOrderAddressResponseDto(address, viewerExtras?.preciseAddress ?? true) : undefined,
     technician_name: technicianContact?.name,
     technician_phone: technicianContact?.phone,
     assigned_company_name: viewerExtras?.assignedCompanyName ?? undefined,

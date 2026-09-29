@@ -96,6 +96,16 @@ export interface OrderCustomerInput {
   label: string;
   value: string;
   unit: string | null;
+  /**
+   * بيانات عرض إضافية (docs/08 §185) — **اختيارية** عمدًا: الطلبات اللي اتعملت قبلها مالهاش
+   * الحقول دي خالص، وأي مستهلك لازم يشتغل من غيرها. للعرض بس — ممنوع تدخل التسعير.
+   */
+  field_type?: string | null;
+  is_required?: boolean | null;
+  /** القيمة هي نفسها اللي المحرك كان هيفترضها لو العميل ما بعتهاش (`isPricingFieldDefaultValue`). */
+  is_default?: boolean | null;
+  /** slider بحدود صحيحة — العدد قطع/وحدات، فالعرض يقدر يقرّب القيم الكسرية القديمة. */
+  integer_quantity?: boolean | null;
 }
 
 @Entity('orders')

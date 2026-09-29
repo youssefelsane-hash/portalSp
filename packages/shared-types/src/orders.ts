@@ -80,7 +80,7 @@ export interface OrderResponseDto {
   problem_description: string | null;
   customer_notes: string | null;
   /** إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات محلولة، للعرض. */
-  customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
+  customer_inputs: OrderCustomerInputDto[] | null;
   scheduled_at: string | null;
   /** عدد التأجيلات الذاتية للعميل؛ undefined فقط للردود من خادم قبل migration 0301. */
   customer_reschedule_count?: number;
@@ -154,7 +154,7 @@ export interface OrderResponseDto {
    */
   customer_user_id?: string;
   service_name_ar?: string;
-  address?: { street_name: string; landmark: string | null; latitude: number; longitude: number };
+  address?: OrderAddressDto;
 }
 
 // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). نفس CreateOrderDto اللي apps/customer-web
@@ -468,4 +468,35 @@ export interface OrderCrewSummaryDto {
   requiredAssistants: number;
   crewComplete: boolean;
   isTeamBooking: boolean;
+}
+
+/**
+ * بند من إجابات العميل على الفورم الديناميكي (docs/08 §71). الحقول بعد `unit` بيانات عرض
+ * أُضيفت في docs/08 §185 — **اختيارية**: الطلبات الأقدم مالهاش، فأي مستهلك يشتغل من غيرها.
+ */
+export interface OrderCustomerInputDto {
+  key: string;
+  label: string;
+  value: string;
+  unit: string | null;
+  field_type?: string | null;
+  is_required?: boolean | null;
+  /** القيمة هي نفسها اللي المحرك كان هيفترضها لو العميل ما بعتهاش. عرض بس. */
+  is_default?: boolean | null;
+  /** slider بحدود صحيحة (عدّاد قطع/وحدات). */
+  integer_quantity?: boolean | null;
+}
+
+/** عنوان الطلب. تفاصيل الوصول (docs/08 §185) `null` لو فاضية أو العارض مش مسموح له بيها. */
+export interface OrderAddressDto {
+  street_name: string;
+  landmark: string | null;
+  latitude: number;
+  longitude: number;
+  building_number?: string | null;
+  floor_number?: string | null;
+  apartment_number?: string | null;
+  delivery_notes?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
 }

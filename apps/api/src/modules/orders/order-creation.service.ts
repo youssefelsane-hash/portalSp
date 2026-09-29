@@ -34,6 +34,7 @@ import { schedulePrecision } from '../catalog/schedule-precision';
 import { initialPriceStatus } from './initial-price-status';
 import { estimatedDisplayRange } from '../catalog/estimated-display-range';
 import { contractPeriodFromFieldValues } from '../pricing/pricing-templates';
+import { isIntegerQuantityField, isPricingFieldDefaultValue } from '../pricing/pricing-field-default';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
 import { CreateOrderDto, PrepaymentMethodInput } from './dto/create-order.dto';
@@ -351,9 +352,14 @@ export class OrderCreationService {
           unit_ar: string | null;
           options: PricingFieldOption[] | null;
           display_order: number;
+          is_required: boolean;
+          default_value: string | null;
+          min_value: string | null;
+          max_value: string | null;
         }[]
       >(
-        `SELECT field_key, field_type, label_ar, unit_ar, options, display_order
+        `SELECT field_key, field_type, label_ar, unit_ar, options, display_order,
+                is_required, default_value, min_value, max_value
            FROM service_pricing_fields
           WHERE service_id = $1 AND deleted_at IS NULL`,
         [serviceId],
@@ -375,17 +381,31 @@ export class OrderCreationService {
                     ? 'نعم'
                     : 'لأ'
                   : String(rawValue);
+          // بيانات العرض (docs/08 §185): تطبيق الفني بيفلتر بيها القيم اللي العميل ماغيّرهاش
+          // بدل ما يخفي الصفر بشكل أعمى. حقل مش معروف ⇒ null (مش false) عشان العرض مايخمّنش.
+          const rule = field
+            ? {
+                fieldType: field.field_type as PricingFieldType,
+                defaultValue: field.default_value,
+                minValue: field.min_value,
+                maxValue: field.max_value,
+              }
+            : null;
           return {
             key,
             // حقل اتمسح من الخدمة بعد كده (أو مفيش صف ليه أصلاً) بيتعرض بمفتاحه بدل ما يختفي.
             label: field?.label_ar ?? key,
             value,
             unit: field?.unit_ar ?? null,
+            field_type: field?.field_type ?? null,
+            is_required: field ? field.is_required : null,
+            is_default: rule ? isPricingFieldDefaultValue(rule, rawValue) : null,
+            integer_quantity: rule ? isIntegerQuantityField(rule) : null,
             displayOrder: field?.display_order ?? 999,
           };
         })
         .sort((a, b) => a.displayOrder - b.displayOrder)
-        .map(({ key, label, value, unit }) => ({ key, label, value, unit }));
+        .map(({ displayOrder: _displayOrder, ...input }) => input);
       return inputs.length > 0 ? inputs : null;
     } catch (err) {
       this.logger.warn(`فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الطلب بيكمل عادي: ${String(err)}`);
