@@ -77,16 +77,17 @@ describe('PricingEngineService — default_value بتتجاوز فحص min/max �
       { record: auditLogRecord } as unknown as AuditLogService,
     );
 
-    // خدمة #1: حقل NUMBER بحدود [1,100] لكن default_value='99999' (بره الحدود تمامًا).
-    await fieldsService.create(ids.adminUser, ids.serviceOutOfRange, {
+    // نحاكي إعدادًا قديمًا فاسدًا مباشرةً؛ الحفظ الجديد بيرفضه قبل وصوله للتقييم.
+    const numericField = await fieldsService.create(ids.adminUser, ids.serviceOutOfRange, {
       field_key: 'area',
       label_ar: 'المساحة',
       field_type: PricingFieldType.NUMBER,
       is_required: false,
       min_value: 1,
       max_value: 100,
-      default_value: '99999',
+      default_value: '1',
     });
+    await q(`UPDATE service_pricing_fields SET default_value = '99999' WHERE id = $1`, [numericField.id]);
     await rulesService.upsert(ids.adminUser, ids.serviceOutOfRange, {
       rule_type: PricingRuleType.FORMULA,
       rule_key: 'final_price',

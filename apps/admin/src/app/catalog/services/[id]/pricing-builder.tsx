@@ -28,7 +28,6 @@ import type {
   PricingRuleResponseDto,
   PricingRuleTestResponseDto,
   PricingRuleTestRunResultDto,
-  UpdatePricingFieldBody,
   UpsertPricingRuleBody,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -46,6 +45,7 @@ import { formatEgp } from '@/lib/format';
 import { ErrorNotice } from '@/components/notice';
 import { FormulaTreeEditor, type FormulaEditorContext } from './formula-tree-editor';
 import { collectFormulaPayloadIssues, isRecord } from './formula-validation';
+import { NUMERIC_PRICING_FIELD_TYPES, pricingFieldDefaultError, pricingFieldDefaultPayload } from './pricing-field-default';
 import { FORMULA_LIMITS } from '@baytak/shared-types';
 
 const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
@@ -66,7 +66,7 @@ const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
 };
 
 const FIELD_TYPES_WITH_OPTIONS: PricingFieldType[] = ['dropdown', 'multi_select'];
-const FIELD_TYPES_WITH_RANGE: PricingFieldType[] = ['number', 'area', 'length', 'volume', 'slider'];
+const FIELD_TYPES_WITH_RANGE = NUMERIC_PRICING_FIELD_TYPES;
 
 // أنواع حقول مش مدعومة في apps/customer-app لسه (راجع create_order_screen.dart's isSupported) —
 // كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): لو الأدمن يحطّها إجبارية، العميل بيوصل لحقل
@@ -232,6 +232,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
       max_value: field.max_value ?? undefined,
       min_files: field.min_files ?? undefined,
       max_files: field.max_files ?? undefined,
+      default_value: field.default_value ?? undefined,
     });
     setFieldOptionsText((field.options ?? []).map((o) => `${o.value}=${o.label_ar}`).join('\n'));
   }
@@ -281,10 +282,16 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
       );
       return;
     }
+    const defaultError = pricingFieldDefaultError(fieldForm);
+    if (defaultError) {
+      setError(defaultError);
+      return;
+    }
     setIsSaving(true);
     const hasOptions = FIELD_TYPES_WITH_OPTIONS.includes(fieldForm.field_type);
-    const body: CreatePricingFieldBody | UpdatePricingFieldBody = {
+    const body = {
       ...fieldForm,
+      default_value: pricingFieldDefaultPayload(fieldForm.default_value),
       options: hasOptions ? parseOptionsText(fieldOptionsText) : undefined,
     };
     try {
@@ -603,7 +610,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   <SelectNative
                     id="pf_type"
                     value={fieldForm.field_type}
-                    onChange={(e) => setFieldForm((f) => ({ ...f, field_type: e.target.value as PricingFieldType }))}
+                    onChange={(e) => setFieldForm((f) => ({ ...f, field_type: e.target.value as PricingFieldType, default_value: undefined }))}
                   >
                     {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
                       <option key={value} value={value}>
@@ -656,6 +663,40 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                       />
                     </div>
                   </>
+                )}
+                {!['image_upload', 'video_upload', 'voice_note', 'location'].includes(fieldForm.field_type) && (
+                  <div className="col-span-2 flex flex-col gap-1">
+                    <Label htmlFor="pf_default">القيمة الافتراضية / Default Value (اختياري)</Label>
+                    {fieldForm.field_type === 'checkbox' ? (
+                      <SelectNative
+                        id="pf_default"
+                        value={fieldForm.default_value ?? ''}
+                        onChange={(e) => setFieldForm((f) => ({ ...f, default_value: e.target.value }))}
+                        aria-describedby="pf_default_help"
+                      >
+                        <option value="">بدون قيمة محددة (الافتراضي: لا)</option>
+                        <option value="true">نعم</option>
+                        <option value="false">لا</option>
+                      </SelectNative>
+                    ) : (
+                      <Input
+                        id="pf_default"
+                        type={FIELD_TYPES_WITH_RANGE.includes(fieldForm.field_type) ? 'number' : 'text'}
+                        step="any"
+                        min={FIELD_TYPES_WITH_RANGE.includes(fieldForm.field_type) ? fieldForm.min_value : undefined}
+                        max={FIELD_TYPES_WITH_RANGE.includes(fieldForm.field_type) ? fieldForm.max_value : undefined}
+                        maxLength={255}
+                        value={fieldForm.default_value ?? ''}
+                        onChange={(e) => setFieldForm((f) => ({ ...f, default_value: e.target.value }))}
+                        aria-describedby="pf_default_help"
+                      />
+                    )}
+                    <p id="pf_default_help" className="text-xs text-muted-foreground">
+                      تستخدم في الحساب فقط لو الحقل اختياري والعميل لم يرسل قيمة. تركها فارغة يلغي القيمة المحددة.
+                      {fieldForm.field_type === 'slider' && ' شريط التمرير بدون قيمة محددة يستخدم أقل قيمة، أو 0 لو مفيش حد أدنى.'}
+                      {FIELD_TYPES_WITH_OPTIONS.includes(fieldForm.field_type) && ' اكتب القيمة البرمجية للخيار، وليس التسمية.'}
+                    </p>
+                  </div>
                 )}
                 {fieldForm.field_type === 'image_upload' && (
                   <>

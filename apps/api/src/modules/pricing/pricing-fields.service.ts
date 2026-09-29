@@ -7,6 +7,7 @@ import { CreatePricingFieldDto } from './dto/create-pricing-field.dto';
 import { UpdatePricingFieldDto } from './dto/update-pricing-field.dto';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
 import { ServicePricingRule } from './entities/service-pricing-rule.entity';
+import { assertNumericPricingDefault } from './pricing-field-default';
 import {
   indexFormulaReferences,
   loadActiveFormulaPayloads,
@@ -150,6 +151,7 @@ export class PricingFieldsService {
       maxFiles: limits.maxFiles,
       defaultValue: dto.default_value ?? null,
     });
+    assertNumericPricingDefault(field);
     await this.fields.save(field);
 
     await this.auditLog.record({
@@ -171,6 +173,13 @@ export class PricingFieldsService {
     this.assertSupportedIfRequired(dto.field_type ?? field.fieldType, dto.is_required ?? field.isRequired);
     const nextFieldType = dto.field_type ?? field.fieldType;
     const nextRequired = dto.is_required ?? field.isRequired;
+    assertNumericPricingDefault({
+      fieldType: nextFieldType,
+      labelAr: dto.label_ar ?? field.labelAr,
+      defaultValue: dto.default_value !== undefined ? dto.default_value : field.defaultValue,
+      minValue: dto.min_value !== undefined ? String(dto.min_value) : field.minValue,
+      maxValue: dto.max_value !== undefined ? String(dto.max_value) : field.maxValue,
+    });
     const limits = this.imageLimits(
       nextFieldType,
       nextRequired,

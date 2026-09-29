@@ -1,5 +1,26 @@
 # modules/pricing
 
+## Pricing Field Defaults (2026-09-29)
+
+Baseline: `main@54786da1`. Scope: API and Admin only; no customer/technician source,
+mobile build, migration, notification or permission changes.
+
+Execution map: Admin PricingBuilder -> existing pricing-fields POST/PATCH (`catalog.manage`)
+-> PricingFieldsService -> existing `default_value` column (migration 0138) ->
+PricingEngineService normalization -> shared formula evaluator -> preview/estimate/booking.
+Existing orders keep their stored pricing snapshots.
+
+| Acceptance | Before | Intended change | Verification |
+| --- | --- | --- | --- |
+| Load/edit/save/clear default in Admin | GAP: form omits it | Existing API property, blank clears to null | IMPLEMENTED: Admin tests + real UI |
+| Optional omitted slider | GAP: ignored without default | Explicit default, else min, else 0 | IMPLEMENTED: real DB + HTTP |
+| Explicit slider input and required fields | CONFIRMED_EXISTING | Preserve precedence and required rejection | VERIFIED: regression tests |
+| Invalid numeric default | BUG: accepted at save, rejected at evaluation | Reject create/update and legacy evaluation clearly | IMPLEMENTED: real DB + HTTP negative tests |
+| Number/checkbox/formula behavior | CONFIRMED_EXISTING | No new number fallback or checkbox change | VERIFIED: existing and new specs |
+
+Implementation/verification status: COMPLETE for this slice; see [test results](DEFAULTS-VERIFICATION.md).
+The earlier broad production audit remains paused. No production deployment was performed.
+
 حساب السعر والعمولة والخصم. يستخدم `service_zone_pricing` و`service_level_pricing` (قاموس §5.3-5.4) للتسعير الثابت العادي (موجود في `catalog` module نفسه). **تحديث 2026-08-11**: الموديول ده بقى فيه كمان محرك التسعير الديناميكي (Pricing Engine) — راجع `docs/08-pricing-engine-and-platform-vision.md` §1 و`docs/adr/0001-dynamic-pricing-engine.md` قبل أي تعديل.
 
 ## محرك التسعير الديناميكي (Pricing Engine) — ✅ خلص بالكامل end-to-end (Backend + Admin UI + تتبّع السعر بالطلب، 2026-08-12)

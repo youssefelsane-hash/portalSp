@@ -72,5 +72,5 @@ export class CreatePricingFieldDto {
   @IsOptional()
   @IsString()
   @Length(1, 255)
-  default_value?: string;
+  default_value?: string | null;
 }
