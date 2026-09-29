@@ -35,6 +35,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
   final _floorController = TextEditingController();
   final _apartmentController = TextEditingController();
   final _landmarkController = TextEditingController();
+  final _deliveryNotesController = TextEditingController();
   LatLng? _pickedLocation;
 
   bool _saving = false;
@@ -51,6 +52,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
       _floorController.text = existing.floorNumber ?? '';
       _apartmentController.text = existing.apartmentNumber ?? '';
       _landmarkController.text = existing.landmark ?? '';
+      _deliveryNotesController.text = existing.deliveryNotes ?? '';
       _cityId = existing.cityId;
       _areaId = existing.areaId;
       _pickedLocation = LatLng(existing.latitude, existing.longitude);
@@ -68,6 +70,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
     _floorController.dispose();
     _apartmentController.dispose();
     _landmarkController.dispose();
+    _deliveryNotesController.dispose();
     super.dispose();
   }
 
@@ -153,6 +156,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
               floorNumber: _floorController.text.trim(),
               apartmentNumber: _apartmentController.text.trim(),
               landmark: _landmarkController.text.trim(),
+              deliveryNotes: _deliveryNotesController.text.trim(),
             )
           : await widget.repository.update(
               existing.id,
@@ -166,6 +170,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
               floorNumber: _floorController.text.trim(),
               apartmentNumber: _apartmentController.text.trim(),
               landmark: _landmarkController.text.trim(),
+              deliveryNotes: _deliveryNotesController.text.trim(),
             );
       if (mounted) Navigator.of(context).pop(address);
     } catch (errRaw) {
@@ -313,6 +318,19 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                         labelText: 'علامة مميزة قريبة',
                         hintText: 'مثال: فوق صيدلية العزبي، جنب المسجد',
                         helperText: 'اختياري، بيساعد مقدم الخدمة يوصلك من غير ما يتوه',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // docs/08 §185 — كانت في الـAPI من الأول ومفيش شاشة بتجمعها، فـ«ملاحظات الوصول»
+                    // عند الفني مكانتش ممكن تتملى أصلًا.
+                    TextFormField(
+                      controller: _deliveryNotesController,
+                      maxLines: 2,
+                      maxLength: 300,
+                      decoration: const InputDecoration(
+                        labelText: 'ملاحظات الوصول',
+                        hintText: 'مثال: الجرس مش شغال، كلمني قبل ما تطلع',
+                        helperText: 'اختياري، بتوصل لمقدم الخدمة بعد تأكيد الطلب',
                       ),
                     ),
                     const SizedBox(height: 12),

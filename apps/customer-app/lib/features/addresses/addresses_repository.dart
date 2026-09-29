@@ -22,6 +22,7 @@ class AddressesRepository {
     String? floorNumber,
     String? apartmentNumber,
     String? landmark,
+    String? deliveryNotes,
     bool? isDefault,
   }) async {
     final data = await auth.authedRequest('POST', '/addresses', body: {
@@ -35,6 +36,7 @@ class AddressesRepository {
       if (floorNumber != null && floorNumber.isNotEmpty) 'floor_number': floorNumber,
       if (apartmentNumber != null && apartmentNumber.isNotEmpty) 'apartment_number': apartmentNumber,
       if (landmark != null && landmark.isNotEmpty) 'landmark': landmark,
+      if (deliveryNotes != null && deliveryNotes.isNotEmpty) 'delivery_notes': deliveryNotes,
       'is_default': ?isDefault,
     });
     return Address.fromJson(data!);
@@ -56,6 +58,7 @@ class AddressesRepository {
     String? floorNumber,
     String? apartmentNumber,
     String? landmark,
+    String? deliveryNotes,
   }) async {
     final data = await auth.authedRequest('PATCH', '/addresses/$addressId', body: {
       'city_id': ?cityId,
@@ -68,6 +71,8 @@ class AddressesRepository {
       'floor_number': ?floorNumber,
       'apartment_number': ?apartmentNumber,
       'landmark': ?landmark,
+      // فاضية = مسح الملاحظة (الحقل `IsString` بس في الـDTO، والعرض بيعتبر الفاضي null).
+      'delivery_notes': ?deliveryNotes,
     });
     return Address.fromJson(data!);
   }
