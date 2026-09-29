@@ -7,6 +7,7 @@ import type {
   AdminTechnicianResponseDto,
   ComplaintResponseDto,
   OrderDetailResponseDto,
+  OrderCustomerInputDto,
   OrderEarningShareResponseDto,
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
@@ -23,7 +24,7 @@ import type {
   TechnicianCapacityTier,
   TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
-import { describeCustomerInput, formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
+import { formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { OrderEarningAdjustmentsSection } from './order-earning-adjustments-section';
@@ -141,6 +142,7 @@ import { formatDateTimeAr, formatEgp  } from '@/lib/format';
 import { ErrorNotice, Notice } from '@/components/notice';
 import { DataList, DataRow, DataBlock } from '@/components/data-list';
 import { FORMATION_STAGE_KEYS, type OrderPriceTrail } from '@/lib/order-price-trail';
+import { displayOrderCustomerInput, splitOrderCustomerInputs } from '@/lib/order-customer-inputs';
 
 /** إصدار عرض سعر كما بيرجّعه `GET /admin/orders/:id/quotes`. */
 interface AdminOrderQuote {
@@ -1368,6 +1370,20 @@ export default function OrderDetailPage() {
     );
   }
 
+  const customerInputs = splitOrderCustomerInputs(order.customer_inputs ?? []);
+  const renderCustomerInput = (input: OrderCustomerInputDto) => {
+    const display = displayOrderCustomerInput(input);
+    return (
+      <li key={input.key} className="min-w-0 rounded-md border border-border/60 bg-background px-3 py-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <span className="min-w-0 break-words">{input.label}</span>
+          <strong className="font-semibold tabular-nums"><bdi>{display.value}</bdi></strong>
+        </div>
+        {display.explanation && <p className="mt-1 text-xs text-muted-foreground">{display.explanation}</p>}
+      </li>
+    );
+  };
+
   return (
     <AppShell>
       <PageHeader
@@ -1712,42 +1728,22 @@ export default function OrderDetailPage() {
                 </DataRow>
               )}
               {order.problem_description && <DataBlock label="وصف المشكلة">{order.problem_description}</DataBlock>}
-              {/* docs/08 §71 — اللي العميل اختاره في الفورم الديناميكي وقت الحجز. docs/08 §185: صفوف
-                  «سؤال … إجابة» بنفس قواعد تطبيق الفني (`describeCustomerInput`) بدل سطر واحد كان بيعرض
-                  شرح الأدمن كوحدة («0 حدد إجمالي عدد…»). الأدمن بيشوف **كل** البنود: الافتراضي مطوي بس،
-                  والقيمة المخزّنة بتظهر لو العرض قرّبها (نسخ تطبيق قديمة بعتت كسور والسعر اتحسب عليها). */}
-              {order.customer_inputs && order.customer_inputs.length > 0 && (() => {
-                const rows = order.customer_inputs.map(describeCustomerInput);
-                const chosen = rows.filter((row) => !row.isDefault);
-                const defaults = rows.filter((row) => row.isDefault);
-                const renderRow = (row: (typeof rows)[number], muted = false) => (
-                  <li key={row.key} className={`flex items-start justify-between gap-4 py-1 ${muted ? 'text-muted-foreground' : ''}`}>
-                    <span className="min-w-0 break-words text-muted-foreground">{row.label}</span>
-                    <span className={`shrink-0 text-left ${muted ? '' : 'font-semibold'}`}>
-                      {row.value}
-                      {row.storedValue && (
-                        <span className="block text-xs font-normal text-amber-700" title="القيمة زي ما اتسجّلت على الطلب">
-                          مسجّلة: {row.storedValue}
-                        </span>
-                      )}
-                    </span>
-                  </li>
-                );
-                return (
-                  <DataBlock label="اختيارات العميل وقت الحجز">
-                    <ul className="divide-y">{chosen.map((row) => renderRow(row))}</ul>
-                    {chosen.length === 0 && <p className="text-muted-foreground">العميل ساب كل الاختيارات على الإعداد الافتراضي.</p>}
-                    {defaults.length > 0 && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          {defaults.length} اختيار على الإعداد الافتراضي
-                        </summary>
-                        <ul className="divide-y">{defaults.map((row) => renderRow(row, true))}</ul>
-                      </details>
-                    )}
-                  </DataBlock>
-                );
-              })()}
+              {order.customer_inputs && order.customer_inputs.length > 0 && (
+                <div className="col-span-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">اختيارات العميل وقت الحجز</p>
+                  {customerInputs.meaningful.length > 0 && (
+                    <ul className="grid gap-2 sm:grid-cols-2">{customerInputs.meaningful.map(renderCustomerInput)}</ul>
+                  )}
+                  {customerInputs.defaults.length > 0 && (
+                    <details className="mt-3 text-sm">
+                      <summary className="cursor-pointer font-medium text-muted-foreground">
+                        القيم الافتراضية ({customerInputs.defaults.length})
+                      </summary>
+                      <ul className="mt-2 grid gap-2 sm:grid-cols-2">{customerInputs.defaults.map(renderCustomerInput)}</ul>
+                    </details>
+                  )}
+                </div>
+              )}
               {order.customer_notes && <DataBlock label="ملاحظات العميل">{order.customer_notes}</DataBlock>}
               {order.optional_warranty && (
                 <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
@@ -2259,31 +2255,22 @@ export default function OrderDetailPage() {
                 <DataRow label="العنوان">
                   {order.address.street_name}
                   {order.address.landmark ? ` — ${order.address.landmark}` : ''}
-                  {/* docs/08 §185 — تفاصيل الوصول (null للعناوين القديمة ⇒ مفيش سطر). */}
+                </DataRow>
+              )}
+              {order.address && [order.address.building_number, order.address.floor_number, order.address.apartment_number].some(Boolean) && (
+                <DataRow label="تفاصيل الوصول">
                   {[
                     order.address.building_number && `عمارة ${order.address.building_number}`,
                     order.address.floor_number && `الدور ${order.address.floor_number}`,
                     order.address.apartment_number && `شقة ${order.address.apartment_number}`,
-                  ].filter(Boolean).length > 0 && (
-                    <span className="block text-sm">
-                      {[
-                        order.address.building_number && `عمارة ${order.address.building_number}`,
-                        order.address.floor_number && `الدور ${order.address.floor_number}`,
-                        order.address.apartment_number && `شقة ${order.address.apartment_number}`,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
-                  )}
-                  {order.address.delivery_notes && (
-                    <span className="block text-sm text-muted-foreground">ملاحظات الوصول: {order.address.delivery_notes}</span>
-                  )}
-                  {(order.address.contact_name || order.address.contact_phone) && (
-                    <span className="block text-sm text-muted-foreground">
-                      المستلم: {order.address.contact_name ?? ''}{' '}
-                      {order.address.contact_phone && <span dir="ltr">{order.address.contact_phone}</span>}
-                    </span>
-                  )}
+                  ].filter(Boolean).join(' · ')}
+                </DataRow>
+              )}
+              {order.address?.delivery_notes && <DataBlock label="ملاحظات الوصول">{order.address.delivery_notes}</DataBlock>}
+              {order.address && (order.address.contact_name || order.address.contact_phone) && (
+                <DataRow label="المستلم في العنوان">
+                  {order.address.contact_name && <span>{order.address.contact_name}</span>}
+                  {order.address.contact_phone && <span dir="ltr" className="ms-2 inline-block">{order.address.contact_phone}</span>}
                 </DataRow>
               )}
             </DataList>

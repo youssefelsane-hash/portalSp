@@ -7,6 +7,7 @@ import type { ApiEnvelope, ApiMeta, LoginResult, MfaRequiredResponse, UserRespon
 import { isMfaRequiredResponse } from '@baytak/shared-types';
 import { apiFetch, apiFetchPaginated, ApiError } from './api-client';
 import { StepUpDialog } from '@/components/step-up-dialog';
+import { startWorkforceActivityTracker } from './workforce-activity-tracker';
 
 interface AuthState {
   accessToken: string | null;
@@ -345,59 +346,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [doRefresh, requestStepUp, setAccessTokenBoth],
   );
 
-  // فترة الخمس دقائق بتتحسب لو حصل تفاعل فيها؛ مجرد ترك التبويب ظاهرًا لا يُحسب عملًا.
+  // حفظ أول عشر ثوانٍ ثم أثناء التفاعل، مع سماح خمس دقائق للانتقال المؤقت بين التبويبات.
   useEffect(() => {
     if (!user) return;
-    let hadActivity = false;
-    let lastInteractionAt = 0;
-    let lastHeartbeatAt = 0;
-    let idle = false;
-    function sendHeartbeat(reset: boolean) {
-      lastHeartbeatAt = Date.now();
+    return startWorkforceActivityTracker((reset, keepalive) => {
       void authedFetch('/admin/workforce/heartbeat', {
         method: 'POST',
         body: JSON.stringify({ reset }),
+        keepalive,
       }).catch(() => undefined);
-    }
-    function onInteraction() {
-      if (document.visibilityState !== 'visible') return;
-      lastInteractionAt = Date.now();
-      hadActivity = true;
-      if (idle || Date.now() - lastHeartbeatAt > 360_000) {
-        idle = false;
-        sendHeartbeat(true);
-      }
-    }
-    function onVisibilityChange() {
-      if (document.visibilityState !== 'visible') {
-        idle = true;
-        hadActivity = false;
-      }
-    }
-    function tick() {
-      if (document.visibilityState !== 'visible') return;
-      if (Date.now() - lastHeartbeatAt > 360_000) {
-        idle = true;
-        hadActivity = false;
-        return;
-      }
-      if (hadActivity && Date.now() - lastInteractionAt <= 300_000) {
-        sendHeartbeat(false);
-      } else {
-        idle = true;
-      }
-      hadActivity = false;
-    }
-    sendHeartbeat(true);
-    const interval = setInterval(tick, 300_000);
-    const events = ['pointermove', 'pointerdown', 'keydown', 'scroll', 'wheel', 'touchstart'] as const;
-    for (const event of events) document.addEventListener(event, onInteraction, { passive: true });
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      clearInterval(interval);
-      for (const event of events) document.removeEventListener(event, onInteraction);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
+    });
   }, [user, authedFetch]);
 
   const hasPermission = useCallback((permissionName: string) => permissions?.has(permissionName) ?? false, [permissions]);

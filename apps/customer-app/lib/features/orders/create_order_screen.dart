@@ -1368,16 +1368,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // مابيقررش مين المرشّح، وبالتالي تغيير الترشيح مابيحتاجش نسخة جديدة من التطبيق.
     final recommended = available && channel?.isRecommended == true;
     final badgeText = channel?.recommendedLabelAr;
-    // **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «يظهرله إن فيه دفع by InstaPay
-    // عليه ٣٠ جنيه خصم… شطب على السعر القديم»). القيمة والنص الاتنين جايين من الباك-إند —
-    // التطبيق بيعرض بس، فتغيير المبلغ من لوحة الأدمن مايحتاجش نسخة جديدة من التطبيق.
-    final discountCents = available ? (channel?.discountCents ?? 0) : 0;
+    final previewDueCents = _dueRemoteAssessmentFeeCents > 0
+        ? _dueRemoteAssessmentFeeCents
+        : !_payFullInsteadOfDeposit && _pricePreview?.depositAmountCents != null
+            ? _pricePreview!.depositAmountCents
+            : _pricePreview?.totalAmountCents;
+    final discountCents = available ? (channel?.discountForAmount(previewDueCents) ?? 0) : 0;
     // الرقم المعروض بييجي من **اللي بيتدفع دلوقتي**، مش من سعر الشغل — الشرح الكامل والسبب
     // في `resolveOnlineDiscountDisplay()` تحت.
     final discountDisplay = resolveOnlineDiscountDisplay(
       discountCents: discountCents,
       remoteAssessmentFeeDueCents: _dueRemoteAssessmentFeeCents,
-      previewTotalCents: _pricePreview?.totalAmountCents,
+      previewTotalCents: previewDueCents,
     );
     return RadioListTile<String?>(
       value: method,
@@ -1396,7 +1398,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(available ? subtitle : reason),
-          if (discountDisplay.applies) ...[
+          if (discountDisplay.applies ||
+              (available && channel?.discountRatePercent != 0 && discountDisplay.baseCents == null)) ...[
             const SizedBox(height: 4),
             _OnlineDiscountLine(
               discountCents: discountCents,

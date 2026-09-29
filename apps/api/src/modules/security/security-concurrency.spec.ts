@@ -115,6 +115,24 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
     expect(rows.length).toBe(1);
   });
 
+  it('نبضات تبويبات متزامنة لا تضاعف دقيقة النشاط ولا تُرجع الساعة للخلف', async () => {
+    await dataSource.query(
+      `UPDATE employee_daily_activity SET last_activity_at = now() - interval '1 minute', active_seconds = 0
+       WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.actorHeartbeat],
+    );
+    const results = await Promise.allSettled(Array.from({ length: 5 }, () => workforce.heartbeat(ids.actorHeartbeat)));
+    expect(results.every((result) => result.status === 'fulfilled')).toBe(true);
+    const [row] = await dataSource.query<{ active_seconds: number; last_activity_at: Date }[]>(
+      `SELECT active_seconds, last_activity_at FROM employee_daily_activity
+       WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.actorHeartbeat],
+    );
+    expect(row.active_seconds).toBeGreaterThanOrEqual(59);
+    expect(row.active_seconds).toBeLessThanOrEqual(61);
+    expect(new Date(row.last_activity_at).getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
   it('سيناريو B — recordDenial متزامن (5 نداء بالتوازي) لنفس (actor+event_type+action): مفيش كراش، صف واحد بس، occurrence_count = 5 بالظبط (Script 7 Phase 30 — كانت فلاكي، اتصلحت فعليًا بقفل استشاري)', async () => {
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, () =>

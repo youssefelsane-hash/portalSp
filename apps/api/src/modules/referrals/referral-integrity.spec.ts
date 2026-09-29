@@ -17,6 +17,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   let service: ReferralsService;
   let promoCodes: PromoCodesService;
   let auditLog: AuditLogService;
+  let monthlyCapCents = 0;
   const runId = Date.now().toString(36);
   const ids = {
     city: '',
@@ -72,7 +73,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     );
     ids.legacyUser = legacy.id;
 
-    for (let index = 0; index < 8; index++) {
+    for (let index = 0; index < 10; index++) {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type, referred_by_user_id)
          VALUES ($1,$2,'customer',$3) RETURNING id`,
@@ -108,6 +109,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
           'referral.required_referrals_per_reward': 2,
           'referral.reward_value_egp': 150,
           'referral.reward_validity_days': 90,
+          'referral.max_monthly_reward_cents_per_customer': monthlyCapCents,
         })[key] ?? fallback,
     };
     service = new ReferralsService(
@@ -272,6 +274,27 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     })).toBe(1);
     await service.reconcilePending(200);
     expect(await dataSource.getRepository(ReferralReward).count({ where: { referrerUserId: ids.referrer } })).toBe(4);
+  });
+
+  it('does not issue another customer reward after the configurable monthly cap', async () => {
+    monthlyCapCents = 60_000;
+    const ninth = ids.referred[8];
+    const tenth = ids.referred[9];
+    await service.createPendingReferral(ids.referrer, ninth.user);
+    await service.createPendingReferral(ids.referrer, tenth.user);
+    await service.handleOrderCompleted(ninth.profile, ninth.order);
+    await service.handleOrderCompleted(tenth.profile, tenth.order);
+
+    expect(await dataSource.getRepository(Referral).count({
+      where: { referrerUserId: ids.referrer, status: ReferralStatus.COMPLETED },
+    })).toBe(10);
+    expect(await dataSource.getRepository(ReferralReward).count({
+      where: { referrerUserId: ids.referrer },
+    })).toBe(4);
+    expect(await dataSource.getRepository(PromoCode).count({
+      where: { restrictedToUserId: ids.referrer },
+    })).toBe(4);
+    monthlyCapCents = 0;
   });
 
   it('returns only the referral code actually persisted during concurrent lazy assignment', async () => {

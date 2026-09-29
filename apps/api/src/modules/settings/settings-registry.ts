@@ -290,7 +290,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)' },
   'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)' },
   'payments.instapay_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار InstaPay للعملاء عند اكتمال بيانات المستلم' },
-  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'هدية ثابتة بالجنيه عند تأكيد العميل الدفع عبر InstaPay. صفر = لا توجد هدية. الهدية تتحملها المنصة ولا تخصم من مستحق الفني.' },
+  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'الحد الأقصى بالجنيه لمكافأة 5% عند الدفع عبر InstaPay. صفر = لا توجد مكافأة. المنصة تتحملها ولا تخصم من مستحق الفني.' },
   'payments.instapay.ipa_address': { type: 'string', default: '', group: 'payments', description: 'عنوان IPA أو رقم موبايل InstaPay المسجّل — بيتعرض للعميل كتعليمات تحويل. فاضي = InstaPay معطّلة (isConfigured=false)' },
   'payments.instapay.qr_image': { type: 'string', default: '', group: 'payments', description: 'صورة QR لاستقبال تحويلات InstaPay — إما "storage://<key>" لملف مرفوع من لوحة الأدمن، أو رابط https خارجي. فاضي = مفيش QR (العميل بيشوف تعليمات التحويل النصية بس)' },
   'payments.instapay.recipient_name': { type: 'string', default: '', group: 'payments', description: 'الاسم اللي بيتعرض للعميل مع عنوان IPA فوق (يتطمّن إنه بيحوّل للجهة الصح). فاضي = InstaPay معطّلة' },
@@ -346,6 +346,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'referral.required_referrals_per_reward': { type: 'number', default: 1, group: 'referral', description: 'عدد الترشيحات المكتملة (أول طلب فعلي للمُرشَّح) المطلوبة لاستحقاق مكافأة واحدة. ١ = مكافأة عن كل ترشيح ناجح.' },
   'referral.reward_validity_days': { type: 'number', default: 90, group: 'referral', description: 'عدد أيام صلاحية كود مكافأة الترشيح من تاريخ الإصدار' },
   'referral.reward_value_egp': { type: 'number', default: 150, group: 'referral', description: 'قيمة كود الخصم اللي بيتصدر تلقائياً كمكافأة ترشيح (بالجنيه) — تقريب لساعة خدمة قياسية' },
+  'referral.max_monthly_reward_cents_per_customer': { type: 'number', default: 0, group: 'referral', description: 'أقصى قيمة أكواد مكافآت الترشيح الصادرة للعميل خلال الشهر بالقرش (صفر = بلا سقف). اضبطه قبل الإطلاق.' },
 
   // ── referral_qr ───────────────────────────────────────────────────────
   'referral_qr.bonus_amount_cents': { type: 'number', default: 5000, group: 'referral_qr', description: 'مكافأة الفني بالقرش لكل طلب مؤهّل (افتراضي 50 جنيه — قابل للتعديل بالكامل)' },

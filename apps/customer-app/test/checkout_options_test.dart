@@ -3,19 +3,41 @@ import 'package:customer_app/features/orders/orders_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('payment channel keeps readiness reason instead of silently disappearing', () {
-    final channel = PaymentChannelAvailability.fromJson({
-      'method': 'card',
-      'is_enabled': true,
-      'is_configured': false,
-      'is_available': false,
-      'unavailable_reason': 'إعداد Paymob غير مكتمل: HMAC Secret',
-    });
+  test(
+    'payment channel keeps readiness reason instead of silently disappearing',
+    () {
+      final channel = PaymentChannelAvailability.fromJson({
+        'method': 'card',
+        'is_enabled': true,
+        'is_configured': false,
+        'is_available': false,
+        'unavailable_reason': 'إعداد Paymob غير مكتمل: HMAC Secret',
+      });
 
-    expect(channel.enabled, isTrue);
-    expect(channel.available, isFalse);
-    expect(channel.unavailableReason, contains('HMAC'));
-  });
+      expect(channel.enabled, isTrue);
+      expect(channel.available, isFalse);
+      expect(channel.unavailableReason, contains('HMAC'));
+    },
+  );
+
+  test(
+    'InstaPay preview calculates five percent of the due amount with the server cap',
+    () {
+      final channel = PaymentChannelAvailability.fromJson({
+        'method': 'instapay',
+        'is_available': true,
+        'discount_cents': 0,
+        'discount_rate_percent': 5,
+        'discount_cap_cents': 3000,
+        'discount_label_ar': 'خصم حتى 5%',
+      });
+
+      expect(channel.discountForAmount(30000), 1500);
+      expect(channel.discountForAmount(100000), 3000);
+      expect(channel.discountForAmount(10000), 500);
+      expect(channel.discountForAmount(null), 0);
+    },
+  );
 
   test('price preview reads the optional warranty as a separate amount', () {
     final preview = OrderPricePreview.fromJson({

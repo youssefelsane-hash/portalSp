@@ -42,4 +42,3 @@ export * from './campaigns';
 export * from './analytics';
 export * from './marketing';
 export * from './ratings';
-export * from './customer-inputs';

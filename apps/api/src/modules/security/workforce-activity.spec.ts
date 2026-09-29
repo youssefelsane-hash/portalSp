@@ -106,14 +106,14 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     expect(idlePresence.state).toBe(EmployeePresenceState.IDLE);
   }, 10000);
 
-  it('وقت العمل الفعلي: فجوة heartbeat ≤ العتبة بتتضاف، فجوة أكبر متتضافش', async () => {
+  it('وقت العمل الفعلي: الرجوع من الخمول يعيد نقطة القياس، وبعده النشاط يتحسب', async () => {
     // الحالة الحالية: last_activity_at من الاختبار اللي فات (منذ ~2.5 ثانية idle). الفجوة دي
     // أكبر من العتبة (2 ثانية) فمفروض متتضافش لـactive_seconds.
     const beforeGap = await dataSource.query<{ active_seconds: number }[]>(
       `SELECT active_seconds FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
       [ids.user],
     );
-    await service.heartbeat(ids.user);
+    await service.heartbeat(ids.user, true);
     const afterIdleGap = await dataSource.query<{ active_seconds: number }[]>(
       `SELECT active_seconds FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
       [ids.user],
@@ -123,7 +123,7 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
 
     // heartbeat تاني بعد فجوة صغيرة (≤ العتبة) لازم يضيف وقت فعلي هالمرة — 1.2 ثانية بس (مش أقل)
     // عشان الفجوة تقرّب لثانية كاملة (active_seconds عمود integer، ومعدل heartbeat الحقيقي كل
-    // دقيقة فمفيش تقريب-لصفر حقيقي في الإنتاج، بس هنا محتاجين فجوة ≥ نص ثانية عشان Math.round تزيد).
+    // ثلاثين ثانية فمفيش تقريب-لصفر حقيقي في الإنتاج، بس هنا محتاجين فجوة ≥ نص ثانية عشان Math.round تزيد).
     await new Promise((resolve) => setTimeout(resolve, 1200));
     await service.heartbeat(ids.user);
     const afterActiveGap = await dataSource.query<{ active_seconds: number }[]>(
@@ -132,6 +132,52 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     );
     expect(afterActiveGap[0].active_seconds).toBeGreaterThan(afterIdleGap[0].active_seconds);
   }, 10000);
+
+  it('يحفظ عشر ثوانٍ كاملة ولا يضيف ساعة غياب حتى لو وصلت نبضة متأخرة', async () => {
+    const readSeconds = async () => {
+      const [row] = await dataSource.query<{ active_seconds: number }[]>(
+        `SELECT active_seconds FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+        [ids.user],
+      );
+      return row.active_seconds;
+    };
+    const before = await readSeconds();
+    await dataSource.query(
+      `UPDATE employee_daily_activity SET last_activity_at = now() - interval '10 seconds'
+       WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.user],
+    );
+    await service.heartbeat(ids.user);
+    expect((await readSeconds()) - before).toBe(10);
+
+    await dataSource.query(
+      `UPDATE employee_daily_activity SET last_activity_at = now() - interval '1 hour'
+       WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.user],
+    );
+    await service.heartbeat(ids.user);
+    expect((await readSeconds()) - before).toBe(10);
+  });
+
+  it('40 دقيقة عمل متصلة تتراكم بدون انتظار دفعات خمس دقائق', async () => {
+    const [before] = await dataSource.query<{ active_seconds: number }[]>(
+      `SELECT active_seconds FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.user],
+    );
+    for (let minute = 0; minute < 40; minute += 1) {
+      await dataSource.query(
+        `UPDATE employee_daily_activity SET last_activity_at = now() - interval '1 minute'
+         WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+        [ids.user],
+      );
+      await service.heartbeat(ids.user);
+    }
+    const [after] = await dataSource.query<{ active_seconds: number }[]>(
+      `SELECT active_seconds FROM employee_daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE`,
+      [ids.user],
+    );
+    expect(after.active_seconds - before.active_seconds).toBe(40 * 60);
+  });
 
   it('ملخص القوى العاملة: بيرجّع صف الموظف بالبيانات الصح', async () => {
     const summary = await service.getWorkforceSummary();

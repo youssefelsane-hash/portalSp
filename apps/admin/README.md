@@ -590,9 +590,8 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
 
 ## صفحة الطلب: اختيارات العميل والعنوان الكامل (docs/08 §185، 2026-09-29)
 
-`/orders/[id]` بيعرض `customer_inputs` صفوف بـ`describeCustomerInput` من `@baytak/shared-types` (نفس قواعد
-كارت الفني): الافتراضي مطوي في `<details>`، الوحدة القصيرة جنب القيمة وشرح الأدمن الطويل لأ، والعدّاد
-الصحيح المقرّب بيبان معاه «مسجّلة: …» بالقيمة المخزّنة فعلاً (الأدمن لازم يشوف اللي السعر اتحسب عليه).
-العنوان بيعرض العمارة/الدور/الشقة، ملاحظات الوصول، والمستلم لو موجودين. طلب قديم بلا metadata بيتعرض
-كله من غير ادعاء «افتراضي». الاختبارات: `test/customer-inputs-display.test.mjs` (unit) و
-`test/order-customer-inputs.e2e.mjs` (نفس بيئة `pricing-field-default.e2e.mjs` المعزولة).
+`/orders/[id]` بيعرض `customer_inputs` صفوف عبر `src/lib/order-customer-inputs.ts` (نفس قواعد كارت الفني):
+الافتراضي الاختياري مطوي في «القيم الافتراضية (N)»، الوحدة القصيرة جنب القيمة والطويلة شرح تحتها، والعدّاد
+الصحيح بيتقرّب. العنوان فيه «تفاصيل الوصول» (العمارة/الدور/الشقة)، ملاحظات الوصول، والمستلم.
+الاختبارات: `test/order-customer-inputs.test.mjs` (unit) و`test/order-customer-inputs.e2e.mjs` — طلب حقيقي
+عبر API العميل ⇒ الصفحة بمتصفح، وطلب قديم بلا metadata (نفس بيئة `pricing-field-default.e2e.mjs` المعزولة).

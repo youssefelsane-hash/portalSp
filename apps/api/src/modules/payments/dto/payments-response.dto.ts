@@ -356,14 +356,12 @@ export interface PaymentChannelResponseDto {
   is_recommended: boolean;
   /** نص الوسم الجاهز للعرض — سطح واحد يكتبه، مش كل تطبيق يخترع صيغته. */
   recommended_label_ar: string | null;
-  /**
-   * **خصم الدفع الإلكتروني** بالقرش (ADR-0085، طلب مالك §141 بند ٥: «يظهرله إن فيه دفع
-   * by InstaPay عليه ٣٠ جنيه خصم… شطب على السعر القديم»). صفر = مفيش خصم على الوسيلة دي.
-   *
-   * الرقم ده هو **نفس** الرقم اللي `OrderCreationService` هيخصمه فعلاً — الاتنين بيقروا من
-   * `online-payment-discount.ts`. الفصل بينهم كان هينتج «الواجهة بتقول خصم والفاتورة مافيهاش».
-   */
+  /** Legacy fixed-amount preview. Zero for percentage rewards so old clients cannot show a false price. */
   discount_cents: number;
-  /** نص الوسم بعد تبديل `{discount}` — `null` لما مفيش خصم. */
+  /** Percentage reward contract for updated clients; legacy fixed-amount previews stay disabled. */
+  discount_rate_percent: number;
+  /** Admin-configured maximum reward in cents. */
+  discount_cap_cents: number;
+  /** نص الوسم — `null` لما مفيش خصم. */
   discount_label_ar: string | null;
 }

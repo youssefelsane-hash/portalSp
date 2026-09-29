@@ -111,8 +111,8 @@ export class ExecutiveKpisService {
    * GMV مش الإيراد — وده أكتر التباس في لوحات القيادة. GMV = قيمة الشغل اللي عدّى على
    * المنصة. الإيراد = دخلنا إحنا (العمولة بعد طرح ما اترجع منها في الاستردادات).
    *
-   * هامش المساهمة = الإيراد − التكاليف المباشرة اللي المنصة بتتحملها على نفس الطلبات:
-   * الخصومات (`0287`: الترويج تكلفة منصة مش خصم من الفني) + تعويضات الشكاوى.
+   * هامش المساهمة = صافي عمولة المنصة بعد الخصومات والاستردادات، ناقص تعويضات الشكاوى.
+   * الخصم خفّض `platform_commission_cents` وقت التسوية بالفعل، فلا يُطرح مرة ثانية هنا.
    */
   private async moneyKpis(from: Date, to: Date): Promise<KpiValue[]> {
     const [row] = await this.dataSource.query<
@@ -150,9 +150,8 @@ export class ExecutiveKpisService {
       { key: 'technician_earnings_cents', value: Number(row?.technician_earnings ?? 0), unit: 'cents', sample_size: null },
       { key: 'discounts_cents', value: discounts, unit: 'cents', sample_size: null },
       { key: 'refunds_cents', value: refunds, unit: 'cents', sample_size: null },
-      // الخصم والتعويض بيتطرحوا هنا؛ الاسترداد اتطرح بالفعل جوّه صافي العمولة، وطرحه تاني
-      // كان هيحسبه مرتين.
-      { key: 'contribution_margin_cents', value: revenue - discounts - compensations, unit: 'cents', sample_size: null },
+      // الخصومات والاستردادات داخل صافي العمولة بالفعل؛ التعويض فقط تكلفة إضافية هنا.
+      { key: 'contribution_margin_cents', value: revenue - compensations, unit: 'cents', sample_size: null },
       this.ratio('refund_rate', refunds, gmv, 'مفيش مبيعات مدفوعة في الفترة دي'),
     ];
   }

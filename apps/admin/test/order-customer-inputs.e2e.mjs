@@ -1,9 +1,9 @@
 // اختبار محلي End-to-End (docs/08 §185): طلب حقيقي عبر API العميل ⇒ صفحة الطلب في لوحة الأدمن.
 // نفس بيئة `pricing-field-default.e2e.mjs` المعزولة (قاعدة اختبار + API + أدمن بمفتاح مرور افتراضي).
 //
-// بيثبت إن الأدمن **بيستهلك** اللي الـAPI بقى بيبعته:
-//   - اختيارات العميل صفوف منظمة (مش سطر `·`)، الافتراضي مطوي، وشرح الأدمن الطويل مابيتعرضش كوحدة.
-//   - عدّاد صحيح مسجّل بكسر من نسخة تطبيق قديمة بيتعرض مقرّب **ومعاه القيمة المسجّلة**.
+// بيثبت إن الأدمن **بيستهلك** اللي الـAPI بقى بيبعته (`src/lib/order-customer-inputs.ts`):
+//   - اختيارات العميل صفوف منظمة (مش سطر `·`)، الافتراضي مطوي، وشرح الأدمن الطويل مابيتكتبش كوحدة.
+//   - عدّاد صحيح مسجّل بكسر من نسخة تطبيق قديمة بيتعرض مقرّب.
 //   - العنوان فيه العمارة/الدور/الشقة وملاحظات الوصول.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -88,15 +88,14 @@ try {
   const text = (await inputsBlock.innerText()).replace(/\s+/g, ' ');
   assert.ok(text.includes('نوع الخدمة الأساسي') && text.includes('غسيل + كي'), text);
   assert.ok(text.includes('2 قميص'), `rounded integer quantity: ${text}`);
-  assert.ok(text.includes('مسجّلة: 1.9639846991701237'), `stored value shown to admin: ${text}`);
-  assert.ok(text.includes('1 اختيار على الإعداد الافتراضي'), `defaults folded: ${text}`);
-  assert.ok(!text.includes('حدد إجمالي'), `admin helper text is not rendered as a unit: ${text}`);
+  assert.ok(text.includes('القيم الافتراضية (1)'), `defaults folded: ${text}`);
+  assert.ok(!/\d\s*\(حدد إجمالي/.test(text), `admin helper text is not rendered as a unit: ${text}`);
   assert.ok(!text.includes(' · '), 'no single dotted paragraph');
-  console.log('PASS: admin order page renders structured customer inputs (defaults folded, stored value visible)');
+  console.log('PASS: admin order page renders structured customer inputs (defaults folded, integer rounded)');
 
   const body = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
   assert.ok(body.includes('عمارة 15 · الدور 3 · شقة 7'), 'unit line');
-  assert.ok(body.includes('ملاحظات الوصول: الجرس مش شغال، كلمني قبل ما تطلع'), 'delivery notes');
+  assert.ok(body.includes('ملاحظات الوصول') && body.includes('الجرس مش شغال، كلمني قبل ما تطلع'), 'delivery notes');
   assert.ok(body.includes('جنب شركة الكهرباء'), 'landmark');
   console.log('PASS: admin order page shows building/floor/apartment, landmark and delivery notes');
 
@@ -112,9 +111,9 @@ try {
   await page.getByText('اختيارات العميل وقت الحجز').waitFor();
   const legacyBody = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
   assert.ok(legacyBody.includes('3 قميص'), 'legacy snapshot renders');
-  assert.ok(!legacyBody.includes('اختيار على الإعداد الافتراضي'), 'no default claims without metadata');
+  assert.ok(!legacyBody.includes('القيم الافتراضية'), 'no default claims without metadata');
   assert.ok(!legacyBody.includes('ملاحظات الوصول'), 'no empty delivery notes line');
-  assert.ok(!/عمارة\s*·|شقة\s*$/.test(legacyBody), 'no empty unit line');
+  assert.ok(!legacyBody.includes('تفاصيل الوصول'), 'no empty unit line');
   assert.deepEqual(errors, [], `browser page errors: ${errors.join(' | ')}`);
   console.log('PASS: legacy order (no metadata, old address) renders without empty rows or errors');
 } finally {

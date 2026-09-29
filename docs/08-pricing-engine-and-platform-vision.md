@@ -18875,10 +18875,10 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
 
 | الحقل (الـAPI) | تطبيق العميل | تطبيق الفني | الويب | الأدمن |
 |---|---|---|---|---|
-| `customer_inputs[].field_type/is_required/is_default/integer_quantity` | — (بيبعت القيم) | `CustomerInputItem` ⇒ الكارت | — | **كان بيتجاهله** ⇒ اتصلح |
-| `address.building_number/floor_number/apartment_number/landmark` | فورم العنوان | `OrderAddress.unitLine` | فورم العنوان | **كان بيعرض الشارع بس** ⇒ اتصلح |
-| `address.delivery_notes` | **مالوش منتِج** ⇒ اتصلح | الكارت | **مالوش منتِج** ⇒ اتصلح | اتضاف |
-| `address.contact_name/contact_phone` | مالوش منتِج | الكارت (لو موجود) | مالوش منتِج | اتضاف |
+| `customer_inputs[].field_type/is_required/is_default/integer_quantity` | — (بيبعت القيم) | `CustomerInputItem` ⇒ الكارت | — | `order-customer-inputs.ts` (main `cdab1f46`) |
+| `address.building_number/floor_number/apartment_number/landmark` | فورم العنوان | `OrderAddress.unitLine` | فورم العنوان | «تفاصيل الوصول» (main `cdab1f46`) |
+| `address.delivery_notes` | **مالوش منتِج** ⇒ اتصلح | الكارت | **مالوش منتِج** ⇒ اتصلح | موجود (main `cdab1f46`) |
+| `address.contact_name/contact_phone` | مالوش منتِج | الكارت (لو موجود) | مالوش منتِج | موجود (main `cdab1f46`) |
 | `customer_notes` | مالوش منتِج (الرسالة بتروح `problem_description` = «المطلوب») | الكارت | مالوش منتِج | موجود من قبل |
 | `default_value` (حقل التسعير) | **كان بيسيبه فاضي** والويب بيختاره ⇒ اتوحّد | — | بيختاره | بيحرّره |
 | `/settings/booking-window` | المنتقي المحصور | — | `min`/`max` | إعدادات |
@@ -18887,9 +18887,9 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
 **فجوات تكامل اتلقطت واتصلحت**:
 1. `delivery_notes` كان السيرفر بيبعته للفني ومفيش أي واجهة بتكتبه ⇒ خانة «ملاحظات الوصول» في فورم
    العنوان في التطبيق (`address_form_screen.dart`، إضافة وتعديل، والفاضي بيمسح) والويب (`NewAddressForm`).
-2. صفحة الطلب في الأدمن كانت بتعرض الاختيارات سطر واحد بـ` · ` وبتتجاهل الـmetadata والعمارة/الدور/الشقة ⇒
-   `describeCustomerInput` في `packages/shared-types/src/customer-inputs.ts` (نفس قواعد `customer_inputs.dart`
-   عند الفني): صفوف، الافتراضي مطوي، والقيمة **المخزّنة** بتبان لو العرض قرّبها (الأدمن لازم يشوف الحقيقة).
+2. صفحة الطلب في الأدمن كانت بتعرض الاختيارات سطر واحد بـ` · ` وبتتجاهل الـmetadata والعمارة/الدور/الشقة.
+   المالك قفلها على `main` في نفس اليوم (`cdab1f46`، `apps/admin/src/lib/order-customer-inputs.ts`)، فالحل
+   الموازي من الجولة دي **اتشال وقت الدمج** (مش نسخة تانية من نفس الحاجة)، والـE2E بقى بيختبر نسخة `main`.
 3. التطبيق كان بيسيب السؤال الاختياري اللي عليه `default_value` فاضي والويب بيعرضه مختار ⇒
    `pricingFieldInitialValue()` (نفس منطق الويب) في `CreateOrderScreen` و`JobDetailsScreen`.
 
@@ -18902,7 +18902,7 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
   لوحده بيمسح بياناته (تشغيلة قبل كده سابت خدمة وقّعت `pricing-templates-live.spec.ts`).
 - `node scripts/verify-web-ux-round-e2e.js` — متصفح: افتراضي مختار، فورم العنوان ⇒ Postgres بالتفاصيل
   وملاحظات الوصول، رقم الفوتر ⇒ `wa.me` (3/3).
-- `apps/admin/test/order-customer-inputs.e2e.mjs` — صفحة الطلب في الأدمن (3 PASS) + `customer-inputs-display.test.mjs`.
+- `apps/admin/test/order-customer-inputs.e2e.mjs` — صفحة الطلب في الأدمن بمتصفح (طلب حقيقي + طلب قديم).
 
 **النتايج**: API tsc/eslint/nest build نضاف، jest 2584/2586 (الاتنين: `workforce-activity.spec.ts` فاشل
 على `main` نفسه، و`mobile-signup-technician-parity.spec.ts` سباق مع `OrderChatRecoveryService` في API شغّال
@@ -18917,6 +18917,8 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
   وقاعدة التطوير فيها خدمات اختبار سايبة من ٢٠٢٦-٠٩-٢٥ (`fwpage-…`، `tsc-…`، `test-service-…`). مش من
   الجولة دي؛ الحل تنظيف القاعدة أو تمرير `servedByTechnicianToken` في التلات ملفات.
 - `customer_notes` و`contact_name/contact_phone` لسه مالهمش منتِج في التطبيق/الويب (العقد والعرض جاهزين).
+- الأدمن بيعرض العدّاد مقرّب (`1.96…` ⇒ `2`) من غير القيمة المخزّنة اللي السعر اتحسب عليها لطلبات نسخ
+  التطبيق ≤ 1.0.8 — لو المالك عايزها، سطر «مسجّلة: …» في `order-customer-inputs.ts`.
 - الويب بيكاش `/legal-entity` ٥ دقايق — تعديل رقم الدعم بيوصل للفوتر خلال المدة دي (مقصود).
 - `AUTH_REGISTRATION_THROTTLE_LIMIT` لازم يترفع مع `THROTTLE_LIMIT` لتشغيل `test_live/` كامل
   (`login-pin.policy.ts`) — من غيره ~٢٠ اختبار بياخدوا 429.
