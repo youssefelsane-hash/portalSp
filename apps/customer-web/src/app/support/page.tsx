@@ -84,7 +84,7 @@ export default function SupportPage() {
           <div className="rounded-2xl border border-border bg-surface p-6">
             <h2 className="font-semibold">مشكلتك في طلب معيّن؟</h2>
             <p className="mt-1 text-sm text-muted">
-              افتح الطلب من «طلباتي» — هتلاقي جواه تواصل مباشر مع الفني وزرار الشكوى الخاصة بالطلب.
+              افتح الطلب من «طلباتي» — هتلاقي جواه تواصل مباشر مع مقدم الخدمة وزرار الشكوى الخاصة بالطلب.
             </p>
             <Link
               href="/orders"

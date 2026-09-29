@@ -66,7 +66,7 @@ export function RescheduleSection({
       {options === null ? (
         <div className="h-24 animate-pulse rounded-lg bg-surface-variant" />
       ) : options.length === 0 ? (
-        <p className="text-sm text-muted">مفيش مواعيد بديلة متاحة للفني حاليًا</p>
+        <p className="text-sm text-muted">مفيش مواعيد بديلة متاحة لمقدم الخدمة حاليًا</p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {options.map((opt) => (

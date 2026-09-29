@@ -60,7 +60,7 @@ export function WarrantyRevisitSection({
     <section className="mt-6 rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-1 font-semibold">الطلب تحت الضمان</h2>
       <p className="mb-3 text-sm text-muted">
-        لو الشغل رجع باظ، تقدر تطلب إعادة زيارة <strong>مجانية بالكامل</strong> لنفس الفني.
+        لو الشغل رجع باظ، تقدر تطلب إعادة زيارة <strong>مجانية بالكامل</strong> لنفس مقدم الخدمة.
         الضمان ساري لحد {new Date(order.warranty_expires_at!).toLocaleDateString('ar-EG-u-nu-latn')}.
       </p>
 

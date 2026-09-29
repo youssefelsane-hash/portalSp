@@ -217,6 +217,14 @@ body {
     box-shadow: 0 10px 24px -24px color-mix(in srgb, var(--primary) 80%, transparent);
   }
 
+  /* الحقل اللي العميل اتودّى له لأنه ناقص (docs/08 §185). */
+  .booking-field-invalid > .booking-field,
+  .booking-field-invalid > fieldset,
+  .booking-field-invalid > label,
+  .booking-field-invalid > div:first-child {
+    border-color: var(--danger);
+  }
+
   .booking-field-warning {
     border-color: color-mix(in oklab, var(--warning) 42%, var(--border));
     background: color-mix(in oklab, var(--warning) 5%, var(--surface));

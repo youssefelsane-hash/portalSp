@@ -86,7 +86,7 @@ export function RatingSection({
   return (
     <section className="mt-6 rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-1 font-semibold">قيّم الطلب</h2>
-      <p className="mb-3 text-sm text-muted">تقييمك بيساعد فنيين أحسن يوصلوا لعملاء أكتر.</p>
+      <p className="mb-3 text-sm text-muted">تقييمك بيساعد مقدمي الخدمة الأحسن يوصلوا لعملاء أكتر.</p>
 
       <StarRow label="التقييم العام" value={overall} onChange={setOverall} required />
       <StarRow label="المواعيد" value={punctuality} onChange={setPunctuality} />
