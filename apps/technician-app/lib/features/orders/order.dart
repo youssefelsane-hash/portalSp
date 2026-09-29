@@ -1,3 +1,7 @@
+import 'customer_inputs.dart';
+
+export 'customer_inputs.dart';
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts (OrderAddressResponseDto) —
 // لزرار "افتح الملاحة" في شاشة تنفيذ الطلب.
 class OrderAddress {
@@ -6,19 +10,64 @@ class OrderAddress {
   final double latitude;
   final double longitude;
 
+  /// تفاصيل الوصول (docs/08 §185) — كانت في كيان العنوان من الأول ومش بتوصل للفني، فكان
+  /// بيوصل العمارة ويتصل بالعميل يسأل «الدور الكام؟». كلها nullable: العنوان القديم مالوش،
+  /// والسيرفر بيرجّعها null لو الطلب برّه سياسة ظهور بيانات العميل.
+  final String? buildingNumber;
+  final String? floorNumber;
+  final String? apartmentNumber;
+  final String? deliveryNotes;
+
+  /// المستلم في العنوان لو مختلف عن صاحب الحساب — بيتبع **نفس** سياسة ظهور اسم/رقم العميل.
+  final String? contactName;
+  final String? contactPhone;
+
   OrderAddress({
     required this.streetName,
     required this.landmark,
     required this.latitude,
     required this.longitude,
+    this.buildingNumber,
+    this.floorNumber,
+    this.apartmentNumber,
+    this.deliveryNotes,
+    this.contactName,
+    this.contactPhone,
   });
 
   factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
     streetName: json['street_name'] as String,
-    landmark: json['landmark'] as String?,
+    landmark: _blankToNull(json['landmark']),
     latitude: (json['latitude'] as num).toDouble(),
     longitude: (json['longitude'] as num).toDouble(),
+    buildingNumber: _blankToNull(json['building_number']),
+    floorNumber: _blankToNull(json['floor_number']),
+    apartmentNumber: _blankToNull(json['apartment_number']),
+    deliveryNotes: _blankToNull(json['delivery_notes']),
+    contactName: _blankToNull(json['contact_name']),
+    contactPhone: _blankToNull(json['contact_phone']),
   );
+
+  /// «عمارة 15 · الدور 3 · شقة 7» — `null` لو مفيش ولا واحدة (مفيش سطر فاضي).
+  String? get unitLine {
+    final parts = [
+      if (buildingNumber != null) 'عمارة $buildingNumber',
+      if (floorNumber != null) 'الدور $floorNumber',
+      if (apartmentNumber != null) 'شقة $apartmentNumber',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  /// الملاحة بالإحداثيات مش بالنص: الشارع المكتوب بإيد العميل ممكن مايتلاقاش على الخرائط.
+  Uri get navigationUri => Uri.parse(
+    'https://www.google.com/maps/dir/?api=1&destination=$latitude,$longitude',
+  );
+}
+
+String? _blankToNull(Object? value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }
 
 // تكوين الطاقم الموحّد (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين، بتستبدل teamShortage/
@@ -67,34 +116,19 @@ class CrewStatus {
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
 // AvailableOrder اللي بيرجعها /technician/orders/available، ده الشكل الكامل اللي كل فعل
 // (accept/depart/arrive/start/complete) بيرجّعه بعد تنفيذه).
-/// docs/08 §71 — سطر واحد من إجابات العميل: "المساحة: 25 م² · الدور: 3". التسميات محلولة من
-/// الباك-إند وقت الحجز (snapshot)، فمفيش أي منطق تسمية هنا — بس تجميع للعرض.
-String _formatCustomerInputs(dynamic raw) {
-  if (raw is! List) return '';
-  return raw
-      .whereType<Map<String, dynamic>>()
-      .map((item) {
-        final label = item['label'] as String? ?? '';
-        final value = item['value'] as String? ?? '';
-        final unit = item['unit'] as String?;
-        if (label.isEmpty || value.isEmpty) return '';
-        return unit != null && unit.isNotEmpty
-            ? '$label: $value $unit'
-            : '$label: $value';
-      })
-      .where((part) => part.isNotEmpty)
-      .join(' · ');
-}
-
 class Order {
   final String id;
   final String orderNumber;
   final String orderStatus;
   final String? problemDescription;
 
-  /// اللي العميل اختاره في الفورم الديناميكي وقت الحجز (docs/08 §71) — نص جاهز للعرض في سطر
-  /// واحد، متبني في الباك-إند بتسميات عربية محلولة. فاضي = الخدمة مالهاش حقول ديناميكية.
-  final String customerInputsLine;
+  /// اللي العميل اختاره في الفورم الديناميكي وقت الحجز (docs/08 §71) — **قايمة منظمة** مش
+  /// نص واحد (docs/08 §185)، عشان العرض يقدر يفرز الافتراضي من اللي العميل حدده فعلًا. فاضية =
+  /// الخدمة مالهاش حقول ديناميكية.
+  final List<CustomerInputItem> customerInputs;
+
+  /// ملاحظات العميل على الطلب (`customer_notes`) — منفصلة عن «المطلوب» (`problem_description`).
+  final String? customerNotes;
   // الصورة المالية المسموحة للفني (docs/08 §60.2، طلب مالك صريح). الباك-إند بيفلتر قبل الإرسال —
   // الحقول القديمة (paid_amount_cents، financed_order_amount_cents، installment_outstanding_cents،
   // total_amount_cents وقت وجود دفع أونلاين) **مش بترجع من الـAPI أصلاً**، مش مجرد مخفية هنا.
@@ -197,7 +231,8 @@ class Order {
     required this.orderNumber,
     required this.orderStatus,
     required this.problemDescription,
-    this.customerInputsLine = '',
+    this.customerInputs = const [],
+    this.customerNotes,
     required this.cashToCollectCents,
     this.cashCollectedCents = 0,
     required this.myEarningCents,
@@ -235,7 +270,8 @@ class Order {
     orderNumber: json['order_number'] as String,
     orderStatus: json['order_status'] as String,
     problemDescription: json['problem_description'] as String?,
-    customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
+    customerInputs: parseCustomerInputs(json['customer_inputs']),
+    customerNotes: _blankToNull(json['customer_notes']),
     cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
     cashCollectedCents: json['cash_collected_cents'] as int? ?? 0,
     myEarningCents: json['my_earning_cents'] as int? ?? 0,
@@ -273,11 +309,19 @@ class Order {
   );
 }
 
+/// أي مدة أقل من أو تساوي الرقم ده قيمة **جدولة تشغيلية** مش مدة تنفيذ (docs/08 §185).
+///
+/// خدمات زي المغسلة متسعّرة بـ`duration_minutes = 1` عمدًا: عشان الـscheduler مايعتبرش مقدم
+/// الخدمة مشغول ساعات، فيقدر ياخد ٢٠–٣٠ طلب في نفس الفترة. «المدة المتوقعة: 1 دقيقة» كانت
+/// بتقول لمقدم الخدمة معلومة غلط عن شغله. نفس الحد في تطبيق العميل والويب (shared-types).
+const kSchedulingOnlyDurationMaxMinutes = 4;
+
 String? formatOrderDurationAr({
   int? durationMinutes,
   int? estimatedDurationDays,
 }) {
-  final minutes = durationMinutes ?? 0;
+  final raw = durationMinutes ?? 0;
+  final minutes = raw <= kSchedulingOnlyDurationMaxMinutes ? 0 : raw;
   final days = estimatedDurationDays ?? 0;
   if (days > 0 && minutes >= 24 * 60) return _formatDurationDaysAr(days);
   if (minutes > 0) return _formatDurationMinutesAr(minutes);

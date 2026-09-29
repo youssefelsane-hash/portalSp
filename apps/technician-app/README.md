@@ -551,3 +551,17 @@ cd apps/technician-app && flutter test test_live/all_screens_smoke_live_test.dar
 دلوقتي: حارس Gradle بيرفض أي بناء release بلا عنوان إنتاج https، والسكربت بيتحقق إن العنوان
 متخبّز جوّه الكود المترجم، و`main()` بيرسم `StartupFailureApp` برسالة لو الإقلاع فشل بدل ما
 يسيب الشاشة فاضية. التفاصيل في `docs/runbooks/release-verification.md`.
+
+## كارت الطلب: اختيارات العميل والعنوان الكامل (docs/08 §185، 2026-09-29)
+
+`lib/features/orders/order_brief_card.dart` (`OrderBriefCard`) بالترتيب اللي مقدم الخدمة محتاجه: الخدمة ←
+الموعد ← المدة ← المطلوب ← اختيارات العميل ← ملاحظات العميل ← بيانات العميل ← العنوان كامل ← الملاحة.
+
+- **اختيارات العميل** بقت `List<CustomerInputItem>` (`customer_inputs.dart`) بدل `join(' · ')`. الحقل
+  الاختياري اللي `is_default=true` (من السيرفر، نفس قاعدة محرك التسعير) بيتطوي ورا «عرض كل الاختيارات (N)» —
+  مخفي مش ممسوح. طلب قديم بلا metadata بيتعرض كله (مطوي بعد ٦). عدّاد صحيح بيتقرّب (`1.96…` ⇒ `2`)،
+  وشرح الأدمن الطويل في `unit` مابيتعرضش كوحدة.
+- **العنوان**: العمارة/الدور/الشقة/علامة مميزة/ملاحظات الوصول/المستلم — السيرفر بيبعتهم بس جوّه سياسة
+  ظهور بيانات العميل، وأي حقل فاضي مالوش صف. الملاحة بالإحداثيات (`OrderAddress.navigationUri`).
+- **`customer_notes`** بتتعرض لو موجودة. **المدة** ≤ 4 دقايق (قيمة جدولة) مابتتعرضش (`formatOrderDurationAr`).
+- لقطة بخط عربي: `OSTA_PREVIEW_DIR=/tmp/p flutter test test/order_brief_card_preview_test.dart`.

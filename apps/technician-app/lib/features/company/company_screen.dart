@@ -490,7 +490,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
                       if (order.technicianName != null) order.technicianName!,
                       if (order.scheduledAt != null)
                         _formatOrderDate(order.scheduledAt!),
-                      if (duration != null) 'المدة المتوقعة: $duration',
+                      if (duration != null) 'المدة المتوقعة للتنفيذ: $duration',
                     ].join(' — '),
                   ),
                   trailing: Column(

@@ -18,7 +18,7 @@ import '../schedule/models.dart' show ScheduleSlot;
 import '../schedule/schedule_repository.dart';
 import 'models.dart';
 import 'order.dart';
-import 'order_context_badges.dart';
+import 'order_brief_card.dart';
 import 'orders_repository.dart';
 import 'recruit_team_screen.dart';
 import '../../design/order_number_title.dart';
@@ -461,12 +461,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   Future<void> _openNavigation() async {
     final address = _order.address;
     if (address == null) return;
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=${address.latitude},${address.longitude}',
-    );
     await openExternalUrl(
       context,
-      uri,
+      address.navigationUri,
       failureMessage: 'مقدرناش نفتح تطبيق الخرائط',
     );
   }
@@ -867,7 +864,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             const SizedBox(height: 12),
             // "الشغلانة دي إيه ولمين؟" (docs/08 §56 بند 3) — أول حاجة الفني يشوفها، فوق أي حاجة
             // مالية أو أزرار تنفيذ. قبل كده الشاشة كانت بتبدأ بالمبلغ والأزرار على طول.
-            _JobBriefCard(order: _order),
+            OrderBriefCard(
+              order: _order,
+              onNavigate: _order.address == null ? null : _openNavigation,
+            ),
             const SizedBox(height: 12),
             _MoneySummaryCard(
               order: _order,
@@ -970,14 +970,6 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 icon: const Icon(Icons.share_location_outlined),
                 label: const Text('شارك موقعك مع العميل'),
               ),
-              if (_order.address != null) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _openNavigation,
-                  icon: const Icon(Icons.navigation_outlined),
-                  label: const Text('افتح الملاحة للعنوان'),
-                ),
-              ],
             ],
             if (_beforePhotoStatuses.contains(_order.orderStatus) ||
                 _afterPhotoStatuses.contains(_order.orderStatus)) ...[
@@ -1630,176 +1622,6 @@ class _MoneyLine extends StatelessWidget {
 
 // طاقم الطلب (docs/08 §5) — راجع تعليق TeamMember في models.dart. `null` لسه بيحمّل، قايمة فاضية
 // معناها "محدّش اتضاف لسه" (مختلف عن null، مش خطأ تحميل — الكارت بيوضّح الاتنين بنص مختلف).
-/// "الشغلانة دي إيه ولمين؟" (docs/08 §56 بند 3) — بلاغ مالك مباشر بسكرين شوت: شاشة الطلب عند
-/// الفني كانت بتعرض الحالة والمبلغ وأزرار التنفيذ بس، من غير اسم العميل ولا تليفونه ولا اسم
-/// الخدمة ولا وصف الشغل. الكارت ده بيتعرض فوق كل حاجة تانية في الشاشة.
-class _JobBriefCard extends StatelessWidget {
-  const _JobBriefCard({required this.order});
-
-  final Order order;
-
-  /// الجدولة باليوم مش بالساعة (ADR-0018 §2) — `scheduled_at` لخدمة عادية = بداية اليوم بالظبط،
-  /// فعرض "12:00 ص" هيبقى كذب مش معلومة. الوقت بيتعرض بس لو الخدمة فعلاً طلبت وقت محدد
-  /// (أوضاع ADR-0032)، واللي بيميّزها إن الوقت مش منتصف الليل.
-  static String _formatSchedule(String? iso) {
-    if (iso == null) return 'في أقرب وقت (فوري)';
-    final at = DateTime.tryParse(iso)?.toLocal();
-    if (at == null) return 'في أقرب وقت (فوري)';
-    final day =
-        '${at.year}/${at.month.toString().padLeft(2, '0')}/${at.day.toString().padLeft(2, '0')}';
-    if (at.hour == 0 && at.minute == 0) {
-      return '$day (اليوم كله — مفيش ساعة محددة)';
-    }
-    return '$day الساعة ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final duration = formatOrderDurationAr(
-      durationMinutes: order.durationMinutes,
-      estimatedDurationDays: order.estimatedDurationDays,
-    );
-    final badges = orderContextBadges(
-      isRecurring: order.isRecurring,
-      isWarrantyRevisit: order.isWarrantyRevisit,
-    );
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // شارات سياق الطلب فوق الاسم مباشرةً — أول حاجة الفني يشوفها لما يفتح الطلب
-            // (بلاغ مالك 2026-09-21).
-            if (badges.isNotEmpty) ...[
-              Wrap(spacing: 6, runSpacing: 4, children: badges),
-              const SizedBox(height: 8),
-            ],
-            Text(
-              order.serviceNameAr ?? 'طلب خدمة',
-              style: theme.textTheme.titleLarge,
-            ),
-            if (order.assignedCompanyName != null) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.business_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'الطلب تابع لشركة: ${order.assignedCompanyName}',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                const Icon(Icons.event_outlined, size: 16),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    _formatSchedule(order.scheduledAt),
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              ],
-            ),
-            if (duration != null) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.timer_outlined, size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'المدة المتوقعة: $duration',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (order.problemDescription != null &&
-                order.problemDescription!.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text('المطلوب', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 2),
-              Text(order.problemDescription!),
-            ],
-            // docs/08 §71 — اللي العميل اختاره وقت الحجز (مساحة/دور/نوع…) في سطر واحد، عشان
-            // الفني يعرف حجم الشغل قبل ما يتحرك بدل ما يسأل العميل على التليفون.
-            if (order.customerInputsLine.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text('اختيارات العميل', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 2),
-              Text(order.customerInputsLine, style: theme.textTheme.bodyMedium),
-            ],
-            // بيانات التواصل بترجع من الباك-إند بس بعد تأكيد الحجز — قبل كده بتبقى null والقسم
-            // ده بيختفي بالكامل بدل ما يعرض سطر فاضي.
-            if (order.customerName != null) ...[
-              const Divider(height: 24),
-              Row(
-                children: [
-                  const Icon(Icons.person_outline, size: 18),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      order.customerName!,
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ),
-                ],
-              ),
-              if (order.customerPhone != null) ...[
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(Icons.phone_outlined, size: 18),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        order.customerPhone!,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: () =>
-                          openPhoneDialer(context, order.customerPhone!),
-                      icon: const Icon(Icons.call, size: 18),
-                      label: const Text('اتصل'),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-            if (order.address != null) ...[
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.location_on_outlined, size: 18),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      order.address!.landmark == null
-                          ? order.address!.streetName
-                          : '${order.address!.streetName} — ${order.address!.landmark}',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _TeamRosterCard extends StatelessWidget {
   final List<TeamMember>? members;
   final int? requiredTechnicians;
