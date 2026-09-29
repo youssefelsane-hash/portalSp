@@ -1214,3 +1214,12 @@ Navigator.of(context).pushAndRemoveUntil(
 
 **لقطات بخط عربي حقيقي**: `OSTA_PREVIEW_DIR=/tmp/p flutter test test/pricing_fields_preview_test.dart`
 (`flutter test` العادي بيرسم مربعات Ahem، فمش بيقول حاجة عن التفاف العربي).
+
+**تحقق End-to-End (2026-09-29)**:
+- فورم العنوان فيه «ملاحظات الوصول» (`delivery_notes`، اختياري، ≤ 300) — ده المنتِج الوحيد للسطر اللي
+  بيظهر في كارت الفني. في التعديل، مسح الخانة بيمسح القيمة (`update` بيبعت `''`).
+- السؤال الاختياري اللي عليه `default_value` بيبدأ مختار (`pricingFieldInitialValue()`) — نفس الويب بالظبط.
+- `test_live/ux_round_e2e_live_test.dart`: أدمن ⇒ الشاشات الحقيقية ⇒ طلب ⇒ Postgres. لوحده بيمسح بياناته؛
+  مع تكملة الفني: `scripts/verify-ux-round-e2e.sh` (بيبعت `UX_E2E_HANDOFF=true`).
+- `test_live/` كامل محتاج الـAPI بـ`THROTTLE_LIMIT=100000 AUTH_REGISTRATION_THROTTLE_LIMIT=100000` — التاني
+  سقف تسجيل لكل IP مش متغطي بالأول (`login-pin.policy.ts`).

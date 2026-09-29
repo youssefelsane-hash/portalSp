@@ -30,3 +30,10 @@
   (كان مفيش watch mode قبل كده — دي كانت الفجوة اللي خلّت البَقّة ممكنة أصلاً).
 
 مرجع كامل: `../../docs/01-master-plan.md`
+
+## `describeCustomerInput` — عرض اختيارات العميل (docs/08 §185)
+
+`src/customer-inputs.ts`: دالة عرض واحدة لبند `customer_inputs` (نفس قواعد `customer_inputs.dart` في تطبيق
+الفني): وحدة قصيرة (≤ `MAX_INLINE_UNIT_LENGTH`) جنب القيمة وأطول منها شرح مابيتكتبش، العدّاد الصحيح بيتقرّب
+للعرض ومعاه `storedValue` بالقيمة المخزّنة، و`isDefault` بس من metadata السيرفر (بند قديم ⇒ false). مستخدمة في
+صفحة الطلب في الأدمن؛ الاختبار في `apps/admin/test/customer-inputs-display.test.mjs`.

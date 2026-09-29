@@ -18865,3 +18865,58 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
 - نص كارت الرئيسية «بين أكتر من فني واختار الأنسب ليك» **محتوى أدمن** (نصايح الرئيسية) مش كود — يتعدّل من الأدمن.
 - نسخ التطبيق ≤ 1.0.8 بتبعت slider كسري والمحرك بيسعّر بيه؛ الإصلاح من المصدر وصل في التطبيق الجديد بس.
 - `workforce-activity.spec.ts` بيفشل على `main` نفسه من غير تغييرات الجولة دي (اتأكد بـstash).
+
+### تحقق End-to-End بعد الدمج (2026-09-29، جولة تانية) — ✅ **خلص**
+
+**الطلب**: قبل اعتبار الجولة خلصت، إثبات إن كل حقل/metadata/تفصيلة عنوان **متوصّلة** من الـBackend لحد
+كل واجهة (API ⇒ موديل ⇒ مكان العرض ⇒ fallback للقديم)، بفلوهات حقيقية مش unit tests بس.
+
+**مراجعة العقود** (كل حقل additive من الجولة ⇒ مين بيقراه ⇒ فين بيتعرض):
+
+| الحقل (الـAPI) | تطبيق العميل | تطبيق الفني | الويب | الأدمن |
+|---|---|---|---|---|
+| `customer_inputs[].field_type/is_required/is_default/integer_quantity` | — (بيبعت القيم) | `CustomerInputItem` ⇒ الكارت | — | **كان بيتجاهله** ⇒ اتصلح |
+| `address.building_number/floor_number/apartment_number/landmark` | فورم العنوان | `OrderAddress.unitLine` | فورم العنوان | **كان بيعرض الشارع بس** ⇒ اتصلح |
+| `address.delivery_notes` | **مالوش منتِج** ⇒ اتصلح | الكارت | **مالوش منتِج** ⇒ اتصلح | اتضاف |
+| `address.contact_name/contact_phone` | مالوش منتِج | الكارت (لو موجود) | مالوش منتِج | اتضاف |
+| `customer_notes` | مالوش منتِج (الرسالة بتروح `problem_description` = «المطلوب») | الكارت | مالوش منتِج | موجود من قبل |
+| `default_value` (حقل التسعير) | **كان بيسيبه فاضي** والويب بيختاره ⇒ اتوحّد | — | بيختاره | بيحرّره |
+| `/settings/booking-window` | المنتقي المحصور | — | `min`/`max` | إعدادات |
+| `support_phone` / `support.whatsapp_number` | «تواصل معنا» + الفوتر | — | الفوتر (كاش ٥ دقايق) | إعدادات |
+
+**فجوات تكامل اتلقطت واتصلحت**:
+1. `delivery_notes` كان السيرفر بيبعته للفني ومفيش أي واجهة بتكتبه ⇒ خانة «ملاحظات الوصول» في فورم
+   العنوان في التطبيق (`address_form_screen.dart`، إضافة وتعديل، والفاضي بيمسح) والويب (`NewAddressForm`).
+2. صفحة الطلب في الأدمن كانت بتعرض الاختيارات سطر واحد بـ` · ` وبتتجاهل الـmetadata والعمارة/الدور/الشقة ⇒
+   `describeCustomerInput` في `packages/shared-types/src/customer-inputs.ts` (نفس قواعد `customer_inputs.dart`
+   عند الفني): صفوف، الافتراضي مطوي، والقيمة **المخزّنة** بتبان لو العرض قرّبها (الأدمن لازم يشوف الحقيقة).
+3. التطبيق كان بيسيب السؤال الاختياري اللي عليه `default_value` فاضي والويب بيعرضه مختار ⇒
+   `pricingFieldInitialValue()` (نفس منطق الويب) في `CreateOrderScreen` و`JobDetailsScreen`.
+
+**فلوهات حقيقية** (API + Postgres + Redis شغّالين، كود التطبيقات الحقيقي):
+- `scripts/verify-ux-round-e2e.sh` — أدمن بيعمل خدمة وحقول ونافذة حجز ورقم دعم بالـAPI ⇒ `JobDetailsScreen`
+  الحقيقية بترسمها (افتراضي مختار، عدّاد int، التمرير لأول ناقص) ⇒ منتقي الوقت محصور بالنافذة الجديدة
+  والسيرفر بيرفض برّاها ⇒ `OrdersRepository.create` ⇒ Postgres (`shirts=2` مش كسر، `duration_minutes=1`
+  و`scheduled_end_at IS NULL`) ⇒ تطبيق الفني بـ`getOne` + `OrderBriefCard` (منظم، العنوان كامل بس جوّه
+  سياسة الظهور، `customer_notes`، طلب/عنوان قديم). نص الفني بيتشغّل بس بـ`UX_E2E_HANDOFF=true`، ونص العميل
+  لوحده بيمسح بياناته (تشغيلة قبل كده سابت خدمة وقّعت `pricing-templates-live.spec.ts`).
+- `node scripts/verify-web-ux-round-e2e.js` — متصفح: افتراضي مختار، فورم العنوان ⇒ Postgres بالتفاصيل
+  وملاحظات الوصول، رقم الفوتر ⇒ `wa.me` (3/3).
+- `apps/admin/test/order-customer-inputs.e2e.mjs` — صفحة الطلب في الأدمن (3 PASS) + `customer-inputs-display.test.mjs`.
+
+**النتايج**: API tsc/eslint/nest build نضاف، jest 2584/2586 (الاتنين: `workforce-activity.spec.ts` فاشل
+على `main` نفسه، و`mobile-signup-technician-parity.spec.ts` سباق مع `OrderChatRecoveryService` في API شغّال
+على نفس القاعدة ⇒ الـafterAll بقى يمسح الـthreads)؛ Flutter analyze صفر + unit 249/91؛ `test_live/` للعميل
+122/125 وللفني 94/95 (الفاشل كان ملف تسليم قديم ⇒ اتقفل بالعلم الصريح)؛ admin/web tsc+eslint+unit+build
+نضاف؛ `verify-customer-inputs-display.js` 12/12؛ `verify-web-flow-order.js` نضيف؛ `audit-booking-flow.js
+--quick` 39 تركيبة بلا فجوة (الأداة كانت بتعمل حساباتها **من غير رمز دخول** بعد ADR-0109 ⇒ `ensureToolPin`).
+
+**فجوات صريحة**:
+- تلات اختبارات `test_live/` للعميل (`chat_live_test`، `chat_image_live_test`، `order_tracking_live_test`)
+  بيسقطوا بـ«الفني غير مؤهل» لأن `pickBookableServiceId()` من غير فني بترجع أول خدمة في `/services`،
+  وقاعدة التطوير فيها خدمات اختبار سايبة من ٢٠٢٦-٠٩-٢٥ (`fwpage-…`، `tsc-…`، `test-service-…`). مش من
+  الجولة دي؛ الحل تنظيف القاعدة أو تمرير `servedByTechnicianToken` في التلات ملفات.
+- `customer_notes` و`contact_name/contact_phone` لسه مالهمش منتِج في التطبيق/الويب (العقد والعرض جاهزين).
+- الويب بيكاش `/legal-entity` ٥ دقايق — تعديل رقم الدعم بيوصل للفوتر خلال المدة دي (مقصود).
+- `AUTH_REGISTRATION_THROTTLE_LIMIT` لازم يترفع مع `THROTTLE_LIMIT` لتشغيل `test_live/` كامل
+  (`login-pin.policy.ts`) — من غيره ~٢٠ اختبار بياخدوا 429.

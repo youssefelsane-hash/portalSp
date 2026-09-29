@@ -587,3 +587,12 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
 `app/error.tsx` و`not-found.tsx` و`global-error.tsx` + إبلاغ (`lib/error-reporter.ts`،
 `app: 'admin'`). و`lib/api-client.ts` بقى بيتعامل مع **رد مش JSON** (كان `await res.json()` خام
 بيرمي `SyntaxError` والشاشة تفضل على التحميل بلا رسالة) ومع فشل الشبكة قبل أي رد.
+
+## صفحة الطلب: اختيارات العميل والعنوان الكامل (docs/08 §185، 2026-09-29)
+
+`/orders/[id]` بيعرض `customer_inputs` صفوف بـ`describeCustomerInput` من `@baytak/shared-types` (نفس قواعد
+كارت الفني): الافتراضي مطوي في `<details>`، الوحدة القصيرة جنب القيمة وشرح الأدمن الطويل لأ، والعدّاد
+الصحيح المقرّب بيبان معاه «مسجّلة: …» بالقيمة المخزّنة فعلاً (الأدمن لازم يشوف اللي السعر اتحسب عليه).
+العنوان بيعرض العمارة/الدور/الشقة، ملاحظات الوصول، والمستلم لو موجودين. طلب قديم بلا metadata بيتعرض
+كله من غير ادعاء «افتراضي». الاختبارات: `test/customer-inputs-display.test.mjs` (unit) و
+`test/order-customer-inputs.e2e.mjs` (نفس بيئة `pricing-field-default.e2e.mjs` المعزولة).
