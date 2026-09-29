@@ -83,6 +83,7 @@ export class WorkforceActivityService {
   /**
    * بتتنادى من POST /admin/workforce/heartbeat بعد تفاعل حديث فقط. أول نبضة بعد الخمول
    * تعيد نقطة القياس بلا رصيد؛ النبضات التالية لا تضيف أكثر من خمس دقائق مهما تأخر المؤقت.
+   * التحديث ذري لأن نبضات تبويبين لنفس المستخدم ممكن تصل معًا أو بترتيب مختلف.
    *
    * ملاحظة معمارية صريحة: الـaccess token (JwtPayload) مبيحملش session/refresh-token id (تصميم
    * موجود من قبل، ADR-0011) — إضافة claim جديد كانت هتلمس إصدار/تحقق التوكن في كل التطبيق. فبدل
@@ -96,33 +97,21 @@ export class WorkforceActivityService {
     const today = now.toISOString().slice(0, 10);
 
     await this.refreshTokens.update({ userId, isRevoked: false, expiresAt: MoreThan(now) }, { lastActivityAt: now });
-
-    const existing = await this.dataSource.query<{ last_activity_at: string | null; activity_date: string }[]>(
-      `SELECT last_activity_at, activity_date::text FROM employee_daily_activity WHERE user_id = $1 AND activity_date = $2`,
-      [userId, today],
-    );
-
-    if (existing.length === 0) {
-      await this.dataSource.query(
-        `INSERT INTO employee_daily_activity (user_id, activity_date, last_activity_at, active_seconds)
-         VALUES ($1, $2, $3, 0)
-         ON CONFLICT (user_id, activity_date) DO UPDATE SET last_activity_at = $3, updated_at = now()`,
-        [userId, today, now],
-      );
-      return;
-    }
-
-    const lastActivityAt = existing[0].last_activity_at ? new Date(existing[0].last_activity_at) : null;
-    const gapSeconds = lastActivityAt ? Math.max(0, (now.getTime() - lastActivityAt.getTime()) / 1000) : 0;
-    const contributesActive = !reset && lastActivityAt !== null && gapSeconds <= MAX_HEARTBEAT_GAP_SECONDS;
-
     await this.dataSource.query(
-      `UPDATE employee_daily_activity
-       SET last_activity_at = $3,
-           active_seconds = active_seconds + $4,
-           updated_at = now()
-       WHERE user_id = $1 AND activity_date = $2`,
-      [userId, today, now, contributesActive ? Math.min(Math.round(gapSeconds), HEARTBEAT_INTERVAL_SECONDS) : 0],
+      `INSERT INTO employee_daily_activity (user_id, activity_date, last_activity_at, active_seconds)
+       VALUES ($1, $2, $3, 0)
+       ON CONFLICT (user_id, activity_date) DO UPDATE SET
+         active_seconds = employee_daily_activity.active_seconds + CASE
+           WHEN $4::boolean = false
+             AND employee_daily_activity.last_activity_at IS NOT NULL
+             AND $3::timestamptz >= employee_daily_activity.last_activity_at
+             AND $3::timestamptz - employee_daily_activity.last_activity_at <= $5::integer * INTERVAL '1 second'
+           THEN LEAST(ROUND(EXTRACT(EPOCH FROM ($3::timestamptz - employee_daily_activity.last_activity_at)))::integer, $6::integer)
+           ELSE 0
+         END,
+         last_activity_at = GREATEST(employee_daily_activity.last_activity_at, $3::timestamptz),
+         updated_at = now()`,
+      [userId, today, now, reset, MAX_HEARTBEAT_GAP_SECONDS, HEARTBEAT_INTERVAL_SECONDS],
     );
   }
 

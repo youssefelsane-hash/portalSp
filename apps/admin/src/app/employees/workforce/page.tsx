@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ErrorNotice } from '@/components/notice';
 import { Users } from 'lucide-react';
+import { formatActiveTime } from '@/lib/workforce-time';
 
 // لوحة القوى العاملة (Script 5 Part 2 §5/9) — ملخص حي ليوم النهارده لكل موظف: حضور
 // (ACTIVE/IDLE/OFFLINE)، وقت عمل فعلي (مش مدة تسجيل الدخول)، عدد الأفعال، الأفعال الحساسة
@@ -31,14 +32,6 @@ const DEPARTMENT_LABELS: Record<string, string> = {
   'finance & brand coordinator': 'المالية والعلامة التجارية',
 };
 
-function formatActiveTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours === 0 && minutes === 0) return '0 دقيقة';
-  if (hours === 0) return `${minutes} دقيقة`;
-  return `${hours}س ${minutes}د`;
-}
-
 export default function WorkforceDashboardPage() {
   const { isLoading, authedFetch } = useAuth();
   const [rows, setRows] = useState<WorkforceSummaryRowDto[] | null>(null);
@@ -53,7 +46,7 @@ export default function WorkforceDashboardPage() {
         .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ملخص القوى العاملة'));
     }
     load();
-    const interval = setInterval(load, 60_000);
+    const interval = setInterval(load, 10_000);
     document.addEventListener('visibilitychange', load);
     return () => {
       clearInterval(interval);
@@ -67,7 +60,7 @@ export default function WorkforceDashboardPage() {
 
   return (
     <AppShell>
-      <PageHeader title="لوحة القوى العاملة" description="وقت التفاعل الفعلي اليوم، مش مدة بقاء الصفحة مفتوحة. يُرصد النشاط كل خمس دقايق." />
+      <PageHeader title="لوحة القوى العاملة" description="وقت التفاعل الفعلي اليوم بالثواني، مش مدة بقاء الصفحة مفتوحة. يُرصد النشاط أثناء العمل، والفجوات حتى خمس دقائق عند العودة؛ الغياب الأطول لا يُحتسب." />
 
       {error && <ErrorNotice>{error}</ErrorNotice>}
 

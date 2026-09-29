@@ -1,11 +1,8 @@
 import { WorkforceActivityService } from './workforce-activity.service';
 
 describe('workforce heartbeat credit', () => {
-  function setup(gapSeconds: number) {
-    const previous = new Date(Date.now() - gapSeconds * 1000).toISOString();
-    const query = jest.fn()
-      .mockResolvedValueOnce([{ last_activity_at: previous }])
-      .mockResolvedValueOnce([]);
+  function setup() {
+    const query = jest.fn().mockResolvedValue([]);
     const update = jest.fn().mockResolvedValue({ affected: 1 });
     const service = new WorkforceActivityService(
       { query } as never,
@@ -16,27 +13,18 @@ describe('workforce heartbeat credit', () => {
     return { service, query, update };
   }
 
-  it('resuming after idle resets the clock without crediting the gap', async () => {
-    const { service, query } = setup(120);
+  it('sends reset and timing limits to one atomic database upsert', async () => {
+    const { service, query } = setup();
     await service.heartbeat('employee-id', true);
-    expect(query.mock.calls[1][1][3]).toBe(0);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain('ON CONFLICT (user_id, activity_date) DO UPDATE');
+    expect(query.mock.calls[0][1].slice(3)).toEqual([true, 360, 300]);
   });
 
-  it('credits a full five-minute window when there was interaction', async () => {
-    const { service, query } = setup(300);
+  it('sends a non-reset heartbeat without a read-then-write race', async () => {
+    const { service, query } = setup();
     await service.heartbeat('employee-id');
-    expect(query.mock.calls[1][1][3]).toBe(300);
-  });
-
-  it('allows network delay without crediting more than five minutes', async () => {
-    const { service, query } = setup(350);
-    await service.heartbeat('employee-id');
-    expect(query.mock.calls[1][1][3]).toBe(300);
-  });
-
-  it('does not credit a gap beyond the allowed heartbeat delay', async () => {
-    const { service, query } = setup(400);
-    await service.heartbeat('employee-id');
-    expect(query.mock.calls[1][1][3]).toBe(0);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][1].slice(3)).toEqual([false, 360, 300]);
   });
 });
