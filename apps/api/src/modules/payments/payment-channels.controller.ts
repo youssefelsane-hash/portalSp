@@ -9,6 +9,7 @@ import { PaymentMethod } from './entities/payment.entity';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
 import { PaymentMethodAvailabilityGuard } from './payment-method-availability.guard';
+import { INSTAPAY_REWARD_RATE_PERCENT } from './instapay-reward';
 
 
 /**
@@ -91,7 +92,7 @@ export class PaymentChannelsController {
       // والرقم هنا **وعد بالحد الأقصى**: الإجمالي لسه مش معروف وقت عرض الوسائل (العميل لسه
       // بيختار)، والخصم الحقيقي بيتحسب وقت الدفع وبيتقفل لو قيمته ≥ المستحق (عشان المستحق
       // مايوصلش صفر). الفاتورة هي الحاكمة دايمًا.
-      const discountCents =
+      const discountCapCents =
         isAvailable && entry.method === PaymentMethod.INSTAPAY && instapayDiscountEgp > 0
           ? Math.round(instapayDiscountEgp * 100)
           : 0;
@@ -113,8 +114,12 @@ export class PaymentChannelsController {
         // الوسم مشروط بالإتاحة عمدًا: ترشيح وسيلة العميل مش قادر يستخدمها بيضايقه مش بيساعده.
         is_recommended: isAvailable && entry.method === recommended,
         recommended_label_ar: isAvailable && entry.method === recommended ? RECOMMENDED_LABEL_AR : null,
-        discount_cents: discountCents,
-        discount_label_ar: discountCents > 0 ? `وفّر ${discountCents / 100} ج.م لما تدفع بـInstaPay` : null,
+        // Older clients interpret discount_cents as a flat amount. Zero prevents a false crossed-out price;
+        // updated clients use the percentage and cap fields to preview the actual reward.
+        discount_cents: 0,
+        discount_rate_percent: discountCapCents > 0 ? INSTAPAY_REWARD_RATE_PERCENT : 0,
+        discount_cap_cents: discountCapCents,
+        discount_label_ar: discountCapCents > 0 ? 'خصم حتى 5% لما تدفع بـInstaPay' : null,
         // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
         ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
         ...(isAdmin && adminMissingFields.length ? { admin_missing_fields: adminMissingFields } : {}),
@@ -140,6 +145,8 @@ export class PaymentChannelsController {
       // التقسيط مش دفع فوري، فمفيش «هدية دفع أونلاين» عليه — وده مكتوب هنا صراحةً بدل ما
       // يبقى نتيجة إن الوسيلة مش في القايمة بالصدفة.
       discount_cents: 0,
+      discount_rate_percent: 0,
+      discount_cap_cents: 0,
       discount_label_ar: null,
       ...(isAdmin && installmentAdminNote ? { admin_note: installmentAdminNote } : {}),
       ...(isAdmin && !paymobStatus.configured && paymobStatus.missingFields.length

@@ -1,6 +1,17 @@
-import { PaymentChannelDto } from './api-types';
+import type { PaymentChannelDto } from './api-types';
 
 export type { PaymentChannelDto };
+
+export function paymentChannelRewardCents(channel: PaymentChannelDto, amountDueCents: number | null): number {
+  const rate = channel.discount_rate_percent ?? 0;
+  const cap = channel.discount_cap_cents ?? 0;
+  if (rate > 0 && cap > 0) {
+    if (amountDueCents === null || amountDueCents <= 0) return 0;
+    const reward = Math.min(Math.round(amountDueCents * rate / 100), cap);
+    return reward < amountDueCents ? reward : 0;
+  }
+  return channel.discount_cents ?? 0;
+}
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 

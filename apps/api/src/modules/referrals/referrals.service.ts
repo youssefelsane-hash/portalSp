@@ -75,6 +75,7 @@ export class ReferralsService {
     const requiredPerReward = await this.settingsService.getNumber('referral.required_referrals_per_reward', 1);
     const rewardValueEgp = await this.settingsService.getNumber('referral.reward_value_egp', 150);
     const validityDays = await this.settingsService.getNumber('referral.reward_validity_days', 90);
+    const monthlyCapCents = await this.settingsService.getNumber('referral.max_monthly_reward_cents_per_customer', 0);
     const result = await this.dataSource.transaction(async (manager) => {
       // كل إحالات نفس المُرشِّح تدخل من بوابة واحدة قبل عدّ milestones وإصدار الكوبون.
       const scopeLock = await manager.query<{ referrer_user_id: string }[]>(
@@ -124,6 +125,20 @@ export class ReferralsService {
         where: { referrerUserId: referral.referrerUserId, milestoneCount: completedCount },
       });
       if (existingReward) return null;
+
+      if (monthlyCapCents > 0) {
+        const [monthTotal] = await manager.query<{ total_cents: string }[]>(
+          `SELECT COALESCE(SUM(pc.discount_value * 100), 0)::bigint AS total_cents
+           FROM referral_rewards reward
+           JOIN promo_codes pc ON pc.id = reward.promo_code_id
+           WHERE reward.referrer_user_id = $1
+             AND reward.created_at >= (date_trunc('month', now() AT TIME ZONE 'Africa/Cairo') AT TIME ZONE 'Africa/Cairo')`,
+          [referral.referrerUserId],
+        );
+        if (Number(monthTotal?.total_cents ?? 0) + Math.round(rewardValueEgp * 100) > monthlyCapCents) {
+          return null;
+        }
+      }
 
       const promo = await this.issueRewardInTransaction(
         manager,

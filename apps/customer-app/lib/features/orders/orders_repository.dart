@@ -18,10 +18,22 @@ class PaymentChannelAvailability {
   final bool isRecommended;
   final String? recommendedLabelAr;
 
-  /// **خصم الدفع الإلكتروني** بالقرش (ADR-0085) — صفر = مفيش خصم على الوسيلة دي.
-  /// نفس الرقم اللي الباك-إند هيخصمه فعلاً وقت إنشاء الطلب، مش حساب موازي في التطبيق.
+  /// Legacy fixed-amount preview; the percentage contract supersedes it.
   final int discountCents;
+  final int discountRatePercent;
+  final int discountCapCents;
   final String? discountLabelAr;
+
+  int discountForAmount(int? amountDueCents) {
+    if (discountRatePercent > 0 && discountCapCents > 0) {
+      if (amountDueCents == null || amountDueCents <= 0) return 0;
+      final reward = ((amountDueCents * discountRatePercent + 50) ~/ 100)
+          .clamp(0, discountCapCents)
+          .toInt();
+      return reward < amountDueCents ? reward : 0;
+    }
+    return discountCents;
+  }
 
   PaymentChannelAvailability.fromJson(Map<String, dynamic> json)
     : method = json['method'] as String,
@@ -34,6 +46,9 @@ class PaymentChannelAvailability {
       isRecommended = json['is_recommended'] as bool? ?? false,
       recommendedLabelAr = json['recommended_label_ar'] as String?,
       discountCents = (json['discount_cents'] as num?)?.toInt() ?? 0,
+      discountRatePercent =
+          (json['discount_rate_percent'] as num?)?.toInt() ?? 0,
+      discountCapCents = (json['discount_cap_cents'] as num?)?.toInt() ?? 0,
       discountLabelAr = json['discount_label_ar'] as String?;
 }
 

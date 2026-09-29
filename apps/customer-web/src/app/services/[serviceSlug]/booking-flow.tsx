@@ -6,9 +6,10 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { fetchService, fetchPricingFields, estimatePrice } from '@/lib/catalog';
 import { ServiceDto, PricingFieldDto, PricingFieldValue, PriceEstimateDto } from '@/lib/api-types';
+import { nextPricingSliderStep, pricingSliderState } from '@/lib/pricing-slider';
 import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
-import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
+import { fetchPaymentChannels, payWithCard, paymentChannelRewardCents, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
 import {
   createOrder,
   createMatchPreview,
@@ -358,6 +359,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
           const defaults = Object.fromEntries(
             fields.flatMap((field) => {
               if (current[field.field_key] !== undefined) return [];
+              if (field.field_type === 'slider' && field.is_required) return [];
               if (field.default_value !== null) {
                 const parsedNumber = Number(field.default_value);
                 const value = field.field_type === 'number' || field.field_type === 'slider'
@@ -984,6 +986,11 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     !effectiveRequestRemoteQuote &&
     priceBreakdown?.deposit_amount_cents != null &&
     priceBreakdown.deposit_amount_cents > 0;
+  const prepaymentDueCents = priceBreakdown
+    ? depositChoiceVisible && !payFullInsteadOfDeposit
+      ? priceBreakdown.deposit_amount_cents
+      : priceBreakdown.total_amount_cents
+    : null;
 
   /**
    * وسائل الدفع المقدّم المتاحة، **بترتيب السيرفر زي ما جه** (InstaPay فوق ثم الكاش ثم الباقي).
@@ -1924,7 +1931,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         <section className="motion-rise booking-panel mt-6">
           <h2 className="mb-2 font-semibold">طريقة الدفع</h2>
           <div className="flex flex-wrap gap-2">
-            {prepaymentOptions.map((channel) => (
+            {prepaymentOptions.map((channel) => {
+              const rewardCents = paymentChannelRewardCents(channel, prepaymentDueCents);
+              const hasOffer = rewardCents > 0 || (channel.discount_rate_percent ?? 0) > 0;
+              return (
               <button
                 key={channel.method}
                 onClick={() => setPaymentChoice(channel.method as 'card' | 'instapay')}
@@ -1939,15 +1949,15 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                 {/* **خصم الدفع الإلكتروني** (ADR-0085، طلب مالك §141 بند ٥: «شطب على السعر
                     القديم»). الرقم والنص جايين من السيرفر — نفس اللي هيتخصم في الفاتورة فعلاً،
                     فالواجهة بتعرض مش بتحسب. السعر المشطوب بيظهر بس لما الإجمالي يكون معروف. */}
-                {(channel.discount_cents ?? 0) > 0 && (
+                {hasOffer && (
                   <span className="flex items-center gap-1.5">
-                    {priceBreakdown && (
+                    {prepaymentDueCents !== null && rewardCents > 0 && (
                       <>
                         <span className="text-muted line-through">
-                          {formatEgp(priceBreakdown.total_amount_cents)}
+                          {formatEgp(prepaymentDueCents)}
                         </span>
                         <span className="font-bold text-primary">
-                          {formatEgp(Math.max(0, priceBreakdown.total_amount_cents - (channel.discount_cents ?? 0)))}
+                          {formatEgp(prepaymentDueCents - rewardCents)}
                         </span>
                       </>
                     )}
@@ -1959,7 +1969,8 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                   </span>
                 )}
               </button>
-            ))}
+              );
+            })}
             {/* «بعد الشغل» مش وسيلة في السجل — هو غياب دفع مسبق، فبيتعرض آخر واحد ومش بيترشّح.
                 بيتحجب لو الخدمة أصلاً بتفرض دفع مقدّم (عربون أو كاش ممنوع)، لأن الباك-إند
                 بيرفضه ساعتها وعرضه كان بيوصّل العميل لرسالة خطأ عند التأكيد. */}
@@ -2470,9 +2481,38 @@ function DynamicPricingFieldControl({
   }
 
   if (field.field_type === 'slider') {
-    const minimum = field.min_value ?? 0;
-    const maximum = Math.max(field.max_value ?? 100, minimum + 1);
-    const current = typeof value === 'number' ? Math.min(Math.max(value, minimum), maximum) : minimum;
+    const { min, max, integer, stepper, current } = pricingSliderState(field, typeof value === 'number' ? value : undefined);
+    if (stepper) {
+      return (
+        <div className="booking-field">
+          <p className="booking-field-label">{fieldLabel}</p>
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3 py-2">
+            <button
+              type="button"
+              aria-label={`زوّد ${field.label_ar}`}
+              disabled={current !== null && current >= max}
+              onClick={() => onChange(nextPricingSliderStep(current, min, max, 1))}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border text-xl disabled:opacity-40"
+            >
+              +
+            </button>
+            <output className="min-w-0 text-center text-lg font-bold tabular-nums">
+              {current === null ? '—' : current}{current !== null && inlineUnit ? ` ${inlineUnit}` : ''}
+            </output>
+            <button
+              type="button"
+              aria-label={`قلّل ${field.label_ar}`}
+              disabled={current !== null && current <= min}
+              onClick={() => onChange(nextPricingSliderStep(current, min, max, -1))}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border text-xl disabled:opacity-40"
+            >
+              −
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-muted">من {min} إلى {max}</p>
+        </div>
+      );
+    }
     return (
       <div className="booking-field">
         <div className="flex items-center justify-between gap-3">
@@ -2485,13 +2525,14 @@ function DynamicPricingFieldControl({
         <input
           id={`field-${field.id}`}
           type="range"
-          min={minimum}
-          max={maximum}
-          value={current}
-          onChange={(event) => onChange(Number(event.target.value))}
+          min={min}
+          max={max}
+          step={integer ? 1 : 'any'}
+          value={current ?? min}
+          onChange={(event) => onChange(integer ? Math.round(Number(event.target.value)) : Number(event.target.value))}
           className="booking-range mt-4 w-full"
         />
-        <div className="mt-1 flex justify-between text-xs text-muted"><span>{minimum}</span><span>{maximum}</span></div>
+        <div className="mt-1 flex justify-between text-xs text-muted"><span>{min}</span><span>{max}</span></div>
       </div>
     );
   }

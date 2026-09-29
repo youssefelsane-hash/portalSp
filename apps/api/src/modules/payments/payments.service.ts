@@ -71,6 +71,7 @@ import { allocateCrewRefundReversal } from './crew-refund-allocation';
 import { EarningsPolicyService } from './earnings-policy.service';
 import { calculateEarningsV2, EarningsCalculationResult } from './earnings-calculator';
 import { allocateSettlementRefundReversal } from './settlement-refund-allocation';
+import { calculateInstaPayRewardCents } from './instapay-reward';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
@@ -696,7 +697,7 @@ export class PaymentsService {
     return (await this.getCollectionBreakdownForOrder(order, manager)).amountDueToTechnicianCents;
   }
 
-  /** قيمة الحافز مضبوطة بالجنيه في الإدارة، لكن كل الحسابات تحتها تظل بالقروش الصحيحة. */
+  /** قيمة السقف مضبوطة بالجنيه في الإدارة، لكن كل الحسابات تحتها تظل بالقروش الصحيحة. */
   private async configuredInstaPayDiscountCents(): Promise<number> {
     const egp = await this.settingsService.getNumber('payments.instapay_discount_egp', 0);
     if (!Number.isFinite(egp) || egp <= 0) return 0;
@@ -713,11 +714,8 @@ export class PaymentsService {
     if (order.instapayDiscountCents > 0 || order.paymentStatus === OrderPaymentStatus.PAID || amountCents <= 0) {
       return 0;
     }
-    const configuredCents = await this.configuredInstaPayDiscountCents();
-    if (configuredCents <= 0 || configuredCents >= amountCents || configuredCents >= order.totalAmountCents) {
-      return 0;
-    }
-    return configuredCents;
+    const capCents = await this.configuredInstaPayDiscountCents();
+    return calculateInstaPayRewardCents(Math.min(amountCents, order.totalAmountCents), capCents);
   }
 
   /** يطبق الحافز داخل قفل الطلب؛ لا يوجد هنا أي I/O مع بوابة دفع. */

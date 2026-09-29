@@ -40,6 +40,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     order4: '',
     instapayPayment4: '',
     order5: '',
+    order6: '',
     cardPayment: '',
   };
 
@@ -236,6 +237,8 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order2]);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order5]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order5]);
+    await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order6]);
+    await q(`DELETE FROM orders WHERE id = $1`, [ids.order6]);
     // طلبات §11 (تأكيد متزامن / تأكيد بعد رفض) — نفس ترتيب المسح بالظبط.
     await q(`DELETE FROM refunds WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
     await q(`DELETE FROM order_status_history WHERE order_id = ANY($1)`, [[ids.order3, ids.order4]]);
@@ -273,6 +276,26 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       expect(Number(row.total_amount_cents)).toBe(97000);
       expect(Number(row.discount_amount_cents)).toBe(3000);
       expect(Number(row.instapay_discount_cents)).toBe(3000);
+    });
+
+    it('applies five percent rather than the full cap to a smaller payment', async () => {
+      const [order] = await dataSource.query(
+        `INSERT INTO orders (commission_rate_applied,order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+           payment_status, total_amount_cents, placed_at)
+         VALUES (20,$1,$2,$3,$4,$5,'pending_payment','pending',30000, now()) RETURNING id`,
+        [`TESTIP6-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      );
+      ids.order6 = order.id;
+
+      const transfer = await service.payWithInstaPay(ids.customerUser, ids.order6, `instapay-percentage-${runId}`);
+      expect(transfer.payment.amountCents).toBe(28500);
+      const [row] = await dataSource.query(
+        `SELECT total_amount_cents, discount_amount_cents, instapay_discount_cents FROM orders WHERE id = $1`,
+        [ids.order6],
+      );
+      expect(Number(row.total_amount_cents)).toBe(28500);
+      expect(Number(row.discount_amount_cents)).toBe(1500);
+      expect(Number(row.instapay_discount_cents)).toBe(1500);
     });
   });
 

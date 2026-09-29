@@ -59,7 +59,10 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     // اختبار في النص فشل قبل ما finally بتاعه يشتغل.
     await dataSource.query(`UPDATE settings SET value = 'true', updated_by_user_id = NULL WHERE key = 'payments.cash_enabled'`);
     await cache.del('settings:payments.cash_enabled');
+    await dataSource.query(`UPDATE settings SET value = '0', updated_by_user_id = NULL WHERE key = 'payments.instapay_discount_egp'`);
+    await cache.del('settings:payments.instapay_discount_egp');
     settingsService.invalidateLocalCache('payments.cash_enabled');
+    settingsService.invalidateLocalCache('payments.instapay_discount_egp');
     cache.onModuleDestroy();
     await dataSource.destroy();
   });
@@ -69,6 +72,25 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     expect(items.find((i) => i.method === PaymentMethod.CASH)?.is_available).toBe(true);
     expect(items.find((i) => i.method === PaymentMethod.CARD)?.is_available).toBe(false);
     expect(items.find((i) => i.method === PaymentMethod.WALLET)?.is_available).toBe(true);
+  });
+
+  it('exposes the percentage and cap without telling old clients it is a flat discount', async () => {
+    await dataSource.query(`UPDATE settings SET value = '30' WHERE key = 'payments.instapay_discount_egp'`);
+    await cache.del('settings:payments.instapay_discount_egp');
+    settingsService.invalidateLocalCache('payments.instapay_discount_egp');
+    try {
+      const items = await controller.list(CUSTOMER);
+      const instapay = items.find((item) => item.method === PaymentMethod.INSTAPAY);
+      expect(instapay?.discount_cents).toBe(0);
+      expect(instapay?.discount_rate_percent).toBe(5);
+      expect(instapay?.discount_cap_cents).toBe(3000);
+      expect(instapay?.discount_label_ar).toContain('حتى 5%');
+      expect(instapay?.discount_label_ar).not.toContain('30');
+    } finally {
+      await dataSource.query(`UPDATE settings SET value = '0' WHERE key = 'payments.instapay_discount_egp'`);
+      await cache.del('settings:payments.instapay_discount_egp');
+      settingsService.invalidateLocalCache('payments.instapay_discount_egp');
+    }
   });
 
   // docs/08 §76-ز — بلاغ مالك: نصوص موجّهة للأدمن كانت بتظهر للعميل. الأخطر إن سبب الكارت

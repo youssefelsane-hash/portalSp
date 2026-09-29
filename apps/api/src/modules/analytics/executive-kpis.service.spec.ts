@@ -276,10 +276,30 @@ describe('ExecutiveKpisService (ADR-0081) — حي', () => {
       expect(kpi(result, 'technician_earnings_cents').value).toBe(120_000);
     });
 
-    it('هامش المساهمة = الإيراد ناقص الخصومات (الترويج تكلفة منصة، 0287)', async () => {
+    it('هامش المساهمة لا يطرح الخصومات مرتين بعدما خفّضت عمولة المنصة', async () => {
       const result = await service.executiveKpis(windowFrom, windowTo);
       expect(kpi(result, 'discounts_cents').value).toBe(5_000);
-      expect(kpi(result, 'contribution_margin_cents').value).toBe(25_000);
+      expect(kpi(result, 'contribution_margin_cents').value).toBe(30_000);
+    });
+
+    it('خدمة 300 ج وخصم 30 ج تظل ربح المنصة فيها 30 ج لا صفر', async () => {
+      await makeOrder({
+        customerProfile: ids.customerAProfile,
+        addressId: ids.address,
+        status: 'completed',
+        paymentStatus: 'paid',
+        placedAt: '2031-04-01T08:00:00Z',
+        completedAt: '2031-04-01T09:00:00Z',
+        paidAt: '2031-04-01T10:00:00Z',
+        total: 27_000,
+        commission: 3_000,
+        earning: 24_000,
+        discount: 3_000,
+      });
+      const result = await service.executiveKpis(new Date('2031-04-01T00:00:00Z'), new Date('2031-04-02T00:00:00Z'));
+      expect(kpi(result, 'revenue_cents').value).toBe(3_000);
+      expect(kpi(result, 'discounts_cents').value).toBe(3_000);
+      expect(kpi(result, 'contribution_margin_cents').value).toBe(3_000);
     });
 
     it('الأرقام المالية بتتنسب **لتاريخ الدفع** — طلب اتدفع برّه النافذة مايدخلش', async () => {
