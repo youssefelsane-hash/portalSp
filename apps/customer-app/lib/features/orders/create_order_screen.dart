@@ -10,6 +10,7 @@ import '../../core/work_scope_label.dart';
 import '../../design/app_motion.dart';
 import 'assessment_route.dart';
 import 'booking_scheduled_at.dart';
+import 'booking_time_picker.dart';
 import 'booking_window.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
@@ -121,6 +122,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _pricingFieldsSectionKey = GlobalKey();
   final _scheduleSectionKey = GlobalKey();
   final _policiesSectionKey = GlobalKey();
+  final _paymentSectionKey = GlobalKey();
+  final _problemImagesSectionKey = GlobalKey();
+
+  /// رسالة النقص **جنب القسم نفسه** (docs/08 §185) — قبل كده كانت بتظهر تحت جنب زرار التأكيد
+  /// بس، فالعميل يتمرّر للقسم ومايلاقيش أي علامة عليه. قسم واحد بس في المرة: الأول الناقص.
+  Map<GlobalKey, String> _sectionErrors = const {};
+
+  /// «ودّيني لأول حقل ناقص» جوّه الفورم الديناميكي نفسه، مش لبداية القسم.
+  final _pricingFormController = PricingFieldsFormController();
 
   /// شروط «الدفع بعد الخدمة» المنطبقة على الخدمة دي (migration 0177).
   List<PaymentPolicy> _postpaidPolicies = const [];
@@ -223,8 +233,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final fee = _formatEgp(_resolvedInspectionFeeCents);
     final assessorExecutes = widget.service.onsiteAssessorExecutesWork;
     return assessorExecutes
-        ? 'فني بيجي يشوف الشغل ويبعتلك السعر، وهو نفسه اللي بينفّذ بعد موافقتك — رسم المعاينة $fee'
-        : 'فني بيجي يشوف الشغل ويبعتلك السعر، والتنفيذ بيتوزّع بعد موافقتك — رسم المعاينة $fee';
+        ? 'مقدم الخدمة بيجي يشوف الشغل ويبعتلك السعر، وهو نفسه اللي بينفّذ بعد موافقتك — رسم المعاينة $fee'
+        : 'مقدم خدمة بيجي يشوف الشغل ويبعتلك السعر، والتنفيذ بيتوزّع بعد موافقتك — رسم المعاينة $fee';
   }
 
   /// رسم المعاينة في الموقع **بعد تطبيق تسعير المنطقة** — مش القيمة الخام من الكتالوج.
@@ -274,7 +284,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           fileBytes: bytes,
           filename: image.name,
         );
-        if (mounted) setState(() => _problemImages.add((id: id, bytes: bytes)));
+        if (mounted) {
+          setState(() {
+            _problemImages.add((id: id, bytes: bytes));
+            _clearSectionError(_problemImagesSectionKey);
+          });
+        }
       }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
@@ -574,7 +589,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           for (final field in fields) {
             if (field.fieldType == 'checkbox' &&
                 !_fieldValues.containsKey(field.fieldKey)) {
-              _fieldValues[field.fieldKey] = false;
+              // الافتراضي اللي الأدمن ضبطه (default_value='true') بدل false ثابتة — نفس اللي
+              // السيرفر كان هيفترضه (docs/08 §185). من غير default بيفضل false زي الأول.
+              _fieldValues[field.fieldKey] =
+                  pricingFieldDisplayDefault(field) as bool? ?? false;
             }
           }
         });
@@ -593,16 +611,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // نحسب سعر حقيقي — نفس التحقق اللي PricingEngineService.evaluate() بيعمله في الباك-إند بالظبط،
   // بس هنا عشان نقرر إمتى نستدعي evaluate-price بدل ما نبعت طلبات ناقصة تترفض كل مرة.
   bool get _pricingFieldsComplete =>
-      _pricingFields.where((f) => f.isSupported).every((f) {
-        final value = _fieldValues[f.fieldKey];
-        if (f.fieldType == 'image_upload') {
-          final count = value is String
-              ? value.split(',').where((id) => id.trim().isNotEmpty).length
-              : 0;
-          return count >= (f.minFiles ?? (f.isRequired ? 1 : 0));
-        }
-        return !f.isRequired || (value != null && value != '');
-      });
+      firstIncompletePricingField(_pricingFields, _fieldValues) == null;
 
   bool get _hasUnsupportedRequiredField =>
       _pricingFields.any((f) => f.isRequired && !f.isSupported);
@@ -698,6 +707,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (address != null) {
       setState(() {
         _selectedAddress = address;
+        _clearSectionError(_addressSectionKey);
         // العنوان اتغيّر — أي معاينة سعر/خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
         _pricePreview = null;
         _codeError = null;
@@ -733,6 +743,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _requestedAt = choice.scheduledAt;
         _requestedAtRangeEnd = choice.rangeEnd;
         if (choice.preciseTime != null) _preciseTime = choice.preciseTime;
+        _clearSectionError(_scheduleSectionKey);
       });
     }
   }
@@ -755,9 +766,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   );
 
   Future<void> _pickPreciseTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _preciseTime ?? _bookingWindow.start,
+    // نفس المنتقي المحصور اللي في شاشة الموعد بالظبط (docs/08 §185) — مفيش شاشة فاضلة على
+    // `showTimePicker`.
+    final picked = await showBookingTimePicker(
+      context,
+      window: _bookingWindow,
+      initial: _preciseTime,
     );
     if (picked == null || !mounted) return;
     // **المدخل التاني لنفس القاعدة** (ADR-0097): العميل يقدر يغيّر الساعة من شاشة التأكيد
@@ -950,15 +964,53 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   /// الترتيب مقصود: `setState` الأول عشان الرسالة تتكتب، وبعدين التمرير — عشان لو القسم
   /// الناقص هو نفسه اللي فيه الرسالة، يوصله والرسالة ظاهرة مش وهو لسه بيتبني.
   void _failValidation(String message, GlobalKey? section) {
-    setState(() => _error = message);
-    final target = section?.currentContext;
-    if (target == null) return;
-    Scrollable.ensureVisible(
-      target,
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeOutCubic,
-      // 0.1 مش 0 عمدًا: بيسيب مسافة صغيرة فوق القسم فالعميل يشوف عنوانه مش أول بكسل منه.
-      alignment: 0.1,
+    // القسم مش مرسوم (مش متوقع بعد ما الشاشة بقت بتبني كل أقسامها) ⇒ الرسالة تحت كاحتياطي.
+    final inline = section != null && section.currentContext != null;
+    setState(() {
+      _sectionErrors = inline ? {section: message} : const {};
+      _error = inline ? null : message;
+    });
+    if (!inline) return;
+    // بعد الـframe اللي فيه الرسالة، عشان التمرير يحسب ارتفاع القسم بيها.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = section.currentContext;
+      if (target == null || !target.mounted) return;
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        // 0.1 مش 0 عمدًا: بيسيب مسافة صغيرة فوق القسم فالعميل يشوف عنوانه مش أول بكسل منه.
+        alignment: 0.1,
+      );
+    });
+  }
+
+  void _clearSectionError(GlobalKey section) {
+    if (_sectionErrors.containsKey(section)) {
+      _sectionErrors = Map.of(_sectionErrors)..remove(section);
+    }
+  }
+
+  /// رسالة النقص تحت القسم — لا شيء لو القسم سليم (مفيش مساحة فاضية محجوزة).
+  Widget _sectionError(GlobalKey section) {
+    final message = _sectionErrors[section];
+    if (message == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 16, color: scheme.error),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.error),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1037,7 +1089,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   Future<void> _submit() async {
     if (_selectedAddress == null) {
-      _failValidation('اختار عنوان الأول', _addressSectionKey);
+      _failValidation('اختار العنوان اللي هننفّذ فيه الخدمة.', _addressSectionKey);
       return;
     }
     if (_showsDynamicForm) {
@@ -1049,10 +1101,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         return;
       }
       if (!_pricingFieldsComplete) {
-        _failValidation(
-          'كمّل كل بيانات السعر المطلوبة الأول',
-          _pricingFieldsSectionKey,
+        // الفورم نفسه بيوصّل للحقل الناقص بالظبط ويكتب تحته يعمل فيه إيه.
+        final missing = _pricingFormController.revealFirstMissing(
+          purpose: _isFormulaPricing ? 'علشان نقدر نحسب السعر' : 'علشان نكمّل طلبك',
         );
+        if (missing == null) {
+          _failValidation('كمّل تفاصيل الطلب المطلوبة الأول.', _pricingFieldsSectionKey);
+        } else {
+          setState(() {
+            _sectionErrors = const {};
+            _error = null;
+          });
+        }
         return;
       }
     }
@@ -1063,8 +1123,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       return;
     }
     if (_effectiveRemoteQuote && _problemImages.isEmpty) {
-      setState(
-        () => _error = 'ارفع صورة واحدة على الأقل عشان الإدارة تحدد السعر',
+      _failValidation(
+        'ارفع صورة واحدة على الأقل علشان الإدارة تحدد السعر.',
+        _problemImagesSectionKey,
       );
       return;
     }
@@ -1072,9 +1133,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // هنا بيوقف الطلب قبل ما يروح للسيرفر ويرجع برسالة حمرا العميل مش فاهم سببها.
     if (_remoteAssessmentFeeDue &&
         !kElectronicPaymentMethods.contains(_selectedPaymentMethod)) {
-      setState(
-        () => _error =
-            'رسم التقييم ${_formatEgp(_dueRemoteAssessmentFeeCents)} بيتدفع دلوقتي — اختار بطاقة أو InstaPay أو فوري',
+      _failValidation(
+        'رسم التقييم ${_formatEgp(_dueRemoteAssessmentFeeCents)} بيتدفع دلوقتي — اختار بطاقة أو InstaPay أو فوري.',
+        _paymentSectionKey,
       );
       return;
     }
@@ -1083,19 +1144,28 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (widget.scheduleSlotId == null &&
         widget.service.requiresStartTime &&
         _combinedPreciseScheduledAt() == null) {
-      _failValidation('حدد تاريخ ووقت بداية الخدمة', _scheduleSectionKey);
+      _failValidation(
+        _requestedAt == null
+            ? 'حدد يوم الخدمة ووقت البداية المناسبين.'
+            : 'حدد وقت بداية الخدمة في اليوم اللي اخترته.',
+        _scheduleSectionKey,
+      );
       return;
     }
     // شروط الدفع بعد الخدمة (migration 0177) — الباك-إند بيرفض الطلب من غيرها برسالة بتسمّي
     // الشروط الناقصة. الفحص هنا بيوقفها قبل رحلة الشبكة وبيوجّه العميل للقسم نفسه بدل رسالة
     // حمرا تحت مش واضح مصدرها.
     if (!_allRequiredPoliciesAccepted) {
-      _failValidation('لازم توافق على شروط الدفع الأول', _policiesSectionKey);
+      _failValidation(
+        'وافق على شروط الدفع بعد الخدمة علشان نقدر نأكد الطلب.',
+        _policiesSectionKey,
+      );
       return;
     }
     setState(() {
       _submitting = true;
       _error = null;
+      _sectionErrors = const {};
     });
     try {
       final effectiveMatchPreviewId = await _refreshedMatchPreviewId();
@@ -1458,7 +1528,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: Text(
-              'المدة المتوقعة: ${formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays)}',
+              'المدة المتوقعة للتنفيذ: ${formatWorkDuration(minutes: preview.durationMinutes, days: preview.estimatedDurationDays)}',
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
@@ -1500,7 +1570,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
-                    'ده السعر الحالي قبل اختيار الفني. قد يزيد الإجمالي حسب مستوى الفني '
+                    'ده السعر الحالي قبل اختيار مقدم الخدمة. قد يزيد الإجمالي حسب مستوى مقدم الخدمة '
                     'اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.',
                     style: TextStyle(fontSize: 12.5, height: 1.45),
                   ),
@@ -1650,43 +1720,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         Text(_pricingFieldsError!, style: const TextStyle(color: Colors.red)),
       ];
     }
-    final sortedFields = [..._pricingFields]..sort(comparePricingFields);
+    if (_pricingFields.isEmpty) return const [];
     return [
       const SizedBox(height: 16),
-      Text(
-        'تفاصيل تحديد السعر',
-        style: Theme.of(context).textTheme.titleMedium,
-      ),
+      // «تفاصيل تحديد السعر» كانت بتكشف للعميل إن الأسئلة جزء من محرك تسعير. العنوان العام
+      // بيناسب كل الخدمات: عدد الملابس في المكوجي، الغرف في التنظيف، المساحة في الدهان.
+      Text('حدد تفاصيل طلبك', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 8),
       Card(
+        key: _pricingFieldsSectionKey,
         child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            key: _pricingFieldsSectionKey,
-            children: sortedFields.map(_buildPricingFieldWidget).toList(),
+          padding: const EdgeInsets.all(8),
+          // الرسم كله في ملف مشترك (catalog/pricing_field_widgets.dart) مع JobDetailsScreen.
+          child: PricingFieldsForm(
+            controller: _pricingFormController,
+            fields: _pricingFields,
+            values: _fieldValues,
+            onChanged: _onFieldValueChanged,
+            onUploadImage: (pricingField, image) async =>
+                _repository.uploadPricingFieldImage(
+                  serviceId: widget.service.id,
+                  fieldId: pricingField.id,
+                  fileBytes: await image.readAsBytes(),
+                  filename: image.name,
+                ),
           ),
         ),
       ),
+      _sectionError(_pricingFieldsSectionKey),
     ];
   }
-
-  // منطق رسم الحقول اتقلع لملف مشترك (catalog/pricing_field_widgets.dart) — P0-10 (2026-08-13):
-  // JobDetailsScreen محتاجة نفس الرسم قبل شاشة اختيار الفني، فمفيش داعي نكرره هنا.
-  Widget _buildPricingFieldWidget(PricingField field) =>
-      buildPricingFieldWidget(
-        context,
-        field,
-        _fieldValues,
-        _onFieldValueChanged,
-        onUploadImage: (pricingField, image) async =>
-            _repository.uploadPricingFieldImage(
-              serviceId: widget.service.id,
-              fieldId: pricingField.id,
-              fileBytes: await image.readAsBytes(),
-              filename: image.name,
-            ),
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -1694,9 +1757,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: Text('طلب: ${widget.service.nameAr}')),
-        body: ListView(
+        // مش ListView: الـListView بيبني اللي قريب من الشاشة بس، فحقل ناقص بعيد مالوش context
+        // و`Scrollable.ensureVisible` مايقدرش يوصله. الشاشة فورم محدود، فبناؤها كلها رخيص.
+        body: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          children: [
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
             Card(
               child: ListTile(
                 leading: Icon(
@@ -1732,15 +1800,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 onTap: _pickAddress,
               ),
             ),
+            _sectionError(_addressSectionKey),
             if (widget.scheduleSlotId != null) ...[
               const SizedBox(height: 16),
               Card(
                 color: Theme.of(context).colorScheme.primaryContainer,
                 child: const ListTile(
                   leading: Icon(Icons.event_available_outlined),
-                  title: Text('حجز موعد محدد مع هذا الفني'),
+                  title: Text('حجز موعد محدد مع مقدم الخدمة ده'),
                   subtitle: Text(
-                    'الطلب هيتوزّع على الفني ده أول حاجة — لو مش متاح وقتها، هنلاقيلك فني تاني',
+                    'الطلب هيتوزّع عليه أول حاجة — لو مش متاح وقتها، هنلاقيلك مقدم خدمة تاني',
                   ),
                 ),
               ),
@@ -1752,6 +1821,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ...[
                 Text(
                   'الموعد المطلوب',
+                  key: _scheduleSectionKey,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
@@ -1783,6 +1853,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     ),
                   ),
                 ],
+                _sectionError(_scheduleSectionKey),
               ],
             ],
             if (_showsDynamicForm)
@@ -1792,11 +1863,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             const SizedBox(height: 16),
             Text(
               'صور المشكلة (اختياري)',
+              key: _problemImagesSectionKey,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 6),
             Text(
-              'ارفع صور واضحة لو حابب تساعد الفني أو تطلب من الإدارة تحديد السعر قبل إرسال فني.',
+              'ارفع صور واضحة لو حابب تساعد مقدم الخدمة، أو تطلب من الإدارة تحديد السعر قبل ما حد يتحرك.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
@@ -1854,6 +1926,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 _uploadingProblemImages ? 'جاري رفع الصور…' : 'إضافة صور',
               ),
             ),
+            _sectionError(_problemImagesSectionKey),
             // ── اختيار مسار التقييم (docs/08 §124) ──────────────────────────────────────
             // قبل كده كان switch واحد «خلّي الإدارة تحدد السعر من الصور»، وحالته المقفولة
             // كانت **ضمنيًا** معاينة في الموقع من غير ما حاجة تقول كده — فالمالك قال بالحرف
@@ -1907,9 +1980,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                                 // والتوزيع بيحصل بعد الموافقة. من غير السطر ده الاختيار
                                 // بيتلغى في صمت والعميل يفتكر إن الفني اللي اختاره جايله.
                                 : _hasPreselectedProvider
-                                ? 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني — '
-                                      'الفني اللي اخترته مش هيتثبّت في المسار ده$_remoteFeeSuffix'
-                                : 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت فني$_remoteFeeSuffix',
+                                ? 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت حد — '
+                                      'مقدم الخدمة اللي اخترته مش هيتثبّت في المسار ده$_remoteFeeSuffix'
+                                : 'هتستلم عرض سعر وتوافق أو ترفض قبل ما نبعت حد$_remoteFeeSuffix',
                           ),
                           secondary: const Icon(Icons.photo_camera_outlined),
                         ),
@@ -2089,7 +2162,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     'هيعتبر الحجز ده أول موعد، والمواعيد الجاية هيتولّد منها طلبات عادية بنفس التفاصيل '
-                    '(نفس الفني لو متاح، وسعر كل موعد بيتحسب بسعر الخدمة وقتها). تقدر توقف التكرار في أي وقت من '
+                    '(نفس مقدم الخدمة لو متاح، وسعر كل موعد بيتحسب بسعر الخدمة وقتها). تقدر توقف التكرار في أي وقت من '
                     '"الحجوزات المتكررة" في حسابك.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
@@ -2166,7 +2239,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Text('طريقة الدفع', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'طريقة الدفع',
+              key: _paymentSectionKey,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             // طلب مالك مباشر (2026-08-22) — رسالة واضحة قبل ما العميل يحاول يدفع، بدل ما يختار
             // "بعد الخدمة" ويترفض برسالة حمرا بعد ما يدوس "تأكيد الطلب".
@@ -2252,8 +2329,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   _requiresElectronicPayment && _selectedPaymentMethod == null
                   ? '__electronic_required__'
                   : _selectedPaymentMethod,
-              onChanged: (value) =>
-                  setState(() => _selectedPaymentMethod = value),
+              onChanged: (value) => setState(() {
+                _selectedPaymentMethod = value;
+                _clearSectionError(_paymentSectionKey);
+              }),
               child: Card(
                 child: Column(
                   children: [
@@ -2285,7 +2364,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                             : ((_paymentChannels['cash']?.available ?? false) ||
                                   (_paymentChannels['wallet']?.available ??
                                       false))
-                            ? 'تدفع بعد ما الفني يخلّص الشغل'
+                            ? 'تدفع بعد ما الشغل يخلص'
                             : 'مش متاح للخدمة دي دلوقتي',
                       ),
                     ),
@@ -2334,19 +2413,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 child: PaymentPoliciesSection(
                   policies: _visiblePostpaidPolicies,
                   acceptedVersionIds: _acceptedPolicyVersionIds,
-                  onChanged: (next) =>
-                      setState(() => _acceptedPolicyVersionIds = next),
+                  onChanged: (next) => setState(() {
+                    _acceptedPolicyVersionIds = next;
+                    _clearSectionError(_policiesSectionKey);
+                  }),
                 ),
               ),
+              _sectionError(_policiesSectionKey),
             ],
             const SizedBox(height: 16),
             // النص القديم كان «وصف المشكلة (اختياري)» — بلاغ مالك صريح (docs/08 §76-هـ):
             // العميل مش عارف الكلام ده رايح لمين، فبيسيبه فاضي. التسمية دلوقتي بتقول الوجهة
             // بالاسم («الفني») بدل ما توصف المحتوى، وده اللي بيخلّي الحقل يتملي فعلاً.
-            Text('رسالة للفني', style: Theme.of(context).textTheme.titleMedium),
+            Text('رسالة لمقدم الخدمة', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
-              'اللي هتكتبه هنا بيوصل للفني قبل ما ييجي — تفاصيل المشكلة، مكان العطل، أو أي حاجة تحب ياخد باله منها.',
+              'اللي هتكتبه هنا بيوصل لمقدم الخدمة قبل ما ييجي — تفاصيل طلبك، أو أي حاجة تحب ياخد باله منها.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
@@ -2375,6 +2457,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   : const Text('تأكيد الطلب'),
             ),
           ],
+          ),
         ),
       ),
     );

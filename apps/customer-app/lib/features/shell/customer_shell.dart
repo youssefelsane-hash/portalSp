@@ -157,7 +157,7 @@ class _GuestTabInvitation extends StatelessWidget {
       icon: Icons.receipt_long_outlined,
       title: 'طلباتك هتظهر هنا',
       body:
-          'أول ما تحجز أول شغلانة، هتلاقي هنا حالتها والفني والسعر — كل حاجة في مكان واحد.',
+          'أول ما تحجز أول شغلانة، هتلاقي هنا حالتها ومقدم الخدمة والسعر — كل حاجة في مكان واحد.',
     ),
     CustomerTab.warranties => (
       icon: Icons.verified_user_outlined,

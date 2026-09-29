@@ -413,11 +413,11 @@ class CancellationReason {
 const Map<String, String> orderStatusLabelsAr = {
   'draft': 'مسودة',
   'pending_payment': 'في انتظار الدفع',
-  'searching_technician': 'بيدوّر على فني',
-  'technician_assigned': 'اتعيّن فني',
-  'accepted': 'الفني قبل الطلب',
-  'technician_on_way': 'الفني في الطريق',
-  'technician_arrived': 'الفني وصل',
+  'searching_technician': 'بندوّر على مقدم خدمة',
+  'technician_assigned': 'اتعيّن مقدم الخدمة',
+  'accepted': 'مقدم الخدمة قبل الطلب',
+  'technician_on_way': 'مقدم الخدمة في الطريق',
+  'technician_arrived': 'مقدم الخدمة وصل',
   'in_progress': 'الشغل شغّال',
   'awaiting_quote_approval': 'في انتظار موافقتك على السعر',
   'awaiting_admin_quote': 'في انتظار تسعير الإدارة',
@@ -426,13 +426,13 @@ const Map<String, String> orderStatusLabelsAr = {
   'awaiting_payment': 'في انتظار الدفع',
   'completed': 'اتقفل',
   'cancelled_by_customer': 'اتلغى منك',
-  'cancelled_by_technician': 'اتلغى من الفني',
+  'cancelled_by_technician': 'اتلغى من مقدم الخدمة',
   'cancelled_by_system': 'اتلغى تلقائياً',
   'expired': 'انتهت صلاحيته',
   'disputed': 'فيه خلاف',
   'refunded': 'اترد',
   // سياسة إلغاء الفني (docs/10) — الفني اعتذر عن طلب كنت اختاره بنفسك، محتاج تختار بديل.
-  'awaiting_technician_reselection': 'محتاج تختار فني بديل',
+  'awaiting_technician_reselection': 'محتاج تختار مقدم خدمة بديل',
 };
 
 /// نغمة الحالة للعرض (docs/08 §131) — تطبيق الفني بيعرض حالاته كـ`StatusChip` ملوّن بينما

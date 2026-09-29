@@ -43,7 +43,9 @@ void main() {
       ),
     );
 
-    expect(find.text('($explanation)'), findsOneWidget);
+    // الشرح بيتعرض كامل تحت عنوان السؤال، من غير أقواس ومن غير ما يتحشر جوّه الـinput
+    // (docs/08 §185).
+    expect(find.text(explanation), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

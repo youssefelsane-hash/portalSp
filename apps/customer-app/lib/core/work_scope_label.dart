@@ -13,8 +13,19 @@ library;
 
 const _workDayMinutes = 10 * 60;
 
+/// أي مدة أقل من أو تساوي الرقم ده قيمة **جدولة تشغيلية** مش مدة تنفيذ (docs/08 §185).
+///
+/// خدمات زي المغسلة متسعّرة بـ`duration_minutes = 1` عمدًا: عشان الـscheduler مايعتبرش مقدم
+/// الخدمة مشغول ساعات، فيقدر ياخد ٢٠–٣٠ طلب في نفس الفترة. الرقم صح للجدولة وكذب لو اتعرض
+/// كـ«المدة المتوقعة: دقيقة واحدة». مفيش خدمة منزلية بتتنفّذ في أقل من ٥ دقايق، فالحد ده
+/// مابيخفيش مدة حقيقية. نفس الرقم في `SCHEDULING_ONLY_DURATION_MAX_MINUTES` (shared-types).
+const kSchedulingOnlyDurationMaxMinutes = 4;
+
 /// نص المدة، أو `null` لو مفيش أي تقدير — الواجهة ساعتها ما تعرضش السطر أصلاً.
 String? formatWorkDuration({int? minutes, num? days}) {
+  if (minutes != null && minutes > 0 && minutes <= kSchedulingOnlyDurationMaxMinutes) {
+    minutes = null;
+  }
   if (minutes != null && minutes > 0) {
     // المدة المحسوبة بالدقائق هي مصدر الحقيقة. أقل من (أو يساوي) يوم العمل يظل بالساعات؛ ما
     // تجاوزه يُقرب لأيام عمل كاملة حتى يعرف العميل حجم الالتزام المتوقع.
@@ -54,7 +65,8 @@ String _daysLabel(num days) {
 
 /// تصريف عربي مبسّط بس صحيح للأعداد الشايعة: ١ مفرد، ٢ مثنى، ٣–١٠ جمع، ١١+ تمييز مفرد.
 String _countLabel(int count, String singular, String plural) {
-  if (count == 1) return '$singular واحد';
+  // «ساعة واحدة» مش «ساعة واحد» — العدد بيطابق المعدود المؤنث.
+  if (count == 1) return '$singular ${singular.endsWith('ة') ? 'واحدة' : 'واحد'}';
   if (count == 2) return _dual(singular);
   if (count <= 10) return '$count $plural';
   return '$count $singular';

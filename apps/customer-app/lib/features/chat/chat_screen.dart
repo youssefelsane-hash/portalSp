@@ -13,7 +13,7 @@ class ChatScreen extends StatefulWidget {
   final String appBarTitle;
 
   const ChatScreen({super.key, required this.orderId})
-      : appBarTitle = 'الشات مع الفني';
+      : appBarTitle = 'الشات مع مقدم الخدمة';
 
   // خيط الدعم العام (support_chat) — مفيش orderId، الـ thread بيتحل بـ get-or-create
   // (ChatRepository.getOrCreateSupportThreadId) بدل ChatRepository.getThreadIdForOrder.

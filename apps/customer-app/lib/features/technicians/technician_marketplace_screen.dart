@@ -183,7 +183,7 @@ class _TechnicianMarketplaceScreenState
           title: Text(
             widget.bookingMode == BookingMode.team
                 ? 'اختار قائد/شركة: ${widget.service.nameAr}'
-                : 'اختار الفني: ${widget.service.nameAr}',
+                : 'اختار مقدم الخدمة: ${widget.service.nameAr}',
           ),
         ),
         body: Column(
@@ -202,7 +202,7 @@ class _TechnicianMarketplaceScreenState
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'بتشوف الفنيين المتاحين يوم ${_formatDay(_effectiveRequestedAt!)}',
+                          'بتشوف مقدمي الخدمة المتاحين يوم ${_formatDay(_effectiveRequestedAt!)}',
                         ),
                       ),
                       TextButton(
@@ -284,7 +284,7 @@ class _TechnicianMarketplaceScreenState
         padding: EdgeInsets.all(16),
         child: EmptyState(
           icon: Icons.engineering_outlined,
-          title: 'مفيش فنيين متاحين للخدمة دي في منطقتك دلوقتي',
+          title: 'مفيش مقدمي خدمة متاحين للخدمة دي في منطقتك دلوقتي',
           description: 'جرّب "اختاروا لي الأنسب" بدل كده',
         ),
       );
@@ -492,8 +492,8 @@ class _TechnicianMarketplaceScreenState
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     t.availableAgainAt != null
-                        ? 'الفني متاح من ${_formatDay(t.availableAgainAt!)}'
-                        : 'الفني ده مش متاح خلال الشهر الجاي',
+                        ? 'متاح من ${_formatDay(t.availableAgainAt!)}'
+                        : 'مش متاح خلال الشهر الجاي',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
@@ -514,7 +514,7 @@ class _TechnicianMarketplaceScreenState
   String _countLabel(List<TechnicianBookingListItem> items) {
     final conflictedCount = items.where((t) => t.isScheduleConflicted).length;
     final availableCount = items.length - conflictedCount;
-    if (conflictedCount == 0) return '$availableCount فني متاح';
+    if (conflictedCount == 0) return '$availableCount متاح';
     return '$availableCount متاح · $conflictedCount مش متاح للفترة دي';
   }
 
@@ -588,7 +588,7 @@ class _TechnicianMarketplaceScreenState
                     ),
                     _CompanyTag(
                       icon: Icons.engineering_outlined,
-                      label: '${c.staffCount ?? 0} فني',
+                      label: '${c.staffCount ?? 0} فرد في الفريق',
                     ),
                     if ((c.branchCount ?? 0) > 0)
                       _CompanyTag(

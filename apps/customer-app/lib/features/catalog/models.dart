@@ -273,6 +273,11 @@ class PricingField {
   final int? minFiles;
   final int? maxFiles;
 
+  /// القيمة اللي محرك التسعير بيفترضها لو العميل ساب الحقل الاختياري (migration 0138) — نص خام
+  /// زي ما الأدمن كتبه. كانت راجعة من الـAPI من الأول ومتجاهلة هنا، فالشاشة كانت بتعرض
+  /// «مش مختار» لحقل السيرفر هيحسبه على قيمة معيّنة (docs/08 §185). عرض بس.
+  final String? defaultValue;
+
   PricingField({
     required this.id,
     required this.fieldKey,
@@ -286,6 +291,7 @@ class PricingField {
     required this.maxValue,
     required this.minFiles,
     required this.maxFiles,
+    this.defaultValue,
   });
 
   bool get isSupported => !unsupportedPricingFieldTypes.contains(fieldType);
@@ -305,6 +311,7 @@ class PricingField {
     maxValue: json['max_value'] as num?,
     minFiles: json['min_files'] as int?,
     maxFiles: json['max_files'] as int?,
+    defaultValue: json['default_value'] as String?,
   );
 }
 

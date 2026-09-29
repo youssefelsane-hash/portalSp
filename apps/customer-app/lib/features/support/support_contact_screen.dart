@@ -1,25 +1,55 @@
 import 'package:flutter/material.dart';
 import '../../core/external_links.dart';
 import '../chat/chat_screen.dart';
+import '../shell/site_info_repository.dart';
+import '../shell/social_brand_mark.dart';
 import 'support_tickets_screen.dart';
 import 'support_contact_repository.dart';
 
-// "تواصل معنا" (docs/08 §22 بند 15-19) — نقطة وصول واحدة واضحة لكل طرق التواصل مع خدمة العملاء.
-// قاعدة البساطة الصارمة (§22 بند 20-30): زرارين كبار بس (اتصال/واتساب) لو موجودين، من غير أي
-// مصطلحات تقنية. لو الإدارة لسه ما ملّتش الأرقام (support.enabled=false)، بيوجّه لشات الدعم
-// الموجود بالفعل بدل ما يعرض شاشة فاضية.
-class SupportContactScreen extends StatelessWidget {
-  const SupportContactScreen({super.key});
+/// رقم واتساب الدعم **من الإعدادات، مش من الكود** (docs/08 §185).
+///
+/// الأولوية: رقم واتساب خدمة العملاء (`support.whatsapp_number`) لو الأدمن مفعّله، وإلا رقم الدعم
+/// في بيانات الجهة (`/legal-entity` → `support_phone`) — نفس الرقم اللي في الفوتر. كده تغيير
+/// الرقم من لوحة الأدمن بيوصل للزرار من غير نسخة تطبيق جديدة، ومفيش رقم تاني مكتوب هنا يختلف.
+Uri? resolveSupportWhatsappUri({SupportContact? contact, LegalEntityInfo? entity}) {
+  final configured = contact != null && contact.enabled ? contact.whatsappUrl : null;
+  final parsed = configured == null ? null : Uri.tryParse(configured);
+  if (parsed != null && parsed.scheme == 'https' && parsed.host == 'wa.me') return parsed;
+  return whatsappChatUri(entity?.supportPhone);
+}
 
-  Future<void> _call(BuildContext context, String phone) =>
-      openPhoneDialer(context, phone);
+// "تواصل معنا" (docs/08 §22 بند 15-19) — نقطة وصول واحدة لكل طرق التواصل مع خدمة العملاء.
+// تلات طرق ثابتة (تذاكر، شات، واتساب) + الاتصال لو الإدارة مفعّلاه. أي طريقة إعداداتها ناقصة
+// مابتظهرش — مفيش زرار بيودّي لحتة فاضية.
+class SupportContactScreen extends StatefulWidget {
+  const SupportContactScreen({super.key, this.loadContact, this.loadEntity});
 
-  Future<void> _openWhatsapp(BuildContext context, String url) =>
-      openExternalUrl(
-        context,
-        Uri.parse(url),
-        failureMessage: 'تعذّر فتح واتساب',
-      );
+  /// للاختبارات بس — الافتراضي النداءات الحقيقية.
+  final Future<SupportContact> Function()? loadContact;
+  final Future<LegalEntityInfo> Function()? loadEntity;
+
+  @override
+  State<SupportContactScreen> createState() => _SupportContactScreenState();
+}
+
+class _SupportContactScreenState extends State<SupportContactScreen> {
+  late final Future<({SupportContact? contact, LegalEntityInfo? entity})> _load = _fetch();
+
+  Future<({SupportContact? contact, LegalEntityInfo? entity})> _fetch() async {
+    // كل مصدر لوحده: فشل واحد (شبكة، إعداد ناقص) مايخفيش الطرق التانية.
+    final results = await Future.wait<Object?>([
+      (widget.loadContact ?? () => SupportContactRepository().fetch())()
+          .then<Object?>((value) => value)
+          .catchError((Object _) => null),
+      (widget.loadEntity ?? () => SiteInfoRepository().legalEntity())()
+          .then<Object?>((value) => value)
+          .catchError((Object _) => null),
+    ]);
+    return (
+      contact: results[0] as SupportContact?,
+      entity: results[1] as LegalEntityInfo?,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,107 +57,121 @@ class SupportContactScreen extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: const Text('تواصل معنا')),
-        body: FutureBuilder<SupportContact>(
-          future: SupportContactRepository().fetch(),
+        body: FutureBuilder(
+          future: _load,
           builder: (context, snapshot) {
-            if (!snapshot.hasData && !snapshot.hasError) {
+            if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final contact = snapshot.data;
-            final hasDirectContact =
-                contact != null &&
-                contact.enabled &&
-                (contact.phoneNumber != null || contact.whatsappUrl != null);
+            final contact = snapshot.data!.contact;
+            final whatsapp = resolveSupportWhatsappUri(
+              contact: contact,
+              entity: snapshot.data!.entity,
+            );
+            final phone = contact != null && contact.enabled ? contact.phoneNumber : null;
 
             return ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          'تحتاج متابعة من فريق الدعم؟',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'افتح تذكرة واحتفظ برقمها للمتابعة. شكاوى الطلبات تظل من صفحة الطلب.',
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const SupportTicketsScreen(),
-                            ),
-                          ),
-                          icon: const Icon(Icons.confirmation_number_outlined),
-                          label: const Text('تذاكر الدعم'),
-                        ),
-                      ],
-                    ),
+                _ContactOption(
+                  icon: const Icon(Icons.confirmation_number_outlined),
+                  title: 'تذاكر الدعم',
+                  subtitle: 'افتح تذكرة واحتفظ برقمها للمتابعة. شكاوى الطلبات تظل من صفحة الطلب.',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SupportTicketsScreen()),
                   ),
-                ),
-                const SizedBox(height: 20),
-                if (hasDirectContact) ...[
-                  const Text(
-                    'محتاج مساعدة؟ كلّمنا على طول',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 24),
-                  if (contact.phoneNumber != null)
-                    FilledButton.icon(
-                      onPressed: () => _call(context, contact.phoneNumber!),
-                      icon: const Icon(Icons.call),
-                      label: const Text(
-                        'اتصل بينا',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                      ),
-                    ),
-                  if (contact.phoneNumber != null &&
-                      contact.whatsappUrl != null)
-                    const SizedBox(height: 12),
-                  if (contact.whatsappUrl != null)
-                    FilledButton.icon(
-                      onPressed: () =>
-                          _openWhatsapp(context, contact.whatsappUrl!),
-                      icon: const Icon(Icons.chat),
-                      label: const Text(
-                        'واتساب',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                ],
-                const Text(
-                  'أو ابعتلنا رسالة من هنا',
-                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ChatScreen.support(),
-                    ),
-                  ),
+                _ContactOption(
                   icon: const Icon(Icons.chat_bubble_outline),
-                  label: const Text('شات الدعم'),
+                  title: 'شات الدعم',
+                  subtitle: 'ابعتلنا رسالة من هنا وهنرد عليك جوّه التطبيق.',
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ChatScreen.support()),
+                  ),
                 ),
+                if (whatsapp != null) ...[
+                  const SizedBox(height: 12),
+                  _ContactOption(
+                    icon: const SocialBrandMark(network: 'whatsapp', size: 24),
+                    title: 'تواصل معنا على واتساب',
+                    subtitle: 'ابعتلنا رسالتك على واتساب',
+                    onTap: () => openWhatsappChat(context, whatsapp),
+                  ),
+                ],
+                if (phone != null) ...[
+                  const SizedBox(height: 12),
+                  _ContactOption(
+                    icon: const Icon(Icons.call_outlined),
+                    title: 'اتصل بينا',
+                    subtitle: phone,
+                    subtitleLtr: true,
+                    onTap: () => openPhoneDialer(context, phone),
+                  ),
+                ],
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _ContactOption extends StatelessWidget {
+  const _ContactOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.subtitleLtr = false,
+  });
+
+  final Widget icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool subtitleLtr;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              IconTheme(
+                data: IconThemeData(color: theme.colorScheme.primary, size: 24),
+                child: icon,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(title, style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        subtitle,
+                        textDirection: subtitleLtr ? TextDirection.ltr : null,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_left, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
         ),
       ),
     );

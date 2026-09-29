@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_client.dart';
 import '../../core/arabic_time.dart';
 import '../../core/auth_repository.dart';
+import 'booking_time_picker.dart';
 import 'booking_window.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
@@ -411,11 +412,12 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // بلا بارامتر `context` عمدًا: بعد الـawait الاستخدام لازم يكون على `State.context` المحروس
   // بـ`mounted`، والبارامتر بيخلّي التحليل يعتبره سياق غريب (use_build_context_synchronously).
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      // البداية المقترحة لازم تكون هي نفسها جوّه النافذة — لو النافذة بتبدأ ١١ مثلاً،
-      // فتح المنتقي على ١٠ كان بيدّي أول اختيار مرفوض.
-      initialTime: _selectedTime ?? _bookingWindow.start,
+    // منتقي محصور في النافذة (docs/08 §185) — الساعات برّه النافذة مابتتعرضش أصلًا، بدل
+    // `showTimePicker` بالـ٢٤ ساعة والرفض بعد الاختيار.
+    final picked = await showBookingTimePicker(
+      context,
+      window: _bookingWindow,
+      initial: _selectedTime,
     );
     if (picked == null || !mounted) return;
     // **الرفض هنا بنفس قاعدة السيرفر بالحرف** (ADR-0097) — والرسالة بتقول الحدود بدل ما
@@ -558,7 +560,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                     title: 'مرن — اختار نطاق أيام',
                     subtitle: _selectedRangeEnd != null
                         ? '${_formatDate(_selectedDate!)} — ${_formatDate(_selectedRangeEnd!)}'
-                        : 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                        : 'هنجيبلك أقرب يوم فيه مقدم خدمة متاح جوّه النطاق اللي تختاره',
                     selected: _selectedRangeEnd != null,
                     onTap: () => _pickFlexibleRange(context),
                   ),
@@ -571,7 +573,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                     const _SuggestionIntro(
                       title: 'ساعات مقترحة في اليوم ده',
                       subtitle:
-                          'دي الساعات اللي فيها أكبر مساحة لفني يوصلك في الموعد.',
+                          'دي الساعات اللي فيها أكبر فرصة إن مقدم الخدمة يوصلك في الموعد.',
                     ),
                     const SizedBox(height: 10),
                     Wrap(
@@ -595,7 +597,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                             _selectedTime!.minute == asTimeOfDay.minute;
                         return ChoiceChip(
                           selected: isPicked,
-                          label: Text('$time · $free فني فاضي'),
+                          label: Text('$time · $free متاحين'),
                           onSelected: asTimeOfDay == null
                               ? null
                               : (_) =>
@@ -875,7 +877,7 @@ class _BookingTimingNotice extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج تأكيد الفني الأول.',
+              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج تأكيد مقدم الخدمة الأول.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

@@ -59,6 +59,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
   final Map<String, dynamic> _fieldValues = {};
+  final _formController = PricingFieldsFormController();
 
   @override
   void initState() {
@@ -84,7 +85,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           for (final field in fields) {
             if (field.fieldType == 'checkbox' &&
                 !_fieldValues.containsKey(field.fieldKey)) {
-              _fieldValues[field.fieldKey] = false;
+              // الافتراضي اللي الأدمن ضبطه (default_value='true') بدل false ثابتة — نفس اللي
+              // السيرفر كان هيفترضه (docs/08 §185). من غير default بيفضل false زي الأول.
+              _fieldValues[field.fieldKey] =
+                  pricingFieldDisplayDefault(field) as bool? ?? false;
             }
           }
         });
@@ -109,19 +113,6 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     if (address != null && mounted) setState(() => _selectedAddress = address);
   }
 
-  // نفس فحص CreateOrderScreen._pricingFieldsComplete بالحرف (PricingEngineService.evaluate()
-  // في الباك-إند بيرفض واضح لو حقل مطلوب ناقص — هنا عشان نعرف إمتى نسمح بمتابعة القايمة).
-  bool get _pricingFieldsComplete =>
-      _pricingFields.where((f) => f.isSupported).every((f) {
-        final value = _fieldValues[f.fieldKey];
-        if (f.fieldType == 'image_upload') {
-          final count = value is String
-              ? value.split(',').where((id) => id.trim().isNotEmpty).length
-              : 0;
-          return count >= (f.minFiles ?? (f.isRequired ? 1 : 0));
-        }
-        return !f.isRequired || (value != null && value != '');
-      });
 
   bool get _hasUnsupportedRequiredField =>
       _pricingFields.any((f) => f.isRequired && !f.isSupported);
@@ -137,7 +128,14 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   }
 
   /// بترجّع الناتج لـ`catalog_navigation` اللي بيكمّل لشاشة الميعاد — الشاشة دي بقت **قبلها**.
+  ///
+  /// الزرار مابقاش بيتقفل في صمت لما حقل ناقص (docs/08 §185): العميل كان بيشوف زرار رمادي ومش
+  /// عارف ليه. دلوقتي الضغطة بتوديه لأول حقل ناقص وتقوله يعمل إيه فيه بالظبط.
   void _continueToSchedule() {
+    final purpose = widget.service.pricingModel == 'formula'
+        ? 'علشان نقدر نحسب السعر'
+        : 'علشان نكمّل طلبك';
+    if (_formController.revealFirstMissing(purpose: purpose) != null) return;
     Navigator.of(context).pop(
       JobDetailsResult(
         address: _selectedAddress,
@@ -148,7 +146,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canContinue = _pricingFieldsComplete && !_hasUnsupportedRequiredField;
+    final canContinue = !_loadingPricingFields && !_hasUnsupportedRequiredField;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -176,10 +174,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
             const SizedBox(height: 8),
             // النص بيشرح **ليه** الحقول دي بدري كده (ADR-0100): هي اللي بتحدد المدة، والمدة
             // هي اللي بتخلّي المواعيد المقترحة حقيقية بدل تخمين على مدة الخدمة الافتراضية.
-            const Text(
+            Text(
               'دخّل تفاصيل الشغل الأول — منها بنحسب المدة المتوقعة، وبنقدر نقترح عليك مواعيد '
-              'فيها منفّذين يقدروا يخلّصوا الشغل كامل فعلاً.',
-              style: TextStyle(color: Colors.grey),
+              'فيها مقدمي خدمة يقدروا يخلّصوا الشغل كامل فعلاً.',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             if (_loadingPricingFields)
@@ -189,35 +187,30 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                 _pricingFieldsError!,
                 style: const TextStyle(color: Colors.red),
               )
-            else
+            else if (_pricingFields.isNotEmpty) ...[
+              Text('حدد تفاصيل طلبك', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
               Card(
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children:
-                        (List.of(_pricingFields)..sort(comparePricingFields))
-                            .map(
-                              (field) => buildPricingFieldWidget(
-                                context,
-                                field,
-                                _fieldValues,
-                                _onFieldValueChanged,
-                                onUploadImage: (pricingField, image) async =>
-                                    OrdersRepository(
-                                      context.read<AuthRepository>(),
-                                    ).uploadPricingFieldImage(
-                                      serviceId: widget.service.id,
-                                      fieldId: pricingField.id,
-                                      fileBytes: await image.readAsBytes(),
-                                      filename: image.name,
-                                    ),
-                              ),
-                            )
-                            .toList(),
+                  padding: const EdgeInsets.all(8),
+                  child: PricingFieldsForm(
+                    controller: _formController,
+                    fields: _pricingFields,
+                    values: _fieldValues,
+                    onChanged: _onFieldValueChanged,
+                    onUploadImage: (pricingField, image) async =>
+                        OrdersRepository(
+                          context.read<AuthRepository>(),
+                        ).uploadPricingFieldImage(
+                          serviceId: widget.service.id,
+                          fieldId: pricingField.id,
+                          fileBytes: await image.readAsBytes(),
+                          filename: image.name,
+                        ),
                   ),
                 ),
               ),
+            ],
             const SizedBox(height: 24),
             FilledButton(
               onPressed: canContinue ? _continueToSchedule : null,

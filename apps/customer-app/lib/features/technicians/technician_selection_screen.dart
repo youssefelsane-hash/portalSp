@@ -292,7 +292,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           title: Text(
             widget.bookingMode == BookingMode.team
                 ? 'اختار الفريق: ${widget.service.nameAr}'
-                : 'اختار الفني: ${widget.service.nameAr}',
+                : 'اختار مقدم الخدمة: ${widget.service.nameAr}',
           ),
         ),
         body: address == null
@@ -317,7 +317,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                     Text(
                       widget.bookingMode == BookingMode.team
                           ? 'إزاي حابب تختار الفريق/الشركة؟'
-                          : 'إزاي حابب تختار الفني؟',
+                          : 'إزاي حابب تختار مقدم الخدمة؟',
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -327,7 +327,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       title: 'اختاروا لي الأنسب',
                       subtitle: widget.bookingMode == BookingMode.team
                           ? 'هنبعت الطلب لأنسب فريق/شركة متاحة فورًا حسب تقييمها وقربها منك'
-                          : 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
+                          : 'هنبعت الطلب لأنسب مقدم خدمة متاح فورًا حسب تقييمه وقربه منك',
                       onTap: _previewingAuto
                           ? () {}
                           : () => unawaited(_startAutoMatch()),
@@ -338,8 +338,8 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       icon: Icons.people_outline,
                       title: 'اختار الفريق بنفسك',
                       subtitle: widget.bookingMode == BookingMode.team
-                          ? 'شوف قايمة الفنيين المؤهّلين والشركات المتاحة وقارن بينهم قبل ما تختار'
-                          : 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
+                          ? 'اختار من مقدمي الخدمة المؤهّلين والشركات المتاحة الأنسب ليك'
+                          : 'اختار من مقدمي الخدمة المتاحين الأنسب ليك',
                       onTap: _openMarketplace,
                     ),
                     const Spacer(flex: 2),

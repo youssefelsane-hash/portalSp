@@ -106,7 +106,7 @@ class _SignInInvitationSheet extends StatelessWidget {
             const SizedBox(height: 18),
             const _Reason(icon: Icons.location_on_outlined, text: 'عشان نعرف نوصلك فين بالظبط'),
             const SizedBox(height: 10),
-            const _Reason(icon: Icons.support_agent_outlined, text: 'عشان الفني يقدر يتواصل معاك'),
+            const _Reason(icon: Icons.support_agent_outlined, text: 'عشان مقدم الخدمة يقدر يتواصل معاك'),
             const SizedBox(height: 10),
             const _Reason(icon: Icons.receipt_long_outlined, text: 'عشان تتابع طلبك وضمانه بعدين'),
             const SizedBox(height: 22),

@@ -225,10 +225,23 @@ class _AppFooterState extends State<AppFooter> {
           if (_entity.supportPhone != null || _entity.supportEmail != null) ...[
             const SizedBox(height: 14),
             if (_entity.supportPhone != null)
+              // رقم الدعم للعميل بيفتح **محادثة واتساب** مش الاتصال (docs/08 §185، طلب مالك) —
+              // التواصل الفعلي مع الدعم على واتساب. الاتصال بيفضل احتياطي لو الرقم مايصلحش
+              // لواتساب بس (مثلًا رقم أرضي قصير).
               _FooterLink(
                 label: _entity.supportPhone!,
                 ltr: true,
-                onTap: () => openPhoneDialer(context, _entity.supportPhone!),
+                leading: footerSupportUri(_entity.supportPhone!).scheme == 'tel'
+                    ? null
+                    : const SocialBrandMark(network: 'whatsapp', size: 16),
+                onTap: () {
+                  final target = footerSupportUri(_entity.supportPhone!);
+                  if (target.scheme == 'tel') {
+                    openPhoneDialer(context, _entity.supportPhone!);
+                  } else {
+                    openWhatsappChat(context, target);
+                  }
+                },
               ),
             if (_entity.supportEmail != null)
               _FooterLink(
@@ -400,18 +413,28 @@ class _FooterColumn extends StatelessWidget {
   }
 }
 
+/// الضغطة على رقم الدعم في الفوتر بتروح فين (docs/08 §185): محادثة واتساب، و`tel:` بس لو
+/// الرقم مايصلحش لواتساب.
+Uri footerSupportUri(String phone) =>
+    whatsappChatUri(phone) ??
+    Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'[\s()-]'), ''));
+
 class _FooterLink extends StatelessWidget {
   const _FooterLink({
     required this.label,
     required this.onTap,
     this.external = false,
     this.ltr = false,
+    this.leading,
   });
 
   final String label;
   final VoidCallback onTap;
   final bool external;
   final bool ltr;
+
+  /// أيقونة صغيرة قبل النص (علامة واتساب جنب رقم الدعم).
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -427,7 +450,12 @@ class _FooterLink extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 7),
-        child: external
+        child: leading != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [leading!, const SizedBox(width: 6), Flexible(child: text)],
+              )
+            : external
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

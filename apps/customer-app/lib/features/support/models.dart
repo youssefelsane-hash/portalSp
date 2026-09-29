@@ -2,10 +2,10 @@
 // apps/api/src/modules/support/entities/complaint.entity.ts.
 enum ComplaintCategory {
   poorQuality('poor_quality', 'جودة الشغل ضعيفة'),
-  lateArrival('late_arrival', 'تأخير الفني'),
-  noShow('no_show', 'الفني ملحقش يجي خالص'),
+  lateArrival('late_arrival', 'تأخير مقدم الخدمة'),
+  noShow('no_show', 'مقدم الخدمة ماجاش خالص'),
   overcharging('overcharging', 'اتحاسبت زيادة عن المتفق عليه'),
-  rudeBehavior('rude_behavior', 'سلوك غير لائق من الفني'),
+  rudeBehavior('rude_behavior', 'سلوك غير لائق من مقدم الخدمة'),
   damageToProperty('damage_to_property', 'ضرر في الممتلكات'),
   incompleteWork('incomplete_work', 'الشغل مخلصش'),
   safetyConcern('safety_concern', 'مشكلة أمان'),
@@ -27,7 +27,7 @@ const Map<String, String> complaintStatusLabelsAr = {
   'open': 'مفتوحة',
   'under_investigation': 'قيد المراجعة',
   'awaiting_customer': 'مستنية ردّك',
-  'awaiting_technician': 'مستنية رد الفني',
+  'awaiting_technician': 'مستنية رد مقدم الخدمة',
   'resolved': 'اتحلّت',
   'rejected': 'مرفوضة',
   'escalated': 'مُصعَّدة',

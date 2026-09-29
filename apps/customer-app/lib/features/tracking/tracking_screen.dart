@@ -78,7 +78,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
           markerId: const MarkerId('technician'),
           position: LatLng(_lastUpdate!.latitude, _lastUpdate!.longitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: const InfoWindow(title: 'الفني'),
+          infoWindow: const InfoWindow(title: 'مقدم الخدمة'),
         ),
       );
     }
@@ -131,7 +131,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   else if (_lastUpdate == null)
                     const Padding(
                       padding: EdgeInsets.all(12),
-                      child: Text('متصل — في انتظار تحديث موقع الفني'),
+                      child: Text('متصل — في انتظار تحديث موقع مقدم الخدمة'),
                     ),
                   Expanded(
                     child: initialPosition == null
