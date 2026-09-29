@@ -282,7 +282,9 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       orderTeamService,
       commissionBaseServiceStub(),
     );
-  });
+    // ~٢٥ إدخال متسلسل + تهيئة DataSource: لوحده ثانيتين، بس في السويت الكاملة (`--runInBand`)
+    // كان بيعدّي الـ٥ ثواني الافتراضية فالـ٢١ اختبار بيقعوا من غير ما يتنفّذوا.
+  }, 30000);
 
   afterAll(async () => {
     try {
@@ -315,7 +317,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }
-  });
+  }, 30000);
 
   it('listRecruitCandidates — مرشّح رتبته أعلى من القائد بيتستبعد، الأقل/المطابق بيظهروا، فريق القائد الدائم أولاً', async () => {
     const orderId = await insertOrder(`list-${runId}`, { requiredTechnicians: 3 });

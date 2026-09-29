@@ -194,7 +194,11 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
   it('اعتماد (TEAM) — فني new يتحجب، فني professional يترشّح', async () => {
     const candidates = await findCandidates(BookingMode.TEAM);
     expect(candidates.some((c) => c.technician_id === ids.newTechProfile)).toBe(false);
-    expect(candidates.some((c) => c.technician_id === ids.proTechProfile)).toBe(true);
+    // الـprofessional المستقل بيترشّح باسمه. صاحب الشركة لأ بالضرورة: الشركة بتدخل بأفضل عضو واحد،
+    // والتلات أعضاء التانيين professional في نفس المكان — التعادل بياخد أول صف من Postgres (مش
+    // مضمون)، فالاختبار كان بيقع عشوائيًا في السويت الكاملة. المطلوب إن الشركة نفسها مترشّحة.
+    expect(candidates.some((c) => c.technician_id === ids.independentProProfile)).toBe(true);
+    expect(candidates.some((c) => c.provider_company_id === ids.company)).toBe(true);
   });
 
   it('فردي (INDIVIDUAL) — الشركة تدخل كمرشح واحد وتختار أفضل عضو فيها', async () => {
