@@ -164,6 +164,8 @@ jobs:
     name: "flutter analyze + test + build — ${{ matrix.app }}"
     runs-on: ubuntu-latest
     strategy:
+      # من غيره فشل تطبيق بيلغي التاني في النص (`cancelled`)، فنتيجة تطبيق الفني ماكانتش بتبان خالص.
+      fail-fast: false
       matrix:
         app: [customer-app, technician-app]
     steps:
@@ -190,6 +192,22 @@ jobs:
       - name: flutter test (وحدة/widget بلا باك-إند حي)
         working-directory: apps/${{ matrix.app }}
         run: flutter test
+
+      # حارس الخرائط في `customer-app/android/app/build.gradle.kts` بيرفض **أي** بناء من غير مفتاح —
+      # مقصود (نسخة بخريطة بيضا مابتتكشفش غير عند العميل). الـCI كان أحمر عليه من ساعة ما اتضاف.
+      # الحل مش تخطّي الحارس: المفتاح بييجي من سر GitHub بس، ومابيتكتبش في اللوج ولا في git.
+      - name: مفتاح Google Maps من أسرار GitHub (تطبيق العميل)
+        if: matrix.app == 'customer-app'
+        working-directory: apps/customer-app/android
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: |
+          if [ -z "$GOOGLE_MAPS_API_KEY" ]; then
+            echo "::error::سر GOOGLE_MAPS_API_KEY مش متضاف (Settings → Secrets and variables → Actions). حارس الخرائط بيرفض البناء من غيره عمدًا."
+            exit 1
+          fi
+          umask 077
+          printf 'googleMapsApiKey=%s\n' "$GOOGLE_MAPS_API_KEY" > maps.properties
 
       - name: flutter build apk --debug (فحص تصدير حقيقي، مش static analysis بس)
         working-directory: apps/${{ matrix.app }}

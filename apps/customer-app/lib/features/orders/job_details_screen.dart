@@ -83,13 +83,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           // بَقّة حقيقية اتلقطت (مراجعة مالك مباشرة، نفس الإصلاح في create_order_screen.dart) —
           // راجع التعليق الكامل هناك.
           for (final field in fields) {
-            if (field.fieldType == 'checkbox' &&
-                !_fieldValues.containsKey(field.fieldKey)) {
-              // الافتراضي اللي الأدمن ضبطه (default_value='true') بدل false ثابتة — نفس اللي
-              // السيرفر كان هيفترضه (docs/08 §185). من غير default بيفضل false زي الأول.
-              _fieldValues[field.fieldKey] =
-                  pricingFieldDisplayDefault(field) as bool? ?? false;
-            }
+            if (_fieldValues.containsKey(field.fieldKey)) continue;
+            // نفس تهيئة الويب (`pricingFieldInitialValue`): الافتراضي بيتبعت، والـcheckbox false.
+            final initial = pricingFieldInitialValue(field);
+            if (initial != null) _fieldValues[field.fieldKey] = initial;
           }
         });
       }

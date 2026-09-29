@@ -118,6 +118,26 @@ Object? pricingFieldDisplayDefault(PricingField field) {
   return null;
 }
 
+/// القيمة المبدئية اللي بتتحط في `fieldValues` أول ما الفورم يتحمّل — **نفس تهيئة الويب بالحرف**
+/// (`booking-flow.tsx`): الافتراضي اللي الأدمن ضبطه بيتبعت فعلًا (number/slider رقم، checkbox
+/// bool، غيره نص)، والـcheckbox من غير default بيبدأ false. `null` = الحقل يفضل فاضي لحد ما العميل
+/// يجاوب. كان التطبيق بيملّي الـcheckbox بس، فحقل إجباري عليه default كان بيعدّي على الويب
+/// ويتقفل على الموبايل (docs/08 §185، اتلقطت في مراجعة التكامل).
+Object? pricingFieldInitialValue(PricingField field) {
+  final raw = field.defaultValue;
+  if (raw != null) {
+    if (field.fieldType == 'number' || field.fieldType == 'slider') {
+      final parsed = num.tryParse(raw);
+      if (parsed == null) return raw;
+      // عدّاد صحيح: int من المصدر زي أي قيمة العميل بيدخلها.
+      return isIntegerSliderField(field) && parsed == parsed.roundToDouble() ? parsed.round() : parsed;
+    }
+    if (field.fieldType == 'checkbox') return raw == 'true';
+    return raw;
+  }
+  return field.fieldType == 'checkbox' ? false : null;
+}
+
 /// أرقام عربية/فارسية وفاصلة عشرية عربية ⇒ صيغة `num.tryParse` بتفهمها. من غيرها العميل اللي
 /// كيبورده عربي بيكتب «٣» والقيمة بتتبعت `null` في صمت.
 num? parseLocalizedNumber(String input) {

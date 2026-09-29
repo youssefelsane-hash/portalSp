@@ -396,6 +396,9 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [
         `TESTSIGNUP-%`,
       ]);
+      // لو فيه API شغّال على نفس القاعدة، استرجاع الشات الدوري (OrderChatRecoveryService) ممكن يفتح
+      // thread لطلب مقبول هنا قبل ما نمسحه.
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTSIGNUP-%`]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTSIGNUP-%`]);
       await q(`DELETE FROM technician_categories WHERE technician_id = ANY($1::uuid[])`, [technicianProfiles]);
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1::uuid[])`, [technicianProfiles]);

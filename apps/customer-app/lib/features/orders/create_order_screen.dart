@@ -587,13 +587,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           // الإصلاح: نفس الافتراض الضمني اللي الباك-إند بيطبّقه (resolveDefaultValue في
           // pricing-engine.service.ts) — false صريحة من أول ما الفورم يتحمّل، مش لما العميل يدوس.
           for (final field in fields) {
-            if (field.fieldType == 'checkbox' &&
-                !_fieldValues.containsKey(field.fieldKey)) {
-              // الافتراضي اللي الأدمن ضبطه (default_value='true') بدل false ثابتة — نفس اللي
-              // السيرفر كان هيفترضه (docs/08 §185). من غير default بيفضل false زي الأول.
-              _fieldValues[field.fieldKey] =
-                  pricingFieldDisplayDefault(field) as bool? ?? false;
-            }
+            if (_fieldValues.containsKey(field.fieldKey)) continue;
+            // نفس تهيئة الويب (`pricingFieldInitialValue`): الافتراضي بيتبعت، والـcheckbox false.
+            final initial = pricingFieldInitialValue(field);
+            if (initial != null) _fieldValues[field.fieldKey] = initial;
           }
         });
       }

@@ -587,3 +587,11 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
 `app/error.tsx` و`not-found.tsx` و`global-error.tsx` + إبلاغ (`lib/error-reporter.ts`،
 `app: 'admin'`). و`lib/api-client.ts` بقى بيتعامل مع **رد مش JSON** (كان `await res.json()` خام
 بيرمي `SyntaxError` والشاشة تفضل على التحميل بلا رسالة) ومع فشل الشبكة قبل أي رد.
+
+## صفحة الطلب: اختيارات العميل والعنوان الكامل (docs/08 §185، 2026-09-29)
+
+`/orders/[id]` بيعرض `customer_inputs` صفوف عبر `src/lib/order-customer-inputs.ts` (نفس قواعد كارت الفني):
+الافتراضي الاختياري مطوي في «القيم الافتراضية (N)»، الوحدة القصيرة جنب القيمة والطويلة شرح تحتها، والعدّاد
+الصحيح بيتقرّب. العنوان فيه «تفاصيل الوصول» (العمارة/الدور/الشقة)، ملاحظات الوصول، والمستلم.
+الاختبارات: `test/order-customer-inputs.test.mjs` (unit) و`test/order-customer-inputs.e2e.mjs` — طلب حقيقي
+عبر API العميل ⇒ الصفحة بمتصفح، وطلب قديم بلا metadata (نفس بيئة `pricing-field-default.e2e.mjs` المعزولة).

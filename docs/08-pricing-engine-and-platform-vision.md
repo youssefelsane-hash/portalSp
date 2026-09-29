@@ -18864,4 +18864,101 @@ frame. فمفيش frame ⇐ مفيش رسم ⇐ الـsplash بتاع النظا
   `order-provider-lock.ts`) — برّه نطاق «Customer App/Web copy»، محتاجة جولة API منفصلة.
 - نص كارت الرئيسية «بين أكتر من فني واختار الأنسب ليك» **محتوى أدمن** (نصايح الرئيسية) مش كود — يتعدّل من الأدمن.
 - نسخ التطبيق ≤ 1.0.8 بتبعت slider كسري والمحرك بيسعّر بيه؛ الإصلاح من المصدر وصل في التطبيق الجديد بس.
-- `workforce-activity.spec.ts` بيفشل على `main` نفسه من غير تغييرات الجولة دي (اتأكد بـstash).
+- `workforce-activity.spec.ts` بيفشل على `main` نفسه من غير تغييرات الجولة دي (اتأكد بـstash). — **اتصلح على `main` في `40bc155d`** (عدّى في §186).
+
+### تحقق End-to-End بعد الدمج (2026-09-29، جولة تانية) — ✅ **خلص**
+
+**الطلب**: قبل اعتبار الجولة خلصت، إثبات إن كل حقل/metadata/تفصيلة عنوان **متوصّلة** من الـBackend لحد
+كل واجهة (API ⇒ موديل ⇒ مكان العرض ⇒ fallback للقديم)، بفلوهات حقيقية مش unit tests بس.
+
+**مراجعة العقود** (كل حقل additive من الجولة ⇒ مين بيقراه ⇒ فين بيتعرض):
+
+| الحقل (الـAPI) | تطبيق العميل | تطبيق الفني | الويب | الأدمن |
+|---|---|---|---|---|
+| `customer_inputs[].field_type/is_required/is_default/integer_quantity` | — (بيبعت القيم) | `CustomerInputItem` ⇒ الكارت | — | `order-customer-inputs.ts` (main `cdab1f46`) |
+| `address.building_number/floor_number/apartment_number/landmark` | فورم العنوان | `OrderAddress.unitLine` | فورم العنوان | «تفاصيل الوصول» (main `cdab1f46`) |
+| `address.delivery_notes` | **مالوش منتِج** ⇒ اتصلح | الكارت | **مالوش منتِج** ⇒ اتصلح | موجود (main `cdab1f46`) |
+| `address.contact_name/contact_phone` | مالوش منتِج | الكارت (لو موجود) | مالوش منتِج | موجود (main `cdab1f46`) |
+| `customer_notes` | مالوش منتِج (الرسالة بتروح `problem_description` = «المطلوب») | الكارت | مالوش منتِج | موجود من قبل |
+| `default_value` (حقل التسعير) | **كان بيسيبه فاضي** والويب بيختاره ⇒ اتوحّد | — | بيختاره | بيحرّره |
+| `/settings/booking-window` | المنتقي المحصور | — | `min`/`max` | إعدادات |
+| `support_phone` / `support.whatsapp_number` | «تواصل معنا» + الفوتر | — | الفوتر (كاش ٥ دقايق) | إعدادات |
+
+**فجوات تكامل اتلقطت واتصلحت**:
+1. `delivery_notes` كان السيرفر بيبعته للفني ومفيش أي واجهة بتكتبه ⇒ خانة «ملاحظات الوصول» في فورم
+   العنوان في التطبيق (`address_form_screen.dart`، إضافة وتعديل، والفاضي بيمسح) والويب (`NewAddressForm`).
+2. صفحة الطلب في الأدمن كانت بتعرض الاختيارات سطر واحد بـ` · ` وبتتجاهل الـmetadata والعمارة/الدور/الشقة.
+   المالك قفلها على `main` في نفس اليوم (`cdab1f46`، `apps/admin/src/lib/order-customer-inputs.ts`)، فالحل
+   الموازي من الجولة دي **اتشال وقت الدمج** (مش نسخة تانية من نفس الحاجة)، والـE2E بقى بيختبر نسخة `main`.
+3. التطبيق كان بيسيب السؤال الاختياري اللي عليه `default_value` فاضي والويب بيعرضه مختار ⇒
+   `pricingFieldInitialValue()` (نفس منطق الويب) في `CreateOrderScreen` و`JobDetailsScreen`.
+
+**فلوهات حقيقية** (API + Postgres + Redis شغّالين، كود التطبيقات الحقيقي):
+- `scripts/verify-ux-round-e2e.sh` — أدمن بيعمل خدمة وحقول ونافذة حجز ورقم دعم بالـAPI ⇒ `JobDetailsScreen`
+  الحقيقية بترسمها (افتراضي مختار، عدّاد int، التمرير لأول ناقص) ⇒ منتقي الوقت محصور بالنافذة الجديدة
+  والسيرفر بيرفض برّاها ⇒ `OrdersRepository.create` ⇒ Postgres (`shirts=2` مش كسر، `duration_minutes=1`
+  و`scheduled_end_at IS NULL`) ⇒ تطبيق الفني بـ`getOne` + `OrderBriefCard` (منظم، العنوان كامل بس جوّه
+  سياسة الظهور، `customer_notes`، طلب/عنوان قديم). نص الفني بيتشغّل بس بـ`UX_E2E_HANDOFF=true`، ونص العميل
+  لوحده بيمسح بياناته (تشغيلة قبل كده سابت خدمة وقّعت `pricing-templates-live.spec.ts`).
+- `node scripts/verify-web-ux-round-e2e.js` — متصفح: افتراضي مختار، فورم العنوان ⇒ Postgres بالتفاصيل
+  وملاحظات الوصول، رقم الفوتر ⇒ `wa.me` (3/3).
+- `apps/admin/test/order-customer-inputs.e2e.mjs` — صفحة الطلب في الأدمن بمتصفح (طلب حقيقي + طلب قديم).
+
+**النتايج**: API tsc/eslint/nest build نضاف، jest 2584/2586 (الاتنين: `workforce-activity.spec.ts` فاشل
+على `main` نفسه، و`mobile-signup-technician-parity.spec.ts` سباق مع `OrderChatRecoveryService` في API شغّال
+على نفس القاعدة ⇒ الـafterAll بقى يمسح الـthreads)؛ Flutter analyze صفر + unit 249/91؛ `test_live/` للعميل
+122/125 وللفني 94/95 (الفاشل كان ملف تسليم قديم ⇒ اتقفل بالعلم الصريح)؛ admin/web tsc+eslint+unit+build
+نضاف؛ `verify-customer-inputs-display.js` 12/12؛ `verify-web-flow-order.js` نضيف؛ `audit-booking-flow.js
+--quick` 39 تركيبة بلا فجوة (الأداة كانت بتعمل حساباتها **من غير رمز دخول** بعد ADR-0109 ⇒ `ensureToolPin`).
+
+**فجوات صريحة**:
+- تلات اختبارات `test_live/` للعميل (`chat_live_test`، `chat_image_live_test`، `order_tracking_live_test`)
+  بيسقطوا بـ«الفني غير مؤهل» لأن `pickBookableServiceId()` من غير فني بترجع أول خدمة في `/services`،
+  وقاعدة التطوير فيها خدمات اختبار سايبة من ٢٠٢٦-٠٩-٢٥ (`fwpage-…`، `tsc-…`، `test-service-…`). مش من
+  الجولة دي؛ الحل تنظيف القاعدة أو تمرير `servedByTechnicianToken` في التلات ملفات.
+- `customer_notes` و`contact_name/contact_phone` لسه مالهمش منتِج في التطبيق/الويب (العقد والعرض جاهزين).
+- الأدمن بيعرض العدّاد مقرّب (`1.96…` ⇒ `2`) من غير القيمة المخزّنة اللي السعر اتحسب عليها لطلبات نسخ
+  التطبيق ≤ 1.0.8 — لو المالك عايزها، سطر «مسجّلة: …» في `order-customer-inputs.ts`.
+- الويب بيكاش `/legal-entity` ٥ دقايق — تعديل رقم الدعم بيوصل للفوتر خلال المدة دي (مقصود).
+- `AUTH_REGISTRATION_THROTTLE_LIMIT` لازم يترفع مع `THROTTLE_LIMIT` لتشغيل `test_live/` كامل
+  (`login-pin.policy.ts`) — من غيره ~٢٠ اختبار بياخدوا 429.
+
+## §186 — الـCI كان أحمر من 2026-09-25 ومش بيختبر حاجة — السبب والإغلاق (2026-09-29) — ✅ **خلص (فاضل سر واحد عند المالك)**
+
+### الطلب
+
+المالك: «الـCI واقع كله، أحمر» — اتأكد إن مفيش أخطاء، وصلّح أي حاجة غلط من غير ما تبوّظ حاجة شغّالة.
+
+### التشخيص (من لوجات GitHub Actions، كل run على `main` من 2026-09-26 لحد `cdab1f46`)
+
+| الـjob | الخطوة الفاشلة | السبب | النوع |
+|---|---|---|---|
+| API | «فحص نظافة مخطّط قاعدة البيانات» | 3 مفاتيح أجنبية على `users` بلا فهرس (من 0362/0363/0366): `client_error_events.user_id`، `pin_reset_tokens.issued_by_user_id`، `user_role_grants.granted_by_user_id` | حقيقي |
+| API | typecheck/lint/build/**jest** | **كانوا بيتخطّوا** (`skipped`) لأن الخطوة اللي قبلهم وقعت — يعني أيام من غير أي اختبار في الـCI | نتيجة |
+| customer-app | `flutter build apk --debug` | حارس الخرائط في `build.gradle.kts` بيرفض أي بناء من غير `maps.properties` — والـCI مالوش مفتاح | إعداد |
+| technician-app | `cancelled` | `fail-fast` الافتراضي بيلغيه لما العميل يقع — نتيجته ماكانتش بتبان | إعداد |
+
+### الإصلاح
+
+- `infra/migrations/0369_index_fk_client_errors_pin_reset_role_grants.sql` — التلات فهارس (جزئية للأعمدة
+  اللي بتقبل NULL، نفس نمط 0336)، بإقرار `migration-safety: ok` مكتوب (جداول صغيرة/محدودة بطبيعتها).
+- لما الفحوص رجعت تشتغل فعلاً (jest على قاعدة **جديدة** بالظبط زي الـCI، `--runInBand --forceExit`)
+  طلعت فئة اختبارات هشّة كانت مستخبية:
+  - `order-team-recruiting.spec.ts`: `beforeAll` (~25 إدخال) بيعدّي الـ5 ثواني الافتراضية في السويت
+    الكاملة ⇒ 21 اختبار بيقعوا من غير ما يتنفّذوا. ⇐ مهلة 30 ثانية زي 129 spec تانيين.
+  - `matching-team-booking-level-gate.spec.ts`: الشركة بتدخل الأوتو ماتشينج **بعضو واحد** (مقصود)،
+    وأعضاءها الأربعة متعادلين ⇒ مين يمثّلها بيتحدد بترتيب صفوف Postgres (مش مضمون) ⇒ الاختبار كان
+    بيدوّر على ID بعينه. ⇐ بيتأكد من الشركة نفسها + المحترف المستقل. **سلوك المنتج مااتغيّرش.**
+- `ci.yml`: خطوة بتكتب `maps.properties` من سر GitHub `GOOGLE_MAPS_API_KEY` (مابيتطبعش ولا بيتعمله
+  commit، ومن غيره بتفشل برسالة واضحة) — **الحارس نفسه مااتلمسش**. و`fail-fast: false` للمصفوفة.
+
+### النتيجة المحلية (نفس أوامر الـCI بالحرف، قاعدة جديدة)
+
+migrations ⇒ نظافة المخطّط ✅ ⇒ tsc ✅ ⇒ eslint ✅ ⇒ nest build ✅ ⇒ **jest 2594/2594** ✅. Flutter analyze
+صفر + test 250/91؛ admin/web tsc+eslint+unit+build ✅.
+
+### فاضل عند المالك
+
+- **إضافة سر `GOOGLE_MAPS_API_KEY`** في GitHub (Settings → Secrets and variables → Actions) — مفتاح
+  مقيّد بـ`com.ostahome.customer` + Maps SDK for Android. من غيره job تطبيق العميل هيفضل أحمر برسالة صريحة.
+- مفيش Android SDK في بيئة التطوير السحابية، فبناء الـAPK للتطبيقين (debug وrelease) بيتأكد في الـCI بس.

@@ -565,3 +565,5 @@ cd apps/technician-app && flutter test test_live/all_screens_smoke_live_test.dar
   ظهور بيانات العميل، وأي حقل فاضي مالوش صف. الملاحة بالإحداثيات (`OrderAddress.navigationUri`).
 - **`customer_notes`** بتتعرض لو موجودة. **المدة** ≤ 4 دقايق (قيمة جدولة) مابتتعرضش (`formatOrderDurationAr`).
 - لقطة بخط عربي: `OSTA_PREVIEW_DIR=/tmp/p flutter test test/order_brief_card_preview_test.dart`.
+- تحقق End-to-End على طلب حقيقي من تطبيق العميل: `test_live/ux_round_e2e_live_test.dart` — بيتشغّل بس
+  كتكملة (`scripts/verify-ux-round-e2e.sh`، علم `UX_E2E_HANDOFF=true`)، ولوحده بيتعدّى (skip).

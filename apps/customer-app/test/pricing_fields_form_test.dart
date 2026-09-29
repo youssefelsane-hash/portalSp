@@ -2,6 +2,7 @@
 // نص عربي طويل ومصطلح إنجليزي مابيعملوش overflow، الشرح كامل، ٣ اختيارات ظاهرة مش مستخبية،
 // القيمة اللي بتروح للسيرفر هي هي، العدّاد الصحيح int بس، الـslider المتصل زي ما هو، ٢٠+ حقل
 // من غير crash، والحقل الناقص بيتمرّر له والخطأ بيظهر تحته هو.
+import 'package:customer_app/features/addresses/models.dart';
 import 'package:customer_app/features/catalog/models.dart';
 import 'package:customer_app/features/catalog/pricing_field_widgets.dart';
 import 'package:flutter/material.dart';
@@ -337,5 +338,28 @@ void main() {
     expect(pricingFieldInlineUnit(_field('a', 'a', 'number', unit: 'حدد عدد البلوزات في الطلب.')), isNull);
     expect(pricingFieldHelperText(_field('a', 'a', 'number', unit: '(حدد عدد البلوزات في الطلب.)')), 'حدد عدد البلوزات في الطلب.');
     expect(pricingFieldHelperText(_field('a', 'a', 'number', unit: '   ')), isNull);
+  });
+
+  test('القيمة المبدئية = تهيئة الويب بالحرف (الافتراضي بيتبعت)', () {
+    expect(pricingFieldInitialValue(_field('t', 't', 'dropdown', defaultValue: 'same_as_main')), 'same_as_main');
+    // إجباري عليه default: بيتملى زي الويب (كان بيتقفل على الموبايل ويعدّي على الويب).
+    expect(pricingFieldInitialValue(_field('t', 't', 'dropdown', required: true, defaultValue: 'a')), 'a');
+    expect(pricingFieldInitialValue(_field('s', 's', 'slider', min: 0, max: 15, defaultValue: '3')), isA<int>());
+    expect(pricingFieldInitialValue(_field('s', 's', 'slider', min: 0.5, max: 9.5, defaultValue: '2.5')), 2.5);
+    expect(pricingFieldInitialValue(_field('c', 'c', 'checkbox', defaultValue: 'true')), isTrue);
+    expect(pricingFieldInitialValue(_field('c', 'c', 'checkbox')), isFalse);
+    expect(pricingFieldInitialValue(_field('n', 'n', 'number')), isNull);
+    expect(pricingFieldInitialValue(_field('s', 's', 'slider', min: 0, max: 15)), isNull,
+        reason: 'العدّاد الاختياري من غير default مابيتبعتش — السيرفر بيفترض الحد الأدنى');
+  });
+
+  test('موديل العنوان بيقرا ملاحظات الوصول، والعنوان القديم من غيرها شغّال', () {
+    Map<String, dynamic> json([Map<String, dynamic> extra = const {}]) => {
+      'id': 'a', 'label': null, 'city_id': null, 'area_id': null, 'service_zone_id': null,
+      'street_name': 'شارع', 'building_number': null, 'floor_number': null, 'apartment_number': null,
+      'landmark': null, 'latitude': 30.0, 'longitude': 31.0, 'is_default': true, ...extra,
+    };
+    expect(Address.fromJson(json({'delivery_notes': 'الجرس مش شغال'})).deliveryNotes, 'الجرس مش شغال');
+    expect(Address.fromJson(json()).deliveryNotes, isNull);
   });
 }

@@ -9,6 +9,10 @@ class Address {
   final String? floorNumber;
   final String? apartmentNumber;
   final String? landmark;
+
+  /// ملاحظات الوصول لمقدم الخدمة («الجرس مش شغال، كلمني قبل ما تطلع») — docs/08 §185.
+  /// بتوصل للفني جوّه سياسة ظهور بيانات العميل. `null` للعناوين القديمة.
+  final String? deliveryNotes;
   final double latitude;
   final double longitude;
   final bool isDefault;
@@ -26,6 +30,7 @@ class Address {
     required this.floorNumber,
     required this.apartmentNumber,
     required this.landmark,
+    this.deliveryNotes,
     required this.latitude,
     required this.longitude,
     required this.isDefault,
@@ -43,6 +48,7 @@ class Address {
     floorNumber: json['floor_number'] as String?,
     apartmentNumber: json['apartment_number'] as String?,
     landmark: json['landmark'] as String?,
+    deliveryNotes: json['delivery_notes'] as String?,
     latitude: (json['latitude'] as num).toDouble(),
     longitude: (json['longitude'] as num).toDouble(),
     isDefault: json['is_default'] as bool,

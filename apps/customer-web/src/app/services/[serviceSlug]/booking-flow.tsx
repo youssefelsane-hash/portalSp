@@ -2597,6 +2597,8 @@ function NewAddressForm({
   const [floorNumber, setFloorNumber] = useState('');
   const [apartmentNumber, setApartmentNumber] = useState('');
   const [landmark, setLandmark] = useState('');
+  // docs/08 §185 — ملاحظات الوصول بتوصل لمقدم الخدمة بعد تأكيد الطلب. كانت في الـAPI من غير أي فورم.
+  const [deliveryNotes, setDeliveryNotes] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2637,6 +2639,7 @@ function NewAddressForm({
         floor_number: floorNumber || undefined,
         apartment_number: apartmentNumber || undefined,
         landmark: landmark || undefined,
+        delivery_notes: deliveryNotes.trim() || undefined,
         latitude: Number(latitude),
         longitude: Number(longitude),
       });
@@ -2690,6 +2693,14 @@ function NewAddressForm({
         <input value={apartmentNumber} onChange={(e) => setApartmentNumber(e.target.value)} placeholder="الشقة" className="rounded-lg border border-border bg-surface px-3 py-2" />
       </div>
       <input value={landmark} onChange={(e) => setLandmark(e.target.value)} placeholder="علامة مميزة (اختياري)" className="w-full rounded-lg border border-border bg-surface px-3 py-2" />
+      <textarea
+        value={deliveryNotes}
+        onChange={(e) => setDeliveryNotes(e.target.value)}
+        maxLength={300}
+        rows={2}
+        placeholder="ملاحظات الوصول (اختياري) — مثال: الجرس مش شغال، كلمني قبل ما تطلع"
+        className="w-full rounded-lg border border-border bg-surface px-3 py-2"
+      />
       <MapPicker
         latitude={latitude ? Number(latitude) : null}
         longitude={longitude ? Number(longitude) : null}

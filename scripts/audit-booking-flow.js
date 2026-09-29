@@ -28,7 +28,9 @@
  * ببادئة `zz-audit-` وبيمسحها هي وطلباتها في الآخر.
  */
 const { Client } = require('pg');
+const bcrypt = require('bcryptjs');
 const { resolveApiDatabaseUrl } = require('./lib/resolve-api-db');
+const { PIN_BCRYPT_ROUNDS } = require('./lib/pin-constants');
 
 const API = process.env.API_BASE || 'http://localhost:3000/api/v1';
 const DB_URL = resolveApiDatabaseUrl();
@@ -109,6 +111,19 @@ async function freshLogin(phone) {
 
 
 /**
+ * رمز الدخول لحسابات الأداة (ADR-0109): الحسابين بيتعملوا هنا مش في `seed-dev-accounts.js`، فمن غير
+ * السطر ده الدخول بيترفض على أي قاعدة جديدة. نفس شرط السكربت ده: مابنلغيش رمز حد غيّره بإيده.
+ */
+async function ensureToolPin(q, userId) {
+  await q(
+    `UPDATE users SET pin_hash = COALESCE(pin_hash, $2), pin_set_at = COALESCE(pin_set_at, now()),
+                      pin_failed_attempts = 0, pin_locked_until = NULL
+      WHERE id = $1`,
+    [userId, await bcrypt.hash(LOGIN_PIN, PIN_BCRYPT_ROUNDS)],
+  );
+}
+
+/**
  * بينشئ (أو بيرجّع) حساب أدمن التدقيق ودوره. idempotent بالكامل، ومقصور على صلاحيتين.
  * الرقم ثابت وواضح إنه للأدوات، فمش هيتلبس على حساب حقيقي في أي قايمة.
  */
@@ -126,6 +141,7 @@ async function ensureAuditAdmin(db) {
   } else {
     await q(`UPDATE users SET is_active = true, user_type = 'admin' WHERE id = $1`, [user.id]);
   }
+  await ensureToolPin(q, user.id);
 
   let [role] = await q(`SELECT id FROM roles WHERE name = 'flow_audit_tool' AND deleted_at IS NULL`);
   if (!role) {
@@ -162,6 +178,7 @@ async function ensureAuditCustomer(db) {
   } else {
     await q(`UPDATE users SET is_active = true WHERE id = $1`, [user.id]);
   }
+  await ensureToolPin(q, user.id);
   const [profile] = await q(`SELECT id FROM customer_profiles WHERE user_id = $1`, [user.id]);
   if (!profile) await q(`INSERT INTO customer_profiles (user_id) VALUES ($1)`, [user.id]);
 
