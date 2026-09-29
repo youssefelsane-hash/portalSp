@@ -1,5 +1,3 @@
-const mapboxAccessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?.trim();
-
 export type MapTileLayerConfig = {
   url: string;
   attribution: string;
@@ -11,9 +9,10 @@ export type MapTileLayerConfig = {
 
 // Mapbox's styles endpoint serves 512px tiles, so Leaflet needs the matching
 // tile size and zoom offset to keep labels and zoom levels aligned correctly.
-export const mapTileLayer: MapTileLayerConfig | null = mapboxAccessToken
-  ? {
-      url: `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}@2x?access_token=${mapboxAccessToken}`,
+export function createMapTileLayer(accessToken?: string): MapTileLayerConfig {
+  const token = accessToken?.trim();
+  return token ? {
+      url: `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}@2x?access_token=${token}`,
       attribution: '&copy; <a href="https://www.mapbox.com/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 22,
       tileSize: 512,
@@ -23,6 +22,14 @@ export const mapTileLayer: MapTileLayerConfig | null = mapboxAccessToken
       // to tile images only instead of weakening the rest of the dashboard.
       referrerPolicy: 'strict-origin-when-cross-origin',
     }
-  : null;
+  : {
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+      tileSize: 256,
+      zoomOffset: 0,
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    };
+}
 
-export const mapTilesConfigurationMessage = 'لم يتم إعداد مفتاح Mapbox للخريطة. أضف NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ثم أعد تشغيل لوحة الإدارة.';
+export const mapTileLayer = createMapTileLayer(process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN);

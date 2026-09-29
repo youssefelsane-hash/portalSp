@@ -106,6 +106,7 @@ describe('بوابة InstaPay — نسخة تانية بتعرف الإعداد 
 
   it('حفظ الإعداد على النسخة A ⇒ النسخة B بتشتغل بيه من غير restart', async () => {
     const newAddress = `audit-a3-${Date.now()}@instapay`;
+    const reloads = jest.spyOn(providerB, 'handleSettingUpdated');
 
     // النسخة A بتعمل اللي `SettingsService.update()` بتعمله بالظبط: تكتب، تبطّل الكاش المشترك،
     // وبعدين تبلّغ باقي النسخ.
@@ -119,6 +120,10 @@ describe('بوابة InstaPay — نسخة تانية بتعرف الإعداد 
     await bridgeA.broadcast(new SettingUpdatedEvent(IPA_KEY, newAddress));
     await bridgeA.broadcast(new SettingUpdatedEvent(RECIPIENT_KEY, 'صُنّاع'));
 
+    // وصول العنوان وحده لا يعني انتهاء البلاغ التاني؛ كان بيتسرّب للاختبار اللي بعده.
+    expect(await waitFor(() => reloads.mock.calls.length >= 2)).toBe(true);
+    await Promise.all(reloads.mock.results.map((result) => result.value as Promise<void>));
+    reloads.mockRestore();
     const arrived = await waitFor(() => providerB.isConfigured && providerB['ipaAddress'] === newAddress);
     expect({
       عنوان_النسخة_B: providerB['ipaAddress'],

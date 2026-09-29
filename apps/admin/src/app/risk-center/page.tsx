@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ErrorNotice } from '@/components/notice';
+import { BUCKET_LABELS } from '@/lib/risk-labels';
 
 /**
  * **مركز المخاطر والتلاعب** (ADR-0085، طلب مالك docs/08 §140).
@@ -45,15 +46,6 @@ const LEVEL_CLASS: Record<string, string> = {
   medium: 'bg-orange-100 text-orange-800',
   high: 'bg-red-100 text-red-800',
   critical: 'bg-red-600 text-white',
-};
-
-export const BUCKET_LABELS: Record<string, string> = {
-  pricing_abuse: 'إساءة تسعير',
-  parts_manipulation: 'تلاعب بقطع الغيار',
-  order_abuse: 'إساءة استخدام الطلبات',
-  off_platform_leakage: 'تسريب خارج المنصة',
-  customer_abuse: 'إساءة من العميل',
-  collusion_fraud: 'تواطؤ / احتيال',
 };
 
 const ACTOR_LABELS: Record<string, string> = {

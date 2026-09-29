@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LngLatPoint } from '@baytak/shared-types';
 import { Button } from '@/components/ui/button';
-import { mapTileLayer, mapTilesConfigurationMessage } from '@/lib/map-tiles';
+import { mapTileLayer } from '@/lib/map-tiles';
 import 'leaflet/dist/leaflet.css';
 
 const DEFAULT_CENTER: [number, number] = [30.0444, 31.2357]; // القاهرة، fallback لو المدينة معندهاش مركز محفوظ
@@ -37,10 +37,6 @@ export function ZoneBoundaryMap({ center, initialPoints, isSaving, onSave, onCan
       map = L.map(containerRef.current).setView(startCenter, 12);
       mapRef.current = map;
 
-      if (!mapTileLayer) {
-        console.error(mapTilesConfigurationMessage);
-        return;
-      }
       L.tileLayer(mapTileLayer.url, {
         attribution: mapTileLayer.attribution,
         maxZoom: mapTileLayer.maxZoom,

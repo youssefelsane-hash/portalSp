@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
-import { mapTileLayer, mapTilesConfigurationMessage } from '@/lib/map-tiles';
+import { mapTileLayer } from '@/lib/map-tiles';
+import { Button } from '@/components/ui/button';
 
 export type LiveMapTechnician = {
   id: string;
@@ -49,43 +50,70 @@ export function OperationsLiveMap({ technicians, orders }: { technicians: LiveMa
   const mapRef = useRef<import('leaflet').Map | null>(null);
   const layersRef = useRef<import('leaflet').LayerGroup | null>(null);
   const firstFitRef = useRef(true);
+  const [mapInstance, setMapInstance] = useState<import('leaflet').Map | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | undefined;
+    let tileTimeout: ReturnType<typeof setTimeout> | undefined;
     import('leaflet')
       .then((L) => {
         if (cancelled || !containerRef.current || mapRef.current) return;
         const map = L.map(containerRef.current, { zoomControl: true }).setView(CAIRO_FALLBACK, 11);
-        if (!mapTileLayer) {
-          console.error(mapTilesConfigurationMessage);
-          return;
-        }
-        L.tileLayer(mapTileLayer.url, {
+        mapRef.current = map;
+        firstFitRef.current = true;
+        setMapInstance(map);
+        const tiles = L.tileLayer(mapTileLayer.url, {
           attribution: mapTileLayer.attribution,
           maxZoom: mapTileLayer.maxZoom,
           tileSize: mapTileLayer.tileSize,
           zoomOffset: mapTileLayer.zoomOffset,
           referrerPolicy: mapTileLayer.referrerPolicy,
-        }).addTo(map);
-        mapRef.current = map;
+        });
+        let failedTiles = 0;
+        const tileFailure = () => {
+          if (!cancelled) setMapError('تعذّر تحميل خلفية الخريطة. تأكد من الاتصال بالإنترنت وإعدادات مزوّد الخرائط، ثم حاول مرة أخرى.');
+        };
+        // الشبكة ممكن تفضل معلّقة بلا tileerror، فلا نترك خلفية فارغة بلا تفسير.
+        tiles.on('loading', () => {
+          failedTiles = 0;
+          clearTimeout(tileTimeout);
+          tileTimeout = setTimeout(tileFailure, 15_000);
+        });
+        tiles.on('tileerror', () => { failedTiles += 1; tileFailure(); });
+        tiles.on('load', () => {
+          clearTimeout(tileTimeout);
+          if (!cancelled && failedTiles === 0) setMapError(null);
+        });
+        tiles.addTo(map);
+        resizeObserver = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+        resizeObserver.observe(containerRef.current);
       })
-      .catch((error: unknown) => console.error('فشل تحميل الخريطة الحية', error));
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        console.error('فشل تحميل الخريطة الحية', error);
+        setMapError('تعذّر تشغيل الخريطة. حاول مرة أخرى أو أعد تحميل الصفحة.');
+      });
 
     return () => {
       cancelled = true;
+      clearTimeout(tileTimeout);
+      resizeObserver?.disconnect();
       mapRef.current?.remove();
       mapRef.current = null;
       layersRef.current = null;
     };
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     let cancelled = false;
-    const map = mapRef.current;
-    if (!map) return;
+    const map = mapInstance;
+    if (!map || mapRef.current !== map) return;
 
     void import('leaflet').then((L) => {
-      if (cancelled || !mapRef.current) return;
+      if (cancelled || mapRef.current !== map) return;
       layersRef.current?.remove();
       const layers = L.layerGroup().addTo(map);
       layersRef.current = layers;
@@ -134,14 +162,28 @@ export function OperationsLiveMap({ technicians, orders }: { technicians: LiveMa
         firstFitRef.current = false;
         map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 14 });
       }
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.error('فشل عرض نقاط الخريطة', error);
+      setMapError('تعذّر عرض نقاط الخريطة. حاول مرة أخرى.');
     });
 
     return () => {
       cancelled = true;
     };
-  }, [technicians, orders]);
+  }, [technicians, orders, mapInstance]);
 
-  return <div ref={containerRef} className="h-[62vh] min-h-[34rem] w-full rounded-xl border" style={{ zIndex: 0 }} />;
+  return (
+    <div className="space-y-3">
+      {mapError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <p className="flex-1">{mapError}</p>
+          <Button variant="outline" onClick={() => { setMapError(null); setAttempt((value) => value + 1); }}>إعادة المحاولة</Button>
+        </div>
+      )}
+      <div ref={containerRef} aria-label="خريطة الفنيين والطلبات" className="h-[62vh] min-h-[34rem] w-full rounded-xl border" style={{ zIndex: 0 }} />
+    </div>
+  );
 }
 
 export function MapLegend() {

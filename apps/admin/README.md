@@ -595,3 +595,20 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
 الصحيح بيتقرّب. العنوان فيه «تفاصيل الوصول» (العمارة/الدور/الشقة)، ملاحظات الوصول، والمستلم.
 الاختبارات: `test/order-customer-inputs.test.mjs` (unit) و`test/order-customer-inputs.e2e.mjs` — طلب حقيقي
 عبر API العميل ⇒ الصفحة بمتصفح، وطلب قديم بلا metadata (نفس بيئة `pricing-field-default.e2e.mjs` المعزولة).
+
+## تحقق إصدار 2026-09-29: الخرائط وبناء الإنتاج
+
+`src/lib/map-tiles.ts` يستخدم Mapbox لو `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` موجودة **وقت البناء**،
+وإلا يستخدم OpenStreetMap للعرض التفاعلي المحدود داخل الأدمن، مع attribution وReferer
+وكاش المتصفح. تغيير قيمة Mapbox يحتاج إعادة بناء، مش restart بس. خدمة OSM بديل best-effort
+وليست SLA أو مصدر bulk/offline tiles: https://operations.osmfoundation.org/policies/tiles/ .
+
+`OperationsLiveMap` ينتظر جاهزية Leaflet قبل أول رسم، ينظف الخريطة عند الإغلاق، ويتابع
+تغير الحجم، ويعرض فشل تحميل البلاطات مع إعادة المحاولة بدلاً من مساحة فارغة. اختبار مستقل
+بالكومبوننت الحقيقي وReact StrictMode: `node test/live-map.e2e.mjs` (اضبط `CHROMIUM` عند الحاجة).
+الاختبار الآلي يحاكي صور البلاطات ولا ينزّل صوراً من مزود الخرائط. `MAP_MANUAL=1` يفتح
+خادماً مؤقتاً للفحص اليدوي من المتصفح. اختبارات الإعداد: `npm run test:unit`.
+
+قاموس `BUCKET_LABELS` انتقل إلى `src/lib/risk-labels.ts` بلا تغيير في معناه: تصديره من ملف
+`page.tsx` كان يمنع فحص Next الإنتاجي. نتائج الإصدار في
+`docs/audits/2026-09-29-release-alignment.md` من جذر المشروع.

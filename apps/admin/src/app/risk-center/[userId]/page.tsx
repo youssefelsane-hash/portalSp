@@ -17,7 +17,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { ErrorNotice } from '@/components/notice';
-import { BUCKET_LABELS } from '../page';
+import { BUCKET_LABELS } from '@/lib/risk-labels';
 
 /**
  * **ملف المخاطر** (ADR-0085) — مش صفحة الفني العادية.
