@@ -44,7 +44,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      # تاريخ كامل: `check-migration-safety.js` بيقارن بـ`origin/main...HEAD`. الـcheckout الافتراضي
+      # (عمق 1، ومن غير `origin/main` في الـPR) كان بيخلّيه يرجع لفحص **كل** الـmigrations القديمة،
+      # فكل PR كان بيقع هنا على ملفات اتطبّقت من شهور، وبيتخطّى typecheck/lint/jest.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
