@@ -1,5 +1,6 @@
 import type { ApiEnvelope, ApiMeta } from '@baytak/shared-types';
 import { reportClientError } from './error-reporter';
+import { describeNetworkError, fetchWithOneRetry } from '@baytak/shared-types';
 
 export class ApiError extends Error {
   code: string;
@@ -27,20 +28,21 @@ export async function apiFetch<T>(
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, {
+    // فشل شبكة لحظي في قراءة بيتعاد مرة واحدة (docs/08 §187) — الكتابة لأ.
+    res = await fetchWithOneRetry(() => fetch(`${API_URL}${path}`, {
       ...options,
       headers: {
         ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...options.headers,
       },
-    });
+    }), options);
   } catch (networkError) {
     // فشل شبكة قبل أي رد: الاستثناء الخام كان بيطلع للشاشة بلا أي رسالة مفهومة.
     reportClientError({
       kind: 'network',
       errorName: networkError instanceof Error ? networkError.name : 'NetworkError',
-      errorMessage: networkError instanceof Error ? networkError.message : String(networkError),
+      errorMessage: describeNetworkError(networkError),
       apiPath: path,
     });
     throw new ApiError('NETWORK', 'مفيش اتصال بالسيرفر — اتأكد من الشبكة وحاول تاني', 0);

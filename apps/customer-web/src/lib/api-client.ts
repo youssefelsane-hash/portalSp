@@ -2,6 +2,7 @@ import { ApiEnvelope } from './api-types';
 import { funnelHeaders } from './funnel';
 import { reportClientError } from './error-reporter';
 import { notifyNetworkFailure, notifyNetworkSuccess } from './connectivity';
+import { describeNetworkError, fetchWithOneRetry } from '@baytak/shared-types';
 
 export class ApiError extends Error {
   code: string;
@@ -32,7 +33,7 @@ export async function apiFetch<T>(path: string, accessToken: string | null, opti
     reportClientError({
       kind: 'network',
       errorName: networkError instanceof Error ? networkError.name : 'NetworkError',
-      errorMessage: networkError instanceof Error ? networkError.message : String(networkError),
+      errorMessage: describeNetworkError(networkError),
       apiPath: path,
     });
     throw new ApiError('NETWORK', 'مفيش اتصال بالسيرفر — اتأكد من الإنترنت وحاول تاني', 0);
@@ -67,7 +68,8 @@ function rawFetch(
   options: RequestInit,
   isFormData: boolean,
 ): Promise<Response> {
-  return fetch(`${API_URL}${path}`, {
+  // فشل شبكة لحظي في قراءة بيتعاد مرة واحدة (docs/08 §187) — الكتابة لأ.
+  return fetchWithOneRetry(() => fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
@@ -78,7 +80,7 @@ function rawFetch(
       ...funnelHeaders(),
       ...options.headers,
     },
-  });
+  }), options);
 }
 
 /**
@@ -120,7 +122,7 @@ export async function apiFetchPage<T>(
     reportClientError({
       kind: 'network',
       errorName: networkError instanceof Error ? networkError.name : 'NetworkError',
-      errorMessage: networkError instanceof Error ? networkError.message : String(networkError),
+      errorMessage: describeNetworkError(networkError),
       apiPath: path,
     });
     throw new ApiError('NETWORK', 'مفيش اتصال بالسيرفر — اتأكد من الإنترنت وحاول تاني', 0);
