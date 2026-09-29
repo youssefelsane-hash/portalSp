@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 export default function FavoritesPage() {
   const { authedFetch } = useAuth();
   return (
-    <AccountSection title="المفضّلة" load={fetchFavorites} emptyText="مفيش فنيين في المفضّلة — احفظ اللي عجبك شغله عشان تلاقيه بسرعة">
+    <AccountSection title="المفضّلة" load={fetchFavorites} emptyText="مفيش مقدمي خدمة في المفضّلة — احفظ اللي عجبك شغله عشان تلاقيه بسرعة">
       {(favorites, reload) => (
         <div className="space-y-2">
           {favorites.map((fav) => (

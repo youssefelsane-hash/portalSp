@@ -137,7 +137,7 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
                               '${offer.streetName}${offer.landmark != null ? ' — ${offer.landmark}' : ''}',
                             ),
                             if (duration != null)
-                              Text('المدة المتوقعة: $duration'),
+                              Text('المدة المتوقعة للتنفيذ: $duration'),
                             if (offer.problemDescription != null)
                               Text(offer.problemDescription!),
                             const SizedBox(height: 4),

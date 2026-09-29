@@ -16,7 +16,7 @@ const ACCOUNT_SECTIONS: { href: string; label: string; description: string }[] =
   { href: '/orders', label: 'طلباتي', description: 'كل طلباتك الحالية والسابقة' },
   { href: '/account/wallet', label: 'محفظتي', description: 'رصيدك وكل الحركات المالية' },
   { href: '/account/addresses', label: 'عناويني', description: 'العناوين المحفوظة للحجز السريع' },
-  { href: '/account/favorites', label: 'المفضّلة', description: 'الفنيين اللي حفظتهم' },
+  { href: '/account/favorites', label: 'المفضّلة', description: 'مقدمي الخدمة اللي حفظتهم' },
   { href: '/account/payment-methods', label: 'وسائل الدفع المحفوظة', description: 'الكروت المحفوظة' },
   { href: '/account/loyalty', label: 'نقاط الولاء', description: 'رصيد نقاطك وسجل الكسب' },
   { href: '/account/projects', label: 'مشاريعي', description: 'المشاريع الكبيرة ومراحلها' },

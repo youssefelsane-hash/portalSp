@@ -9,9 +9,13 @@
  * ويتأكد إن:
  *
  *   ١. الخطوة ١ بتطلب **العنوان** (مش الميعاد).
- *   ٢. زرار «التالي» **مقفول** قبل اختيار عنوان.
- *   ٣. بعد اختيار عنوان، الخطوة ٢ بتطلب الميعاد ومعاه **اقتراحات محسوبة** (نداء
- *      `booking-slots/days` حصل فعلاً).
+ *   ٢. «التالي» قبل العنوان **مابيعدّيش** — وبيقول إيه الناقص جنب قسم العنوان نفسه
+ *      (docs/08 §185: كان زرار رمادي بلا سبب).
+ *   ٣. حقل شغل إجباري ناقص ⇒ الرسالة جنب الحقل نفسه والصفحة بتتمرّر له؛ و٣ اختيارات
+ *      بتتعرض أزرار مش قايمة منسدلة.
+ *   ٤. بعد اختيار عنوان وتكميل الحقول، الخطوة ٢ بتطلب الميعاد ومعاه **اقتراحات محسوبة**
+ *      (نداء `booking-slots/days` حصل فعلاً) — **والصفحة بتبدأ من أول الخطوة** حتى لو العميل
+ *      كان متمرّر لآخرها.
  *
  *   node scripts/verify-web-flow-order.js   # محتاج API + customer-web dev شغالين
  */
@@ -40,6 +44,21 @@ async function main() {
         WHERE id = $1`,
       [serviceId],
     );
+    // حقلين إجباريين بترتيب عرض: اختيار من ٣ (لازم يتعرض أزرار) ورقم (لازم يتقال عليه بالاسم).
+    await h.q(
+      `INSERT INTO service_pricing_fields
+         (service_id, field_key, label_ar, field_type, is_required, display_order, unit_ar, options)
+       VALUES ($1,'main_type','نوع الخدمة الأساسي','dropdown',true,1,
+               '(الاختيار ده هيتطبق تلقائيًا على كل الملابس في الطلب.)',
+               '[{"value":"iron_only","label_ar":"كي فقط"},{"value":"wash_iron","label_ar":"غسيل + كي"},{"value":"dry_clean_iron","label_ar":"دراي كلين + كي"}]'::jsonb),
+              ($1,'rooms','عدد الغرف والصالات المطلوب تنظيفها','number',true,2,'غرفة',NULL)`,
+      [serviceId],
+    );
+    await h.q(
+      `INSERT INTO service_pricing_rules (service_id, rule_type, rule_key, payload, display_order, valid_from, is_active)
+       VALUES ($1,'formula','final_price',$2,1, now(), true)`,
+      [serviceId, JSON.stringify({ price_cents: { type: 'literal', value: 40000 }, duration_minutes: { type: 'literal', value: 180 } })],
+    );
     const customer = await h.makeCustomer('c');
     await h.makeTechnician('t');
     // **عميل بعنوانين ومفيش افتراضي** — الحالة اللي الاحتياطي القديم (`?? list[0]`) كان
@@ -54,7 +73,10 @@ async function main() {
     const phone = user.phone_number;
 
     browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'ar-EG' });
+    // مقاس موبايل: بلاغ «الصفحة بتفضل تحت بعد تغيير الخطوة» أوضح على الشاشة الضيقة.
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ar-EG' });
+    const shots = process.env.WEB_FLOW_SHOTS_DIR;
+    const shot = async (name) => shots && page.screenshot({ path: `${shots}/${name}.png`, fullPage: false });
     const page = await ctx.newPage();
     /** نداءات التوافر اللي حصلت فعلاً — الدليل إن الاقتراح اتحسب. */
     const slotCalls = [];
@@ -88,22 +110,68 @@ async function main() {
     );
     if (!(asksAddressFirst && !asksScheduleFirst)) failures += 1;
 
-    // ═══ ٢. «التالي» مقفول قبل العنوان ═══
+    // ═══ ٢. «التالي» قبل العنوان: مابيعدّيش، وبيقول السبب جنب القسم ═══
     const next = page.locator('button', { hasText: 'التالي' }).first();
-    const disabledBefore = await next.isDisabled().catch(() => null);
-    ok(disabledBefore === true, 'زرار «التالي» مقفول قبل اختيار عنوان (الخطوة مش مكتملة)', `disabled=${disabledBefore}`);
-    if (disabledBefore !== true) failures += 1;
+    await next.click();
+    await page.waitForTimeout(900);
+    const addressError = page.locator('#booking-address [role="alert"]');
+    const addressMsg = (await addressError.innerText().catch(() => '')).trim();
+    const stillStep1 = (await bodyText()).includes('اختار عنوان التنفيذ');
+    const addressVisible = await page.locator('#booking-address').isVisible();
+    ok(
+      stillStep1 && addressMsg.includes('اختار العنوان') && addressVisible,
+      '«التالي» قبل العنوان مابيعدّيش، والرسالة جنب قسم العنوان نفسه',
+      `رسالة=«${addressMsg}» · خطوة١=${stillStep1}`,
+    );
+    if (!(stillStep1 && addressMsg.includes('اختار العنوان'))) failures += 1;
+    await shot('web-1-address-missing');
 
-    // ═══ ٣. نختار عنوان → «التالي» يفتح → الخطوة ٢ ميعاد + اقتراحات ═══
+    // ═══ ٣. عنوان + الحقل الإجباري الناقص: تمرير له والرسالة جنبه ═══
     await page.locator('input[name="address"]').first().check();
     await page.waitForTimeout(2500); // فحص التوافر للعنوان
-    const disabledAfter = await next.isDisabled().catch(() => null);
-    ok(disabledAfter === false, 'بعد اختيار العنوان الخطوة ١ بقت مكتملة و«التالي» فتح', `disabled=${disabledAfter}`);
-    if (disabledAfter !== false) failures += 1;
+    const selectCount = await page.locator('#booking-field-main_type select').count();
+    const choiceButtons = await page.locator('#booking-field-main_type button').allInnerTexts();
+    ok(
+      selectCount === 0 && choiceButtons.some((t) => t.includes('غسيل + كي')) && choiceButtons.length === 3,
+      '٣ اختيارات بتتعرض أزرار ظاهرة، مش قايمة منسدلة',
+      `أزرار=${JSON.stringify(choiceButtons)}`,
+    );
+    if (selectCount !== 0 || choiceButtons.length !== 3) failures += 1;
+    await page.locator('#booking-field-main_type button', { hasText: 'غسيل + كي' }).click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await next.click();
+    await page.waitForTimeout(1200);
+    const roomsError = (await page.locator('#booking-field-rooms [role="alert"]').innerText().catch(() => '')).trim();
+    const roomsBox = await page.locator('#booking-field-rooms').boundingBox();
+    const inView = roomsBox !== null && roomsBox.y >= 0 && roomsBox.y < 844;
+    const focused = await page.evaluate(() => document.activeElement?.closest('#booking-field-rooms') !== null);
+    ok(
+      roomsError.includes('«عدد الغرف والصالات المطلوب تنظيفها»') && inView && focused,
+      'الحقل الإجباري الناقص: الرسالة باسمه تحته، والصفحة اتمرّرت له، والتركيز جوّاه',
+      `رسالة=«${roomsError}» · y=${roomsBox?.y} · focus=${focused}`,
+    );
+    if (!(roomsError && inView && focused)) failures += 1;
+    await shot('web-2-field-missing');
+    await page.locator('#booking-field-rooms input').fill('3');
+    await page.waitForTimeout(300);
+    const errorGone = (await page.locator('#booking-field-rooms [role="alert"]').count()) === 0;
+    ok(errorGone, 'الرسالة بتختفي أول ما الحقل يتكمّل');
+    if (!errorGone) failures += 1;
 
+    // ═══ ٤. الخطوة ٢ بتبدأ من أولها حتى لو كنا تحت خالص ═══
     const slotCallsBeforeStep2 = slotCalls.length;
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(300);
     await next.click();
     await page.waitForTimeout(3000);
+    const stepperTop = await page.locator('ol').first().boundingBox();
+    ok(
+      stepperTop !== null && stepperTop.y >= -5 && stepperTop.y < 200,
+      'بعد «التالي» الصفحة بتبدأ من أول الخطوة الجديدة (مش من آخر الصفحة)',
+      `stepper.y=${stepperTop?.y} · scrollY=${await page.evaluate(() => window.scrollY)}`,
+    );
+    if (!(stepperTop && stepperTop.y >= -5 && stepperTop.y < 200)) failures += 1;
+    await shot('web-3-step2-top');
     const secondStep = await bodyText();
     const asksScheduleSecond = secondStep.includes('اختار الموعد المناسب');
     ok(asksScheduleSecond, 'الخطوة ٢ بتطلب الميعاد', `ميعاد=${asksScheduleSecond}`);
@@ -117,9 +185,24 @@ async function main() {
     );
     if (!suggestionsRequested) failures += 1;
 
+    // «التالي» من غير ميعاد: الرسالة اللي المالك كتبها بالحرف، جنب قسم الموعد.
+    await page.locator('button', { hasText: 'التالي' }).first().click();
+    await page.waitForTimeout(900);
+    // `innerText` فيه أيقونة ⚠ قبل النص — الفحص على الجملة نفسها.
+    const scheduleMsg = (await page.locator('#booking-schedule [role="alert"]').innerText().catch(() => ''))
+      .replace('⚠', '')
+      .trim();
+    ok(
+      scheduleMsg === 'حدد الموعد المناسب قبل اختيار مقدم الخدمة.',
+      'الموعد ناقص ⇒ «حدد الموعد المناسب قبل اختيار مقدم الخدمة.» جنب قسم الموعد',
+      `رسالة=«${scheduleMsg}»`,
+    );
+    if (scheduleMsg !== 'حدد الموعد المناسب قبل اختيار مقدم الخدمة.') failures += 1;
+    await shot('web-4-schedule-missing');
+
     // ومؤشر الخطوات بيقول نفس الترتيب
-    const indicatorOk = secondStep.includes('العنوان والشغل') && secondStep.includes('الموعد والفني');
-    ok(indicatorOk, 'مؤشر الخطوات بيسمّي الترتيب الجديد («العنوان والشغل» ثم «الموعد والفني»)');
+    const indicatorOk = secondStep.includes('العنوان والشغل') && secondStep.includes('الموعد ومقدم الخدمة');
+    ok(indicatorOk, 'مؤشر الخطوات بيسمّي الترتيب («العنوان والشغل» ثم «الموعد ومقدم الخدمة»)');
     if (!indicatorOk) failures += 1;
   } finally {
     await browser?.close();

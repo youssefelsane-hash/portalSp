@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// فتح رابط خارجي (موقع/تليفون/إيميل/واتساب/خرائط) **بطريقة مش بتفشل بصمت**.
@@ -75,3 +76,68 @@ Future<bool> openEmailApp(BuildContext context, String email) => openExternalUrl
       Uri(scheme: 'mailto', path: email),
       failureMessage: 'تعذّر فتح تطبيق البريد',
     );
+
+/// رابط محادثة واتساب (`https://wa.me/<رقم دولي>`) من رقم مكتوب بأي شكل — `null` لو الرقم
+/// مايصلحش (docs/08 §185).
+///
+/// نفس قاعدة السيرفر في `support-contact.controller.ts`: أرقام بس، ٦–٢٠ رقم، من غير `+`. بنقبل
+/// الرقم زي ما الأدمن كاتبه في بيانات الجهة («+20 150 598 8990» أو «01505988990» أو بأرقام
+/// عربية) عشان مايبقاش فيه رقم تاني مكتوب في الكود يختلف عن اللي في الفوتر.
+Uri? whatsappChatUri(String? phone) {
+  if (phone == null) return null;
+  const eastern = '٠١٢٣٤٥٦٧٨٩';
+  final buffer = StringBuffer();
+  for (final char in phone.split('')) {
+    final index = eastern.indexOf(char);
+    if (index >= 0) {
+      buffer.write(index);
+    } else if (RegExp(r'[0-9]').hasMatch(char)) {
+      buffer.write(char);
+    }
+  }
+  var digits = buffer.toString();
+  if (digits.startsWith('00')) digits = digits.substring(2);
+  // رقم موبايل مصري محلي (01xxxxxxxxx) — واتساب محتاجه بكود الدولة.
+  if (digits.length == 11 && digits.startsWith('01')) digits = '2$digits';
+  if (!RegExp(r'^[0-9]{6,20}$').hasMatch(digits)) return null;
+  return Uri.https('wa.me', '/$digits');
+}
+
+typedef ExternalUrlLauncher = Future<bool> Function(Uri uri, LaunchMode mode);
+
+Future<bool> _defaultLauncher(Uri uri, LaunchMode mode) => launchUrl(uri, mode: mode);
+
+/// فتح محادثة واتساب **بـfallback محترم** (docs/08 §185).
+///
+/// ١. تطبيق خارجي: لو واتساب متثبّت بيفتح المحادثة، ولو لأ رابط `wa.me` بيفتح في المتصفح (صفحة
+///    واتساب الرسمية فيها «ابدأ المحادثة»/واتساب ويب).
+/// ٢. لو مفيش تطبيق خارجي يفتحه: متصفح جوّه التطبيق.
+/// ٣. لو ولا ده: رسالة فيها الرقم وزرار نسخ — مش «مقدرناش» وخلاص.
+Future<bool> openWhatsappChat(
+  BuildContext context,
+  Uri chatUri, {
+  ExternalUrlLauncher launcher = _defaultLauncher,
+}) async {
+  for (final mode in const [LaunchMode.externalApplication, LaunchMode.inAppBrowserView]) {
+    try {
+      if (await launcher(chatUri, mode)) return true;
+    } catch (_) {
+      // أندرويد بيرمي ACTIVITY_NOT_FOUND بدل ما يرجّع false (راجع أول الملف) — نجرّب اللي بعده.
+    }
+  }
+  if (!context.mounted) return false;
+  final number = '+${chatUri.pathSegments.isEmpty ? '' : chatUri.pathSegments.first}';
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('مقدرناش نفتح واتساب على جهازك — رقمنا على واتساب: ${isolateLtr(number)}'),
+      action: SnackBarAction(
+        label: 'انسخ الرقم',
+        onPressed: () => Clipboard.setData(ClipboardData(text: number)),
+      ),
+    ),
+  );
+  return false;
+}
+
+/// رقم تليفون جوّه جملة عربية بيتعرض LTR من غير ما يقلب ترتيب الجملة.
+String isolateLtr(String value) => '\u2066$value\u2069';

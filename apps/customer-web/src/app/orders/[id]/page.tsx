@@ -26,7 +26,7 @@ import {
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
-import { formatWorkDuration, formatWorkforce } from '@baytak/shared-types';
+import { formatCustomerFacingWorkDuration, formatWorkforce } from '@baytak/shared-types';
 import { InstallmentSection } from './installment-section';
 import { RescheduleSection } from './reschedule-section';
 import { RatingSection } from './rating-section';
@@ -141,7 +141,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           §60.3 بيفرض إن زيادة سعر «الفني المميّز» تبان **بسببها مكتوب** مش كرقم بيتغيّر لوحده. */}
       {order.level_premium_cents > 0 && (
         <p className="mt-1 text-sm font-medium text-primary">
-          منها {formatEgp(order.level_premium_cents)} — فني Premium
+          منها {formatEgp(order.level_premium_cents)} — مقدم خدمة مميّز
         </p>
       )}
       {order.warranty_price_cents > 0 && (
@@ -192,13 +192,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* المدة المتوقعة وعدد الأفراد — نفس الصياغة المشتركة (`lib/work-scope.ts`). كانت
           معروضة في تطبيق العميل بس رغم إن الحقول راجعة في نفس الرد. */}
-      {(formatWorkDuration(order.duration_minutes, order.estimated_duration_days) !== null ||
+      {(formatCustomerFacingWorkDuration(order.duration_minutes, order.estimated_duration_days) !== null ||
         formatWorkforce(order.required_technicians, order.required_assistants) !== null) && (
         <section className="mt-6 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-1 font-semibold">حجم الشغلانة</h2>
           <p className="text-sm text-muted">
             {[
-              formatWorkDuration(order.duration_minutes, order.estimated_duration_days),
+              formatCustomerFacingWorkDuration(order.duration_minutes, order.estimated_duration_days),
               formatWorkforce(order.required_technicians, order.required_assistants),
             ]
               .filter(Boolean)
@@ -218,7 +218,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {(order.technician_name || order.assigned_company_name) && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-1 font-semibold">جهة التنفيذ</h2>
-          {order.technician_name && <p>الفني: {order.technician_name}</p>}
+          {order.technician_name && <p>مقدم الخدمة: {order.technician_name}</p>}
           {order.assigned_company_name && <p className="mt-1 text-sm text-muted">عن طريق شركة: {order.assigned_company_name}</p>}
           {order.technician_phone && (
             <a href={`tel:${order.technician_phone}`} dir="ltr" className="text-primary hover:underline">
@@ -233,7 +233,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           نفس order_detail_screen.dart's شرط: technicianId != null بس، صفر ربط بحالة الطلب). */}
       {order.technician_id && (
         <Link href={`/technicians/${order.technician_id}`} className="mt-4 block text-sm text-primary hover:underline">
-          بروفايل الفني
+          بروفايل مقدم الخدمة
         </Link>
       )}
 
@@ -249,7 +249,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <section className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
           <h2 className="font-semibold text-primary">الإدارة بتراجع الصور</h2>
           <p className="mt-1 text-sm text-muted">
-            هنحدد السعر من الصور ونبعتلك إشعار. الطلب مش هيروح لأي فني قبل ما تشوف السعر وتوافق عليه.
+            هنحدد السعر من الصور ونبعتلك إشعار. الطلب مش هيروح لأي مقدم خدمة قبل ما تشوف السعر وتوافق عليه.
           </p>
         </section>
       )}
@@ -277,7 +277,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">
-          <p className="mb-3">الفني خلّص الشغل — أكّد إنك استلمت وسلّمت الكاش للفني.</p>
+          <p className="mb-3">الشغل خلص — أكّد إنك استلمت وسلّمت الكاش لمقدم الخدمة.</p>
           <button
             onClick={() => confirmCashHandover(authedFetch, order.id).then(setOrder)}
             className="rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
@@ -364,8 +364,8 @@ function InitialQuoteApprovalSection({
       <h2 className="font-semibold">السعر جاهز ومستني موافقتك</h2>
       <p className="mt-1 text-sm text-muted">
         {isRemoteQuote
-          ? 'الإدارة حددت السعر من الصور. بعد موافقتك هنبدأ اختيار أنسب فني.'
-          : 'الفني حدد السعر بعد المعاينة. راجعه قبل بدء الشغل.'}
+          ? 'الإدارة حددت السعر من الصور. بعد موافقتك هنبدأ اختيار أنسب مقدم خدمة.'
+          : 'مقدم الخدمة حدد السعر بعد المعاينة. راجعه قبل بدء الشغل.'}
       </p>
       {order.initial_quote_note && (
         <p className="mt-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">{order.initial_quote_note}</p>
@@ -439,7 +439,7 @@ function QuoteApprovalSection({
 
   return (
     <section className="mt-4 rounded-xl border border-warning bg-warning/5 p-4">
-      <h2 className="mb-2 font-semibold">الفني اقترح شغل إضافي — يحتاج موافقتك</h2>
+      <h2 className="mb-2 font-semibold">مقدم الخدمة اقترح شغل إضافي — يحتاج موافقتك</h2>
       {items === null ? (
         <div className="h-16 animate-pulse rounded-lg bg-surface-variant" />
       ) : pending.length === 0 ? (
@@ -679,7 +679,7 @@ function ChatSection({
       </div>
       {/* طلب مالك صريح (docs/08 §93) — نفس السطر الموجود في تطبيق الموبايل بالحرف. */}
       <p className="mb-3 text-xs text-muted">
-        اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.
+        اشرح طلبك لمقدم الخدمة وابعتله صور قبل الزيارة — كده هيعرف يجهّز اللي محتاجه.
       </p>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {messages.length === 0 ? (

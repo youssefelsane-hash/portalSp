@@ -204,7 +204,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                               SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'عندك طلب شغال على العنوان ده — تغييره هيغيّر مكان وصول الفني للطلب ده.',
+                                  'عندك طلب شغال على العنوان ده — تغييره هيغيّر مكان وصول مقدم الخدمة للطلب ده.',
                                   style: TextStyle(color: Colors.orange),
                                 ),
                               ),
@@ -312,7 +312,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                       decoration: const InputDecoration(
                         labelText: 'علامة مميزة قريبة',
                         hintText: 'مثال: فوق صيدلية العزبي، جنب المسجد',
-                        helperText: 'اختياري، بيساعد الفني يوصلك من غير ما يتوه',
+                        helperText: 'اختياري، بيساعد مقدم الخدمة يوصلك من غير ما يتوه',
                       ),
                     ),
                     const SizedBox(height: 12),

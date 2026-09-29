@@ -83,7 +83,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.textContaining('اختار قائد/شركة'), findsOneWidget);
       expect(find.byType(DropdownButton<TechnicianSortOption>), findsOneWidget);
-      expect(find.textContaining('مفيش فنيين متاحين'), findsOneWidget);
+      expect(find.textContaining('مفيش مقدمي خدمة متاحين'), findsOneWidget);
     },
   );
 }

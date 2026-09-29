@@ -5,7 +5,8 @@ import { fetchSupportContactServer } from '@/lib/public-info';
 import { SOCIAL_LABELS_AR, fetchSocialLinks } from '@/lib/social-links';
 import { fetchSeoServices } from '@/lib/seo';
 import { FooterServices } from '@/components/seo/footer-services';
-import { SocialIcon } from '@/components/social-icons';
+import { SocialIcon, WhatsAppMark } from '@/components/social-icons';
+import { whatsappChatUrl } from '@/lib/whatsapp';
 
 /**
  * فوتر الموقع (docs/08 §99 → §136 → **إعادة بناء بريميوم 2026-09-11**).
@@ -87,10 +88,12 @@ export async function SiteFooter() {
   const year = new Date().getFullYear();
 
   const supportEnabled = Boolean(support?.enabled);
-  const whatsappUrl = supportEnabled ? support?.whatsapp_url : null;
-  const callPhone = supportEnabled ? support?.phone_number : null;
+  // رقم الدعم للعميل بيفتح **محادثة واتساب** مش `tel:` (docs/08 §185، طلب مالك). الرقم من
+  // إعدادات خدمة العملاء لو مفعّلة، وإلا رقم الدعم في بيانات الجهة — نفس فوتر التطبيق بالظبط.
+  const supportNumber = (supportEnabled ? support?.phone_number : null) ?? entity.support_phone ?? null;
+  const whatsappUrl = (supportEnabled ? support?.whatsapp_url : null) ?? whatsappChatUrl(supportNumber);
   const email = entity.support_email ?? (supportEnabled ? support?.email : null) ?? null;
-  const hasContactRow = Boolean(whatsappUrl || callPhone || email);
+  const hasContactRow = Boolean(whatsappUrl || supportNumber || email);
 
   return (
     <footer className="mt-20 border-t border-border bg-surface">
@@ -127,22 +130,29 @@ export async function SiteFooter() {
 
             {hasContactRow && (
               <ul className="mt-6 space-y-2 text-sm">
-                {callPhone && (
+                {supportNumber && (
                   <li>
-                    <a href={`tel:${callPhone}`} className="text-foreground transition-colors hover:text-primary" dir="ltr">
-                      {callPhone}
+                    <a
+                      href={whatsappUrl ?? `tel:${supportNumber}`}
+                      {...(whatsappUrl ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                      aria-label={whatsappUrl ? `تواصل معنا على واتساب: ${supportNumber}` : undefined}
+                      className="inline-flex items-center gap-2 text-foreground transition-colors hover:text-primary"
+                    >
+                      {whatsappUrl && <WhatsAppMark className="h-4 w-4 shrink-0" />}
+                      <span dir="ltr">{supportNumber}</span>
                     </a>
                   </li>
                 )}
-                {whatsappUrl && (
+                {whatsappUrl && !supportNumber && (
                   <li>
                     <a
                       href={whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-muted transition-colors hover:text-primary"
+                      className="inline-flex items-center gap-2 text-muted transition-colors hover:text-primary"
                     >
-                      تواصل عبر واتساب
+                      <WhatsAppMark className="h-4 w-4 shrink-0" />
+                      تواصل معنا على واتساب
                     </a>
                   </li>
                 )}

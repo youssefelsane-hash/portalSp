@@ -98,6 +98,7 @@ export class TechnicianOrderExecutionController {
         serviceNameAr,
         isNewForTechnician: order.technicianViewedAt === null,
         assignedCompanyName,
+        preciseAddress: contactVisible,
       }),
       money,
     );

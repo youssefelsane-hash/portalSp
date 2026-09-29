@@ -983,7 +983,7 @@ class _ActiveOrderCard extends StatelessWidget {
                     ),
                     if (duration != null)
                       Text(
-                        'المدة المتوقعة: $duration',
+                        'المدة المتوقعة للتنفيذ: $duration',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     if (order.customerName != null ||
@@ -1074,7 +1074,7 @@ class _EmergencyRequestCard extends StatelessWidget {
               '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
             ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-            if (duration != null) Text('المدة المتوقعة: $duration'),
+            if (duration != null) Text('المدة المتوقعة للتنفيذ: $duration'),
             if (order.problemDescription != null)
               Text(order.problemDescription!),
             const SizedBox(height: 8),
@@ -1178,7 +1178,7 @@ class _WorkOpportunityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            if (duration != null) Text('المدة المتوقعة: $duration'),
+            if (duration != null) Text('المدة المتوقعة للتنفيذ: $duration'),
             Text(opportunity.streetName),
             if (opportunity.problemDescription != null)
               Text(opportunity.problemDescription!),
@@ -1273,7 +1273,7 @@ class _CrewOpportunityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            if (duration != null) Text('المدة المتوقعة: $duration'),
+            if (duration != null) Text('المدة المتوقعة للتنفيذ: $duration'),
             Text(invite.streetName),
             if (invite.problemDescription != null)
               Text(invite.problemDescription!),
@@ -1394,7 +1394,7 @@ class _OverdueJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
-            if (duration != null) 'المدة المتوقعة: $duration',
+            if (duration != null) 'المدة المتوقعة للتنفيذ: $duration',
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
@@ -1468,7 +1468,7 @@ class _UpcomingJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
-            if (duration != null) 'المدة المتوقعة: $duration',
+            if (duration != null) 'المدة المتوقعة للتنفيذ: $duration',
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
@@ -1508,7 +1508,7 @@ class _TeamAssignedJobCard extends StatelessWidget {
           [
             if (order.teamLeaderName != null)
               'قائد الفريق: ${order.teamLeaderName}',
-            if (duration != null) 'المدة المتوقعة: $duration',
+            if (duration != null) 'المدة المتوقعة للتنفيذ: $duration',
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
               earningPending: order.earningPending,
@@ -1795,7 +1795,7 @@ class _NearTermRequestCard extends StatelessWidget {
               '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
             ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-            if (duration != null) Text('المدة المتوقعة: $duration'),
+            if (duration != null) Text('المدة المتوقعة للتنفيذ: $duration'),
             if (order.problemDescription != null)
               Text(order.problemDescription!),
             const SizedBox(height: 6),

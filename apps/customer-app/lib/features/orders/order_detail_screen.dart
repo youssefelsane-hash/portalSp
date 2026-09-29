@@ -199,7 +199,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         await _loadRescheduleRequests();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(approve ? 'تم اعتماد الموعد الجديد وإبلاغ الفني' : 'تم الرفض وسيظل الموعد الحالي كما هو')),
+            SnackBar(content: Text(approve ? 'تم اعتماد الموعد الجديد وإبلاغ مقدم الخدمة' : 'تم الرفض وسيظل الموعد الحالي كما هو')),
           );
         }
       }
@@ -294,7 +294,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
     if (!mounted) return;
     if (options.isEmpty) {
-      await _showRescheduleSupport('لا توجد أيام متاحة للفني خلال الفترة القادمة.');
+      await _showRescheduleSupport('لا توجد أيام متاحة لمقدم الخدمة خلال الفترة القادمة.');
       return;
     }
 
@@ -314,7 +314,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 return ListTile(
                   leading: const Icon(Icons.calendar_today_outlined),
                   title: Text(_formatRescheduleOptionDate(option.date)),
-                  subtitle: const Text('الفني متاح في هذا اليوم'),
+                  subtitle: const Text('مقدم الخدمة متاح في هذا اليوم'),
                   onTap: () => Navigator.of(context).pop(option),
                 );
               },
@@ -338,7 +338,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       );
       if (mounted) {
         setState(() => _order = updated);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — مقدم الخدمة اتبلّغ')));
       }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
@@ -431,7 +431,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         // النتيجة النهائية بتتأكد لاحقًا (webhook)؛ رسالة بسيطة بس، صفر تفاصيل بوابة/دفع للعميل.
         final message = paymentChoice == 'electronic' && order.paymentStatus == 'paid'
             ? 'تمت الموافقة على الزيادة — جاري تحصيل المبلغ'
-            : 'تمت الموافقة — الفني هيكمل الشغل';
+            : 'تمت الموافقة — مقدم الخدمة هيكمل الشغل';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (errRaw) {
@@ -513,8 +513,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           SnackBar(
             content: Text(
               order.orderStatus == 'searching_technician'
-                  ? 'وافقت على السعر — بدأنا اختيار الفني المناسب'
-                  : 'وافقت على السعر — الفني يقدر يكمل الشغل',
+                  ? 'وافقت على السعر — بدأنا اختيار مقدم الخدمة المناسب'
+                  : 'وافقت على السعر — مقدم الخدمة يقدر يكمل الشغل',
             ),
           ),
         );
@@ -711,7 +711,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         child: AlertDialog(
           title: const Text('طلب إعادة زيارة (ضمان)'),
           content: const Text(
-            'هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل. الفني هيتواصل معاك، '
+            'هيتبعت طلب مجاني بالكامل لنفس مقدم الخدمة اللي نفّذ الشغل. هيتواصل معاك، '
             'والنظام هيحجز أول موعد فاضي في جدوله بعد مهلة التنسيق ويعرضه لك فورًا.',
           ),
           actions: [
@@ -738,7 +738,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
         );
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة واتحدد أول موعد متاح للفني')));
+            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة واتحدد أول موعد متاح لمقدم الخدمة')));
       }
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
@@ -758,7 +758,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       await _repository.requestRematch(widget.orderId);
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('بندوّرلك على فني بديل دلوقتي')));
+            .showSnackBar(const SnackBar(content: Text('بندوّرلك على مقدم خدمة بديل دلوقتي')));
       }
       await _load();
     } catch (errRaw) {
@@ -789,7 +789,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 await _repository.requestRematch(widget.orderId, requestedTechnicianId: requestedTechnicianId);
                 if (mounted) {
                   ScaffoldMessenger.of(context)
-                      .showSnackBar(const SnackBar(content: Text('اتبعت طلبك للفني اللي اخترته ✅')));
+                      .showSnackBar(const SnackBar(content: Text('اتبعت طلبك لمقدم الخدمة اللي اخترته ✅')));
                 }
                 await _load();
               } catch (errRaw) {
@@ -1095,7 +1095,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     // بتفيض أفقيًا على شاشة ضيقة/خط كبير بدل ما تلف لسطر تاني.
                                     Expanded(
                                       child: Text(
-                                        'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
+                                        'منها ${_formatEgp(order.levelPremiumCents)} — مقدم خدمة مميّز',
                                         style: TextStyle(
                                           color: Theme.of(context).colorScheme.tertiary,
                                           fontWeight: FontWeight.w600,
@@ -1105,7 +1105,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   ],
                                 ),
                                 Text(
-                                  'اتعيّن لك فني تقييمه ومستواه أعلى. لو تحب تختار بنفسك المرة الجاية، تقدر من "اختار الفني".',
+                                  'اتعيّن لك مقدم خدمة تقييمه ومستواه أعلى. لو تحب تختار بنفسك المرة الجاية، تقدر من "اختار مقدم الخدمة".',
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                         color: Theme.of(context).hintColor,
                                       ),
@@ -1135,7 +1135,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (formatWorkDuration(minutes: order.durationMinutes, days: order.estimatedDurationDays) != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'المدة المتوقعة: ${formatWorkDuration(minutes: order.durationMinutes, days: order.estimatedDurationDays)}'
+                                  'المدة المتوقعة للتنفيذ: ${formatWorkDuration(minutes: order.durationMinutes, days: order.estimatedDurationDays)}'
                                   '${formatWorkforce(technicians: order.requiredTechnicians, assistants: order.requiredAssistants) != null ? ' — ${formatWorkforce(technicians: order.requiredTechnicians, assistants: order.requiredAssistants)}' : ''}',
                                 ),
                               ],
@@ -1149,7 +1149,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'إعادة زيارة لطلب سابق — مجانية بالكامل، والموعد المعروض هو أول وقت متاح للفني الأصلي.',
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل، والموعد المعروض هو أول وقت متاح لمقدم الخدمة الأصلي.',
                                   style: TextStyle(color: Theme.of(context).colorScheme.primary),
                                 ),
                               ],
@@ -1217,7 +1217,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   const SizedBox(height: 8),
                                 ],
                                 if (order.technicianPhone != null) ...[
-                                  const Text('يفضل الاتصال بالفني لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
+                                  const Text('يفضل الاتصال بمقدم الخدمة لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
                                   const SizedBox(height: 8),
                                 // قاعدة بساطة الواجهة (docs/08 §22 بند 20-30) — زرار ثانوي (اتصال/تواصل)
                                 // مش الفعل الأساسي للمرحلة، فمش لازم يتنافس بصريًا مع الفعل الأساسي
@@ -1225,7 +1225,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 OutlinedButton.icon(
                                   onPressed: () => _callTechnician(order.technicianPhone!),
                                   icon: const Icon(Icons.call),
-                                  label: Text('اتصل بالفني${order.technicianName != null ? ' — ${order.technicianName}' : ''}'),
+                                  label: Text('اتصل بمقدم الخدمة${order.technicianName != null ? ' — ${order.technicianName}' : ''}'),
                                 ),
                                 ],
                               ],
@@ -1248,7 +1248,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     const Icon(Icons.event_repeat_outlined),
                                     const SizedBox(width: 8),
                                     Expanded(
-                                      child: Text('الفني يقترح تغيير الموعد', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                      child: Text('مقدم الخدمة يقترح تغيير الموعد', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                                     ),
                                   ]),
                                   const SizedBox(height: 10),
@@ -1300,7 +1300,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.',
+                                'اشرح طلبك لمقدم الخدمة وابعتله صور قبل الزيارة — كده هيعرف يجهّز اللي محتاجه.',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
@@ -1312,7 +1312,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             MaterialPageRoute(builder: (_) => ChatScreen(orderId: order.id)),
                           ),
                           icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('الشات مع الفني'),
+                          label: const Text('الشات مع مقدم الخدمة'),
                         ),
                         const SizedBox(height: 8),
                         OutlinedButton.icon(
@@ -1322,7 +1322,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             ),
                           ),
                           icon: const Icon(Icons.person_outline),
-                          label: const Text('بروفايل الفني'),
+                          label: const Text('بروفايل مقدم الخدمة'),
                         ),
                       ],
                       if (_teamMembers.isNotEmpty) ...[
@@ -1437,7 +1437,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             ),
                           ),
                           icon: const Icon(Icons.location_on_outlined),
-                          label: const Text('تتبّع الفني لحظياً'),
+                          label: const Text('تتبّع مقدم الخدمة لحظيًا'),
                         ),
                       ],
                       if (order.orderStatus == 'awaiting_quote_approval' && _quoteItems.isNotEmpty) ...[
@@ -1511,7 +1511,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             leading: Icon(Icons.manage_search_outlined),
                             title: Text('الإدارة بتراجع الصور'),
                             subtitle: Text(
-                              'هنبعتلك السعر هنا وفي الإشعارات. مفيش فني هيتحرك قبل موافقتك.',
+                              'هنبعتلك السعر هنا وفي الإشعارات. محدش هيتحرك قبل موافقتك.',
                             ),
                           ),
                         ),
@@ -1539,7 +1539,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 const SizedBox(height: 4),
                                 Text(
                                   order.initialQuoteSource == 'admin_remote'
-                                      ? 'السعر اتحدد من الصور. بعد الموافقة هنبدأ اختيار الفني.'
+                                      ? 'السعر اتحدد من الصور. بعد الموافقة هنبدأ اختيار مقدم الخدمة.'
                                       : 'السعر اتحدد بعد المعاينة، راجعه قبل استمرار الشغل.',
                                 ),
                                 if ((_initialQuote?.diagnosis ?? order.initialQuoteNote)?.trim().isNotEmpty ?? false) ...[
@@ -1653,14 +1653,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               icon: const Icon(Icons.money_outlined),
                               label: _confirmingCashHandover
                                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Text('دفعت الفلوس كاش للفني'),
+                                  : const Text('دفعت الفلوس كاش لمقدم الخدمة'),
                             )
                           else
                             Row(
                               children: const [
                                 Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
                                 SizedBox(width: 6),
-                                Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد الفني')),
+                                Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد مقدم الخدمة')),
                               ],
                             ),
                         ],
@@ -1704,7 +1704,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'الفني اعتذر عن طلبك. اختار فني بديل بنفسك أو سيبنا ندوّرلك على واحد.',
+                                  'مقدم الخدمة اعتذر عن طلبك. اختار بديل بنفسك أو سيبنا ندوّرلك على واحد.',
                                 ),
                                 const SizedBox(height: 8),
                                 Row(
@@ -1712,7 +1712,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     Expanded(
                                       child: OutlinedButton(
                                         onPressed: _requestingRematch ? null : _openManualReselection,
-                                        child: const Text('اختار فني بديل'),
+                                        child: const Text('اختار مقدم خدمة بديل'),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -1805,7 +1805,7 @@ class _AwaitingTechnicianCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'طلبك معانا وبندوّرلك على فني',
+                    'طلبك معانا وبندوّرلك على مقدم خدمة',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: theme.colorScheme.onSecondaryContainer,
@@ -1816,8 +1816,8 @@ class _AwaitingTechnicianCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'الطلب ده محتاج الفني يوافق عليه بنفسه — يا إما لأنه قريب/مستعجل، يا إما لأن '
-              'الفنيين المتاحين مشغولين دلوقتي وإحنا مستنيين أول واحد يفضى. أول ما حد يقبل '
+              'الطلب ده محتاج مقدم الخدمة يوافق عليه بنفسه — يا إما لأنه قريب/مستعجل، يا إما لأن '
+              'مقدمي الخدمة المتاحين مشغولين دلوقتي وإحنا مستنيين أول واحد يفضى. أول ما حد يقبل '
               'هيوصلك إشعار فورًا، وفي كل الأحوال هنتواصل معاك خلال الساعات الجاية.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSecondaryContainer,
@@ -2058,7 +2058,7 @@ class _InstaPayInlineCardState extends State<_InstaPayInlineCard> {
             child: Text(
               'لو هتحوّل، ابعت التحويل قبل ما الشغل يخلص بوقت كافي — مراجعة التحويل بتاخد '
               'حوالي ${preview.confirmTypicalMinutes} دقيقة (لحد ${preview.confirmMaxMinutes} '
-              'دقيقة في أوقات الزحمة)، وعايزين نخلّصها والفني لسه معاك.',
+              'دقيقة في أوقات الزحمة)، وعايزين نخلّصها ومقدم الخدمة لسه معاك.',
               style: theme.textTheme.bodySmall,
             ),
           ),

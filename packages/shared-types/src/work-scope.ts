@@ -25,6 +25,25 @@ export function formatWorkDuration(minutes: number | null, days: number | null):
 }
 
 /**
+ * أي مدة أقل من كده قيمة **جدولة تشغيلية** مش مدة تنفيذ (docs/08 §185).
+ *
+ * خدمات زي المغسلة متسعّرة بـ`duration_minutes = 1` عمدًا: عشان الـscheduler مايعتبرش مقدم
+ * الخدمة مشغول ساعات، فيقدر ياخد ٢٠–٣٠ طلب في نفس الفترة. الرقم صح للجدولة وكذب لو اتعرض
+ * للعميل كـ«المدة المتوقعة: دقيقة واحدة». مفيش خدمة منزلية بتتنفّذ في أقل من ٥ دقايق، فالحد ده
+ * مابيخفيش مدة حقيقية.
+ */
+export const SCHEDULING_ONLY_DURATION_MAX_MINUTES = 4;
+
+/**
+ * نسخة العميل من `formatWorkDuration`: نفس الصياغة بالحرف، بس بتخفي مدة الجدولة التشغيلية.
+ * الأدمن بيفضل يستخدم `formatWorkDuration` ويشوف الرقم الحقيقي اللي الـscheduler شغّال بيه.
+ */
+export function formatCustomerFacingWorkDuration(minutes: number | null, days: number | null): string | null {
+  const schedulingOnly = minutes != null && minutes > 0 && minutes <= SCHEDULING_ONLY_DURATION_MAX_MINUTES;
+  return formatWorkDuration(schedulingOnly ? null : minutes, days);
+}
+
+/**
  * «١ متخصص» / «٢ متخصصين» + المساعدين لو فيه.
  *
  * كلمة «صنايعي» اتشالت بطلب المالك: المنصة فيها خدمات مش حرفية (جليسة أطفال، تنظيف، رعاية).
@@ -52,7 +71,8 @@ function daysLabel(days: number): string {
 
 /** تصريف عربي مبسّط بس صحيح: ١ مفرد، ٢ مثنى، ٣–١٠ جمع، ١١+ تمييز مفرد. */
 function countLabel(count: number, singular: string, plural: string): string {
-  if (count === 1) return `${singular} واحد`;
+  // «ساعة واحدة» مش «ساعة واحد» — العدد بيطابق المعدود المؤنث.
+  if (count === 1) return `${singular} ${singular.endsWith('ة') ? 'واحدة' : 'واحد'}`;
   if (count === 2) return dual(singular);
   if (count <= 10) return `${count} ${plural}`;
   return `${count} ${singular}`;

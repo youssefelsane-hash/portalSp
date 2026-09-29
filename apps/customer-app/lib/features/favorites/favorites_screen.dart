@@ -78,8 +78,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                         SizedBox(height: 80),
                         EmptyState(
                           icon: Icons.favorite_border,
-                          title: 'لسه مفيش فنيين في المفضّلة',
-                          description: 'احفظ فني بعد ما تشتغل معاه عشان تلاقيه هنا',
+                          title: 'لسه مفيش مقدمي خدمة في المفضّلة',
+                          description: 'احفظ مقدم الخدمة بعد ما تتعامل معاه عشان تلاقيه هنا',
                         ),
                       ],
                     )

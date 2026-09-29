@@ -16,7 +16,7 @@ class PortfolioLinkViewerScreen extends StatelessWidget {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text(link.title ?? 'فيديو من شغل الفني')),
+        appBar: AppBar(title: Text(link.title ?? 'فيديو من شغل مقدم الخدمة')),
         body: embedUrl == null
             ? const Center(child: Text('مش قادرين نعرض الفيديو ده — الرابط مش بصيغة معروفة'))
             : WebViewWidget(

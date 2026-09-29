@@ -131,7 +131,7 @@ export function InstaPayInlineSection({
       <p className="mt-3 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
         لو هتحوّل، ابعت التحويل <strong>قبل ما الشغل يخلص</strong> بوقت كافي — مراجعة التحويل
         بتاخد حوالي {preview.confirm_typical_minutes} دقيقة (لحد {preview.confirm_max_minutes}{' '}
-        دقيقة في أوقات الزحمة)، وعايزين نخلّصها والفني لسه معاك.
+        دقيقة في أوقات الزحمة)، وعايزين نخلّصها ومقدم الخدمة لسه معاك.
       </p>
 
       {preview.is_payable ? (

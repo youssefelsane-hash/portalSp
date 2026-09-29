@@ -35,7 +35,8 @@ import {
 import { ApiError } from '@/lib/api-client';
 import { assessmentRoutesForService } from '@/lib/assessment-routes';
 import { isProviderDiscoveryReady, providerEligibilityKey } from '@/lib/provider-discovery';
-import { formatWorkDuration } from '@baytak/shared-types';
+import { bookingAnchorId, firstMissingUpTo, missingPricingFields, type BookingMissingItem } from '@/lib/booking-validation';
+import { formatCustomerFacingWorkDuration } from '@baytak/shared-types';
 import { trackFunnelStage } from '@/lib/funnel';
 import { MapPicker } from '@/components/map-picker';
 import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';
@@ -259,6 +260,33 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
    * الويب مش مطلوب يبقى نفس عدد الشاشات، بس **نفس الترتيب المنطقي**.
    */
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  // docs/08 §185 — البند الناقص اللي العميل اتودّى له. رسالته بتختفي لوحدها أول ما يتكمّل
+  // (بتتحسب من الحالة الحالية، مش مخزّنة)، فمفيش خطأ قديم يفضل معلّق بعد التصحيح.
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [scrollNonce, setScrollNonce] = useState(0);
+  const pendingScrollKey = useRef<string | null>(null);
+  const previousStep = useRef(step);
+  const stepperRef = useRef<HTMLOListElement>(null);
+
+  // **خطوة جديدة بتبدأ من أولها** (بلاغ مالك): الصفحة كانت بتفضل متمرّرة لتحت بعد «التالي»،
+  // والموعد المطلوب فوق مش باين. ولو الانتقال سببه بند ناقص، التمرير بيروح للبند نفسه.
+  useEffect(() => {
+    const key = pendingScrollKey.current;
+    if (key) {
+      pendingScrollKey.current = null;
+      previousStep.current = step;
+      const target = document.getElementById(bookingAnchorId(key));
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target
+        .querySelector<HTMLElement>('input:not([type=hidden]):not([type=radio]):not([type=checkbox]), select, textarea')
+        ?.focus({ preventScroll: true });
+      return;
+    }
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    stepperRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [step, scrollNonce]);
   // تفكيك السعر الكامل من `POST /orders/preview` — نفس مصدر التطبيق بالحرف. `estimate`
   // (`/services/:id/estimate`) بيفضل للتقدير المبكّر في الخطوة الأولى بس.
   const [orderPreview, setOrderPreview] = useState<PreviewOrderResponseDto | null>(null);
@@ -669,7 +697,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     } catch (err) {
       // رسالة صريحة بدل كارت فاضي — البند بيمنع أي استبدال أو فشل صامت.
       setPreviewError(
-        err instanceof ApiError ? err.message : 'مقدرناش نرشّح لك فني دلوقتي — جرّب تاني',
+        err instanceof ApiError ? err.message : 'مقدرناش نرشّح لك مقدم خدمة دلوقتي — جرّب تاني',
       );
     } finally {
       setPreviewLoading(false);
@@ -1026,6 +1054,74 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     !submitting &&
     !submitted;
 
+  /*
+    ═══ البنود الناقصة بترتيب الشاشة (docs/08 §185) ═══
+    نفس شروط `stepOneComplete`/`stepTwoComplete`/`canSubmit` فوق بالظبط، بس كل شرط بمكانه
+    ورسالته — عشان «التالي» يودّي العميل للحاجة الناقصة بدل ما يتقفل رمادي من غير سبب.
+  */
+  const missingItems: BookingMissingItem[] = [];
+  if (!selectedAddressId) {
+    missingItems.push({ key: 'address', step: 1, message: 'اختار العنوان اللي هننفّذ فيه الخدمة.' });
+  } else if (!serviceAvailableForAddress) {
+    missingItems.push({
+      key: 'address',
+      step: 1,
+      message: effectiveServiceAvailabilityError
+        ? 'العنوان ده مش متاح للخدمة دي — اختار عنوان تاني أو ضيف عنوان جديد.'
+        : 'بنتأكد إن الخدمة متاحة في العنوان ده — ثواني وجرّب تاني.',
+    });
+  }
+  if (showsDynamicForm) {
+    missingItems.push(
+      ...missingPricingFields(
+        pricingFields ?? [],
+        fieldValues,
+        service.pricing_model === 'formula' ? 'علشان نقدر نحسب السعر' : 'علشان نكمّل طلبك',
+      ),
+    );
+  }
+  if (!scheduleComplete) {
+    missingItems.push({ key: 'schedule', step: 2, message: 'حدد الموعد المناسب قبل اختيار مقدم الخدمة.' });
+  } else if (needsPreciseTime && !preciseTime) {
+    missingItems.push({ key: 'schedule', step: 2, message: 'حدد وقت البداية في اليوم اللي اخترته.' });
+  }
+  if (!providerLocked) {
+    missingItems.push({
+      key: 'provider',
+      step: 2,
+      message:
+        technicianChoiceMode === 'auto'
+          ? 'استنى لحد ما نرشّحلك مقدم الخدمة وسعره، أو اختار بنفسك من القايمة.'
+          : 'اختار مقدم الخدمة من القايمة.',
+    });
+  }
+  if (!remoteQuoteValid) {
+    missingItems.push({
+      key: 'images',
+      step: 3,
+      message: isSameDayBooking
+        ? 'تحديد السعر من الصور مش متاح لحجز النهارده — اختار يوم تاني أو معاينة في الموقع.'
+        : 'ارفع صورة واحدة على الأقل علشان الإدارة تحدد السعر.',
+    });
+  }
+  if (!allRequiredAccepted) {
+    missingItems.push({ key: 'policies', step: 3, message: 'وافق على الشروط المطلوبة علشان نقدر نأكد الحجز.' });
+  }
+
+  /** بيودّي لأول بند ناقص لحد الخطوة دي — لو في خطوة سابقة، بيرجع لها الأول. */
+  function revealFirstMissing(upTo: 1 | 2 | 3): boolean {
+    const first = firstMissingUpTo(missingItems, upTo);
+    if (!first) return false;
+    setRevealedKey(first.key);
+    pendingScrollKey.current = first.key;
+    if (first.step !== step) setStep(first.step);
+    setScrollNonce((n) => n + 1);
+    return true;
+  }
+
+  const errorFor = (key: string): string | null =>
+    revealedKey === key ? (missingItems.find((item) => item.key === key)?.message ?? null) : null;
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
       <header className="overflow-hidden rounded-[28px] border border-border bg-surface shadow-[0_18px_45px_-32px_rgba(18,59,105,0.48)]">
@@ -1057,10 +1153,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
 
       {/* بند 2-7 — مؤشر الخطوات التلاتة. مفيش خطوة رابعة للمراجعة: المراجعة بتحصل في
           الخطوة التالتة نفسها جنب كارت الفني والسعر النهائي. */}
-      <ol className="mt-5 grid grid-cols-3 gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm sm:mt-6 sm:gap-3 sm:p-3">
+      <ol ref={stepperRef} className="mt-5 grid scroll-mt-4 grid-cols-3 gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm sm:mt-6 sm:gap-3 sm:p-3">
         {[
           { n: 1 as const, label: 'العنوان والشغل' },
-          { n: 2 as const, label: 'الموعد والفني' },
+          { n: 2 as const, label: 'الموعد ومقدم الخدمة' },
           { n: 3 as const, label: 'التفاصيل والتأكيد' },
         ].map((s) => (
           // `min-w-0` **ضروري**: بلاها `truncate` جوّه العنصر ده مالهاش أي أثر خالص.
@@ -1096,7 +1192,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         الاقتراحات دلوقتي ليها عنوان تبني عليه، فالعميل بيشوف أيام/ساعات حقيقية مش منتقي فاضي.
       */}
       {step === 2 && needsSchedule && (
-        <section className="motion-rise booking-panel mt-6">
+        <section id={bookingAnchorId('schedule')} className="motion-rise booking-panel mt-6 scroll-mt-24">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
             <div>
               <p className="text-sm font-medium text-accent">الخطوة 2 من 3</p>
@@ -1218,7 +1314,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                 onChange={(e) => setScheduledDateRangeEnd(e.target.value)}
                 />
               </label>
-              <p className="text-xs text-muted sm:col-span-3">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره.</p>
+              <p className="text-xs text-muted sm:col-span-3">هنجيبلك أقرب يوم فيه مقدم خدمة متاح جوّه النطاق اللي تختاره.</p>
             </div>
           )}
 
@@ -1284,6 +1380,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               {timeError && <p className="mt-1 text-sm text-destructive">{timeError}</p>}
             </div>
           )}
+          <FieldError message={errorFor('schedule')} />
         </section>
       )}
 
@@ -1301,7 +1398,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         الويب مش لازم يبقى نفس عدد الشاشات، بس **نفس ترتيب الاعتماديات**.
       */}
       {step === 1 && (
-      <section className="motion-rise booking-panel mt-6">
+      <section id={bookingAnchorId('address')} className="motion-rise booking-panel mt-6 scroll-mt-24">
         <p className="text-sm font-medium text-accent">الخطوة 1 من 3</p>
         <h2 className="mb-3 mt-1 text-xl font-bold">اختار عنوان التنفيذ</h2>
         {addresses === null ? (
@@ -1377,6 +1474,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
             {effectiveServiceAvailabilityError}
           </p>
         )}
+        <FieldError message={errorFor('address')} />
       </section>
       )}
 
@@ -1385,25 +1483,27 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       {step === 1 && showsDynamicForm && pricingFields && pricingFields.length > 0 && (
         <section className="motion-rise booking-panel mt-6">
           <p className="text-sm font-medium text-accent">تفاصيل تساعدنا نطابقك صح</p>
-          <h2 className="mb-1 mt-1 text-xl font-bold">تفاصيل الشغل</h2>
+          <h2 className="mb-1 mt-1 text-xl font-bold">حدد تفاصيل طلبك</h2>
           {/* نفس الجملة بالحرف اللي `JobDetailsScreen` في التطبيق بيقولها. الفكرة إن العميل
               يفهم **ليه** بنسأله قبل ما نعرض أي سعر: من غير التفاصيل دي، السعر اللي هيتعرض
               جنب كل فني في القايمة مش هيكون رقمه الحقيقي. */}
           <p className="mb-3 text-sm text-muted">
-            دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل فني في القايمة
+            دخّل تفاصيل الشغل عشان نقدر نعرضلك السعر النهائي الحقيقي لكل مقدم خدمة في القايمة
           </p>
           <div className="motion-list space-y-3">
             {pricingFields
               .slice()
               .sort((a, b) => a.display_order - b.display_order)
               .map((field) => (
-                <DynamicPricingField
-                  key={field.id}
-                  field={field}
-                  value={fieldValues[field.field_key]}
-                  onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
-                  onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
-                />
+                <div key={field.id} id={bookingAnchorId(`field:${field.field_key}`)} className="scroll-mt-24">
+                  <DynamicPricingField
+                    field={field}
+                    value={fieldValues[field.field_key]}
+                    error={errorFor(`field:${field.field_key}`)}
+                    onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
+                    onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
+                  />
+                </div>
               ))}
           </div>
         </section>
@@ -1419,7 +1519,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
           `catalog_navigation.dart`: حجز اليوم بيروح لإنشاء الطلب مباشرة، وأول فني يقبل
           بياخده. سؤال العميل «مين يعمل الشغل؟» في الحالة دي بيوعده باختيار مش موجود. */}
       {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && !isSameDayBooking && (
-        <section className="motion-rise booking-panel mt-6">
+        <section id={bookingAnchorId('provider')} className="motion-rise booking-panel mt-6 scroll-mt-24">
           <p className="text-sm font-medium text-accent">اختيار المنفّذ</p>
           <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -1430,7 +1530,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               }`}
             >
               <p className="font-medium text-primary">خلي أسطى يختار</p>
-              <p className="text-sm text-muted">أسرع فني متاح بالمنطقة، بأفضل تقييم</p>
+              <p className="text-sm text-muted">أسرع مقدم خدمة متاح بالمنطقة، بأفضل تقييم</p>
             </button>
             <button
               onClick={() => changeTechnicianChoiceMode('manual')}
@@ -1439,7 +1539,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               }`}
             >
               <p className="font-medium">اختار بنفسك</p>
-              <p className="text-sm text-muted">شوف الفنيين المتاحين وسعر كل واحد</p>
+              <p className="text-sm text-muted">اختار من مقدمي الخدمة المتاحين الأنسب ليك</p>
             </button>
           </div>
 
@@ -1506,7 +1606,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
             <div className="motion-list mt-3 space-y-2">
               {/* الموعد لسه ناقص ⇒ حالة محايدة، مش «مفيش فنيين». القايمة ماتسألتش أصلاً. */}
               {!providerScheduleReady ? (
-                <p className="text-sm text-muted">اختار الموعد الأول عشان نعرض لك الفنيين المتاحين وقتها</p>
+                <p className="text-sm text-muted">اختار الموعد الأول عشان نعرض لك مقدمي الخدمة المتاحين وقتها</p>
               ) : technicians === null ? (
                 <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
               ) : technicians.length === 0 ? (
@@ -1514,10 +1614,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                    لآخر خطوة في الحجز بيسيب. البديلين الحقيقيين الوحيدين: معاد تاني، أو نختار
                    إحنا (اللي بيوسّع البحث لأنه مش مربوط بفني بعينه). */
                 <div className="rounded-xl border border-border bg-surface p-4" data-testid="no-technicians-state">
-                  <p className="text-sm font-semibold">مفيش فني متاح في الموعد ده</p>
+                  <p className="text-sm font-semibold">مفيش مقدم خدمة متاح في الموعد ده</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                    كل الفنيين المؤهلين للخدمة دي في منطقتك مشغولين في الوقت اللي اخترته. جرّب
-                    معاد تاني، أو سيبنا نختار أقرب فني متاح.
+                    كل مقدمي الخدمة المؤهلين للخدمة دي في منطقتك مشغولين في الوقت اللي اخترته. جرّب
+                    معاد تاني، أو سيبنا نختار أقرب مقدم خدمة متاح.
                   </p>
                   <button
                     type="button"
@@ -1525,7 +1625,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                     className="motion-press mt-3 inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground"
                     data-testid="no-technicians-auto"
                   >
-                    اختاروا لي أقرب فني متاح
+                    اختاروا لي أقرب مقدم خدمة متاح
                   </button>
                 </div>
               ) : (
@@ -1562,6 +1662,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               )}
             </div>
           )}
+          <FieldError message={errorFor('provider')} />
         </section>
       )}
 
@@ -1605,16 +1706,16 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
           onChange={(e) => setProblemDescription(e.target.value)}
           maxLength={2000}
           rows={3}
-          placeholder="اكتب أي تفاصيل تساعد الفني يجهّز الأدوات المناسبة"
+          placeholder="اكتب أي تفاصيل تساعد مقدم الخدمة يجهّز اللي محتاجه"
           className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
         />
       </section>
       )}
 
       {step === 3 && (
-      <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
+      <section id={bookingAnchorId('images')} className="motion-rise mt-6 scroll-mt-24 rounded-xl border border-border bg-surface p-4">
         <h2 className="font-semibold">صور المشكلة (اختياري)</h2>
-        <p className="mt-1 text-sm text-muted">الصور بتساعد الفني يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
+        <p className="mt-1 text-sm text-muted">الصور بتساعد مقدم الخدمة يجهّز نفسه، ومش مطلوبة للحجز العادي.</p>
         {problemImages.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {problemImages.map((image, index) => (
@@ -1693,7 +1794,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               <span>
                 <span className="block font-medium">الإدارة تحدد السعر من الصور</span>
                 <span className="mt-1 block text-sm text-muted">
-                  الإدارة هتبعت السعر، وإنت تقبله أو ترفضه قبل ما الطلب يروح لأي فني
+                  الإدارة هتبعت السعر، وإنت تقبله أو ترفضه قبل ما الطلب يروح لأي مقدم خدمة
                   {service.remote_assessment_fee_cents > 0 &&
                     ` — رسم التقييم ${formatEgp(service.remote_assessment_fee_cents)}`}
                   .
@@ -1742,6 +1843,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
             </p>
           </div>
         )}
+        <FieldError message={errorFor('images')} />
       </section>
       )}
 
@@ -1876,7 +1978,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
           مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
       {step === 3 && postpaidPolicies.length > 0 && (
-        <section className="motion-rise mt-6 rounded-xl border border-border bg-surface p-4">
+        <section id={bookingAnchorId('policies')} className="motion-rise mt-6 scroll-mt-24 rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-2 font-semibold">شروط الدفع</h2>
           {postpaidPolicies.map((policy) => {
             const checked = acceptedPolicyVersions.has(policy.currentVersionId);
@@ -1904,6 +2006,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               </label>
             );
           })}
+          <FieldError message={errorFor('policies')} />
         </section>
       )}
 
@@ -1981,13 +2084,13 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
               )}
               {service.pricing_model === 'inspection_then_quote' && (
                 <p className="mt-0.5 text-xs text-muted">
-                  السعر النهائي بعد ما الفني يشوف الشغل
+                  السعر النهائي بعد ما مقدم الخدمة يشوف الشغل
                 </p>
               )}
-              {formatWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days) !== null && (
+              {formatCustomerFacingWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days) !== null && (
                 <p className="mt-0.5 text-xs text-muted">
-                  المدة المتوقعة:{' '}
-                  {formatWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days)}
+                  المدة المتوقعة للتنفيذ:{' '}
+                  {formatCustomerFacingWorkDuration(priceBreakdown.duration_minutes, priceBreakdown.estimated_duration_days)}
                 </p>
               )}
 
@@ -2038,28 +2141,41 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         )}
         {step < 3 ? (
           <button
-            onClick={() => setStep((step + 1) as 1 | 2 | 3)}
-            disabled={step === 1 ? !stepOneComplete : !stepTwoComplete}
+            onClick={() => {
+              // الزرار مابيتقفلش في صمت: لو فيه حاجة ناقصة بيودّي لها ويقول إيه هي.
+              if (revealFirstMissing(step)) return;
+              // شبكة أمان: نفس بوابة الخطوة القديمة بالحرف. لو القايمة فوق ماجابتش بند والبوابة
+              // لسه قافلة (شرط اتضاف هنا ومااتضافش هناك)، مانعدّيش الخطوة في صمت.
+              if (!(step === 1 ? stepOneComplete : stepTwoComplete)) {
+                setError('كمّل البيانات المطلوبة في الخطوة دي الأول.');
+                return;
+              }
+              setRevealedKey(null);
+              setError(null);
+              setStep((step + 1) as 1 | 2 | 3);
+            }}
             className="flex-1 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             التالي
           </button>
         ) : (
           <button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
+            onClick={() => {
+              if (revealFirstMissing(3)) return;
+              // كل البنود كاملة والسعر لسه بيتحسب — مش بند ناقص عند العميل، فمفيش مكان نودّيه له.
+              if (!canSubmit) {
+                setError('استنى لحد ما السعر يتحسب وبعدين أكّد.');
+                return;
+              }
+              void handleSubmit();
+            }}
+            disabled={submitting || submitted}
             className="flex-1 rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? 'جاري تأكيد الحجز...' : submitted ? 'تم التأكيد' : 'أكّد الحجز'}
           </button>
         )}
       </div>
-      {step === 1 && !stepOneComplete && (
-        <p className="mt-2 text-sm text-muted">كمّل تفاصيل الشغل والموعد عشان تعدّي للخطوة الجاية.</p>
-      )}
-      {step === 2 && !stepTwoComplete && (
-        <p className="mt-2 text-sm text-muted">اختار عنوان ووافق على الشروط المطلوبة عشان تعدّي.</p>
-      )}
     </div>
   );
 }
@@ -2111,7 +2227,46 @@ function ShieldCheckIcon() {
   );
 }
 
+/** رسالة النقص تحت الحقل/القسم نفسه (docs/08 §185) — مفيش مساحة محجوزة لو مفيش خطأ. */
+function FieldError({ message }: { message: string | null | undefined }) {
+  if (!message) return null;
+  return (
+    <p role="alert" className="mt-2 flex items-start gap-1.5 text-sm font-medium text-danger">
+      <span aria-hidden="true">⚠</span>
+      <span>{message}</span>
+    </p>
+  );
+}
+
+/** الحقل + رسالة النقص بتاعته. الإطار بيتلوّن لما العميل يتودّى له. */
 function DynamicPricingField({
+  error,
+  ...props
+}: {
+  field: PricingFieldDto;
+  value: PricingFieldValue | undefined;
+  onChange: (value: PricingFieldValue) => void;
+  onUpload: (file: File) => Promise<{ id: string; file_url: string }>;
+  error?: string | null;
+}) {
+  return (
+    <div className={error ? 'booking-field-invalid' : undefined}>
+      <DynamicPricingFieldControl {...props} />
+      <FieldError message={error} />
+    </div>
+  );
+}
+
+/**
+ * أكتر من كده اختيارات ⇒ قايمة منسدلة مرتبة بدل شبكة أزرار بطول الصفحة. التطبيق بيفتح
+ * bottom sheet بعد ٤ (شاشة الموبايل أضيق)؛ الويب بيستحمل شبكة أعرض قبل ما يحتاج قايمة.
+ */
+const WEB_INLINE_CHOICES_MAX = 8;
+
+/** الوحدة لو أطول من كده مش وحدة، ده شرح الأدمن — نفس الحد في التطبيق (`kMaxInlineUnitLength`). */
+const MAX_INLINE_UNIT_LENGTH = 24;
+
+function DynamicPricingFieldControl({
   field,
   value,
   onChange,
@@ -2125,12 +2280,15 @@ function DynamicPricingField({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, string>>({});
-  const unit = field.unit_ar?.trim();
-  const longUnit = unit && unit.length > 24 ? `(${unit})` : null;
-  const label = `${field.label_ar}${field.is_required ? ' *' : ''}${unit && !longUnit ? ` (${unit})` : ''}`;
+  // `unit_ar` بيتكتب إما وحدة قصيرة («قميص») أو شرح كامل («حدد عدد البلوزات في الطلب»). القصير
+  // وحدة جنب القيمة، والطويل شرح تحت العنوان — كامل ومن غير أقواس (docs/08 §185).
+  const unit = field.unit_ar?.trim() || null;
+  const inlineUnit = unit && unit.length <= MAX_INLINE_UNIT_LENGTH ? unit : null;
+  const helper = unit && !inlineUnit ? unit.replace(/^\(([\s\S]*)\)$/, '$1').trim() || null : null;
   const fieldLabel = <>
-    {label}
-    {longUnit && <span className="mt-1 block break-words text-sm font-normal text-muted">{longUnit}</span>}
+    {field.label_ar}
+    {field.is_required && <span className="text-danger"> *</span>}
+    {helper && <span className="mt-1 block break-words text-sm font-normal leading-6 text-muted">{helper}</span>}
   </>;
 
   if (field.field_type === 'image_upload') {
@@ -2209,6 +2367,27 @@ function DynamicPricingField({
           <p className="font-semibold">{fieldLabel}</p>
           <p className="mt-1 text-sm text-muted">لا توجد اختيارات مهيأة لهذا الحقل الآن. لن نطلب منك كتابة قيمة غير واضحة.</p>
         </div>
+      );
+    }
+    if (options.length > WEB_INLINE_CHOICES_MAX) {
+      return (
+        <label className="booking-field block">
+          <span className="booking-field-label">{fieldLabel}</span>
+          <select
+            value={typeof value === 'string' ? value : ''}
+            onChange={(e) => onChange(e.target.value)}
+            className="booking-control mt-3"
+          >
+            <option value="" disabled>
+              اختار من {options.length} اختيارات
+            </option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label_ar}
+              </option>
+            ))}
+          </select>
+        </label>
       );
     }
     return (
@@ -2298,7 +2477,10 @@ function DynamicPricingField({
       <div className="booking-field">
         <div className="flex items-center justify-between gap-3">
           <label htmlFor={`field-${field.id}`} className="booking-field-label min-w-0 break-words">{fieldLabel}</label>
-          <output className="rounded-full bg-primary/8 px-3 py-1 text-sm font-bold text-primary">{current}</output>
+          <output className="shrink-0 rounded-full bg-primary/8 px-3 py-1 text-sm font-bold text-primary">
+            {current}
+            {inlineUnit ? ` ${inlineUnit}` : ''}
+          </output>
         </div>
         <input
           id={`field-${field.id}`}
@@ -2341,14 +2523,19 @@ function DynamicPricingField({
   return (
     <label className="booking-field block">
       <span className="booking-field-label">{fieldLabel}</span>
-      <input
-        type="number"
-        value={(value as number) ?? ''}
-        min={field.min_value ?? undefined}
-        max={field.max_value ?? undefined}
-        onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-        className="booking-control mt-3"
-      />
+      <span className="mt-3 flex items-center gap-2">
+        <input
+          type="number"
+          inputMode="decimal"
+          placeholder="أدخل العدد"
+          value={(value as number) ?? ''}
+          min={field.min_value ?? undefined}
+          max={field.max_value ?? undefined}
+          onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+          className="booking-control min-w-0 flex-1"
+        />
+        {inlineUnit && <span className="shrink-0 text-sm text-muted">{inlineUnit}</span>}
+      </span>
     </label>
   );
 }
@@ -2481,7 +2668,7 @@ function NewAddressForm({
 // بادج توثيق صغيرة (docs/08 §83 جزء ج) — مطابقة TrustBadge في apps/customer-app بصريًا.
 function TrustBadge() {
   return (
-    <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary" title="فني موثّق">
+    <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary" title="مقدم خدمة موثّق">
       ✓
     </span>
   );
@@ -2552,13 +2739,13 @@ function IndividualCard({
                 هو اللي كان بيستخدمه. */}
             <p className="mt-0.5 text-xs text-muted">
               {t.available_again_at
-                ? `الفني متاح من ${new Date(t.available_again_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'numeric' })}`
-                : 'الفني ده مش متاح خلال الشهر الجاي'}
+                ? `متاح من ${new Date(t.available_again_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'numeric' })}`
+                : 'مش متاح خلال الشهر الجاي'}
             </p>
           </>
         )}
         <p className="mt-1 text-sm text-muted">
-          {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}
+          {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'جديد على أسطى'}
           {t.distance_km !== null ? ` · ${t.distance_km} كم` : ''}
         </p>
         {/* نفس منطق التطبيق بالحرف (ADR-0099): المؤشر بيتبدّل بأفق الطلب، والسيرفر هو اللي
@@ -2608,7 +2795,7 @@ function CompanyCard({
       <div className="p-3">
         <div className="flex flex-wrap gap-1.5">
           <CompanyTag label={t.is_commercial_company ? 'شركة مسجّلة' : 'فريق عمل'} emphasized />
-          <CompanyTag label={`${t.staff_count ?? 0} فني`} />
+          <CompanyTag label={`${t.staff_count ?? 0} فرد في الفريق`} />
           {(t.branch_count ?? 0) > 0 && <CompanyTag label={`${t.branch_count} فرع`} />}
           {t.service_completed_count > 0 && (
             <CompanyTag label={`${t.service_completed_count} طلب في الخدمة دي`} />
