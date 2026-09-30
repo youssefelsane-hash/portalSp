@@ -19210,3 +19210,23 @@ rollback على نفس الفشل. **مقاس على القديم**: الفرق 
 
 لا notification system جديد، لا ranking engine جديد، لا training platform جديدة، لا خدمة مراقبة جديدة، لا
 auto-rematch في D-4 (الموظف بيستخدم reassign/rematch/reschedule الموجودين).
+
+### التنفيذ والنتائج (بيتحدّث مع كل بند)
+
+- **UX-1 ✅** `packages/shared-types/src/phone.ts` (`phoneNumberForApi`/`isValidPhoneInput`/`phoneNumberForDisplay`) —
+  نفس قاعدة `phone_number.dart` بالحرف، مستخدمة في دخول/تسجيل/استرجاع الويب. السيرفر نفسه بقى يقبل `01[0125]…`
+  كدفاع (`common/utils/phone-number.ts`، 9 اختبارات). `test/phone-number.test.mjs` 4/4.
+- **UX-2 ✅** ADR-0115: `POST /auth/pin/phone-status` ⇒ `{registered}` بس، سقف لكل IP (10/د)، مفتاح
+  `auth.phone_status_lookup_enabled` (migration 0371). الدخول نفسه **ماتغيّرش** — تدقيق الأمان 34/34
+  (4 فحوص جديدة للمسار). التطبيقين: `AuthRepository.isPhoneRegistered()` + توجيه في شاشة الدخول (9 widget
+  tests + `test_live/phone_routing_live_test.dart`). الويب: `usePhoneRegistrationRouting` + «لا، خليني هنا»
+  (`scripts/verify-web-phone-routing.js` 5/5 بمتصفح). أي فشل للسؤال = السلوك القديم بالظبط.
+- **UX-3 ✅** تطبيق العميل: `lib/design/reveal_next_section.dart` — أقل تمرير يبيّن الجزء الجاي
+  (`keepVisibleAtEnd`)، صفر حركة لو باين، ومن غير أنيميشن مع «تقليل الحركة». موصول في
+  `ScheduleSelectionScreen`: اليوم ⇒ كارت الساعة (ومرة تانية لما الاقتراحات توصل وتطوّله) ⇒ «تأكيد الميعاد».
+  `test/reveal_next_section_test.dart` 4/4 (منهم الشاشة الحقيقية على 360×520). الويب:
+  `src/lib/reveal-next-section.ts` بنفس الحساب (سقف عند أول الجزء تحت الهيدر، `prefers-reduced-motion`)،
+  موصول في `booking-flow.tsx`: اليوم (اقتراح/تاريخ/نطاق) ⇒ الساعة ⇒ «مقدم الخدمة». `test/reveal-next-section.test.mjs`
+  4/4 + `scripts/verify-web-booking-reveal.js` 5/5 بمتصفح (390×640: الساعة من y=1125 مستخبية ⇒ باينة كلها
+  وخانة اليوم لسه على الشاشة). «لأول حاجة ناقصة» كان موجود من §185 (`_failValidation` في التطبيق،
+  `revealFirstMissing` في الويب) — اتراجع ومااتعملش نسخة تانية منه.

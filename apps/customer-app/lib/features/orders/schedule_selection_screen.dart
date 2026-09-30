@@ -6,6 +6,7 @@ import '../../core/arabic_time.dart';
 import '../../core/auth_repository.dart';
 import 'booking_time_picker.dart';
 import 'booking_window.dart';
+import '../../design/reveal_next_section.dart';
 
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
 // **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
@@ -125,6 +126,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
 
   /// نافذة اختيار الموعد (ADR-0097) — بتيجي مع اقتراح الأيام، وبتفضل الافتراضي لو النداء فشل.
   BookingWindow _bookingWindow = BookingWindow.fallback;
+
+  /// الخطوة الجاية بعد اليوم (الساعة)، وبعد الساعة (زرار التأكيد) — docs/08 §189 UX-3.
+  final _timeSectionKey = GlobalKey();
+  final _confirmKey = GlobalKey();
 
   /// بيتقري مرة واحدة في `initState` — استخدام `context` بعد `await` بيكسر قاعدة
   /// `use_build_context_synchronously` (والـWidget ممكن يكون اتشال أصلاً).
@@ -251,7 +256,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       _selectedRangeEnd = null;
       _suggestedTimes = const [];
     });
+    revealNextSection(_timeSectionKey);
     await _loadSuggestedTimes(date);
+    // الساعات المقترحة بتزوّد طول الجزء بعد التحميل — نفس التمرير تاني عشان يبان كامل.
+    if (mounted) revealNextSection(_timeSectionKey);
   }
 
   @override
@@ -372,7 +380,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       _selectedRangeEnd = null;
       _suggestedTimes = const [];
     });
+    revealNextSection(_timeSectionKey);
     await _loadSuggestedTimes(date);
+    // الساعات المقترحة بتزوّد طول الجزء بعد التحميل — نفس التمرير تاني عشان يبان كامل.
+    if (mounted) revealNextSection(_timeSectionKey);
   }
 
   Future<void> _pickFlexibleRange(BuildContext context) async {
@@ -407,6 +418,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       _selectedDate = start;
       _selectedRangeEnd = end;
     });
+    revealNextSection(_timeSectionKey);
   }
 
   // بلا بارامتر `context` عمدًا: بعد الـawait الاستخدام لازم يكون على `State.context` المحروس
@@ -429,6 +441,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       return;
     }
     setState(() => _selectedTime = picked);
+    revealNextSection(_confirmKey);
   }
 
   String _formatDate(DateTime date) {
@@ -600,14 +613,19 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                           label: Text('$time · $free متاحين'),
                           onSelected: asTimeOfDay == null
                               ? null
-                              : (_) =>
-                                    setState(() => _selectedTime = asTimeOfDay),
+                              : (_) {
+                                  setState(() => _selectedTime = asTimeOfDay);
+                                  revealNextSection(_confirmKey);
+                                },
                         );
                       }).toList(),
                     ),
                   ],
                   const SizedBox(height: 12),
+                  // هدف التمرير بعد اختيار اليوم (docs/08 §189 UX-3): كارت الساعة نفسه — هو اللي
+                  // العميل محتاج يدوس عليه، والساعات المقترحة فوقه بتبان معاه.
                   _ScheduleOptionCard(
+                    key: _timeSectionKey,
                     icon: Icons.schedule_outlined,
                     title: 'الساعة',
                     subtitle: _selectedTime != null
@@ -618,6 +636,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                   ),
                   const SizedBox(height: 20),
                   FilledButton(
+                    key: _confirmKey,
                     onPressed: _canConfirm ? _confirm : null,
                     child: const Text('تأكيد الميعاد'),
                   ),
@@ -798,6 +817,7 @@ class _ScheduleOptionCard extends StatelessWidget {
   final bool selected;
 
   const _ScheduleOptionCard({
+    super.key,
     required this.icon,
     required this.title,
     required this.subtitle,

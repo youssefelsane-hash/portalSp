@@ -39,6 +39,7 @@ import { isProviderDiscoveryReady, providerEligibilityKey } from '@/lib/provider
 import { bookingAnchorId, firstMissingUpTo, missingPricingFields, type BookingMissingItem } from '@/lib/booking-validation';
 import { formatCustomerFacingWorkDuration } from '@baytak/shared-types';
 import { trackFunnelStage } from '@/lib/funnel';
+import { revealNextSection } from '@/lib/reveal-next-section';
 import { MapPicker } from '@/components/map-picker';
 import { clearPendingPromoLinkCode, readPendingPromoLink } from '@/lib/promo-link';
 import {
@@ -268,6 +269,22 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   const pendingScrollKey = useRef<string | null>(null);
   const previousStep = useRef(step);
   const stepperRef = useRef<HTMLOListElement>(null);
+  // docs/08 §189 UX-3 — بعد اختيار اليوم ننزل بهدوء لحد الساعة، وبعد الساعة لحد اختيار المنفّذ.
+  const timeSectionRef = useRef<HTMLDivElement>(null);
+  const providerSectionRef = useRef<HTMLElement>(null);
+  // اقتراحات الساعة بتوصل بعد اليوم بلحظة وبتطوّل الجزء — فبنكمّل التمرير لما توصل.
+  const revealTimeAfterSuggestions = useRef(false);
+  function revealTimeSection() {
+    // خدمات «يوم بس» مالهاش جزء ساعة — مفيش حاجة نستناها.
+    if (!timeSectionRef.current) return;
+    revealTimeAfterSuggestions.current = true;
+    revealNextSection(timeSectionRef.current);
+  }
+  useEffect(() => {
+    if (!revealTimeAfterSuggestions.current || suggestedTimes === null) return;
+    revealTimeAfterSuggestions.current = false;
+    revealNextSection(timeSectionRef.current);
+  }, [suggestedTimes]);
 
   // **خطوة جديدة بتبدأ من أولها** (بلاغ مالك): الصفحة كانت بتفضل متمرّرة لتحت بعد «التالي»،
   // والموعد المطلوب فوق مش باين. ولو الانتقال سببه بند ناقص، التمرير بيروح للبند نفسه.
@@ -1284,6 +1301,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                             setScheduledDate(suggestion.day);
                             markBookingStarted();
                             setRequestRemoteQuote(false);
+                            revealTimeSection();
                           }}
                           className={`booking-suggestion text-right ${
                             isPicked ? 'booking-suggestion-selected' : ''
@@ -1316,6 +1334,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                     setScheduledDate(e.target.value);
                     markBookingStarted();
                     if (e.target.value <= new Date().toLocaleDateString('en-CA')) setRequestRemoteQuote(false);
+                    if (e.target.value) revealTimeSection();
                   }}
                 />
               </label>
@@ -1340,7 +1359,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                 <input
                 type="date"
                 value={scheduledDateRangeEnd}
-                onChange={(e) => setScheduledDateRangeEnd(e.target.value)}
+                onChange={(e) => {
+                  setScheduledDateRangeEnd(e.target.value);
+                  if (e.target.value) revealNextSection(providerSectionRef.current);
+                }}
                 />
               </label>
               <p className="text-xs text-muted sm:col-span-3">هنجيبلك أقرب يوم فيه مقدم خدمة متاح جوّه النطاق اللي تختاره.</p>
@@ -1361,7 +1383,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
           )}
 
           {needsPreciseTime && (
-            <div className="mt-6 border-t border-border pt-5">
+            <div ref={timeSectionRef} data-testid="booking-time-section" className="mt-6 border-t border-border pt-5">
               {suggestedTimes && suggestedTimes.length > 0 && (
                 <div className="booking-suggestions mb-4">
                   <p className="font-semibold">اقتراحات الساعة</p>
@@ -1371,7 +1393,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                       <button
                         key={slot.time}
                         type="button"
-                        onClick={() => setPreciseTime(slot.time)}
+                        onClick={() => {
+                          setPreciseTime(slot.time);
+                          revealNextSection(providerSectionRef.current);
+                        }}
                           className={`booking-time-chip ${
                             preciseTime === slot.time ? 'booking-time-chip-selected' : ''
                           }`}
@@ -1548,7 +1573,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
           `catalog_navigation.dart`: حجز اليوم بيروح لإنشاء الطلب مباشرة، وأول فني يقبل
           بياخده. سؤال العميل «مين يعمل الشغل؟» في الحالة دي بيوعده باختيار مش موجود. */}
       {step === 2 && selectedAddressId && !effectiveRequestRemoteQuote && !isSameDayBooking && (
-        <section id={bookingAnchorId('provider')} className="motion-rise booking-panel mt-6 scroll-mt-24">
+        <section ref={providerSectionRef} id={bookingAnchorId('provider')} className="motion-rise booking-panel mt-6 scroll-mt-24">
           <p className="text-sm font-medium text-accent">اختيار المنفّذ</p>
           <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>
           <div className="flex flex-col gap-2 sm:flex-row">
