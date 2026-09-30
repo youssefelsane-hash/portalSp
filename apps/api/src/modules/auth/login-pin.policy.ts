@@ -240,3 +240,20 @@ export function registrationThrottleLimit(nodeEnv = process.env.NODE_ENV): numbe
     ? Math.floor(raw)
     : REGISTRATION_THROTTLE_LIMIT_DEFAULT;
 }
+
+/**
+ * **سقف سؤال «الرقم ده مسجّل؟» لكل IP في الدقيقة** (ADR-0115) — الافتراضي ١٠.
+ *
+ * أعلى من التسجيل (٥) لأن المستخدم الحقيقي ممكن يصحّح رقمه كذا مرة، وأقل كفاية إن مسح الأرقام
+ * بالجملة يبقى بطيء ومرصود. نفس قاعدة `registrationThrottleLimit` بالظبط: متغيّر البيئة بيرفع السقف
+ * **بره الإنتاج بس** (للاختبارات الحية من IP واحد)، والإنتاج مقفول على الافتراضي بالبناء.
+ */
+export const PHONE_STATUS_THROTTLE_LIMIT_DEFAULT = 10;
+
+export function phoneStatusThrottleLimit(nodeEnv = process.env.NODE_ENV): number {
+  if (nodeEnv === 'production' || nodeEnv === 'staging') return PHONE_STATUS_THROTTLE_LIMIT_DEFAULT;
+  const raw = Number(process.env.AUTH_PHONE_STATUS_THROTTLE_LIMIT);
+  return Number.isFinite(raw) && raw > PHONE_STATUS_THROTTLE_LIMIT_DEFAULT
+    ? Math.floor(raw)
+    : PHONE_STATUS_THROTTLE_LIMIT_DEFAULT;
+}

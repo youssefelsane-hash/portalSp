@@ -842,6 +842,19 @@ export class AuthService {
    * كل حاجة تانية — البروفايل، المحفظة، كود الترشيح، والخمس أحداث — بتمر من نفس الدوال
    * بالظبط، عشان أي مستهلك (إعلانات، ترشيح، ترحيب) ماياخدش باله إن فيه مسار تاني أصلاً.
    */
+  /**
+   * «الرقم ده مسجّل؟» (ADR-0115). نفس المعلومة اللي الـ409 بتاع التسجيل بيقولها من زمان، بس من غير
+   * إنشاء حساب — عشان الواجهة توجّه المستخدم قبل ما يكتب رمز أو اسم. مفيش أي حقل تاني بيرجع.
+   * المفتاح `auth.phone_status_lookup_enabled` بيقفله (404) والواجهات بترجع للسلوك القديم.
+   */
+  async phoneRegistrationStatus(phoneNumber: string): Promise<{ registered: boolean }> {
+    if (!(await this.settingsService.getBoolean('auth.phone_status_lookup_enabled', true))) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مش متاحة حاليًا', HttpStatus.NOT_FOUND);
+    }
+    const registered = await this.users.exists({ where: { phoneNumber } });
+    return { registered };
+  }
+
   async registerWithPin(dto: PinRegisterDto, ip: string | null): Promise<TokenPair> {
     this.assertPinFormat(dto.pin);
     const pinHash = await hashPin(dto.pin, this.pinPepper());

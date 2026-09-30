@@ -7,6 +7,8 @@ import { PhoneField } from '@/components/phone-field';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { PinField, localPinError } from '@/components/pin-field';
+import { PhoneRoutingNotice } from '@/components/phone-routing-notice';
+import { usePhoneRegistrationRouting } from '@/lib/phone-registration-routing';
 
 /**
  * **تسجيل الدخول — رقم موبايل + رمز دخول** (ADR-0109).
@@ -18,8 +20,12 @@ import { PinField, localPinError } from '@/components/pin-field';
 function LoginForm() {
   const router = useRouter();
   const { loginWithPin } = useAuth();
-  const [phone, setPhone] = useState(useSearchParams().get('phone') ?? '');
+  const searchParams = useSearchParams();
+  const [phone, setPhone] = useState(searchParams.get('phone') ?? '');
   const [pin, setPin] = useState('');
+  // جاي من «حساب جديد» برقم مسجّل (docs/08 §189 UX-2): الرقم مكتوب، والناقص الرمز بس.
+  const cameFromRegister = searchParams.get('from') === 'register';
+  const routing = usePhoneRegistrationRouting('login', phone);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /**
@@ -58,8 +64,15 @@ function LoginForm() {
     <div className="mx-auto max-w-sm px-4 py-16">
       <h1 className="mb-6 text-center text-2xl font-bold">تسجيل الدخول</h1>
 
+      {cameFromRegister && (
+        <p className="mb-4 rounded-lg bg-primary/5 px-4 py-3 text-sm" data-testid="login-existing-account">
+          إنت عميل حالي — اكتب رمز الدخول بتاعك وكمّل.
+        </p>
+      )}
+
       <form onSubmit={submit} className="space-y-4">
-        <PhoneField id="login-phone" value={phone} onChange={setPhone} autoFocus />
+        <PhoneField id="login-phone" value={phone} onChange={setPhone} autoFocus={!cameFromRegister} />
+        <PhoneRoutingNotice routing={routing} goLabel="أنشئ حساب جديد" />
 
         <PinField
           id="login-pin"
@@ -67,6 +80,7 @@ function LoginForm() {
           value={pin}
           onChange={setPin}
           autoComplete="current-password"
+          autoFocus={cameFromRegister}
           allowLegacy
         />
 

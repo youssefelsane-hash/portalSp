@@ -225,6 +225,39 @@ async function main() {
     check('**إعادة استخدام refresh قديم مرفوضة** — سرقة توكن قديم مابتفتحش جلسة',
       replay.status >= 400, `HTTP=${replay.status}`);
 
+    // ═══ «الرقم ده مسجّل؟» (ADR-0115) ═══════════════════════════════════
+    //
+    // المعلومة دي مقبولة صراحةً (نفس الـ409 بتاع التسجيل)، فاللي بيتقاس هنا **حدودها**: boolean
+    // واحد بس، ونفس الإجابة للشكل المحلي والدولي. سقف المعدل نفسه في `rate-limit-abuse-audit.js`
+    // (التدقيق ده بيشتغل بسقوف مرفوعة عن قصد).
+    console.log(`\n${B}«الرقم ده مسجّل؟» (ADR-0115)${O}`);
+    const known = await registerFresh('status');
+    const statusKnown = await h.api('/auth/pin/phone-status', { method: 'POST', body: { phone_number: known.phone } });
+    const unknownPhone = h.nextPhone();
+    const statusUnknown = await h.api('/auth/pin/phone-status', { method: 'POST', body: { phone_number: unknownPhone } });
+    check('رقم مسجّل ⇒ registered=true، ومش مسجّل ⇒ false',
+      statusKnown.body?.data?.registered === true && statusUnknown.body?.data?.registered === false,
+      `HTTP=${statusKnown.status}/${statusUnknown.status}`);
+    check('**الرد boolean واحد بس** — مفيش اسم ولا دور ولا حالة قفل',
+      JSON.stringify(Object.keys(statusKnown.body?.data ?? {})) === '["registered"]',
+      JSON.stringify(statusKnown.body?.data));
+    const local = known.phone.startsWith('+20') ? `0${known.phone.slice(3)}` : null;
+    if (local && /^01[0125][0-9]{8}$/.test(local)) {
+      const statusLocal = await h.api('/auth/pin/phone-status', { method: 'POST', body: { phone_number: local } });
+      check('الشكل المحلي (010…) بيدّي نفس الإجابة', statusLocal.body?.data?.registered === true, `HTTP=${statusLocal.status}`);
+    }
+    const unregisteredLogin = await h.api('/auth/pin/login', {
+      method: 'POST',
+      body: { phone_number: unknownPhone, pin: WRONG_PIN },
+    });
+    const wrongPinLogin = await h.api('/auth/pin/login', {
+      method: 'POST',
+      body: { phone_number: known.phone, pin: WRONG_PIN },
+    });
+    check('**مسار الدخول نفسه لسه مابيفرّقش** (ADR-0109 §5.1 سليم بعد ADR-0115)',
+      unregisteredLogin.status === wrongPinLogin.status && msgOf(unregisteredLogin) === msgOf(wrongPinLogin),
+      `مش مسجّل ${unregisteredLogin.status} / رمز غلط ${wrongPinLogin.status}`);
+
     // ═══ الخلاصة ═════════════════════════════════════════════════════════
     const failed = results.filter((r) => !r.pass);
     console.log(`\n${B}الخلاصة:${O} ${results.length - failed.length}/${results.length} عدّوا`);

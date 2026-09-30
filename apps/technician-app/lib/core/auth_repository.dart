@@ -214,6 +214,23 @@ class AuthRepository extends ChangeNotifier {
   // التغيير الوحيد هو الحقل اللي بيتبعت.
 
   /// دخول برقم + رمز. بيرمي `ApiException` برسالة الباك-إند زي ما هي.
+  /// «الرقم ده مسجّل؟» (ADR-0115، docs/08 §189 UX-2) — عشان الشاشة توجّه المستخدم للدخول أو
+  /// للتسجيل من غير ما يكتب رمز مالوش. بترجع `null` لو السؤال فشل لأي سبب (مقفول من الأدمن، حد
+  /// المعدل، شبكة): الشاشة بتكمل بالسلوك القديم بالظبط، من غير رسالة خطأ.
+  Future<bool?> isPhoneRegistered(String phoneNumber) async {
+    try {
+      final data = await apiRequest(
+        'POST',
+        '/auth/pin/phone-status',
+        body: {'phone_number': phoneNumberForApi(phoneNumber)},
+      ).timeout(const Duration(seconds: 6));
+      final registered = data?['registered'];
+      return registered is bool ? registered : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> loginWithPin(String phoneNumber, String pin) async {
     final data = await apiRequest(
       'POST',

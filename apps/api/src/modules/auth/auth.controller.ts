@@ -20,7 +20,8 @@ import { AccountRole } from './entities/user-role-grant.entity';
 import { ConfirmPhoneVerificationDto, RequestPhoneVerificationDto } from './dto/phone-verification.dto';
 import { PhoneVerificationService } from './phone-verification.service';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
-import { registrationThrottleLimit } from './login-pin.policy';
+import { phoneStatusThrottleLimit, registrationThrottleLimit } from './login-pin.policy';
+import { PhoneStatusDto } from './dto/phone-status.dto';
 
 function clientIp(req: Request): string | null {
   return req.ip ?? req.socket.remoteAddress ?? null;
@@ -70,6 +71,16 @@ export class AuthController {
   // ── الدخول برمز (ADR-0109) ───────────────────────────────────────────
   // نفس حدود الـthrottle بتاعت مساري الـOTP بالحرف — الحماية مش أضعف لمجرد إن الـcredential
   // اتغيّر. وفوقها القفل المتدرّج على مستوى الحساب نفسه (`login-pin.policy.ts`).
+
+  // «الرقم ده مسجّل؟» (ADR-0115) — boolean بس، عشان الواجهة توجّه الدخول/التسجيل للمستخدم غير
+  // التقني. مسار الدخول نفسه مابيتغيّرش ووعده (نص/زمن/كود) فاضل كامل.
+  @Public()
+  @Post('pin/phone-status')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: phoneStatusThrottleLimit(), ttl: 60_000 } })
+  phoneStatus(@Body() dto: PhoneStatusDto) {
+    return this.authService.phoneRegistrationStatus(dto.phone_number);
+  }
 
   @Public()
   @Post('pin/register')
