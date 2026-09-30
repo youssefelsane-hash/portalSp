@@ -612,3 +612,14 @@ node scripts/admin-visual.js [--out <dir>] [--keep]
 قاموس `BUCKET_LABELS` انتقل إلى `src/lib/risk-labels.ts` بلا تغيير في معناه: تصديره من ملف
 `page.tsx` كان يمنع فحص Next الإنتاجي. نتائج الإصدار في
 `docs/audits/2026-09-29-release-alignment.md` من جذر المشروع.
+
+## صفحة الفني لموظف بصلاحيات محدودة (docs/08 §188)
+
+`technicians/[id]` بقت بتحمّل كل قسم بنفس الصلاحية اللي الـAPI بيفرضها عليه: المناطق
+(`geo.view`)، الفئات (`catalog.view`)، الخدمات المحجوبة (`technicians.approve`)، الملاحظات
+الداخلية (`technicians.notes.view`)، وكشف المستحقات (`technicians.finance.view`). قبلها موظف
+مالية كان بيشوف «دورك الإداري مش مديك صلاحية العملية دي» بالأحمر فوق الصفحة كلها، على أقسام
+مش معروضة له أصلاً. أي قسم جديد في الصفحة: يتحمّل ورا `hasPermission` بنفس صلاحية الـendpoint.
+
+التحقق: `node scripts/visual-admin-hardening.js` — موظف مالية بيدخل برمز + Passkey (مصادق
+افتراضي)، ومن غير أي نداء API فاشل بعد الدخول.

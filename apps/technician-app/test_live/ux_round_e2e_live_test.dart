@@ -46,7 +46,7 @@ class _LiveAuth extends AuthRepository {
 String _sql(String sql) {
   final result = Process.runSync(
     'psql',
-    ['-h', 'localhost', '-U', 'baytak', '-d', 'baytak_main', '-Atc', sql],
+    ['-h', 'localhost', '-U', 'baytak', '-d', liveDatabaseName(), '-Atc', sql],
     environment: {'PGPASSWORD': 'baytak'},
   );
   if (result.exitCode != 0) throw StateError('psql: ${result.stderr}');
