@@ -46,6 +46,9 @@ export const NEAR_TERM_ARRIVAL_HOURS_FALLBACK = 48;
 /** أقل عدد زيارات قبل ما نعرض نسبة التزام — نسبة مبنية على زيارة أو اتنين بتكذب. */
 export const MIN_PUNCTUALITY_SAMPLE_FALLBACK = 3;
 
+/** «وصل في معاده» = خلال المدة دي من الموعد. نفس الرقم المكتوب في استعلامات `technicians.service.ts`. */
+export const ON_TIME_GRACE_MINUTES = 15;
+
 export type ArrivalMetricMode = 'expected_arrival' | 'punctuality';
 
 export interface ArrivalMetricDecision {

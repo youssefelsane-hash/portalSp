@@ -269,6 +269,7 @@ export class AdminOrdersController {
               workload_penalty: explanation.rankInfo.scoreBreakdown.workloadPenalty,
               fairness_penalty: explanation.rankInfo.scoreBreakdown.fairnessPenalty,
               reliability_adjustment: explanation.rankInfo.scoreBreakdown.reliabilityAdjustment,
+              punctuality_adjustment: explanation.rankInfo.scoreBreakdown.punctualityAdjustment,
               company_adjustment: explanation.rankInfo.scoreBreakdown.companyAdjustment,
               distance_penalty: explanation.rankInfo.scoreBreakdown.distancePenalty,
               distance_weight: explanation.rankInfo.scoreBreakdown.distanceWeight,

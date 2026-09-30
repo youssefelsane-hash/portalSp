@@ -29,6 +29,8 @@ export interface TechnicianRankScoreBreakdownDto {
   workload_penalty: number;
   fairness_penalty: number;
   reliability_adjustment: number;
+  /** docs/08 §189 D-2 — الالتزام بالمواعيد؛ 0 تحت الحد الأدنى للعيّنة. */
+  punctuality_adjustment: number;
   company_adjustment: number;
   /** ADR-0062 — خصم القرب: كيلومتر × الوزن الساري لسياق الطلب. 0 = الأدمن سايب الأوزان معطّلة. */
   distance_penalty: number;

@@ -1,4 +1,15 @@
 import { SettingsService } from '../settings/settings.service';
+import { MIN_PUNCTUALITY_SAMPLE_FALLBACK, ON_TIME_GRACE_MINUTES } from '../technicians/technician-arrival-metrics';
+
+/**
+ * docs/08 §189 بند D-2 — افتراضيات الموثوقية بقت **صغيرة ومش صفر** (طلب مالك: «مش نقفز من 0 لرقم كبير»).
+ * المقياس للمقارنة: فرق مستوى واحد = 10 نقط، وكل طلب نشط = 2.
+ * - الالتزام: فني وصل في معاده دايمًا ⇒ +0.75، نص المرات ⇒ −1.75، أبدًا ⇒ −4.25 (أقل من نص مستوى).
+ * - التقييم: 5 نجوم ⇒ +2، 3 نجوم ⇒ −2.
+ */
+export const PUNCTUALITY_WEIGHT_FALLBACK = 5;
+export const PUNCTUALITY_BASELINE_PERCENT_FALLBACK = 85;
+export const RELIABILITY_WEIGHT_FALLBACK = 2;
 
 export interface CandidateQualityRankingSettings {
   workloadWeight: number;
@@ -8,6 +19,9 @@ export interface CandidateQualityRankingSettings {
   reliabilityBaselineRating: number;
   reliabilityWeight: number;
   reliabilityMinRatingsCount: number;
+  punctualityWeight: number;
+  punctualityBaselinePercent: number;
+  punctualityMinSample: number;
 }
 
 export async function resolveCandidateQualityRankingSettings(
@@ -21,14 +35,20 @@ export async function resolveCandidateQualityRankingSettings(
     reliabilityBaselineRating,
     reliabilityWeight,
     reliabilityMinRatingsCount,
+    punctualityWeight,
+    punctualityBaselinePercent,
+    punctualityMinSample,
   ] = await Promise.all([
     settings.getNumber('matching.workload_balance_weight', 2),
     settings.getNumber('matching.fairness_lookback_days', 7),
     settings.getNumber('matching.fairness_decline_weight', 0.5),
     settings.getNumber('matching.fairness_weight', 0),
     settings.getNumber('matching.reliability_baseline_rating', 4),
-    settings.getNumber('matching.reliability_weight', 0),
+    settings.getNumber('matching.reliability_weight', RELIABILITY_WEIGHT_FALLBACK),
     settings.getNumber('matching.reliability_min_ratings_count', 3),
+    settings.getNumber('matching.punctuality_weight', PUNCTUALITY_WEIGHT_FALLBACK),
+    settings.getNumber('matching.punctuality_baseline_percent', PUNCTUALITY_BASELINE_PERCENT_FALLBACK),
+    settings.getNumber('matching.min_punctuality_sample', MIN_PUNCTUALITY_SAMPLE_FALLBACK),
   ]);
   return {
     workloadWeight,
@@ -38,7 +58,43 @@ export async function resolveCandidateQualityRankingSettings(
     reliabilityBaselineRating,
     reliabilityWeight,
     reliabilityMinRatingsCount,
+    punctualityWeight,
+    punctualityBaselinePercent,
+    punctualityMinSample,
   };
+}
+
+/**
+ * **الالتزام بالمواعيد في الترتيب** (docs/08 §189 بند D-2) — نفس مقياس «الالتزام بالمواعيد» اللي العميل
+ * بيشوفه على كارت الفني بالحرف (`technicians.service.ts`، ADR-0099): زيارات مجدولة ليها وقت وصول، ووصل
+ * خلال ${ON_TIME_GRACE_MINUTES} دقيقة من الموعد. مقياس واحد للعرض وللترتيب، مش اتنين.
+ *
+ * **محايد تحت الحد الأدنى للعيّنة** (`matching.min_punctuality_sample` — نفس حد العرض): فني جديد أو
+ * زيارتين بس مابيتعاقبش ولا بيتكافئ. ووزن صفر = الاستعلام الداخلي مابيتنفّذش أصلاً (one-time filter).
+ */
+export function candidatePunctualityAdjustmentSql(opts: {
+  weightParam: string;
+  baselinePercentParam: string;
+  minSampleParam: string;
+  technicianAlias?: string;
+}): string {
+  const tp = opts.technicianAlias ?? 'tp';
+  return `COALESCE((
+    SELECT CASE WHEN COUNT(*) >= GREATEST(${opts.minSampleParam}::int, 1)
+      THEN (
+        COUNT(*) FILTER (
+          WHERE punctual.technician_arrived_at <= punctual.scheduled_at + interval '${ON_TIME_GRACE_MINUTES} minutes'
+        ) * 100.0 / COUNT(*)
+        - ${opts.baselinePercentParam}::numeric
+      ) / 100.0 * ${opts.weightParam}::numeric
+      ELSE 0 END
+    FROM orders punctual
+    WHERE ${opts.weightParam}::numeric <> 0
+      AND punctual.technician_id = ${tp}.id
+      AND punctual.scheduled_at IS NOT NULL
+      AND punctual.technician_arrived_at IS NOT NULL
+      AND punctual.deleted_at IS NULL
+  ), 0)`;
 }
 
 /** جودة المرشح دون المسافة؛ المطابقة الرئيسية والمساعدون يستخدمان المعادلة نفسها. */
@@ -48,6 +104,9 @@ export function candidateQualityScoreSql(opts: {
   reliabilityBaselineParam: string;
   reliabilityWeightParam: string;
   reliabilityMinRatingsParam: string;
+  punctualityWeightParam: string;
+  punctualityBaselineParam: string;
+  punctualityMinSampleParam: string;
   technicianAlias?: string;
 }): string {
   const tp = opts.technicianAlias ?? 'tp';
@@ -60,6 +119,12 @@ export function candidateQualityScoreSql(opts: {
           * ${opts.reliabilityWeightParam}::numeric
         ELSE 0
       END
+    + ${candidatePunctualityAdjustmentSql({
+      weightParam: opts.punctualityWeightParam,
+      baselinePercentParam: opts.punctualityBaselineParam,
+      minSampleParam: opts.punctualityMinSampleParam,
+      technicianAlias: tp,
+    })}
   )`;
 }
 

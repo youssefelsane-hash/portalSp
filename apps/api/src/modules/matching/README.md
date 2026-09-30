@@ -1018,3 +1018,21 @@ compatibility, matching and admin explainability: 41 tests passed on isolated Po
   عشان فشله مايرجعش للفني كخطأ على رفض اتسجّل فعلاً.
 
 الاختبار: `matching-premium-fail-closed.spec.ts` (بضابط — فشل على الكود القديم بـ`accepted`).
+
+## الالتزام بالمواعيد جوّه الترتيب + وزن صغير للتقييم (docs/08 §189 بند D-2، migration 0373، 2026-09-30)
+
+- **مكوّن واحد، مش محرك جديد**: `candidatePunctualityAdjustmentSql()` في `candidate-quality-ranking.ts` بقى جزء من
+  `candidateQualityScoreSql()` نفسها، فالأربع مستخدمين (المطابقة الرئيسية، مطابقة المساعدين، تجنيد الطاقم، قايمة
+  المساعدين في الأدمن) خدوه مع بعض — الـparams بقت إجبارية في النوع عشان مفيش مستخدم يتنسي.
+- **نفس المقياس اللي العميل بيشوفه** (ADR-0099): زيارات مجدولة ليها وقت وصول، و«في المعاد» = خلال
+  `ON_TIME_GRACE_MINUTES` (15) من الموعد. **نفس حد العيّنة** `matching.min_punctuality_sample` — تحته محايد (صفر).
+- المعادلة: `(نسبة الالتزام − matching.punctuality_baseline_percent) / 100 × matching.punctuality_weight`. الافتراضي
+  (5 و85٪): دايمًا في المعاد ⇒ +0.75، ربع المرات ⇒ −3، أبدًا ⇒ −4.25 — أقل من نص فرق مستوى (10). الوزن صفر ⇒
+  الاستعلام الداخلي مابيتنفّذش أصلاً.
+- `matching.reliability_weight` بقى 2 بدل 0 (5 نجوم ⇒ +2، 3 ⇒ −2). الـmigration بتغيّره **بس** لو لسه صفر ومحدش
+  من الأدمن لمسه (لا `updated_by_user_id` ولا سجل `setting.updated`).
+- **التفسير**: `punctuality_adjustment` في `EligibleTechnicianRow` ⇒ `scoreBreakdown.punctualityAdjustment` ⇒
+  `GET /admin/orders/:id/technicians/:technicianId/explain` ⇒ سطر «التزام بالمواعيد» في صفحة الطلب في الأدمن.
+- **الجاي في نفس المكوّن** (مش مبني لسه): الإلغاء بعد القبول، إعادة الشغل تحت الضمان، والشكاوى المقبولة — كل واحد
+  term جنب الالتزام بنفس النمط (عيّنة دنيا + وزن صغير + سطر تفسير).
+- الاختبار الحي: `matching-reliability-scoring.spec.ts` (المعادلة بالأرقام، الترتيب، محايد تحت العيّنة، الوزن صفر).

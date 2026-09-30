@@ -288,6 +288,9 @@ export class AssistantMatchingService {
                  reliabilityBaselineParam: '$16',
                  reliabilityWeightParam: '$17',
                  reliabilityMinRatingsParam: '$18',
+                 punctualityWeightParam: '$19',
+                 punctualityBaselineParam: '$20',
+                 punctualityMinSampleParam: '$21',
                })} DESC,
                tp.id ASC
       LIMIT $4
@@ -311,6 +314,9 @@ export class AssistantMatchingService {
         ranking.reliabilityBaselineRating,
         ranking.reliabilityWeight,
         ranking.reliabilityMinRatingsCount,
+        ranking.punctualityWeight,
+        ranking.punctualityBaselinePercent,
+        ranking.punctualityMinSample,
       ],
     );
 
