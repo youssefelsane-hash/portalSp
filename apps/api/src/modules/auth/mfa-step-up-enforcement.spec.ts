@@ -68,4 +68,81 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
 
     expect(!!stepUpMetadata(handler)).toBe(requiresStepUp);
   });
+
+  /*
+    ═══ المسح الشامل (docs/08 §188) ═══
+
+    القايمة فوق **مكتوبة بالإيد**، وده بالظبط اللي خلّى `AdminTechnicianDebtController.
+    recordSettlement` (`wallets.adjust` — بيحرّك فلوس حقيقية) يعدّي من غير step-up: محدش ضافه
+    للقايمة. التعليق جوّه الكونترولر كان بيقول «نفس حماية التصحيح اليدوي» والـdecorator مش موجود.
+
+    المسح ده بيقرا **كل** كونترولر في المشروع، وأي مسار بيكتب (POST/PUT/PATCH/DELETE) بصلاحية من
+    `MFA_REQUIRED_PERMISSIONS` لازم يبقى عليه `@RequireStepUp()` — إلا المستثنى هنا بسبب مكتوب.
+    كونترولر جديد بكرة بيدخل المسح أوتوماتيك من غير ما حد يفتكر يضيفه.
+  */
+  it('مسح شامل: كل مسار كتابة بصلاحية MFA عليه step-up فعلاً (إلا المستثنى بسبب مكتوب)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PATH_METADATA, METHOD_METADATA } = require('@nestjs/common/constants');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { RequestMethod } = require('@nestjs/common');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as typeof import('path');
+
+    /** `Controller.method` ← السبب. أي استثناء جديد لازم سببه يتكتب هنا صراحةً. */
+    const EXEMPT: Record<string, string> = {
+      // بترجّع حجز فلوس موجود لصاحبه الأصلي (releaseReservation)، مش تحويل لطرف تالت.
+      'AdminPaymentsController.rejectPayout': 'بترجّع مبلغ محجوز لصاحبه — مفيش فلوس خارجة',
+      // بيستعملوا صلاحية السعر كـ**بوابة وصول** لطابور المعاينة، مش بيغيّروا سعر: رفع صورة
+      // للمشكلة، وطلب معلومات إضافية من العميل. الـPasskey على كل صورة كان هيبقى احتكاك بلا حماية.
+      'AdminOrdersController.uploadProblemImage': 'رفع صورة مشكلة — مفيش سعر بيتغيّر',
+      'AdminOrdersController.requestAssessmentInfo': 'طلب معلومات من العميل — مفيش سعر بيتغيّر',
+      // الفلوس في الشكوى بتتحرّك في `resolve` بس (التعويض) وده محمي. الرفض والإقفال وتغيير
+      // الخطورة قرارات تشغيلية مابتحرّكش قرش.
+      'AdminSupportController.reject': 'رفض شكوى — مفيش تعويض بيتصرف',
+      'AdminSupportController.close': 'إقفال شكوى — مفيش تعويض بيتصرف',
+      'AdminSupportController.updateSeverity': 'تصنيف خطورة — مفيش فلوس',
+    };
+
+    const writeVerbs = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE]);
+    const mfaPermissions = new Set<string>(MFA_REQUIRED_PERMISSIONS);
+
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.controller.ts')) files.push(full);
+      }
+    };
+    walk(path.join(__dirname, '..', '..'));
+
+    const missing: string[] = [];
+    let scannedRoutes = 0;
+    for (const file of files) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const exported = require(file) as Record<string, unknown>;
+      for (const candidate of Object.values(exported)) {
+        if (typeof candidate !== 'function' || Reflect.getMetadata(PATH_METADATA, candidate) === undefined) continue;
+        const proto = candidate.prototype as Record<string, (...args: unknown[]) => unknown>;
+        for (const methodName of Object.getOwnPropertyNames(proto)) {
+          if (methodName === 'constructor') continue;
+          const handler = proto[methodName];
+          if (typeof handler !== 'function') continue;
+          const verb = Reflect.getMetadata(METHOD_METADATA, handler);
+          if (verb === undefined || !writeVerbs.has(verb)) continue;
+          const permission = permissionMetadata(handler, candidate);
+          if (!permission || !mfaPermissions.has(permission)) continue;
+          scannedRoutes += 1;
+          const id = `${candidate.name}.${methodName}`;
+          if (!stepUpMetadata(handler) && !EXEMPT[id]) missing.push(`${id} (${permission})`);
+        }
+      }
+    }
+
+    // لو المسح مالقاش ولا مسار، يبقى هو اللي بايظ مش المشروع اللي سليم.
+    expect(scannedRoutes).toBeGreaterThan(20);
+    expect(missing).toEqual([]);
+  });
 });

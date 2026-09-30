@@ -334,7 +334,19 @@ export class OrderCreationService {
    * والطلب لازم يفضل يقول اللي العميل شافه واختاره وقتها بالظبط — نفس فلسفة الـsnapshot المتبعة
    * في المشروع كله. وكمان بيخلي العرض في 3 واجهات بصفر استعلامات إضافية.
    *
-   * أي فشل هنا **ما ينفعش يكسر إنشاء طلب حقيقي** — بنرجّع null ونكمّل (الطلب أهم من سطر عرض).
+   * ### الفشل هنا بيفشّل الحجز (docs/08 §188، مراجعة معمارية 2026-09-30)
+   *
+   * كان بيبلع أي خطأ ويرجّع null بحجّة «الطلب أهم من سطر عرض». بس ده **مش سطر عرض**: ده
+   * نطاق الشغل اللي الأدمن والفني بيشتغلوا عليه («عدد الحمامات ٢، التسريب تحت الحوض»). طلب
+   * بيوصل الفني ناقص التفاصيل دي أسوأ من رفض واضح العميل يعيده — خصوصًا في المعاينة والتسعير
+   * بالصور، اللي مفيهمش تقييم معادلة تاني يعوّض.
+   *
+   * وكمان البلع كان وهم للاستعلامات: الدالة بتجري **جوّه ترانزاكشن الإنشاء**، وأي خطأ SQL
+   * بيحط الترانزاكشن في حالة aborted في Postgres — فالطلب مكانش هيتحفظ أصلاً، والعميل كان
+   * بياخد خطأ تاني مالوش علاقة بالسبب. دلوقتي الخطأ الحقيقي بيتسجّل والعميل بياخد رسالة واضحة
+   * (`SYS_001` = إعادة المحاولة آمنة، ومفتاح منع التكرار بيحمي من طلب مزدوج).
+   *
+   * الفرق عن الآثار الجانبية (إشعار، audit): دي **مدخلات الشغل نفسه**، مش حاجة بتحصل بعده.
    */
   private async buildCustomerInputsSnapshot(
     manager: EntityManager,
@@ -408,8 +420,15 @@ export class OrderCreationService {
         .map(({ displayOrder: _displayOrder, ...input }) => input);
       return inputs.length > 0 ? inputs : null;
     } catch (err) {
-      this.logger.warn(`فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الطلب بيكمل عادي: ${String(err)}`);
-      return null;
+      this.logger.error(
+        `فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الحجز اترفض بدل ما يتسجّل ناقص`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new ApiException(
+        ErrorCode.SYS_001,
+        'مقدرناش نحفظ تفاصيل طلبك دلوقتي — حاول تاني بعد لحظة. طلبك ماتسجّلش، فمفيش حاجة هتتكرر.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
@@ -901,119 +920,19 @@ export class OrderCreationService {
       }
     }
 
-    // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
-    // [scheduled_at, scheduled_at_range_end] (الاتنين شاملين) على أقرب يوم فيه فني مؤهّل واحد على
-    // الأقل فعليًا، ونستبدل به dto.scheduled_at الحرفي تحت. لو محدش متاح في كل النطاق، بنسيب أول
-    // يوم في النطاق كما هو — نفس فلسفة "مفيش إلغاء تلقائي لمجرد مفيش فني دلوقتي"
-    // (MatchingRecoveryService.sweep() هتعيد المحاولة تلقائيًا بعد إنشاء الطلب).
-    let resolvedScheduledAtIso: string | undefined = dto.scheduled_at;
-    if (dto.scheduled_at_range_end) {
-      // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — نفس نمط allows_individual/
-      // cash_allowed بالحرف. صفر لمس لمنطق حل النطاق تحت — بوابة دخول بس.
-      if (!service.allowsDateRangeBooking) {
-        throw new ApiException(ErrorCode.VAL_001, 'حجز نطاق أيام مرن مش متاح لهذه الخدمة — لازم تحدد يوم واحد', HttpStatus.BAD_REQUEST);
-      }
-      if (!dto.scheduled_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن محتاج تاريخ بداية (scheduled_at)', HttpStatus.BAD_REQUEST);
-      }
-      if (scheduleSlot) {
-        throw new ApiException(ErrorCode.VAL_001, 'مينفعش تحدد نطاق أيام مرن مع سلوت وقت محدد', HttpStatus.BAD_REQUEST);
-      }
-      const rangeStart = new Date(dto.scheduled_at);
-      const rangeEnd = new Date(dto.scheduled_at_range_end);
-      const rangeDays = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000));
-      if (rangeDays < 0 || rangeDays > 14) {
-        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن لازم يكون بين يوم و14 يوم', HttpStatus.BAD_REQUEST);
-      }
-      // **حمل الشغلانة الحقيقي بيدخل البحث** (بلاغ المالك ٢ في §141).
-      //
-      // البحث ده كان بيسأل «فيه حد متاح اليوم ده؟» عن **شغلانة يوم واحد افتراضية**، مهما كانت
-      // الشغلانة الحقيقية يومين أو تلاتة. النتيجة اللي المالك وصفها بالحرف: «تخلي العميل يختار
-      // اليوم اللي إنت قلت عليه إنه فاضي، ويحط شغلانة كبيرة، فتطلع الناس كلها مش متاحة».
-      //
-      // ده كان **آخر مكان** فاضل بيسأل السؤال ناقص: `order-reschedule` (مرتين) و«متاح تاني
-      // إمتى؟» في `technicians.service` كلهم بيبعتوا الحمل من وقت ADR-0064 §3، والمكان ده
-      // اتنسي. دلوقتي التلاتة بيسألوا نفس السؤال بالظبط فبيدّوا نفس الإجابة.
-      const rangeCandidateLoad = await this.estimateCandidateLoad(service, zone.id, dto);
-      for (let offset = 0; offset <= rangeDays; offset += 1) {
-        const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
-
-        const eligible = await this.techniciansService.hasEligibleTechnicianForDate(
-          service.id,
-          zone.id,
-          address.id,
-          candidateDay,
-          undefined,
-          undefined,
-          rangeCandidateLoad,
-        );
-        if (eligible) {
-          resolvedScheduledAtIso = candidateDay.toISOString();
-          break;
-        }
-      }
-    }
-
-    // ══ الاشتقاق، المرحلة 1: الاستعجال (ADR-0048 §1/§2) ══
-    //
-    // اليوم النهائي بقى معروف دلوقتي (بعد حل النطاق المرن فوق)، والاستعجال بيتحدد منه **بس**.
-    // لازم يتحسب هنا بالذات — قبل التسعير مباشرة — لأنه مدخل لرسوم الطوارئ.
-    //
-    // **السلوت المحجوز بيلغي الاستعجال** حتى لو في نفس اليوم: فني بعينه التزم بوقت محدد، وده
-    // تعيين مؤكّد مش بث طوارئ. تحويله لطوارئ كان هيلغي التزامه ويبثّه لناس تانية.
-    // A recurring occurrence was commercially scheduled when the customer created the
-    // plan. Materialising it on the visit day must not turn it into a new same-day
-    // emergency or add an emergency fee merely because a worker ran late.
-    const urgent = !recurringIdentity
-      && !scheduleSlot
-      && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
-    // المفتاح الأضيق (ج-١٧): الطوارئ وحدها. مكانه هنا بالذات لأن `urgent` لسه اتحسب دلوقتي —
-    // قبل السطر ده مفيش إجابة على «ده طوارئ ولا لأ» (ADR-0048: الوضع مشتق مش مختار). وقبل
-    // التسعير مباشرةً، فمفيش رسوم طوارئ بتتحسب لطلب هيترفض بعدها.
-    if (urgent) await this.bookingAvailability.assertEmergencyBookingsAllowed(!!recurringIdentity);
-
-    // الجهة التانية من نفس البوابة: الأدمن قافل الجدولة (`allows_scheduling = false`) والعميل
-    // اختار يوم جاي. كان إعداد ميت بالكامل — بيتحفظ وماليهوش أي أثر (اتأكد بفحص حي على الـ16
-    // تركيبة قدرات: كلها قبلت حجز «بكرة»).
-    if (!urgent && resolvedScheduledAtIso && !canAcceptScheduled(service)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    // **نافذة اختيار الموعد** (طلب مالك 2026-09-15، docs/08 §151، ADR-0097) — البداية اللي
-    // العميل اختارها لازم تكون جوّه الفترة المسموحة (٥ص–٧م افتراضيًا).
-    //
-    // مكانها هنا بالذات: **بعد** حل النطاق المرن (`resolvedScheduledAtIso` بقى نهائي) و**قبل**
-    // التسعير، فمفيش رسوم بتتحسب لطلب هيترفض بعدها.
-    //
-    // مستثنى عمدًا:
-    //  - الطلب المستعجل (`urgent`) — العميل بيقول «دلوقتي»، مش بيختار ساعة أصلاً.
-    //  - الحجز على سلوت فني معلَن (`scheduleSlot`) — ده وقت **الفني** التزم بيه بنفسه، والقاعدة
-    //    دي عن اختيار العميل الحر.
-    //  - التكرار المتولّد (`recurringIdentity`) — الموعد اتقبل وقت إنشاء الخطة، ورفضه هنا كان
-    //    هيكسر خطة شغّالة بأثر رجعي.
-    if (!urgent && !scheduleSlot && !recurringIdentity && resolvedScheduledAtIso) {
-      const chosenAt = new Date(resolvedScheduledAtIso);
-      // `bookingWindowApplies` بتستبعد «اليوم المجرّد» (`T00:00:00.000Z`) والخدمات اللي
-      // مابتطلبش ساعة بداية — في الحالتين مفيش ساعة اختارها العميل عشان نحكم عليها.
-      if (bookingWindowApplies({ scheduledAt: chosenAt, serviceRequiresStartTime: service.requiresStartTimeOnly })) {
-        const bookingWindow = await resolveBookingWindowSetting(this.settingsService);
-        if (!isWithinBookingWindow(chosenAt, bookingWindow)) {
-          throw new ApiException(ErrorCode.VAL_001, bookingWindowMessageAr(bookingWindow), HttpStatus.BAD_REQUEST);
-        }
-      }
-    }
-    if (urgent && !canAcceptSameDay(service)) {
-      // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
-      // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    // ══ الموعد النهائي + الاستعجال + بوابات الجدولة — **مصدر واحد** مع `previewPrice()` ══
+    // (docs/08 §188). الكتلة دي كانت هنا بالحرف والمعاينة عندها نسخة ناقصة منها، فالرقمين
+    // كانوا بيفرقوا: شوف تعليق `resolveBookingSchedule()` للتفاصيل.
+    const { resolvedScheduledAtIso, urgent } = await this.resolveBookingSchedule({
+      service,
+      zoneId: zone.id,
+      addressId: address.id,
+      scheduledAt: dto.scheduled_at,
+      scheduledAtRangeEnd: dto.scheduled_at_range_end,
+      hasScheduleSlot: !!scheduleSlot,
+      isRecurringOccurrence: !!recurringIdentity,
+      loadInput: dto,
+    });
 
     // مضاعف سعر مستوى الفني (docs/08 — "قرار عمل: السعر النهائي معروف قبل التأكيد") — بيتطبّق
     // بس لو الفني معروف صراحة وقت الحجز (اختيار مباشر أو سلوت جدولة)، مش لو العميل سايب المطابقة
@@ -1949,7 +1868,7 @@ export class OrderCreationService {
   // PromotionsService.previewForOrder() الموجودة من قبل لمعاينة كود الخصم بس).
   async previewPrice(userId: string, dto: PreviewOrderDto): Promise<PreviewOrderResponseDto> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-    await this.assertBookingDateWindow(dto.scheduled_at);
+    await this.assertBookingDateWindow(dto.scheduled_at, dto.scheduled_at_range_end);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const remoteAssessmentRequested = dto.request_remote_quote === true;
@@ -1976,22 +1895,6 @@ export class OrderCreationService {
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
     const previewPeriod = contractPeriodFromFieldValues(dto.field_values);
 
-    // نفس اشتقاق `create()` بالحرف (ADR-0048) — لازم يفضلوا متطابقين، وإلا المعاينة بتقول سعر
-    // والتحصيل ياخد سعر تاني. السلوت بيلغي الاستعجال هنا كمان، بنفس السبب المشروح في `create()`.
-    const urgent = !dto.schedule_slot_id && isSameDayUrgent({ scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null });
-    if (urgent && !canAcceptSameDay(service)) {
-      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني', HttpStatus.BAD_REQUEST);
-    }
-    // نفس بوابة الجدولة اللي في `create()` — لازم تتفحص هنا كمان، وإلا المعاينة بتعدّي والتأكيد
-    // بيترفض: بالظبط الشكل اللي المالك بيشتكي منه («العميل بيوصل لآخر خطوة وياخد error»).
-    if (!urgent && dto.scheduled_at && !canAcceptScheduled(service)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     if (!address.cityId) {
       throw new ApiException(ErrorCode.ORDR_001, 'العنوان مش مربوط بمدينة', HttpStatus.BAD_REQUEST);
     }
@@ -2001,6 +1904,20 @@ export class OrderCreationService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
     await this.catalogService.assertServiceAvailableInZone(service.id, zone.id);
+
+    // **نفس الدالة اللي `create()` بيندهها** (docs/08 §188) — الموعد المحلول والاستعجال وكل
+    // بوابات الجدولة. كانت هنا نسخة ناقصة بتسعّر يوم البداية الحرفي للنطاق المرن ومابتفحصش
+    // نافذة المواعيد، فالمعاينة كانت ممكن تقول سعر والتأكيد ياخد تاني أو يرفض.
+    const { resolvedScheduledAtIso, urgent } = await this.resolveBookingSchedule({
+      service,
+      zoneId: zone.id,
+      addressId: address.id,
+      scheduledAt: dto.scheduled_at,
+      scheduledAtRangeEnd: dto.scheduled_at_range_end,
+      hasScheduleSlot: !!dto.schedule_slot_id,
+      isRecurringOccurrence: false,
+      loadInput: dto,
+    });
 
     // مضاعف سعر مستوى الفني (docs/08) — نفس منطق create() بالحرف، راجع تعليقها الكامل هناك.
     // سلوت الجدولة بيغلب requested_technician_id لو الاتنين موجودين (نفس أولوية create()).
@@ -2022,7 +1939,7 @@ export class OrderCreationService {
     // ADR-0060 §2 — نفس مصدر `create()` بالحرف: الفترة من حقول الفورم. لو المعاينة قرأت من مكان
     // والإنشاء من مكان تاني، الرقمين هيختلفوا — وده بالظبط عكس الغرض من المعاينة.
     const pricingContext = buildPricingContext({
-      scheduledAt: dto.scheduled_at,
+      scheduledAt: resolvedScheduledAtIso,
       periodStart: previewPeriod.start,
       periodEnd: previewPeriod.end,
       serviceFieldValues: dto.field_values,
@@ -2030,6 +1947,8 @@ export class OrderCreationService {
       isEmergency: urgent,
       technicianLevel: previewTechnicianLevel,
       addonIds: dto.addon_ids,
+      // نفس سطر `create()` — التكرار مدخل تسعير، فغيابه هنا كان بيخلّي المعاينة ترقم غير التحصيل.
+      recurringMetadata: dto.repeat_frequency ? { frequency: dto.repeat_frequency } : undefined,
     });
 
     const estimate = await this.catalogService.estimate(
@@ -2094,6 +2013,15 @@ export class OrderCreationService {
     const depositAmountCents = !remoteAssessmentRequested && service.depositRequired && totalAmountCents > 0
       ? Math.round((totalAmountCents * Number(service.depositPercentage)) / 100)
       : null;
+    /*
+      `pay_full_amount` بيأثّر على **المطلوب دلوقتي** بس، مش على العربون المعروض (docs/08 §188).
+
+      `deposit_amount_cents` هنا هو **العرض** — الواجهات بتقرر تعرض اختيار «عربون ولا كامل» بناءً
+      عليه. لو اتصفّر لما العميل يختار «كامل»، الاختيار نفسه كان هيختفي من الشاشة والطلب يتغيّر
+      تاني (دايرة). اللي لازم يطابق `create()` هو المحصّل: الإنشاء مع `pay_full_amount` مابيحطّش
+      عربون، فالمطلوب دلوقتي = الإجمالي — وده اللي بيرجع تحت.
+    */
+    const chargedDepositCents = dto.pay_full_amount ? null : depositAmountCents;
 
     return {
       base_price_cents: remoteAssessmentRequested ? 0 : estimate.estimated_total_cents,
@@ -2124,8 +2052,8 @@ export class OrderCreationService {
       estimated_duration_days: durationEstimate?.estimated_days ?? estimate.estimated_duration_days,
       level_price_multiplier: estimate.level_price_multiplier,
       deposit_amount_cents: depositAmountCents,
-      due_now_cents: depositAmountCents ?? totalAmountCents,
-      remaining_amount_cents: depositAmountCents !== null ? totalAmountCents - depositAmountCents : null,
+      due_now_cents: chargedDepositCents ?? totalAmountCents,
+      remaining_amount_cents: chargedDepositCents !== null ? totalAmountCents - chargedDepositCents : null,
       price_certainty_mode: service.priceCertaintyMode,
       // بند 10 — النطاق بيتحسب حوالين السعر المحسوب فعلاً للمدخلات دي، مش الحقول الثابتة.
       // من غير كده خدمة سعرها بيتغيّر حسب الشغل كانت بتعرض نفس النطاق دايمًا.
@@ -2184,10 +2112,155 @@ export class OrderCreationService {
    * الفشل بيرجّع حمل فاضي بدل ما يكسر الحجز: ده تحسين لجودة الاقتراح، والطلب لازم يعدّي حتى لو
    * التقدير مانفعش (نفس قاعدة «أي فشل مساعد يتلقّط ويرجّع بأمان» في CLAUDE.md).
    */
+  /**
+   * **الموعد النهائي + الاستعجال + بوابات الجدولة — مصدر واحد لـ`create()` و`previewPrice()`**
+   * (docs/08 §188، مراجعة معمارية 2026-09-30).
+   *
+   * الكتلة دي كانت جوّه `create()` بالحرف، والمعاينة عندها **نسخة ناقصة** منها، والتعليق فوق
+   * `previewPrice()` نفسه كان بيقول «أي تعديل هنا لازم يتكرر هناك يدويًا». اتقاس إن النسختين
+   * فرقوا في أربع حاجات:
+   *   1. النطاق المرن: الإنشاء بيحلّه لأول يوم فيه فني؛ المعاينة كانت بتسعّر يوم البداية الحرفي.
+   *   2. `urgent` (رسوم الطوارئ): الإنشاء بيحسبه من اليوم المحلول؛ المعاينة من الحرفي — فعميل
+   *      اختار «من النهارده لبكرة» كان بيشوف طوارئ في المعاينة ويتحاسب عادي (أو العكس).
+   *   3. نافذة المواعيد (٥ص–٧م): الإنشاء بيرفض؛ المعاينة ماكانتش بتفحص — العميل يوصل لآخر خطوة
+   *      وياخد error.
+   *   4. مفتاح إيقاف الطوارئ (`assertEmergencyBookingsAllowed`): الإنشاء بس.
+   *
+   * دلوقتي الاتنين بيندهوا الدالة دي، فمستحيل يفرقوا. **الكود اتنقل زي ما هو** — المتغيّرات
+   * المحلية بس بقت باراميترات؛ مفيش قاعدة جديدة.
+   */
+  private async resolveBookingSchedule(input: {
+    service: Service;
+    zoneId: string;
+    addressId: string;
+    scheduledAt?: string;
+    scheduledAtRangeEnd?: string;
+    hasScheduleSlot: boolean;
+    isRecurringOccurrence: boolean;
+    loadInput: StandardDurationInput & { field_values?: Record<string, string | number | boolean> };
+  }): Promise<{ resolvedScheduledAtIso: string | undefined; urgent: boolean }> {
+    const { service } = input;
+    // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
+    // [scheduled_at, scheduled_at_range_end] (الاتنين شاملين) على أقرب يوم فيه فني مؤهّل واحد على
+    // الأقل فعليًا، ونستبدل به dto.scheduled_at الحرفي تحت. لو محدش متاح في كل النطاق، بنسيب أول
+    // يوم في النطاق كما هو — نفس فلسفة "مفيش إلغاء تلقائي لمجرد مفيش فني دلوقتي"
+    // (MatchingRecoveryService.sweep() هتعيد المحاولة تلقائيًا بعد إنشاء الطلب).
+    let resolvedScheduledAtIso: string | undefined = input.scheduledAt;
+    if (input.scheduledAtRangeEnd) {
+      // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — نفس نمط allows_individual/
+      // cash_allowed بالحرف. صفر لمس لمنطق حل النطاق تحت — بوابة دخول بس.
+      if (!service.allowsDateRangeBooking) {
+        throw new ApiException(ErrorCode.VAL_001, 'حجز نطاق أيام مرن مش متاح لهذه الخدمة — لازم تحدد يوم واحد', HttpStatus.BAD_REQUEST);
+      }
+      if (!input.scheduledAt) {
+        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن محتاج تاريخ بداية (scheduled_at)', HttpStatus.BAD_REQUEST);
+      }
+      if (input.hasScheduleSlot) {
+        throw new ApiException(ErrorCode.VAL_001, 'مينفعش تحدد نطاق أيام مرن مع سلوت وقت محدد', HttpStatus.BAD_REQUEST);
+      }
+      const rangeStart = new Date(input.scheduledAt);
+      const rangeEnd = new Date(input.scheduledAtRangeEnd);
+      const rangeDays = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000));
+      if (rangeDays < 0 || rangeDays > 14) {
+        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن لازم يكون بين يوم و14 يوم', HttpStatus.BAD_REQUEST);
+      }
+      // **حمل الشغلانة الحقيقي بيدخل البحث** (بلاغ المالك ٢ في §141).
+      //
+      // البحث ده كان بيسأل «فيه حد متاح اليوم ده؟» عن **شغلانة يوم واحد افتراضية**، مهما كانت
+      // الشغلانة الحقيقية يومين أو تلاتة. النتيجة اللي المالك وصفها بالحرف: «تخلي العميل يختار
+      // اليوم اللي إنت قلت عليه إنه فاضي، ويحط شغلانة كبيرة، فتطلع الناس كلها مش متاحة».
+      //
+      // ده كان **آخر مكان** فاضل بيسأل السؤال ناقص: `order-reschedule` (مرتين) و«متاح تاني
+      // إمتى؟» في `technicians.service` كلهم بيبعتوا الحمل من وقت ADR-0064 §3، والمكان ده
+      // اتنسي. دلوقتي التلاتة بيسألوا نفس السؤال بالظبط فبيدّوا نفس الإجابة.
+      const rangeCandidateLoad = await this.estimateCandidateLoad(service, input.zoneId, input.loadInput);
+      for (let offset = 0; offset <= rangeDays; offset += 1) {
+        const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
+
+        const eligible = await this.techniciansService.hasEligibleTechnicianForDate(
+          service.id,
+          input.zoneId,
+          input.addressId,
+          candidateDay,
+          undefined,
+          undefined,
+          rangeCandidateLoad,
+        );
+        if (eligible) {
+          resolvedScheduledAtIso = candidateDay.toISOString();
+          break;
+        }
+      }
+    }
+
+    // ══ الاشتقاق، المرحلة 1: الاستعجال (ADR-0048 §1/§2) ══
+    //
+    // اليوم النهائي بقى معروف دلوقتي (بعد حل النطاق المرن فوق)، والاستعجال بيتحدد منه **بس**.
+    // لازم يتحسب هنا بالذات — قبل التسعير مباشرة — لأنه مدخل لرسوم الطوارئ.
+    //
+    // **السلوت المحجوز بيلغي الاستعجال** حتى لو في نفس اليوم: فني بعينه التزم بوقت محدد، وده
+    // تعيين مؤكّد مش بث طوارئ. تحويله لطوارئ كان هيلغي التزامه ويبثّه لناس تانية.
+    // A recurring occurrence was commercially scheduled when the customer created the
+    // plan. Materialising it on the visit day must not turn it into a new same-day
+    // emergency or add an emergency fee merely because a worker ran late.
+    const urgent = !input.isRecurringOccurrence
+      && !input.hasScheduleSlot
+      && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    // المفتاح الأضيق (ج-١٧): الطوارئ وحدها. مكانه هنا بالذات لأن `urgent` لسه اتحسب دلوقتي —
+    // قبل السطر ده مفيش إجابة على «ده طوارئ ولا لأ» (ADR-0048: الوضع مشتق مش مختار). وقبل
+    // التسعير مباشرةً، فمفيش رسوم طوارئ بتتحسب لطلب هيترفض بعدها.
+    if (urgent) await this.bookingAvailability.assertEmergencyBookingsAllowed(input.isRecurringOccurrence);
+
+    // الجهة التانية من نفس البوابة: الأدمن قافل الجدولة (`allows_scheduling = false`) والعميل
+    // اختار يوم جاي. كان إعداد ميت بالكامل — بيتحفظ وماليهوش أي أثر (اتأكد بفحص حي على الـ16
+    // تركيبة قدرات: كلها قبلت حجز «بكرة»).
+    if (!urgent && resolvedScheduledAtIso && !canAcceptScheduled(service)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش بتقبل حجز مواعيد مقدمًا — اطلبها لنفس اليوم',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    // **نافذة اختيار الموعد** (طلب مالك 2026-09-15، docs/08 §151، ADR-0097) — البداية اللي
+    // العميل اختارها لازم تكون جوّه الفترة المسموحة (٥ص–٧م افتراضيًا).
+    //
+    // مكانها هنا بالذات: **بعد** حل النطاق المرن (`resolvedScheduledAtIso` بقى نهائي) و**قبل**
+    // التسعير، فمفيش رسوم بتتحسب لطلب هيترفض بعدها.
+    //
+    // مستثنى عمدًا:
+    //  - الطلب المستعجل (`urgent`) — العميل بيقول «دلوقتي»، مش بيختار ساعة أصلاً.
+    //  - الحجز على سلوت فني معلَن (`scheduleSlot`) — ده وقت **الفني** التزم بيه بنفسه، والقاعدة
+    //    دي عن اختيار العميل الحر.
+    //  - التكرار المتولّد (`recurringIdentity`) — الموعد اتقبل وقت إنشاء الخطة، ورفضه هنا كان
+    //    هيكسر خطة شغّالة بأثر رجعي.
+    if (!urgent && !input.hasScheduleSlot && !input.isRecurringOccurrence && resolvedScheduledAtIso) {
+      const chosenAt = new Date(resolvedScheduledAtIso);
+      // `bookingWindowApplies` بتستبعد «اليوم المجرّد» (`T00:00:00.000Z`) والخدمات اللي
+      // مابتطلبش ساعة بداية — في الحالتين مفيش ساعة اختارها العميل عشان نحكم عليها.
+      if (bookingWindowApplies({ scheduledAt: chosenAt, serviceRequiresStartTime: service.requiresStartTimeOnly })) {
+        const bookingWindow = await resolveBookingWindowSetting(this.settingsService);
+        if (!isWithinBookingWindow(chosenAt, bookingWindow)) {
+          throw new ApiException(ErrorCode.VAL_001, bookingWindowMessageAr(bookingWindow), HttpStatus.BAD_REQUEST);
+        }
+      }
+    }
+    if (urgent && !canAcceptSameDay(service)) {
+      // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
+      // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return { resolvedScheduledAtIso, urgent };
+  }
+
   private async estimateCandidateLoad(
     service: Service,
     zoneId: string,
-    dto: CreateOrderDto,
+    dto: StandardDurationInput & { field_values?: Record<string, string | number | boolean> },
   ): Promise<CandidateOperationalLoad | undefined> {
     try {
       // مسار البيانات القياسية أولاً — نفس أولوية `durationEstimate ?? estimate` المستخدمة

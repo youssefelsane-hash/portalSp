@@ -1004,3 +1004,17 @@ compatibility, matching and admin explainability: 41 tests passed on isolated Po
 
 الاختبارات: `dispatch-workload-gate.spec.ts` (فروع السياسة، بنداء الدالة الحقيقية) +
 `scripts/verify-dispatch-route-reasons.js` (المسار الكامل على طلبات حقيقية).
+
+## فرق الفني المميّز fail-closed في كل مسارات التعيين (docs/08 §188)
+
+`applyLevelPremiumSafely()` كانت بتبلع فشل حساب الفرق في التأكيد التلقائي، فالفني يتعيّن **بسعر
+ناقص**، بينما `accept()` بيعمل rollback على نفس الفشل. اتشال البلع (`applyLevelPremium()`):
+الفشل بيفشّل التعيين في المسارين، والطلب بيفضل `SEARCHING_TECHNICIAN` والـsweep بيعيد. آمن لأن
+التأكيد التلقائي مابيجريش جوّه طلب HTTP لعميل (طابور/مستمع/sweep، وكلهم بيمسكوا).
+
+- المستوى وفئة التسعير بيتقروا **من نفس الترانزاكشن** بدل `TechniciansService` — البلع كان
+  مخبّي `TypeError` في كل سبيك بيبني الخدمة بـ`techniciansService = {}`.
+- `declineWorkOpportunity()`: التوزيع التالي بعد الرفض بقى ملفوف (نفس `OrderDispatchListener`)،
+  عشان فشله مايرجعش للفني كخطأ على رفض اتسجّل فعلاً.
+
+الاختبار: `matching-premium-fail-closed.spec.ts` (بضابط — فشل على الكود القديم بـ`accepted`).

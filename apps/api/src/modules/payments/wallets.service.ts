@@ -280,6 +280,23 @@ export class WalletsService {
     return manager ? run(manager) : this.dataSource.transaction(run);
   }
 
+  /**
+   * بيقفل كذا محفظة **بنفس الترتيب الثابت (بالـ id)** اللي `doubleEntryWithManager` و
+   * `finalizePayout` بيقفلوا بيه — لأي عملية لازم **تقرا رصيد وتقرّر عليه** قبل القيد نفسه.
+   *
+   * القراءة من غير قفل كانت بتسمح لعمليتين متزامنتين ياخدوا نفس القرار على نفس الرصيد:
+   * سدادين لدين 100 ج الاتنين قروا -100 وعدّوا، والرصيد انتهى **+100** (docs/08 §188، اتقاس).
+   * الترتيب الثابت هو اللي بيمنع deadlock مع أي `doubleEntry` تاني على نفس المحفظتين؛ والقفل
+   * التاني جوّه `doubleEntry` بعد كده re-entrant لأنه في نفس الترانزاكشن.
+   */
+  async lockWalletsInOrder(walletIds: string[], manager: EntityManager): Promise<Map<string, Wallet>> {
+    const locked = new Map<string, Wallet>();
+    for (const id of [...new Set(walletIds)].sort()) {
+      locked.set(id, await this.lockWallet(id, manager));
+    }
+    return locked;
+  }
+
   private async lockWallet(walletId: string, manager: EntityManager): Promise<Wallet> {
     const wallet = await manager
       .createQueryBuilder(Wallet, 'w')

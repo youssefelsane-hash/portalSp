@@ -634,6 +634,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
   // الكود بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validateCode) — مش أوتوماتيك مع كل
   // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
+  // **نفس شروط `createOrder` بالحرف** (docs/08 §188) — المعاينة لازم تسعّر نفس الحجز اللي
+  // هيتأكد، فالنطاق المرن والتكرار بيتبعتوا هنا بنفس اللي الإنشاء بيبعته بالظبط.
+  /// إعادة المعاينة بنفس الكود المطبّق حاليًا — نفس نداء معالج الضمان بالحرف، مجمّع في مكان واحد.
+  void _refreshPreviewKeepingCodes() => _refreshPreview(
+        promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
+        buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
+      );
+
+  String? get _previewRangeEnd => _effectiveRemoteQuote || widget.scheduleSlotId != null
+      ? null
+      : _requestedAtRangeEnd?.toUtc().toIso8601String();
+
+  String? get _previewRepeatFrequency =>
+      _effectiveRemoteQuote ? null : (_canRepeat ? _repeatFrequency : null);
+
   Future<void> _refreshPreview({
     String? promoCode,
     String? buildingCode,
@@ -663,6 +678,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
         scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
+        scheduledAtRangeEnd: _previewRangeEnd,
+        repeatFrequency: _previewRepeatFrequency,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -742,6 +759,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         if (choice.preciseTime != null) _preciseTime = choice.preciseTime;
         _clearSectionError(_scheduleSectionKey);
       });
+      // اليوم هو اللي بيحدد رسوم الاستعجال (ADR-0048)، والنطاق المرن بيتحل على السيرفر لليوم
+      // الفعلي — فتغيير الموعد من غير إعادة المعاينة كان بيسيب سعر قديم على الشاشة (docs/08 §188).
+      _refreshPreviewKeepingCodes();
     }
   }
 
@@ -847,6 +867,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           buildingCode: asBuilding ? code : null,
           warrantyPlanId: _selectedWarrantyPlanId,
           scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
+          scheduledAtRangeEnd: _previewRangeEnd,
+          repeatFrequency: _previewRepeatFrequency,
         );
 
     try {
@@ -2133,7 +2155,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               const SizedBox(height: 8),
               RadioGroup<String?>(
                 groupValue: _repeatFrequency,
-                onChanged: (value) => setState(() => _repeatFrequency = value),
+                onChanged: (value) {
+                  setState(() => _repeatFrequency = value);
+                  // التكرار مدخل تسعير على السيرفر (`recurringMetadata`) — نفس سبب الموعد فوق.
+                  _refreshPreviewKeepingCodes();
+                },
                 child: Column(
                   children: [
                     _repeatOption(

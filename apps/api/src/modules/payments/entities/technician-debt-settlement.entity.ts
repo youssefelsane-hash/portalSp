@@ -36,6 +36,10 @@ export class TechnicianDebtSettlement {
   @Column({ name: 'wallet_transaction_id', type: 'uuid', nullable: true })
   walletTransactionId: string | null;
 
+  // migration 0370 — NULL للصفوف القديمة بس؛ المسار الحالي بيشترطه (docs/08 §188).
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 120, nullable: true })
+  idempotencyKey: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

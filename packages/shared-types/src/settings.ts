@@ -11,4 +11,6 @@ export interface SettingResponseDto {
   updated_at: string;
   is_deprecated: boolean;
   deprecation_reason: string | null;
+  /** الحدود اللي السيرفر بيفرضها على الحفظ (docs/08 §188). `null` = مفيش حد مسجّل للمفتاح ده. */
+  allowed_range: { min: number; max: number; integer: boolean } | null;
 }

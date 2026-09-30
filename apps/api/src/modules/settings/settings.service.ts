@@ -13,6 +13,7 @@ import {
 } from '../../common/events/setting-updated.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Setting } from './entities/setting.entity';
+import { SETTINGS_REGISTRY } from './settings-registry';
 
 // TTL دفاعي بس — الإبطال الفعلي فوري في update() تحت، الـ TTL ده شبكة أمان لو حصل تعديل
 // مباشر في القاعدة (SQL) من غير ما يعدّي من update() هنا.
@@ -50,6 +51,27 @@ export const isLegacyEarningsSettingKey = (key: string): boolean =>
   /^commission\.(individual|team|emergency)_adjustment_percentage$/.test(key) ||
   key === 'crew.assistant_share_ratio' ||
   key === 'earnings.v2_cutover_enabled';
+
+/**
+ * بيرفض أي قيمة رقمية بره الحدود المسجّلة للمفتاح في `SETTINGS_REGISTRY` (docs/08 §188).
+ *
+ * مفتاح مالوش `range` بيعدّي زي ما هو — الحدود مقصودة على المفاتيح اللي الرقم الغلط فيها بيضرّ
+ * فلوس أو توزيع أو مواعيد، مش على كل مفتاح.
+ */
+export function assertSettingWithinRange(key: string, value: unknown): void {
+  const range = SETTINGS_REGISTRY[key]?.range;
+  if (!range || typeof value !== 'number') return;
+  const outOfRange = !Number.isFinite(value) || value < range.min || value > range.max;
+  const notInteger = range.integer === true && !Number.isInteger(value);
+  if (outOfRange || notInteger) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      range.messageAr ??
+        `القيمة لازم تكون ${range.integer ? 'عدد صحيح ' : ''}من ${range.min} لـ${range.max}`,
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+}
 
 @Injectable()
 export class SettingsService {
@@ -310,20 +332,9 @@ export class SettingsService {
   async update(adminUserId: string, key: string, value: unknown, meta?: AuditActorMeta): Promise<Setting> {
     const setting = await this.getOrThrow(key);
     this.assertValueMatchesType(setting, value);
-    if (key === 'matching.additional_request_batch_size' &&
-        (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100)) {
-      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100', HttpStatus.BAD_REQUEST);
-    }
-    if (
-      key === 'matching.daily_capacity_minutes' &&
-      (typeof value !== 'number' || !Number.isInteger(value) || value < 60 || value > 12 * 60)
-    ) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'يوم العمل لازم يكون عدد دقائق صحيحًا من ساعة إلى 12 ساعة كحد أقصى',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    // الحدود من السجل (`SETTINGS_REGISTRY[key].range`) — مكان واحد للقاعدة بدل `if` لكل مفتاح
+    // هنا (كان فيه اتنين، docs/08 §188).
+    assertSettingWithinRange(key, value);
 
     if (isLegacyEarningsSettingKey(key)) {
       throw new ApiException(

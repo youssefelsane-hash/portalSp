@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -42,18 +43,27 @@ export class AdminTechnicianDebtController {
   /**
    * «الراجل ده دفع» — تسجيل سداد حصل برّه التطبيق.
    *
-   * `wallets.adjust` عمدًا: نفس صلاحية التصحيح اليدوي واللي بتفرض MFA بالفعل
-   * (`MFA_REQUIRED_PERMISSIONS`). التسجيل بيحرّك فلوس حقيقية، فنفس مستوى الحماية بالظبط وبلا
-   * صلاحية جديدة تضخّم المصفوفة.
+   * `wallets.adjust` عمدًا: نفس صلاحية التصحيح اليدوي. التسجيل بيحرّك فلوس حقيقية، فنفس
+   * مستوى الحماية **بالظبط** — وده كان الكلام بس (docs/08 §188): التعليق هنا كان بيقول «نفس
+   * الحماية» والـ`@RequireStepUp()` مش موجودة، و`StepUpGuard` بيبقى no-op من غيرها. يعني
+   * جلسة مسروقة كانت تقدر تسجّل سداد وهمي يصفّر دين فني من غير Passkey حديث، بينما
+   * `adjustWallet` جنبها محمية. نفس فئة البَقّة اللي اتصلحت هناك في 2026-08-14 بالحرف.
+   * ودلوقتي كمان `Idempotency-Key` إجباري بنفس الشكل.
    */
   @Post(':id/debt/settlements')
   @RequirePermission('wallets.adjust')
+  @RequireStepUp()
   async recordSettlement(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordDebtSettlementDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @AuditContext() audit: AuditMeta,
   ) {
+    const operationKey = idempotencyKey?.trim();
+    if (!operationKey || operationKey.length > 120) {
+      throw new BadRequestException('Idempotency-Key header مطلوب وبحد أقصى 120 حرف');
+    }
     return this.technicianDebtService.recordSettlement(
       admin.sub,
       id,
@@ -63,6 +73,7 @@ export class AdminTechnicianDebtController {
         externalReference: dto.external_reference,
         note: dto.note,
       },
+      operationKey,
       audit,
     );
   }

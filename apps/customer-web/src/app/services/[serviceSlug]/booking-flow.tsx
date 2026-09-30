@@ -627,10 +627,28 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       address_id: selectedAddressId,
       // مفيش `booking_mode`: السيرفر بيتجاهله ويشتقّ الوضع بنفسه (ADR-0106).
       ...(scheduledDate ? { scheduled_at: computeScheduledAt(scheduledDate) } : {}),
+      /*
+        الاتنين دول **نفس سطور `handleSubmit` بالحرف** (docs/08 §188). غيابهم كان معناه إن
+        المعاينة بتسعّر حجز تاني غير اللي هيتأكد: يوم البداية الحرفي بدل اليوم المحلول للنطاق
+        المرن، ومن غير أثر التكرار على السعر.
+
+        `pay_full_amount` **مابيتبعتش هنا عن قصد**: اختيار «ادفع كامل» نفسه ظاهر بناءً على
+        `deposit_amount_cents` اللي راجع من المعاينة دي. لو اتبعت، المعاينة هترجّع من غير عربون،
+        فالاختيار يختفي، فالطلب يتغيّر — دايرة. «المطلوب دلوقتي» بيتحسب محليًا من العربون
+        والاختيار (`prepaymentDueCents`) بنفس قاعدة الإنشاء بالظبط.
+      */
+      ...(scheduleDayMode === 'flexible' && scheduledDateRangeEnd
+        ? { scheduled_at_range_end: computeScheduledAt(scheduledDateRangeEnd) }
+        : {}),
+      ...(repeatFrequency ? { repeat_frequency: repeatFrequency } : {}),
       ...(Object.keys(debouncedFieldValues).length > 0 ? { field_values: debouncedFieldValues } : {}),
       ...(promoCode.trim() ? { promo_code: promoCode.trim() } : {}),
+      // الشركة في خانتها والفني في خانته — نفس `handleSubmit`. كان بيبعت id الشركة كـ«فني»،
+      // فالمعاينة بترجع 404 وتسقط لتقدير عام بدل سعر الشركة بمعاملها.
       ...(selectedTechnicianId && technicianChoiceMode === 'manual'
-        ? { requested_technician_id: selectedTechnicianId }
+        ? selectedProviderIsCompany
+          ? { requested_technician_company_id: selectedTechnicianId }
+          : { requested_technician_id: selectedTechnicianId }
         : {}),
     })
       .then((preview) => {
@@ -661,6 +679,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     promoCode,
     selectedTechnicianId,
     technicianChoiceMode,
+    selectedProviderIsCompany,
+    scheduleDayMode,
+    scheduledDateRangeEnd,
+    repeatFrequency,
   ]);
 
   // مطابق لـ RescheduleSection's fetchRescheduleOptions/rescheduleOrder بالحرف (نفس اتفاقية
