@@ -19242,4 +19242,9 @@ auto-rematch في D-4 (الموظف بيستخدم reassign/rematch/reschedule �
   `matching.punctuality_weight` (5) و`matching.punctuality_baseline_percent` (85) — أقصى أثر أقل من نص مستوى.
   `matching.reliability_weight` 0 ⇒ 2 (بس لو الأدمن مالمسهوش). سطر «التزام بالمواعيد» في تفسير الترتيب بالأدمن.
   اختبارات حية: 3 جديدة + 42 suite ترتيب/مطابقة كلها خضرا. الإلغاء/إعادة الشغل/الشكاوى: نفس المكوّن لاحقًا (مكتوب في README).
+- **D-4 ✅** `atRiskAppointments` جوّه `AdminExceptionCenterService`: مراقبة (≤30 د قبل الموعد ولسه ماتحرّكش) ⇒
+  تأخر في التحرك (أصفر، جه الموعد) ⇒ تأخر في الوصول (أحمر، +20 د) — الأرقام إعدادات
+  `operations.departure_warning_minutes`/`operations.arrival_grace_minutes`. الصف فيه الرقم والموعد والفني وتليفونه
+  والدقايق واتحرك ولا لأ وآخر نشاط. تنبيه `ops_manager` مرة لكل مستوى (compare-and-set على `orders.at_risk_alert_level`)،
+  ومفيش auto-rematch. اختبارات حية 3 جديدة + 16 suite عمليات/إعدادات خضرا، والـAPI بيقوم (health 200).
 

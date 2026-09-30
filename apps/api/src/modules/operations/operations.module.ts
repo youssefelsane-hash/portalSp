@@ -15,12 +15,13 @@ import { RiskCenterService } from './risk/risk-center.service';
 import { RiskDetectorService } from './risk/risk-detector.service';
 import { RiskDetectorScheduler } from './risk/risk-detector.scheduler';
 import { AuditModule } from '../audit/audit.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — موديول جديد مستقل عمدًا (نفس نمط MatchingModule):
 // بيستورد كيانات/ثوابت خام بس من orders (OrderStatus، الثوابت، ESCALATABLE_STATUSES) مش OrdersModule
 // نفسه، عشان يتجنّب أي دورة استيراد (نفس التحذير الموثّق في matching.module.ts بالحرف).
 @Module({
-  imports: [SettingsModule, RealtimeSecurityModule, AuditModule],
+  imports: [SettingsModule, RealtimeSecurityModule, AuditModule, NotificationsModule],
   controllers: [AdminOperationsController, AdminRiskCenterController],
   providers: [
     AdminOperationsOverviewService,

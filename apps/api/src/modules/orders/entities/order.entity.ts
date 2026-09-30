@@ -212,6 +212,13 @@ export class Order {
   @Column({ name: 'recurring_payment_next_attempt_at', type: 'timestamptz', nullable: true })
   recurringPaymentNextAttemptAt: Date | null;
 
+  // docs/08 §189 D-4 — آخر مستوى «موعد في خطر» اتبعت عنه تنبيه للعمليات (compare-and-set).
+  @Column({ name: 'at_risk_alert_level', type: 'varchar', length: 20, nullable: true })
+  atRiskAlertLevel: 'late_departure' | 'late_arrival' | null;
+
+  @Column({ name: 'at_risk_alerted_at', type: 'timestamptz', nullable: true })
+  atRiskAlertedAt: Date | null;
+
   // ADR-0116 — آخر ميعاد لدفع نوبة متكررة يدوية؛ NULL = مهلة الطلب العادية.
   @Column({ name: 'recurring_payment_deadline_at', type: 'timestamptz', nullable: true })
   recurringPaymentDeadlineAt: Date | null;

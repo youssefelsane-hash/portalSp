@@ -344,6 +344,26 @@ export class AdminOperationsController {
       zoneId: query.zone_id ?? null,
     });
     return {
+      // docs/08 §189 D-4 — المواعيد اللي في خطر **النهارده** (قبل ما تبقى overdue بكرة).
+      at_risk_appointments: {
+        items: result.atRiskAppointments.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          scheduled_at: i.scheduledAt,
+          level: i.level,
+          order_status: i.orderStatus,
+          technician_id: i.technicianId,
+          technician_code: i.technicianCode,
+          full_name: i.fullName,
+          phone: i.phone,
+          minutes_from_appointment: i.minutesFromAppointment,
+          moved: i.moved,
+          departed_at: i.departedAt,
+          last_location_at: i.lastLocationAt,
+          last_activity_at: i.lastActivityAt,
+        })),
+        total: result.atRiskAppointments.total,
+      },
       // docs/08 §56 بند 4 — أول عنصر عمدًا: شغلانة معادها عدّى ولسه ما بدأتش هي أعجل حاجة هنا.
       overdue_orders: {
         items: result.overdueOrders.items.map((i) => ({

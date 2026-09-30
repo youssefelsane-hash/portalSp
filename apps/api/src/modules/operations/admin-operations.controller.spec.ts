@@ -133,6 +133,27 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
           ],
           total: 1,
         },
+        atRiskAppointments: {
+          items: [
+            {
+              orderId: 'o6',
+              orderNumber: 'ORD-6',
+              scheduledAt: '2026-08-28T10:00:00.000Z',
+              level: 'late_arrival',
+              orderStatus: 'technician_on_way',
+              technicianId: 't6',
+              technicianCode: 'T6',
+              fullName: 'فني متأخر',
+              phone: '+201000000006',
+              minutesFromAppointment: 35,
+              moved: true,
+              departedAt: '2026-08-28T09:40:00.000Z',
+              lastLocationAt: '2026-08-28T10:30:00.000Z',
+              lastActivityAt: '2026-08-28T10:30:00.000Z',
+            },
+          ],
+          total: 1,
+        },
         matchingWorkflowDelayed: {
           items: [
             {
@@ -181,6 +202,14 @@ describe('AdminOperationsController.getExceptions() — كل مجموعة محس
       order_number: 'ORD-4',
       attempt_count: 4,
       age_seconds: 172_800,
+    });
+    expect(result.at_risk_appointments.items[0]).toMatchObject({
+      order_number: 'ORD-6',
+      level: 'late_arrival',
+      phone: '+201000000006',
+      minutes_from_appointment: 35,
+      moved: true,
+      last_activity_at: '2026-08-28T10:30:00.000Z',
     });
     expect(result.stale_in_progress.items[0]).toMatchObject({
       order_number: 'ORD-5',
