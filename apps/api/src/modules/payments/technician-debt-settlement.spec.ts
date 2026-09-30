@@ -77,7 +77,7 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
     expect(view.debtCents).toBe(0);
 
     await expect(
-      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 1000, method: 'cash' }),
+      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 1000, method: 'cash' }, `none-${runId}`),
     ).rejects.toThrow('الفني مش مديون للمنصة أصلاً');
   });
 
@@ -109,7 +109,7 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
       method: 'instapay',
       externalReference: 'IPN-12345',
       note: 'سدّد جزء في المكتب',
-    });
+    }, `partial-${runId}`);
 
     expect(view.balanceCents).toBe(-50_000);
     expect(view.debtCents).toBe(50_000);
@@ -139,7 +139,7 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
 
   it('مبلغ أكبر من المديونية بيترفض — الأدمن ما يقدرش يحوّل الدَّين لرصيد موجب بالغلط', async () => {
     await expect(
-      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 999_999, method: 'cash' }),
+      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 999_999, method: 'cash' }, `over-${runId}`),
     ).rejects.toThrow(/أكبر من المديونية/);
   });
 
@@ -148,7 +148,7 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
       amountCents: 50_000,
       method: 'cash',
       note: 'سدّد الباقي كاش',
-    });
+    }, `rest-${runId}`);
     expect(view.balanceCents).toBe(0);
     expect(view.status).toBe('none');
     expect(view.debtCents).toBe(0);
@@ -158,5 +158,69 @@ describe('تسوية مديونية الفني — حي (ADR-0041)', () => {
   it('الفني بيظهر في قايمة المديونين وهو مديون، وبيختفي بعد السداد', async () => {
     const afterSettle = await service.listTechniciansInDebt();
     expect(afterSettle.some((v) => v.technicianId === ids.techId)).toBe(false);
+  });
+
+  /*
+    ═══ race مالي حقيقي (docs/08 §188) ═══
+
+    الاختبارات فوق كلها **متتالية**. القراءة كانت بتحصل قبل القفل: عمليتين متزامنتين بيقروا
+    نفس الرصيد (-100)، الاتنين بيعدّوا فحص `amount <= debt`، والتانية بتدخل بعد الأولى وتخلّي
+    الرصيد **+100** — فلوس اتخلقت من العدم. الاختبار ده بيبعت الاتنين في نفس اللحظة فعلاً.
+  */
+  it('سدادين متزامنين لنفس الدَّين: واحد بس بيعدّي، والرصيد مابيبقاش موجب أبدًا', async () => {
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    await walletsService.doubleEntry({
+      fromWalletId: ids.techWalletId,
+      toWalletId: platformWallet.id,
+      amountCents: 10_000,
+      transactionType: WalletTxType.COMMISSION_DEDUCTION,
+      referenceType: 'order',
+      referenceId: ids.techId,
+      descriptionAr: 'عمولة كاش',
+      allowNegativeBalance: true,
+    });
+
+    const results = await Promise.allSettled([
+      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 10_000, method: 'cash' }, `race-a-${runId}`),
+      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 10_000, method: 'cash' }, `race-b-${runId}`),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(String(rejected.reason?.message ?? rejected.reason)).toMatch(/مش مديون/);
+
+    const wallet = await dataSource.getRepository(Wallet).findOneByOrFail({ id: ids.techWalletId });
+    expect(wallet.balanceCents).toBe(0);
+  });
+
+  it('إعادة نفس الطلب بنفس Idempotency-Key مابتحرّكش فلوس تاني', async () => {
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    await walletsService.doubleEntry({
+      fromWalletId: ids.techWalletId,
+      toWalletId: platformWallet.id,
+      amountCents: 5_000,
+      transactionType: WalletTxType.COMMISSION_DEDUCTION,
+      referenceType: 'order',
+      referenceId: ids.techId,
+      descriptionAr: 'عمولة كاش',
+      allowNegativeBalance: true,
+    });
+
+    const key = `retry-${runId}`;
+    const first = await service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 3_000, method: 'cash' }, key);
+    // «الشبكة قطعت والموظف داس تاني» — نفس المفتاح، نفس العملية.
+    const replay = await service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 3_000, method: 'cash' }, key);
+
+    expect(first.balanceCents).toBe(-2_000);
+    expect(replay.balanceCents).toBe(-2_000);
+    const rows = await dataSource
+      .getRepository(TechnicianDebtSettlement)
+      .countBy({ technicianId: ids.techId, idempotencyKey: key });
+    expect(rows).toBe(1);
+
+    // نفس المفتاح لعملية **مختلفة** = خطأ صريح، مش تنفيذ صامت ولا تجاهل صامت.
+    await expect(
+      service.recordSettlement(ids.adminUserId, ids.techId, { amountCents: 2_000, method: 'cash' }, key),
+    ).rejects.toThrow(/Idempotency-Key/);
   });
 });

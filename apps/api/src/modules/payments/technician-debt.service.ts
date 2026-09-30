@@ -136,22 +136,56 @@ export class TechnicianDebtService {
    * بيعمل قيد مزدوج حقيقي (منصة → الفني) عشان الرصيد يتحرّك من المسار الرسمي الوحيد، وبيسجّل
    * الواقعة بمبلغها وطريقتها ومرجعها. الاتنين جوّه **ترانزاكشن واحدة**: مينفعش نسجّل سداد
    * والرصيد ما اتحركش، ولا نحرّك رصيد بلا سجل يفسّره.
+   *
+   * ### القفل قبل القراءة (docs/08 §188 — race مالي اتقاس واتصلح)
+   *
+   * الرصيد كان بيتقري **قبل** القفل، والقفل الحقيقي كان جوّه `doubleEntry()` بعدها. سدادين
+   * متزامنين لدين 100 ج الاتنين قروا -100 وعدّوا فحص «المبلغ ≤ الدين»، والتاني خلّى الرصيد
+   * **+100** — وسجل كل واحد فيهم قال «قبل -100، بعد 0». دلوقتي المحفظتين بيتقفلوا الأول بنفس
+   * ترتيب `doubleEntry`، والرصيد بيتقري **تحت القفل**، فالتاني بيستنى ويشوف الدين اتصفّر.
+   *
+   * ### Idempotency-Key (نفس نمط `adminAdjustWallet` بالحرف)
+   *
+   * نفس المفتاح من نفس الموظف = نفس العملية: بترجّع الحالة من غير ما تحرّك فلوس تاني. ونفس
+   * المفتاح لعملية **مختلفة** بيترفض صراحةً بدل ما يتنفّذ أو يتجاهَل بصمت.
    */
   async recordSettlement(
     adminUserId: string,
     technicianProfileId: string,
     input: { amountCents: number; method: DebtSettlementMethod; externalReference?: string; note?: string },
+    idempotencyKey: string,
     meta?: AuditActorMeta,
   ): Promise<TechnicianDebtView> {
     const profile = await this.techniciansService.findByProfileIdOrThrow(technicianProfileId);
 
-    await this.dataSource.transaction(async (manager) => {
-      const technicianWallet = await this.walletsService.getOrCreateWallet(
+    const created = await this.dataSource.transaction(async (manager) => {
+      const technicianWalletRow = await this.walletsService.getOrCreateWallet(
         profile.userId,
         WalletOwnerType.TECHNICIAN,
         manager,
       );
-      const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+      const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+      const locked = await this.walletsService.lockWalletsInOrder([technicianWalletRow.id, platformWallet.id], manager);
+      const technicianWallet = locked.get(technicianWalletRow.id)!;
+
+      // بعد القفل: أي تسجيل تاني بنفس المفتاح يا إما خلص (فهنلاقيه) يا إما مستني ورانا.
+      const previous = await manager
+        .getRepository(TechnicianDebtSettlement)
+        .findOneBy({ recordedByUserId: adminUserId, idempotencyKey });
+      if (previous) {
+        if (
+          previous.technicianId !== technicianProfileId ||
+          previous.amountCents !== input.amountCents ||
+          previous.method !== input.method
+        ) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'Idempotency-Key مستخدم قبل كده لعملية سداد مختلفة',
+            HttpStatus.CONFLICT,
+          );
+        }
+        return false;
+      }
 
       if (technicianWallet.balanceCents >= 0) {
         throw new ApiException(ErrorCode.VAL_001, 'الفني مش مديون للمنصة أصلاً', HttpStatus.CONFLICT);
@@ -185,12 +219,18 @@ export class TechnicianDebtService {
         method: input.method,
         externalReference: input.externalReference ?? null,
         note: input.note ?? null,
+        // نفس المعنى القديم (الرصيد المتاح)، بس متقري **تحت القفل** فمايكذبش تاني.
         balanceBeforeCents: technicianWallet.balanceCents,
         balanceAfterCents: technicianWallet.balanceCents + input.amountCents,
         recordedByUserId: adminUserId,
         walletTransactionId: credit.id,
+        idempotencyKey,
       });
+      return true;
     });
+
+    // الإعادة مالهاش أثر جديد، فمالهاش سطر audit جديد — السطر الأصلي هو السجل.
+    if (!created) return this.getDebtView(technicianProfileId);
 
     await this.auditLog.record({
       actorUserId: adminUserId,

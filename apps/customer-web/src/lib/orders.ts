@@ -338,6 +338,9 @@ export interface PreviewOrderBody {
   address_id: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   scheduled_at?: string;
+  /** نفس `CreateOrderDto` — الباك-إند بيحل النطاق لنفس اليوم اللي الإنشاء هيختاره (docs/08 §188). */
+  scheduled_at_range_end?: string;
+  repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
   field_values?: Record<string, PricingFieldValue>;
   addon_ids?: string[];
   promo_code?: string;

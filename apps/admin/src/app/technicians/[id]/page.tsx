@@ -251,6 +251,7 @@ export default function TechnicianDetailPage() {
       // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
       // والمستخدم مش عارف ليه (docs/08 §133).
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+    if (!hasPermission('technicians.approve')) return;
     authedFetch<TechnicianServicePermissionRow[]>(`/admin/technicians/${id}/service-permissions`)
       .then(setServicePermissions)
       // القسم ده تحسين تشغيلي — فشل تحميله مايكسرش صفحة الفني كلها.
@@ -263,14 +264,19 @@ export default function TechnicianDetailPage() {
     loadZones();
     loadCategories();
     load360();
-    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones)
-      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
-      // والمستخدم مش عارف ليه (docs/08 §133).
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
-    authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories)
-      // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
-      // والمستخدم مش عارف ليه (docs/08 §133).
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+    // كل قسم بيتحمّل بس لو الموظف عنده صلاحيته (نفس `@RequirePermission` في الـAPI). من غير كده
+    // موظف مالية بـ`technicians.view` كان بيفتح الصفحة يلاقي «دورك الإداري مش مديك صلاحية»
+    // بالأحمر فوق، على أقسام مش معروضة له أصلاً (docs/08 §188).
+    if (hasPermission('geo.view')) {
+      authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones)
+        // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
+        // والمستخدم مش عارف ليه (docs/08 §133).
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+    }
+    if (hasPermission('catalog.view')) {
+      authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
@@ -643,9 +649,11 @@ export default function TechnicianDetailPage() {
         />
       </div>
 
-      <div className="mb-6">
-        <TechnicianInternalNotes technicianId={id} />
-      </div>
+      {hasPermission('technicians.notes.view') && (
+        <div className="mb-6">
+          <TechnicianInternalNotes technicianId={id} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -924,7 +932,7 @@ export default function TechnicianDetailPage() {
         <TechnicianDebtPanel technicianId={id} />
 
         {/* docs/08 §63.أ1 — كشف المستحقات الشهري، بنفس خدمة تطبيق الفني (مصدر رقم واحد). */}
-        <TechnicianEarningsStatement technicianId={id} />
+        {hasPermission('technicians.finance.view') && <TechnicianEarningsStatement technicianId={id} />}
 
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -1483,94 +1491,96 @@ export default function TechnicianDetailPage() {
         {/* الشغلانات المسموح بيها (ADR-0049، docs/08 §86) — جنب كارت التخصصات مباشرة عمدًا:
             ده نفس القرار بدقة أعلى («الراجل ده سبّاك، بس مش هدّيله تسليك مجاري»)، وفصله في تبويب
             بعيد كان هيخلّي الأدمن يظبط التخصص وينسى إن فيه طبقة تانية أصلاً. */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {detail.technician_kind === 'assistant' ? 'الشغلانات التي يمكنه قيادتها' : 'الشغلانات المسموح بيها'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-4 text-sm text-muted-foreground">
-              {detail.technician_kind === 'assistant' ? (
-                <>
-                  الحجب هنا يمنع المساعد من استلام الشغلانة <strong>كقائد بمفرده</strong> — مش
-                  بيظهر للعميل ولا بياخد توزيع تلقائي عليها. لكنه <strong>يفضل ينفع يساعد</strong>
-                  فيها داخل طاقم فني تاني؛ لإيقاف ده خالص ألغِ اعتماد التخصص نفسه.
-                </>
+        {hasPermission('technicians.approve') && (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {detail.technician_kind === 'assistant' ? 'الشغلانات التي يمكنه قيادتها' : 'الشغلانات المسموح بيها'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-sm text-muted-foreground">
+                {detail.technician_kind === 'assistant' ? (
+                  <>
+                    الحجب هنا يمنع المساعد من استلام الشغلانة <strong>كقائد بمفرده</strong> — مش
+                    بيظهر للعميل ولا بياخد توزيع تلقائي عليها. لكنه <strong>يفضل ينفع يساعد</strong>
+                    فيها داخل طاقم فني تاني؛ لإيقاف ده خالص ألغِ اعتماد التخصص نفسه.
+                  </>
+                ) : (
+                  <>
+                    الفني بياخد <strong>كل</strong> شغلانات تخصصاته المعتمدة افتراضيًا. لو فيه شغلانة
+                    معيّنة مش عايزها توصله، احجبها من هنا — وهو مش هيتخطر بيه، بس الطلبات دي مش هتوصله
+                    ومش هيظهر للعملاء عليها.
+                  </>
+                )}
+              </p>
+              {error ? null : !servicePermissions ? (
+                <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+              ) : servicePermissions.length === 0 ? (
+                <EmptyState
+                  title={
+                    detail.technician_kind === 'assistant'
+                      ? 'مفيش شغلانات — اعتمد تخصص للمساعد الأول'
+                      : 'مفيش شغلانات — اعتمد تخصص للفني الأول'
+                  }
+                />
               ) : (
-                <>
-                  الفني بياخد <strong>كل</strong> شغلانات تخصصاته المعتمدة افتراضيًا. لو فيه شغلانة
-                  معيّنة مش عايزها توصله، احجبها من هنا — وهو مش هيتخطر بيه، بس الطلبات دي مش هتوصله
-                  ومش هيظهر للعملاء عليها.
-                </>
-              )}
-            </p>
-            {error ? null : !servicePermissions ? (
-              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
-            ) : servicePermissions.length === 0 ? (
-              <EmptyState
-                title={
-                  detail.technician_kind === 'assistant'
-                    ? 'مفيش شغلانات — اعتمد تخصص للمساعد الأول'
-                    : 'مفيش شغلانات — اعتمد تخصص للفني الأول'
-                }
-              />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>الشغلانة</TableHead>
-                    <TableHead>التخصص</TableHead>
-                    <TableHead>الحالة</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {servicePermissions.map((row) => (
-                    <TableRow key={row.service_id}>
-                      <TableCell>{row.service_name_ar}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{row.category_name_ar}</TableCell>
-                      <TableCell>
-                        <Badge variant={row.is_excluded ? 'destructive' : 'secondary'}>
-                          {row.is_excluded ? 'محجوبة' : 'مسموحة'}
-                        </Badge>
-                        {row.is_excluded && row.exclusion_reason && (
-                          <p className="mt-1 text-xs text-muted-foreground">{row.exclusion_reason}</p>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-end">
-                        {row.is_excluded ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={savingPermission === row.service_id}
-                            onClick={() => handleToggleServicePermission(row)}
-                          >
-                            ارفع الحجب
-                          </Button>
-                        ) : (
-                          <PromptDialog
-                            trigger={
-                              <Button size="sm" variant="ghost" className="text-destructive" disabled={savingPermission === row.service_id}>
-                                احجبها
-                              </Button>
-                            }
-                            title={`حجب "${row.service_name_ar}" عن الفني`}
-                            label="سبب الحجب (للإدارة بس)"
-                            minLength={0}
-                            confirmLabel="احجب"
-                            destructive
-                            onConfirm={(reason) => handleToggleServicePermission(row, reason)}
-                          />
-                        )}
-                      </TableCell>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>الشغلانة</TableHead>
+                      <TableHead>التخصص</TableHead>
+                      <TableHead>الحالة</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {servicePermissions.map((row) => (
+                      <TableRow key={row.service_id}>
+                        <TableCell>{row.service_name_ar}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{row.category_name_ar}</TableCell>
+                        <TableCell>
+                          <Badge variant={row.is_excluded ? 'destructive' : 'secondary'}>
+                            {row.is_excluded ? 'محجوبة' : 'مسموحة'}
+                          </Badge>
+                          {row.is_excluded && row.exclusion_reason && (
+                            <p className="mt-1 text-xs text-muted-foreground">{row.exclusion_reason}</p>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-end">
+                          {row.is_excluded ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={savingPermission === row.service_id}
+                              onClick={() => handleToggleServicePermission(row)}
+                            >
+                              ارفع الحجب
+                            </Button>
+                          ) : (
+                            <PromptDialog
+                              trigger={
+                                <Button size="sm" variant="ghost" className="text-destructive" disabled={savingPermission === row.service_id}>
+                                  احجبها
+                                </Button>
+                              }
+                              title={`حجب "${row.service_name_ar}" عن الفني`}
+                              label="سبب الحجب (للإدارة بس)"
+                              minLength={0}
+                              confirmLabel="احجب"
+                              destructive
+                              onConfirm={(reason) => handleToggleServicePermission(row, reason)}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="flex-row items-center justify-between">

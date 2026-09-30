@@ -215,6 +215,17 @@ Future<String> _devTokenFor(String phoneNumber, String userType) async {
   );
 }
 
+/// اسم قاعدة التطوير من `apps/api/.env` — نفس مصدر باقي هيلبرز الملف ده. للاختبارات اللي
+/// بتسأل Postgres مباشرة من ملفها هي؛ اسم مكتوب بالإيد كان بيوقع `ux_round_e2e_live_test` على أي
+/// بيئة قاعدتها مش باسمه.
+String liveDatabaseName() {
+  final databaseUrl = _readApiEnv()['DATABASE_URL'];
+  if (databaseUrl == null || databaseUrl.isEmpty) {
+    throw StateError('DATABASE_URL مش موجود في apps/api/.env');
+  }
+  return databaseUrl.split('/').last.split('?').first;
+}
+
 Map<String, String> _readApiEnv() {
   for (final path in const ['/home/user/portalSp/apps/api/.env', 'apps/api/.env', '../api/.env']) {
     final file = File(path);

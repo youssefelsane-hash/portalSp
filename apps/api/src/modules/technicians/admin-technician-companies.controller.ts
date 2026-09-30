@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/comm
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -67,6 +68,9 @@ export class AdminTechnicianCompaniesController {
    */
   @Patch(':id/price-multiplier')
   @RequirePermission('orders.adjust_price')
+  // بيغيّر سعر **كل** طلب جاي للشركة — أوسع أثرًا من `adjustPrice` على طلب واحد، واللي عليه
+  // step-up أصلاً. كان ناقصها والمسح الشامل لقاها (docs/08 §188).
+  @RequireStepUp()
   async setPriceMultiplier(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

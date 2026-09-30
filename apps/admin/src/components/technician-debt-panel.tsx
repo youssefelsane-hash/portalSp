@@ -61,6 +61,13 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
   const [method, setMethod] = useState<DebtView['settlements'][number]['method']>('cash');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
+  /*
+    مفتاح منع التكرار لكل **عملية سداد** (docs/08 §188) — نفس نمط `WalletAdjustmentForm`.
+    الشبكة قطعت والموظف داس تاني = نفس المفتاح = السيرفر بيرجّع النتيجة الأولى من غير ما يحرّك
+    فلوس تاني. المفتاح بيتجدّد بعد النجاح، ولما المبلغ أو الطريقة يتغيّروا (دي عملية تانية).
+  */
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const renewKey = () => setIdempotencyKey(crypto.randomUUID());
 
   const load = useCallback(() => {
     authedFetch<DebtView>(`/admin/technicians/${technicianId}/debt`)
@@ -87,6 +94,7 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
     try {
       const updated = await authedFetch<DebtView>(`/admin/technicians/${technicianId}/debt/settlements`, {
         method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
           amount_cents: Math.round(egp * 100),
           method,
@@ -95,6 +103,7 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
         }),
       });
       setDebt(updated);
+      renewKey();
       setAmount('');
       setReference('');
       setNote('');
@@ -170,7 +179,10 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
                       step="0.01"
                       max={debt.debtCents / 100}
                       value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
+                      onChange={(e) => {
+                        setAmount(e.target.value);
+                        renewKey();
+                      }}
                       required
                     />
                   </div>
@@ -180,7 +192,10 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
                       id="debt-method"
                       className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                       value={method}
-                      onChange={(e) => setMethod(e.target.value as typeof method)}
+                      onChange={(e) => {
+                        setMethod(e.target.value as typeof method);
+                        renewKey();
+                      }}
                     >
                       <option value="cash">كاش</option>
                       <option value="instapay">إنستاباي</option>
@@ -211,7 +226,10 @@ export function TechnicianDebtPanel({ technicianId }: { technicianId: string }) 
                     size="sm"
                     variant="outline"
                     disabled={isSaving}
-                    onClick={() => setAmount(String(debt.debtCents / 100))}
+                    onClick={() => {
+                      setAmount(String(debt.debtCents / 100));
+                      renewKey();
+                    }}
                   >
                     سدّد المديونية كاملة
                   </Button>

@@ -1142,3 +1142,20 @@ deploy. والوسم مابيظهرش خالص لو الوسيلة نفسها م
 
 **الإثبات**: تست regression مباشر (`الـclaim بيختم last_attempt_at فورًا`) +
 تست التزامن القديم بقى deterministic (٣ تشغيلات متتالية خضر بدل فشل متقطّع).
+
+## سداد مديونية الفني: قفل قبل القراءة + Idempotency-Key + step-up (docs/08 §188)
+
+`TechnicianDebtService.recordSettlement()` كانت بتقرا الرصيد **قبل** القفل، فسدادين متزامنين
+لدين 100 ج الاتنين عدّوا فحص «المبلغ ≤ الدين» والرصيد انتهى **+100** (اتقاس على الكود القديم).
+
+- **القفل قبل القراءة**: `WalletsService.lockWalletsInOrder()` بتقفل محفظتي الفني والمنصة بنفس
+  الترتيب الثابت (بالـid) اللي `doubleEntry()`/`finalizePayout()` بيستخدموه — فمفيش deadlock،
+  والقفل التاني جوّه `doubleEntry()` re-entrant. **أي عملية جديدة بتقرا رصيد وتقرّر عليه قبل
+  القيد لازم تستخدمها.**
+- **Idempotency-Key إجباري** (migration `0370`، فهرس جزئي فريد على
+  `(recorded_by_user_id, idempotency_key)`) — نفس نمط `adminAdjustWallet` بالحرف: نفس المفتاح =
+  نفس النتيجة بلا حركة فلوس، ومفتاح مستعمل لعملية مختلفة = 409.
+- **`@RequireStepUp()`** كانت ناقصة رغم إن التعليق بيقول «نفس حماية التصحيح اليدوي». الاختبار
+  اللي كان المفروض يمسكها كان قايمة يدوية؛ بقى مسح شامل (`auth/mfa-step-up-enforcement.spec.ts`).
+
+الاختبار: `technician-debt-settlement.spec.ts` (سدادين بـ`Promise.all` + إعادة بنفس المفتاح).

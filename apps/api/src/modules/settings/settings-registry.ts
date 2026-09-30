@@ -39,6 +39,17 @@ export interface SettingDefinition {
   group: string;
   /** بيظهر للأدمن جنب المفتاح — لازم يقول **إيه اللي بيتغيّر فعلاً** لما القيمة تتغيّر. */
   description: string;
+  /**
+   * **الحدود المسموحة** لإعداد رقمي (docs/08 §188، مراجعة معمارية 2026-09-30) — مصدر وحيد للقاعدة:
+   * `SettingsService.update()` بيرفض أي قيمة بره الحدود، ولوحة الأدمن بتعرضها جنب الخانة.
+   *
+   * قبلها الفحص الوحيد كان **النوع**: `pricing.emergency_surcharge_percentage = 900` رقم صحيح
+   * فكان بيتحفظ. وكان فيه قاعدتين حدود مكتوبين `if` جوّه `update()` لمفتاحين بس — اتنقلوا هنا
+   * واتشالوا من هناك عشان مايبقاش فيه مكانين للقاعدة نفسها.
+   *
+   * متحطّة على المفاتيح اللي الرقم الغلط فيها بيضرّ فلوس أو توزيع أو مواعيد، مش على كل مفتاح.
+   */
+  range?: { min: number; max: number; integer?: boolean; messageAr?: string };
   /** إعداد تاريخي فقط؛ لا يظهر كتحكم حي ولا يجوز تعديله. */
   deprecated?: boolean;
   /** تفسير موجز للوحة الإدارة بدل أن يبدو المفتاح معطلاً بلا سبب. */
@@ -58,21 +69,21 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'booking.suggestion_lead_hours': { type: 'number', default: 48, group: 'booking', description: 'الاقتراحات بتبدأ بعد كام ساعة من دلوقتي (48 = بعد بكرة). العميل لسه يقدر يختار أقرب من كده بإيده.' },
   'booking.suggestion_horizon_days': { type: 'number', default: 21, group: 'booking', description: 'أبعد يوم ممكن ندوّر فيه على اقتراح' },
   'booking.suggestion_count': { type: 'number', default: 3, group: 'booking', description: 'عدد الأيام/الساعات المقترحة المعروضة' },
-  'booking.suggestion_day_start_hour': { type: 'number', default: 9, group: 'booking', description: 'أول ساعة في نافذة الاقتراح اليومي (توقيت مصر) — مابتمنعش اختيار ساعة برّاها يدويًا' },
-  'booking.suggestion_day_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة بداية في نافذة الاقتراح اليومي (توقيت مصر)' },
-  'booking.suggestion_roominess_ratio': { type: 'number', default: 0.7, group: 'booking', description: 'اليوم بيتعد «فيه براح» لو عدد الصنايعية المتاحين فيه ≥ النسبة دي × أحسن يوم في الأفق' },
-  'booking.suggestion_delay_penalty_per_day': { type: 'number', default: 0.04, group: 'booking', description: 'كام بتقل درجة اليوم عن كل يوم تأخير (٠.٠٤ = ٤٪). أعلى = بنفضّل الأقرب حتى لو أزحم، أقل = بنروح لأيام أبعد فيها صنايعية أكتر.' },
+  'booking.suggestion_day_start_hour': { type: 'number', default: 9, group: 'booking', description: 'أول ساعة في نافذة الاقتراح اليومي (توقيت مصر) — مابتمنعش اختيار ساعة برّاها يدويًا', range: { min: 0, max: 23, integer: true } },
+  'booking.suggestion_day_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة بداية في نافذة الاقتراح اليومي (توقيت مصر)', range: { min: 0, max: 23, integer: true } },
+  'booking.suggestion_roominess_ratio': { type: 'number', default: 0.7, group: 'booking', description: 'اليوم بيتعد «فيه براح» لو عدد الصنايعية المتاحين فيه ≥ النسبة دي × أحسن يوم في الأفق', range: { min: 0, max: 1 } },
+  'booking.suggestion_delay_penalty_per_day': { type: 'number', default: 0.04, group: 'booking', description: 'كام بتقل درجة اليوم عن كل يوم تأخير (٠.٠٤ = ٤٪). أعلى = بنفضّل الأقرب حتى لو أزحم، أقل = بنروح لأيام أبعد فيها صنايعية أكتر.', range: { min: 0, max: 1 } },
   'booking.suggestion_min_day_spacing': { type: 'number', default: 2, group: 'booking', description: 'أقل مسافة بالأيام بين أي اقتراحين — بتمنع تلات أيام متلاصقة لما الطاقة متساوية.' },
   'booking.suggestion_min_hour_spacing': { type: 'number', default: 3, group: 'booking', description: 'أقل مسافة بالساعات بين أي اقتراحين في نفس اليوم — بتفرد الاقتراحات على اليوم بدل تلات ساعات أول النافذة.' },
   'booking.suggestion_cache_ttl_seconds': { type: 'number', default: 90, group: 'booking', description: 'مدة كاش طاقة أيام الاقتراح بالثواني. صفر = بلا كاش.' },
-  'booking.selectable_start_hour': { type: 'number', default: 5, group: 'booking', description: 'أول ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة). الشغل نفسه بيكمّل بعد النافذة عادي — القيد على البداية بس.' },
-  'booking.selectable_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة، شاملة: ١٩ يعني ٧:٠٠ م مقبولة و٧:٣٠ لأ).' },
-  'booking.suggestion_sequencing_weight': { type: 'number', default: 0.5, group: 'booking', description: 'وزن «التسلسل» في ترتيب الأيام المقترحة (٠ لـ١). بيفضّل الأيام اللي فيها فنيين يومهم لسه ما بدأش على الأيام اللي فيها عدد أكبر بس نصهم مشغول — عشان الشغل يتوزّع بالترتيب بدل ما يترصّ على نفس الناس. صفر = الوفرة وحدها (السلوك القديم).' },
+  'booking.selectable_start_hour': { type: 'number', default: 5, group: 'booking', description: 'أول ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة). الشغل نفسه بيكمّل بعد النافذة عادي — القيد على البداية بس.', range: { min: 0, max: 23, integer: true } },
+  'booking.selectable_end_hour': { type: 'number', default: 19, group: 'booking', description: 'آخر ساعة يقدر العميل يختارها كبداية للشغل (بتوقيت القاهرة، شاملة: ١٩ يعني ٧:٠٠ م مقبولة و٧:٣٠ لأ).', range: { min: 0, max: 23, integer: true } },
+  'booking.suggestion_sequencing_weight': { type: 'number', default: 0.5, group: 'booking', description: 'وزن «التسلسل» في ترتيب الأيام المقترحة (٠ لـ١). بيفضّل الأيام اللي فيها فنيين يومهم لسه ما بدأش على الأيام اللي فيها عدد أكبر بس نصهم مشغول — عشان الشغل يتوزّع بالترتيب بدل ما يترصّ على نفس الناس. صفر = الوفرة وحدها (السلوك القديم).', range: { min: 0, max: 1 } },
 
   // ── assistant_matching ────────────────────────────────────────────────
-  'assistant_matching.batch_size': { type: 'number', default: 10, group: 'assistant_matching', description: 'عدد المساعدين المرشّحين اللي بيتبعتلهم عرض في كل بث' },
+  'assistant_matching.batch_size': { type: 'number', default: 10, group: 'assistant_matching', description: 'عدد المساعدين المرشّحين اللي بيتبعتلهم عرض في كل بث', range: { min: 1, max: 100, integer: true } },
   'assistant_matching.pool_matching_enabled': { type: 'boolean', default: true, group: 'assistant_matching', description: 'مفتاح إيقاف عام لبث فرص المساعدة لمجمع المساعدين' },
-  'assistant_matching.response_timeout_seconds': { type: 'number', default: 120, group: 'assistant_matching', description: 'مهلة رد المساعدين على عرض المطابقة بالثانية' },
+  'assistant_matching.response_timeout_seconds': { type: 'number', default: 120, group: 'assistant_matching', description: 'مهلة رد المساعدين على عرض المطابقة بالثانية', range: { min: 10, max: 3600, integer: true } },
 
   // ── campaigns ─────────────────────────────────────────────────────────
   'campaigns.abandoned_intent_delay_minutes': { type: 'number', default: 60, group: 'campaigns', description: 'بعد كام دقيقة من "العميل بص على خدمة وما حجزش" يتبعت التذكير. القيمة على الحملة نفسها بتغلب دي لو متحددة.' },
@@ -112,17 +123,17 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'kpi.enabled': { type: 'boolean', default: true, group: 'kpi', description: 'تفعيل/تعطيل محرك الـKPI الشهري بالكامل' },
   'kpi.expose_approval_notes_to_technician': { type: 'boolean', default: false, group: 'kpi', description: 'إظهار ملاحظات الأدمن الداخلية للفني في شاشة الـKPI بتاعته' },
   'kpi.min_completed_jobs_for_eligibility': { type: 'number', default: 3, group: 'kpi', description: 'أقل عدد طلبات مكتملة في الشهر عشان الفني يبقى مؤهّل لمكافأة مقترحة' },
-  'kpi.monthly_max_bonus_cents': { type: 'number', default: 500000, group: 'kpi', description: 'أقصى مكافأة شهرية للفني الواحد بالقرش (افتراضي 5000 جنيه) — الأدمن العادي مايقدرش يتخطاها' },
+  'kpi.monthly_max_bonus_cents': { type: 'number', default: 500000, group: 'kpi', description: 'أقصى مكافأة شهرية للفني الواحد بالقرش (افتراضي 5000 جنيه) — الأدمن العادي مايقدرش يتخطاها', range: { min: 0, max: 100_000_000, integer: true } },
   'kpi.negative_rating_threshold': { type: 'number', default: 2, group: 'kpi', description: 'التقييم (من 5) اللي يساويه أو أقل منه يُحسب "تقييم سلبي"' },
   'kpi.ops_can_override_suggested_amount': { type: 'boolean', default: true, group: 'kpi', description: 'العمليات تقدر تعتمد مبلغ مختلف عن المقترح (جوّه الحدود) بدل ما تكون ملزمة بالرقم المقترح بالظبط' },
   'kpi.penalty_points_per_upheld_complaint': { type: 'number', default: 20, group: 'kpi', description: 'نقاط تُخصم من بُعد الشكاوى لكل شكوى مثبتة (upheld) الشهر ده' },
   'kpi.serious_complaint_zero_score': { type: 'boolean', default: true, group: 'kpi', description: 'شكوى حرجة (critical) مثبتة تصفّر الـKPI الشهري بالكامل تلقائيًا' },
-  'kpi.weight_acceptance': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل قبول عروض الطلبات' },
-  'kpi.weight_cancellation': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل الإلغاء من الفني (سلبي)' },
-  'kpi.weight_complaints': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد الشكاوى المثبتة (سلبي)' },
-  'kpi.weight_completion': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل إتمام الطلبات المقبولة' },
-  'kpi.weight_rating': { type: 'number', default: 30, group: 'kpi', description: 'وزن بُعد متوسط التقييم' },
-  'kpi.weight_revenue': { type: 'number', default: 10, group: 'kpi', description: 'وزن بُعد الإيراد النسبي مقارنة بمتوسط الفنيين الشهر ده' },
+  'kpi.weight_acceptance': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل قبول عروض الطلبات', range: { min: 0, max: 100 } },
+  'kpi.weight_cancellation': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل الإلغاء من الفني (سلبي)', range: { min: 0, max: 100 } },
+  'kpi.weight_complaints': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد الشكاوى المثبتة (سلبي)', range: { min: 0, max: 100 } },
+  'kpi.weight_completion': { type: 'number', default: 15, group: 'kpi', description: 'وزن بُعد معدل إتمام الطلبات المقبولة', range: { min: 0, max: 100 } },
+  'kpi.weight_rating': { type: 'number', default: 30, group: 'kpi', description: 'وزن بُعد متوسط التقييم', range: { min: 0, max: 100 } },
+  'kpi.weight_revenue': { type: 'number', default: 10, group: 'kpi', description: 'وزن بُعد الإيراد النسبي مقارنة بمتوسط الفنيين الشهر ده', range: { min: 0, max: 100 } },
 
   // ── legal_entity ──────────────────────────────────────────────────────
   'legal.commercial_register': { type: 'string', default: '', group: 'legal_entity', description: 'رقم السجل التجاري.' },
@@ -139,12 +150,12 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── limits ────────────────────────────────────────────────────────────
   'orders.cancellation_free_window_min': { type: 'number', default: 5, group: 'limits', description: 'مهلة الإلغاء المجاني بالدقايق' },
-  'orders.no_show_visit_fee_cents': { type: 'number', default: 5000, group: 'limits', description: 'رسوم الزيارة الفاشلة (عدم حضور/رفض شغل ضروري) اللي الأدمن بيطبّقها على الطلبات المدفوعة مسبقًا بالقرش' },
+  'orders.no_show_visit_fee_cents': { type: 'number', default: 5000, group: 'limits', description: 'رسوم الزيارة الفاشلة (عدم حضور/رفض شغل ضروري) اللي الأدمن بيطبّقها على الطلبات المدفوعة مسبقًا بالقرش', range: { min: 0, max: 100_000_000, integer: true } },
   'orders.stale_in_progress_hours': { type: 'number', default: 48, group: 'limits', description: 'بعد كام ساعة من بداية التنفيذ يظهر الطلب المتوقف في مركز العمليات للمراجعة اليدوية. لا يلغي النظام الطلب أو أي مدفوعات تلقائيًا.' },
   'orders.stale_matching_hours': { type: 'number', default: 24, group: 'limits', description: 'بعد كام ساعة من البحث بلا عرض مطابقة حي يظهر الطلب في مركز العمليات للمراجعة اليدوية. إعادة المحاولة تستمر ولا يوجد إلغاء تلقائي.' },
   'payments.stale_payment_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة تظهر الدفعة pending أو processing أو manual_review في فحص التسوية للمراجعة البشرية. لا ينشئ النظام محاولة تحصيل بديلة تلقائيًا.' },
   'payments.stale_refund_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة يظهر الاسترداد العالق عند بوابة الدفع في فحص التسوية للمراجعة البشرية. لا يعيد النظام الاسترداد ولا يخرج أي أموال تلقائيًا.' },
-  'orders.payment_timeout_minutes': { type: 'number', default: 15, group: 'limits', description: 'إلغاء تلقائي لطلب PENDING_PAYMENT لو الدفع ماتمش' },
+  'orders.payment_timeout_minutes': { type: 'number', default: 15, group: 'limits', description: 'إلغاء تلقائي لطلب PENDING_PAYMENT لو الدفع ماتمش', range: { min: 1, max: 1440, integer: true } },
   // **مفتاح الرجوع الفوري لأخطر تغيير في النظام** (ADR-0109 §7). `pin` = الدخول برمز، و
   // `otp/request` بيترفض فورًا فمفيش أي مسار بيوصل لمزوّد الـSMS ⇒ **صفر تكلفة**. `otp` =
   // الرجوع للسلوك القديم بتغيير إعداد واحد، مش نشر نسخة جديدة. نفس فلسفة OTP_TEST_MODE (§173).
@@ -152,8 +163,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ADR-0112 — الافتراضي `false` **مقصود**: النشر مايغيّرش أي سلوك لحد ما الأدمن يقرر. مفتوح =
   // العميل اللي رقمه مش متحقَّق منه بيتسأل OTP عند **أول طلب بس** (`users.phone_verified_at`).
   'orders.require_phone_verification_on_first_order': { type: 'boolean', default: false, group: 'security', description: 'يطلب من العميل تأكيد رقمه بكود SMS عند أول طلب بس (محتاج مزوّد SMS مُجهّز). مقفول = أي حد يطلب بأي رقم.' },
-  'payouts.auto_approve_limit_cents': { type: 'number', default: 100000, group: 'limits', description: 'أقصى مبلغ صرف بدون مراجعة بشرية' },
-  'payouts.min_amount_cents': { type: 'number', default: 20000, group: 'limits', description: 'أقل مبلغ صرف مسموح' },
+  'payouts.auto_approve_limit_cents': { type: 'number', default: 100000, group: 'limits', description: 'أقصى مبلغ صرف بدون مراجعة بشرية', range: { min: 0, max: 100_000_000, integer: true } },
+  'payouts.min_amount_cents': { type: 'number', default: 20000, group: 'limits', description: 'أقل مبلغ صرف مسموح', range: { min: 0, max: 100_000_000, integer: true } },
 
   // ── loyalty ───────────────────────────────────────────────────────────
   'loyalty.earn_points_per_100_egp_spent': { type: 'number', default: 1, group: 'loyalty', description: 'نقاط الولاء المكتسبة لكل 100 جنيه إنفاق عند اكتمال الطلب' },
@@ -172,38 +183,38 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'marketing.ios_store_url': { type: 'string', default: '', group: 'marketing', description: 'رابط التطبيق على App Store. نفس السلوك لو فاضي.' },
   'marketing.web_landing_url': { type: 'string', default: '', group: 'marketing', description: 'صفحة الهبوط على الويب — الوجهة الافتراضية لأي جهاز، والبديل لما رابط المتجر مايكونش متسجّل. فاضي = الرجوع لعنوان تطبيق الويب من متغيّرات البيئة.' },
   'marketing.first_order_offer_enabled': { type: 'boolean', default: false, group: 'marketing', description: 'تفعيل عرض خصم أول طلب. مقفول افتراضيًا عن قصد: العرض بيصرف فلوس حقيقية، فتشغيله لازم يكون قرار صريح مش نتيجة migration.' },
-  'marketing.first_order_discount_cents': { type: 'number', default: 10000, group: 'marketing', description: 'قيمة خصم أول طلب بالقرش (١٠٠ ج.م افتراضيًا).' },
-  'marketing.first_order_min_order_cents': { type: 'number', default: 30000, group: 'marketing', description: 'أقل قيمة طلب يشتغل عليها الخصم بالقرش (٣٠٠ ج.م افتراضيًا) — بيمنع إن الخصم يبلع الطلب كله.' },
+  'marketing.first_order_discount_cents': { type: 'number', default: 10000, group: 'marketing', description: 'قيمة خصم أول طلب بالقرش (١٠٠ ج.م افتراضيًا).', range: { min: 0, max: 100_000_000, integer: true } },
+  'marketing.first_order_min_order_cents': { type: 'number', default: 30000, group: 'marketing', description: 'أقل قيمة طلب يشتغل عليها الخصم بالقرش (٣٠٠ ج.م افتراضيًا) — بيمنع إن الخصم يبلع الطلب كله.', range: { min: 0, max: 100_000_000, integer: true } },
   'marketing.first_order_validity_days': { type: 'number', default: 30, group: 'marketing', description: 'صلاحية كود أول طلب بالأيام من لحظة إصداره.' },
   'marketing.first_order_message_ar': { type: 'string', default: 'معاك خصم {discount} ج.م على أول طلب — بحد أدنى {min_order} ج.م.', group: 'marketing', description: 'نص رسالة عرض أول طلب. {discount} و{min_order} بيتبدّلوا بالقيم الفعلية وقت الإرسال، فتغيير المبلغ مايسيبش نص قديم بيكذب.' },
   'marketing.referral_invite_message_ar': { type: 'string', default: 'رشّح صاحبك واكسبوا الاتنين — هو ياخد خصم على أول طلب وإنت تاخد خصم لما طلبه يخلص.', group: 'marketing', description: 'نص دعوة الترشيح اللي بيظهر للعميل بعد أول طلب.' },
 
   // ── matching ──────────────────────────────────────────────────────────
-  'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب' },
-  'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا' },
+  'matching.batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد الفنيين في أول دفعة توزيع تلقائي للحجز القريب', range: { min: 1, max: 50, integer: true } },
+  'matching.additional_request_batch_size': { type: 'number', default: 4, group: 'matching', description: 'عدد المؤهلين في دفعة طلب الشغل الإضافي المجدول (1 إلى 100)، اختيار العميل يظل حصريًا', range: { min: 1, max: 100, integer: true, messageAr: 'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100' } },
   'matching.broaden_to_busy_after_round': { type: 'number', default: 4, group: 'matching', description: 'رقم الجولة اللي بعدها يتوسّع البحث لفنيين مرتبطين لكن مشغولين حاليًا' },
   'matching.company_auto_match_boost': { type: 'number', default: 2, group: 'matching', description: 'أفضلية الشركة التجارية المؤهلة ككيان في التوزيع التلقائي (0 يلغي الأفضلية فقط، لا ترشيح الشركة)' },
   'matching.company_large_job_boost': { type: 'number', default: 3, group: 'matching', description: 'زيادة معتدلة في ترتيب ممثل الشركة المسجلة للشغل الكبير عند كفاية طاقمها (0 = تعطيل)' },
   'matching.company_large_job_min_crew': { type: 'number', default: 4, group: 'matching', description: 'أقل إجمالي أفراد مطلوب في طلب فريق قبل تطبيق أفضلية الشركة المسجلة (افتراضي 4)' },
-  'matching.daily_capacity_minutes': { type: 'number', default: 720, group: 'matching', description: 'أقصى دقايق شغل للفني في اليوم الواحد (720 = 12 ساعة). لو المحجوز في اليوم + الشغلانة الجديدة عدّى الرقم ده، الفني مايترشّحش لليوم ده.' },
-  'matching.distance_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة الأساسي في ترتيب المطابقة — كل كيلومتر بيخصم القيمة دي من نتيجة الفني. 0 = المسافة كاسر تعادل بس (افتراضي)' },
+  'matching.daily_capacity_minutes': { type: 'number', default: 720, group: 'matching', description: 'أقصى دقايق شغل للفني في اليوم الواحد (720 = 12 ساعة). لو المحجوز في اليوم + الشغلانة الجديدة عدّى الرقم ده، الفني مايترشّحش لليوم ده.', range: { min: 60, max: 720, integer: true, messageAr: 'يوم العمل لازم يكون عدد دقائق صحيحًا من ساعة إلى 12 ساعة كحد أقصى' } },
+  'matching.distance_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة الأساسي في ترتيب المطابقة — كل كيلومتر بيخصم القيمة دي من نتيجة الفني. 0 = المسافة كاسر تعادل بس (افتراضي)', range: { min: 0, max: 100 } },
   // 2.0 معايَرة على أوزان المستوى (0/10/20/30/40، الفرق ١٠): كل ٥ كم = فرق مستوى كامل، فالقرب
   // بيغلب المستوى جوّه المدينة. تفاصيل المعايرة في migration 0264 §3.
-  'matching.distance_weight_emergency': { type: 'number', default: 2.0, group: 'matching', description: 'وزن المسافة لطلبات الطوارئ — كل كيلومتر بيخصم القيمة دي من نتيجة الفني. 2.0 يعني كل ٥ كم = فرق مستوى فني كامل، فالأقرب بيسبق. لو أقل من الأساسي، الأساسي بيسري' },
-  'matching.distance_weight_low_value': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للشغلانات الرخيصة (أقل من أو يساوي matching.low_value_order_cents) — تكلفة الانتقال بتاكل هامش الشغلانة' },
-  'matching.distance_weight_near_term': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للطلبات خلال نافذة matching.near_term_request_hours (48 ساعة افتراضيًا) — مفيش مساحة لإعادة توزيع، فالأقرب أضمن' },
+  'matching.distance_weight_emergency': { type: 'number', default: 2.0, group: 'matching', description: 'وزن المسافة لطلبات الطوارئ — كل كيلومتر بيخصم القيمة دي من نتيجة الفني. 2.0 يعني كل ٥ كم = فرق مستوى فني كامل، فالأقرب بيسبق. لو أقل من الأساسي، الأساسي بيسري', range: { min: 0, max: 100 } },
+  'matching.distance_weight_low_value': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للشغلانات الرخيصة (أقل من أو يساوي matching.low_value_order_cents) — تكلفة الانتقال بتاكل هامش الشغلانة', range: { min: 0, max: 100 } },
+  'matching.distance_weight_near_term': { type: 'number', default: 0, group: 'matching', description: 'وزن المسافة للطلبات خلال نافذة matching.near_term_request_hours (48 ساعة افتراضيًا) — مفيش مساحة لإعادة توزيع، فالأقرب أضمن', range: { min: 0, max: 100 } },
   'matching.emergency_ignore_schedule': { type: 'boolean', default: false, group: 'matching', description: 'بث الطوارئ للكل: لو مفعّل، طلب الطوارئ بيروح لكل فني مؤهّل قريب **بغض النظر عن جدوله** (مشغول بطلب تاني أو حاطط إجازة) — نفس نظام الدفعات والمهل وأوزان المسافة بالحرف، الفرق الوحيد إن الجدول مش داخل الفلترة. الفني يقبل أو يرفض. مقفول افتراضيًا' },
-  'matching.emergency_batch_size': { type: 'number', default: 10, group: 'matching', description: 'عدد الفنيين في أول دفعة بث لطلب الطوارئ' },
+  'matching.emergency_batch_size': { type: 'number', default: 10, group: 'matching', description: 'عدد الفنيين في أول دفعة بث لطلب الطوارئ', range: { min: 1, max: 100, integer: true } },
   'matching.emergency_escalation_after_rounds': { type: 'number', default: 2, group: 'matching', description: 'عدد جولات الطوارئ الفاشلة قبل تصعيد الطلب للإدارة' },
-  'matching.emergency_max_technicians_contacted': { type: 'number', default: 40, group: 'matching', description: 'أقصى عدد فنيين يتواصل معاهم النظام لطلب طوارئ واحد قبل التصعيد' },
-  'matching.emergency_response_timeout_seconds': { type: 'number', default: 20, group: 'matching', description: 'مهلة رد الفني على عرض طوارئ بالثانية قبل الجولة اللي بعدها' },
-  'matching.emergency_subsequent_batch_size': { type: 'number', default: 10, group: 'matching', description: 'عدد الفنيين في كل دفعة بث تالية لطلب الطوارئ' },
+  'matching.emergency_max_technicians_contacted': { type: 'number', default: 40, group: 'matching', description: 'أقصى عدد فنيين يتواصل معاهم النظام لطلب طوارئ واحد قبل التصعيد', range: { min: 1, max: 500, integer: true } },
+  'matching.emergency_response_timeout_seconds': { type: 'number', default: 20, group: 'matching', description: 'مهلة رد الفني على عرض طوارئ بالثانية قبل الجولة اللي بعدها', range: { min: 5, max: 3600, integer: true } },
+  'matching.emergency_subsequent_batch_size': { type: 'number', default: 10, group: 'matching', description: 'عدد الفنيين في كل دفعة بث تالية لطلب الطوارئ', range: { min: 1, max: 100, integer: true } },
   'matching.fairness_decline_weight': { type: 'number', default: 0.5, group: 'matching', description: 'وزن الفرصة المرفوضة الحديثة في حساب العدالة، نسبة لوزن الطلب المؤكد الفعلي (0 = الرفض بلا أثر، 1 = زي المؤكد بالظبط)' },
   'matching.fairness_lookback_days': { type: 'number', default: 7, group: 'matching', description: 'نافذة الأيام اللي نموذج العدالة بيراجعها لحساب توزيع الشغل الحديث للفني' },
-  'matching.fairness_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن مكوّن العدالة في ترتيب المطابقة — 0 = معطّل تمامًا (الترتيب زي ما هو دلوقتي)، لحد ما يتفعّل صراحة' },
+  'matching.fairness_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن مكوّن العدالة في ترتيب المطابقة — 0 = معطّل تمامًا (الترتيب زي ما هو دلوقتي)، لحد ما يتفعّل صراحة', range: { min: 0, max: 100 } },
   'matching.min_punctuality_sample': { type: 'number', default: 3, group: 'matching', description: 'أقل عدد زيارات مسجّلة قبل ما نعرض «الالتزام بالمواعيد» للعميل. نسبة مبنية على زيارة أو اتنين بتضلّل في الاتجاهين (فني وصل مرة في معاده = ١٠٠٪)، فالإخفاء أصدق.' },
-  'matching.low_value_order_cents': { type: 'number', default: 15000, group: 'matching', description: 'حد «الشغلانة الرخيصة» بالقرش (15000 = 150 جنيه) — الطلب تحته بياخد وزن المسافة المخصّص للشغل الرخيص' },
-  'matching.near_term_request_hours': { type: 'number', default: 48, group: 'matching', description: 'الشغل اللي معاده خلال العدد ده من الساعات بيتبعت للفنيين كـ"طلب" محتاج قبول (زي الطوارئ) بدل التعيين التلقائي. 0 = تعطيل (كل غير الطوارئ يتعيّن تلقائي).' },
+  'matching.low_value_order_cents': { type: 'number', default: 15000, group: 'matching', description: 'حد «الشغلانة الرخيصة» بالقرش (15000 = 150 جنيه) — الطلب تحته بياخد وزن المسافة المخصّص للشغل الرخيص', range: { min: 0, max: 100_000_000, integer: true } },
+  'matching.near_term_request_hours': { type: 'number', default: 48, group: 'matching', description: 'الشغل اللي معاده خلال العدد ده من الساعات بيتبعت للفنيين كـ"طلب" محتاج قبول (زي الطوارئ) بدل التعيين التلقائي. 0 = تعطيل (كل غير الطوارئ يتعيّن تلقائي).', range: { min: 0, max: 720, integer: true } },
   'matching.auto_confirm_requires_idle_technician': { type: 'boolean', default: false, group: 'matching', description: 'لو true، التأكيد التلقائي بيتطلب إن الفني يومه فاضي بالكامل. الافتراضي false: بس التعارض الحقيقي (HEAVY/BLOCKED) بيحوّل الطلب البعيد لطلب يحتاج قبول (ADR-0101، docs/08 §156).' },
   'matching.near_term_round_timeouts_minutes': { type: 'string', default: '5,15,30', group: 'matching', description: 'مهلة كل موجة بث للشغل القريب بالدقايق، مفصولة بفاصلة — الموجة الأولى 5 دقايق، التانية 15، التالتة 30. أي موجة بعد كده بتاخد آخر قيمة.' },
   'matching.preferred_crew_max_size': { type: 'number', default: 10, group: 'matching', description: 'أقصى عدد أعضاء مقبولين في الفريق المفضّل الدائم لكل فني (docs/08 §36.16)' },
@@ -213,18 +224,18 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.recovery_max_backoff_seconds': { type: 'number', default: 3600, group: 'matching', description: 'أقصى مهلة بين محاولات مطابقة الطلب العالق، بالثواني' },
   'matching.reliability_baseline_rating': { type: 'number', default: 4, group: 'matching', description: 'خط أساس التقييم المتوقّع — فني فوقه ياخد أولوية إضافية، تحته خصم (نسبة لـreliability_weight)' },
   'matching.reliability_min_ratings_count': { type: 'number', default: 3, group: 'matching', description: 'أقل عدد تقييمات مطلوب قبل ما الموثوقية تأثر على الترتيب — فني تحت العدد ده محايد تمامًا (صفر تأثير سلبي/إيجابي)' },
-  'matching.reliability_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة — 0 = معطّل بالكامل (افتراضي)' },
+  'matching.reliability_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة — 0 = معطّل بالكامل (افتراضي)', range: { min: 0, max: 100 } },
   'matching.tie_break_threshold': { type: 'number', default: 0, group: 'matching', description: 'الفرق بين نتيجتين مرشّحين اللي تحتهم يُعتبروا "متعادلين" لكسر التعادل الموزون عشوائيًا — 0 = معطّل (ترتيب حتمي زي القديم)' },
-  'matching.workload_balance_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن يتطرح من أولوية مستوى الفني (order_priority_weight) عن كل طلب نشط عليه حاليًا — عشان التوزيع يبقى متوازن مش دايمًا نفس الفني الأعلى مستوى/الأقرب (0 = تعطيل)' },
+  'matching.workload_balance_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن يتطرح من أولوية مستوى الفني (order_priority_weight) عن كل طلب نشط عليه حاليًا — عشان التوزيع يبقى متوازن مش دايمًا نفس الفني الأعلى مستوى/الأقرب (0 = تعطيل)', range: { min: 0, max: 100 } },
 
-  'matching.max_rounds': { type: 'number', default: 4, group: 'matching', description: 'أقصى عدد جولات بث للطلب العادي قبل ما المطابقة تتوقف وتتصعّد' },
+  'matching.max_rounds': { type: 'number', default: 4, group: 'matching', description: 'أقصى عدد جولات بث للطلب العادي قبل ما المطابقة تتوقف وتتصعّد', range: { min: 1, max: 20, integer: true } },
   // ── notification_engine ───────────────────────────────────────────────
   'notification_engine.action_required_max_reminders': { type: 'number', default: 24, group: 'notification_engine', description: 'أقصى عدد تذكيرات لأي action_required قبل ما يفضل ساكت (مش resolved)' },
   'notification_engine.action_required_reminder_interval_minutes': { type: 'number', default: 60, group: 'notification_engine', description: 'كل قد إيه يتكرر تذكير action_required لحد ما يتحل (بالدقايق)' },
   'notification_engine.critical_offer_reminder_ratios': { type: 'json', default: [0.5,0.85], group: 'notification_engine', description: 'نِسَب مواقع تذكيرات عرض الطوارئ (critical_offer) جوّه نافذة الصلاحية نفسها (0-1، مثلاً 0.5 = نص المهلة) — قابلة للتعديل الكامل، صفر قيم دائمة' },
   'notification_engine.quiet_hours_end': { type: 'string', default: '08:00', group: 'notification_engine', description: 'نهاية ساعات الهدوء (UTC، HH:MM)' },
   'notification_engine.quiet_hours_start': { type: 'string', default: '22:00', group: 'notification_engine', description: 'بداية ساعات الهدوء (UTC، HH:MM) — تذكيرات action_required بتتأجل لبعدها' },
-  'notification_engine.scheduled_job_day_before_hour_utc': { type: 'number', default: 8, group: 'notification_engine', description: 'الساعة (UTC) صبح اليوم اللي قبل الموعد لتذكير scheduled_job — لو الموعد بعيد بما يكفي' },
+  'notification_engine.scheduled_job_day_before_hour_utc': { type: 'number', default: 8, group: 'notification_engine', description: 'الساعة (UTC) صبح اليوم اللي قبل الموعد لتذكير scheduled_job — لو الموعد بعيد بما يكفي', range: { min: 0, max: 23, integer: true } },
   'notification_engine.scheduled_job_pre_appointment_minutes': { type: 'number', default: 120, group: 'notification_engine', description: 'قد إيه قبل الموعد نفسه يتبعت آخر تذكير scheduled_job' },
   'notification_engine.scheduled_job_reminder_after_minutes': { type: 'number', default: 60, group: 'notification_engine', description: 'أول تذكير scheduled_job بعد كام دقيقة من القبول لو الفني لسه ما فتحش الإشعار الأول' },
 
@@ -233,8 +244,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // بالحرف — التسجيل هنا مش بيغيّر سياسة، هو اللي بيخلّي الصفوف **ظاهرة وقابلة للتعديل** في شاشة
   // الإعدادات (السجل ده هو مصدر الحقيقة لعرض الأدمن). 0304 بذر الصفوف وماسجّلهاش، فكانت موجودة
   // في القاعدة وغير معروضة — والحارس `settings-registry.spec` بيمنع تكرار ده.
-  'ops.alert_server_error_rate': { type: 'number', default: 0.05, group: 'ops', description: 'نسبة أعطال 5xx خلال آخر ١٥ دقيقة اللي بعدها يترفع تحذير (0.05 = ٥٪)' },
-  'ops.alert_server_error_rate_critical': { type: 'number', default: 0.2, group: 'ops', description: 'نسبة أعطال 5xx اللي بعدها يترفع إنذار حرج (0.2 = ٢٠٪)' },
+  'ops.alert_server_error_rate': { type: 'number', default: 0.05, group: 'ops', description: 'نسبة أعطال 5xx خلال آخر ١٥ دقيقة اللي بعدها يترفع تحذير (0.05 = ٥٪)', range: { min: 0, max: 1 } },
+  'ops.alert_server_error_rate_critical': { type: 'number', default: 0.2, group: 'ops', description: 'نسبة أعطال 5xx اللي بعدها يترفع إنذار حرج (0.2 = ٢٠٪)', range: { min: 0, max: 1 } },
   'ops.alert_latency_p95_ms': { type: 'number', default: 3000, group: 'ops', description: 'زمن استجابة p95 بالمللي ثانية اللي بعده يترفع تحذير' },
   'ops.alert_latency_p95_critical_ms': { type: 'number', default: 10000, group: 'ops', description: 'زمن استجابة p95 بالمللي ثانية اللي بعده يترفع إنذار حرج' },
   'ops.alert_pool_waiting': { type: 'number', default: 1, group: 'ops', description: 'عدد الطلبات المستنية اتصال قاعدة اللي بعده يترفع تحذير (أي انتظار مستمر = ضغط حقيقي)' },
@@ -266,7 +277,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // تدقيق `docs/29` P0-4 — الهيدر `Idempotency-Key` اختياري، فأي كلاينت مش بيبعته كان مكشوف
   // تمامًا لدوسة مزدوجة. السيرفر بيشتق مفتاح بنفسه خلال النافذة دي. صفر = تعطيل.
   'orders.duplicate_guard_window_seconds': { type: 'number', default: 90, group: 'orders', description: 'نافذة حماية الدوسة المزدوجة بالثواني — طلب تاني بنفس البيانات بالظبط من نفس العميل خلالها بيرجّع الطلب الأصلي بدل ما يعمل نسخة. صفر = تعطيل.' },
-  'orders.max_advance_booking_days': { type: 'number', default: 90, group: 'orders', description: 'أقصى عدد أيام مسموح بحجزها مقدمًا من تاريخ اليوم بتوقيت القاهرة. صفر = حجز نفس اليوم فقط.' },
+  'orders.max_advance_booking_days': { type: 'number', default: 90, group: 'orders', description: 'أقصى عدد أيام مسموح بحجزها مقدمًا من تاريخ اليوم بتوقيت القاهرة. صفر = حجز نفس اليوم فقط.', range: { min: 1, max: 365, integer: true } },
   'orders.max_work_sessions_per_order': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد زيارات لطلب واحد (استكمال الشغل يوم تاني). بعده لازم تدخّل الدعم.' },
   'orders.customer_reschedule_max_count': { type: 'number', default: 3, group: 'orders', description: 'أقصى عدد مرات يغيّر فيها العميل موعد نفس الطلب بنفسه. صفر = بلا حد؛ بعد الحد يلزم تدخل الدعم ولا توجد رسوم تلقائية.' },
   'orders.technician_reschedule_max_requests': { type: 'number', default: 2, group: 'orders', description: 'أقصى عدد طلبات تأجيل يستطيع الفني إرسالها لنفس الطلب قبل تدخل الدعم' },
@@ -278,7 +289,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ومسجّل هنا عشان الثابتة «كل صف مسجّل» تفضل صح — و`isLegacyEarningsSettingKey`
   // بيمنع أي تعديل عليه من لوحة الأدمن.
   'earnings.v2_cutover_enabled': { type: 'boolean', default: true, group: 'payments', description: 'مفتاح تحويل سياسة الأرباح للنسخة الموحّدة — مجمّد على مفعّل بعد 0288، ومقفول ضد التعديل.' },
-  'crew.assistant_share_ratio': { type: 'number', default: 0.65, group: 'payments', description: 'نسبة حصة المساعد من حصة الفني في نفس المستوى داخل الطاقم (0.65 = المساعد بياخد 65% من اللي الفني بياخده). بتتضرب في وزن المستوى، مش بديل عنه.' },
+  'crew.assistant_share_ratio': { type: 'number', default: 0.65, group: 'payments', description: 'نسبة حصة المساعد من حصة الفني في نفس المستوى داخل الطاقم (0.65 = المساعد بياخد 65% من اللي الفني بياخده). بتتضرب في وزن المستوى، مش بديل عنه.', range: { min: 0, max: 1 } },
   'earnings.v2_shadow_enabled': { type: 'boolean', default: true, group: 'payments', description: 'Compare legacy and V2 results without posting V2 wallet movements.' },
   'payments.card_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار الدفع بالبطاقة عبر Paymob للعملاء عند اكتمال الإعداد' },
   'payments.cash_enabled': { type: 'boolean', default: true, group: 'payments', description: 'تفعيل الدفع كاش (تسليم مباشر للفني) — لو اتعطّل، العميل ميقدرش يأكّد تسليم كاش ولا يختاره كوسيلة دفع جديدة' },
@@ -287,10 +298,10 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.instapay_confirmation_window_hours': { type: 'number', default: 24, group: 'payments', description: 'مدة صلاحية كود تحويل InstaPay قبل ما يتطلب إعادة الدفع من جديد (ساعات)' },
   // InstaPay كوسيلة أساسية (migration 0319، طلب مالك 2026-09-11).
   'payments.recommended_method': { type: 'string', default: 'instapay', group: 'payments', description: 'وسيلة الدفع اللي بيتكتب جنبها وسم «الأنسب» في شاشة الدفع. فاضي = مفيش ترشيح. الوسم مابيظهرش لو الوسيلة نفسها مش متاحة' },
-  'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)' },
-  'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)' },
+  'payments.instapay_confirm_typical_minutes': { type: 'number', default: 20, group: 'payments', description: 'المدة المعتادة لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كوعد («عادةً خلال ٢٠ دقيقة»)', range: { min: 1, max: 1440, integer: true } },
+  'payments.instapay_confirm_max_minutes': { type: 'number', default: 60, group: 'payments', description: 'الحد الأقصى لتأكيد تحويل InstaPay بالدقايق — بتتعرض للعميل كسقف («وبحد أقصى ساعة»)', range: { min: 1, max: 1440, integer: true } },
   'payments.instapay_enabled': { type: 'boolean', default: true, group: 'payments', description: 'إظهار InstaPay للعملاء عند اكتمال بيانات المستلم' },
-  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'الحد الأقصى بالجنيه لمكافأة 5% عند الدفع عبر InstaPay. صفر = لا توجد مكافأة. المنصة تتحملها ولا تخصم من مستحق الفني.' },
+  'payments.instapay_discount_egp': { type: 'number', default: 0, group: 'payments', description: 'الحد الأقصى بالجنيه لمكافأة 5% عند الدفع عبر InstaPay. صفر = لا توجد مكافأة. المنصة تتحملها ولا تخصم من مستحق الفني.', range: { min: 0, max: 10_000 } },
   'payments.instapay.ipa_address': { type: 'string', default: '', group: 'payments', description: 'عنوان IPA أو رقم موبايل InstaPay المسجّل — بيتعرض للعميل كتعليمات تحويل. فاضي = InstaPay معطّلة (isConfigured=false)' },
   'payments.instapay.qr_image': { type: 'string', default: '', group: 'payments', description: 'صورة QR لاستقبال تحويلات InstaPay — إما "storage://<key>" لملف مرفوع من لوحة الأدمن، أو رابط https خارجي. فاضي = مفيش QR (العميل بيشوف تعليمات التحويل النصية بس)' },
   'payments.instapay.recipient_name': { type: 'string', default: '', group: 'payments', description: 'الاسم اللي بيتعرض للعميل مع عنوان IPA فوق (يتطمّن إنه بيحوّل للجهة الصح). فاضي = InstaPay معطّلة' },
@@ -300,7 +311,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'payments.webhook_recovery_batch_size': { type: 'number', default: 25, group: 'payments', description: 'أقصى عدد webhooks يستعيده الفحص الدوري في الدفعة الواحدة' },
   'payments.webhook_recovery_max_attempts': { type: 'number', default: 5, group: 'payments', description: 'أقصى عدد محاولات معالجة webhook فاشل قبل المراجعة اليدوية' },
   'technician_debt.alert_age_days': { type: 'number', default: 14, group: 'payments', description: 'ADR-0041: عدد أيام استمرار المديونية اللي بعدها تتحسب "قديمة". الحالة alert بتيجي لما العتبتين يتعدّوا مع بعض.' },
-  'technician_debt.alert_threshold_cents': { type: 'number', default: 50000, group: 'payments', description: 'ADR-0041: مديونية الفني اللي فوقها تتحسب "تستاهل انتباه". بالقرش (50000 = 500 ج.م.).' },
+  'technician_debt.alert_threshold_cents': { type: 'number', default: 50000, group: 'payments', description: 'ADR-0041: مديونية الفني اللي فوقها تتحسب "تستاهل انتباه". بالقرش (50000 = 500 ج.م.).', range: { min: 0, max: 100_000_000, integer: true } },
 
   // ── payments_paymob ───────────────────────────────────────────────────
   'payments.paymob.api_key': { type: 'string', default: '', group: 'payments_paymob', description: 'Paymob API key (secret, encrypted)' },
@@ -320,17 +331,17 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'commission_base.include_level_premium': { type: 'boolean', default: true, group: 'pricing', description: 'مضاعف مستوى الفني داخل وعاء العمولة — ليفل أعلى يعني فلوس أكتر للفني نفسه (طلب مالك صريح).' },
   'commission_base.include_warranty': { type: 'boolean', default: false, group: 'pricing', description: 'سعر الضمان الاختياري: false = 100% للشركة (طلب مالك صريح — ده كان أصل البلاغ).' },
   'commission_base.include_zone_surge': { type: 'boolean', default: false, group: 'pricing', description: 'مضاعف المنطقة/التضخم: false = الزيادة دي 100% للشركة، الفني مالوش نصيب فيها.' },
-  'emergency.sla_minutes': { type: 'number', default: 60, group: 'pricing', description: 'الوقت المعلن للعميل ("هيوصلك خلال X دقيقة") لطلبات الطوارئ — رقم معلن بس، مش ETA محسوب من مسار/زحمة فعلية، قيمة افتراضية تجريبية مش نهائية' },
+  'emergency.sla_minutes': { type: 'number', default: 60, group: 'pricing', description: 'الوقت المعلن للعميل ("هيوصلك خلال X دقيقة") لطلبات الطوارئ — رقم معلن بس، مش ETA محسوب من مسار/زحمة فعلية، قيمة افتراضية تجريبية مش نهائية', range: { min: 5, max: 1440, integer: true } },
   'pricing.auto_match_level_premium': { type: 'string', default: 'charge', group: 'pricing', description: 'لما المطابقة التلقائية تعيّن فني مستواه بيزوّد السعر: charge = الفرق يتضاف للطلب كسطر "فني مميّز" (السلوك المطلوب من المالك)؛ absorb = الشركة تتحمّله والسعر ما يتغيّرش.' },
-  'pricing.emergency_surcharge_percentage': { type: 'number', default: 20, group: 'pricing', description: 'رسوم إضافية صريحة (نسبة مئوية) على السعر التقديري لطلبات "طوارئ" — بتتعرض للعميل قبل التأكيد (orders.surge_amount_cents)، قيمة افتراضية تجريبية مش نهائية' },
-  'warranty.default_days': { type: 'number', default: 14, group: 'pricing', description: 'مدة الضمان الافتراضية' },
+  'pricing.emergency_surcharge_percentage': { type: 'number', default: 20, group: 'pricing', description: 'رسوم إضافية صريحة (نسبة مئوية) على السعر التقديري لطلبات "طوارئ" — بتتعرض للعميل قبل التأكيد (orders.surge_amount_cents)، قيمة افتراضية تجريبية مش نهائية', range: { min: 0, max: 100 } },
+  'warranty.default_days': { type: 'number', default: 14, group: 'pricing', description: 'مدة الضمان الافتراضية', range: { min: 0, max: 3650, integer: true } },
 
   // ── productivity ──────────────────────────────────────────────────────
   'productivity.default_evaluation_period_months': { type: 'number', default: 1, group: 'productivity', description: 'عدد الشهور الافتراضي لتجميع بيانات الإنتاجية لو مفيش months مبعوت في الطلب' },
   'productivity.metrics_config': { type: 'json', default: {"complaint_rate":{"weight":15,"enabled":true,"direction":"lower_is_better","minSampleSize":1},"acceptance_rate":{"weight":10,"enabled":true,"direction":"higher_is_better","minSampleSize":1},"completion_rate":{"weight":15,"enabled":true,"direction":"higher_is_better","minSampleSize":1},"customer_rating":{"weight":10,"enabled":true,"direction":"higher_is_better","minSampleSize":1},"completed_orders":{"target":20,"weight":20,"enabled":true,"direction":"higher_is_better","minSampleSize":1},"cancellation_rate":{"weight":15,"enabled":true,"direction":"lower_is_better","minSampleSize":1},"monthly_kpi_score":{"weight":5,"enabled":true,"direction":"higher_is_better","minSampleSize":1},"revenue_delivered":{"target":5000000,"weight":10,"enabled":true,"direction":"higher_is_better","minSampleSize":1}}, group: 'productivity', description: 'تفعيل/وزن/اتجاه/حجم عينة أدنى لكل مقياس إنتاجية — قابل للتعديل الكامل من /settings (محرر JSON العام)، صفر قيم دائمة في الكود' },
 
   // ── productivity_learning ─────────────────────────────────────────────
-  'productivity_learning.min_change_percentage': { type: 'number', default: 5, group: 'productivity_learning', description: 'أقل نسبة فرق بين الإنتاجية الحالية والمقترحة عشان نولّد اقتراح (تفادي اقتراحات تافهة)' },
+  'productivity_learning.min_change_percentage': { type: 'number', default: 5, group: 'productivity_learning', description: 'أقل نسبة فرق بين الإنتاجية الحالية والمقترحة عشان نولّد اقتراح (تفادي اقتراحات تافهة)', range: { min: 0, max: 100 } },
   'productivity_learning.min_sample_size': { type: 'number', default: 5, group: 'productivity_learning', description: 'أقل عدد observations قبل ما نولّد اقتراح تحديث إنتاجية' },
 
   // ── projects ──────────────────────────────────────────────────────────

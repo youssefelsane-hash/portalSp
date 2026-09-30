@@ -14,6 +14,8 @@ export interface SettingResponseDto {
   updated_at: string;
   is_deprecated: boolean;
   deprecation_reason: string | null;
+  /** الحدود المسموحة (docs/08 §188) — نفس اللي `update()` بيفرضه، عشان الأدمن يشوفها قبل ما يحفظ. */
+  allowed_range: { min: number; max: number; integer: boolean } | null;
 }
 
 export function toSettingResponseDto(setting: Setting): SettingResponseDto {
@@ -30,5 +32,8 @@ export function toSettingResponseDto(setting: Setting): SettingResponseDto {
     updated_at: setting.updatedAt.toISOString(),
     is_deprecated: definition?.deprecated === true,
     deprecation_reason: definition?.deprecationReason ?? null,
+    allowed_range: definition?.range
+      ? { min: definition.range.min, max: definition.range.max, integer: definition.range.integer === true }
+      : null,
   };
 }

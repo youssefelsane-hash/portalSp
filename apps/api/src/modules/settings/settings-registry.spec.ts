@@ -1,3 +1,4 @@
+import { assertSettingWithinRange } from './settings.service';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { DataSource } from 'typeorm';
@@ -106,5 +107,49 @@ describe('سجل الإعدادات — تطابق الكود والقاعدة �
       .map(([key, file]) => `${key} (${file})`)
       .sort();
     expect({ مفاتيح_بتتقرا_ومش_مسجّلة: unregistered }).toEqual({ مفاتيح_بتتقرا_ومش_مسجّلة: [] });
+  });
+
+  /*
+    ═══ الحدود المسموحة (docs/08 §188) ═══
+
+    الحدود لازم تطابق الواقع في الاتجاهين: القيمة الافتراضية **و** القيمة الحالية في القاعدة
+    جوّه الحدود. من غير ده، حد غلط هنا كان هيمنع الأدمن يحفظ حتى القيمة اللي النظام شغّال بيها
+    دلوقتي — أو يبان إنه بيحمي وهو بيرفض الإعداد الصح.
+  */
+  it('كل حد مسجّل بيحتوي القيمة الافتراضية والقيمة الحالية في القاعدة', async () => {
+    const ranged = Object.entries(SETTINGS_REGISTRY).filter(([, def]) => def.range);
+    expect(ranged.length).toBeGreaterThan(20);
+    const rows: { key: string; value: unknown }[] = await dataSource.query(
+      `SELECT key, value FROM settings WHERE key = ANY($1::text[])`,
+      [ranged.map(([key]) => key)],
+    );
+    const current = new Map(rows.map((r) => [r.key, r.value]));
+    const violations: string[] = [];
+    for (const [key, def] of ranged) {
+      for (const [label, value] of [['الافتراضي', def.default], ['الحالي', current.get(key)]] as const) {
+        if (typeof value !== 'number') continue;
+        try {
+          assertSettingWithinRange(key, value);
+        } catch {
+          violations.push(`${key}: ${label}=${value} بره [${def.range!.min}, ${def.range!.max}]`);
+        }
+      }
+    }
+    expect({ قيم_بره_الحدود: violations }).toEqual({ قيم_بره_الحدود: [] });
+  });
+
+  it('الحد بيرفض فعلاً: رسوم طوارئ ٩٠٠٪، دفعة ٤.٥ فني، ويوم شغل ٢٠ ساعة', () => {
+    expect(() => assertSettingWithinRange('pricing.emergency_surcharge_percentage', 900)).toThrow(/من 0 لـ100/);
+    expect(() => assertSettingWithinRange('pricing.emergency_surcharge_percentage', 20)).not.toThrow();
+    expect(() => assertSettingWithinRange('matching.batch_size', 4.5)).toThrow(/عدد صحيح/);
+    // الرسالتين اللي كانوا مكتوبين `if` جوّه `update()` اتنقلوا للسجل بنفس النص بالحرف.
+    expect(() => assertSettingWithinRange('matching.daily_capacity_minutes', 20 * 60)).toThrow(
+      'يوم العمل لازم يكون عدد دقائق صحيحًا من ساعة إلى 12 ساعة كحد أقصى',
+    );
+    expect(() => assertSettingWithinRange('matching.additional_request_batch_size', 0)).toThrow(
+      'عدد الفنيين في الدفعة لازم يكون عددًا صحيحًا من 1 إلى 100',
+    );
+    // مفتاح مالوش حد بيعدّي زي ما هو — الحدود مقصودة، مش على كل حاجة.
+    expect(() => assertSettingWithinRange('booking.suggestion_count', 999)).not.toThrow();
   });
 });

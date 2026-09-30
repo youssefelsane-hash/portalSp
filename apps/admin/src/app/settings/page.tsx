@@ -230,24 +230,49 @@ function SettingValueEditor({
     );
   }
 
+  /*
+    الحدود جاية من السيرفر (`allowed_range`، docs/08 §188) — نفس اللي `update()` بيفرضه بالحرف.
+    بتتعرض قبل الحفظ عشان الموظف يعرف المسموح، والزرار بيتقفل على قيمة بره الحدود بدل ما يروح
+    للسيرفر ويرجع برفض. السيرفر لسه هو الحَكَم؛ ده عرض بس.
+  */
+  const range = setting.value_type === 'number' ? setting.allowed_range : null;
+  const draftNumber = Number(draft);
+  const outOfRange =
+    range !== null &&
+    draft.trim() !== '' &&
+    (!Number.isFinite(draftNumber) ||
+      draftNumber < range.min ||
+      draftNumber > range.max ||
+      (range.integer && !Number.isInteger(draftNumber)));
+
   return (
-    <div className="flex items-center gap-2">
-      <Input
-        type={isSecret ? 'password' : undefined}
-        value={draft}
-        placeholder={isSecret && setting.value ? 'مُعدّ بالفعل — اكتب قيمة جديدة للتغيير' : undefined}
-        onChange={(e) => setDraft(e.target.value)}
-        disabled={isDeprecated}
-        dir={setting.value_type === 'number' ? 'ltr' : undefined}
-        className="max-w-xs"
-      />
-      {isDirty && !isDeprecated && (
-        <Button size="sm" disabled={isSaving} onClick={handleSave}>
-          حفظ
-        </Button>
-      )}
-      {isDeprecated && (
-        <p className="text-xs text-muted-foreground">{setting.deprecation_reason ?? 'إعداد تاريخي غير قابل للتعديل'}</p>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <Input
+          type={isSecret ? 'password' : undefined}
+          value={draft}
+          placeholder={isSecret && setting.value ? 'مُعدّ بالفعل — اكتب قيمة جديدة للتغيير' : undefined}
+          onChange={(e) => setDraft(e.target.value)}
+          disabled={isDeprecated}
+          dir={setting.value_type === 'number' ? 'ltr' : undefined}
+          inputMode={setting.value_type === 'number' ? 'decimal' : undefined}
+          aria-invalid={outOfRange || undefined}
+          className="max-w-xs"
+        />
+        {isDirty && !isDeprecated && (
+          <Button size="sm" disabled={isSaving || outOfRange} onClick={handleSave}>
+            حفظ
+          </Button>
+        )}
+        {isDeprecated && (
+          <p className="text-xs text-muted-foreground">{setting.deprecation_reason ?? 'إعداد تاريخي غير قابل للتعديل'}</p>
+        )}
+      </div>
+      {range && !isDeprecated && (
+        <p className={outOfRange ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+          المسموح: من {range.min} لـ{range.max}
+          {range.integer ? ' (عدد صحيح)' : ''}
+        </p>
       )}
     </div>
   );

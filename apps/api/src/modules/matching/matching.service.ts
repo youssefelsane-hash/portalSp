@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import type { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { ORDER_OFFER_CREATED_EVENT, OrderOfferCreatedEvent } from '../../common/events/order-offer-created.event';
@@ -1230,19 +1231,37 @@ export class MatchingService {
   // جديدة على TechniciansService في مسار مُختبر بـstub خفيف (matching.service.spec.ts).
   /**
    * غلاف حوالين [LevelPremiumService.applyOnAutoAssignment] بياخد `technicianId` (الموقع ده
-   * معندوش الـprofile محمّل أصلاً)، وبيبلع أي فشل بتحذير.
+   * معندوش الـprofile محمّل أصلاً).
    *
-   * ليه بيبلع: التعيين نفسه أهم من سطر تسعير إضافي. لو حصل خطأ في حساب الفرق (إعداد ناقص،
-   * صف تسعير مش موجود)، الطلب لازم يفضل متعيّن للفني بدل ما التعيين كله يترول باك ويفضل
-   * العميل مستني — نفس فلسفة "أي فشل في طبقة مساعدة ما يكسرش العملية الحقيقية" في CLAUDE.md.
+   * ### مابيبلعش الفشل تاني (docs/08 §188، مراجعة معمارية 2026-09-30)
+   *
+   * كان بيبلع أي خطأ بتحذير بحجّة «التعيين أهم من سطر تسعير». بس فرق المستوى **مش سطر تجميلي**:
+   * `applyOnAutoAssignment` بيغيّر `totalAmountCents` ووعاء العمولة وبيعمل تحصيل تكميلي. يعني
+   * نفس الحقيقة التجارية («اتعيّن فني مميّز») كانت بتدّي نتيجتين حسب المسار:
+   *   - الفني قبِل بنفسه (`accept()`): الفشل بيعمل rollback، ومفيش تعيين بسعر ناقص.
+   *   - التأكيد التلقائي (هنا): الفشل بيتبلع، والفني يتعيّن **والسعر ناقص الفرق** بصمت.
+   *
+   * القاعدة دلوقتي واحدة في المسارين: الفرق جزء من السعر، ففشله بيفشّل التعيين كله. ده آمن هنا
+   * بالذات لأن التأكيد التلقائي بيجري من الطابور/المستمع/`MatchingRecoveryService.sweep()` —
+   * كلهم بيمسكوا الخطأ، والطلب بيفضل `SEARCHING_TECHNICIAN` والـsweep بيعيد المحاولة. مفيش عميل
+   * مستني على الـHTTP ده.
    */
-  private async applyLevelPremiumSafely(manager: EntityManager, order: Order, technicianId: string): Promise<void> {
-    try {
-      const profile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
-      await this.levelPremiumService.applyOnAutoAssignment(manager, order, profile);
-    } catch (error) {
-      this.logger.warn(`فشل حساب فرق الفني المميّز للطلب ${order.orderNumber}: ${String(error)}`);
+  private async applyLevelPremium(manager: EntityManager, order: Order, technicianId: string): Promise<void> {
+    // المستوى وفئة التسعير بيتقروا **جوّه نفس الترانزاكشن** (هما الحقلين الوحيدين اللي الفرق
+    // محتاجهم). النسخة القديمة كانت بتعدّي على `TechniciansService` برّه الترانزاكشن — وده كان
+    // مخفي ورا البلع: سبيكات كتير بتبني الخدمة بـ`techniciansService = {}`، فالنداء كان بيرمي
+    // TypeError في كل تأكيد تلقائي، والبلع كان بيحوّله لتحذير والاختبار يعدّي أخضر.
+    const [profile] = await manager.query<{ current_level: string; pricing_tier: string }[]>(
+      `SELECT current_level, pricing_tier FROM technician_profiles WHERE id = $1`,
+      [technicianId],
+    );
+    if (!profile) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني غير موجود', HttpStatus.NOT_FOUND);
     }
+    await this.levelPremiumService.applyOnAutoAssignment(manager, order, {
+      currentLevel: profile.current_level as TechnicianProfile['currentLevel'],
+      pricingTier: profile.pricing_tier as TechnicianProfile['pricingTier'],
+    });
   }
 
   /**
@@ -1297,7 +1316,7 @@ export class MatchingService {
 
     // docs/08 §60.3 — الطلب اتسعّر بمضاعف مستوى = 1 (الفني ما كانش معروف وقت الحجز)، فلو الفني
     // اللي اتعيّن مستواه بيزوّد السعر، الفرق بيتضاف هنا كسطر "فني مميّز" مستقل وواضح.
-    await this.applyLevelPremiumSafely(manager, order, technicianId);
+    await this.applyLevelPremium(manager, order, technicianId);
     await manager.save(
       manager.create(OrderStatusHistory, {
         orderId: order.id,
@@ -1629,7 +1648,15 @@ export class MatchingService {
     });
     // الفني رفض — نديله فرصة تانية للمرشّح اللي بعده فورًا بدل ما نستنى sweep الدقيقة (نفس فلسفة
     // reject() الموجودة للطوارئ اللي بتنادي dispatchNextRound() على طول).
-    await this.dispatchOrAutoConfirm(result.orderId);
+    //
+    // **الرفض اتسجّل خلاص** قبل السطر ده. التوزيع التالي تحسين سرعة مش جزء من الرفض، فأي فشل فيه
+    // (فني مميّز فشل فرقه، إلخ) مايرجعش للفني كخطأ على رفض نجح — نفس `OrderDispatchListener`
+    // بالحرف، والـsweep بيكمّل (docs/08 §188).
+    try {
+      await this.dispatchOrAutoConfirm(result.orderId);
+    } catch (err) {
+      this.logger.error(`فشل التوزيع بعد رفض فرصة للطلب ${result.orderId} — الـsweep هيعيد المحاولة`, err instanceof Error ? err.stack : err);
+    }
     return result;
   }
 

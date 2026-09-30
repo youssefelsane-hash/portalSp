@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsNumber,
   IsObject,
   IsOptional,
@@ -49,6 +50,23 @@ export class PreviewOrderDto {
   @IsOptional()
   @IsDateString()
   scheduled_at?: string;
+
+  /*
+    التلات حقول دول **نفس `CreateOrderDto` بالحرف** (docs/08 §188). غيابهم من المعاينة كان
+    معناه إنها بتسعّر حجز غير اللي العميل هيأكده: يوم البداية الحرفي بدل اليوم المحلول للنطاق
+    المرن، من غير أثر التكرار على السعر، وبعربون حتى لو اختار يدفع كامل.
+  */
+  @IsOptional()
+  @IsDateString()
+  scheduled_at_range_end?: string;
+
+  @IsOptional()
+  @IsIn(['weekly', 'monthly', 'yearly'])
+  repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
+
+  @IsOptional()
+  @IsBoolean()
+  pay_full_amount?: boolean;
 
   /** نفس CreateOrderDto.scheduled_end_at لضمان أن المعاينة تحسب مدة البداية/النهاية من السيرفر. */
   @IsOptional()

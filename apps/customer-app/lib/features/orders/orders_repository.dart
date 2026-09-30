@@ -316,6 +316,12 @@ class OrdersRepository {
     String? scheduleSlotId,
     String? warrantyPlanId,
     DateTime? scheduledAt,
+    // نفس حقول `createOrder` بالحرف (docs/08 §188): الباك-إند بيحل النطاق المرن لنفس اليوم اللي
+    // الإنشاء هيختاره، والتكرار مدخل تسعير. غيابهم كان بيخلّي المعاينة تسعّر حجز تاني.
+    // `payFullAmount` مش هنا عن قصد: اختيار «ادفع كامل» نفسه بيظهر من `depositAmountCents` اللي
+    // راجع من المعاينة دي — إرساله كان هيخفي الاختيار بعد ما العميل يختاره.
+    String? scheduledAtRangeEnd,
+    String? repeatFrequency,
   }) async {
     final data = await auth.authedRequest(
       'POST',
@@ -331,6 +337,8 @@ class OrdersRepository {
         // في المعاينة وهو مش مستعجل أصلاً.
         if (scheduledAt != null)
           'scheduled_at': scheduledAt.toUtc().toIso8601String(),
+        'scheduled_at_range_end': ?scheduledAtRangeEnd,
+        'repeat_frequency': ?repeatFrequency,
         if (fieldValues != null && fieldValues.isNotEmpty)
           'field_values': fieldValues,
         if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,

@@ -70,8 +70,14 @@ export class AdminEmployeesController {
     return this.employeesService.getDetail(userId);
   }
 
+  /*
+    التعديل/الحظر/فك الحظر/المسح **كلهم** عليهم step-up (docs/08 §188) — المسح الشامل في
+    `mfa-step-up-enforcement.spec.ts` لقاهم من غيرها. نفس منطق ADR-0111 للإنشاء: `update` بيقدر
+    يرجّع `is_active` لحساب إداري متعطّل، و`unblock` بيرجّع وصوله — يعني نفس خطورة الإنشاء.
+  */
   @Patch(':userId')
   @RequirePermission('employees.manage')
+  @RequireStepUp()
   update(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -83,6 +89,7 @@ export class AdminEmployeesController {
 
   @Post(':userId/block')
   @RequirePermission('employees.manage')
+  @RequireStepUp()
   block(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -94,6 +101,7 @@ export class AdminEmployeesController {
 
   @Post(':userId/unblock')
   @RequirePermission('employees.manage')
+  @RequireStepUp()
   unblock(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -105,6 +113,7 @@ export class AdminEmployeesController {
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('employees.manage')
+  @RequireStepUp()
   delete(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
