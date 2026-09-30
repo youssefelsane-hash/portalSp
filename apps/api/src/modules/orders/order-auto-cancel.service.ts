@@ -6,8 +6,9 @@ import { DataSource, Repository } from 'typeorm';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { SettingsService } from '../settings/settings.service';
-import { Order, OrderStatus } from './entities/order.entity';
+import { Order, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { loadRecurringPlanState, recurringOccurrenceCancelNotice } from './recurring-occurrence-notice.util';
 
 const SWEEP_INTERVAL_MS = 60_000;
 // مهلة إلغاء تلقائي لطلب واقف في PENDING_PAYMENT (docs/08 §19 بند 3) — العميل بدأ دفع إلكتروني
@@ -125,12 +126,24 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
 
     // نوبة card متكررة لها نافذة تحصيل مستقلة حتى T-24 ساعة (`RecurringOrdersService`).
     // لا يجوز لمهلة الطلب العادي (دقائق) أن تلغيها قبل أن تبدأ محاولاتها المجدولة.
+    // الاستثناء على `order_type` مش `recurring_template_id` (ADR-0116): الطلب الأول اللي العميل حجزه
+    // بالكارت مع خطة تكرار نوعه `standard` ومالوش مسار تحصيل — كان بيفضل pending_payment للأبد.
+    //
+    // نوبة يدوية متولّدة ليها ميعاد متخزّن (`recurring_payment_deadline_at`) بدل مهلة الدقايق.
     const staleOrders = await this.orders
       .createQueryBuilder('o')
       .select(['o.id'])
       .where('o.order_status = :status', { status: OrderStatus.PENDING_PAYMENT })
-      .andWhere('o.placed_at < :cutoff', { cutoff })
-      .andWhere('(o.recurring_template_id IS NULL OR o.payment_method IS DISTINCT FROM :card)', { card: 'card' })
+      .andWhere(
+        `(CASE WHEN o.recurring_payment_deadline_at IS NOT NULL
+               THEN o.recurring_payment_deadline_at <= now()
+               ELSE o.placed_at < :cutoff END)`,
+        { cutoff },
+      )
+      .andWhere('(o.order_type <> :recurring OR o.payment_method IS DISTINCT FROM :card)', {
+        recurring: OrderType.RECURRING,
+        card: 'card',
+      })
       // العميل بلّغ تحويل InstaPay لسه مفتوح ⇒ برّه الـsweep خالص (شوف الثابت فوق).
       .andWhere(`NOT ${OPEN_REPORTED_INSTAPAY_TRANSFER_EXISTS}`)
       .andWhere(orderNumberPrefix ? 'o.order_number LIKE :prefix' : 'TRUE', orderNumberPrefix ? { prefix: `${orderNumberPrefix}%` } : {})
@@ -144,7 +157,7 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
       if (cancelled) cancelledCount++;
     }
     if (cancelledCount > 0) {
-      this.logger.log(`الإلغاء التلقائي: ${cancelledCount} طلب اتلغى بعد ${minutes} دقيقة من غير إتمام الدفع`);
+      this.logger.log(`الإلغاء التلقائي: ${cancelledCount} طلب اتلغى لأن الدفع ماتمّش في مهلته`);
     }
     return cancelledCount;
   }
@@ -169,6 +182,15 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
       );
       if (reported[0]?.exists) return null;
 
+      // نوبة متكررة: العميل لازم يعرف إن النوبة دي بس اللي راحت، والخطة لسه شغّالة ولا لأ (D-1).
+      const reason =
+        order.orderType === OrderType.RECURRING && order.recurringTemplateId
+          ? recurringOccurrenceCancelNotice(
+              { kind: 'unpaid', deadline: order.recurringPaymentDeadlineAt },
+              await loadRecurringPlanState((sql, params) => manager.query(sql, params), order.recurringTemplateId),
+            )
+          : `إلغاء تلقائي — الدفع ماتمش خلال ${minutes} دقيقة`;
+
       order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
       order.cancelledAt = new Date();
       await manager.save(order);
@@ -178,11 +200,11 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
           previousStatus: OrderStatus.PENDING_PAYMENT,
           newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
           changeSource: OrderChangeSource.SYSTEM,
-          reason: `إلغاء تلقائي — الدفع ماتمش خلال ${minutes} دقيقة`,
+          reason,
         }),
       );
       await this.promoCodesService.releaseUsage(manager, order.id);
-      return order;
+      return { order, reason };
     });
 
     if (!result) return false;
@@ -190,13 +212,13 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(
-        result.id,
-        result.orderNumber,
+        result.order.id,
+        result.order.orderNumber,
         OrderStatus.PENDING_PAYMENT,
         OrderStatus.CANCELLED_BY_SYSTEM,
-        result.customerId,
-        result.technicianId,
-        `إلغاء تلقائي — الدفع ماتمش خلال ${minutes} دقيقة`,
+        result.order.customerId,
+        result.order.technicianId,
+        result.reason,
       ),
     );
     return true;

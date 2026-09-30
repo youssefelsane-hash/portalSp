@@ -2351,3 +2351,23 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 جوّه ترانزاكشن الإنشاء، وخطأ SQL بيحطها aborted.
 
 الأدلة: `scripts/verify-preview-create-parity.js`، `customer-inputs-snapshot-failure.spec.ts`.
+
+## مهلة دفع حقيقية للنوبة المتكررة اليدوية + إلغاء بنص واضح (ADR-0116، docs/08 §189 بند D-1، 2026-09-30)
+
+- **المشكلة**: نوبة InstaPay بتتولّد قبل موعدها بـ96 ساعة، لكن `sweepPendingPayment()` كان بيلغيها بعد
+  `orders.payment_timeout_minutes` (15 دقيقة) زي أي طلب لحظي — فالتذكير مالوش معنى، وإشعار الإلغاء
+  كان بيخلّي العميل يفتكر إن الحجز المتكرر كله راح.
+- **العمود** `orders.recurring_payment_deadline_at` (migration 0372): بيتحسب **مرة واحدة** وقت التوليد في
+  `RecurringOrdersService.assignManualPaymentDeadline()` من `recurring-payment-deadline.util.ts` (دالة نقية):
+  `min(التوليد + recurring.manual_payment_window_hours، الموعد − 24س)`، يتقدّم لبداية ساعات الهدوء لو وقع
+  جوّاها، وماينزلش عن مهلة الطلب العادي. NULL = السلوك القديم بالظبط. فشل الحساب مابيوقفش التوليد.
+- **الـsweep** بيقرا العمود لو موجود. واستثناء الكارت بقى `order_type = 'recurring'` بس — **بَقّة اتصلحت**:
+  الحجز الأول بالكارت ومعاه خطة تكرار (نوعه `standard`) كان مستثنى ومالوش مسار تحصيل، فكان بيفضل
+  `pending_payment` للأبد لو العميل ساب صفحة الدفع.
+- **نص الإلغاء** (`recurring-occurrence-notice.util.ts`): «النوبة دي بس اتلغت…» + الخطة لسه شغّالة ولا
+  متوقفة + ميعاد الجاية (+ «حدّث بطاقتك» في حالة الكارت). نفس النص في الـtimeline وإشعار الإلغاء التلقائي.
+  إشعار `recurring_card_payment_failed` مع الإلغاء اتشال لأنه كان تكرار وبيقول «أنشئ حجزًا جديدًا» غلط.
+- **التذكيرات**: `notifications/listeners/recurring-order-awaiting-payment-notification.listener.ts` (شوف README
+  الإشعارات). `resolveSettledPaymentReminders()` في نفس الـsweep = شبكة أمان لو حدث الدفع ضاع.
+- الاختبارات: `order-auto-cancel-pending-payment.spec.ts` (4 حالات جديدة)، `recurring-orders-generation-integration.spec.ts`
+  (الميعاد متخزّن ومحمول في الحدث + الـreconciliation)، و`recurring-payment-deadline.util.spec.ts`/`recurring-occurrence-notice.util.spec.ts`.

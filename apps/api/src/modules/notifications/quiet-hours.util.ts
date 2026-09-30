@@ -27,3 +27,18 @@ export function nextTimeOutsideQuietHours(date: Date, startHHMM: string, endHHMM
   if (result <= date) result.setUTCDate(result.getUTCDate() + 1); // نهاية الهدوء فاتت النهارده، يبقى بكرة
   return result;
 }
+
+/**
+ * بداية فترة الهدوء اللي `date` جوّاها (ADR-0116) — لميعاد نهائي عايزين نقدّمه بدل ما نأخّره،
+ * عشان التذكير الأخير قبله يلحق يتبعت (التذكيرات جوّه الهدوء بتتأجل لبعده). لو `date` برّه
+ * الهدوء بترجعها زي ما هي.
+ */
+export function quietHoursStartBefore(date: Date, startHHMM: string, endHHMM: string): Date {
+  if (!isWithinQuietHours(date, startHHMM, endHHMM)) return date;
+
+  const start = parseHHMM(startHHMM);
+  const result = new Date(date);
+  result.setUTCHours(Math.floor(start / 60), start % 60, 0, 0);
+  if (result > date) result.setUTCDate(result.getUTCDate() - 1); // الهدوء بدأ امبارح (عدّى منتصف الليل)
+  return result;
+}

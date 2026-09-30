@@ -10,6 +10,8 @@ import { OrdersService } from './orders.service';
 import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { RecurringOrdersService } from './recurring-orders.service';
+import { recurringManualPaymentDeadline } from './recurring-payment-deadline.util';
+import { RecurringOrderAwaitingPaymentEvent } from '../../common/events/recurring-order-awaiting-payment.event';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
@@ -309,6 +311,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       await q(`DELETE FROM recurring_order_templates WHERE id = $1`, [ids.template]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM notification_workflows WHERE user_id = $1`, [ids.customerUser]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
@@ -563,6 +566,74 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     // البطاقة المحفوظة تُحصّل تلقائياً عند T-3؛ لا نربك العميل برسالة "أكمل الدفع" اليدوية.
     expect(emitSpy).not.toHaveBeenCalled();
 
+    await q(`UPDATE recurring_order_templates SET payment_method = NULL WHERE id = $1`, [ids.template]);
+  });
+
+  // ═══ ADR-0116 (docs/08 §189 D-1) ═══
+  it('قالب InstaPay: النوبة بتاخد ميعاد دفع متخزّن (مش مهلة الـ15 دقيقة) والحدث بيحمله', async () => {
+    await seedDueTemplate();
+    await q(`DELETE FROM recurring_order_occurrences WHERE template_id = $1`, [ids.template]);
+    // بعد ٣ أيام الساعة 10 UTC (12/13 القاهرة) — جوّه نافذة التوليد (96 ساعة) ونافذة الحجز.
+    await q(
+      `UPDATE recurring_order_templates
+          SET payment_method = 'instapay', next_run_at = date_trunc('day', now()) + interval '3 days 10 hours'
+        WHERE id = $1`,
+      [ids.template],
+    );
+
+    emitSpy.mockClear();
+    await sweepOwn();
+    const occurrence = await loadOccurrence();
+    const [order] = await q(
+      `SELECT id, order_status::text AS order_status, payment_method::text AS payment_method,
+              placed_at, scheduled_at, recurring_payment_deadline_at
+         FROM orders WHERE id = $1`,
+      [occurrence.order_id],
+    );
+    if (!order) throw new Error(`النوبة ماتولّدتش: ${JSON.stringify(occurrence)}`);
+    ids.createdOrderIds.push(order.id);
+    expect(order.order_status).toBe('pending_payment');
+
+    const expected = recurringManualPaymentDeadline({
+      generatedAt: new Date(order.placed_at),
+      scheduledAt: new Date(order.scheduled_at),
+      windowHours: 24,
+      minimumMinutes: 15,
+      quietHoursStart: '22:00',
+      quietHoursEnd: '08:00',
+    });
+    expect(new Date(order.recurring_payment_deadline_at).getTime()).toBe(expected.getTime());
+    // أبعد بكتير من مهلة الطلب العادي — ده بالظبط اللي كان ناقص.
+    expect(expected.getTime() - new Date(order.placed_at).getTime()).toBeGreaterThan(60 * 60_000);
+
+    expect(emitSpy).toHaveBeenCalledTimes(1);
+    const event = emitSpy.mock.calls[0][0] as RecurringOrderAwaitingPaymentEvent;
+    expect(event.paymentDeadlineAt?.getTime()).toBe(expected.getTime());
+    expect(event.scheduledAt?.getTime()).toBe(new Date(order.scheduled_at).getTime());
+  });
+
+  it('شبكة الأمان: تذكير دفع مفتوح لنوبة اتدفعت بيتقفل في الدورة الجاية حتى لو الحدث ضاع', async () => {
+    const orders = await loadOrders();
+    const pending = orders.filter((o) => o.order_status === 'pending_payment' && o.order_type === 'recurring');
+    const target = pending[pending.length - 1];
+    const [workflow] = await q(
+      `INSERT INTO notification_workflows
+         (user_id, notification_type, entity_type, entity_id, title_ar, body_ar, action_type, next_reminder_at, target_at, expires_at)
+       VALUES ($1,'recurring_order_payment_reminder','order',$2,'t','b','pay_recurring_occurrence',
+               now() + interval '1 hour', now() + interval '1 day', now() + interval '1 day')
+       RETURNING id`,
+      [ids.customerUser, target.id],
+    );
+
+    await sweepOwn();
+    let [row] = await q(`SELECT resolved_at FROM notification_workflows WHERE id = $1`, [workflow.id]);
+    expect(row.resolved_at).toBeNull(); // لسه مستنية دفع ⇒ التذكير فاضل
+
+    await q(`UPDATE orders SET order_status = 'searching_technician' WHERE id = $1`, [target.id]);
+    await sweepOwn();
+    [row] = await q(`SELECT resolved_at, next_reminder_at FROM notification_workflows WHERE id = $1`, [workflow.id]);
+    expect(row.resolved_at).not.toBeNull();
+    expect(row.next_reminder_at).toBeNull();
     await q(`UPDATE recurring_order_templates SET payment_method = NULL WHERE id = $1`, [ids.template]);
   });
 });

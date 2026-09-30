@@ -212,6 +212,10 @@ export class Order {
   @Column({ name: 'recurring_payment_next_attempt_at', type: 'timestamptz', nullable: true })
   recurringPaymentNextAttemptAt: Date | null;
 
+  // ADR-0116 — آخر ميعاد لدفع نوبة متكررة يدوية؛ NULL = مهلة الطلب العادية.
+  @Column({ name: 'recurring_payment_deadline_at', type: 'timestamptz', nullable: true })
+  recurringPaymentDeadlineAt: Date | null;
+
   @Column({ name: 'recurring_cash_reminder_sent_at', type: 'timestamptz', nullable: true })
   recurringCashReminderSentAt: Date | null;
 

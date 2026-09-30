@@ -9,5 +9,8 @@ export class RecurringOrderAwaitingPaymentEvent {
     public readonly orderId: string,
     public readonly orderNumber: string,
     public readonly customerId: string,
+    // ADR-0116 — آخر ميعاد للدفع وموعد النوبة، للإشعار والتذكيرات. null = نوبة قديمة بلا ميعاد متخزّن.
+    public readonly paymentDeadlineAt: Date | null = null,
+    public readonly scheduledAt: Date | null = null,
   ) {}
 }

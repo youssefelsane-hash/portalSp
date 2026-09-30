@@ -350,6 +350,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── recurring ─────────────────────────────────────────────────────────
   'recurring.materialization_lead_time_hours': { type: 'number', default: 96, group: 'recurring', description: 'عدد الساعات قبل موعد الحجز المتكرر التي يتحول فيها إلى طلب فعلي لبدء المطابقة والدفع مبكرًا' },
+  'recurring.manual_payment_window_hours': { type: 'number', default: 24, group: 'recurring', description: 'مهلة دفع النوبة المتكررة اليدوية (InstaPay) بالساعات من وقت توليدها — بعدها النوبة دي بس بتتلغي والخطة تفضل شغّالة. محدودة بـ24 ساعة قبل الموعد (ADR-0116).', range: { min: 1, max: 72, integer: true } },
 
   // ── referral ──────────────────────────────────────────────────────────
   'referral.recovery_batch_size': { type: 'number', default: 25, group: 'referral', description: 'أقصى عدد إحالات معلقة يفحصها مسار الاسترداد في الدورة الواحدة' },

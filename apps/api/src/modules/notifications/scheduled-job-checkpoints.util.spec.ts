@@ -50,4 +50,12 @@ describe('scheduled-job-checkpoints.util', () => {
       expect(c.getTime()).toBeLessThan(targetAt.getTime());
     }
   });
+
+  it('نقطتين في نفس الساعة تقريبًا ⇒ تذكير واحد بس (مش اتنين ورا بعض)', () => {
+    // الإنشاء 7:10 ⇒ «بعد ساعة» = 8:10، و«صبح اليوم اللي قبل الموعد» = 8:00 نفس اليوم.
+    const createdAt = utc(2026, 0, 1, 7, 10);
+    const targetAt = utc(2026, 0, 2, 7, 10);
+    const checkpoints = computeScheduledJobCheckpoints(createdAt, targetAt, SETTINGS);
+    expect(checkpoints).toEqual([utc(2026, 0, 1, 8, 0), utc(2026, 0, 2, 5, 10)]);
+  });
 });

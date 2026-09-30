@@ -19230,3 +19230,10 @@ auto-rematch في D-4 (الموظف بيستخدم reassign/rematch/reschedule �
   4/4 + `scripts/verify-web-booking-reveal.js` 5/5 بمتصفح (390×640: الساعة من y=1125 مستخبية ⇒ باينة كلها
   وخانة اليوم لسه على الشاشة). «لأول حاجة ناقصة» كان موجود من §185 (`_failValidation` في التطبيق،
   `revealFirstMissing` في الويب) — اتراجع ومااتعملش نسخة تانية منه.
+- **D-1 ✅** ADR-0116. النوبة اليدوية بقى ليها ميعاد دفع حقيقي متخزّن (`orders.recurring_payment_deadline_at`،
+  افتراضي 24 ساعة من التوليد عبر `recurring.manual_payment_window_hours`، ومحدود بالموعد − 24 ساعة) بدل
+  الإلغاء بعد 15 دقيقة. إشعار فوري بالميعاد ⇒ تذكير بعد ساعة ⇒ تذكير أخير قبل الميعاد بساعتين، على
+  `NotificationWorkflowService` الحالي (نوع `recurring_order_payment_reminder`)، وبيقف بالدفع/الإلغاء/تبليغ
+  InstaPay + reconciliation كل دقيقة. الإلغاء بيقول «النوبة دي بس» + حالة الخطة + ميعاد الجاية (يدوي وكارت).
+  **بَقّة اتلقطت واتصلحت**: الحجز الأول بالكارت مع خطة تكرار كان بيفضل `pending_payment` للأبد. اختبارات:
+  27 unit + 7 على المحرك الحقيقي + 6 جديدة على Postgres في الـsweep والتوليد؛ 35 suite متأثرة كلها خضرا.
