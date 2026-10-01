@@ -396,7 +396,7 @@ export class AdminExceptionCenterService implements OnModuleInit, OnModuleDestro
           : `الموعد ${when} و${who} لسه ماتحرّكش. اتصل بيه واتأكد، وبلّغ العميل لو فيه تأخير.`,
         referenceType: 'order',
         referenceId: row.id,
-        deepLink: `/orders/${row.id}`,
+        deepLink: `/admin/orders/${row.id}`,
       });
     }
     return promoted.length;

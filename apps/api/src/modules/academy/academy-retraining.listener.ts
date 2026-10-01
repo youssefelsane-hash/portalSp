@@ -108,7 +108,7 @@ export class AcademyRetrainingListener {
       bodyAr: `${reason}. الفني اتبلّغ يعيد الكورس الإلزامي؛ الإيقاف قرار يدوي لو الحالة جسيمة.`,
       referenceType: 'technician_profile',
       referenceId: technicianId,
-      deepLink: `/technicians/${technicianId}`,
+      deepLink: `/admin/technicians/${technicianId}`,
     });
     return true;
   }
