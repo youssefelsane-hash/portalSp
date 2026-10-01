@@ -1,6 +1,6 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
-/** `correct_index` مابيطلعش من السيرفر أبدًا — التصحيح هنا بس (ADR-0117). */
+/** `correct_index` بيظهر للأدمن صاحب academy.manage فقط، مش لتطبيق الفني (ADR-0117). */
 export interface AcademyQuizQuestion {
   id: string;
   prompt_ar: string;

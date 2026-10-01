@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { cairoDay } from '@/lib/orders-date-range.mjs';
 
 /**
  * **تقويم حِمل التشغيل** (docs/08 §157) — «فين الأيام الفاضية وفين المكدسة».
@@ -66,7 +67,7 @@ interface MonthBlock {
 function buildMonths(days: CalendarDay[]): MonthBlock[] {
   const monthsWithData = new Set(days.map((d) => d.day.slice(0, 7)));
   const now = new Date();
-  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const currentKey = cairoDay(now).slice(0, 7);
   monthsWithData.add(currentKey);
   if (monthsWithData.size === 0) return [];
 
@@ -111,7 +112,7 @@ export function OrdersCalendar({
   const byDay = new Map(days.map((d) => [d.day, d]));
   const months = buildMonths(days);
   const busiest = Math.max(1, ...days.map((d) => d.total));
-  const today = iso(new Date());
+  const today = cairoDay(new Date());
 
   /** إجمالي طلبات كل شهر — بيتعرض على شريحة الشهر عشان الأدمن يعرف فين الشغل قبل ما يفتح. */
   const totalOfMonth = (key: string) => {
@@ -128,7 +129,8 @@ export function OrdersCalendar({
    * طويل لحد آخر الصفحة. دلوقتي شريط شرائح بالشهور (ومعاها إجمالي كل شهر) وشبكة واحدة تحته،
    * والافتراضي الشهر الحالي.
    */
-  const currentKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
+  const [currentYear, currentMonth] = cairoDay(new Date()).slice(0, 7).split('-').map(Number);
+  const currentKey = `${currentYear}-${currentMonth - 1}`;
   const [activeKey, setActiveKey] = useState(currentKey);
   const active = months.find((m) => m.key === activeKey) ?? months.find((m) => m.key === currentKey) ?? months[0];
 

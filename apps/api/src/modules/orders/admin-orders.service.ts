@@ -205,7 +205,8 @@ export class AdminOrdersService {
     if (query.sort === 'soonest') {
       // "اللي تنفيذه قرّب" — الأقرب موعدًا الأول. الطلبات بلا موعد محدد بتروح الآخر (NULLS LAST)
       // لأن السؤال هنا حرفيًا "إيه اللي هيتنفّذ قريب".
-      qb.orderBy('o.scheduled_at', 'ASC', 'NULLS LAST').addOrderBy('o.id', 'DESC');
+      // مع تقسيم الصفحات TypeORM محتاج اسم خاصية الـentity، مش اسم العمود في القاعدة.
+      qb.orderBy('o.scheduledAt', 'ASC', 'NULLS LAST').addOrderBy('o.id', 'DESC');
     } else {
       // بَقّة حقيقية اتلقطت وقت تطوير §73 بند 3 (بحث موسّع فوق): TypeORM بيرمي "COALESCE(o alias
       // was not found" لما orderBy عبارة عن تعبير SQL خام (مش alias.column بسيط) *مع* وجود
@@ -286,8 +287,26 @@ export class AdminOrdersService {
 
     // ــ النطاق الزمني على **الحقل اللي الأدمن اختاره** ــ
     const dateColumn = ORDER_DATE_COLUMNS[query.date_field ?? 'scheduled_at'];
-    if (query.from) qb.andWhere(`${dateColumn} >= :from`, { from: new Date(query.from) });
-    if (query.to) qb.andWhere(`${dateColumn} <= :to`, { to: new Date(query.to) });
+    // اليوم المكتوب من الواجهة يوم كامل بتوقيت القاهرة، مش منتصف ليل UTC؛ ومدخلات الوقت
+    // الكاملة من مستهلكي الـAPI القدام بتفضل لحظات دقيقة زي ما كانت.
+    if (query.from) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(query.from)) {
+        qb.andWhere(`${dateColumn} >= (CAST(:fromDay AS date)::timestamp AT TIME ZONE 'Africa/Cairo')`, {
+          fromDay: query.from,
+        });
+      } else {
+        qb.andWhere(`${dateColumn} >= :fromInstant`, { fromInstant: new Date(query.from) });
+      }
+    }
+    if (query.to) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(query.to)) {
+        qb.andWhere(`${dateColumn} < ((CAST(:toDay AS date) + 1)::timestamp AT TIME ZONE 'Africa/Cairo')`, {
+          toDay: query.to,
+        });
+      } else {
+        qb.andWhere(`${dateColumn} <= :toInstant`, { toInstant: new Date(query.to) });
+      }
+    }
 
     // ــ الاختصارات التشغيلية — كلها مشتقّة ــ
     this.applyBucket(qb, query.bucket);
@@ -335,7 +354,7 @@ export class AdminOrdersService {
         qb.andWhere(`${cairoDay} = ${today} + 1`);
         return;
       case 'next7':
-        qb.andWhere(`${cairoDay} BETWEEN ${today} AND ${today} + 7`);
+        qb.andWhere(`${cairoDay} BETWEEN ${today} AND ${today} + 6`);
         return;
       case 'upcoming':
         qb.andWhere('o.scheduled_at >= now()');
@@ -416,7 +435,8 @@ export class AdminOrdersService {
   async calendar(query: ListOrdersQueryDto): Promise<
     { day: string; total: number; unassigned: number; in_progress: number; completed: number; overdue: number }[]
   > {
-    const dayExpr = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
+    const dateColumn = ORDER_DATE_COLUMNS[query.date_field ?? 'scheduled_at'];
+    const dayExpr = `(${dateColumn} AT TIME ZONE 'Africa/Cairo')::date`;
     const rows = await this.buildOrdersFilter(query)
       .select(`${dayExpr}::text`, 'day')
       .addSelect('COUNT(*)::int', 'total')
@@ -428,7 +448,7 @@ export class AdminOrdersService {
         'overdue',
       )
       .setParameter('terminalForCalendar', [...TERMINAL_ORDER_STATUSES])
-      .andWhere('o.scheduled_at IS NOT NULL')
+      .andWhere(`${dateColumn} IS NOT NULL`)
       .groupBy(dayExpr)
       .orderBy(dayExpr, 'ASC')
       .getRawMany<{ day: string; total: string; unassigned: string; in_progress: string; completed: string; overdue: string }>();

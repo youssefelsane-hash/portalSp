@@ -102,6 +102,35 @@ describe('الأكاديمية — الكورس الإلزامي وإعادة ا
     expect(outgoing[0]).toEqual({ id: 'q1', prompt_ar: course.quizQuestions[0].prompt_ar, options_ar: course.quizQuestions[0].options_ar });
   });
 
+  it('تعديل الأسئلة يتخزن ويظهر للفني، من غير تغيير نتيجة محاولة سابقة', async () => {
+    const questions = [{ id: 'q1', prompt_ar: 'سؤال تجريبي', options_ar: ['صحيح', 'خطأ'], correct_index: 0 }];
+    const [row] = await q(
+      `INSERT INTO academy_courses (title_ar, title_en, passing_score, display_order, is_active, quiz_questions, is_mandatory_onboarding)
+       VALUES ($1, $2, 80, 99, true, $3::jsonb, false) RETURNING id`,
+      [`كورس تحرير ${runId}`, `Edit course ${runId}`, JSON.stringify(questions)],
+    );
+    try {
+      const earlier = await academy.submitAttempt(ids.tech, row.id, [0]);
+      expect(earlier.attempt.score).toBe(100);
+
+      const edited = [{ id: 'q1', prompt_ar: 'السؤال بعد التعديل', options_ar: ['إجابة قديمة', 'إجابة جديدة'], correct_index: 1 }];
+      await academy.updateCourse(ids.techUser, row.id, { quiz_questions: edited });
+
+      const persisted = await dataSource.getRepository(AcademyCourse).findOneByOrFail({ id: row.id });
+      expect(persisted.quizQuestions).toEqual(edited);
+      expect(publicQuestions(persisted.quizQuestions)).toEqual([{ id: 'q1', prompt_ar: edited[0].prompt_ar, options_ar: edited[0].options_ar }]);
+
+      const [oldAttempt] = await q(`SELECT score, passed FROM academy_exam_attempts WHERE id = $1`, [earlier.attempt.id]);
+      expect(Number(oldAttempt.score)).toBe(100);
+      expect(oldAttempt.passed).toBe(true);
+      const next = await academy.submitAttempt(ids.tech, row.id, [1]);
+      expect(next.grade.score).toBe(100);
+    } finally {
+      await q(`DELETE FROM academy_exam_attempts WHERE course_id = $1`, [row.id]);
+      await q(`DELETE FROM academy_courses WHERE id = $1`, [row.id]);
+    }
+  });
+
   it('التصحيح: ٧/٨ = 88 ناجح، ٦/٨ = 75 راسب (حد النجاح 80)', () => {
     const answers = correctAnswers();
     const oneWrong = answers.map((a, i) => (i === 0 ? (a + 1) % 3 : a));
@@ -271,4 +300,3 @@ describe('الأكاديمية — الكورس الإلزامي وإعادة ا
     }
   });
 });
-

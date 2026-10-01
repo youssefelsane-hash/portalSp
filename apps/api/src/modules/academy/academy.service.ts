@@ -7,7 +7,7 @@ import { CreateAcademyCourseDto } from './dto/create-academy-course.dto';
 import { RecordExamAttemptDto } from './dto/record-exam-attempt.dto';
 import { UpdateAcademyCourseDto } from './dto/update-academy-course.dto';
 import { AcademyExamAttempt } from './entities/academy-exam-attempt.entity';
-import { AcademyCourse } from './entities/academy-course.entity';
+import { AcademyCourse, AcademyQuizQuestion } from './entities/academy-course.entity';
 import { gradeQuiz, loadOnboardingStatus, OnboardingStatus, QuizGrade } from './academy-onboarding';
 
 @Injectable()
@@ -111,6 +111,27 @@ export class AcademyService {
   ): Promise<AcademyCourse> {
     const course = await this.findCourseOrThrow(id);
     const oldValues = { is_active: course.isActive, passing_score: course.passingScore };
+    const oldQuestions = course.quizQuestions ?? [];
+
+    let updatedQuestions: AcademyQuizQuestion[] | undefined;
+    if (dto.quiz_questions !== undefined) {
+      const proposed = dto.quiz_questions;
+      if (!Array.isArray(proposed) || proposed.length !== oldQuestions.length || oldQuestions.length === 0) {
+        throw new ApiException(ErrorCode.VAL_001, 'عدد الأسئلة لا يمكن تغييره من محرّر الصياغة', HttpStatus.BAD_REQUEST);
+      }
+      updatedQuestions = proposed.map((question, index) => {
+        const original = oldQuestions[index];
+        if (question.id !== original.id || question.options_ar.length !== original.options_ar.length) {
+          throw new ApiException(ErrorCode.VAL_001, 'ترتيب الأسئلة وعدد الاختيارات لا يمكن تغييرهما', HttpStatus.BAD_REQUEST);
+        }
+        const prompt = question.prompt_ar.trim();
+        const options = question.options_ar.map((option) => option.trim());
+        if (!prompt || options.some((option) => !option) || question.correct_index < 0 || question.correct_index >= options.length) {
+          throw new ApiException(ErrorCode.VAL_001, 'اكتب السؤال وكل الاختيارات وحدد الإجابة الصحيحة', HttpStatus.BAD_REQUEST);
+        }
+        return { id: original.id, prompt_ar: prompt, options_ar: options, correct_index: question.correct_index };
+      });
+    }
 
     if (dto.title_ar !== undefined) course.titleAr = dto.title_ar;
     if (dto.title_en !== undefined) course.titleEn = dto.title_en;
@@ -118,6 +139,7 @@ export class AcademyService {
     if (dto.passing_score !== undefined) course.passingScore = dto.passing_score;
     if (dto.display_order !== undefined) course.displayOrder = dto.display_order;
     if (dto.is_active !== undefined) course.isActive = dto.is_active;
+    if (updatedQuestions !== undefined) course.quizQuestions = updatedQuestions;
     await this.courses.save(course);
 
     await this.auditLog.record({
@@ -126,8 +148,12 @@ export class AcademyService {
       action: 'academy_course.updated',
       entityType: 'academy_course',
       entityId: course.id,
-      oldValues,
-      newValues: { is_active: course.isActive, passing_score: course.passingScore },
+      oldValues: { ...oldValues, ...(updatedQuestions ? { quiz_questions: oldQuestions } : {}) },
+      newValues: {
+        is_active: course.isActive,
+        passing_score: course.passingScore,
+        ...(updatedQuestions ? { quiz_questions: course.quizQuestions } : {}),
+      },
       meta,
     });
     return course;

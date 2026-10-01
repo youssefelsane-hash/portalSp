@@ -2371,3 +2371,12 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
   الإشعارات). `resolveSettledPaymentReminders()` في نفس الـsweep = شبكة أمان لو حدث الدفع ضاع.
 - الاختبارات: `order-auto-cancel-pending-payment.spec.ts` (4 حالات جديدة)، `recurring-orders-generation-integration.spec.ts`
   (الميعاد متخزّن ومحمول في الحدث + الـreconciliation)، و`recurring-payment-deadline.util.spec.ts`/`recurring-occurrence-notice.util.spec.ts`.
+# تدقيق فلاتر طلبات الأدمن (2026-10-01)
+
+`AdminOrdersService.buildOrdersFilter()` هو مسار الفلترة المشترك للقائمة والملخص والتقويم. التاريخ
+`YYYY-MM-DD` يغطي يوم القاهرة كاملًا بحد أعلى حصري لليوم التالي، والمدخلات ISO ذات الوقت تبقى
+لحظات دقيقة حفاظًا على التوافق. التقويم يُجمّع حسب `date_field` المختار، و`sort=soonest` يستخدم
+اسم خاصية الـentity حتى يعمل مع تقسيم الصفحات. اختصار `next7` يشمل اليوم والستة أيام التالية.
+التحقق الحي: `admin-orders-filters.spec.ts` على Postgres، والبحث الموسّع في
+`admin-orders-search.spec.ts`. التفاصيل ونتائج النشر في
+`docs/audits/2026-10-01-admin-orders-search-filters.md`.

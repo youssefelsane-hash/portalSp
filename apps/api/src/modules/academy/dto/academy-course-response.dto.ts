@@ -1,4 +1,4 @@
-import { AcademyCourse } from '../entities/academy-course.entity';
+import { AcademyCourse, AcademyQuizQuestion } from '../entities/academy-course.entity';
 
 export interface AcademyCourseResponseDto {
   id: string;
@@ -26,5 +26,16 @@ export function toAcademyCourseResponseDto(course: AcademyCourse): AcademyCourse
     course_key: course.courseKey ?? null,
     is_mandatory_onboarding: course.isMandatoryOnboarding ?? false,
     question_count: (course.quizQuestions ?? []).length,
+  };
+}
+
+export interface AdminAcademyCourseEditResponseDto extends AcademyCourseResponseDto {
+  quiz_questions: AcademyQuizQuestion[];
+}
+
+export function toAdminAcademyCourseEditResponseDto(course: AcademyCourse): AdminAcademyCourseEditResponseDto {
+  return {
+    ...toAcademyCourseResponseDto(course),
+    quiz_questions: course.quizQuestions ?? [],
   };
 }
