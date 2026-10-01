@@ -157,6 +157,13 @@ export class TechnicianProfile {
   @Column({ name: 'verification_notes', type: 'text', nullable: true })
   verificationNotes: string | null;
 
+  // ADR-0117 — إعادة تدريب (مش إيقاف): النجاح في الكورس الإلزامي بعد التاريخ ده بيشيلها.
+  @Column({ name: 'retraining_required_at', type: 'timestamptz', nullable: true })
+  retrainingRequiredAt: Date | null;
+
+  @Column({ name: 'retraining_reason', type: 'varchar', length: 200, nullable: true })
+  retrainingReason: string | null;
+
   // ADR-0039 (docs/08 §62.1) — العلامة الزرقاء في واجهة العميل. **مش** مشتقة من verificationStatus:
   // دي أهلية تشغيلية (استوفى أوراقه ومسموح له يشتغل)، ودي قرار تجاري يدوي من الأدمن.
   @Column({ name: 'is_trust_verified', type: 'boolean', default: false })

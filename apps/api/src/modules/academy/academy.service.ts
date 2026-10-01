@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CreateAcademyCourseDto } from './dto/create-academy-course.dto';
@@ -8,6 +8,7 @@ import { RecordExamAttemptDto } from './dto/record-exam-attempt.dto';
 import { UpdateAcademyCourseDto } from './dto/update-academy-course.dto';
 import { AcademyExamAttempt } from './entities/academy-exam-attempt.entity';
 import { AcademyCourse } from './entities/academy-course.entity';
+import { gradeQuiz, loadOnboardingStatus, OnboardingStatus, QuizGrade } from './academy-onboarding';
 
 @Injectable()
 export class AcademyService {
@@ -15,7 +16,53 @@ export class AcademyService {
     @InjectRepository(AcademyCourse) private readonly courses: Repository<AcademyCourse>,
     @InjectRepository(AcademyExamAttempt) private readonly attempts: Repository<AcademyExamAttempt>,
     private readonly auditLog: AuditLogService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
+
+  onboardingStatus(technicianId: string): Promise<OnboardingStatus> {
+    return loadOnboardingStatus(this.dataSource, technicianId);
+  }
+
+  /**
+   * الفني بيمتحن من التطبيق (ADR-0117). التصحيح هنا بس — التطبيق بيبعت أرقام اختيارات، والإجابة
+   * الصح عمرها ما بتطلع. نجاح في كورس إلزامي بعد طلب إعادة تدريب بيشيل العلامة لو كل الإلزامي اكتمل.
+   */
+  async submitAttempt(
+    technicianId: string,
+    courseId: string,
+    answers: number[],
+  ): Promise<{ attempt: AcademyExamAttempt; grade: QuizGrade; onboarding: OnboardingStatus }> {
+    const course = await this.findCourseOrThrow(courseId);
+    const questions = course.quizQuestions ?? [];
+    if (!course.isActive || questions.length === 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'الكورس ده مالوش اختبار متاح دلوقتي', HttpStatus.CONFLICT);
+    }
+    if (answers.length !== questions.length || answers.some((a, i) => a < 0 || a >= questions[i].options_ar.length)) {
+      throw new ApiException(ErrorCode.VAL_001, 'جاوب على كل الأسئلة الأول', HttpStatus.BAD_REQUEST);
+    }
+    const grade = gradeQuiz(questions, answers);
+    const attempt = await this.attempts.save(
+      this.attempts.create({
+        technicianId,
+        courseId,
+        score: grade.score,
+        passed: grade.score >= course.passingScore,
+        recordedByUserId: null,
+        attemptedAt: new Date(),
+        source: 'self',
+        answers,
+      }),
+    );
+    let onboarding = await this.onboardingStatus(technicianId);
+    if (attempt.passed && onboarding.retraining_required && onboarding.complete) {
+      await this.dataSource.query(
+        `UPDATE technician_profiles SET retraining_required_at = NULL, retraining_reason = NULL WHERE id = $1`,
+        [technicianId],
+      );
+      onboarding = { ...onboarding, retraining_required: false, retraining_reason: null };
+    }
+    return { attempt, grade, onboarding };
+  }
 
   listActiveCourses(): Promise<AcademyCourse[]> {
     return this.courses.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });

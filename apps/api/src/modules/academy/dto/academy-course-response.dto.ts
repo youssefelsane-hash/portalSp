@@ -8,6 +8,10 @@ export interface AcademyCourseResponseDto {
   passing_score: number;
   display_order: number;
   is_active: boolean;
+  /** ADR-0117 */
+  course_key: string | null;
+  is_mandatory_onboarding: boolean;
+  question_count: number;
 }
 
 export function toAcademyCourseResponseDto(course: AcademyCourse): AcademyCourseResponseDto {
@@ -19,5 +23,8 @@ export function toAcademyCourseResponseDto(course: AcademyCourse): AcademyCourse
     passing_score: course.passingScore,
     display_order: course.displayOrder,
     is_active: course.isActive,
+    course_key: course.courseKey ?? null,
+    is_mandatory_onboarding: course.isMandatoryOnboarding ?? false,
+    question_count: (course.quizQuestions ?? []).length,
   };
 }

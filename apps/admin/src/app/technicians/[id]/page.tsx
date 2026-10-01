@@ -49,7 +49,7 @@ import {
   capacityTierBadgeClass,
 } from '@/lib/technician-labels';
 import { formatDateTimeAr, formatEgp  } from '@/lib/format';
-import type { TechnicianCapacityTier } from '@baytak/shared-types';
+import type { AcademyOnboardingStatus, TechnicianCapacityTier } from '@baytak/shared-types';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ErrorNotice, Notice } from '@/components/notice';
 import { COMPLAINT_SEVERITY_LABELS, COMPLAINT_STATUS_LABELS } from '@/lib/support-labels';
@@ -165,6 +165,8 @@ export default function TechnicianDetailPage() {
   const goBack = useAdminBack('/technicians');
 
   const [detail, setDetail] = useState<AdminTechnicianDetailResponseDto | null>(null);
+  // ADR-0117 — الموظف بيشوف «نجح في الكورس الإلزامي» وإعادة التدريب قبل ما يعتمد.
+  const [academyStatus, setAcademyStatus] = useState<AcademyOnboardingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showRejectForm, setShowRejectForm] = useState(false);
@@ -246,6 +248,14 @@ export default function TechnicianDetailPage() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'تعذّر تحميل البيانات'));
   }
 
+  function loadAcademyStatus() {
+    if (!hasPermission('academy.view')) return;
+    authedFetch<AcademyOnboardingStatus>(`/admin/academy/technicians/${id}/onboarding-status`)
+      .then(setAcademyStatus)
+      // تحسين تشغيلي — فشله مايكسرش الصفحة ولا يمنع الاعتماد.
+      .catch(() => setAcademyStatus(null));
+  }
+
   function loadCategories() {
     authedFetch<TechnicianCategoryResponseDto[]>(`/admin/technicians/${id}/categories`).then(setCategories)
       // فشل التحميل كان بيضيع كـunhandled rejection: القسم يفضل فاضي
@@ -262,6 +272,7 @@ export default function TechnicianDetailPage() {
     if (isLoading) return;
     load();
     loadZones();
+    loadAcademyStatus();
     loadCategories();
     load360();
     // كل قسم بيتحمّل بس لو الموظف عنده صلاحيته (نفس `@RequirePermission` في الـAPI). من غير كده
@@ -294,7 +305,15 @@ export default function TechnicianDetailPage() {
   }
 
   async function handleApprove() {
-    await runAction(() => authedFetch(`/admin/technicians/${id}/approve`, { method: 'POST' }));
+    await runAction(() => authedFetch(`/admin/technicians/${id}/approve`, { method: 'POST', body: JSON.stringify({}) }));
+    loadAcademyStatus();
+  }
+
+  // بوابة الأكاديمية مفتوحة والفني لسه ماخلّصش ⇒ super_admin بس، بسبب بيتسجّل (السيرفر هو الحارس).
+  async function handleApproveWithOverride(reason: string) {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/approve`, { method: 'POST', body: JSON.stringify({ override_reason: reason }) }),
+    );
   }
 
   async function handleNextStep(endpoint: string, notes: string) {
@@ -675,6 +694,19 @@ export default function TechnicianDetailPage() {
             <p className={detail.has_current_location ? undefined : 'font-medium text-warning'}>
               الشرط الفعلي لاستقبال الطلبات — تحديد الموقع (GPS): {detail.has_current_location ? 'موجود ✓' : 'غير موجود — لازم الفني يفتح التطبيق ويسمح بالموقع'}
             </p>
+            {academyStatus && academyStatus.courses.length > 0 && (
+              <div data-testid="technician-academy-status" className="flex flex-wrap items-center gap-2">
+                <span>الأكاديمية:</span>
+                {academyStatus.courses.map((course) => (
+                  <Badge key={course.course_id} variant={course.passed ? 'secondary' : 'outline'} className={course.passed ? undefined : 'border-warning text-warning'}>
+                    {course.title_ar} — {course.passed ? 'ناجح ✓' : 'لسه'}
+                  </Badge>
+                ))}
+                {academyStatus.retraining_required && (
+                  <Badge variant="destructive">إعادة تدريب مطلوبة{academyStatus.retraining_reason ? ` — ${academyStatus.retraining_reason}` : ''}</Badge>
+                )}
+              </div>
+            )}
           </CardContent>
           {detail.verification_status !== 'approved' && detail.verification_status !== 'rejected' && (
             <CardFooter className="flex-col items-stretch gap-3">
@@ -696,6 +728,20 @@ export default function TechnicianDetailPage() {
                 <Button disabled={isSaving} onClick={handleApprove}>
                   اعتماد
                 </Button>
+                {academyStatus && !academyStatus.complete && (
+                  <PromptDialog
+                    trigger={
+                      <Button variant="outline" disabled={isSaving}>
+                        اعتماد استثنائي
+                      </Button>
+                    }
+                    title="اعتماد قبل اكتمال الأكاديمية"
+                    label="السبب (بيتسجّل — لـsuper_admin بس لو البوابة مفعّلة)"
+                    required
+                    confirmLabel="اعتماد"
+                    onConfirm={handleApproveWithOverride}
+                  />
+                )}
                 <Button variant="destructive" disabled={isSaving} onClick={() => setShowRejectForm((s) => !s)}>
                   رفض
                 </Button>

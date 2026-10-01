@@ -161,6 +161,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // **مفتاح الرجوع الفوري لأخطر تغيير في النظام** (ADR-0109 §7). `pin` = الدخول برمز، و
   // `otp/request` بيترفض فورًا فمفيش أي مسار بيوصل لمزوّد الـSMS ⇒ **صفر تكلفة**. `otp` =
   // الرجوع للسلوك القديم بتغيير إعداد واحد، مش نشر نسخة جديدة. نفس فلسفة OTP_TEST_MODE (§173).
+  'academy.onboarding_gate_enabled': { type: 'boolean', default: false, group: 'security', description: 'اعتماد فني جديد يتطلب نجاحه في كورسات الأكاديمية الإلزامية. مقفول: الموظف بيشوف الحالة بس. مفتوح: الاعتماد العادي بيترفض، وsuper_admin بس يعدّي بسبب مكتوب (ADR-0117).' },
+  'academy.retraining_professionalism_threshold': { type: 'number', default: 2, group: 'security', description: 'تقييم «الاحترافية» من العميل عند الرقم ده أو أقل بيطلب من الفني إعادة الكورس الإلزامي (مش إيقاف). 0 = معطّل.', range: { min: 0, max: 5, integer: true } },
   'auth.phone_status_lookup_enabled': { type: 'boolean', default: true, group: 'security', description: 'التوجيه التلقائي بين الدخول والتسجيل (ADR-0115): الواجهة تسأل «الرقم ده مسجّل؟» وتنقل المستخدم. الإيقاف بيرجّع السلوك القديم (مفيش توجيه)، ومسار الدخول نفسه مابيتأثرش في الحالتين.' },
   'auth.login_method': { type: 'string', default: 'pin', group: 'security', description: 'وسيلة الدخول: pin (رمز دخول، الافتراضي) أو otp (كود SMS — بيرجّع تكلفة المزوّد).' },
   // ADR-0112 — الافتراضي `false` **مقصود**: النشر مايغيّرش أي سلوك لحد ما الأدمن يقرر. مفتوح =

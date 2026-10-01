@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_repository.dart';
+import '../features/academy/academy_screen.dart';
 import '../features/assistant_offers/assistant_offers_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/internal_chat/internal_chat_detail_screen.dart';
@@ -28,6 +29,12 @@ Future<void> handleDeepLink(String? deepLink) async {
   final navigator = rootNavigatorKey.currentState;
   final context = rootNavigatorKey.currentContext;
   if (navigator == null || context == null) return;
+
+  // ADR-0117 — إشعار «إعادة تدريب مطلوبة».
+  if (deepLink == '/technician/academy') {
+    navigator.push(MaterialPageRoute(builder: (_) => const AcademyScreen()));
+    return;
+  }
 
   if (deepLink.startsWith(_assistantOffersDeepLinkPrefix)) {
     navigator.push(MaterialPageRoute(builder: (_) => const AssistantOffersScreen()));

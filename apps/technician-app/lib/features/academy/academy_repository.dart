@@ -17,4 +17,16 @@ class AcademyRepository {
     final items = await auth.authedRequestList('/academy/my-exam-attempts');
     return items.map(AcademyExamAttempt.fromJson).toList();
   }
+
+  /// ADR-0117 — الكورسات الإلزامية وإعادة التدريب.
+  Future<AcademyOnboardingStatus> onboardingStatus() async {
+    final json = await auth.authedRequest('GET', '/academy/onboarding-status');
+    return AcademyOnboardingStatus.fromJson(json!);
+  }
+
+  /// التطبيق بيبعت رقم الاختيار لكل سؤال بس — التصحيح في السيرفر.
+  Future<AcademyQuizResult> submitAttempt(String courseId, List<int> answers) async {
+    final json = await auth.authedRequest('POST', '/academy/courses/$courseId/attempts', body: {'answers': answers});
+    return AcademyQuizResult.fromJson(json!);
+  }
 }
