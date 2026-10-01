@@ -14,6 +14,17 @@ export interface AcademyCourseResponseDto {
   question_count?: number;
 }
 
+export interface AcademyQuizQuestionForAdmin {
+  id: string;
+  prompt_ar: string;
+  options_ar: string[];
+  correct_index: number;
+}
+
+export interface AdminAcademyCourseEditResponseDto extends AcademyCourseResponseDto {
+  quiz_questions: AcademyQuizQuestionForAdmin[];
+}
+
 export interface CreateAcademyCourseBody {
   title_ar: string;
   title_en: string;
@@ -23,7 +34,9 @@ export interface CreateAcademyCourseBody {
   is_active?: boolean;
 }
 
-export type UpdateAcademyCourseBody = Partial<CreateAcademyCourseBody>;
+export interface UpdateAcademyCourseBody extends Partial<CreateAcademyCourseBody> {
+  quiz_questions?: AcademyQuizQuestionForAdmin[];
+}
 
 export interface AcademyExamAttemptResponseDto {
   id: string;

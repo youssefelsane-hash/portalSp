@@ -6,15 +6,13 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AcademyService } from './academy.service';
-import { toAcademyCourseResponseDto } from './dto/academy-course-response.dto';
+import { toAcademyCourseResponseDto, toAdminAcademyCourseEditResponseDto } from './dto/academy-course-response.dto';
 import { toAcademyExamAttemptResponseDto } from './dto/academy-exam-attempt-response.dto';
 import { CreateAcademyCourseDto } from './dto/create-academy-course.dto';
 import { RecordExamAttemptDto } from './dto/record-exam-attempt.dto';
 import { UpdateAcademyCourseDto } from './dto/update-academy-course.dto';
 
-// إدارة "الأكاديمية" من الأدمن — base بس (migration 0072، تفاصيل القرار في README.md المجاور).
-// مفيش شاشة أدمن بتستخدم الـendpoints دي لسه — تسجيل الكورسات/نتائج الاختبار يدوي عبر الـAPI مباشرة
-// (curl/Postman) لحد ما الأولوية تيجي تُبنى شاشة (المالك نفسه طلب الموضوع ده يفضل base بس دلوقتي).
+// إدارة الأكاديمية؛ الإجابات الصحيحة لا تظهر إلا في endpoint التحرير المحمي بـacademy.manage.
 @Controller('admin/academy')
 @Roles(UserType.ADMIN)
 export class AdminAcademyController {
@@ -25,6 +23,12 @@ export class AdminAcademyController {
   async listCourses() {
     const courses = await this.academyService.listAllCoursesForAdmin();
     return courses.map(toAcademyCourseResponseDto);
+  }
+
+  @Get('courses/:id')
+  @RequirePermission('academy.manage')
+  async getCourseForEditing(@Param('id', ParseUUIDPipe) id: string) {
+    return toAdminAcademyCourseEditResponseDto(await this.academyService.findCourseOrThrow(id));
   }
 
   @Post('courses')

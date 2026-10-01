@@ -31,6 +31,7 @@ import { formatEgp, formatExecutionWindow, formatRelativeSchedule } from '@/lib/
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ErrorNotice } from '@/components/notice';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { matchingOrdersPreset, ordersDateRange } from '@/lib/orders-date-range.mjs';
 
 const PER_PAGE = 20;
 
@@ -68,11 +69,11 @@ const DATE_FIELDS: { value: string; label: string }[] = [
 ];
 
 /** نطاقات جاهزة — بتكتب `from`/`to` على الحقل المختار، فمفيش داعي لتقويمين في الشريط الرئيسي. */
-const RANGE_PRESETS: { value: string; label: string; days: number | null }[] = [
-  { value: '', label: 'كل الفترات', days: null },
-  { value: '0', label: 'اليوم', days: 0 },
-  { value: '7', label: '٧ أيام', days: 7 },
-  { value: '30', label: '٣٠ يوم', days: 30 },
+const RANGE_PRESETS: { value: string; label: string }[] = [
+  { value: '', label: 'كل الفترات' },
+  { value: '1', label: 'اليوم' },
+  { value: '7', label: '٧ أيام' },
+  { value: '30', label: '٣٠ يوم' },
 ];
 
 const ORIGIN_FILTERS: { value: string; label: string }[] = [
@@ -214,23 +215,16 @@ function OrdersListPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
-  const activePreset = (() => {
-    if (!from || !to) return '';
-    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
-    return RANGE_PRESETS.some((p) => p.days === days) ? String(days) : '';
-  })();
+  const activePreset = matchingOrdersPreset(from, to);
 
   const applyPreset = (value: string) => {
+    if (value === 'custom') return;
     if (value === '') {
-      setParams({ from: null, to: null, page: '1' });
+      setParams({ from: null, to: null, bucket: null, page: '1' });
       return;
     }
-    const days = Number(value);
-    const start = new Date();
-    const end = new Date();
-    end.setDate(end.getDate() + days);
-    const isoDay = (d: Date) => d.toISOString().slice(0, 10);
-    setParams({ from: isoDay(start), to: isoDay(end), bucket: null, page: '1' });
+    const range = ordersDateRange(Number(value));
+    setParams({ ...range, bucket: null, page: '1' });
   };
 
   const resetAll = () =>
@@ -321,7 +315,8 @@ function OrdersListPage() {
           onSubmit={(event) => {
             event.preventDefault();
             const value = new FormData(event.currentTarget).get('search');
-            setParams({ search: typeof value === 'string' ? value.trim() : null, page: '1' });
+            const search = typeof value === 'string' ? value.trim() : '';
+            setParams({ search, scope: search ? 'all' : null, page: '1' });
           }}
         >
           <Input
@@ -341,7 +336,9 @@ function OrdersListPage() {
           <SelectNative
             className="h-9 w-auto"
             value={dateField}
-            onChange={(e) => setParams({ date_field: e.target.value, page: '1' })}
+            onChange={(e) => setParams({ date_field: e.target.value,
+              ...(e.target.value === 'completed_at' && scope === 'current' ? { scope: 'completed' } : {}),
+              page: '1' })}
             aria-label="التاريخ حسب"
           >
             {DATE_FIELDS.map((f) => (
@@ -352,7 +349,7 @@ function OrdersListPage() {
           </SelectNative>
           <SelectNative
             className="h-9 w-auto"
-            value={activePreset}
+            value={activePreset || (from || to ? 'custom' : '')}
             onChange={(e) => applyPreset(e.target.value)}
             aria-label="الفترة"
           >
@@ -361,7 +358,7 @@ function OrdersListPage() {
                 {p.label}
               </option>
             ))}
-            {activePreset === '' && from && to && <option value="">فترة مخصّصة</option>}
+            {activePreset === '' && (from || to) && <option value="custom" disabled>فترة مخصّصة</option>}
           </SelectNative>
         </div>
 
@@ -446,7 +443,8 @@ function OrdersListPage() {
               <Input
                 type="date"
                 value={from}
-                onChange={(e) => setParams({ from: e.target.value, page: '1' })}
+                onChange={(e) => setParams({ from: e.target.value, to: to && e.target.value > to ? null : to,
+                  bucket: null, page: '1' })}
                 className="h-10"
                 aria-label="من تاريخ"
               />
@@ -454,7 +452,8 @@ function OrdersListPage() {
               <Input
                 type="date"
                 value={to}
-                onChange={(e) => setParams({ to: e.target.value, page: '1' })}
+                onChange={(e) => setParams({ to: e.target.value, from: from && e.target.value < from ? null : from,
+                  bucket: null, page: '1' })}
                 className="h-10"
                 aria-label="إلى تاريخ"
               />
