@@ -5,6 +5,7 @@ ALTER TABLE academy_courses ADD COLUMN IF NOT EXISTS course_key VARCHAR(60) NULL
 ALTER TABLE academy_courses ADD COLUMN IF NOT EXISTS lesson_ar TEXT NULL;
 ALTER TABLE academy_courses ADD COLUMN IF NOT EXISTS quiz_questions JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE academy_courses ADD COLUMN IF NOT EXISTS is_mandatory_onboarding BOOLEAN NOT NULL DEFAULT false;
+-- migration-safety: ok الجدول academy_courses فيه كورسات معدودة (أقل من 50 صف) — القفل لحظي.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_academy_courses_course_key
   ON academy_courses (course_key) WHERE course_key IS NOT NULL AND deleted_at IS NULL;
 COMMENT ON COLUMN academy_courses.quiz_questions IS
