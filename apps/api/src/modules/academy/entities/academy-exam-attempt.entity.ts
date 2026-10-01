@@ -38,6 +38,13 @@ export class AcademyExamAttempt {
   @Column({ name: 'attempted_at', type: 'timestamptz' })
   attemptedAt: Date;
 
+  /** ADR-0117 — `self` = الفني امتحن من التطبيق واتصحح في السيرفر، `admin` = نتيجة سجّلها موظف. */
+  @Column({ type: 'varchar', length: 20, default: 'admin' })
+  source: 'admin' | 'self';
+
+  @Column({ type: 'jsonb', nullable: true })
+  answers: number[] | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

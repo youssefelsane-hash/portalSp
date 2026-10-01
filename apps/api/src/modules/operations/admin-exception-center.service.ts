@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { runExclusiveSweep } from '../../common/db/sweep-lock';
+import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { ESCALATABLE_STATUSES } from '../orders/crew-shortage-escalation.service';
 import { computeCrewComposition } from '../orders/order-team.service';
 import {
@@ -11,6 +13,41 @@ import {
 import { SettingsService } from '../settings/settings.service';
 
 const EXCEPTION_LIST_LIMIT = 50;
+const DEPARTURE_WARNING_MINUTES_FALLBACK = 30;
+const ARRIVAL_GRACE_MINUTES_FALLBACK = 20;
+const AT_RISK_SWEEP_INTERVAL_MS = 60_000;
+export const AT_RISK_ROUTING_EVENT = 'order.appointment_at_risk';
+
+/**
+ * **موعد في خطر** (docs/08 §189 بند D-4) — بيتلقط **قبل** ما اليوم يفوت، مش بعده زي `overdueOrders`.
+ *
+ * | المستوى | الشرط | اللون |
+ * |---|---|---|
+ * | `watch` | فاضل ≤ `operations.departure_warning_minutes` على الموعد والفني لسه ماتحرّكش | مراقبة (بلا تنبيه) |
+ * | `late_departure` | جه الموعد والفني لسه ماتحرّكش | أصفر + تنبيه |
+ * | `late_arrival` | عدّى على الموعد `operations.arrival_grace_minutes` والفني لسه ماوصلش (اتحرك أو لأ) | أحمر + تنبيه |
+ *
+ * مفيش auto-rematch: الموظف بيتصل بالفني والعميل ويستخدم reassign/rematch/reschedule الموجودين.
+ */
+export type AtRiskLevel = 'watch' | 'late_departure' | 'late_arrival';
+
+export interface AtRiskAppointmentItem {
+  orderId: string;
+  orderNumber: string;
+  scheduledAt: string;
+  level: AtRiskLevel;
+  orderStatus: string;
+  technicianId: string | null;
+  technicianCode: string | null;
+  fullName: string | null;
+  phone: string | null;
+  /** موجب = متأخر بالدقايق عن الموعد، سالب = فاضل كام دقيقة. */
+  minutesFromAppointment: number;
+  moved: boolean;
+  departedAt: string | null;
+  lastLocationAt: string | null;
+  lastActivityAt: string | null;
+}
 
 export interface ExceptionCenterFilters {
   categoryId?: string | null;
@@ -126,6 +163,24 @@ export interface AdminExceptionCenterResult {
   matchingWorkflowDelayed: { items: MatchingWorkflowDelayedItem[]; total: number };
   staleMatching: { items: StaleMatchingExceptionItem[]; total: number };
   staleInProgress: { items: StaleInProgressExceptionItem[]; total: number };
+  atRiskAppointments: { items: AtRiskAppointmentItem[]; total: number };
+}
+
+interface RawAtRiskRow {
+  id: string;
+  order_number: string;
+  scheduled_at: string;
+  risk_level: AtRiskLevel;
+  order_status: string;
+  technician_id: string | null;
+  technician_code: string | null;
+  full_name: string | null;
+  phone: string | null;
+  minutes_from_appointment: string;
+  technician_departed_at: string | null;
+  last_location_at: string | null;
+  last_activity_at: string | null;
+  total_count: string;
 }
 
 interface RawWorkflowDelayedRow {
@@ -229,11 +284,123 @@ interface RawStaleInProgressRow {
  * `/orders` المفلترة أو §36.7's dispatch-delivery feed).
  */
 @Injectable()
-export class AdminExceptionCenterService {
+export class AdminExceptionCenterService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AdminExceptionCenterService.name);
+  private timer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly settingsService: SettingsService,
+    // اختياري: الاختبارات القديمة بتبني الخدمة بمعاملين (القراءة بس) — التنبيه بيتخطّى من غيره.
+    @Optional() private readonly routingService?: NotificationRoutingService,
   ) {}
+
+  onModuleInit(): void {
+    if (process.env.NODE_ENV === 'test') return;
+    this.timer = setInterval(() => {
+      void runExclusiveSweep(this.dataSource, 'at-risk-appointments', () => this.alertAtRiskTransitions(), this.logger);
+    }, AT_RISK_SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  private async atRiskThresholds(): Promise<{ warn: number; grace: number }> {
+    const [warn, grace] = await Promise.all([
+      this.settingsService.getNumber('operations.departure_warning_minutes', DEPARTURE_WARNING_MINUTES_FALLBACK),
+      this.settingsService.getNumber('operations.arrival_grace_minutes', ARRIVAL_GRACE_MINUTES_FALLBACK),
+    ]);
+    return { warn: Math.max(0, Math.floor(warn)), grace: Math.max(0, Math.floor(grace)) };
+  }
+
+  /**
+   * التصنيف نفسه — مصدر واحد للقايمة وللتنبيه. `$1` = دقايق التحذير، `$2` = سماحية الوصول.
+   *
+   * الخدمات «باليوم بس» متستثنية: الموعد عندها متخزّن منتصف الليل UTC (مش ساعة وصول)، وكانت كلها
+   * هتبان «متأخرة» من أول اليوم. والطلب اللي يومه عدّى وهو accepted مكانه `overdueOrders`، مش هنا.
+   */
+  private atRiskCte(): string {
+    return `
+      risk AS (
+        SELECT o.id, o.order_number, o.scheduled_at, o.order_status::text AS order_status, o.technician_id,
+               o.technician_departed_at, o.at_risk_alert_level, o.service_zone_id, s.category_id,
+               CASE
+                 WHEN o.technician_arrived_at IS NULL
+                      AND now() >= o.scheduled_at + make_interval(mins => $2::int)
+                   THEN 'late_arrival'
+                 WHEN o.technician_departed_at IS NULL AND o.order_status IN ('technician_assigned', 'accepted')
+                      AND now() >= o.scheduled_at
+                   THEN 'late_departure'
+                 WHEN o.technician_departed_at IS NULL AND o.order_status IN ('technician_assigned', 'accepted')
+                      AND now() >= o.scheduled_at - make_interval(mins => $1::int)
+                   THEN 'watch'
+               END AS risk_level
+        FROM orders o
+        JOIN services s ON s.id = o.service_id
+        WHERE o.deleted_at IS NULL
+          AND o.order_status IN ('technician_assigned', 'accepted', 'technician_on_way')
+          AND o.scheduled_at IS NOT NULL
+          AND s.requires_start_time_only = true
+          AND o.scheduled_at <> date_trunc('day', o.scheduled_at)
+          AND o.scheduled_at >= now() - interval '12 hours'
+          AND o.scheduled_at <= now() + make_interval(mins => $1::int)
+          AND NOT (
+            o.order_status = 'accepted'
+            AND (o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date < (now() AT TIME ZONE 'Africa/Cairo')::date
+          )
+      )`;
+  }
+
+  /**
+   * تنبيه العمليات لما صف **يدخل** الأصفر أو الأحمر — مرة واحدة لكل مستوى. الـUPDATE نفسه هو الـcompare-
+   * and-set (`at_risk_alert_level` بيطلع لفوق بس)، فدورتين متوازيتين أو نفس الدقيقة تاني مابيطلّعوش
+   * تنبيه مكرر. مركز الاستثناءات يفضل مصدر الحقيقة؛ ده مجرد جرس.
+   */
+  async alertAtRiskTransitions(): Promise<number> {
+    if (!this.routingService) return 0;
+    const { warn, grace } = await this.atRiskThresholds();
+    const promoted = await this.dataSource.query<
+      { id: string; order_number: string; scheduled_at: string; risk_level: 'late_departure' | 'late_arrival'; full_name: string | null; phone: string | null; moved: boolean }[]
+    >(
+      `
+      WITH ${this.atRiskCte()},
+      promoted AS (
+        UPDATE orders o
+           SET at_risk_alert_level = r.risk_level, at_risk_alerted_at = now()
+          FROM risk r
+         WHERE o.id = r.id
+           AND r.risk_level IN ('late_departure', 'late_arrival')
+           AND (o.at_risk_alert_level IS NULL OR (o.at_risk_alert_level = 'late_departure' AND r.risk_level = 'late_arrival'))
+        RETURNING o.id, o.order_number, o.scheduled_at, r.risk_level, o.technician_id, (o.technician_departed_at IS NOT NULL) AS moved
+      )
+      SELECT p.id, p.order_number, p.scheduled_at, p.risk_level, p.moved, u.full_name, u.phone_number AS phone
+        FROM promoted p
+        LEFT JOIN technician_profiles tp ON tp.id = p.technician_id
+        LEFT JOIN users u ON u.id = tp.user_id
+      `,
+      [warn, grace],
+    );
+    for (const row of promoted) {
+      const when = new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Cairo' }).format(
+        new Date(row.scheduled_at),
+      );
+      const who = row.full_name ? `الفني ${row.full_name}${row.phone ? ` (${row.phone})` : ''}` : 'الفني';
+      const late = row.risk_level === 'late_arrival';
+      await this.routingService.routeToRole(AT_RISK_ROUTING_EVENT, {
+        notificationType: 'order_appointment_at_risk',
+        titleAr: late ? `تأخر في الوصول — ${row.order_number}` : `الفني لسه ماتحرّكش — ${row.order_number}`,
+        bodyAr: late
+          ? `الموعد كان ${when} و${who} لسه ماوصلش${row.moved ? ' (اتحرك)' : ' ولا اتحرك'}. اتصل بيه وبلّغ العميل، ولو محتاج استخدم إعادة التعيين أو الجدولة من صفحة الطلب.`
+          : `الموعد ${when} و${who} لسه ماتحرّكش. اتصل بيه واتأكد، وبلّغ العميل لو فيه تأخير.`,
+        referenceType: 'order',
+        referenceId: row.id,
+        deepLink: `/admin/orders/${row.id}`,
+      });
+    }
+    return promoted.length;
+  }
 
   async getExceptions(filters: ExceptionCenterFilters): Promise<AdminExceptionCenterResult> {
     const categoryId = filters.categoryId ?? null;
@@ -546,7 +713,52 @@ export class AdminExceptionCenterService {
       ageSeconds: Number(r.age_seconds),
     }));
 
+    const { warn, grace } = await this.atRiskThresholds();
+    const atRiskRows = await this.dataSource.query<RawAtRiskRow[]>(
+      `
+      WITH ${this.atRiskCte()}
+      SELECT r.id, r.order_number, r.scheduled_at, r.risk_level, r.order_status, r.technician_id,
+             tp.technician_code, u.full_name, u.phone_number AS phone,
+             ROUND(EXTRACT(EPOCH FROM (now() - r.scheduled_at)) / 60)::int AS minutes_from_appointment,
+             r.technician_departed_at, tp.current_location_updated_at AS last_location_at,
+             GREATEST(
+               (SELECT MAX(h.created_at) FROM order_status_history h WHERE h.order_id = r.id),
+               tp.current_location_updated_at
+             ) AS last_activity_at,
+             COUNT(*) OVER() AS total_count
+        FROM risk r
+        LEFT JOIN technician_profiles tp ON tp.id = r.technician_id
+        LEFT JOIN users u ON u.id = tp.user_id
+       WHERE r.risk_level IS NOT NULL
+         AND ($3::uuid IS NULL OR r.category_id = $3)
+         AND ($4::uuid IS NULL OR r.service_zone_id = $4)
+       ORDER BY CASE r.risk_level WHEN 'late_arrival' THEN 0 WHEN 'late_departure' THEN 1 ELSE 2 END, r.scheduled_at ASC
+       LIMIT $5
+      `,
+      [warn, grace, categoryId, zoneId, EXCEPTION_LIST_LIMIT],
+    );
+    const atRiskItems: AtRiskAppointmentItem[] = atRiskRows.map((r) => ({
+      orderId: r.id,
+      orderNumber: r.order_number,
+      scheduledAt: r.scheduled_at,
+      level: r.risk_level,
+      orderStatus: r.order_status,
+      technicianId: r.technician_id,
+      technicianCode: r.technician_code,
+      fullName: r.full_name,
+      phone: r.phone,
+      minutesFromAppointment: Number(r.minutes_from_appointment),
+      moved: r.technician_departed_at !== null,
+      departedAt: r.technician_departed_at,
+      lastLocationAt: r.last_location_at,
+      lastActivityAt: r.last_activity_at,
+    }));
+
     return {
+      atRiskAppointments: {
+        items: atRiskItems,
+        total: atRiskRows.length > 0 ? Number(atRiskRows[0].total_count) : 0,
+      },
       staleMatching: {
         items: staleMatchingItems,
         total: staleMatchingRows.length > 0 ? Number(staleMatchingRows[0].total_count) : 0,

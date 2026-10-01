@@ -45,6 +45,8 @@ export interface TechnicianRankScoreBreakdown {
   fairnessPenalty: number;
   /** موثوقية (docs/08 §36.20-21، ADR-0023) — تعديل مبني على تقييم الفني، صفر لو تقييماته أقل من الحد الأدنى. */
   reliabilityAdjustment: number;
+  /** الالتزام بالمواعيد (docs/08 §189 D-2) — صفر تحت الحد الأدنى للعيّنة أو لو الوزن صفر. */
+  punctualityAdjustment: number;
   /** أفضلية شركة مسجلة وقادرة على تغطية طاقم طلب كبير؛ صفر لكل الحالات الأخرى. */
   companyAdjustment: number;
   /**
@@ -358,6 +360,7 @@ export class MatchingExplainabilityService {
             workloadPenalty: Number(row.workload_penalty),
             fairnessPenalty: Number(row.fairness_penalty),
             reliabilityAdjustment: Number(row.reliability_adjustment),
+            punctualityAdjustment: Number(row.punctuality_adjustment ?? 0),
             companyAdjustment: Number(row.company_adjustment),
             distancePenalty: Number(row.distance_penalty),
             distanceWeight: distanceWeight.weight,

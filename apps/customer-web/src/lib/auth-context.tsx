@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiEnvelope, TokenPair, UserResponseDto } from './api-types';
 import { apiFetch, ApiError, apiFetchPage } from './api-client';
+import { phoneNumberForApi } from '@baytak/shared-types';
 
 interface AuthContextValue {
   accessToken: string | null;
@@ -109,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (phoneNumber: string, pin: string) => {
       await adoptSession(
         await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/pin/login', {
-          phone_number: phoneNumber,
+          phone_number: phoneNumberForApi(phoneNumber),
           pin,
         }),
       );
@@ -121,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (phoneNumber: string, pin: string, fullName: string, promoLinkCode?: string) => {
       await adoptSession(
         await callLocalAuthRoute<Pick<TokenPair, 'access_token' | 'expires_in_seconds'>>('/api/auth/pin/register', {
-          phone_number: phoneNumber,
+          phone_number: phoneNumberForApi(phoneNumber),
           pin,
           full_name: fullName,
           user_type: 'customer',

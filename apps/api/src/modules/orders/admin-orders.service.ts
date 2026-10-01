@@ -1554,6 +1554,9 @@ export class AdminOrdersService {
                   reliabilityBaselineParam: '$11',
                   reliabilityWeightParam: '$12',
                   reliabilityMinRatingsParam: '$13',
+                  punctualityWeightParam: '$14',
+                  punctualityBaselineParam: '$15',
+                  punctualityMinSampleParam: '$16',
                 })} DESC,
                 tp.id ASC`,
       [
@@ -1570,6 +1573,9 @@ export class AdminOrdersService {
         ranking.reliabilityBaselineRating,
         ranking.reliabilityWeight,
         ranking.reliabilityMinRatingsCount,
+        ranking.punctualityWeight,
+        ranking.punctualityBaselinePercent,
+        ranking.punctualityMinSample,
       ],
     );
 

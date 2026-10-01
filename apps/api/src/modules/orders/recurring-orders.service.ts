@@ -32,6 +32,13 @@ import { PaymentsService } from '../payments/payments.service';
 import { PaymentGatewayStatus, PaymentMethod } from '../payments/entities/payment.entity';
 import { Order, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { SettingsService } from '../settings/settings.service';
+import {
+  RECURRING_PAYMENT_LAST_CALL_HOURS,
+  RECURRING_PAYMENT_REMINDER_ACTION,
+  recurringManualPaymentDeadline,
+} from './recurring-payment-deadline.util';
+import { loadRecurringPlanState, recurringOccurrenceCancelNotice } from './recurring-occurrence-notice.util';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import {
   RECURRING_CARD_PAYMENT_FAILED_EVENT,
@@ -46,7 +53,13 @@ const CLAIM_LEASE_MS = 5 * 60_000;
 const MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK = 96;
 const RECURRING_CARD_COLLECTION_LEAD_DAYS = 3;
 const RECURRING_CASH_REMINDER_LEAD_DAYS = 4;
-const RECURRING_CARD_PAYMENT_DEADLINE_HOURS = 24;
+const RECURRING_CARD_PAYMENT_DEADLINE_HOURS = RECURRING_PAYMENT_LAST_CALL_HOURS;
+// ADR-0116 — نفس افتراضيات السجل؛ بتُستخدم بس لو SettingsService مش متحقن (اختبارات قديمة).
+const MANUAL_PAYMENT_WINDOW_HOURS_FALLBACK = 24;
+const PAYMENT_TIMEOUT_MINUTES_FALLBACK = 15;
+const QUIET_HOURS_START_FALLBACK = '22:00';
+const QUIET_HOURS_END_FALLBACK = '08:00';
+
 // المحاولة الثالثة تكون قبل T-24 بساعة، فلا تضيع بسبب فرق ثوانٍ بين scheduler وSQL cutoff.
 const RECURRING_CARD_FINAL_ATTEMPT_BUFFER_HOURS = 1;
 const RECURRING_CARD_MAX_ATTEMPTS = 3;
@@ -145,6 +158,8 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     // آخر dependency عمدًا: اختبارات قديمة تبني الخدمة positional وتغطي create/list فقط.
     // Nest يحقنها في التطبيق الفعلي، وغيابها في اختبار قديم لا يفعّل sweep التحصيل أصلًا.
     private readonly paymentsService?: PaymentsService,
+    // نفس القاعدة: غيابه = افتراضيات السجل لمهلة الدفع اليدوي (ADR-0116).
+    private readonly settingsService?: SettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -357,6 +372,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     await this.materializeDueOccurrences(SWEEP_BATCH_SIZE, options?.templateIds);
     await this.sweepRecurringPaymentCollection(options?.templateIds);
     await this.sendRecurringCashReminders(options?.templateIds);
+    await this.resolveSettledPaymentReminders();
     const occurrences = await this.claimOccurrences(SWEEP_BATCH_SIZE, options?.templateIds);
 
     let generatedCount = 0;
@@ -486,7 +502,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
           reason: `إلغاء النوبة المتكررة بعد ${RECURRING_CARD_MAX_ATTEMPTS} محاولات تحصيل فاشلة: ${failureReason}`,
         }),
       );
-      return { order, cancelled: true };
+      // النص اللي العميل هيشوفه (D-1): النوبة دي بس، والخطة لسه شغّالة ولا لأ، والجاية امتى.
+      const notice = recurringOccurrenceCancelNotice(
+        { kind: 'card_declined', attempts: attemptNumber },
+        await loadRecurringPlanState((sql, params) => manager.query(sql, params), order.recurringTemplateId),
+      );
+      return { order, cancelled: true, notice };
     });
 
     if (!resolved) return;
@@ -501,7 +522,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
           OrderStatus.CANCELLED_BY_SYSTEM,
           order.customerId,
           order.technicianId,
-          'إلغاء تلقائي بعد فشل تحصيل البطاقة المتكررة',
+          resolved.notice,
         ),
       );
     }
@@ -785,9 +806,16 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       // البطاقة المحفوظة لا تطلب من العميل دفعًا يدويًا هنا: التحصيل التلقائي يبدأ عند T-3.
       // InstaPay يظل مساره اليدوي كما هو ويأخذ إشعار "أكمل الدفع" الحالي.
       if (order.orderStatus === 'pending_payment' && template.paymentMethod !== PaymentMethod.CARD) {
+        const deadline = await this.assignManualPaymentDeadline(order.id, order.placedAt ?? new Date(), occurrence.scheduledFor);
         this.eventEmitter.emit(
           RECURRING_ORDER_AWAITING_PAYMENT_EVENT,
-          new RecurringOrderAwaitingPaymentEvent(order.id, order.orderNumber, order.customerId),
+          new RecurringOrderAwaitingPaymentEvent(
+            order.id,
+            order.orderNumber,
+            order.customerId,
+            deadline,
+            occurrence.scheduledFor,
+          ),
         );
       }
       return true;
@@ -802,6 +830,75 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       }
       await this.recordFailure(occurrence, template, err);
       return false;
+    }
+  }
+
+  /**
+   * ADR-0116 — ميعاد دفع النوبة اليدوية بيتحسب مرة واحدة ويتخزن، فاللي اتقال للعميل هو اللي
+   * بيتطبّق. فشل هنا مايوقفش التوليد: الطلب بيفضل بمهلة الطلب العادي (السلوك القديم) والإشعار
+   * بيطلع من غير ميعاد.
+   */
+  private async assignManualPaymentDeadline(orderId: string, generatedAt: Date, scheduledAt: Date): Promise<Date | null> {
+    try {
+      const settings = this.settingsService;
+      const [windowHours, minimumMinutes, quietHoursStart, quietHoursEnd] = settings
+        ? await Promise.all([
+            settings.getNumber('recurring.manual_payment_window_hours', MANUAL_PAYMENT_WINDOW_HOURS_FALLBACK),
+            settings.getNumber('orders.payment_timeout_minutes', PAYMENT_TIMEOUT_MINUTES_FALLBACK),
+            settings.getString('notification_engine.quiet_hours_start', QUIET_HOURS_START_FALLBACK),
+            settings.getString('notification_engine.quiet_hours_end', QUIET_HOURS_END_FALLBACK),
+          ])
+        : [MANUAL_PAYMENT_WINDOW_HOURS_FALLBACK, PAYMENT_TIMEOUT_MINUTES_FALLBACK, QUIET_HOURS_START_FALLBACK, QUIET_HOURS_END_FALLBACK];
+      const deadline = recurringManualPaymentDeadline({
+        generatedAt,
+        scheduledAt,
+        windowHours,
+        minimumMinutes,
+        quietHoursStart,
+        quietHoursEnd,
+      });
+      await this.templates.manager.query(
+        `UPDATE orders SET recurring_payment_deadline_at = $2
+          WHERE id = $1 AND order_status = 'pending_payment' AND recurring_payment_deadline_at IS NULL`,
+        [orderId, deadline],
+      );
+      return deadline;
+    } catch (err) {
+      this.logger.warn(`تعذّر تحديد ميعاد دفع النوبة ${orderId} — هتاخد مهلة الطلب العادي: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
+  }
+
+  /**
+   * شبكة أمان لتذكيرات دفع النوبة (ADR-0116): الحل الأساسي بالأحداث (الدفع/التبليغ/الإلغاء) في
+   * `RecurringOrderAwaitingPaymentNotificationListener`، لكن حدث ضاع (restart بين الـcommit والـemit)
+   * كان هيسيب العميل ياخد «ادفع» على نوبة مدفوعة. هنا بنقفل أي تذكير مفتوح طلبه مابقاش مستني دفع
+   * أو العميل بلّغ فيه تحويل — من Postgres مباشرة كل دورة.
+   */
+  private async resolveSettledPaymentReminders(): Promise<void> {
+    try {
+      await this.templates.manager.query(
+        `UPDATE notification_workflows w
+            SET resolved_at = now(), next_reminder_at = NULL, updated_at = now()
+           FROM orders o
+          WHERE w.action_type = $1
+            AND w.entity_type = 'order'
+            AND w.entity_id = o.id
+            AND w.resolved_at IS NULL
+            AND w.next_reminder_at IS NOT NULL
+            AND (
+              o.order_status <> 'pending_payment'
+              OR EXISTS (
+                SELECT 1 FROM payments p
+                 WHERE p.order_id = o.id
+                   AND p.customer_confirmed_transfer_at IS NOT NULL
+                   AND p.payment_status IN ('pending', 'processing', 'manual_review')
+              )
+            )`,
+        [RECURRING_PAYMENT_REMINDER_ACTION],
+      );
+    } catch (err) {
+      this.logger.warn(`تعذّر مراجعة تذكيرات دفع النوبات: ${err instanceof Error ? err.message : err}`);
     }
   }
 

@@ -151,6 +151,8 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // ── limits ────────────────────────────────────────────────────────────
   'orders.cancellation_free_window_min': { type: 'number', default: 5, group: 'limits', description: 'مهلة الإلغاء المجاني بالدقايق' },
   'orders.no_show_visit_fee_cents': { type: 'number', default: 5000, group: 'limits', description: 'رسوم الزيارة الفاشلة (عدم حضور/رفض شغل ضروري) اللي الأدمن بيطبّقها على الطلبات المدفوعة مسبقًا بالقرش', range: { min: 0, max: 100_000_000, integer: true } },
+  'operations.departure_warning_minutes': { type: 'number', default: 30, group: 'orders', description: 'قبل الموعد بالمدة دي (دقايق) والفني لسه ماتحرّكش ⇒ «تحت المراقبة» (بلا تنبيه). ولو جه الموعد وهو لسه ماتحرّكش ⇒ «تأخر في التحرك» (أصفر) وتنبيه للعمليات.', range: { min: 5, max: 240, integer: true } },
+  'operations.arrival_grace_minutes': { type: 'number', default: 20, group: 'orders', description: 'بعد الموعد بالمدة دي (دقايق) والفني لسه ماوصلش ⇒ «تأخر في الوصول» (أحمر) وتنبيه للعمليات.', range: { min: 0, max: 180, integer: true } },
   'orders.stale_in_progress_hours': { type: 'number', default: 48, group: 'limits', description: 'بعد كام ساعة من بداية التنفيذ يظهر الطلب المتوقف في مركز العمليات للمراجعة اليدوية. لا يلغي النظام الطلب أو أي مدفوعات تلقائيًا.' },
   'orders.stale_matching_hours': { type: 'number', default: 24, group: 'limits', description: 'بعد كام ساعة من البحث بلا عرض مطابقة حي يظهر الطلب في مركز العمليات للمراجعة اليدوية. إعادة المحاولة تستمر ولا يوجد إلغاء تلقائي.' },
   'payments.stale_payment_hours': { type: 'number', default: 24, group: 'payments', description: 'بعد كام ساعة تظهر الدفعة pending أو processing أو manual_review في فحص التسوية للمراجعة البشرية. لا ينشئ النظام محاولة تحصيل بديلة تلقائيًا.' },
@@ -159,6 +161,9 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   // **مفتاح الرجوع الفوري لأخطر تغيير في النظام** (ADR-0109 §7). `pin` = الدخول برمز، و
   // `otp/request` بيترفض فورًا فمفيش أي مسار بيوصل لمزوّد الـSMS ⇒ **صفر تكلفة**. `otp` =
   // الرجوع للسلوك القديم بتغيير إعداد واحد، مش نشر نسخة جديدة. نفس فلسفة OTP_TEST_MODE (§173).
+  'academy.onboarding_gate_enabled': { type: 'boolean', default: false, group: 'security', description: 'اعتماد فني جديد يتطلب نجاحه في كورسات الأكاديمية الإلزامية. مقفول: الموظف بيشوف الحالة بس. مفتوح: الاعتماد العادي بيترفض، وsuper_admin بس يعدّي بسبب مكتوب (ADR-0117).' },
+  'academy.retraining_professionalism_threshold': { type: 'number', default: 2, group: 'security', description: 'تقييم «الاحترافية» من العميل عند الرقم ده أو أقل بيطلب من الفني إعادة الكورس الإلزامي (مش إيقاف). 0 = معطّل.', range: { min: 0, max: 5, integer: true } },
+  'auth.phone_status_lookup_enabled': { type: 'boolean', default: true, group: 'security', description: 'التوجيه التلقائي بين الدخول والتسجيل (ADR-0115): الواجهة تسأل «الرقم ده مسجّل؟» وتنقل المستخدم. الإيقاف بيرجّع السلوك القديم (مفيش توجيه)، ومسار الدخول نفسه مابيتأثرش في الحالتين.' },
   'auth.login_method': { type: 'string', default: 'pin', group: 'security', description: 'وسيلة الدخول: pin (رمز دخول، الافتراضي) أو otp (كود SMS — بيرجّع تكلفة المزوّد).' },
   // ADR-0112 — الافتراضي `false` **مقصود**: النشر مايغيّرش أي سلوك لحد ما الأدمن يقرر. مفتوح =
   // العميل اللي رقمه مش متحقَّق منه بيتسأل OTP عند **أول طلب بس** (`users.phone_verified_at`).
@@ -224,7 +229,9 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
   'matching.recovery_max_backoff_seconds': { type: 'number', default: 3600, group: 'matching', description: 'أقصى مهلة بين محاولات مطابقة الطلب العالق، بالثواني' },
   'matching.reliability_baseline_rating': { type: 'number', default: 4, group: 'matching', description: 'خط أساس التقييم المتوقّع — فني فوقه ياخد أولوية إضافية، تحته خصم (نسبة لـreliability_weight)' },
   'matching.reliability_min_ratings_count': { type: 'number', default: 3, group: 'matching', description: 'أقل عدد تقييمات مطلوب قبل ما الموثوقية تأثر على الترتيب — فني تحت العدد ده محايد تمامًا (صفر تأثير سلبي/إيجابي)' },
-  'matching.reliability_weight': { type: 'number', default: 0, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة — 0 = معطّل بالكامل (افتراضي)', range: { min: 0, max: 100 } },
+  'matching.reliability_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن تقييم الفني (average_rating) في ترتيب المطابقة: (التقييم − خط الأساس) × الوزن. 2 = تأثير صغير (5 نجوم ⇒ +2، 3 نجوم ⇒ −2؛ فرق المستوى = 10). 0 = معطّل.', range: { min: 0, max: 100 } },
+  'matching.punctuality_weight': { type: 'number', default: 5, group: 'matching', description: 'وزن الالتزام بالمواعيد في ترتيب المطابقة: الفرق بين فني وصل في معاده دايمًا وفني ماوصلش أبدًا = الرقم ده بالنقط (فرق المستوى = 10). 0 = معطّل. تحت matching.min_punctuality_sample محايد.', range: { min: 0, max: 20 } },
+  'matching.punctuality_baseline_percent': { type: 'number', default: 85, group: 'matching', description: 'نسبة الالتزام «الطبيعية» (٪): فني فوقها بياخد أولوية صغيرة، وتحتها خصم بنسبة matching.punctuality_weight.', range: { min: 0, max: 100 } },
   'matching.tie_break_threshold': { type: 'number', default: 0, group: 'matching', description: 'الفرق بين نتيجتين مرشّحين اللي تحتهم يُعتبروا "متعادلين" لكسر التعادل الموزون عشوائيًا — 0 = معطّل (ترتيب حتمي زي القديم)' },
   'matching.workload_balance_weight': { type: 'number', default: 2, group: 'matching', description: 'وزن يتطرح من أولوية مستوى الفني (order_priority_weight) عن كل طلب نشط عليه حاليًا — عشان التوزيع يبقى متوازن مش دايمًا نفس الفني الأعلى مستوى/الأقرب (0 = تعطيل)', range: { min: 0, max: 100 } },
 
@@ -349,6 +356,7 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
 
   // ── recurring ─────────────────────────────────────────────────────────
   'recurring.materialization_lead_time_hours': { type: 'number', default: 96, group: 'recurring', description: 'عدد الساعات قبل موعد الحجز المتكرر التي يتحول فيها إلى طلب فعلي لبدء المطابقة والدفع مبكرًا' },
+  'recurring.manual_payment_window_hours': { type: 'number', default: 24, group: 'recurring', description: 'مهلة دفع النوبة المتكررة اليدوية (InstaPay) بالساعات من وقت توليدها — بعدها النوبة دي بس بتتلغي والخطة تفضل شغّالة. محدودة بـ24 ساعة قبل الموعد (ADR-0116).', range: { min: 1, max: 72, integer: true } },
 
   // ── referral ──────────────────────────────────────────────────────────
   'referral.recovery_batch_size': { type: 'number', default: 25, group: 'referral', description: 'أقصى عدد إحالات معلقة يفحصها مسار الاسترداد في الدورة الواحدة' },

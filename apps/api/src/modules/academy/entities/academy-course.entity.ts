@@ -1,5 +1,13 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
+/** `correct_index` مابيطلعش من السيرفر أبدًا — التصحيح هنا بس (ADR-0117). */
+export interface AcademyQuizQuestion {
+  id: string;
+  prompt_ar: string;
+  options_ar: string[];
+  correct_index: number;
+}
+
 @Entity('academy_courses')
 export class AcademyCourse {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
@@ -19,6 +27,19 @@ export class AcademyCourse {
 
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;
+
+  // ADR-0117 — محتوى الكورس والاختبار على نفس الصف (مفيش منصة تدريب منفصلة).
+  @Column({ name: 'course_key', type: 'varchar', length: 60, nullable: true })
+  courseKey: string | null;
+
+  @Column({ name: 'lesson_ar', type: 'text', nullable: true })
+  lessonAr: string | null;
+
+  @Column({ name: 'quiz_questions', type: 'jsonb', default: () => `'[]'::jsonb` })
+  quizQuestions: AcademyQuizQuestion[];
+
+  @Column({ name: 'is_mandatory_onboarding', type: 'boolean', default: false })
+  isMandatoryOnboarding: boolean;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

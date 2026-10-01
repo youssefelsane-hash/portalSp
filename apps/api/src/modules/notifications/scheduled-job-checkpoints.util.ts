@@ -4,6 +4,8 @@
 // بره النطاق [الإنشاء, الموعد) بيتفلتر تلقائيًا — موعد قريب جدًا يعني checkpoints أقل، مش تراكم
 // تذكيرات فات ميعادها.
 
+const MIN_GAP_BETWEEN_CHECKPOINTS_MS = 30 * 60_000;
+
 export interface ScheduledJobCheckpointSettings {
   afterMinutes: number;
   dayBeforeHourUtc: number;
@@ -27,5 +29,14 @@ export function computeScheduledJobCheckpoints(
 
   candidates.push(new Date(targetAt.getTime() - settings.preAppointmentMinutes * 60_000));
 
-  return candidates.filter((t) => t > createdAt && t < targetAt).sort((a, b) => a.getTime() - b.getTime());
+  const inRange = candidates.filter((t) => t > createdAt && t < targetAt).sort((a, b) => a.getTime() - b.getTime());
+  // نقطتين قريبين من بعض (مثلاً «بعد ساعة» و«صبح اليوم اللي قبله» وقعوا نفس الساعة) كانوا بيطلعوا
+  // تذكيرين ورا بعض — للمستخدم ده إزعاج مش تذكير. الأولى بس هي اللي بتفضل.
+  const distinct: Date[] = [];
+  for (const t of inRange) {
+    const previous = distinct[distinct.length - 1];
+    if (previous && t.getTime() - previous.getTime() < MIN_GAP_BETWEEN_CHECKPOINTS_MS) continue;
+    distinct.push(t);
+  }
+  return distinct;
 }

@@ -661,6 +661,9 @@ export class OrderTeamService {
                reliabilityBaselineParam: '$10',
                reliabilityWeightParam: '$11',
                reliabilityMinRatingsParam: '$12',
+               punctualityWeightParam: '$13',
+               punctualityBaselineParam: '$14',
+               punctualityMinSampleParam: '$15',
              })} DESC,
              tp.id ASC`
           : '"isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC'
@@ -681,6 +684,9 @@ export class OrderTeamService {
             ranking!.reliabilityBaselineRating,
             ranking!.reliabilityWeight,
             ranking!.reliabilityMinRatingsCount,
+            ranking!.punctualityWeight,
+            ranking!.punctualityBaselinePercent,
+            ranking!.punctualityMinSample,
           ]
         : [orderId, leaderProfileId, rankCeiling, leaderProfile.companyId],
     );

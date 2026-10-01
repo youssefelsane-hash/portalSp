@@ -58,7 +58,14 @@ import {
   resolveWorkloadGate,
 } from './dispatch-route';
 import { CandidateOperationalLoad, resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
-import { candidateQualityScoreSql } from './candidate-quality-ranking';
+import {
+  candidatePunctualityAdjustmentSql,
+  candidateQualityScoreSql,
+  PUNCTUALITY_BASELINE_PERCENT_FALLBACK,
+  PUNCTUALITY_WEIGHT_FALLBACK,
+  RELIABILITY_WEIGHT_FALLBACK,
+} from './candidate-quality-ranking';
+import { MIN_PUNCTUALITY_SAMPLE_FALLBACK } from '../technicians/technician-arrival-metrics';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -109,8 +116,8 @@ const FAIRNESS_DECLINE_WEIGHT_FALLBACK = 0.5;
 // كسر التعادل بين مرشحين متقاربين جدًا في الترتيب (docs/08 §34.2، ADR-0020 §6، بند T من رسالة
 // المالك — "avoid permanent deterministic winners"). افتراضي معطّل (0 = مفيش نطاق تعادل خالص).
 const TIE_BREAK_THRESHOLD_FALLBACK = 0;
-// docs/08 §36.20-21، ADR-0023 — وزن الموثوقية، معطّل افتراضيًا زي fairness_weight.
-const RELIABILITY_WEIGHT_FALLBACK = 0;
+// docs/08 §36.20-21، ADR-0023 — وزن الموثوقية. بقى صغير مش صفر (docs/08 §189 D-2) — القيمة في
+// `candidate-quality-ranking.ts` عشان المطابقة والمساعدين والأدمن يقروا نفس الافتراضي.
 const RELIABILITY_BASELINE_RATING_FALLBACK = 4.0;
 const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 // أفضلية شركة صغيرة ومقيدة للشغل الكبير فقط. 3 نقاط أقل بوضوح من فرق مستويات الفنيين المعتاد
@@ -138,6 +145,8 @@ export interface EligibleTechnicianRow {
   workload_penalty: string;
   fairness_penalty: string;
   reliability_adjustment: string;
+  /** docs/08 §189 D-2 — تعديل الالتزام بالمواعيد؛ صفر تحت الحد الأدنى للعيّنة. */
+  punctuality_adjustment: string;
   company_adjustment: string;
   company_id: string | null;
   company_name: string | null;
@@ -317,6 +326,13 @@ export class MatchingService {
       'matching.reliability_min_ratings_count',
       RELIABILITY_MIN_RATINGS_COUNT_FALLBACK,
     );
+    // docs/08 §189 D-2 — الالتزام بالمواعيد، بنفس حد العيّنة اللي بيتحكم في عرضه للعميل.
+    const punctualityWeight = await this.settingsService.getNumber('matching.punctuality_weight', PUNCTUALITY_WEIGHT_FALLBACK);
+    const punctualityBaselinePercent = await this.settingsService.getNumber(
+      'matching.punctuality_baseline_percent',
+      PUNCTUALITY_BASELINE_PERCENT_FALLBACK,
+    );
+    const punctualityMinSample = await this.settingsService.getNumber('matching.min_punctuality_sample', MIN_PUNCTUALITY_SAMPLE_FALLBACK);
     const companyLargeJobMinCrew = await this.settingsService.getNumber(
       'matching.company_large_job_min_crew',
       COMPANY_LARGE_JOB_MIN_CREW_FALLBACK,
@@ -348,6 +364,9 @@ export class MatchingService {
                  reliabilityBaselineParam: '$21',
                  reliabilityWeightParam: '$20',
                  reliabilityMinRatingsParam: '$22',
+                 punctualityWeightParam: '$30',
+                 punctualityBaselineParam: '$31',
+                 punctualityMinSampleParam: '$32',
                })}
                -- ADR-0062 — المسافة مكوّن حقيقي في النتيجة، مش كاسر تعادل بس. الوزن بيتحسب في
                -- resolveDistanceWeight() حسب سياق الطلب (طوارئ/موعد قريب/شغل رخيص)، و0 (الافتراضي)
@@ -374,6 +393,11 @@ export class MatchingService {
                  ELSE 0
                END
              ) AS reliability_adjustment,
+             ${candidatePunctualityAdjustmentSql({
+               weightParam: '$30',
+               baselinePercentParam: '$31',
+               minSampleParam: '$32',
+             })} AS punctuality_adjustment,
              (
                CASE WHEN $19::boolean IS TRUE
                          AND $23::int >= $24::int
@@ -595,6 +619,9 @@ export class MatchingService {
         previewLoad?.durationMinutes ?? null,
         previewLoad?.estimatedDurationDays ?? null,
         requestedTechnicianId === null,
+        punctualityWeight,
+        punctualityBaselinePercent,
+        punctualityMinSample,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);

@@ -45,7 +45,8 @@ export function PhoneField({
         autoComplete={autoComplete}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="+2010xxxxxxxx"
+        // الشكل اللي المصري بيعرف رقمه بيه (docs/08 §189) — التحويل لـ+20 بيحصل قبل النداء.
+        placeholder="01xxxxxxxxx"
         dir="ltr"
         className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left outline-none focus:border-primary"
       />

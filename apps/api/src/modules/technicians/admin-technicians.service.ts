@@ -41,6 +41,8 @@ import {
 } from './entities/technician-profile.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 import { canTransitionVerification } from './technician-verification-state-machine';
+import { loadOnboardingStatus } from '../academy/academy-onboarding';
+import { isSuperAdmin } from '../../common/rbac/effective-permissions';
 
 export interface TechnicianWithUser {
   profile: TechnicianProfile;
@@ -209,14 +211,63 @@ export class AdminTechniciansService {
     return profile;
   }
 
-  async approve(adminUserId: string, technicianProfileId: string, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+  /**
+   * **بوابة الأكاديمية** (ADR-0117) — مقفولة افتراضيًا (`academy.onboarding_gate_enabled`): الموظف بيشوف
+   * الحالة في صفحة الفني بس. لما تتفتح، الاعتماد العادي بيترفض لو الكورسات الإلزامية مش مكتملة، و
+   * super_admin بس يعدّي بسبب مكتوب بيتسجّل في ملاحظات الاعتماد وفي الـaudit. بترجّع سبب الاستثناء لو اتستخدم.
+   */
+  private async assertAcademyOnboardingGate(
+    adminUserId: string,
+    technicianProfileId: string,
+    overrideReason: string | null,
+  ): Promise<string | null> {
+    const enabled = await this.settingsService.getBoolean('academy.onboarding_gate_enabled', false);
+    if (!enabled) return null;
+    const status = await loadOnboardingStatus(this.technicianProfiles.manager, technicianProfileId);
+    if (status.complete) return null;
+    const missing = status.courses.filter((c) => !c.passed).map((c) => `«${c.title_ar}»`).join('، ');
+    const reason = overrideReason?.trim() ?? '';
+    if (!reason) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني لسه ماخلّصش الكورسات الإلزامية في الأكاديمية: ${missing}. الاعتماد الاستثنائي لـsuper_admin بس وبسبب مكتوب.`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (!(await isSuperAdmin(this.technicianProfiles.manager, adminUserId))) {
+      throw new ApiException(ErrorCode.VAL_001, 'الاعتماد قبل اكتمال الأكاديمية لـsuper_admin بس', HttpStatus.FORBIDDEN);
+    }
+    if (reason.length < 10) {
+      throw new ApiException(ErrorCode.VAL_001, 'اكتب سبب واضح للاعتماد الاستثنائي (١٠ حروف على الأقل)', HttpStatus.BAD_REQUEST);
+    }
+    return reason;
+  }
+
+  async approve(
+    adminUserId: string,
+    technicianProfileId: string,
+    meta?: AuditActorMeta,
+    overrideReason: string | null = null,
+  ): Promise<TechnicianWithUser> {
+    const override = await this.assertAcademyOnboardingGate(adminUserId, technicianProfileId, overrideReason);
     const profile = await this.transitionVerification(
       technicianProfileId,
       adminUserId,
       TechnicianVerificationStatus.APPROVED,
-      null,
+      override ? `اعتماد استثنائي قبل اكتمال الأكاديمية: ${override}` : null,
       meta,
     );
+    if (override) {
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'technician.academy_gate_overridden',
+        entityType: 'technician_profile',
+        entityId: technicianProfileId,
+        newValues: { override_reason: override },
+        meta,
+      });
+    }
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
   }

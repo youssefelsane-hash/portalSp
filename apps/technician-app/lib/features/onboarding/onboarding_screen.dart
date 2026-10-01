@@ -6,6 +6,7 @@ import '../../core/auth_repository.dart';
 import '../../design/empty_state.dart';
 import 'models.dart';
 import 'onboarding_repository.dart';
+import '../academy/academy_onboarding_banner.dart';
 
 // اعتماد الفني الجديد (docs/02 §technician_profiles.verification_status) — كانت فجوة موثّقة
 // صراحة: فني جديد سجّل حساب (verification_status=pending تلقائيًا) كان بيتحوّل مباشرة لشاشة
@@ -252,6 +253,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         ),
                       ),
                     const SizedBox(height: 16),
+                    // ADR-0117 — الكورس الإلزامي جزء من التجهيز للاعتماد (بيظهر بس لو لسه ناقص).
+                    const AcademyOnboardingBanner(),
                     // الرقم القومي فوق المستندات عمدًا: هو **شرط** الاعتماد (الباك-إند بيرفض
                     // الاعتماد بدونه)، فترتيبه بعد المستندات كان هيخلّي الفني يرفع كل حاجة
                     // ويستنى اعتماد مش هييجي.

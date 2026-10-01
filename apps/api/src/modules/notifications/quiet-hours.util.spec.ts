@@ -1,4 +1,4 @@
-import { isWithinQuietHours, nextTimeOutsideQuietHours } from './quiet-hours.util';
+import { isWithinQuietHours, nextTimeOutsideQuietHours, quietHoursStartBefore } from './quiet-hours.util';
 
 // كل الأوقات UTC (نفس اتفاقية المشروع) — تواريخ 2026-01-01 بس عشان نتحكم في الساعة/الدقيقة.
 function utc(hour: number, minute: number): Date {
@@ -62,6 +62,26 @@ describe('quiet-hours.util', () => {
       expect(next.getUTCDate()).toBe(2); // بكرة
       expect(next.getUTCHours()).toBe(8);
       expect(next.getUTCMinutes()).toBe(0);
+    });
+  });
+
+  describe('quietHoursStartBefore (ADR-0116 — ميعاد نهائي بيتقدّم مش بيتأخّر)', () => {
+    it('برّه الهدوء ⇒ نفس اللحظة', () => {
+      const date = utc(15, 30);
+      expect(quietHoursStartBefore(date, '22:00', '08:00')).toEqual(date);
+    });
+
+    it('قبل منتصف الليل جوّه الهدوء ⇒ بداية الهدوء نفس اليوم', () => {
+      const result = quietHoursStartBefore(utc(23, 40), '22:00', '08:00');
+      expect(result.getUTCDate()).toBe(1);
+      expect(result.getUTCHours()).toBe(22);
+      expect(result.getUTCMinutes()).toBe(0);
+    });
+
+    it('بعد منتصف الليل جوّه الهدوء ⇒ بداية الهدوء امبارح', () => {
+      const date = new Date(Date.UTC(2026, 0, 2, 3, 0));
+      const result = quietHoursStartBefore(date, '22:00', '08:00');
+      expect(result).toEqual(new Date(Date.UTC(2026, 0, 1, 22, 0)));
     });
   });
 });

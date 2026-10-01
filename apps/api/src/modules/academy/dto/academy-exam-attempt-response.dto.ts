@@ -7,6 +7,7 @@ export interface AcademyExamAttemptResponseDto {
   score: number;
   passed: boolean;
   attempted_at: string;
+  source: 'admin' | 'self';
 }
 
 export function toAcademyExamAttemptResponseDto(attempt: AcademyExamAttempt): AcademyExamAttemptResponseDto {
@@ -17,5 +18,6 @@ export function toAcademyExamAttemptResponseDto(attempt: AcademyExamAttempt): Ac
     score: attempt.score,
     passed: attempt.passed,
     attempted_at: attempt.attemptedAt.toISOString(),
+    source: attempt.source ?? 'admin',
   };
 }

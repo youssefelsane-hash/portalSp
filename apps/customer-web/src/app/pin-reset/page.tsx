@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api-client';
 import { ApiEnvelope } from '@/lib/api-types';
 import { PinField, localPinError } from '@/components/pin-field';
 import { SupportContactLinks } from '@/components/support-contact-links';
+import { phoneNumberForApi } from '@baytak/shared-types';
 
 /**
  * **استرجاع رمز الدخول** (ADR-0109 §6-ب).
@@ -45,7 +46,7 @@ function PinResetForm() {
       const res = await fetch('/api/auth/pin/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: phone, reset_code: resetCode, pin }),
+        body: JSON.stringify({ phone_number: phoneNumberForApi(phone), reset_code: resetCode, pin }),
       });
       const envelope = (await res.json()) as ApiEnvelope<unknown>;
       if (!res.ok || !envelope.success) {

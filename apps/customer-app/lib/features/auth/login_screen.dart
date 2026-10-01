@@ -78,6 +78,13 @@ class _LoginScreenState extends State<LoginScreen> {
   /// الحساب، وفي نفس الوقت بيمنع المستخدم الجديد من إنه يتحاصر في شاشة رمز مالوش رمز فيها.
   bool _suggestRegister = false;
 
+  /// **توجيه تلقائي بين الدخول والتسجيل** (docs/08 §189 UX-2، ADR-0115): رسالة بتقول للمستخدم
+  /// إحنا نقلناه ليه — «الرقم ده جديد» أو «إنت عندك حساب». null = مفيش توجيه حصل.
+  String? _routingNotice;
+
+  /// إجابة «مسجّل؟» لكل رقم في الجلسة دي — نفس الرقم مايتسألش مرتين.
+  final Map<String, bool> _registeredByPhone = {};
+
   @override
   void dispose() {
     _phoneController.dispose();
@@ -99,12 +106,14 @@ class _LoginScreenState extends State<LoginScreen> {
   ///
   /// كانت `_requestOtp()` بتنادي السيرفر عشان يبعت SMS ويستنى الرد. دلوقتي مفيش حاجة تتبعت
   /// خالص: التحقق محلي والانتقال فوري. ده أكبر فرق بيحسّه المستخدم في التغيير كله.
-  void _goToPinStep() {
+  Future<void> _goToPinStep() async {
     final phone = _phoneController.text.trim();
     if (!isValidPhoneInput(phone)) {
       setState(() => _error = 'اكتب رقم موبايل صحيح');
       return;
     }
+    // قبل الاسم عمدًا: عميل حالي فاتح «حساب جديد» مايتسألش عن اسمه قبل ما نقوله إنه مسجّل.
+    if (await _routeByRegistration(phone)) return;
     if (_isRegisterMode && _fullNameController.text.trim().length < 2) {
       setState(() => _error = 'اكتب اسمك الكامل الأول');
       return;
@@ -113,6 +122,64 @@ class _LoginScreenState extends State<LoginScreen> {
       _pinStep = true;
       _error = null;
       _suggestRegister = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pinFocusNode.requestFocus();
+    });
+  }
+
+  /// بيسأل «الرقم ده مسجّل؟» ولو المستخدم في المود الغلط بينقله بالرقم مكتوب ورسالة واضحة.
+  /// بيرجّع `true` لو حصل توجيه (والخطوة الحالية تقف). أي فشل للسؤال = مفيش توجيه.
+  Future<bool> _routeByRegistration(String phone) async {
+    final key = phoneNumberForApi(phone);
+    var registered = _registeredByPhone[key];
+    if (registered == null) {
+      setState(() {
+        _isSubmitting = true;
+        _error = null;
+      });
+      registered = await context.read<AuthRepository>().isPhoneRegistered(phone);
+      if (!mounted) return true;
+      setState(() => _isSubmitting = false);
+      if (registered == null) return false;
+      _registeredByPhone[key] = registered;
+    }
+    if (!_isRegisterMode && !registered) {
+      _showRegisterForNewNumber();
+      return true;
+    }
+    if (_isRegisterMode && registered) {
+      _showLoginForExistingNumber();
+      return true;
+    }
+    return false;
+  }
+
+  void _showRegisterForNewNumber() {
+    setState(() {
+      _isRegisterMode = true;
+      _pinStep = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
+      _error = null;
+      _suggestRegister = false;
+      _routingNotice =
+          'الرقم ده جديد عندنا — اكتب اسمك واضغط «التالي» وهنعملك حساب في خطوتين.';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fullNameFocusNode.requestFocus();
+    });
+  }
+
+  void _showLoginForExistingNumber() {
+    setState(() {
+      _isRegisterMode = false;
+      _pinStep = true;
+      _pinController.clear();
+      _pinConfirmController.clear();
+      _error = null;
+      _suggestRegister = false;
+      _routingNotice = 'إنت عندك حساب بالفعل بالرقم ده — اكتب رمز الدخول بتاعك.';
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _pinFocusNode.requestFocus();
@@ -169,6 +236,12 @@ class _LoginScreenState extends State<LoginScreen> {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة — مايتسابش يهرب فيسيب
       // الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
+      // 409 = الرقم مسجّل (ADR-0115): نفس التوجيه لو السؤال المبكر ماتمش لأي سبب.
+      if (_isRegisterMode && err.statusCode == 409) {
+        _registeredByPhone[phoneNumberForApi(_phoneController.text.trim())] = true;
+        _showLoginForExistingNumber();
+        return;
+      }
       // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب بيخلي المستخدم يضغط
       // «دخول» على نفس الرمز الغلط ويحرق محاولة من الخمسة بلا داعي.
       _pinController.clear();
@@ -199,6 +272,7 @@ class _LoginScreenState extends State<LoginScreen> {
   /// محروقة على حساب حد تاني.
   void _backToPhoneStep() {
     setState(() {
+      _routingNotice = null;
       _pinStep = false;
       _pinController.clear();
       _pinConfirmController.clear();
@@ -221,6 +295,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _toggleMode() {
     setState(() {
+      _routingNotice = null;
       _isRegisterMode = !_isRegisterMode;
       _pinStep = false;
       _pinController.clear();
@@ -279,6 +354,32 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (_routingNotice != null) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        key: const ValueKey('login-routing-notice'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer.withValues(
+                            alpha: 0.5,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(_routingNotice!)),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     if (!_pinStep) ...[
                       if (_isRegisterMode) ...[

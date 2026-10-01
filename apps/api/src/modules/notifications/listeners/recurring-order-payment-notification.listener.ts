@@ -18,12 +18,14 @@ export class RecurringOrderPaymentNotificationListener {
 
   @OnEvent(RECURRING_CARD_PAYMENT_FAILED_EVENT)
   async notifyCardFailure(event: RecurringCardPaymentFailedEvent): Promise<void> {
+    // الإلغاء بعد آخر محاولة بيوصل للعميل مرة واحدة من إشعار الإلغاء التلقائي نفسه، ونصه بقى بيقول
+    // النوبة دي بس + الخطة لسه شغّالة + الجاية امتى + «حدّث بطاقتك» (ADR-0116). إشعار تاني هنا كان
+    // تكرار لنفس الحدث، وكان بيقول «أنشئ حجزًا جديدًا» والخطة لسه شغّالة فعلاً.
+    if (event.cancelled) return;
     try {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
-      const title = event.cancelled ? 'تم إلغاء الحجز المتكرر بسبب فشل الدفع' : 'لم نتمكن من سحب قيمة الحجز المتكرر';
-      const body = event.cancelled
-        ? `الحجز ${event.orderNumber} اتلغى بعد 3 محاولات فاشلة. حدّث بطاقتك وأنشئ حجزًا جديدًا إذا ما زلت تحتاج الخدمة.`
-        : `محاولة ${event.attemptNumber} من 3 للحجز ${event.orderNumber} لم تنجح. تأكد من البطاقة أو حدّث وسيلة الدفع؛ سنحاول مرة أخرى قبل الموعد.`;
+      const title = 'لم نتمكن من سحب قيمة الحجز المتكرر';
+      const body = `محاولة ${event.attemptNumber} من 3 للحجز ${event.orderNumber} لم تنجح. تأكد من البطاقة أو حدّث وسيلة الدفع؛ سنحاول مرة أخرى قبل الموعد.`;
       await this.notifications.notify({
         userId: customer.userId,
         notificationType: 'recurring_card_payment_failed',

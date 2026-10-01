@@ -48,3 +48,24 @@ Platinum، و§9.3 بيذكر "تدريب سلوكي يوم واحد" ضمن م�
 ودرجة أعلى → `passed:true`، وظهرت في `GET /admin/academy/technicians/:id/exam-attempts` وفي
 `GET /academy/my-exam-attempts` بتاع نفس الفني. بيانات الاختبار (كورس + محاولتين) اتحذفت بعد
 التأكيد.
+
+## الأكاديمية بقت جزء من دورة الفني: كورس إلزامي + امتحان + إعادة تدريب (ADR-0117، migration 0375، 2026-09-30)
+
+- **مفيش منصة تدريب جديدة** — نفس الجداول اتمدت: `academy_courses` (`course_key`، `lesson_ar`، `quiz_questions`
+  JSONB، `is_mandatory_onboarding`)، `academy_exam_attempts` (`source` = `admin`/`self`، `answers`)،
+  و`technician_profiles` (`retraining_required_at`، `retraining_reason`).
+- **كورس مزروع**: «التعامل مع العميل وسياسة أسطة» — الالتزام، الاحترام والنظافة، السعر والتحصيل، جوّه البيت،
+  التصوير، الشكوى والضمان + ٨ أسئلة (النجاح 80٪ ⇒ ٧/٨).
+- **الامتحان من التطبيق**: `POST /academy/courses/:id/attempts {answers}` — التصحيح هنا بس (`gradeQuiz`)، والـ
+  `correct_index` مابيطلعش أبدًا (`publicQuestions`). محدود بـ10 محاولات/ساعة. `GET /academy/onboarding-status`.
+- **الاعتماد**: `academy-onboarding.ts` → `loadOnboardingStatus()` (SQL بلا حقن، عشان `admin-technicians.service`
+  يقراه من غير دورة استيراد). البوابة `academy.onboarding_gate_enabled` **مقفولة افتراضيًا**: الموظف بيشوف «ناجح ✓/لسه»
+  في صفحة الفني. لما تتفتح: اعتماد عادي ⇒ 409، و`override_reason` من super_admin بس (≥10 حروف) بيتسجّل في
+  ملاحظات الاعتماد وفي audit `technician.academy_gate_overridden`.
+- **إعادة التدريب** (`academy-retraining.listener.ts`): شكوى `rude_behavior` اتحلّت بإجراء (مش `no_action`)، أو تقييم
+  احترافية ≤ `academy.retraining_professionalism_threshold` (2) ⇒ علامة مرة واحدة + إشعار للفني (`/technician/academy`)
+  وللعمليات (`technician.retraining_required`). **مش إيقاف**. النجاح **بعد** العلامة بيشيلها لوحده.
+- تطبيق الفني: `academy_course_screen.dart` (الدرس + الاختبار، تمرير لأول سؤال ناقص)، بانر في شاشة استكمال
+  البيانات، وشارة «إلزامي»/«ناجح» في الأكاديمية.
+- الاختبارات: `academy-onboarding.spec.ts` (8 على Postgres: الأسئلة من غير الإجابات، التصحيح، الدورة كاملة،
+  إعادة التدريب بالشكوى وبالتقييم، والبوابة بالـoverride)، و`test/academy_course_quiz_test.dart` في التطبيق.

@@ -184,7 +184,33 @@ export interface StaleInProgressExceptionItemDto {
   age_seconds: number;
 }
 
+/**
+ * **موعد في خطر** (docs/08 §189 D-4) — بيتلقط قبل ما اليوم يفوت. `watch` مراقبة بلا تنبيه،
+ * `late_departure` أصفر، `late_arrival` أحمر (الاتنين بيطلّعوا تنبيه للعمليات مرة واحدة لكل مستوى).
+ */
+export type AtRiskLevelDto = 'watch' | 'late_departure' | 'late_arrival';
+
+export interface AtRiskAppointmentItemDto {
+  order_id: string;
+  order_number: string;
+  scheduled_at: string;
+  level: AtRiskLevelDto;
+  order_status: string;
+  technician_id: string | null;
+  technician_code: string | null;
+  full_name: string | null;
+  phone: string | null;
+  /** موجب = متأخر بالدقايق عن الموعد، سالب = فاضل كام دقيقة. */
+  minutes_from_appointment: number;
+  moved: boolean;
+  departed_at: string | null;
+  last_location_at: string | null;
+  last_activity_at: string | null;
+}
+
 export interface ExceptionCenterResponseDto {
+  /** optional للتوافق مع API أقدم أثناء النشر. */
+  at_risk_appointments?: { items: AtRiskAppointmentItemDto[]; total: number };
   overdue_orders: { items: OverdueOrderExceptionItemDto[]; total: number };
   stale_matching: { items: StaleMatchingExceptionItemDto[]; total: number };
   stale_in_progress: { items: StaleInProgressExceptionItemDto[]; total: number };

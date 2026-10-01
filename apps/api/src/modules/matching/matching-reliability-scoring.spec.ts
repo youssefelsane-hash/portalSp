@@ -11,8 +11,8 @@ import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // وزن الموثوقية في محرك المطابقة (docs/08 §36.20-21، ADR-0023) — اختبار حي ضد Postgres حقيقي.
 // نفس نمط matching-fairness-scoring.spec.ts بالحرف (fixture/buildMatchingService/findCandidates).
-// الافتراضي (reliability_weight=0) بيرجّع للسلوك القديم بالحرف — الاختبارات دي بتفعّل الإعداد
-// صراحة عشان تتحقق من الميكانيزم نفسه.
+// الافتراضي بقى وزن صغير (2) مش صفر (docs/08 §189 D-2)؛ 0 لسه بيقفل الأثر بالكامل. الاختبارات
+// بتحدد الوزن صراحةً عشان تتحقق من الميكانيزم نفسه، ومعاها الالتزام بالمواعيد على نفس الـfixture.
 describe('MatchingService.findEligibleTechnicians() — وزن الموثوقية (docs/08 §36.20-21، ADR-0023)', () => {
   jest.setTimeout(30_000);
 
@@ -147,6 +147,7 @@ describe('MatchingService.findEligibleTechnicians() — وزن الموثوقي�
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
+      await q(`DELETE FROM orders WHERE technician_id = ANY($1::uuid[])`, [cleanupTechnicianIds]);
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1::uuid[])`, [cleanupTechnicianIds]);
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [cleanupTechnicianIds]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [cleanupTechnicianIds]);
@@ -163,11 +164,11 @@ describe('MatchingService.findEligibleTechnicians() — وزن الموثوقي�
     }
   });
 
-  it('reliability_weight=0 (الافتراضي) — تقييم الفني مالوش أي أثر على الترتيب', async () => {
+  it('reliability_weight=0 — تقييم الفني مالوش أي أثر على الترتيب', async () => {
     const highRated = await makeTechnician('high-off', { averageRating: 5, totalRatingsCount: 20 });
     const lowRated = await makeTechnician('low-off', { averageRating: 2, totalRatingsCount: 20 });
 
-    const service = buildMatchingService({});
+    const service = buildMatchingService({ 'matching.reliability_weight': 0 });
     const candidates = await findCandidates(service, buildOrder());
     const highScore = candidates.find((c) => c.technician_id === highRated)?.rank_score;
     const lowScore = candidates.find((c) => c.technician_id === lowRated)?.rank_score;
@@ -203,5 +204,54 @@ describe('MatchingService.findEligibleTechnicians() — وزن الموثوقي�
     const candidates2 = await findCandidates(service, buildOrder());
     const ids_ = candidates2.map((c) => c.technician_id);
     expect(ids_.indexOf(newTech)).toBeLessThan(ids_.indexOf(lowRatedButQualified));
+  });
+
+  // ═══ docs/08 §189 D-2 — الالتزام بالمواعيد جوّه نفس النتيجة ═══
+  /** زيارات مكتملة ليها موعد ووقت وصول — نفس المصدر اللي «الالتزام بالمواعيد» عند العميل بيتحسب منه. */
+  async function addVisits(technicianId: string, label: string, visits: { lateMinutes: number }[]): Promise<void> {
+    let n = 0;
+    for (const visit of visits) {
+      n += 1;
+      await q(
+        `INSERT INTO orders (commission_rate_applied, order_number, customer_id, service_id, address_id, service_zone_id,
+            order_status, payment_status, total_amount_cents, technician_earning_cents, technician_id,
+            scheduled_at, technician_arrived_at, placed_at)
+         VALUES (20, $1, $2, $3, $4, $5, 'completed', 'paid', 10000, 0, $6,
+                 now() - interval '10 days', now() - interval '10 days' + ($7 || ' minutes')::interval, now() - interval '11 days')`,
+        [`PU${n}${label.slice(0, 4)}${runId}`, ids.customerProfile, ids.service, ids.address, ids.zone, technicianId, visit.lateMinutes],
+      );
+    }
+  }
+  const PUNCTUALITY_ON = { 'matching.reliability_weight': 0, 'matching.punctuality_weight': 5, 'matching.punctuality_baseline_percent': 85, 'matching.min_punctuality_sample': 3 };
+  const adjustmentOf = (rows: { technician_id: string }[], id: string) =>
+    Number((rows.find((c) => c.technician_id === id) as { punctuality_adjustment?: string } | undefined)?.punctuality_adjustment);
+
+  it('الالتزام: فني بيوصل في معاده بيتقدّم على فني بيتأخر — والتعديل بالمعادلة المعلنة', async () => {
+    const punctual = await makeTechnician('punct-on');
+    const late = await makeTechnician('punct-late');
+    await addVisits(punctual, 'on', [{ lateMinutes: 0 }, { lateMinutes: 10 }, { lateMinutes: -5 }, { lateMinutes: 15 }]);
+    await addVisits(late, 'late', [{ lateMinutes: 40 }, { lateMinutes: 90 }, { lateMinutes: 5 }, { lateMinutes: 30 }]);
+
+    const candidates = await findCandidates(buildMatchingService(PUNCTUALITY_ON), buildOrder());
+    // ٤/٤ في المعاد (15 دقيقة سماحية زي العرض) ⇒ (100 − 85) / 100 × 5 = 0.75
+    expect(adjustmentOf(candidates, punctual)).toBeCloseTo(0.75, 5);
+    // ١/٤ ⇒ (25 − 85) / 100 × 5 = −3
+    expect(adjustmentOf(candidates, late)).toBeCloseTo(-3, 5);
+    const order = candidates.map((c) => c.technician_id);
+    expect(order.indexOf(punctual)).toBeLessThan(order.indexOf(late));
+  });
+
+  it('الالتزام: عيّنة أقل من الحد الأدنى ⇒ محايد تمامًا (زيارتين متأخرين مايعاقبوش فني جديد)', async () => {
+    const fresh = await makeTechnician('punct-fresh');
+    await addVisits(fresh, 'fresh', [{ lateMinutes: 60 }, { lateMinutes: 60 }]);
+    const candidates = await findCandidates(buildMatchingService(PUNCTUALITY_ON), buildOrder());
+    expect(adjustmentOf(candidates, fresh)).toBe(0);
+  });
+
+  it('الالتزام: الوزن صفر ⇒ مالوش أي أثر على النتيجة', async () => {
+    const late = await makeTechnician('punct-off');
+    await addVisits(late, 'off', [{ lateMinutes: 120 }, { lateMinutes: 120 }, { lateMinutes: 120 }]);
+    const candidates = await findCandidates(buildMatchingService({ ...PUNCTUALITY_ON, 'matching.punctuality_weight': 0 }), buildOrder());
+    expect(adjustmentOf(candidates, late)).toBe(0);
   });
 });

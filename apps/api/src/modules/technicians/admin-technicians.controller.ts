@@ -18,6 +18,7 @@ import { SetTechnicianKindDto } from './dto/set-technician-kind.dto';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { SetCompanyExclusiveDto } from './dto/set-company-exclusive.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
+import { ApproveTechnicianDto } from './dto/approve-technician.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
@@ -520,8 +521,9 @@ export class AdminTechniciansController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @AuditContext() audit: AuditMeta,
+    @Body() dto: ApproveTechnicianDto = {},
   ) {
-    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id, audit);
+    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id, audit, dto?.override_reason ?? null);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

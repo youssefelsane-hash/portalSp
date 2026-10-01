@@ -27,6 +27,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _pinConfirmController = TextEditingController();
   final _fullNameController = TextEditingController();
   final _pinFocusNode = FocusNode();
+  final _fullNameFocusNode = FocusNode();
+
+  /// **توجيه تلقائي بين الدخول والتسجيل** (docs/08 §189 UX-2، ADR-0115) — رسالة بتقول للفني
+  /// إحنا نقلناه ليه. null = مفيش توجيه حصل.
+  String? _routingNotice;
+
+  /// إجابة «مسجّل؟» لكل رقم في الجلسة دي — نفس الرقم مايتسألش مرتين.
+  final Map<String, bool> _registeredByPhone = {};
 
   bool _pinStep = false;
   bool _isSubmitting = false;
@@ -56,6 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _pinFocusNode.dispose();
+    _fullNameFocusNode.dispose();
     _phoneController.dispose();
     _pinController.dispose();
     _pinConfirmController.dispose();
@@ -64,12 +73,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   /// **الانتقال لخطوة الرمز — بلا أي نداء شبكة** (ADR-0109).
-  void _goToPinStep() {
+  Future<void> _goToPinStep() async {
     final phone = _phoneController.text.trim();
     if (!isValidPhoneInput(phone)) {
       setState(() => _error = 'اكتب رقم موبايل صحيح');
       return;
     }
+    // قبل الاسم عمدًا: صاحب حساب فاتح «حساب جديد» مايتسألش عن اسمه قبل ما نقوله إنه مسجّل.
+    if (await _routeByRegistration(phone)) return;
     if (_isRegisterMode && _fullNameController.text.trim().length < 2) {
       setState(() => _error = 'اكتب اسمك الكامل الأول');
       return;
@@ -79,6 +90,68 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
       _suggestRegister = false;
       _suggestAddTechnicianRole = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pinFocusNode.requestFocus();
+    });
+  }
+
+  /// بيسأل «الرقم ده مسجّل؟» ولو الفني في المود الغلط بينقله بالرقم مكتوب ورسالة واضحة.
+  /// بيرجّع `true` لو حصل توجيه. أي فشل للسؤال = مفيش توجيه (السلوك القديم بالظبط).
+  Future<bool> _routeByRegistration(String phone) async {
+    final key = phoneNumberForApi(phone);
+    var registered = _registeredByPhone[key];
+    if (registered == null) {
+      setState(() {
+        _isSubmitting = true;
+        _error = null;
+      });
+      registered = await context.read<AuthRepository>().isPhoneRegistered(phone);
+      if (!mounted) return true;
+      setState(() => _isSubmitting = false);
+      if (registered == null) return false;
+      _registeredByPhone[key] = registered;
+    }
+    if (!_isRegisterMode && !registered) {
+      _showRegisterForNewNumber();
+      return true;
+    }
+    if (_isRegisterMode && registered) {
+      _showLoginForExistingNumber();
+      return true;
+    }
+    return false;
+  }
+
+  void _showRegisterForNewNumber() {
+    setState(() {
+      _isRegisterMode = true;
+      _pinStep = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
+      _error = null;
+      _suggestRegister = false;
+      _suggestAddTechnicianRole = false;
+      _routingNotice =
+          'الرقم ده جديد عندنا — صنايعي جديد؟ اكتب اسمك واضغط «التالي» وكمّل التسجيل.';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fullNameFocusNode.requestFocus();
+    });
+  }
+
+  /// الرقم مسجّل (ممكن كعميل بس): الدخول برمزه، ولو مالوش دور فني `AUTH_008` بيعرض «ضيف دور
+  /// الصنايعي» زي ما هو — فالرسالة مابتوعدش بأكتر من كده.
+  void _showLoginForExistingNumber() {
+    setState(() {
+      _isRegisterMode = false;
+      _pinStep = true;
+      _pinController.clear();
+      _pinConfirmController.clear();
+      _error = null;
+      _suggestRegister = false;
+      _routingNotice =
+          'الرقم ده مسجّل عندنا بالفعل — اكتب رمز الدخول بتاعك وكمّل.';
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _pinFocusNode.requestFocus();
@@ -144,6 +217,12 @@ class _LoginScreenState extends State<LoginScreen> {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة — مايتسابش يهرب فيسيب الشاشة
       // معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
+      // 409 = الرقم مسجّل (ADR-0115): نفس التوجيه لو السؤال المبكر ماتمش لأي سبب.
+      if (_isRegisterMode && err.statusCode == 409) {
+        _registeredByPhone[phoneNumberForApi(_phoneController.text.trim())] = true;
+        _showLoginForExistingNumber();
+        return;
+      }
       // الخانة بتتفضّى: الرمز اللي اترفض مش هينفع تاني، وسيبانه مكتوب أسرع طريقة يستهلك بيها
       // الفني محاولاته الخمسة بلا فايدة.
       _pinController.clear();
@@ -198,6 +277,7 @@ class _LoginScreenState extends State<LoginScreen> {
   /// محروقة على حساب حد تاني.
   void _backToPhoneStep() {
     setState(() {
+      _routingNotice = null;
       _pinStep = false;
       _pinController.clear();
       _pinConfirmController.clear();
@@ -221,6 +301,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _toggleMode() {
     setState(() {
+      _routingNotice = null;
       _isRegisterMode = !_isRegisterMode;
       _pinStep = false;
       _pinController.clear();
@@ -264,12 +345,39 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
+                    if (_routingNotice != null) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        key: const ValueKey('login-routing-notice'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(_routingNotice!)),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     if (!_pinStep) ...[
                       if (_isRegisterMode) ...[
                         TextField(
                           key: const ValueKey('login-full-name-field'),
                           controller: _fullNameController,
+                          focusNode: _fullNameFocusNode,
                           textCapitalization: TextCapitalization.words,
                           decoration: const InputDecoration(
                             labelText: 'الاسم الكامل',

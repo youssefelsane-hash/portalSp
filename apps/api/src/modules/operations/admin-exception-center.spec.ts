@@ -452,4 +452,88 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     expect(orderIdsInResult).toContain(orderA);
     expect(orderIdsInResult).not.toContain(orderB);
   });
+
+  // ═══ docs/08 §189 D-4 — مواعيد في خطر ═══
+  async function insertAppointment(opts: { minutesFromNow: number; status: string; departed?: boolean; technicianId: string }) {
+    const [order] = await q(
+      `INSERT INTO orders (commission_rate_applied, order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
+         order_status, payment_status, total_amount_cents, technician_earning_cents, scheduled_at, technician_departed_at)
+       VALUES (20,$1,$2,$3,$4,$5,$6,$7::order_status,'pending',50000,0,
+         now() + ($8::text || ' minutes')::interval,
+         CASE WHEN $9::boolean THEN now() - interval '10 minutes' ELSE NULL END)
+       RETURNING id`,
+      [`TESTEX-${randomUUID().slice(0, 8)}`, ids.customerProfile, opts.technicianId, ids.serviceB, ids.address, ids.zoneB,
+       opts.status, opts.minutesFromNow, opts.departed ?? false],
+    );
+    orderIds.push(order.id);
+    return order.id as string;
+  }
+  const levelOf = (items: { orderId: string; level: string }[], id: string) => items.find((i) => i.orderId === id)?.level ?? null;
+
+  it('المواعيد في خطر: مراقبة ⇒ تأخر في التحرك ⇒ تأخر في الوصول، والطبيعي مابيظهرش', async () => {
+    const tech = await insertTechnician('risk1');
+    const normal = await insertAppointment({ minutesFromNow: 120, status: 'accepted', technicianId: tech });
+    const watch = await insertAppointment({ minutesFromNow: 20, status: 'accepted', technicianId: tech });
+    const lateDeparture = await insertAppointment({ minutesFromNow: -5, status: 'accepted', technicianId: tech });
+    const onWayFine = await insertAppointment({ minutesFromNow: -5, status: 'technician_on_way', departed: true, technicianId: tech });
+    const lateArrivalMoved = await insertAppointment({ minutesFromNow: -40, status: 'technician_on_way', departed: true, technicianId: tech });
+    const lateArrivalStill = await insertAppointment({ minutesFromNow: -40, status: 'accepted', technicianId: tech });
+
+    const { atRiskAppointments } = await service().getExceptions({ categoryId: ids.categoryB });
+    const items = atRiskAppointments.items;
+    expect(levelOf(items, normal)).toBeNull();
+    expect(levelOf(items, onWayFine)).toBeNull();
+    expect(levelOf(items, watch)).toBe('watch');
+    expect(levelOf(items, lateDeparture)).toBe('late_departure');
+    expect(levelOf(items, lateArrivalMoved)).toBe('late_arrival');
+    expect(levelOf(items, lateArrivalStill)).toBe('late_arrival');
+
+    const moved = items.find((i) => i.orderId === lateArrivalMoved)!;
+    expect(moved.moved).toBe(true);
+    expect(moved.minutesFromAppointment).toBeGreaterThanOrEqual(39);
+    expect(moved.phone).toMatch(/^\+/);
+    expect(items.find((i) => i.orderId === lateArrivalStill)!.moved).toBe(false);
+    // الأحمر الأول في القايمة
+    expect(items[0].level).toBe('late_arrival');
+  });
+
+  it('خدمة «باليوم بس» (موعد منتصف الليل) مابتظهرش كموعد في خطر', async () => {
+    const tech = await insertTechnician('risk2');
+    await q(`UPDATE services SET requires_start_time_only = false WHERE id = $1`, [ids.serviceB]);
+    try {
+      const dayOnly = await insertAppointment({ minutesFromNow: -40, status: 'accepted', technicianId: tech });
+      const { atRiskAppointments } = await service().getExceptions({ categoryId: ids.categoryB });
+      expect(levelOf(atRiskAppointments.items, dayOnly)).toBeNull();
+    } finally {
+      await q(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.serviceB]);
+    }
+  });
+
+  it('التنبيه: مرة واحدة لكل مستوى — أصفر، ومفيش تكرار كل دقيقة، وبعدين أحمر مرة واحدة', async () => {
+    const tech = await insertTechnician('risk3');
+    const orderId = await insertAppointment({ minutesFromNow: -5, status: 'accepted', technicianId: tech });
+    const watchOnly = await insertAppointment({ minutesFromNow: 20, status: 'accepted', technicianId: tech });
+    const routed: Array<{ event: string; referenceId?: string; titleAr: string }> = [];
+    const routing = { routeToRole: async (event: string, payload: { referenceId?: string; titleAr: string }) => { routed.push({ event, ...payload }); } };
+    const svc = new AdminExceptionCenterService(dataSource, settingsServiceStub, routing as never);
+    const mine = (id: string) => routed.filter((r) => r.referenceId === id);
+
+    await svc.alertAtRiskTransitions();
+    expect(mine(orderId)).toHaveLength(1);
+    expect(mine(orderId)[0].event).toBe('order.appointment_at_risk');
+    expect(mine(orderId)[0].titleAr).toContain('ماتحرّكش');
+    expect(mine(watchOnly)).toHaveLength(0);
+
+    await svc.alertAtRiskTransitions();
+    expect(mine(orderId)).toHaveLength(1);
+
+    await q(`UPDATE orders SET scheduled_at = now() - interval '40 minutes' WHERE id = $1`, [orderId]);
+    await svc.alertAtRiskTransitions();
+    await svc.alertAtRiskTransitions();
+    expect(mine(orderId)).toHaveLength(2);
+    expect(mine(orderId)[1].titleAr).toContain('تأخر في الوصول');
+    const [row] = await q(`SELECT at_risk_alert_level FROM orders WHERE id = $1`, [orderId]);
+    expect(row.at_risk_alert_level).toBe('late_arrival');
+  });
 });
+

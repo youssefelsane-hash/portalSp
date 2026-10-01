@@ -8,6 +8,10 @@ export interface AcademyCourseResponseDto {
   passing_score: number;
   display_order: number;
   is_active: boolean;
+  /** ADR-0117 */
+  course_key?: string | null;
+  is_mandatory_onboarding?: boolean;
+  question_count?: number;
 }
 
 export interface CreateAcademyCourseBody {
@@ -28,10 +32,23 @@ export interface AcademyExamAttemptResponseDto {
   score: number;
   passed: boolean;
   attempted_at: string;
+  /** ADR-0117 — `self` = امتحن من التطبيق واتصحح في السيرفر. */
+  source?: 'admin' | 'self';
 }
 
 export interface RecordExamAttemptBody {
   technician_id: string;
   course_id: string;
   score: number;
+}
+
+/**
+ * ADR-0117 — حالة الكورسات الإلزامية وإعادة التدريب (`GET /academy/onboarding-status` للفني،
+ * و`GET /admin/academy/technicians/:id/onboarding-status` للأدمن).
+ */
+export interface AcademyOnboardingStatus {
+  courses: Array<{ course_id: string; title_ar: string; passed: boolean }>;
+  complete: boolean;
+  retraining_required: boolean;
+  retraining_reason: string | null;
 }

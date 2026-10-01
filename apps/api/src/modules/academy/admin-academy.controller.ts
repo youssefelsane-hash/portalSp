@@ -50,6 +50,13 @@ export class AdminAcademyController {
     return toAcademyExamAttemptResponseDto(await this.academyService.recordExamAttempt(admin.sub, dto, audit));
   }
 
+  // ADR-0117 — الموظف بيشوف «نجح في الكورس الإلزامي» قبل الاعتماد، وحالة إعادة التدريب.
+  @Get('technicians/:technicianId/onboarding-status')
+  @RequirePermission('academy.view')
+  async onboardingStatus(@Param('technicianId', ParseUUIDPipe) technicianId: string) {
+    return this.academyService.onboardingStatus(technicianId);
+  }
+
   @Get('technicians/:technicianId/exam-attempts')
   @RequirePermission('academy.view')
   async listAttemptsForTechnician(@Param('technicianId', ParseUUIDPipe) technicianId: string) {

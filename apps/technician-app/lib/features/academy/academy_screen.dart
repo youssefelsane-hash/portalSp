@@ -4,10 +4,11 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
+import 'academy_course_screen.dart';
 import 'academy_repository.dart';
 import 'models.dart';
 
-// الأكاديمية — كورسات التدريب المتاحة، ونتائج اختباراتي (مسجّلة يدويًا من الأدمن).
+// الأكاديمية — كورسات التدريب (الدرس + الاختبار من التطبيق، ADR-0117)، ونتائج اختباراتي.
 class AcademyScreen extends StatefulWidget {
   const AcademyScreen({super.key});
 
@@ -19,6 +20,7 @@ class _AcademyScreenState extends State<AcademyScreen> {
   late final AcademyRepository _repository;
   List<AcademyCourse>? _courses;
   List<AcademyExamAttempt>? _attempts;
+  AcademyOnboardingStatus? _onboarding;
   String? _error;
 
   @override
@@ -32,10 +34,17 @@ class _AcademyScreenState extends State<AcademyScreen> {
     try {
       final courses = await _repository.listCourses();
       final attempts = await _repository.myExamAttempts();
+      AcademyOnboardingStatus? onboarding;
+      try {
+        onboarding = await _repository.onboardingStatus();
+      } catch (_) {
+        // سيرفر أقدم من ADR-0117 — الشاشة بتشتغل من غير حالة الإلزامي.
+      }
       if (mounted) {
         setState(() {
           _courses = courses;
           _attempts = attempts;
+          _onboarding = onboarding;
         });
       }
     } catch (errRaw) {
@@ -44,6 +53,20 @@ class _AcademyScreenState extends State<AcademyScreen> {
       final err = ApiException.from(errRaw);
       if (mounted) setState(() => _error = err.message);
     }
+  }
+
+  bool _passed(AcademyCourse course) {
+    for (final c in _onboarding?.courses ?? const <AcademyOnboardingCourse>[]) {
+      if (c.courseId == course.id) return c.passed;
+    }
+    return (_attempts ?? const <AcademyExamAttempt>[]).any((a) => a.courseId == course.id && a.passed);
+  }
+
+  Future<void> _openCourse(AcademyCourse course) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => AcademyCourseScreen(course: course, repository: _repository)),
+    );
+    await _load();
   }
 
   String _courseTitle(String courseId) {
@@ -66,15 +89,40 @@ class _AcademyScreenState extends State<AcademyScreen> {
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
+                      if (_onboarding?.retrainingRequired == true)
+                        Card(
+                          key: const Key('academy-retraining-notice'),
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          child: ListTile(
+                            leading: const Icon(Icons.replay),
+                            title: const Text('مطلوب منك تعيد الكورس الإلزامي'),
+                            subtitle: Text(
+                              'السبب: ${_onboarding!.retrainingReason ?? 'تقييم أو شكوى على الأسلوب'}. ده مش إيقاف — العلامة بتتشال أول ما تنجح.',
+                            ),
+                          ),
+                        ),
                       Text('الكورسات المتاحة', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
                       if (_courses!.isEmpty) const EmptyState(icon: Icons.school_outlined, title: 'مفيش كورسات متاحة دلوقتي'),
                       for (final course in _courses!)
                         Card(
                           child: ListTile(
-                            title: Text(course.titleAr),
+                            title: Row(
+                              children: [
+                                Flexible(child: Text(course.titleAr)),
+                                if (course.isMandatoryOnboarding) ...[
+                                  const SizedBox(width: 8),
+                                  const Chip(label: Text('إلزامي'), visualDensity: VisualDensity.compact),
+                                ],
+                              ],
+                            ),
                             subtitle: course.descriptionAr != null ? Text(course.descriptionAr!) : null,
-                            trailing: Text('حد النجاح ${course.passingScore}%'),
+                            trailing: course.hasQuiz
+                                ? (_passed(course) && _onboarding?.retrainingRequired != true
+                                    ? const Icon(Icons.check_circle, color: Colors.green)
+                                    : const Icon(Icons.chevron_left))
+                                : Text('حد النجاح ${course.passingScore}%'),
+                            onTap: course.hasQuiz || course.lessonAr != null ? () => _openCourse(course) : null,
                           ),
                         ),
                       const SizedBox(height: 24),

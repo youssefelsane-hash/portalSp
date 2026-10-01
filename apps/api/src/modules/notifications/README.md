@@ -495,3 +495,22 @@ default_channels` كان افتراضيًا `'["push","in_app"]'` (`infra/migrat
   قصد الأدمن يضيف/يشيل توصيل، والرفض كان هيبقى عائق بلا فايدة).
 - migration 0293 صلّحت الـ٣٦ صف الموجودين (إضافة بحتة: مابتشيلش أي قناة اختارها الأدمن).
 - `in-app-channel-guarantee.spec.ts` بيحرس القاعدة في الاتجاهين.
+
+## تذكير دفع النوبة المتكررة على المحرك الحالي (ADR-0116، docs/08 §189 بند D-1، 2026-09-30)
+
+مفيش خدمة/جدول جديد — `RecurringOrderAwaitingPaymentNotificationListener` بقى:
+
+1. **إشعار فوري** (`recurring_order_awaiting_payment`، in_app+push، deep link `/orders/:id`) فيه موعد النوبة
+   و**آخر ميعاد للدفع** الحقيقي، وإن التأخير بيلغي النوبة دي بس.
+2. **workflow** من `NotificationWorkflowService` بنوع `recurring_order_payment_reminder` (scheduled_job،
+   `requires_acknowledgment = false` لأن فتح الإشعار مش دفع) و`targetAt = الميعاد` ⇒ تذكير بعد
+   `scheduled_job_reminder_after_minutes` وتذكير أخير قبل الميعاد بـ`scheduled_job_pre_appointment_minutes`،
+   ويقف عند الميعاد.
+3. **الحل** (`action_type = pay_recurring_occurrence`): أي خروج من `pending_payment` (دفع/إلغاء/إلغاء تلقائي)،
+   أو تبليغ تحويل InstaPay. ومعاه reconciliation كل دقيقة في `RecurringOrdersService.sweep()`.
+
+تحسين عام صغير في `scheduled-job-checkpoints.util.ts`: نقطتين بينهم أقل من 30 دقيقة (مثلاً «بعد ساعة» و«صبح
+اليوم اللي قبله») بقوا تذكير واحد بدل اتنين ورا بعض. `quiet-hours.util.ts` اتضاف له `quietHoursStartBefore()`.
+
+الاختبار الحي: `recurring-payment-reminders.spec.ts` — المحرك الحقيقي على Postgres (فوري ⇒ تذكير ⇒ أخير ⇒ يقف،
+القراءة مابتوقفهوش، الدفع/التبليغ بيوقفوه، والنوبة القديمة بلا ميعاد بتاخد الإشعار القديم بالظبط).

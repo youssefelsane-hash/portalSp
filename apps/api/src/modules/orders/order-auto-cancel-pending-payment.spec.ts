@@ -234,6 +234,86 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIA
     expect(order?.cancelledAt).toBeNull();
   });
 
+  // ═══ ADR-0116 (docs/08 §189 D-1) ═══
+  async function insertRecurringInstaPayOccurrence(label: string, opts: { deadlineOffsetMinutes: number; planActive: boolean }) {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [template] = await q(
+      `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, payment_method, is_active)
+       VALUES ($1,$2,$3,'individual','weekly', now() + interval '10 days', 'instapay', $4) RETURNING id`,
+      [ids.customerProfile, ids.service, ids.address, opts.planActive],
+    );
+    const { orderId } = await insertOrder({
+      label,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await q(
+      `UPDATE orders
+          SET recurring_template_id = $2, order_type = 'recurring', payment_method = 'instapay',
+              scheduled_at = now() + interval '3 days', recurring_occurrence_at = now() + interval '3 days',
+              recurring_payment_deadline_at = now() + ($3 || ' minutes')::interval
+        WHERE id = $1`,
+      [orderId, template.id, opts.deadlineOffsetMinutes],
+    );
+    return orderId;
+  }
+
+  it('نوبة InstaPay متكررة ميعادها لسه ماجاش ⇒ ماتتلغيش حتى لو عدّى عليها أكتر من مهلة الطلب العادي', async () => {
+    const orderId = await insertRecurringInstaPayOccurrence(`rw-${runId}`, { deadlineOffsetMinutes: 600, planActive: true });
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
+  });
+
+  it('نوبة InstaPay ميعادها فات ⇒ تتلغي، والسبب بيقول «النوبة دي بس» والخطة لسه شغّالة', async () => {
+    const orderId = await insertRecurringInstaPayOccurrence(`rx-${runId}`, { deadlineOffsetMinutes: -5, planActive: true });
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
+    const [history] = await dataSource.query(
+      `SELECT reason FROM order_status_history WHERE order_id = $1 AND new_status = 'cancelled_by_system'`,
+      [orderId],
+    );
+    expect(history.reason).toContain('النوبة دي بس اتلغت');
+    expect(history.reason).toContain('حجزك المتكرر لسه شغّال');
+    expect(history.reason).toContain('والنوبة الجاية');
+  });
+
+  it('نوبة ميعادها فات والخطة نفسها متوقفة ⇒ السبب بيقول مفيش نوبات جاية', async () => {
+    const orderId = await insertRecurringInstaPayOccurrence(`ry-${runId}`, { deadlineOffsetMinutes: -5, planActive: false });
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+    const [history] = await dataSource.query(
+      `SELECT reason FROM order_status_history WHERE order_id = $1 AND new_status = 'cancelled_by_system'`,
+      [orderId],
+    );
+    expect(history.reason).toContain('والحجز المتكرر نفسه متوقف');
+  });
+
+  it('الحجز الأول بالكارت ومعاه خطة تكرار (standard) ⇒ بيتلغي بمهلة الطلب العادي (كان بيفضل معلّق للأبد)', async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [template] = await q(
+      `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, payment_method)
+       VALUES ($1,$2,$3,'individual','weekly', now() + interval '7 days', 'card') RETURNING id`,
+      [ids.customerProfile, ids.service, ids.address],
+    );
+    const { orderId } = await insertOrder({
+      label: `rf-${runId}`,
+      orderStatus: OrderStatus.PENDING_PAYMENT,
+      paymentStatus: OrderPaymentStatus.UNPAID,
+      minutesAgo: OLD_MINUTES_AGO,
+    });
+    await q(
+      `UPDATE orders SET recurring_template_id = $2, recurring_occurrence_at = now() + interval '1 day',
+              order_type = 'standard', payment_method = 'card', scheduled_at = now() + interval '1 day'
+        WHERE id = $1`,
+      [orderId, template.id],
+    );
+    await service.sweep({ orderNumberPrefix: 'TESTAC-' });
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
+  });
+
   it('طلب SEARCHING_TECHNICIAN مدفوع (كارت) قديم جدًا — يفضل SEARCHING_TECHNICIAN بلا أي إلغاء أو استرداد (regression: كان بيتلغى ويترد تلقائيًا قبل قرار المالك 2026-08-19)', async () => {
     const { orderId } = await insertOrder({
       label: `pd-${runId}`,

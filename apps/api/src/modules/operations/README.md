@@ -507,3 +507,23 @@ API_LOG=<مسار لوج الباك-إند> npm run test:e2e:operations --prefix
 التغطية: `admin-review-center.service.spec.ts` (٧ اختبارات حية) +
 `scripts/review-center-audit.js` (١١ فحص على الـAPI الحقيقي: العقد، الفلاتر من الـquery string،
 الصلاحية، والتبرير الإجباري).
+
+## مواعيد في خطر — قبل ما اليوم يفوت (docs/08 §189 بند D-4، migration 0374، 2026-09-30)
+
+قسم جديد **جوّه نفس** `AdminExceptionCenterService` (`atRiskAppointments`)، مش خدمة مراقبة جديدة. بيتحسب
+مباشرة من `scheduled_at` + `order_status` + `technician_departed_at`/`technician_arrived_at`:
+
+| المستوى | الشرط | في الأدمن |
+|---|---|---|
+| `watch` | فاضل ≤ `operations.departure_warning_minutes` (30) والفني ماتحرّكش | «تحت المراقبة» — بلا تنبيه |
+| `late_departure` | جه الموعد والفني ماتحرّكش | أصفر + تنبيه |
+| `late_arrival` | عدّى `operations.arrival_grace_minutes` (20) والفني ماوصلش | أحمر + تنبيه |
+
+- الصف فيه: رقم الطلب، الموعد، الفني ورقمه (tel:)، الحالة، الدقايق من الموعد، اتحرك ولا لأ، وآخر نشاط
+  (آخر تغيير حالة أو آخر تحديث لموقع الفني).
+- مستبعد: خدمات «باليوم بس» (الموعد متخزّن منتصف الليل UTC)، واللي يومه عدّى وهو accepted (مكانه `overdueOrders`).
+- **التنبيه**: `alertAtRiskTransitions()` كل دقيقة (قفل `runExclusiveSweep`، ومتقفل في `NODE_ENV=test`) ⇒
+  `routeToRole('order.appointment_at_risk')` (قاعدة افتراضية لـ`ops_manager`، in_app+push). الـUPDATE على
+  `orders.at_risk_alert_level` هو الـcompare-and-set: المستوى بيطلع لفوق بس ⇒ تنبيه واحد للأصفر وواحد للأحمر، مش كل دقيقة.
+- **مفيش auto-rematch** — الموظف بيتصل ويستخدم reassign/rematch/reschedule الموجودين. قرار أتمتة أي حالة بعد بيانات أول شهر.
+- الاختبار الحي: `admin-exception-center.spec.ts` (المستويات الأربعة، استثناء «باليوم بس»، تنبيه مرة لكل مستوى).

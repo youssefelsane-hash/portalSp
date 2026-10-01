@@ -19171,3 +19171,107 @@ rollback على نفس الفشل. **مقاس على القديم**: الفرق 
 - من مناظرة الفشل/النجاح: هامش المساهمة وهدية InstaPay وسقف الترشيح **اتصلحوا على `main` قبل
   الجولة دي** من سيشن تانية، والـCI على `main` بقى أخضر (§186). التسريب (رقم العميل ظاهر للفني)
   وإيقاف دين الكاش التلقائي لسه قرارات منتج مفتوحة.
+
+## §189 — نسخة 1.0.12: سهولة للمستخدم غير التقني + أربع تطويرات فوق الموجود (2026-09-30) — ✅ **خلص (جاهز للنشر)**
+
+### الطلب (نص المالك مختصر)
+
+المرجع المستقر: **1.0.11** (Google Play + السيرفر). المطلوب نسختين **1.0.12** + تحديث السيرفر، ومن غير نشر
+تلقائي — كل حاجة جاهزة على GitHub وأوامر البناء/التحديث في الآخر. البنود:
+
+- **UX-1** رقم الموبايل على الويب يبدأ `010/011/012/015` زي التطبيقات (مش `+20`).
+- **UX-2** رقم مش مسجّل في «تسجيل الدخول» ⇒ ينقل تلقائي لـ«إنشاء حساب»؛ رقم مسجّل في «إنشاء حساب» ⇒ «تسجيل الدخول». التطبيقين والويب.
+- **UX-3** تمرير تلقائي بسلاسة: اختيار اليوم ⇒ ينزل للساعة، وأي صفحة طويلة ⇒ لأول حاجة ناقصة. من غير إجبار.
+- **D-1 Recurring**: Generate → إشعار فوري → تذكير → تذكير أخير → دفع أو إلغاء تلقائي، فوق الموجود.
+- **D-2 Quality ranking**: الالتزام بالمواعيد جوّه `candidateQualityScoreSql()` + أوزان صغيرة قابلة للضبط.
+- **D-3 Professionalism**: كورس إلزامي في الأكاديمية الحالية + اختبار، رؤيته قبل الاعتماد، وإعادة تدريب.
+- **D-4 At-risk appointments**: قسم جديد في `AdminExceptionCenterService` + تنبيه للأوبريشن مرة واحدة لكل مستوى.
+
+### مصفوفة القبول (baseline: `main@47b73bb0`)
+
+| البند | السلوك الحالي (Fact) | المطلوب | الحالة |
+|---|---|---|---|
+| UX-1 | `normalizePhoneNumber()` (`common/utils/phone-number.ts`) بـlibphonenumber من غير دولة افتراضية ⇒ `010…` بيترفض؛ التطبيقين بيحوّلوا محليًا (`phone_number.dart`)، الويب لأ (`PhoneField` placeholder `+2010…`) | دالة واحدة في shared-types للويب/الأدمن + السيرفر يقبل الشكل المحلي كدفاع | GAP |
+| UX-2 تسجيل ⇒ دخول | `registerWithPin` بيرجّع **409** «الرقم ده مسجل قبل كده» (`auth.service.ts:853`) — الواجهات بتعرضه نص بس | الواجهة تنقل لتسجيل الدخول بالرقم | GAP (واجهة بس) |
+| UX-2 دخول ⇒ تسجيل | `loginWithPin` مقصود مايفرّقش (ADR-0109 §5.1: نص/زمن/كود) | lookup مستقل محدود المعدل، والدخول نفسه مايتغيّرش | DECISION ⇒ ADR-0115 |
+| UX-3 | التمرير لأول ناقص موجود (§185)؛ اختيار اليوم في `schedule_selection_screen.dart` بيظهر الساعة تحت من غير تمرير | تمرير ناعم لليوم⇒الساعة⇒التأكيد (تطبيق + ويب)، يحترم تقليل الحركة | GAP |
+| D-1 قنوات | `recurring_order_awaiting_payment` = `["in_app","push"]` (migration 0335) + deep link `/orders/:id` | — | CONFIRMED_EXISTING |
+| D-1 مهلة الدفع | النوبة بتتولّد قبل الموعد بـ**96 ساعة** (`recurring.materialization_lead_time_hours`) لكن بتتلغى بعد **15 دقيقة** (`orders.payment_timeout_minutes`) لو InstaPay — أي تذكير مالوش معنى | `recurring.manual_payment_window_hours` (افتراضي 24) للنوبات غير الكارت، في نفس الـsweep | BUG/GAP |
+| D-1 تذكيرات | مفيش تذكير لنفس النوبة | `NotificationWorkflowService` الحالي: تذكير بعد مدة + تذكير أخير قبل المهلة، ويتحل بالدفع/الإلغاء | GAP |
+| D-1 إشعار الإلغاء | «إلغاء تلقائي — الدفع ماتمش خلال 15 دقيقة» | «النوبة دي بس اتلغت — حجزك المتكرر لسه شغال، والنوبة الجاية يوم …» | GAP |
+| D-2 | `reliability_weight=0` (مقاس بلا أثر)؛ الالتزام محسوب بس للعرض (`technicians.service.ts`، سماحية 15 د، `matching.min_punctuality_sample=3`) | `matching.punctuality_weight` + `punctuality_baseline_percent`، نفس الحد الأدنى الحالي، محايد تحته؛ وزن صغير للتقييم | GAP |
+| D-3 كورس | الأكاديمية: كورسات بلا محتوى، والنتيجة **بيدخلها موظف يدوي** (`recordExamAttempt`) | درس + أسئلة على نفس الجداول، تصحيح في السيرفر، الإجابات الصح ماتوصلش للتطبيق | GAP |
+| D-3 اعتماد | الاعتماد يقفز لـapproved بلا شرط | رؤية passed في صفحة الفني؛ بوابة backend بإعداد (مقفولة افتراضيًا) + override لـsuper_admin بسبب مسجّل | GAP |
+| D-3 إعادة تدريب | شكوى `rude_behavior` محلولة/تقييم احترافية ضعيف ⇒ تنبيه بس | `retraining_required` ⇒ الكورس تاني، ويتشال بالنجاح | GAP |
+| D-4 | `overdueOrders` = accepted واليوم عدّى | `atRiskAppointments`: watch/late_departure/late_arrival من `scheduled_at`+الحالة+`technician_departed_at`، إعدادات للدقايق، تنبيه `routeToRole` مرة لكل مستوى (compare-and-set على الطلب) | GAP |
+| إصدار | التطبيقين 1.0.11+12 | 1.0.12+13 + أوامر البناء/التحديث بلا نشر | GAP |
+
+### قيود صريحة من المالك
+
+لا notification system جديد، لا ranking engine جديد، لا training platform جديدة، لا خدمة مراقبة جديدة، لا
+auto-rematch في D-4 (الموظف بيستخدم reassign/rematch/reschedule الموجودين).
+
+### التنفيذ والنتائج (بيتحدّث مع كل بند)
+
+- **UX-1 ✅** `packages/shared-types/src/phone.ts` (`phoneNumberForApi`/`isValidPhoneInput`/`phoneNumberForDisplay`) —
+  نفس قاعدة `phone_number.dart` بالحرف، مستخدمة في دخول/تسجيل/استرجاع الويب. السيرفر نفسه بقى يقبل `01[0125]…`
+  كدفاع (`common/utils/phone-number.ts`، 9 اختبارات). `test/phone-number.test.mjs` 4/4.
+- **UX-2 ✅** ADR-0115: `POST /auth/pin/phone-status` ⇒ `{registered}` بس، سقف لكل IP (10/د)، مفتاح
+  `auth.phone_status_lookup_enabled` (migration 0371). الدخول نفسه **ماتغيّرش** — تدقيق الأمان 34/34
+  (4 فحوص جديدة للمسار). التطبيقين: `AuthRepository.isPhoneRegistered()` + توجيه في شاشة الدخول (9 widget
+  tests + `test_live/phone_routing_live_test.dart`). الويب: `usePhoneRegistrationRouting` + «لا، خليني هنا»
+  (`scripts/verify-web-phone-routing.js` 5/5 بمتصفح). أي فشل للسؤال = السلوك القديم بالظبط.
+- **UX-3 ✅** تطبيق العميل: `lib/design/reveal_next_section.dart` — أقل تمرير يبيّن الجزء الجاي
+  (`keepVisibleAtEnd`)، صفر حركة لو باين، ومن غير أنيميشن مع «تقليل الحركة». موصول في
+  `ScheduleSelectionScreen`: اليوم ⇒ كارت الساعة (ومرة تانية لما الاقتراحات توصل وتطوّله) ⇒ «تأكيد الميعاد».
+  `test/reveal_next_section_test.dart` 4/4 (منهم الشاشة الحقيقية على 360×520). الويب:
+  `src/lib/reveal-next-section.ts` بنفس الحساب (سقف عند أول الجزء تحت الهيدر، `prefers-reduced-motion`)،
+  موصول في `booking-flow.tsx`: اليوم (اقتراح/تاريخ/نطاق) ⇒ الساعة ⇒ «مقدم الخدمة». `test/reveal-next-section.test.mjs`
+  4/4 + `scripts/verify-web-booking-reveal.js` 5/5 بمتصفح (390×640: الساعة من y=1125 مستخبية ⇒ باينة كلها
+  وخانة اليوم لسه على الشاشة). «لأول حاجة ناقصة» كان موجود من §185 (`_failValidation` في التطبيق،
+  `revealFirstMissing` في الويب) — اتراجع ومااتعملش نسخة تانية منه.
+- **D-1 ✅** ADR-0116. النوبة اليدوية بقى ليها ميعاد دفع حقيقي متخزّن (`orders.recurring_payment_deadline_at`،
+  افتراضي 24 ساعة من التوليد عبر `recurring.manual_payment_window_hours`، ومحدود بالموعد − 24 ساعة) بدل
+  الإلغاء بعد 15 دقيقة. إشعار فوري بالميعاد ⇒ تذكير بعد ساعة ⇒ تذكير أخير قبل الميعاد بساعتين، على
+  `NotificationWorkflowService` الحالي (نوع `recurring_order_payment_reminder`)، وبيقف بالدفع/الإلغاء/تبليغ
+  InstaPay + reconciliation كل دقيقة. الإلغاء بيقول «النوبة دي بس» + حالة الخطة + ميعاد الجاية (يدوي وكارت).
+  **بَقّة اتلقطت واتصلحت**: الحجز الأول بالكارت مع خطة تكرار كان بيفضل `pending_payment` للأبد. اختبارات:
+  27 unit + 7 على المحرك الحقيقي + 6 جديدة على Postgres في الـsweep والتوليد؛ 35 suite متأثرة كلها خضرا.
+- **D-2 ✅** الالتزام بالمواعيد بقى term جوّه `candidateQualityScoreSql()` نفسها (الأربع مستخدمين)، بنفس مقياس
+  العرض للعميل (15 دقيقة) ونفس حد العيّنة (`matching.min_punctuality_sample`، محايد تحته). إعدادات جديدة
+  `matching.punctuality_weight` (5) و`matching.punctuality_baseline_percent` (85) — أقصى أثر أقل من نص مستوى.
+  `matching.reliability_weight` 0 ⇒ 2 (بس لو الأدمن مالمسهوش). سطر «التزام بالمواعيد» في تفسير الترتيب بالأدمن.
+  اختبارات حية: 3 جديدة + 42 suite ترتيب/مطابقة كلها خضرا. الإلغاء/إعادة الشغل/الشكاوى: نفس المكوّن لاحقًا (مكتوب في README).
+- **D-4 ✅** `atRiskAppointments` جوّه `AdminExceptionCenterService`: مراقبة (≤30 د قبل الموعد ولسه ماتحرّكش) ⇒
+  تأخر في التحرك (أصفر، جه الموعد) ⇒ تأخر في الوصول (أحمر، +20 د) — الأرقام إعدادات
+  `operations.departure_warning_minutes`/`operations.arrival_grace_minutes`. الصف فيه الرقم والموعد والفني وتليفونه
+  والدقايق واتحرك ولا لأ وآخر نشاط. تنبيه `ops_manager` مرة لكل مستوى (compare-and-set على `orders.at_risk_alert_level`)،
+  ومفيش auto-rematch. اختبارات حية 3 جديدة + 16 suite عمليات/إعدادات خضرا، والـAPI بيقوم (health 200).
+- **D-3 ✅** ADR-0117. الأكاديمية الحالية اتمدت (مش منصة جديدة): كورس إلزامي «التعامل مع العميل وسياسة أسطة»
+  بدرس + ٨ أسئلة، امتحان من تطبيق الفني والتصحيح في السيرفر (الإجابات مابتطلعش). الموظف بيشوف «ناجح/لسه» قبل
+  الاعتماد؛ بوابة backend بإعداد (مقفولة افتراضيًا) + override لـsuper_admin بسبب مسجّل. شكوى أسلوب مثبتة أو
+  احترافية ≤2 ⇒ إعادة تدريب (مش إيقاف) + إشعار للفني والعمليات، وبتتشال بالنجاح. اختبارات: 8 Postgres + 2 widget.
+- **إصدار ✅** التطبيقين `1.0.12+13`. تدقيق الجاهزية لقى deep link `/technicians/:id` في تنبيه العمليات بتاع D-3
+  (بيتقري كرابط لتطبيق الفني) ⇒ اتصلح لـ`/admin/technicians/:id` ومعاه تنبيه D-4 لـ`/admin/orders/:id` (الأدمن بيشيل
+  البريفكس) — 14/14.
+
+### التحقق النهائي (2026-10-01، قبل الـPR)
+
+| الفحص | النتيجة |
+|---|---|
+| API: `tsc` + `eslint --max-warnings 0` + `nest build` | نضيف |
+| API: jest كامل `-w=1` على Postgres/Redis حقيقيين | **398 suite / 2653 اختبار — كلهم عدّوا** |
+| customer-app: analyze + test | نضيف، 259 |
+| technician-app: analyze + test | نضيف، 97 |
+| customer-web: tsc + eslint + unit | نضيف، 36 |
+| admin: tsc + eslint | نضيف |
+| `auth-pin-security-audit.js` | 34/34 |
+| `verify-web-phone-routing.js` / `verify-web-booking-reveal.js` (متصفح حقيقي) | 5/5 / 5/5 |
+| `audit-booking-flow.js --quick` | مفيش تركيبة الأدمن بيقبلها والعميل بيتقفل عليها |
+| `release-readiness-audit.js` (deep links، حراس العنوان، الإشعارات) | 14/14 |
+| migrations 0371→0375 + `check-migrations.js` | متطبقة، مفيش رقم مكرر |
+
+**على السيرفر**: مفيش أي متغيّر بيئة جديد إجباري (`AUTH_PHONE_STATUS_THROTTLE_LIMIT` اختياري وافتراضيه 10، وثابت في
+الإنتاج). الـmigrations الخمسة بيطبّقها `deploy-osta-release.sh` بعد نسخة احتياطية من القاعدة. البوابة
+`academy.onboarding_gate_enabled` مقفولة افتراضيًا — بتتفتح من `/settings` لما العمليات تكون جاهزة.
+

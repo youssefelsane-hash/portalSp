@@ -242,6 +242,12 @@ function formatDelay(seconds: number): string {
   return `${Math.floor(hours / 24)} يوم و${hours % 24} ساعة`;
 }
 
+const AT_RISK_LEVEL_LABELS: Record<'watch' | 'late_departure' | 'late_arrival', string> = {
+  watch: 'تحت المراقبة',
+  late_departure: 'تأخر في التحرك',
+  late_arrival: 'تأخر في الوصول',
+};
+
 function ExceptionGroup({
   title,
   count,
@@ -351,6 +357,7 @@ function ExceptionCenterSection({
   // docs/08 §63.ب1 — مركز الاستثناءات لازم يكون حي بطبيعته: كل بند فيه طلب محتاج تدخّل دلوقتي.
   useAdminLiveRefresh(['orders', 'technicians'], refresh);
 
+  const atRiskCount = data?.at_risk_appointments?.total ?? 0;
   const overdueCount = data?.overdue_orders.total ?? 0;
   const staleMatchingCount = data?.stale_matching.total ?? 0;
   const staleInProgressCount = data?.stale_in_progress.total ?? 0;
@@ -358,7 +365,7 @@ function ExceptionCenterSection({
   const crewCount = data?.crew_shortage.total ?? 0;
   const staleCount = data?.stale_dispatch.total ?? 0;
   const revisitCount = data?.stalled_revisits.total ?? 0;
-  const totalCount = overdueCount + staleMatchingCount + staleInProgressCount + workflowCount + crewCount + staleCount + revisitCount;
+  const totalCount = atRiskCount + overdueCount + staleMatchingCount + staleInProgressCount + workflowCount + crewCount + staleCount + revisitCount;
 
   return (
     <section>
@@ -381,6 +388,51 @@ function ExceptionCenterSection({
 
       {!error && data && totalCount > 0 && (
         <div className="motion-list flex flex-col gap-4">
+          {/* docs/08 §189 D-4 — مواعيد النهارده اللي في خطر، قبل ما تبقى «معادها عدّى». لا إعادة
+              مطابقة تلقائية: الموظف بيتصل بالفني وبيبلّغ العميل ويستخدم أدوات صفحة الطلب. */}
+          {atRiskCount > 0 && data.at_risk_appointments && (
+            <ExceptionGroup title="مواعيد في خطر — الفني ماتحرّكش أو ماوصلش" count={atRiskCount} tone="danger">
+              <ul className="flex flex-col gap-1.5" data-testid="at-risk-appointments">
+                {data.at_risk_appointments.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge
+                      variant={item.level === 'late_arrival' ? 'destructive' : 'outline'}
+                      className={item.level === 'late_departure' ? 'border-warning text-warning' : undefined}
+                    >
+                      {AT_RISK_LEVEL_LABELS[item.level]}
+                    </Badge>
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                      {item.order_number}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">معاده: {arDateTime(item.scheduled_at)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {item.minutes_from_appointment > 0
+                        ? `متأخر ${item.minutes_from_appointment} د`
+                        : `فاضل ${Math.abs(item.minutes_from_appointment)} د`}
+                    </span>
+                    {item.technician_id && (
+                      <span className="text-xs text-muted-foreground">
+                        الفني{' '}
+                        <Link href={`/technicians/${item.technician_id}`} className="text-foreground hover:underline">
+                          {item.full_name}
+                        </Link>
+                        {item.phone && (
+                          <a href={`tel:${item.phone}`} dir="ltr" className="ms-1 text-foreground hover:underline">
+                            {item.phone}
+                          </a>
+                        )}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">{item.moved ? 'اتحرك' : 'ماتحرّكش'}</span>
+                    {item.last_activity_at && (
+                      <span className="text-xs text-muted-foreground">آخر نشاط: {arDateTime(item.last_activity_at)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </ExceptionGroup>
+          )}
+
           {/* ترتيب مقصود (docs/08 §56 بند 4): شغلانة معادها عدّى ولسه ما بدأتش هي أعجل حاجة. */}
           {overdueCount > 0 && (
             <ExceptionGroup title="شغلانة معادها عدّى ولسه ما بدأتش" count={overdueCount} tone="danger">
