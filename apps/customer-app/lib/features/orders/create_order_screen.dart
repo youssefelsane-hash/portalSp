@@ -12,6 +12,7 @@ import 'assessment_route.dart';
 import 'booking_scheduled_at.dart';
 import 'booking_time_picker.dart';
 import 'booking_window.dart';
+import 'checkout_review_section.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
@@ -124,6 +125,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _policiesSectionKey = GlobalKey();
   final _paymentSectionKey = GlobalKey();
   final _problemImagesSectionKey = GlobalKey();
+  bool _reviewExpanded = true;
+  bool _checkoutInteracted = false;
 
   /// رسالة النقص **جنب القسم نفسه** (docs/08 §185) — قبل كده كانت بتظهر تحت جنب زرار التأكيد
   /// بس، فالعميل يتمرّر للقسم ومايلاقيش أي علامة عليه. قسم واحد بس في المرة: الأول الناقص.
@@ -377,14 +380,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (widget.initialFieldValues != null) {
       _fieldValues.addAll(widget.initialFieldValues!);
     }
-    _loadAddons();
-    if (_showsDynamicForm) {
-      _loadPricingFields();
-    } else {
-      _loadStandardData();
-    }
-    if (_selectedAddress != null) _refreshPreview();
-    _loadCheckoutOptions();
+    final initialLoads = <Future<void>>[
+      _loadAddons(),
+      if (_showsDynamicForm) _loadPricingFields() else _loadStandardData(),
+      if (_selectedAddress != null) _refreshPreview(),
+      _loadCheckoutOptions(),
+    ];
+    Future.wait(initialLoads).then((_) {
+      if (mounted &&
+          _selectedAddress != null &&
+          _pricingFieldsError == null &&
+          (!_showsDynamicForm || (_pricingFieldsComplete && !_hasUnsupportedRequiredField))) {
+        focusCheckoutPayment(
+          _paymentSectionKey,
+          userInteracted: () => !mounted || _checkoutInteracted,
+        );
+      }
+    });
     _loadPostpaidPolicies();
     // نافذة اختيار الموعد (ADR-0097) — تحميل مستقل: فشله بيسيب الافتراضي شغّال والسيرفر
     // بيفضل هو الحارس، فمابيعطّلش الشاشة.
@@ -592,6 +604,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             final initial = pricingFieldInitialValue(field);
             if (initial != null) _fieldValues[field.fieldKey] = initial;
           }
+          _reviewExpanded = !shouldCollapseCheckoutReview(
+            previousAnswers: widget.initialFieldValues,
+            fields: fields,
+            values: _fieldValues,
+          );
         });
       }
     } catch (errRaw) {
@@ -1004,6 +1021,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     });
   }
 
+  void _revealMissingPricingField() {
+    if (!_reviewExpanded) {
+      setState(() => _reviewExpanded = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _revealMissingPricingField();
+      });
+      return;
+    }
+    final missing = _pricingFormController.revealFirstMissing(
+      purpose: _isFormulaPricing ? 'علشان نقدر نحسب السعر' : 'علشان نكمّل طلبك',
+    );
+    if (missing == null) {
+      _failValidation('كمّل تفاصيل الطلب المطلوبة الأول.', _pricingFieldsSectionKey);
+    } else {
+      setState(() {
+        _sectionErrors = const {};
+        _error = null;
+      });
+    }
+  }
+
   void _clearSectionError(GlobalKey section) {
     if (_sectionErrors.containsKey(section)) {
       _sectionErrors = Map.of(_sectionErrors)..remove(section);
@@ -1120,18 +1158,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         return;
       }
       if (!_pricingFieldsComplete) {
-        // الفورم نفسه بيوصّل للحقل الناقص بالظبط ويكتب تحته يعمل فيه إيه.
-        final missing = _pricingFormController.revealFirstMissing(
-          purpose: _isFormulaPricing ? 'علشان نقدر نحسب السعر' : 'علشان نكمّل طلبك',
-        );
-        if (missing == null) {
-          _failValidation('كمّل تفاصيل الطلب المطلوبة الأول.', _pricingFieldsSectionKey);
-        } else {
-          setState(() {
-            _sectionErrors = const {};
-            _error = null;
-          });
-        }
+        _revealMissingPricingField();
         return;
       }
     }
@@ -1745,28 +1772,23 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_pricingFields.isEmpty) return const [];
     return [
       const SizedBox(height: 16),
-      // «تفاصيل تحديد السعر» كانت بتكشف للعميل إن الأسئلة جزء من محرك تسعير. العنوان العام
-      // بيناسب كل الخدمات: عدد الملابس في المكوجي، الغرف في التنظيف، المساحة في الدهان.
-      Text('حدد تفاصيل طلبك', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 8),
-      Card(
+      CheckoutReviewSection(
         key: _pricingFieldsSectionKey,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          // الرسم كله في ملف مشترك (catalog/pricing_field_widgets.dart) مع JobDetailsScreen.
-          child: PricingFieldsForm(
-            controller: _pricingFormController,
-            fields: _pricingFields,
-            values: _fieldValues,
-            onChanged: _onFieldValueChanged,
-            onUploadImage: (pricingField, image) async =>
-                _repository.uploadPricingFieldImage(
-                  serviceId: widget.service.id,
-                  fieldId: pricingField.id,
-                  fileBytes: await image.readAsBytes(),
-                  filename: image.name,
-                ),
-          ),
+        expanded: _reviewExpanded,
+        complete: _pricingFieldsComplete,
+        onToggle: () => setState(() => _reviewExpanded = !_reviewExpanded),
+        child: PricingFieldsForm(
+          controller: _pricingFormController,
+          fields: _pricingFields,
+          values: _fieldValues,
+          onChanged: _onFieldValueChanged,
+          onUploadImage: (pricingField, image) async =>
+              _repository.uploadPricingFieldImage(
+                serviceId: widget.service.id,
+                fieldId: pricingField.id,
+                fileBytes: await image.readAsBytes(),
+                filename: image.name,
+              ),
         ),
       ),
       _sectionError(_pricingFieldsSectionKey),
@@ -1781,7 +1803,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         appBar: AppBar(title: Text('طلب: ${widget.service.nameAr}')),
         // مش ListView: الـListView بيبني اللي قريب من الشاشة بس، فحقل ناقص بعيد مالوش context
         // و`Scrollable.ensureVisible` مايقدرش يوصله. الشاشة فورم محدود، فبناؤها كلها رخيص.
-        body: SingleChildScrollView(
+        body: Listener(
+          onPointerDown: (_) => _checkoutInteracted = true,
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           child: Column(
@@ -2270,6 +2294,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               key: _paymentSectionKey,
               style: Theme.of(context).textTheme.titleMedium,
             ),
+            const SizedBox(height: 4),
+            Text(
+              'اختار طريقة الدفع، وبعدها اضغط تأكيد الطلب.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 8),
             // طلب مالك مباشر (2026-08-22) — رسالة واضحة قبل ما العميل يحاول يدفع، بدل ما يختار
             // "بعد الخدمة" ويترفض برسالة حمرا بعد ما يدوس "تأكيد الطلب".
@@ -2483,6 +2512,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   : const Text('تأكيد الطلب'),
             ),
           ],
+          ),
           ),
         ),
       ),
