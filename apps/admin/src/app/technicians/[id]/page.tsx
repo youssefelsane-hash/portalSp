@@ -663,7 +663,10 @@ export default function TechnicianDetailPage() {
         <NationalIdCard
           technicianId={id}
           nationalId={detail.national_id}
-          canManage={hasPermission('technicians.manage')}
+          // كانت `technicians.manage` — صلاحية مش موجودة في الكتالوج أصلًا، فالكشف والتسجيل كانوا
+          // مخفيين عن الكل حتى المدير العام، رغم إن الاعتماد بيرفض فني من غير رقم قومي.
+          canReveal={hasPermission('technicians.national_id.view')}
+          canManage={hasPermission('technicians.national_id.manage')}
           onChanged={load}
         />
       </div>

@@ -981,7 +981,10 @@ export default function ServiceDetailPage() {
                 <div className="flex flex-col gap-1">
                   <Label>سياسة مستحقات الخدمة</Label>
                   <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-                    عمولة V2 مبلغ ثابت وتُدار من مركز سياسة المستحقات فقط. نسبة V1 القديمة محفوظة للطلبات التاريخية.
+                    {/* كان مكتوب «عمولة V2 مبلغ ثابت» — والتسوية الفعلية نسبة: `commission_rate_applied` بيتثبت من
+                        `commission_percentage` وقت إنشاء الطلب (order-creation.service.ts). */}
+                    نسبة عمولة المنصة للخدمة دي بتتعدّل من مركز سياسة المستحقات فقط، وبتتثبت على كل طلب لحظة
+                    إنشائه — التعديل بيسري على الطلبات الجديدة بس.
                   </div>
                 </div>
                 <div className="flex flex-col gap-1">

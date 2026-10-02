@@ -52,6 +52,13 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // (حتى بصلاحية complaints.resolve بس، مش لازم super_admin/finance) كانت تقدر تحوّل فلوس حقيقية
   // بلا أي تأكيد MFA حديث خالص.
   'complaints.resolve',
+  // الاتجاه العكسي للقايمة: الـPasskey بيتسجّل **بس** وقت دخول حساب صلاحياته من هنا
+  // (`webauthn.controller.ts` registration مقصورة على جلسة MFA). فأي مسار عليه `@RequireStepUp()`
+  // وصلاحيته برّه القايمة = موظف بالصلاحية دي لوحدها عمره ما يقدر يسجّل Passkey، فالمسار مقفول
+  // عليه للأبد. اتلقطت وقت كتابة دليل الموظفين: دور «مخاطر» بـ`risk_center.manage` بيحكم على
+  // الإشارات بس مايقدرش يعلّق حساب، ودور تقسيط بـ`installments.review` مايقدرش يعتمد طلب.
+  'risk_center.manage',
+  'installments.review',
 ] as const;
 
 @Injectable()

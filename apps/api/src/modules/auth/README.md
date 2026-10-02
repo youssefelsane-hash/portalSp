@@ -136,6 +136,16 @@ manage` مش في `MFA_REQUIRED_PERMISSIONS`، فأدمن عنده الصلاح�
 عادي" عن "منح super_admin" محتاج منطق service-layer إضافي مش مجرد decorator على الـcontroller،
 مؤجّل لمرحلة تانية وموثّق هنا كفجوة معروفة صراحة.
 
+**نفس القاعدة اتكسرت مرتين بعد كده من غير ما حد ياخد باله (اتلقطت 2026-10-02 وقت كتابة دليل
+الموظفين)**: `POST /admin/risk-center/actors/:userId/actions` و`/admin/risk-center/run-detectors`
+عليهم step-up بصلاحية `risk_center.manage`، و`POST /admin/installments/applications/:id/{approve,
+reject}` بصلاحية `installments.review` — والصلاحيتين برّه القايمة. فدور «مخاطر» كان بيحكم على الإشارات بس
+مايقدرش يعلّق حساب، ودور تقسيط مايقدرش يعتمد طلب، والاتنين من غير أي رسالة تفهّمهم ليه. الصلاحيتين
+اتضافوا لـ`MFA_REQUIRED_PERMISSIONS`. **ومعاهم قفل بنيوي**: `mfa-step-up-enforcement.spec.ts` فيه
+مسح عكسي بيلف على كل `*.controller.ts` — أي handler عليه `@RequireStepUp()` لازم صلاحيته تكون في
+القايمة، أو يكون مسار ذاتي صريح (`SessionsController.revokeAll`, `WebAuthnController.
+removeCredential`). أي مسار جديد بيعيد نفس الغلطة بيكسر الاختبار باسمه.
+
 ### إدارة الأجهزة/الجلسات
 
 `refresh_tokens.device_id/device_name/device_platform` (موجودين من زمان، فاضيين) + أعمدة جديدة

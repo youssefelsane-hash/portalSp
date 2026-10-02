@@ -200,6 +200,29 @@ export class TechnicianIdentityService {
     return row?.nationalIdEncrypted ? decryptPii(row.nationalIdEncrypted) : null;
   }
 
+  /**
+   * الكشف اللي بيطلبه موظف بزرار «اكشف الرقم كامل» — منفصلة عن `revealNationalId()` لأن دي
+   * بتتنادى داخليًا مع كل فتح لصفحة الفني (عشان الإخفاء في `summaryFor`)، وتسجيل ده كان هيغرق
+   * السجل. الرقم نفسه ما بيتسجّلش، المقنّع بس — نفس قاعدة `setNationalId`.
+   */
+  async revealNationalIdForAdmin(params: {
+    technicianProfileId: string;
+    actorUserId: string;
+    meta?: AuditActorMeta;
+  }): Promise<string | null> {
+    const nationalId = await this.revealNationalId(params.technicianProfileId);
+    await this.auditLog.record({
+      actorUserId: params.actorUserId,
+      actorRole: 'admin',
+      action: 'technician.national_id_revealed',
+      entityType: 'technician_profile',
+      entityId: params.technicianProfileId,
+      newValues: { national_id_masked: nationalId ? maskNationalId(nationalId) : null },
+      meta: params.meta,
+    });
+    return nationalId;
+  }
+
   /** ملخّص آمن للعرض في أي مكان (مفيش الرقم كامل) — بيتحط في رد الأدمن العادي. */
   async summaryFor(profile: TechnicianProfile): Promise<{
     hasNationalId: boolean;
