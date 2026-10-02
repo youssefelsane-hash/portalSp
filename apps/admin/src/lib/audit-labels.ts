@@ -177,6 +177,7 @@ const VERB_LABELS: Record<string, string> = {
 /** أفعال بعينها التركيب فيها بيطلع ركيك أو ناقص — دي بترجمة كاملة. */
 const EXACT_LABELS: Record<string, string> = {
   'customer.deleted': 'حذف حساب عميل',
+  'employee.activation_code_reissued': 'إصدار كود تنشيط جديد لموظف',
   'employee.session_revoked': 'إلغاء جلسة موظف',
   'geo.zone_catalog_availability_updated': 'تعديل خدمات نطاق',
   'loyalty.manual_credit': 'إضافة نقاط ولاء يدويًا',
@@ -203,13 +204,17 @@ const EXACT_LABELS: Record<string, string> = {
   'payment_policy.version_published': 'نشر نسخة سياسة دفع',
   'security.access_denied': 'محاولة وصول مرفوضة',
   'setting.updated': 'تعديل إعداد',
+  'technician.academy_gate_overridden': 'اعتماد فني استثنائيًا قبل الأكاديمية',
   'technician.debt_settlement_recorded': 'تسجيل تسوية مديونية',
   'technician.kind_changed': 'تغيير نوع الفني',
+  'technician.national_id_revealed': 'كشف الرقم القومي للفني',
   'technician.pricing_tier_changed': 'تغيير فئة تسعير الفني',
   'technician.service_allowed': 'السماح بخدمة للفني',
   'technician.service_excluded': 'استثناء خدمة من الفني',
   'technician_company.ownership_transferred': 'نقل ملكية الشركة',
   'technician_company.price_multiplier_changed': 'تغيير معامل سعر الشركة',
+  'user.phone_changed': 'تغيير رقم الموبايل',
+  'user.pin_reset': 'استرجاع رمز الدخول بواسطة الإدارة',
   'wallet.adjusted': 'تعديل رصيد محفظة',
 };
 

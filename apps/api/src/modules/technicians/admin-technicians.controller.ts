@@ -510,8 +510,18 @@ export class AdminTechniciansController {
    */
   @Get(':id/national-id')
   @RequirePermission('technicians.national_id.view')
-  async revealNationalId(@Param('id', ParseUUIDPipe) id: string) {
-    return { national_id: await this.identityService.revealNationalId(id) };
+  async revealNationalId(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return {
+      national_id: await this.identityService.revealNationalIdForAdmin({
+        technicianProfileId: id,
+        actorUserId: admin.sub,
+        meta: audit,
+      }),
+    };
   }
 
   @Post(':id/approve')

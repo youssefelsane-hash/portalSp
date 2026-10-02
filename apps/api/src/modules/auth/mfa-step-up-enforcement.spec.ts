@@ -103,6 +103,10 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
       'AdminSupportController.reject': 'رفض شكوى — مفيش تعويض بيتصرف',
       'AdminSupportController.close': 'إقفال شكوى — مفيش تعويض بيتصرف',
       'AdminSupportController.updateSeverity': 'تصنيف خطورة — مفيش فلوس',
+      // الحكم على إشارة وفتح حالة قرارات مراجعة مسجّلة، مابتعلّقش حساب ولا بتحرّك فلوس. اللي بيلمس
+      // الحساب فعلاً (`action`) والتشغيل اليدوي للكواشف عليهم step-up.
+      'AdminRiskCenterController.verdict': 'حكم على إشارة — مفيش إجراء على الحساب',
+      'AdminRiskCenterController.upsertCase': 'فتح/تحديث حالة مراجعة — مفيش إجراء على الحساب',
     };
 
     const writeVerbs = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE]);
@@ -144,5 +148,66 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
     // لو المسح مالقاش ولا مسار، يبقى هو اللي بايظ مش المشروع اللي سليم.
     expect(scannedRoutes).toBeGreaterThan(20);
     expect(missing).toEqual([]);
+  });
+
+  /*
+    ═══ المسح العكسي ═══
+
+    الـPasskey بيتسجّل بس وقت دخول حساب صلاحياته من `MFA_REQUIRED_PERMISSIONS`. فمسار عليه
+    `@RequireStepUp()` وصلاحيته برّه القايمة بيبقى **مقفول للأبد** على أي دور ماعندوش صلاحية تانية
+    منها: الموظف مايقدرش يسجّل Passkey، فمايقدرش يعدّي الـstep-up. ده اللي حصل لـ
+    `risk_center.manage` و`installments.review`.
+  */
+  it('مسح عكسي: كل مسار عليه step-up صلاحيته من قايمة MFA (إلا المسارات الذاتية)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PATH_METADATA } = require('@nestjs/common/constants');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require('path') as typeof import('path');
+
+    /** مسارات المستخدم على حسابه هو (مالهاش صلاحية إدارية) — `Controller.method` ← السبب. */
+    const SELF_SERVICE: Record<string, string> = {
+      'SessionsController.revokeAll': 'المستخدم بيقفل جلساته هو',
+      'WebAuthnController.removeCredential': 'المستخدم بيمسح Passkey بتاعه',
+    };
+
+    const mfaPermissions = new Set<string>(MFA_REQUIRED_PERMISSIONS);
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.controller.ts')) files.push(full);
+      }
+    };
+    walk(path.join(__dirname, '..', '..'));
+
+    const unreachable: string[] = [];
+    let stepUpRoutes = 0;
+    for (const file of files) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const exported = require(file) as Record<string, unknown>;
+      for (const candidate of Object.values(exported)) {
+        if (typeof candidate !== 'function' || Reflect.getMetadata(PATH_METADATA, candidate) === undefined) continue;
+        const proto = candidate.prototype as Record<string, (...args: unknown[]) => unknown>;
+        for (const methodName of Object.getOwnPropertyNames(proto)) {
+          if (methodName === 'constructor') continue;
+          const handler = proto[methodName];
+          if (typeof handler !== 'function' || !stepUpMetadata(handler)) continue;
+          stepUpRoutes += 1;
+          const id = `${candidate.name}.${methodName}`;
+          const permission = permissionMetadata(handler, candidate);
+          if (!permission) {
+            if (!SELF_SERVICE[id]) unreachable.push(`${id} (بلا صلاحية)`);
+          } else if (!mfaPermissions.has(permission)) {
+            unreachable.push(`${id} (${permission})`);
+          }
+        }
+      }
+    }
+
+    expect(stepUpRoutes).toBeGreaterThan(20);
+    expect(unreachable).toEqual([]);
   });
 });

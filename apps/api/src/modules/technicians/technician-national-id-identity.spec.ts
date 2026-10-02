@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
 import { ApiException } from '../../common/exceptions/api.exception';
-import { blindIndex, normalizeNationalId } from '../../common/crypto/pii-crypto.util';
+import { blindIndex, maskNationalId, normalizeNationalId } from '../../common/crypto/pii-crypto.util';
 import { TechnicianIdentityService } from './technician-identity.service';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { User, UserType } from '../auth/entities/user.entity';
@@ -15,6 +15,7 @@ describe('TechnicianIdentityService — الرقم القومي كهوية دا�
   const runId = Date.now().toString(36);
   const ids = { userA: '', profileA: '', userB: '', profileB: '', userC: '', profileC: '', adminUser: '' };
   const securityEvents: { eventType: string; severity: string; attemptedValue: unknown }[] = [];
+  const auditRecord = jest.fn(async (_params: { action: string; newValues?: unknown }) => undefined);
 
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
@@ -66,7 +67,7 @@ describe('TechnicianIdentityService — الرقم القومي كهوية دا�
     service = new TechnicianIdentityService(
       dataSource.getRepository(TechnicianProfile),
       dataSource,
-      { record: jest.fn(async () => undefined) } as never,
+      { record: auditRecord } as never,
       {
         recordDenial: jest.fn(async (params: { eventType: string; severity: string; attemptedValue: unknown }) => {
           securityEvents.push(params);
@@ -122,6 +123,23 @@ describe('TechnicianIdentityService — الرقم القومي كهوية دا�
     expect(row.national_id_set_by_user_id).toBe(ids.userA);
 
     expect(await service.revealNationalId(ids.profileA)).toBe(nationalId);
+  });
+
+  it('كشف الأدمن بيتسجّل في السجل بالمقنّع بس — والقراءة الداخلية للإخفاء ما بتسجّلش', async () => {
+    const nationalId = await service.revealNationalId(ids.profileA);
+    auditRecord.mockClear();
+
+    await service.summaryFor(await dataSource.getRepository(TechnicianProfile).findOneByOrFail({ id: ids.profileA }));
+    expect(auditRecord).not.toHaveBeenCalled();
+
+    expect(
+      await service.revealNationalIdForAdmin({ technicianProfileId: ids.profileA, actorUserId: ids.adminUser }),
+    ).toBe(nationalId);
+    expect(auditRecord).toHaveBeenCalledTimes(1);
+    const [entry] = auditRecord.mock.calls[0];
+    expect(entry.action).toBe('technician.national_id_revealed');
+    expect(JSON.stringify(entry)).not.toContain(nationalId!);
+    expect(entry.newValues).toEqual({ national_id_masked: maskNationalId(nationalId!) });
   });
 
   it('فني تاني بنفس الرقم بيترفض، والمحاولة بتتسجّل كحدث أمني بلا تسريب صاحب الرقم', async () => {

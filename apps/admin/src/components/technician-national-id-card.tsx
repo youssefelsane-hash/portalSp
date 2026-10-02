@@ -29,11 +29,15 @@ type NationalIdSummary = AdminTechnicianDetailResponseDto['national_id'];
 export function NationalIdCard({
   technicianId,
   nationalId,
+  canReveal,
   canManage,
   onChanged,
 }: {
   technicianId: string;
   nationalId: NationalIdSummary;
+  /** `technicians.national_id.view` — نفس صلاحية `GET …/national-id` على الباك-إند. */
+  canReveal: boolean;
+  /** `technicians.national_id.manage` — نفس صلاحية `PATCH …/national-id`. */
   canManage: boolean;
   onChanged: () => void;
 }) {
@@ -112,7 +116,7 @@ export function NationalIdCard({
                 اتسجّل: {(formatDateTimeAr(nationalId.set_at) ?? '—')}
               </p>
             )}
-            {canManage && !revealed && (
+            {canReveal && !revealed && (
               <Button size="sm" variant="outline" className="self-start" onClick={reveal} disabled={revealing}>
                 {revealing ? 'بيتحمّل…' : 'اكشف الرقم كامل'}
               </Button>
