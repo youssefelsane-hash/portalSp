@@ -54,4 +54,6 @@ OSTA ليست دليل فنيين؛ هي طبقة ثقة بين البيت وص�
 - المصدر الهندسي: `brand/logo/generate-logo.py`.
 - تصدير وتركيب الأيقونات: `node scripts/export-brand-png.js`.
 - إنتاج مقاسات الحملة: `node scripts/export-brand-campaign.js`.
+- بوسترات العمارات (أسانسير/باب، جاهزة للمطبعة): `node scripts/export-building-posters.js` — المحتوى في `brand/campaigns/building-posters/config.json`.
+- الخط المحلي للمطبوعات: `brand/fonts/tajawal/` (OFL).
 - لا تُعدّل ملفات SVG أو PNG المولّدة يدويًا؛ يُعدّل المصدر ثم يعاد التصدير.

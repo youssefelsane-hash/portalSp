@@ -1,0 +1,125 @@
+{
+  "_readme": "كل نص في البوسترات هنا. عدّل واعمل: node scripts/export-building-posters.js — شوف README.md جنب الملف ده.",
+
+  "brand": {
+    "nameAr": "أسطى",
+    "siteUrl": "https://ostahome.com",
+    "siteDisplay": "ostahome.com"
+  },
+
+  "contact": {
+    "phone": "",
+    "whatsapp": "",
+    "_note": "فاضي = بيتطبع مكانه علامة «لسه» والـPDF بيطلع باسم DRAFT. الأرقام الرسمية في الإعدادات (support.phone_number / support.whatsapp_number)."
+  },
+
+  "stores": {
+    "googlePlay": "",
+    "appStore": "",
+    "_note": "لينك صفحة التطبيق في كل ستور. السكربت بيولّد الـQR بنفسه. لو فاضي بيطلع مكان QR فاضي متعلّم."
+  },
+
+  "building": {
+    "name": "",
+    "code": "",
+    "discountPercent": 10,
+    "_note": "كود العمارة من الأدمن ← العمائر (BLD-…). فاضي = البوستر عام من غير شريط الخصم. --building-code و--building-name و--discount بيعدّوا عليه من سطر الأوامر."
+  },
+
+  "proofs": [
+    { "icon": "shield", "text": "فني موثّق" },
+    { "icon": "tag", "text": "سعر واضح" },
+    { "icon": "route", "text": "تتابع طلبك" }
+  ],
+
+  "services": {
+    "plumbing":          { "label": "سباكة",              "icon": "plumbing" },
+    "electric":          { "label": "كهربا",         "icon": "electric" },
+    "ironing":           { "label": "مكوجي وغسيل",         "icon": "ironing" },
+    "cleaning":          { "label": "تنضيف البيت",    "icon": "cleaning" },
+    "deep_cleaning":     { "label": "تنضيف عميق",          "icon": "sparkle" },
+    "post_construction": { "label": "تنضيف بعد التشطيب",   "icon": "broom" },
+    "carpet":            { "label": "غسيل سجاد",           "icon": "carpet" }
+  },
+
+  "posters": [
+    {
+      "id": "plumbing",
+      "layout": "focus",
+      "service": "plumbing",
+      "eyebrow": "سباكة",
+      "headline": ["الحوض مسدود؟", "سيبها علينا."],
+      "sub": "سبّاك موثّق لحد باب شقتك، وتعرف السعر قبل ما الشغل يبدأ.",
+      "items": ["تسليك الصرف والحوض والبانيو", "تغيير خلاط أو حنفية أو محبس", "كشف وإصلاح التسريب", "تركيب سخان أو فلتر مياه"],
+      "side": ["electric", "ironing", "cleaning", "post_construction", "carpet"]
+    },
+    {
+      "id": "electric",
+      "layout": "focus",
+      "service": "electric",
+      "eyebrow": "كهربا",
+      "headline": ["فيشة باظت؟", "نوّرها بأمان."],
+      "sub": "فني كهربا موثّق للتصليحات والتركيبات البسيطة في شقتك.",
+      "items": ["تغيير فيشة أو مفتاح", "تركيب نجفة أو سبوت لايت", "تركيب شفاط أو مروحة سقف", "كشف على الفصل المتكرر"],
+      "side": ["plumbing", "ironing", "cleaning", "deep_cleaning", "carpet"]
+    },
+    {
+      "id": "ironing",
+      "layout": "focus",
+      "service": "ironing",
+      "eyebrow": "مكوجي وغسيل",
+      "headline": ["هدومك تتكوى", "وانت مرتاح."],
+      "sub": "كوي وغسيل لهدوم البيت كلها، من قطعة واحدة لحد شنطة كاملة.",
+      "items": ["كوي بالقطعة أو بالشنطة", "غسيل وكوي كامل", "قمصان وبدل وفساتين", "ملايات ومفارش وستاير"],
+      "side": ["cleaning", "carpet", "plumbing", "electric", "deep_cleaning"]
+    },
+    {
+      "id": "cleaning",
+      "layout": "focus",
+      "service": "cleaning",
+      "eyebrow": "تنضيف البيت",
+      "headline": ["البيت يلمع", "من غير تعب."],
+      "sub": "تنضيف عادي أو عميق أو دوري، بالساعة أو بالزيارة، على حسب بيتك.",
+      "items": ["تنضيف عادي للشقة كلها", "تنضيف عميق للمطبخ والحمامات", "زيارات دورية أسبوعية أو شهرية", "شبابيك وأرضيات وأبواب"],
+      "side": ["ironing", "carpet", "post_construction", "plumbing", "electric"]
+    },
+    {
+      "id": "post-construction",
+      "layout": "focus",
+      "service": "post_construction",
+      "eyebrow": "تنضيف بعد التشطيب",
+      "headline": ["خلّصت التشطيب؟", "التراب علينا."],
+      "sub": "بعد المحارة والدهان والتكسير، الشقة ترجعلك جاهزة تتسكن.",
+      "items": ["شيل بواقي الأسمنت والدهان", "أتربة التكسير من كل ركن", "تلميع الأرضيات والسيراميك", "تنضيف الشبابيك والأبواب"],
+      "side": ["deep_cleaning", "carpet", "electric", "plumbing", "ironing"]
+    },
+    {
+      "id": "carpet",
+      "layout": "focus",
+      "service": "carpet",
+      "eyebrow": "غسيل سجاد",
+      "headline": ["السجادة ترجع", "نضيفة من تاني."],
+      "sub": "غسيل السجاد والموكيت بعناية، والسعر قدامك قبل ما تأكّد.",
+      "items": ["سجاد بكل المقاسات", "موكيت وأرضيات قماش", "إزالة البقع والروايح", "مواعيد على حسب وقتك"],
+      "side": ["cleaning", "deep_cleaning", "ironing", "plumbing", "electric"]
+    },
+    {
+      "id": "elevator",
+      "layout": "lift",
+      "eyebrow": "على ما الأسانسير يوصل",
+      "headline": ["تكون حجزت", "أسطى لشقتك."],
+      "sub": "كل شغل البيت في تطبيق واحد.",
+      "steps": ["اختار الخدمة", "حدّد الميعاد", "الأسطى في الطريق", "الشغل خلص"],
+      "grid": ["plumbing", "electric", "ironing", "cleaning", "post_construction", "carpet"]
+    },
+    {
+      "id": "residents",
+      "layout": "code",
+      "eyebrow": "لسكان العمارة",
+      "headline": ["عمارتك ليها", "خصم خاص."],
+      "sub": "اكتب كود العمارة وقت الحجز من التطبيق، والخصم بيتحسب لوحده.",
+      "steps": ["حمّل تطبيق أسطى", "اختار الخدمة والميعاد", "اكتب الكود في خانة «كود خاص»"],
+      "grid": ["plumbing", "electric", "ironing", "cleaning", "post_construction", "carpet"]
+    }
+  ]
+}
