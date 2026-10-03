@@ -528,3 +528,13 @@ service.allowsScheduling && !isEmergency && !scheduled_at  ⇒  400 VAL_001
   توافق بس لما الكولر يبعت رتبة بلا فئة.
 
 العقد كله متثبّت في `pricing-multiplier-chain.spec.ts`.
+
+## «نفس اليوم كحجز عادي» و«رسوم الطوارئ» لكل خدمة (ADR-0118، migration 0376)
+
+- `services.same_day_scheduling_enabled` (افتراضي false): حجز النهارده موعد عادي — `isSameDayUrgent()` بترجّع false،
+  و`booking_mode=emergency` من عميل قديم بيتجاهل في `POST /services/:id/estimate` و`GET /services/:id/technicians`.
+  محتاج `allows_scheduling` (`serviceBookabilityIssues` بيرفض الحفظ برسالة، وCHECK في القاعدة كخط أخير).
+- `services.emergency_surcharge_enabled` (افتراضي true): لما تتقفل، `CatalogService.estimate()` بيحط نسبة الطوارئ صفر
+  — والطلب بيفضل طوارئ في التوزيع والـSLA.
+- قايمة المنفّذين بتطبّق سقف قرار المستوى بعد التسعير (`technicians/decision-limit-gate.ts`)، و`include_ineligible`
+  في `ListTechniciansForServiceDto` بيرجّع غير المؤهّلين بحالة `not_eligible` بدل ما يشيلهم.

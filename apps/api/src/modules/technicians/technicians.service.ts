@@ -108,9 +108,17 @@ export interface TechnicianBookingListItem {
   // الصفوف الحالية (رجريشن صفري). 'schedule_conflicted' بس لصفوف إضافية جديدة (Service.
   // showUnavailableProviders=true + scheduledAt موجودة) — مؤهّل فعلاً بس مشغول بشغل تاني وقت
   // الفترة المطلوبة، مش محظور/غير مؤهّل (الفئة دي تفضل مخفية تمامًا زي ما كانت دايمًا).
-  availabilityStatus: 'available' | 'schedule_conflicted';
+  // `not_eligible` (ADR-0118): مؤهّل للخدمة ومتاح وقتها، بس سعر الشغلانة دي أكبر من سقف قرار
+  // مستواه — المحرك هيرفضه، فالقايمة لازم تقول كده بدل ما تعرضه متاح.
+  availabilityStatus: 'available' | 'schedule_conflicted' | 'not_eligible';
   unavailableReasonAr: string | null;
   availableAgainAt: string | null;
+  /**
+   * سقف قرار المستوى (`technician_level_config.decision_limit_cents`) — نفس الرقم اللي
+   * `findEligibleTechnicians()` و`assertEligible()` بيقارنوه بإجمالي الطلب. للشركة: أعلى سقف بين
+   * أعضائها المتاحين (عضو واحد يكفي). `null` = بلا سقف.
+   */
+  decisionLimitCents: number | null;
 }
 
 export function dedupeTechnicianBookingItems(
@@ -495,6 +503,7 @@ export class TechniciansService {
       distance_km: string | null;
       current_level: TechnicianLevel;
       level_label_ar: string | null;
+      decision_limit_cents: number | null;
       pricing_tier: TechnicianPricingTier;
       is_trust_verified: boolean;
       on_time_rate: string | null;
@@ -515,6 +524,7 @@ export class TechniciansService {
              -- عنده خريطة ثابتة بتقول «مميز» والأدمن ضابط «بريميوم» في نفس الوقت — قيمتين
              -- لنفس الحاجة، وأي تعديل من اللوحة مكانش بيوصل للعميل.
              tlc.display_name_ar AS level_label_ar,
+             tlc.decision_limit_cents,
              tp.is_trust_verified,
              company.id AS company_id, company.name AS company_name,
              company.commercial_registration_number,
@@ -687,6 +697,7 @@ export class TechniciansService {
       availabilityStatus: 'available',
       unavailableReasonAr: null,
       availableAgainAt: null,
+      decisionLimitCents: row.decision_limit_cents !== null ? Number(row.decision_limit_cents) : null,
     }));
 
     // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — دلو إضافي منفصل تمامًا
@@ -737,6 +748,7 @@ export class TechniciansService {
       is_trust_verified: boolean;
       commercial_registration_number: string | null;
       price_multiplier: string;
+      max_decision_limit_cents: string | null;
     }
     const companyRows = await this.technicianProfiles.manager.query<CompanyRow[]>(
       `
@@ -751,7 +763,11 @@ export class TechniciansService {
              SUM(COALESCE(ts.completed_count, 0)) AS completed_count,
              MIN(ST_Distance(tp.current_location, a.location) / 1000.0) AS distance_km,
              (SELECT COUNT(*) FROM technician_profiles WHERE company_id = tc.id) AS staff_count,
-             (SELECT COUNT(*) FROM technician_company_branches WHERE company_id = tc.id) AS branch_count
+             (SELECT COUNT(*) FROM technician_company_branches WHERE company_id = tc.id) AS branch_count,
+             -- ADR-0118 — الشركة تقدر تاخد الشغلانة لو **عضو واحد** متاح سقفه يكفي (التوزيع جوّاها
+             -- بيدوّر على عضو بنفس شرط المحرك). أي عضو بلا سقف ⇒ الشركة بلا سقف.
+             CASE WHEN BOOL_OR(member_cap.decision_limit_cents IS NULL) THEN NULL
+                  ELSE MAX(member_cap.decision_limit_cents) END AS max_decision_limit_cents
       FROM technician_companies tc
       -- نفس شروط أهلية الفرد بالحرف (خدمة/فئة، منطقة، current_location، توافر) فوق، **بدون**
       -- فلتر مستوى — على الأقل عضو واحد مؤهّل فعليًا للخدمة/المنطقة/الموعد ده كافي عشان الشركة
@@ -763,6 +779,7 @@ export class TechniciansService {
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN services svc ON svc.id = $1
+      LEFT JOIN technician_level_config member_cap ON member_cap.level = tp.current_level
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tc.is_active = true
         -- ADR-0087 — نفس قاعدة القايمة الأساسية: الحجب هو اللي بيمنع القيادة، مش النوع.
@@ -845,6 +862,7 @@ export class TechniciansService {
       availabilityStatus: 'available',
       unavailableReasonAr: null,
       availableAgainAt: null,
+      decisionLimitCents: row.max_decision_limit_cents !== null ? Number(row.max_decision_limit_cents) : null,
     }));
 
     /**
@@ -1210,6 +1228,8 @@ export class TechniciansService {
           // مش هيقدر ياخد الطلب دلوقتي — نفس رسالة واحدة بسيطة لكل الحالات.
           unavailableReasonAr: 'الفني ده مش متاح في الوقت ده',
           availableAgainAt: safeNextAvailable,
+          // مش متاح أصلًا — السقف مالوش أثر على صف أحمر.
+          decisionLimitCents: null,
         };
       }),
     );

@@ -185,9 +185,11 @@ describe('GET /services/:id/technicians — سياق الجدولة هو الل�
         `INSERT INTO users (phone_number,full_name,user_type) VALUES ($1,$2,'technician') RETURNING id`,
         [`+208${phoneSuffix}${runId}`.slice(0, 15), `${label} ${runId}`],
       );
+      // مستوى بلا سقف قرار (ADR-0118): الاختبار ده عن التوافر مش عن السقف، وشغلانة الفيكستشر أكبر من سقف
+      // «جديد» — اللي المحرك بيرفضه والقايمة بقت بتشيله زيه. السقف نفسه متغطّي في decision-limit-gate.spec.
       const [tech] = await q(
         `INSERT INTO technician_profiles (user_id,technician_code,national_id_encrypted,verification_status,current_level,current_location)
-         VALUES ($1,$2,'x','approved','new', ST_SetSRID(ST_MakePoint(31.24,30.04),4326)::geography) RETURNING id`,
+         VALUES ($1,$2,'x','approved','premium', ST_SetSRID(ST_MakePoint(31.24,30.04),4326)::geography) RETURNING id`,
         [user.id, `${codePrefix}${runId}`.slice(0, 20)],
       );
       for (const serviceId of [ids.serviceId, ids.asapServiceId]) {

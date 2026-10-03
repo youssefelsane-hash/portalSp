@@ -56,6 +56,9 @@ class TechniciansRepository {
     if (bookingMode != null) {
       query.write('&booking_mode=${bookingMode.apiValue}');
     }
+    // ADR-0118 — التطبيق بيفهم `not_eligible`، فالسيرفر يعرضهم أحمر بسببهم (لو الخدمة بتعرض غير
+    // المتاحين) بدل ما يخفيهم.
+    query.write('&include_ineligible=true');
     final items = await api_client.apiRequestList(
       '/services/$serviceId/technicians?address_id=$addressId$query',
     );

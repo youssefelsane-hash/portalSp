@@ -92,6 +92,10 @@ export interface AdminServiceResponseDto extends ServiceAssessmentPolicyFields {
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
+  /** ADR-0118 §4 — حجز النهارده للخدمة دي موعد عادي مش طوارئ (محتاج `allows_scheduling`). */
+  same_day_scheduling_enabled: boolean;
+  /** ADR-0118 §5 — false = الطلب المستعجل من غير رسوم طوارئ. */
+  emergency_surcharge_enabled: boolean;
   /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات تبادلية. */
   schedule_precision: SchedulePrecision;
   min_technician_level: string;
@@ -200,6 +204,8 @@ export interface CreateServiceBody extends Partial<ServiceAssessmentPolicyFields
   allows_date_range_booking?: boolean;
   allows_recurring_booking?: boolean;
   show_unavailable_providers?: boolean;
+  same_day_scheduling_enabled?: boolean;
+  emergency_surcharge_enabled?: boolean;
   schedule_precision?: SchedulePrecision;
   min_technician_level?: string;
   display_order?: number;

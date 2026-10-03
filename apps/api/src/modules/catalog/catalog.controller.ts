@@ -6,6 +6,7 @@ import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.se
 import { toTechnicianBookingListItemResponseDto } from '../technicians/dto/technician-booking-list-response.dto';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CatalogService } from './catalog.service';
+import { applyDecisionLimitGate } from '../technicians/decision-limit-gate';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { buildPricingContext } from '../pricing/pricing-context';
@@ -94,11 +95,15 @@ export class CatalogController {
   async estimate(@Param('id', ParseUUIDPipe) id: string, @Query() query: EstimateQueryDto) {
     if (query.zone_id) await this.catalogService.assertServiceAvailableInZone(id, query.zone_id);
     const period = contractPeriodFromFieldValues(query.field_values);
+    // ADR-0118 §4 — نفس قاعدة قايمة المنفّذين بالحرف: الخدمة دي مالهاش طوارئ، فـ`emergency` من
+    // عميل قديم مابيغيّرش السعر المعروض عن اللي الحجز هيسجّله.
+    const { sameDaySchedulingEnabled } = await this.catalogService.findServiceOrThrow(id);
+    const isEmergency = query.booking_mode === 'emergency' && !sameDaySchedulingEnabled;
     return this.catalogService.estimate(
       id,
       query.zone_id,
       query.technician_level,
-      query.booking_mode === 'emergency',
+      isEmergency,
       query.field_values,
       query.pricing_tier,
       undefined,
@@ -112,7 +117,7 @@ export class CatalogController {
         periodEnd: period.end,
         serviceFieldValues: query.field_values,
         zoneId: query.zone_id,
-        isEmergency: query.booking_mode === 'emergency',
+        isEmergency,
         technicianLevel: query.technician_level,
       }),
     );
@@ -186,7 +191,12 @@ export class CatalogController {
      * للطوارئ)، ومابقاش له أي دخل في قرار الفريق.
      */
     const scheduledAt = query.scheduled_at ? new Date(query.scheduled_at) : null;
-    const isEmergency = isSameDayUrgent({ scheduledAt }) || query.booking_mode === 'emergency';
+    // ADR-0118 §4 — خدمة «نفس اليوم كحجز عادي» مالهاش طوارئ أصلاً: `booking_mode=emergency` جاي من
+    // نسخ تطبيق منشورة بتعتبر أي حجز للنهارده طوارئ، وتصديقه كان هيعرض قايمة/رسوم مختلفة عن اللي
+    // الإنشاء هيعمله فعلاً.
+    const isEmergency =
+      isSameDayUrgent({ scheduledAt, sameDaySchedulingEnabled: service.sameDaySchedulingEnabled }) ||
+      (query.booking_mode === 'emergency' && !service.sameDaySchedulingEnabled);
     /**
      * **`scheduled_at = null` معناها «دلوقتي» — وده صح للطوارئ بس** (بلاغ مالك 2026-09-19).
      *
@@ -210,7 +220,12 @@ export class CatalogController {
     }
     // خدمات formula من غير field_values مالهاش سعر ولا حمل تشغيلي معروف لسه (العميل ما ملاش
     // الفورم) — بترجع null صراحة بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
-    const canPrice = !(service.pricingModel === PricingModel.FORMULA && !query.field_values);
+    // خدمة formula من غير فورم (أو فورمها كله اختياري) بتتسعّر عادي بقيم فاضية — كانت بترجع بلا سعر
+    // لمجرد إن العميل مابعتش `field_values` (الويب مابيبعتهاش لو الفورم فاضي)، وده كان بيشيل كمان
+    // الأساس الوحيد لفحص سقف المستوى (ADR-0118). الفورم الناقص فعلًا بيرمي، فبنرجع لـ«بلا سعر».
+    const pricingFieldValues =
+      query.field_values ?? (service.pricingModel === PricingModel.FORMULA ? {} : undefined);
+    let canPrice = true;
     // **ADR-0064 §3** — الحمل التشغيلي بيتحسب **مرة واحدة قبل الفلترة**، بنفس محرك التسعير اللي
     // `POST /orders` هيستخدمه بالحرف (تسعير محايد بلا مستوى فني — المدة مخرج المعادلة، مش
     // بتتغيّر بمستوى المنفّذ). من غيره كانت فلترة التوافر بتفترض «يوم واحد» لأي حجز مهما كان
@@ -220,9 +235,13 @@ export class CatalogController {
     // المنطقة اللي `listForServiceBooking()` بتعمله جوّاها (استخراج، مش استعلام تاني موازي).
     const zone = await this.techniciansService.resolveZoneForAddressOrThrow(query.address_id);
     await this.catalogService.assertServiceAvailableInZone(id, zone.id);
-    const neutralEstimate = canPrice
-      ? await this.catalogService.estimate(id, zone.id, undefined, isEmergency, query.field_values)
-      : null;
+    let neutralEstimate: Awaited<ReturnType<CatalogService['estimate']>> | null = null;
+    try {
+      neutralEstimate = await this.catalogService.estimate(id, zone.id, undefined, isEmergency, pricingFieldValues);
+    } catch (err) {
+      if (query.field_values || !(err instanceof ApiException)) throw err;
+      canPrice = false;
+    }
     // الوضع المشتقّ — نفس الدالة اللي إنشاء الطلب بيستخدمها، وبنفس مدخلات التسعير المحايد.
     const derivedMode = resolveBookingMode({
       urgent: isEmergency,
@@ -306,7 +325,7 @@ export class CatalogController {
                 zoneId,
                 item.isCompany ? undefined : item.currentLevel,
                 isEmergency,
-                query.field_values,
+                pricingFieldValues,
                 item.isCompany ? undefined : item.pricingTier,
                 undefined,
                 undefined,
@@ -330,6 +349,18 @@ export class CatalogController {
       sorted.sort((a, b) => b.item.averageRating - a.item.averageRating);
     }
 
+    // ADR-0118 — سقف قرار المستوى على **سعر المنفّذ نفسه**، نفس الرقم المعروض (`final_price_cents`)
+    // واللي المعاينة والتوزيع بيقارنوه بالسقف. من غيره القايمة كانت بتعرض منفّذ المحرك هيرفضه.
+    const gated = applyDecisionLimitGate(
+      sorted.map((entry) => ({
+        ...entry,
+        amountCents: entry.estimate
+          ? entry.estimate.estimated_total_cents + entry.estimate.inspection_fee_cents + entry.estimate.emergency_surcharge_cents
+          : null,
+      })),
+      { showUnavailable: service.showUnavailableProviders, includeIneligible: query.include_ineligible === true },
+    );
+
     // **مؤشر الوصول بيتحدد هنا مرة واحدة** (ADR-0099): فوري/قريب ⇒ مدة وصول، مجدول ⇒ التزام
     // بالمواعيد. القرار في السيرفر عشان التطبيق والويب والأدمن يقولوا نفس الحاجة بنيويًا.
     const arrivalDecision = await resolveArrivalMetric(this.settingsService, query.scheduled_at ?? null);
@@ -337,7 +368,7 @@ export class CatalogController {
       'matching.min_punctuality_sample',
       MIN_PUNCTUALITY_SAMPLE_FALLBACK,
     );
-    return sorted.map(({ item, estimate }) =>
+    return gated.map(({ item, estimate }) =>
       toTechnicianBookingListItemResponseDto(item, estimate, {
         mode: arrivalDecision.mode,
         minPunctualitySample,

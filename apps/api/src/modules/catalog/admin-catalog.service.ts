@@ -351,6 +351,8 @@ export class AdminCatalogService {
       allowsRecurringBooking: dto.allows_recurring_booking ?? false,
       requiresTechnicianLead: dto.requires_technician_lead ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
+      sameDaySchedulingEnabled: dto.same_day_scheduling_enabled ?? false,
+      emergencySurchargeEnabled: dto.emergency_surcharge_enabled ?? true,
       // الحجز بساعة وصول هو القاعدة للخدمات الجديدة. «يوم كامل» استثناء صريح فقط، حتى لا
       // يختفي اختيار الساعة من رحلة الكتالوج إذا لم يرسل نموذج الإدارة الحقل.
       requiresStartTimeOnly: dto.schedule_precision !== 'full_day',
@@ -495,6 +497,7 @@ export class AdminCatalogService {
       allowsTeam: service.allowsTeam,
       allowsEmergency: service.allowsEmergency,
       allowsScheduling: service.allowsScheduling,
+      sameDaySchedulingEnabled: service.sameDaySchedulingEnabled,
     });
     if (issues.length === 0) return;
     throw new ApiException(ErrorCode.VAL_001, issues.join(' · '), HttpStatus.BAD_REQUEST);
@@ -559,6 +562,8 @@ export class AdminCatalogService {
     if (dto.allows_recurring_booking !== undefined) service.allowsRecurringBooking = dto.allows_recurring_booking;
     if (dto.requires_technician_lead !== undefined) service.requiresTechnicianLead = dto.requires_technician_lead;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
+    if (dto.same_day_scheduling_enabled !== undefined) service.sameDaySchedulingEnabled = dto.same_day_scheduling_enabled;
+    if (dto.emergency_surcharge_enabled !== undefined) service.emergencySurchargeEnabled = dto.emergency_surcharge_enabled;
     // ADR-0060 §4 — وضع واحد بالظبط بالبناء: مفيش تركيبة غلط ممكن تتبعت أصلاً، فمفيش تحقق تبادل.
     if (dto.schedule_precision !== undefined) service.requiresStartTimeOnly = dto.schedule_precision === 'start_time';
     this.assertQuantityConfiguration({

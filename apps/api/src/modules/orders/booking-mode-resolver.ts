@@ -30,6 +30,11 @@ export interface UrgencyInput {
   /** اليوم اللي العميل اختاره — `null` يعني مفيش تاريخ اتبعت أصلاً (شوف الشرح تحت). */
   scheduledAt: Date | null;
   now?: Date;
+  /**
+   * `services.same_day_scheduling_enabled` (ADR-0118 §4) — الخدمة دي حجز النهارده فيها موعد عادي.
+   * اختياري عشان أي منادي مابيعرفش الخدمة يفضل على السلوك القديم بالحرف.
+   */
+  sameDaySchedulingEnabled?: boolean;
 }
 
 /**
@@ -54,6 +59,7 @@ export interface UrgencyInput {
  */
 export function isSameDayUrgent(input: UrgencyInput): boolean {
   if (!input.scheduledAt) return false;
+  if (input.sameDaySchedulingEnabled) return false;
   const today = platformDayOf(input.now ?? new Date());
   return platformDayOf(input.scheduledAt) === today;
 }

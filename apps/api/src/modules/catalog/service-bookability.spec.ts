@@ -32,6 +32,15 @@ describe('قابلية الحجز — إعدادات الأدمن مقابل م�
     expect(issues[0]).toContain('فني فردي أو فريق');
   });
 
+  it('«نفس اليوم كحجز عادي» من غير جدولة = موعد النهارده هيترفض، والحفظ لازم يترفض', () => {
+    const issues = serviceBookabilityIssues({
+      ...base, allowsScheduling: false, allowsEmergency: true, sameDaySchedulingEnabled: true,
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('حجز مجدول');
+    expect(serviceBookabilityIssues({ ...base, sameDaySchedulingEnabled: true })).toEqual([]);
+  });
+
   it('لا جدولة ولا طوارئ = مفيش وقت العميل يحجز فيه', () => {
     const issues = serviceBookabilityIssues({ ...base, allowsScheduling: false, allowsEmergency: false });
     expect(issues).toHaveLength(1);

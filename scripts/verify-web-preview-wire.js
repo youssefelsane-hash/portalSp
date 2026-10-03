@@ -6,7 +6,7 @@
  * دي. قبل §188 الويب كان بيبعت يوم البداية بس في «مرن في الموعد»، ومابيبعتش التكرار خالص —
  * فالسيرفر كان بيسعّر حجز تاني غير اللي العميل هيأكده.
  *
- * بيمشي الفلو زي العميل بالظبط (دخول ⇒ عنوان ⇒ موعد ⇒ «خلي أسطى يختار» ⇒ الخطوة ٣) مرتين:
+ * بيمشي الفلو زي العميل بالظبط (دخول ⇒ عنوان ⇒ موعد ⇒ ترشيح تلقائي ⇒ الخطوة ٣) مرتين:
  *   ١. «مرن في الموعد» بنطاق ⇒ آخر نداء `/orders/preview` فيه `scheduled_at_range_end`.
  *   ٢. يوم محدد ثم «أسبوعي» ⇒ نداء معاينة جديد فيه `repeat_frequency: weekly`.
  *
@@ -68,10 +68,8 @@ async function main() {
       await next().click();
       await page.waitForTimeout(2000);
       await pickSchedule();
-      await page.getByRole('button', { name: /خلي أسطى يختار/ }).click();
-      const matchButton = page.getByRole('button', { name: /رشّح لي أفضل أسطى/ });
-      if (await matchButton.count()) await matchButton.click();
-      await page.waitForTimeout(3000);
+      // ADR-0118 §3 — الترشيح التلقائي بيحصل لوحده أول ما الموعد يكتمل (مفيش زرار «خلي أسطى يختار»).
+      await page.getByTestId('auto-pick-result').waitFor({ timeout: 20_000 });
       await next().click();
       await page.waitForTimeout(3000);
     };

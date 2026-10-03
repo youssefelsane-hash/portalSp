@@ -43,7 +43,11 @@ export interface TechnicianBookingListItemDto {
   company_id: string | null;
   company_name: string | null;
   is_commercial_company: boolean;
-  availability_status: 'available' | 'schedule_conflicted';
+  /**
+   * `not_eligible` (ADR-0118): الشغلانة أكبر من سقف مستواه (أو مفيش عضو في الشركة سقفه يكفي).
+   * بيوصل بس لما نبعت `include_ineligible` — وأي حالة غير `available` معناها مايتحجزش.
+   */
+  availability_status: 'available' | 'schedule_conflicted' | 'not_eligible';
   unavailable_reason_ar: string | null;
   available_again_at: string | null;
 }
@@ -77,7 +81,9 @@ export function fetchTechniciansForService(
     scheduledAt?: string;
   } = {},
 ) {
-  const query = new URLSearchParams({ address_id: addressId });
+  // ADR-0118 — بنفهم `not_eligible`، فالسيرفر يعرضهم أحمر بسببهم بدل ما يخفيهم (لو الخدمة بتعرض
+  // غير المتاحين). عميل مابيبعتهاش بيتشالوا له، عشان مايشوفهمش «متاحين» ويتقفل عليه الحجز.
+  const query = new URLSearchParams({ address_id: addressId, include_ineligible: 'true' });
   if (params.sameDayUrgent) query.set('booking_mode', 'emergency');
   if (params.scheduledAt) query.set('scheduled_at', params.scheduledAt);
   if (params.fieldValues && Object.keys(params.fieldValues).length > 0) {
@@ -165,6 +171,8 @@ export interface SuggestedTimeDto {
   /** HH:MM بتوقيت مصر. */
   time: string;
   free_technicians: number;
+  /** ADR-0118 §6 — كام فني الساعة دي بتلزق في شغله (أو أول يومه). */
+  fit_technicians?: number;
 }
 
 /**
@@ -177,10 +185,16 @@ export interface SuggestedTimeDto {
 export interface JobLoadParams {
   durationMinutes?: number | null;
   estimatedDurationDays?: number | null;
+  /**
+   * قيمة الشغلانة التقديرية بالقرش (ADR-0118) — بيتشال بيها من العدّ كل فني سقف مستواه أقل منها،
+   * فالاقتراح مايقولش «٣ متاحين» واللي يقدر ياخدها فعلاً واحد.
+   */
+  estimatedTotalCents?: number | null;
 }
 
 const appendJobLoad = (query: URLSearchParams, load: JobLoadParams) => {
   if (load.durationMinutes) query.set('duration_minutes', String(Math.round(load.durationMinutes)));
+  if (load.estimatedTotalCents) query.set('estimated_total_cents', String(Math.round(load.estimatedTotalCents)));
   if (load.estimatedDurationDays) {
     query.set('estimated_duration_days', String(Math.ceil(load.estimatedDurationDays)));
   }

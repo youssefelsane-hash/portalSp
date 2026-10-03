@@ -106,6 +106,10 @@ class CatalogService {
   final int warrantyDays;
   final bool allowsScheduling;
   final bool allowsEmergency;
+
+  /// ADR-0118 §4 — حجز النهارده للخدمة دي **موعد عادي** مش طوارئ (المكوجي مثلاً): العميل بيختار
+  /// منفّذ وساعة، ومفيش رسوم استعجال. `false` لو الرد من خادم أقدم = السلوك القديم.
+  final bool sameDaySchedulingEnabled;
   // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة: الموديول القديم كان بيقرا
   // allows_emergency بس، مش allows_individual/allows_team رغم إنهم موجودين في رد الباك-إند من
   // زمان (service-response.dto.ts) — اكتشفت وقت بناء "الطلبات المتكررة" لما القالب كان بيتقبل
@@ -155,6 +159,7 @@ class CatalogService {
     this.warrantyDays = 0,
     required this.allowsScheduling,
     required this.allowsEmergency,
+    this.sameDaySchedulingEnabled = false,
     required this.allowsIndividual,
     required this.allowsTeam,
     required this.allowsDateRangeBooking,
@@ -192,6 +197,8 @@ class CatalogService {
     warrantyDays: json['warranty_days'] as int? ?? 0,
     allowsScheduling: json['allows_scheduling'] as bool,
     allowsEmergency: json['allows_emergency'] as bool,
+    sameDaySchedulingEnabled:
+        json['same_day_scheduling_enabled'] as bool? ?? false,
     allowsIndividual: json['allows_individual'] as bool,
     allowsTeam: json['allows_team'] as bool,
     allowsDateRangeBooking: json['allows_date_range_booking'] as bool,

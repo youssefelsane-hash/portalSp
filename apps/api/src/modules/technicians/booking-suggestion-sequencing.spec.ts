@@ -35,10 +35,14 @@ describe('اقتراح المواعيد — التسلسل وصدق العدّا
   const q = <T = Record<string, string>>(sql: string, params?: unknown[]): Promise<T[]> =>
     dataSource.query(sql, params);
 
-  /** إعدادات ثابتة: كل قيمة بترجع افتراضها، إلا وزن التسلسل اللي كل حالة بتحدده. */
-  const settingsStub = (sequencingWeight: number) => ({
+  /** إعدادات ثابتة: كل قيمة بترجع افتراضها، إلا الأوزان اللي كل حالة بتحددها. */
+  const settingsStub = (sequencingWeight: number, compactionWeight?: number) => ({
     getNumber: jest.fn(async (key: string, fallback: number) =>
-      key === 'booking.suggestion_sequencing_weight' ? sequencingWeight : fallback,
+      key === 'booking.suggestion_sequencing_weight'
+        ? sequencingWeight
+        : key === 'booking.suggestion_compaction_weight' && compactionWeight !== undefined
+          ? compactionWeight
+          : fallback,
     ),
     getString: jest.fn(async (_k: string, f: string) => f),
     getBoolean: jest.fn(async (_k: string, f: boolean) => f),
@@ -47,10 +51,10 @@ describe('اقتراح المواعيد — التسلسل وصدق العدّا
   /** كاش مطفي — كل حالة لازم تقيس القاعدة مش صف متبقّي من الحالة اللي قبلها. */
   const cacheStub = { get: jest.fn(async () => null), set: jest.fn(async () => undefined) };
 
-  const buildService = (sequencingWeight: number) =>
+  const buildService = (sequencingWeight: number, compactionWeight?: number) =>
     new BookingSlotSuggestionService(
       dataSource,
-      settingsStub(sequencingWeight) as never,
+      settingsStub(sequencingWeight, compactionWeight) as never,
       new GeoService(
         dataSource.getRepository(City),
         dataSource.getRepository(Area),
@@ -134,15 +138,15 @@ describe('اقتراح المواعيد — التسلسل وصدق العدّا
     return user.id as string;
   }
 
-  async function makeTechnician() {
+  async function makeTechnician(level = 'premium') {
     const userId = await makeUser('technician');
     const [profile] = await q(
       `INSERT INTO technician_profiles
          (user_id, technician_code, current_level, verification_status, is_available, is_on_duty,
           technician_kind, current_location)
-       VALUES ($1,$2,'premium','approved',true,true,'technician',
+       VALUES ($1,$2,$3,'approved',true,true,'technician',
                ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
-      [userId, `BSS${runId.slice(0, 8)}${seq}`.slice(0, 20)],
+      [userId, `BSS${runId.slice(0, 8)}${seq}`.slice(0, 20), level],
     );
     await q(
       `INSERT INTO technician_services (technician_id, service_id, is_active, verification_status)
@@ -278,5 +282,68 @@ describe('اقتراح المواعيد — التسلسل وصدق العدّا
       [overloaded],
     );
     expect(Number(stillCounted)).toBeGreaterThan(0);
+  });
+
+  describe('رصّ الساعات + سقف القرار + نفس اليوم (ADR-0118)', () => {
+    const base = () => ({ customerUserId: ids.customerUser, serviceId: ids.service, addressId: ids.address });
+
+    it('الرصّ: كل ساعة مقترحة بتلزق في شغل قائم أو أول يوم فاضي — مش في نص فراغ فني', async () => {
+      const day = cairoDay(12);
+      const anchored = await makeTechnician();
+      // شغل من ١ لـ٣ الضهر: الساعات اللي «بتلزق» هي ٣ (بعده) و١٢/١١ (قبله في حدود الفجوة).
+      await bookTechnician(anchored, atCairoHour(12, 13), 120);
+
+      const { times } = await buildService(0.5, 1).suggestTimes({ ...base(), day, durationMinutes: 60 });
+      expect(times.length).toBeGreaterThan(0);
+      for (const slot of times) expect(slot.fitTechnicians).toBeGreaterThan(0);
+      // الساعة اللي بعد الشغل مباشرةً لازم تتحسب لازقة لو اتقترحت.
+      const afterJob = times.find((slot) => slot.time === '15:00');
+      if (afterJob) expect(afterJob.fitTechnicians).toBeGreaterThanOrEqual(1);
+    });
+
+    it('وزن رصّ صفر = الترتيب القديم بالحرف (بالفراغ وبس)', async () => {
+      const day = cairoDay(12);
+      const legacy = await buildService(0.5, 0).suggestTimes({ ...base(), day, durationMinutes: 60 });
+      const bestFree = Math.max(...legacy.times.map((slot) => slot.freeTechnicians));
+      // أول اختيار في الترتيب القديم دايمًا أعلى فراغ.
+      expect(legacy.times.some((slot) => slot.freeTechnicians === bestFree)).toBe(true);
+    });
+
+    it('سقف القرار: فني «جديد» مايتعدّش متاح لشغلانة أكبر من سقفه — ولا يوم ولا ساعة', async () => {
+      const day = cairoDay(14);
+      await makeTechnician('new'); // سقف ٢٠٠ج، فاضي طول اليوم
+      const without = await buildService(0.5, 0).suggestTimes({ ...base(), day, durationMinutes: 60 });
+      const withAmount = await buildService(0.5, 0).suggestTimes({
+        ...base(), day, durationMinutes: 60, estimatedTotalCents: 62_400,
+      });
+      const maxFree = (rows: { freeTechnicians: number }[]) => Math.max(...rows.map((row) => row.freeTechnicians));
+      expect(maxFree(withAmount.times)).toBe(maxFree(without.times) - 1);
+      // شغلانة جوّه سقفه ⇒ بيتعدّ عادي.
+      const small = await buildService(0.5, 0).suggestTimes({
+        ...base(), day, durationMinutes: 60, estimatedTotalCents: 15_000,
+      });
+      expect(maxFree(small.times)).toBe(maxFree(without.times));
+    });
+
+    it('النهارده: مفيش ساعة أقرب من مهلة التجهيز (٩٠ دقيقة افتراضيًا)', async () => {
+      const { times } = await buildService(0.5).suggestTimes({ ...base(), day: cairoDay(0), durationMinutes: 60 });
+      const earliestAllowed = Date.now() + 90 * 60_000;
+      for (const slot of times) {
+        expect(new Date(`${cairoDay(0)}T${slot.time}:00+03:00`).getTime()).toBeGreaterThanOrEqual(earliestAllowed - 60_000);
+      }
+    });
+
+    it('خدمة «نفس اليوم كحجز عادي»: الاقتراح مابيستناش ٤٨ ساعة', async () => {
+      await q(`UPDATE services SET same_day_scheduling_enabled = true, allows_scheduling = true WHERE id = $1`, [ids.service]);
+      try {
+        const normal = await buildService(0.5).suggestDays({ ...base(), durationMinutes: 60 });
+        // النهارده لو لسه فيه وقت، وإلا بكرة — في الحالتين أقل من يوم.
+        expect(normal.leadHours).toBeLessThan(24);
+      } finally {
+        await q(`UPDATE services SET same_day_scheduling_enabled = false WHERE id = $1`, [ids.service]);
+      }
+      const regular = await buildService(0.5).suggestDays({ ...base(), durationMinutes: 60 });
+      expect(regular.leadHours).toBe(48);
+    });
   });
 });

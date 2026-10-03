@@ -589,7 +589,11 @@ export class CatalogService {
       companyPriceMultiplier !== undefined ? 'company' : levelMultiplier === 1 ? 'none' : 'pricing_tier';
     const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
       ? await Promise.all([
-          this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
+          // ADR-0118 §5 — الأدمن قافل رسوم الطوارئ على الخدمة دي: الطلب بيفضل مستعجل (SLA والبث)
+          // من غير رسوم. هنا بالذات لأن كل مسار تسعير (العرض، المعاينة، الإنشاء) بيعدّي من هنا.
+          service.emergencySurchargeEnabled
+            ? this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK)
+            : Promise.resolve(0),
           this.settingsService.getNumber('emergency.sla_minutes', EMERGENCY_SLA_MINUTES_FALLBACK),
         ])
       : [0, null];

@@ -29,6 +29,7 @@ export class BookingSlotsController {
       addressId: query.address_id,
       durationMinutes: query.duration_minutes ?? null,
       estimatedDurationDays: query.estimated_duration_days ?? null,
+      estimatedTotalCents: query.estimated_total_cents ?? null,
     });
     return {
       days: result.days.map((day) => ({
@@ -57,7 +58,15 @@ export class BookingSlotsController {
       day: query.day,
       durationMinutes: query.duration_minutes ?? null,
       estimatedDurationDays: query.estimated_duration_days ?? null,
+      estimatedTotalCents: query.estimated_total_cents ?? null,
     });
-    return { times: result.times.map((slot) => ({ time: slot.time, free_technicians: slot.freeTechnicians })) };
+    return {
+      times: result.times.map((slot) => ({
+        time: slot.time,
+        free_technicians: slot.freeTechnicians,
+        // ADR-0118 §6 — كام فني الساعة دي بتلزق في شغله (أو أول يومه) — إضافة، العملاء القدام بيتجاهلوها.
+        fit_technicians: slot.fitTechnicians,
+      })),
+    };
   }
 }

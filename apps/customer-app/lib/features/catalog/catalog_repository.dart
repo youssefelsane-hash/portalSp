@@ -115,7 +115,14 @@ class CatalogRepository {
   /// `price_previewed`، فنداؤها هنا كان هيعدّ «شاف السعر» لعميل لسه ماشافش أي سعر ويفسد القياس.
   ///
   /// بترجّع `null` لو النداء فشل — الاقتراح ساعتها بيرجع لسلوكه القديم بالحرف بدل ما الرحلة تتوقف.
-  Future<({int? durationMinutes, int? estimatedDurationDays})?> estimateJobLoad(
+  Future<
+    ({
+      int? durationMinutes,
+      int? estimatedDurationDays,
+      int? estimatedTotalCents,
+    })?
+  >
+  estimateJobLoad(
     String serviceId, {
     String? zoneId,
     Map<String, dynamic>? fieldValues,
@@ -135,9 +142,15 @@ class CatalogRepository {
       );
       if (data == null) return null;
       final days = (data['estimated_duration_days'] as num?)?.ceil();
+      final total = (data['estimated_total_cents'] as num?)?.round();
       return (
         durationMinutes: (data['duration_minutes'] as num?)?.round(),
         estimatedDurationDays: days,
+        // ADR-0118 — قيمة الشغلانة المحايدة (من غير رسوم طوارئ): الاقتراح بيشيل بيها من العدّ
+        // الفنيين اللي سقف مستواهم أقل منها.
+        estimatedTotalCents: total == null
+            ? null
+            : total + ((data['inspection_fee_cents'] as num?)?.round() ?? 0),
       );
     } catch (_) {
       return null;

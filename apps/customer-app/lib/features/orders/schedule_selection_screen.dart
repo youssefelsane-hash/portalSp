@@ -66,6 +66,9 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// فلسفة `allowsDateRangeBooking` فوق بالحرف.
   final bool allowsSameDay;
 
+  /// ADR-0118 §4 — النهارده للخدمة دي موعد عادي (مش طوارئ): مفيش تنبيه «طلب النهارده».
+  final bool sameDayIsRegular;
+
   /// الخدمة والعنوان — مطلوبين **لاقتراح المواعيد بس** (ADR-0088).
   ///
   /// اختياريين عمدًا: الشاشة ليها مدخلين، وواحد منهم (`create_order_screen` وهو بيغيّر الموعد)
@@ -88,6 +91,9 @@ class ScheduleSelectionScreen extends StatefulWidget {
   /// عدد الأيام المتوقع — للخدمات اللي بتتقاس باليوم (مفيش دقايق). نفس الدور بالظبط.
   final int? estimatedDurationDays;
 
+  /// قيمة الشغلانة التقديرية بالقرش (ADR-0118) — الاقتراح مابيعدّش فني سقف مستواه أقل منها.
+  final int? estimatedTotalCents;
+
   const ScheduleSelectionScreen({
     super.key,
     required this.allowsDateRangeBooking,
@@ -95,10 +101,12 @@ class ScheduleSelectionScreen extends StatefulWidget {
     required this.warrantyDays,
     this.requiresPreciseTime = false,
     this.allowsSameDay = true,
+    this.sameDayIsRegular = false,
     this.serviceId,
     this.addressId,
     this.durationMinutes,
     this.estimatedDurationDays,
+    this.estimatedTotalCents,
   });
 
   @override
@@ -182,6 +190,8 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       'duration_minutes': '${widget.durationMinutes}',
     if (widget.estimatedDurationDays != null)
       'estimated_duration_days': '${widget.estimatedDurationDays}',
+    if (widget.estimatedTotalCents != null)
+      'estimated_total_cents': '${widget.estimatedTotalCents}',
   };
 
   Future<void> _loadSuggestedDays() async {
@@ -245,7 +255,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   Future<void> _pickSuggestedDay(BuildContext context, String day) async {
     final parts = day.split('-').map(int.parse).toList();
     final date = DateTime(parts[0], parts[1], parts[2]);
-    if (_isToday(date) && !await _confirmSameDayUrgency(context)) return;
+    if (_needsUrgencyNotice(date) && !await _confirmSameDayUrgency(context)) {
+      return;
+    }
     if (!context.mounted) return;
     if (!widget.requiresPreciseTime) {
       Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
@@ -295,6 +307,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
         date.month == now.month &&
         date.day == now.day;
   }
+
+  /// تنبيه «طلب النهارده» بيظهر بس لو النهارده فعلاً طوارئ للخدمة دي (ADR-0118 §4).
+  bool _needsUrgencyNotice(DateTime date) =>
+      _isToday(date) && !widget.sameDayIsRegular;
 
   /// أول يوم مسموح في التقويم — بكرة لو الخدمة مابتتعملش في نفس اليوم (ADR-0048 §3).
   DateTime get _firstSelectableDate {
@@ -369,7 +385,9 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       lastDate: DateTime.now().add(const Duration(days: 90)),
     );
     if (date == null || !context.mounted) return;
-    if (_isToday(date) && !await _confirmSameDayUrgency(context)) return;
+    if (_needsUrgencyNotice(date) && !await _confirmSameDayUrgency(context)) {
+      return;
+    }
     if (!context.mounted) return;
     if (!widget.requiresPreciseTime) {
       Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
@@ -401,7 +419,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     if (range == null || !context.mounted) return;
     // النطاق المرن بيبدأ من النهارده = نفس القاعدة بالظبط (الباك-إند بيحل النطاق لأقرب يوم متاح،
     // وممكن يطلع النهارده فعلاً) — فالتنبيه لازم يظهر هنا كمان، مش في مسار اليوم المحدد بس.
-    if (_isToday(range.start) && !await _confirmSameDayUrgency(context)) return;
+    if (_needsUrgencyNotice(range.start) &&
+        !await _confirmSameDayUrgency(context)) {
+      return;
+    }
     if (!context.mounted) return;
     final start = _startOfDay(range.start);
     var end = _startOfDay(range.end);

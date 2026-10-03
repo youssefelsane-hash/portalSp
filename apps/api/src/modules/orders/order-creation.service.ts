@@ -58,7 +58,7 @@ import { assertNoScheduleOverlap } from './order-schedule-interval';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { LOCKED_PROVIDER_UNAVAILABLE_AT_CONFIRM_AR } from './order-provider-lock';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
-import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { canAcceptSameDay, canAcceptScheduled, isSameDayUrgent, platformDayOf, resolveBookingMode } from './booking-mode-resolver';
 import {
   bookingWindowApplies,
   bookingWindowMessageAr,
@@ -703,6 +703,12 @@ export class OrderCreationService {
       // ADR-0080 — التذكرة بتثبّت **منفّذ**: فني أو شركة. اللي بيتبعت في الإنشاء لازم يطابق
       // اللي اتثبّت، والحقل التاني لازم يفضل فاضي — وإلا الطلب بيحمل تفضيلين متناقضين.
       if (selectedMatchPreview.technicianCompanyId) {
+        // تطبيق العميل المنشور (قبل ADR-0118) بيبعت معرّف المرشّح التلقائي في خانة الفني مهما كان
+        // نوعه، فلما المحرك يرشّح شركة الحجز كان بيترفض هنا. المعرّف ده هو الشركة المثبّتة نفسها
+        // بالحرف — مفيش أي التباس — فبيتنقل لخانته بدل الرفض. أي معرّف تاني لسه بيترفض تحت.
+        if (dto.requested_technician_id === selectedMatchPreview.technicianCompanyId) {
+          dto.requested_technician_id = undefined;
+        }
         if (dto.requested_technician_id) {
           throw new ApiException(ErrorCode.VAL_001, 'التذكرة دي لشركة — مينفعش تبعت فني معاها', HttpStatus.CONFLICT);
         }
@@ -2205,7 +2211,10 @@ export class OrderCreationService {
     // emergency or add an emergency fee merely because a worker ran late.
     const urgent = !input.isRecurringOccurrence
       && !input.hasScheduleSlot
-      && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+      && isSameDayUrgent({
+        scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null,
+        sameDaySchedulingEnabled: service.sameDaySchedulingEnabled,
+      });
     // المفتاح الأضيق (ج-١٧): الطوارئ وحدها. مكانه هنا بالذات لأن `urgent` لسه اتحسب دلوقتي —
     // قبل السطر ده مفيش إجابة على «ده طوارئ ولا لأ» (ADR-0048: الوضع مشتق مش مختار). وقبل
     // التسعير مباشرةً، فمفيش رسوم طوارئ بتتحسب لطلب هيترفض بعدها.
@@ -2241,6 +2250,18 @@ export class OrderCreationService {
         const bookingWindow = await resolveBookingWindowSetting(this.settingsService);
         if (!isWithinBookingWindow(chosenAt, bookingWindow)) {
           throw new ApiException(ErrorCode.VAL_001, bookingWindowMessageAr(bookingWindow), HttpStatus.BAD_REQUEST);
+        }
+        // **نفس اليوم كحجز عادي** (ADR-0118 §4): الساعة لازم تدّي الفني وقت يوصل. من غير الحد ده
+        // العميل يقدر يحجز «النهارده الساعة ١٠» وهي ١٠ إلا خمسة — موعد مستحيل يتلحق.
+        if (service.sameDaySchedulingEnabled && platformDayOf(chosenAt) === platformDayOf(new Date())) {
+          const leadMinutes = await this.settingsService.getNumber('booking.same_day_min_lead_minutes', 90);
+          if (chosenAt.getTime() < Date.now() + leadMinutes * 60_000) {
+            throw new ApiException(
+              ErrorCode.VAL_001,
+              `أقرب ميعاد ممكن النهارده بعد ${Math.round(leadMinutes)} دقيقة من دلوقتي — اختار ساعة أبعد`,
+              HttpStatus.BAD_REQUEST,
+            );
+          }
         }
       }
     }

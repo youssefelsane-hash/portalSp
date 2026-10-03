@@ -42,7 +42,10 @@ describe('اقتراح الأيام — دمج الحسابات المتوازي
           location: { coordinates: [31.25, 30.05] },
         }),
       }),
-      query: jest.fn(async () => {
+      query: jest.fn(async (sql: string) => {
+        // قراية علَم «نفس اليوم» للخدمة (ADR-0118) استعلام مفتاح أساسي خفيف زي قراية العنوان —
+        // مش الحساب التقيل اللي الاختبار ده بيعدّه.
+        if (sql.includes('same_day_scheduling_enabled')) return [{ same_day_scheduling_enabled: false }];
         onQuery();
         // تأخير مقصود: من غيره النداءات بتخلص بالترتيب ومايحصلش تزامن حقيقي أصلاً.
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -117,7 +120,8 @@ describe('اقتراح الأيام — دمج الحسابات المتوازي
           location: { coordinates: [31.25, 30.05] },
         }),
       }),
-      query: jest.fn(async () => {
+      query: jest.fn(async (sql: string) => {
+        if (sql.includes('same_day_scheduling_enabled')) return [{ same_day_scheduling_enabled: false }];
         attempts += 1;
         if (attempts === 1) throw new Error('القاعدة وقعت');
         return [{ day: '2027-06-10', available_technicians: '1', idle_technicians: '1' }];

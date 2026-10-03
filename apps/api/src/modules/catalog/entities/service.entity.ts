@@ -279,6 +279,21 @@ export class Service {
   showUnavailableProviders: boolean;
 
   /**
+   * **نفس اليوم كحجز عادي** (ADR-0118 §4، migration 0376) — حجز النهارده للخدمة دي موعد مجدول
+   * مش طوارئ: مفيش رسوم استعجال ولا بث، والعميل بيختار منفّذ، والاقتراحات بتبدأ من النهارده.
+   * مثال المالك: المكوجي بيبعت صبي ياخد الهدوم — مش منطقي العميل يستنى يومين ولا يدفع طوارئ.
+   */
+  @Column({ name: 'same_day_scheduling_enabled', type: 'boolean', default: false })
+  sameDaySchedulingEnabled: boolean;
+
+  /**
+   * رسوم الطوارئ للخدمة دي (ADR-0118 §5). false = الطلب المستعجل بيفضل مستعجل في التوزيع لكن
+   * `emergency_surcharge_cents = 0`. الافتراضي true = السلوك القديم.
+   */
+  @Column({ name: 'emergency_surcharge_enabled', type: 'boolean', default: true })
+  emergencySurchargeEnabled: boolean;
+
+  /**
    * دقة الموعد — العمود الوحيد الباقي من أربعة (ADR-0060 §4، migration 0244).
    *
    * `false` = «يوم كامل» (تاريخ بس)، `true` = «وقت بداية فقط» (تاريخ + ساعة وصول، الافتراضي). التلاتة

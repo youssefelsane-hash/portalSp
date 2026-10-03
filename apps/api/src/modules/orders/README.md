@@ -2380,3 +2380,12 @@ Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/ا�
 التحقق الحي: `admin-orders-filters.spec.ts` على Postgres، والبحث الموسّع في
 `admin-orders-search.spec.ts`. التفاصيل ونتائج النشر في
 `docs/audits/2026-10-01-admin-orders-search-filters.md`.
+
+## الترشيح التلقائي للشركة + نفس اليوم كحجز عادي (ADR-0118، docs/08 §196)
+
+- `BookingMatchPreviewService`: الشركة اللي على راس القايمة بتترشّح **بس** لو `findEligibleTechnicians` لقى عضو مؤهّل
+  جوّاها، وبتتسعّر وتتبصم بـ`requested_technician_company_id` (معاملها) — نفس اللي الإنشاء بيحقنه قبل الهاش.
+- `OrderCreationService`: لو التذكرة لشركة والعميل باعت **نفس معرّف الشركة** في `requested_technician_id` (التطبيق
+  المنشور قبل ADR-0118 بيعمل كده مع الترشيح التلقائي) بيتنقل لخانته بدل الرفض. أي معرّف تاني لسه بيترفض.
+- `isSameDayUrgent()` بتاخد `sameDaySchedulingEnabled`؛ وحجز النهارده لخدمة مفعّل فيها العلَم لازم يبقى بعد
+  `booking.same_day_min_lead_minutes` (٩٠ دقيقة) — وإلا «أقرب ميعاد ممكن النهارده بعد … دقيقة».
