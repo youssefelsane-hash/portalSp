@@ -147,6 +147,11 @@ export interface ServiceDto {
    * يحتاجهم للعرض — بس **مفيش قرار تجاري في `customer-web` مبني عليهم**، وممنوع يرجع.
    */
   allows_emergency: boolean;
+  /**
+   * ADR-0118 §4 — حجز النهارده للخدمة دي موعد عادي مش طوارئ: العميل بيختار ساعة ومنفّذ، ومفيش
+   * رسوم استعجال. اختياري عشان ردود API أقدم.
+   */
+  same_day_scheduling_enabled?: boolean;
   allows_individual: boolean;
   allows_team: boolean;
   // قدرة "الحجز المتكرر" (migration 0176) — nullable في النوع عشان ردود قديمة محتملة،

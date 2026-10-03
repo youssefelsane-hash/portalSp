@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsDateString, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { BOOKING_MODE_FILTER_VALUES, BookingModeFilter } from './list-services.dto';
 
 export class ListTechniciansForServiceDto {
@@ -52,4 +52,14 @@ export class ListTechniciansForServiceDto {
   @IsIn(['recommended', 'lowest_price', 'highest_rating'])
   sort?: 'recommended' | 'lowest_price' | 'highest_rating';
 
+
+  /**
+   * العميل بيفهم حالة `not_eligible` (ADR-0118) — الويب والتطبيق من النسخة دي. من غيرها، المنفّذ
+   * اللي سعر الشغلانة أكبر من سقف مستواه **بيتشال** بدل ما يتعرض أحمر: التطبيق المنشور بيقرا أي
+   * حالة غير `schedule_conflicted` كـ«متاح»، فحالة جديدة كانت هترجّع له نفس البَقّة بالظبط.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  include_ineligible?: boolean;
 }

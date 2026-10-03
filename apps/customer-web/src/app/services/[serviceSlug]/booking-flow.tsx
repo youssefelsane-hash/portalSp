@@ -179,7 +179,13 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   //
   // مقارنة نصية على `YYYY-MM-DD` زي ما `<input type="date">` بيرجّعه — نفس أسلوب `platformDayOf`
   // في الباك-إند بالحرف، بلا أي حساب حدود يوم (البَقّة الموثّقة في `CAIRO_DAY_EXPR`).
-  const isSameDayBooking = scheduledDate !== '' && scheduledDate <= new Date().toLocaleDateString('en-CA');
+  //
+  // ADR-0118 §4 — خدمة «نفس اليوم كحجز عادي» (المكوجي مثلاً): النهارده موعد عادي بمنفّذ وساعة، مش
+  // طوارئ. نفس قرار السيرفر بالحرف (`isSameDayUrgent` بياخد نفس العلَم).
+  const isSameDayBooking =
+    scheduledDate !== '' &&
+    scheduledDate <= new Date().toLocaleDateString('en-CA') &&
+    service?.same_day_scheduling_enabled !== true;
   /*
     ═══ محرك وضع الحجز المحلي اتشال بالكامل (ADR-0106) ═══
 
@@ -503,6 +509,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   // اتشال بالكامل. مفيش غير مسارين تسعير: `formula` (الـeffect فوق، من الفورم) و
   // `inspection_then_quote` (مفيش سعر قبل المعاينة أصلاً).
 
+  // ADR-0118 — قيمة الشغلانة المحايدة (نفس اللي قايمة المنفّذين بتقارن بيها السقف، من غير رسوم
+  // الطوارئ لأن الاقتراح للمواعيد العادية).
+  const suggestionAmountCents = estimate ? estimate.estimated_total_cents + estimate.inspection_fee_cents : null;
+
   // اقتراح الأيام (ADR-0088) — بيتنادى أول ما يبقى فيه عنوان مختار، قبل ما العميل يلمس التاريخ.
   // المدة بتتبعت لو التسعير حسبها، عشان الاقتراح يقيس الطاقة بنفس مسطرة الحجز الحقيقي.
   useEffect(() => {
@@ -517,6 +527,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       addressId: selectedAddressId,
       durationMinutes: estimate?.duration_minutes ?? null,
       estimatedDurationDays: estimate?.estimated_duration_days ?? null,
+      estimatedTotalCents: suggestionAmountCents,
     })
       .then((res) => { if (active) setSuggestedDays(res.days); })
       // الاقتراح ميزة فوق الفلو — فشله بيخفي الشيبس بس ومابيوقفش الحجز.
@@ -531,6 +542,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     service?.allows_scheduling,
     estimate?.duration_minutes,
     estimate?.estimated_duration_days,
+    suggestionAmountCents,
   ]);
 
   // اقتراح الساعات — بعد ما اليوم يتحدد، ولخدمات «ساعة وصول» بس.
@@ -547,6 +559,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       day: scheduledDate,
       durationMinutes: estimate?.duration_minutes ?? null,
       estimatedDurationDays: estimate?.estimated_duration_days ?? null,
+      estimatedTotalCents: suggestionAmountCents,
     })
       .then((res) => { if (active) setSuggestedTimes(res.times); })
       .catch(() => { if (active) setSuggestedTimes(null); });
@@ -559,6 +572,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     service?.schedule_precision,
     estimate?.duration_minutes,
     estimate?.estimated_duration_days,
+    suggestionAmountCents,
   ]);
 
   /**
@@ -736,6 +750,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
       setMatchPreview(preview);
       setMatchPreviewKey(previewInputsKey);
     } catch (err) {
+      if (mode === 'auto') setAutoPreviewFailedKey(previewInputsKey);
       // رسالة صريحة بدل كارت فاضي — البند بيمنع أي استبدال أو فشل صامت.
       setPreviewError(
         err instanceof ApiError ? err.message : 'مقدرناش نرشّح لك مقدم خدمة دلوقتي — جرّب تاني',
@@ -849,6 +864,59 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
     }
   }
 
+  // بند 11 — **إبطال المعاينة عند تغيير أي مدخل مؤثر**، بالاشتقاق مش بـeffect بيمسح الحالة:
+  // بنقارن بصمة المدخلات دلوقتي ببصمتها وقت ما التذكرة اتعملت. أنضف من ناحية React (مفيش
+  // setState جوّه effect ولا رندر متتالي)، وأقرب لطريقة الباك-إند نفسه اللي بيقارن بصمة
+  // برضه — فالواجهة والباك-إند بيسألوا نفس السؤال بنفس الطريقة.
+  //
+  // ومن غيره العميل يفضل شايف كارت فني وسعر محجوزين وهما مابقوش، والباك-إند هيرفض عند التأكيد.
+  //
+  // الحساب هنا قبل أي `return` مبكّر لأن الترشيح التلقائي (تحت) effect محتاج البصمة.
+  const effectiveRequestRemoteQuote = resolveEffectiveRemoteQuote(service, isSameDayBooking, requestRemoteQuote);
+  const previewKeyFor = (mode: 'auto' | 'manual', providerId: string | null) =>
+    JSON.stringify({
+      selectedAddressId,
+      scheduledDate,
+      scheduledDateRangeEnd,
+      preciseTime,
+      scheduleDayMode,
+      promoCode: promoCode.trim(),
+      effectiveRequestRemoteQuote,
+      technicianChoiceMode: mode,
+      selectedTechnicianId: providerId,
+      fieldValues,
+    });
+  const previewInputsKey = previewKeyFor(technicianChoiceMode, selectedTechnicianId);
+  const activePreview = matchPreview !== null && matchPreviewKey === previewInputsKey ? matchPreview : null;
+
+  /**
+   * **الترشيح التلقائي هو الافتراضي** (ADR-0118 §3، طلب مالك 2026-10-03): أول ما الموعد يكتمل
+   * أسطى بيرشّح المنفّذ ويعرضه بسعره، و«اختار حد تاني بنفسك» تحته. خطوة «تلقائي ولا يدوي؟»
+   * اتشالت — كانت سؤال زيادة قبل ما العميل يشوف أي حاجة.
+   *
+   * بيتطلب **مرة واحدة لكل بصمة مدخلات** نجح أو فشل: من غير كده فشل («مفيش حد متاح») يتحول لحلقة
+   * طلبات. إعادة المحاولة بزرار صريح.
+   */
+  const autoPreviewAttemptedKey = useRef<string | null>(null);
+  const [autoPreviewFailedKey, setAutoPreviewFailedKey] = useState<string | null>(null);
+  const autoPreviewReady =
+    step === 2 &&
+    technicianChoiceMode === 'auto' &&
+    service !== null &&
+    selectedAddressId !== null &&
+    availabilityAddressId === selectedAddressId &&
+    serviceAvailabilityError === null &&
+    providerScheduleReady &&
+    !isSameDayBooking &&
+    !effectiveRequestRemoteQuote;
+  useEffect(() => {
+    if (!autoPreviewReady || activePreview !== null || previewLoading) return;
+    if (autoPreviewAttemptedKey.current === previewInputsKey) return;
+    autoPreviewAttemptedKey.current = previewInputsKey;
+    void requestMatchPreview('auto');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPreviewReady, activePreview, previewLoading, previewInputsKey]);
+
   if (authLoading || !service) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-16">
@@ -921,7 +989,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   // بلقطة شاشة مالك: الكارت 0 ج وملخص السعر تحته 150 ج على نفس الشاشة). المعاينة الحية هي
   // المصدر الوحيد، والكتالوج احتياطي للحظة التحميل بس.
   const resolvedInspectionFeeCents = estimate?.inspection_fee_cents ?? service.inspection_fee_cents;
-  const effectiveRequestRemoteQuote = resolveEffectiveRemoteQuote(service, isSameDayBooking, requestRemoteQuote);
+  // `effectiveRequestRemoteQuote` نفسها متحسوبة فوق قبل الـreturn المبكّر (بصمة المعاينة محتاجاها).
   // **بَقّة حقيقية اتلقطت بفحص حي (docs/08 §131)**: الصفحة كانت بتبعت `prepayment_method: undefined`
   // لأي طلب تقييم بالصور، والباك-إند بيرفض بـ«لازم تختار طريقة دفع لرسم التقييم قبل إرسال
   // الصور» لو الخدمة عليها رسم — يعني أي خدمة الأدمن حاطط لها رسم تقييم بالصور مستحيل تتحجز.
@@ -949,25 +1017,6 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
   const remoteQuoteValid = !effectiveRequestRemoteQuote || (problemImages.length > 0 && !isSameDayBooking);
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && service.schedule_precision === 'start_time';
 
-  // بند 11 — **إبطال المعاينة عند تغيير أي مدخل مؤثر**، بالاشتقاق مش بـeffect بيمسح الحالة:
-  // بنقارن بصمة المدخلات دلوقتي ببصمتها وقت ما التذكرة اتعملت. أنضف من ناحية React (مفيش
-  // setState جوّه effect ولا رندر متتالي)، وأقرب لطريقة الباك-إند نفسه اللي بيقارن بصمة
-  // برضه — فالواجهة والباك-إند بيسألوا نفس السؤال بنفس الطريقة.
-  //
-  // ومن غيره العميل يفضل شايف كارت فني وسعر محجوزين وهما مابقوش، والباك-إند هيرفض عند التأكيد.
-  const previewInputsKey = JSON.stringify({
-    selectedAddressId,
-    scheduledDate,
-    scheduledDateRangeEnd,
-    preciseTime,
-    scheduleDayMode,
-    promoCode: promoCode.trim(),
-    effectiveRequestRemoteQuote,
-    technicianChoiceMode,
-    selectedTechnicianId,
-    fieldValues,
-  });
-  const activePreview = matchPreview !== null && matchPreviewKey === previewInputsKey ? matchPreview : null;
 
   /*
     ═══ شروط إكمال كل خطوة — بترجع بالظبط ترتيب الاعتماديات (ADR-0106) ═══
@@ -1576,43 +1625,18 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
         <section ref={providerSectionRef} id={bookingAnchorId('provider')} className="motion-rise booking-panel mt-6 scroll-mt-24">
           <p className="text-sm font-medium text-accent">اختيار المنفّذ</p>
           <h2 className="mb-3 mt-1 text-xl font-bold">مين يعمل الشغل؟</h2>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              onClick={() => changeTechnicianChoiceMode('auto')}
-              className={`booking-option flex-1 ${
-                technicianChoiceMode === 'auto' ? 'booking-option-selected' : ''
-              }`}
-            >
-              <p className="font-medium text-primary">خلي أسطى يختار</p>
-              <p className="text-sm text-muted">أسرع مقدم خدمة متاح بالمنطقة، بأفضل تقييم</p>
-            </button>
-            <button
-              onClick={() => changeTechnicianChoiceMode('manual')}
-              className={`booking-option flex-1 ${
-                technicianChoiceMode === 'manual' ? 'booking-option-selected' : ''
-              }`}
-            >
-              <p className="font-medium">اختار بنفسك</p>
-              <p className="text-sm text-muted">اختار من مقدمي الخدمة المتاحين الأنسب ليك</p>
-            </button>
-          </div>
-
-          {/* بند 9-10 — الترشيح التلقائي بقى **معاينة حقيقية**: العميل بيشوف الفني وسعره
-              وتقييمه قبل ما يأكد، مش بيأكد على المجهول. ولو المرشّح بقى مش متاح وقت التأكيد،
-              الباك-إند بيرفض ويطلب معاينة جديدة — ممنوع استبدال صامت. */}
+          {/* ADR-0118 §3 — مفيش سؤال «تلقائي ولا يدوي» قبل ما العميل يشوف حاجة: أسطى بيرشّح على
+              طول، والقايمة على بُعد ضغطة تحت المرشّح. بند 9-10 — الترشيح **معاينة حقيقية**: الفني
+              وسعره وتقييمه قبل التأكيد، ولو بقى مش متاح وقت التأكيد الباك-إند بيرفض ويطلب معاينة
+              جديدة — ممنوع استبدال صامت. */}
           {technicianChoiceMode === 'auto' && (
-            <div className="mt-3">
-              {activePreview === null ? (
-                <button
-                  onClick={() => requestMatchPreview('auto')}
-                  disabled={previewLoading}
-                  className="w-full rounded-xl border border-primary bg-primary/5 px-4 py-3 text-sm font-medium text-primary disabled:opacity-50"
-                >
-                  {previewLoading ? 'بندوّر على أفضل أسطى...' : 'رشّح لي أفضل أسطى وسعره'}
-                </button>
-              ) : (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-                  <div className="flex items-center justify-between gap-3">
+            <div className="mt-1" data-testid="auto-pick">
+              {!providerScheduleReady ? (
+                <p className="text-sm text-muted">اختار الموعد الأول، وهنرشّح لك أنسب مقدم خدمة متاح وقتها.</p>
+              ) : activePreview !== null ? (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4" data-testid="auto-pick-result">
+                  <p className="text-xs font-medium text-primary">رشّحنا لك</p>
+                  <div className="mt-1 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate font-medium">{activePreview.provider.full_name}</p>
                       <p className="text-sm text-muted">
@@ -1644,20 +1668,53 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                     — ولو غيّرت أي تفصيلة هنرشّح لك من جديد.
                   </p>
                   <button
-                    onClick={() => requestMatchPreview('auto')}
-                    disabled={previewLoading}
-                    className="mt-2 text-sm text-primary underline disabled:opacity-50"
+                    type="button"
+                    onClick={() => changeTechnicianChoiceMode('manual')}
+                    className="motion-press mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-primary px-4 text-sm font-semibold text-primary"
+                    data-testid="auto-pick-choose-other"
                   >
-                    رشّح لي حد تاني
+                    اختار حد تاني بنفسك
                   </button>
                 </div>
+              ) : previewError !== null && !previewLoading ? (
+                <div className="rounded-xl border border-border bg-surface p-4" data-testid="auto-pick-failed">
+                  <p className="text-sm text-danger">{previewError}</p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => changeTechnicianChoiceMode('manual')}
+                      className="motion-press inline-flex min-h-11 flex-1 items-center justify-center rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground"
+                    >
+                      اختار بنفسك من القايمة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void requestMatchPreview('auto')}
+                      className="motion-press inline-flex min-h-11 flex-1 items-center justify-center rounded-xl border border-border px-4 text-sm font-medium"
+                    >
+                      حاول تاني
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border p-4" data-testid="auto-pick-loading" aria-live="polite">
+                  <p className="text-sm text-muted">بندوّر لك على أنسب أسطى متاح في الميعاد ده…</p>
+                  <div className="mt-3 h-10 animate-pulse rounded-lg bg-surface-variant" />
+                </div>
               )}
-              {previewError && <p className="mt-2 text-sm text-danger">{previewError}</p>}
             </div>
           )}
 
           {technicianChoiceMode === 'manual' && (
-            <div className="motion-list mt-3 space-y-2">
+            <div className="motion-list mt-1 space-y-2">
+              <button
+                type="button"
+                onClick={() => changeTechnicianChoiceMode('auto')}
+                className="text-sm font-medium text-primary underline"
+                data-testid="back-to-auto-pick"
+              >
+                خلّي أسطى يرشّح لي
+              </button>
               {/* الموعد لسه ناقص ⇒ حالة محايدة، مش «مفيش فنيين». القايمة ماتسألتش أصلاً. */}
               {!providerScheduleReady ? (
                 <p className="text-sm text-muted">اختار الموعد الأول عشان نعرض لك مقدمي الخدمة المتاحين وقتها</p>
@@ -1671,8 +1728,10 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                   <p className="text-sm font-semibold">مفيش مقدم خدمة متاح في الموعد ده</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-muted">
                     كل مقدمي الخدمة المؤهلين للخدمة دي في منطقتك مشغولين في الوقت اللي اخترته. جرّب
-                    معاد تاني، أو سيبنا نختار أقرب مقدم خدمة متاح.
+                    معاد تاني{autoPreviewFailedKey === previewKeyFor('auto', null) ? '.' : '، أو سيبنا نختار أقرب مقدم خدمة متاح.'}
                   </p>
+                  {/* الترشيح التلقائي فشل لنفس المدخلات ⇒ «اختاروا لي» هيرجّع نفس الرفض، فبيتشال. */}
+                  {autoPreviewFailedKey !== previewKeyFor('auto', null) && (
                   <button
                     type="button"
                     onClick={() => changeTechnicianChoiceMode('auto')}
@@ -1681,6 +1740,7 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                   >
                     اختاروا لي أقرب مقدم خدمة متاح
                   </button>
+                  )}
                 </div>
               ) : (
                 technicians.map((t) =>
@@ -1714,6 +1774,8 @@ export function BookingFlow({ serviceId }: { serviceId: string }) {
                   ),
                 )
               )}
+              {/* فشل تثبيت الاختيار اليدوي ماكانش بيظهر في أي حتة (الرسالة كانت جوّه قسم التلقائي بس). */}
+              {previewError && !previewLoading && <p className="text-sm text-danger">{previewError}</p>}
             </div>
           )}
           <FieldError message={errorFor('provider')} />
@@ -2798,13 +2860,25 @@ function IndividualCard({
   onSelect: () => void;
 }) {
   const conflicted = t.availability_status === 'schedule_conflicted';
+  // ADR-0118 — أي حالة غير «متاح» مايتحجزش: الكارت بيوضّح السبب ومش قابل للاختيار. كان قبل كده
+  // بيتختار عادي ويترفض وقت المعاينة («غير متاح أو غير مؤهل») — نفس بلاغ المالك.
+  const unavailable = t.availability_status !== 'available';
   return (
     <label
-      className={`motion-rise motion-press flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
-        selected ? 'border-primary bg-primary/5' : 'border-border'
-      } ${conflicted ? 'opacity-70' : ''}`}
+      aria-disabled={unavailable}
+      className={`motion-rise flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+        selected ? 'border-primary bg-primary/5' : unavailable ? 'border-danger/30' : 'border-border'
+      } ${unavailable ? 'cursor-not-allowed opacity-70' : 'motion-press cursor-pointer'}`}
+      data-testid={unavailable ? 'provider-unavailable' : 'provider-available'}
     >
-      <input type="radio" name="technician" checked={selected} onChange={onSelect} className="mt-1.5" />
+      <input
+        type="radio"
+        name="technician"
+        checked={selected}
+        onChange={onSelect}
+        disabled={unavailable}
+        className="mt-1.5"
+      />
       {t.avatar_url ? (
         // eslint-disable-next-line @next/next/no-img-element -- صور فنيين خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
         <img
@@ -2828,6 +2902,11 @@ function IndividualCard({
             {t.technician_level_label_ar ?? TECHNICIAN_LEVEL_LABELS_AR[t.technician_level] ?? t.technician_level}
           </span>
         </div>
+        {t.availability_status === 'not_eligible' && (
+          <p className="mt-1 text-xs text-danger">
+            مش متاح للحجز ده{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
+          </p>
+        )}
         {conflicted && (
           <>
             <p className="mt-1 text-xs text-danger">
@@ -2879,13 +2958,23 @@ function CompanyCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const unavailable = t.availability_status !== 'available';
   return (
     <label
-      className={`motion-rise motion-press block cursor-pointer overflow-hidden rounded-xl border-2 transition-colors ${
-        selected ? 'border-primary' : 'border-primary/40'
-      }`}
+      aria-disabled={unavailable}
+      className={`motion-rise block overflow-hidden rounded-xl border-2 transition-colors ${
+        selected ? 'border-primary' : unavailable ? 'border-danger/30' : 'border-primary/40'
+      } ${unavailable ? 'cursor-not-allowed opacity-70' : 'motion-press cursor-pointer'}`}
+      data-testid={unavailable ? 'provider-unavailable' : 'provider-available'}
     >
-      <input type="radio" name="technician" checked={selected} onChange={onSelect} className="sr-only" />
+      <input
+        type="radio"
+        name="technician"
+        checked={selected}
+        onChange={onSelect}
+        disabled={unavailable}
+        className="sr-only"
+      />
       <div className="flex items-center gap-2 bg-primary/10 px-3 py-2">
         <span aria-hidden>🏢</span>
         <span className="flex-1 font-bold">{t.full_name}</span>
@@ -2905,6 +2994,12 @@ function CompanyCard({
         {/* نفس نص التطبيق بالحرف (docs/08 §152) — «الشغل الكبير» كان بيضيّق عرض الشركة
             غلط، و«مسؤولية الشغل» كلام تعاقدي مالوش مكان في كارت اختيار. */}
         <p className="mt-2 text-xs text-muted">فريق كامل من المتخصصين، بيغطّي كل أنواع الشغل.</p>
+        {unavailable && (
+          <p className="mt-2 text-xs text-danger">
+            {t.availability_status === 'not_eligible' ? 'مش متاحة للحجز ده' : 'مش متاحة للفترة دي'}
+            {t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
+          </p>
+        )}
         {t.final_price_cents !== null && (
           <p className="mt-2 text-lg font-bold text-primary">{formatEgp(t.final_price_cents)}</p>
         )}

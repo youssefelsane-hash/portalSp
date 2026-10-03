@@ -32,6 +32,8 @@ export interface ServiceBookabilityConfig {
   allowsTeam: boolean;
   allowsEmergency: boolean;
   allowsScheduling: boolean;
+  /** ADR-0118 §4 — اختياري عشان أي منادي قديم يفضل شغّال (غيابه = مقفول). */
+  sameDaySchedulingEnabled?: boolean;
 }
 
 /**
@@ -76,6 +78,12 @@ export function serviceBookabilityIssues(config: ServiceBookabilityConfig): stri
   // ② **وقت الحجز**: لا جدولة (بكرة وبعده) ولا طوارئ (النهارده) = مفيش وقت العميل يقدر يختاره.
   if (!config.allowsScheduling && !config.allowsEmergency) {
     issues.push('لازم تسمح بالجدولة أو بالطوارئ — واحد على الأقل، وإلا مفيش وقت العميل يقدر يحجز فيه');
+  }
+
+  // ②-ب **نفس اليوم كحجز عادي** (ADR-0118 §4) معناه «حجز النهارده موعد مجدول» — والخدمة
+  // اللي مابتقبلش مواعيد أصلاً هترفض الموعد ده بـ«مش بتقبل حجز مواعيد مقدمًا».
+  if (config.sameDaySchedulingEnabled && !config.allowsScheduling) {
+    issues.push('«نفس اليوم كحجز عادي» محتاج «حجز مجدول» يكون مفعّل — حجز النهارده هنا موعد مجدول عادي');
   }
 
   // ③ **مسار التقييم**: خدمة «محتاجة تقييم» لازم يكون قدام العميل مسار واحد على الأقل.

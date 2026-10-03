@@ -197,11 +197,34 @@ export class BookingMatchPreviewService {
     if (dto.selection_mode === 'auto' && !selectedCompanyId && !dto.technician_id) {
       const topCompany = await this.topRankedCompanyIfBest(pricingInput, previewLoad);
       if (topCompany) {
-        // التسعير بيتعاد **بمعامل الشركة** (ADR-0042) — سعر محسوب بمستوى فرد مالوش أي معنى هنا.
-        selectedCompanyId = topCompany.companyId;
-        autoCompanyDistanceKm = topCompany.distanceKm;
-        chosen = null;
-        finalPricing = await this.ordersService.previewPrice(userId, { ...pricingInput });
+        // **تلات بَقّات كانت هنا** (docs/08 §196، ADR-0118):
+        //  ١. الشركة كانت بتتثبّت من غير ما نتأكد إن **عضو** فيها يقدر ياخد الشغلانة (سقف المستوى،
+        //     الإتاحة) — الفرد بيعدّي على `findEligibleTechnicians` قبل التثبيت، والشركة لأ.
+        //  ٢. التسعير كان من غير `requested_technician_company_id`، فالسعر محايد مش بمعامل الشركة
+        //     (ADR-0042) — والإنشاء بيسعّر بالمعامل، فـ«السعر تغيّر منذ المعاينة».
+        //  ٣. البصمة كانت من غير الشركة، والإنشاء بيحقن الشركة في المدخلات قبل ما يحسبها — فكل حجز
+        //     بشركة مرشّحة تلقائيًا كان بيترفض بـ«تفاصيل الحجز اتغيّرت».
+        // الحل: نفس مسار «العميل اختار الشركة» بالحرف — نفس المدخلات، نفس التسعير، نفس الفحص.
+        const companyInput: PreviewOrderDto = { ...pricingInput, requested_technician_company_id: topCompany.companyId };
+        const companyPricing = await this.ordersService.previewPrice(userId, companyInput);
+        const companyMembers = await this.matchingService.findEligibleTechnicians(
+          this.toEphemeralOrder(companyInput, companyPricing),
+          1,
+          null,
+          false,
+          topCompany.companyId,
+          false,
+          {
+            durationMinutes: companyPricing.duration_minutes,
+            estimatedDurationDays: companyPricing.estimated_duration_days,
+          },
+        );
+        if (companyMembers.length > 0) {
+          selectedCompanyId = topCompany.companyId;
+          autoCompanyDistanceKm = topCompany.distanceKm;
+          chosen = null;
+          finalPricing = companyPricing;
+        }
       }
     }
 
@@ -264,8 +287,10 @@ export class BookingMatchPreviewService {
     // معرّف المنفّذ المثبّت — شركة أو فني، **واحد بالظبط**، ونفس القيمة اللي `create()` هتعيد
     // حساب البصمة بيها (`matchPreviewProviderId`)، وإلا كل حجز بشركة هيترفض بـ«التفاصيل اتغيّرت».
     const providerId = selectedCompanyId ?? chosen!.technician_id;
+    // الشركة بتدخل المدخلات صراحةً — الإنشاء بيحقنها قبل ما يحسب البصمة (`order-creation.service`)،
+    // فلازم تبقى هنا كمان وإلا الشركة المرشّحة تلقائيًا بتترفض وقت التأكيد.
     const exactInput: PreviewOrderDto = selectedCompanyId
-      ? { ...pricingInput }
+      ? { ...pricingInput, requested_technician_company_id: selectedCompanyId }
       : { ...pricingInput, requested_technician_id: chosen!.technician_id };
     const contextHash = bookingMatchContextHash(
       exactInput,

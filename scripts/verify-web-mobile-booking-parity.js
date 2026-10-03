@@ -98,7 +98,9 @@ async function main() {
     if (!excludedFromBoth) failures += 1;
 
     // ═══ ضابط النفي: خدمة فردية بتفتح الفضاء للاتنين ═══
-    await h.q(`UPDATE services SET allows_individual = true, allows_team = false WHERE id = $1`, [serviceId]);
+    // السعر جوّه سقف قرار «جديد» (٢٠٠ج، ADR-0118): الضابط ده عن فلتر حجز الفريق بس — من غيره الفني
+    // بيتشال بسبب تاني صحيح (المحرك هيرفضه بسقفه) والضابط يفشل لسبب مالوش علاقة باللي بيقيسه.
+    await h.q(`UPDATE services SET allows_individual = true, allows_team = false, base_price_cents = 15000 WHERE id = $1`, [serviceId]);
     const webIndividual = await listFor('individual');
     const mobileIndividual = await listFor('team'); // موبايل قديم بيبعت team غلط
     const bothOpen =

@@ -30,6 +30,16 @@ describe('booking-mode-resolver — وضع الحجز مشتق مش مختار (
       expect(isSameDayUrgent({ scheduledAt: new Date('2026-08-29T08:00:00Z'), now })).toBe(false);
     });
 
+    // ADR-0118 §4 — مثال المالك: المكوجي النهارده مش طوارئ.
+    it('خدمة «نفس اليوم كحجز عادي» = النهارده مش مستعجل (لا رسوم ولا بث)', () => {
+      expect(
+        isSameDayUrgent({ scheduledAt: new Date('2026-08-28T14:00:00Z'), now, sameDaySchedulingEnabled: true }),
+      ).toBe(false);
+      expect(
+        isSameDayUrgent({ scheduledAt: new Date('2026-08-28T14:00:00Z'), now, sameDaySchedulingEnabled: false }),
+      ).toBe(true);
+    });
+
     // **قرار مقصود اتاخد بعد ما السويت الكاملة كشفت المشكلة** — الشرح الكامل في الدالة نفسها:
     // رسوم استعجال على طلب محدش شاف تنبيهها = مفاجأة في الفاتورة، وبوابة `allows_emergency`
     // كانت بترفض طلبات مالهاش علاقة بنفس اليوم أصلاً.

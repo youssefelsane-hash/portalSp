@@ -71,6 +71,10 @@ export interface ServiceResponseDto {
   allows_date_range_booking: boolean;
   allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
+  /** ADR-0118 §4 — حجز النهارده للخدمة دي موعد عادي مش طوارئ. */
+  same_day_scheduling_enabled: boolean;
+  /** ADR-0118 §5 — false = مفيش رسوم طوارئ على الخدمة دي. */
+  emergency_surcharge_enabled: boolean;
   /** ADR-0060 §4 — حقل واحد بدل أربع بوليانات: `full_day` أو `start_time`. */
   schedule_precision: SchedulePrecision;
   min_technician_level: string;
@@ -137,6 +141,8 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     allows_date_range_booking: service.allowsDateRangeBooking,
     allows_recurring_booking: service.allowsRecurringBooking,
     show_unavailable_providers: service.showUnavailableProviders,
+    same_day_scheduling_enabled: service.sameDaySchedulingEnabled,
+    emergency_surcharge_enabled: service.emergencySurchargeEnabled,
     schedule_precision: schedulePrecision(service),
     min_technician_level: service.minTechnicianLevel,
   };

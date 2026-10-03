@@ -68,7 +68,7 @@ export interface TechnicianBookingListItemResponseDto {
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — 'available' دايمًا لأي
   // فني كان بيظهر قبل كده (رجريشن صفري). 'schedule_conflicted' بس لصفوف إضافية جديدة، مؤهّل فعلاً
   // بس مشغول بشغل تاني وقت الفترة المطلوبة — مش محظور/غير مؤهّل.
-  availability_status: 'available' | 'schedule_conflicted';
+  availability_status: 'available' | 'schedule_conflicted' | 'not_eligible';
   unavailable_reason_ar: string | null;
   available_again_at: string | null;
 }

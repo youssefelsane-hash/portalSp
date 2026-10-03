@@ -30,6 +30,7 @@ function candidate(overrides: Partial<TechnicianBookingListItem>): TechnicianBoo
     availabilityStatus: 'available',
     unavailableReasonAr: null,
     availableAgainAt: null,
+    decisionLimitCents: null,
     ...overrides,
   };
 }

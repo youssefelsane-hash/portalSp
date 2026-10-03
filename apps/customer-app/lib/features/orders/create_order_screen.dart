@@ -760,7 +760,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
           // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
           // تنبيه رسوم الاستعجال.
-          allowsSameDay: widget.service.allowsEmergency,
+          allowsSameDay:
+              widget.service.allowsEmergency ||
+              widget.service.sameDaySchedulingEnabled,
+          sameDayIsRegular: widget.service.sameDaySchedulingEnabled,
           // اقتراح المواعيد (ADR-0088) — العنوان معروف هنا، فالاقتراح بيظهر. لو لسه مفيش
           // عنوان مختار بيفضل null والشاشة بتشتغل زي ما كانت بالظبط.
           serviceId: widget.service.id,

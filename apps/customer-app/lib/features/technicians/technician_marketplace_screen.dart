@@ -285,7 +285,7 @@ class _TechnicianMarketplaceScreenState
         child: EmptyState(
           icon: Icons.engineering_outlined,
           title: 'مفيش مقدمي خدمة متاحين للخدمة دي في منطقتك دلوقتي',
-          description: 'جرّب "اختاروا لي الأنسب" بدل كده',
+          description: 'ارجع وجرّب ميعاد تاني',
         ),
       );
     }
@@ -298,13 +298,15 @@ class _TechnicianMarketplaceScreenState
   Widget _buildCard(TechnicianBookingListItem t) {
     if (t.isCompany) return _buildCompanyCard(t);
     final conflicted = t.isScheduleConflicted;
+    // ADR-0118 — أي حالة غير «متاح» مايتحجزش؛ «المتعارض» بس ليه يوم بديل يتعرض.
+    final unavailable = t.isUnavailable;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      color: conflicted
+      color: unavailable
           ? Theme.of(context).colorScheme.surfaceContainerHighest
           : null,
       child: Opacity(
-        opacity: conflicted ? 0.7 : 1,
+        opacity: unavailable ? 0.7 : 1,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -344,7 +346,7 @@ class _TechnicianMarketplaceScreenState
                             ),
                           ],
                         ),
-                        if (conflicted)
+                        if (unavailable)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: Wrap(
@@ -352,11 +354,17 @@ class _TechnicianMarketplaceScreenState
                               spacing: 6,
                               children: [
                                 Chip(
-                                  avatar: const Icon(
-                                    Icons.event_busy_outlined,
+                                  avatar: Icon(
+                                    conflicted
+                                        ? Icons.event_busy_outlined
+                                        : Icons.block_outlined,
                                     size: 16,
                                   ),
-                                  label: const Text('مش متاح للفترة دي'),
+                                  label: Text(
+                                    conflicted
+                                        ? 'مش متاح للفترة دي'
+                                        : 'مش متاح للحجز ده',
+                                  ),
                                   visualDensity: VisualDensity.compact,
                                   materialTapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
@@ -472,7 +480,7 @@ class _TechnicianMarketplaceScreenState
                     ),
                     child: const Text('البروفايل'),
                   ),
-                  if (!conflicted)
+                  if (!unavailable)
                     FilledButton(
                       onPressed: _selecting ? null : () => _select(t.id, false),
                       child: Text(_selecting ? 'جاري التجهيز…' : 'اختار'),
@@ -480,7 +488,7 @@ class _TechnicianMarketplaceScreenState
                   // ADR-0059 §6 — الاقتراح بقى تاريخ حقيقي (أقرب يوم الفني فاضي فيه فعلاً)،
                   // فالزرار بيقول اليوم صراحةً بدل «جرّب» مبهمة. النص اللي المالك طلبه بالحرف:
                   // «اكتب الفني متاح من يوم كذا».
-                  else if (t.availableAgainAt != null)
+                  else if (conflicted && t.availableAgainAt != null)
                     FilledButton.tonal(
                       onPressed: () => _tryNextAvailable(t.availableAgainAt!),
                       child: Text('احجز ${_formatDay(t.availableAgainAt!)}'),
@@ -512,10 +520,10 @@ class _TechnicianMarketplaceScreenState
   }
 
   String _countLabel(List<TechnicianBookingListItem> items) {
-    final conflictedCount = items.where((t) => t.isScheduleConflicted).length;
-    final availableCount = items.length - conflictedCount;
-    if (conflictedCount == 0) return '$availableCount متاح';
-    return '$availableCount متاح · $conflictedCount مش متاح للفترة دي';
+    final unavailableCount = items.where((t) => t.isUnavailable).length;
+    final availableCount = items.length - unavailableCount;
+    if (unavailableCount == 0) return '$availableCount متاح';
+    return '$availableCount متاح · $unavailableCount مش متاح';
   }
 
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — كارت مستقل عمداً بدل تعقيد _buildCard
@@ -654,12 +662,22 @@ class _TechnicianMarketplaceScreenState
                           : const SizedBox.shrink(),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: _selecting ? null : () => _select(c.id, true),
-                      child: Text(
-                        _selecting ? 'جاري تجهيز الحجز…' : 'اختار الشركة',
+                    if (c.isUnavailable)
+                      Flexible(
+                        child: Text(
+                          c.unavailableReasonAr ?? 'مش متاحة للحجز ده',
+                          style: TextStyle(fontSize: 12, color: scheme.error),
+                        ),
+                      )
+                    else
+                      FilledButton(
+                        onPressed: _selecting
+                            ? null
+                            : () => _select(c.id, true),
+                        child: Text(
+                          _selecting ? 'جاري تجهيز الحجز…' : 'اختار الشركة',
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ],

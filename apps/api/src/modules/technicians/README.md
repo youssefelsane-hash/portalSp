@@ -1484,3 +1484,19 @@ no_schedule_conflict → available`
 كاملة، فهي فحص ذاتي للمراحل اللي قبلها.
 
 بتتنادى من `CatalogController` لما قايمة الحجز تطلع فاضية في غير الإنتاج، ومن الاختبارات مباشرةً.
+
+## سقف قرار المستوى في القايمة والاقتراح + رصّ الساعات (ADR-0118، docs/08 §196)
+
+- **`decision-limit-gate.ts`** — `applyDecisionLimitGate()`: بعد تسعير كل منفّذ في قايمة الاختيار، اللي سعره أكبر من
+  `technician_level_config.decision_limit_cents` بتاعه بيبقى `not_eligible` بسببه (لو الخدمة بتعرض غير المتاحين
+  **و** العميل باعت `include_ineligible`)، وإلا بيتشال. الشركة سقفها `max_decision_limit_cents` (أعلى سقف بين
+  أعضائها؛ عضو بلا سقف ⇒ بلا سقف).
+- **`technicianDecisionLimitCondition()`** في `technician-eligibility.sql.ts` — نفس شرط `findEligibleTechnicians` بالحرف
+  (`EXISTS` على صف المستوى)، بيستخدمه اقتراح الأيام والساعات مع `estimated_total_cents`. غياب القيمة = بلا فلترة.
+- **الرصّ في `suggestTimes`** — `fitTechnicians` لكل ساعة: بتبدأ بعد شغل عند الفني بيخلص، أو بتخلص قبل شغل بيبدأ، في
+  حدود `booking.suggestion_adjacency_gap_minutes`، أو أول ساعة في يوم لسه فاضي. الدرجة =
+  `(1-w)·فراغ + w·رصّ` بـ`booking.suggestion_compaction_weight` (٠.٦). اقتراح **الأيام** فضل على التسلسل (ADR-0096).
+- الساعات الأقرب من `booking.same_day_min_lead_minutes` مابتتقترحش، والخدمة المفعّل فيها «نفس اليوم كحجز عادي»
+  اقتراح أيامها بيبدأ من النهارده (`effectiveLeadHours`).
+- **فجوة موثّقة:** الرصّ بيقيس الالتصاق بشغل **مقبول** بس (`ACTIVE_TECHNICIAN_ORDER_STATUSES`) ومش بيحسب وقت المشوار
+  الفعلي بين العنوانين — السماحية الثابتة (٦٠ دقيقة) بتغطّي المشوار تقريبيًا.

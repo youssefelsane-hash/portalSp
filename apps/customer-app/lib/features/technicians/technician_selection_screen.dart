@@ -20,6 +20,10 @@ import 'technicians_repository.dart';
 // (docs/08 §Part 18). دلوقتي الخطوة الأولى بالظبط اختيارين كبيرين واضحين: تلقائي أو يدوي.
 // القايمة الحقيقية (كروت المقارنة، الفرز) اتنقلت بالكامل لـTechnicianMarketplaceScreen ومش
 // بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة.
+//
+// **ADR-0118 §3 (طلب مالك 2026-10-03) — الترشيح التلقائي بقى الافتراضي**: سؤال «تلقائي ولا
+// يدوي؟» اتشال. أول ما العنوان يتحدد أسطى بيرشّح على طول ويعرض المرشّح وسعره في الشاشة نفسها،
+// و«اختار حد تاني بنفسك» تحته بيفتح السوق. خطوة أقل، والعميل بيشوف حاجة حقيقية من أول لحظة.
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
 
@@ -76,6 +80,8 @@ class TechnicianSelectionScreen extends StatefulWidget {
 class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   Address? _selectedAddress;
   bool _previewingAuto = false;
+  BookingMatchPreview? _autoPreview;
+  String? _autoError;
   late final TechniciansRepository _techniciansRepository =
       TechniciansRepository(context.read<AuthRepository>());
 
@@ -84,6 +90,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     super.initState();
     if (widget.initialAddress != null) {
       _selectedAddress = widget.initialAddress;
+      _scheduleAutoMatch();
     } else {
       // بَقّة حقيقية اتلقطت بالتشغيل الحي (Xvfb+fluxbox، 2026-08-19): نفس بَقّة JobDetailsScreen —
       // Navigator.push جوّه initState مباشرة بيتصادم مع انيميشن دخول الشاشة الحالية لسه شغالة
@@ -107,6 +114,15 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
       return;
     }
     setState(() => _selectedAddress = address);
+    _scheduleAutoMatch();
+  }
+
+  /// وضع الاستبدال (`onManualSelect`) بيروح للسوق مباشرة، فمفيش ترشيح فيه.
+  void _scheduleAutoMatch() {
+    if (widget.onManualSelect != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_startAutoMatch());
+    });
   }
 
   /// **بنود 9-12 — «اختاروا لي الأنسب» بقى معاينة حقيقية.**
@@ -116,8 +132,12 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   /// بالتذكرة — فالباك-إند بيعيد التحقق من نفس الفني ونفس السعر وقت الإنشاء.
   Future<void> _startAutoMatch() async {
     final address = _selectedAddress;
-    if (address == null) return;
-    setState(() => _previewingAuto = true);
+    if (address == null || _previewingAuto) return;
+    setState(() {
+      _previewingAuto = true;
+      _autoPreview = null;
+      _autoError = null;
+    });
     try {
       final preview = await _techniciansRepository.createMatchPreview(
         serviceId: widget.service.id,
@@ -134,29 +154,33 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         fieldValues: widget.fieldValues,
       );
       if (!mounted) return;
-      final accepted = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        builder: (_) => _AutoMatchPreviewSheet(preview: preview),
-      );
-      if (accepted != true || !mounted) return;
-      _confirmSelection(
-        requestedTechnicianId: preview.provider.id,
-        matchPreviewId: preview.matchPreviewId,
-      );
+      setState(() => _autoPreview = preview);
     } catch (errRaw) {
       // أي استثناء (كاست عقد، تحليل JSON، بَقّة) بيتحوّل لرسالة —
       // مايتسابش يهرب فيسيب الشاشة معلّقة على التحميل للأبد.
       final err = ApiException.from(errRaw);
-      // رسالة صريحة — ممنوع نكمّل في صمت على مرشّح مش موجود (بند 10).
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(err.message)));
-      }
+      // رسالة صريحة في مكان الكارت — ممنوع نكمّل في صمت على مرشّح مش موجود (بند 10).
+      if (mounted) setState(() => _autoError = err.message);
     } finally {
       if (mounted) setState(() => _previewingAuto = false);
     }
+  }
+
+  void _confirmAutoPreview(BookingMatchPreview preview) {
+    // التذكرة ليها عمر؛ العميل ممكن يكون فتح السوق ورجع بعد ما خلصت — نرشّح من جديد بدل ما
+    // يوصل لشاشة التأكيد ويترفض هناك.
+    if (!preview.expiresAt.isAfter(DateTime.now())) {
+      unawaited(_startAutoMatch());
+      return;
+    }
+    _confirmSelection(
+      // ADR-0080 — المرشّح ممكن يبقى شركة، ومعرّفها مكانه خانة الشركة.
+      requestedTechnicianId: preview.isCompany ? null : preview.provider.id,
+      requestedTechnicianCompanyId: preview.isCompany
+          ? preview.provider.id
+          : null,
+      matchPreviewId: preview.matchPreviewId,
+    );
   }
 
   void _confirmSelection({
@@ -262,6 +286,69 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     );
   }
 
+  Widget _buildAutoMatch() {
+    final preview = _autoPreview;
+    final team = widget.bookingMode == BookingMode.team;
+    if (preview != null) {
+      return _AutoMatchCard(
+        preview: preview,
+        onConfirm: () => _confirmAutoPreview(preview),
+        onChooseOther: _openMarketplace,
+      );
+    }
+    if (_autoError != null && !_previewingAuto) {
+      return Card(
+        key: const ValueKey('auto-match-failed'),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _autoError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _openMarketplace,
+                child: Text(
+                  team ? 'اختار الفريق بنفسك' : 'اختار بنفسك من القايمة',
+                ),
+              ),
+              TextButton(
+                onPressed: () => unawaited(_startAutoMatch()),
+                child: const Text('حاول تاني'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Card(
+      key: const ValueKey('auto-match-loading'),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                team
+                    ? 'بندوّر لك على أنسب فريق متاح في الميعاد ده…'
+                    : 'بندوّر لك على أنسب أسطى متاح في الميعاد ده…',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final address = _selectedAddress;
@@ -298,7 +385,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         body: address == null
             ? const SizedBox.shrink() // لسه بيختار عنوان (AddressesScreen فوقها)
             : Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -313,94 +400,13 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                         label: const Text('تغيير العنوان'),
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      widget.bookingMode == BookingMode.team
-                          ? 'إزاي حابب تختار الفريق/الشركة؟'
-                          : 'إزاي حابب تختار مقدم الخدمة؟',
-                      style: Theme.of(context).textTheme.titleLarge,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    _ChoiceCard(
-                      icon: Icons.bolt,
-                      title: 'اختاروا لي الأنسب',
-                      subtitle: widget.bookingMode == BookingMode.team
-                          ? 'هنبعت الطلب لأنسب فريق/شركة متاحة فورًا حسب تقييمها وقربها منك'
-                          : 'هنبعت الطلب لأنسب مقدم خدمة متاح فورًا حسب تقييمه وقربه منك',
-                      onTap: _previewingAuto
-                          ? () {}
-                          : () => unawaited(_startAutoMatch()),
-                      highlighted: true,
-                    ),
-                    const SizedBox(height: 16),
-                    _ChoiceCard(
-                      icon: Icons.people_outline,
-                      title: 'اختار الفريق بنفسك',
-                      subtitle: widget.bookingMode == BookingMode.team
-                          ? 'اختار من مقدمي الخدمة المؤهّلين والشركات المتاحة الأنسب ليك'
-                          : 'اختار من مقدمي الخدمة المتاحين الأنسب ليك',
-                      onTap: _openMarketplace,
-                    ),
-                    const Spacer(flex: 2),
-                  ],
-                ),
-              ),
-      ),
-    );
-  }
-}
-
-class _ChoiceCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-  final bool highlighted;
-
-  const _ChoiceCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.highlighted = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: highlighted ? scheme.primaryContainer : null,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 32,
-                color: highlighted ? scheme.onPrimaryContainer : scheme.primary,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall,
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: SingleChildScrollView(child: _buildAutoMatch()),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_left),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -408,19 +414,26 @@ class _ChoiceCard extends StatelessWidget {
 
 /// كارت المرشّح اللي المحرك اختاره — بيتعرض **قبل** التأكيد (بنود 9-12).
 ///
-/// بيقول تلات حاجات: مين، بكام، ولحد إمتى السعر ده محجوز. من غير الكارت ده «اختاروا لي الأنسب»
-/// بيبقى تأكيد على المجهول.
-class _AutoMatchPreviewSheet extends StatelessWidget {
-  const _AutoMatchPreviewSheet({required this.preview});
+/// بيقول تلات حاجات: مين، بكام، ولحد إمتى السعر ده محجوز. من غير الكارت ده الترشيح التلقائي
+/// بيبقى تأكيد على المجهول. بقى جوّه الشاشة نفسها بدل bottom sheet (ADR-0118 §3).
+class _AutoMatchCard extends StatelessWidget {
+  const _AutoMatchCard({
+    required this.preview,
+    required this.onConfirm,
+    required this.onChooseOther,
+  });
 
   final BookingMatchPreview preview;
+  final VoidCallback onConfirm;
+  final VoidCallback onChooseOther;
 
   @override
   Widget build(BuildContext context) {
     final provider = preview.provider;
-    return SafeArea(
+    return Card(
+      key: const ValueKey('auto-match-result'),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -435,7 +448,11 @@ class _AutoMatchPreviewSheet extends StatelessWidget {
                       ? NetworkImage(provider.avatarUrl!)
                       : null,
                   child: provider.avatarUrl == null
-                      ? const Icon(Icons.person_outline)
+                      ? Icon(
+                          preview.isCompany
+                              ? Icons.groups_outlined
+                              : Icons.person_outline,
+                        )
                       : null,
                 ),
                 const SizedBox(width: 12),
@@ -477,12 +494,17 @@ class _AutoMatchPreviewSheet extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('تمام، كمّل بالأسطى ده'),
+              onPressed: onConfirm,
+              child: Text(
+                preview.isCompany
+                    ? 'تمام، كمّل مع الشركة دي'
+                    : 'تمام، كمّل بالأسطى ده',
+              ),
             ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('رجوع'),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: onChooseOther,
+              child: const Text('اختار حد تاني بنفسك'),
             ),
           ],
         ),

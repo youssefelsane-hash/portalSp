@@ -205,6 +205,16 @@ export class CreateServiceDto {
   @IsBoolean()
   show_unavailable_providers?: boolean;
 
+  /** ADR-0118 §4 — حجز النهارده موعد عادي مش طوارئ (محتاج `allows_scheduling`). */
+  @IsOptional()
+  @IsBoolean()
+  same_day_scheduling_enabled?: boolean;
+
+  /** ADR-0118 §5 — false = الطلب المستعجل من غير رسوم طوارئ. */
+  @IsOptional()
+  @IsBoolean()
+  emergency_surcharge_enabled?: boolean;
+
   /**
    * دقة الموعد (ADR-0060 §4) — **حقل واحد بدل أربع بوليانات تبادلية**.
    *

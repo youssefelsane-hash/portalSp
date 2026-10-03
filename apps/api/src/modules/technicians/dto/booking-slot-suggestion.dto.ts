@@ -32,6 +32,19 @@ export class SuggestedDaysQueryDto {
   @Min(1)
   @Max(60)
   estimated_duration_days?: number;
+
+  /**
+   * **قيمة الشغلانة التقديرية بالقرش** (ناتج `/services/:id/estimate` المحايد) — ADR-0118.
+   *
+   * بيتشال بيها كل فني سقف قرار مستواه أقل منها، لأن المحرك هيرفضه أصلاً: من غيرها الاقتراح كان
+   * بيقول «٣ متاحين» واللي يقدر ياخد الشغلانة فعلاً واحد. غيابها = السلوك القديم (بلا فلترة).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  estimated_total_cents?: number;
 }
 
 export class SuggestedTimesQueryDto {
@@ -62,4 +75,17 @@ export class SuggestedTimesQueryDto {
   @Min(1)
   @Max(60)
   estimated_duration_days?: number;
+
+  /**
+   * **قيمة الشغلانة التقديرية بالقرش** (ناتج `/services/:id/estimate` المحايد) — ADR-0118.
+   *
+   * بيتشال بيها كل فني سقف قرار مستواه أقل منها، لأن المحرك هيرفضه أصلاً: من غيرها الاقتراح كان
+   * بيقول «٣ متاحين» واللي يقدر ياخد الشغلانة فعلاً واحد. غيابها = السلوك القديم (بلا فلترة).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  estimated_total_cents?: number;
 }

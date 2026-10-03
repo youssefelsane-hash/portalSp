@@ -163,6 +163,14 @@ class TechnicianBookingListItem {
 
   bool get isScheduleConflicted => availabilityStatus == 'schedule_conflicted';
 
+  /// ADR-0118 — الشغلانة أكبر من سقف مستواه (أو مفيش عضو في الشركة سقفه يكفي). بيوصل بس لما
+  /// القايمة تتطلب بـ`include_ineligible` — النسخ القديمة مابتطلبوش فبيتشال لها خالص.
+  bool get isNotEligible => availabilityStatus == 'not_eligible';
+
+  /// أي حالة غير «متاح» = مايتحجزش. الشاشات بتقرا ده بدل ما تعدّد الحالات واحدة واحدة،
+  /// عشان أي حالة جديدة بعدين تتقفل افتراضيًا بدل ما تتعرض «متاح» (درس ADR-0118).
+  bool get isUnavailable => availabilityStatus != 'available';
+
   TechnicianBookingListItem({
     required this.id,
     required this.fullName,
@@ -406,12 +414,19 @@ class BookingMatchPreview {
   final BookingMatchProvider provider;
   final int totalAmountCents;
 
+  /// `technician` أو `company` (ADR-0080). الترشيح التلقائي ممكن يختار شركة، ومعرّفها لازم يتبعت
+  /// في خانة الشركة — بعته كفني كان بيترفض وقت التأكيد («التذكرة دي لشركة»).
+  final String providerKind;
+
+  bool get isCompany => providerKind == 'company';
+
   BookingMatchPreview({
     required this.matchPreviewId,
     required this.expiresAt,
     required this.selectionMode,
     required this.provider,
     required this.totalAmountCents,
+    this.providerKind = 'technician',
   });
 
   factory BookingMatchPreview.fromJson(Map<String, dynamic> json) => BookingMatchPreview(
@@ -420,6 +435,7 @@ class BookingMatchPreview {
         selectionMode: json['selection_mode'] as String,
         provider: BookingMatchProvider.fromJson(json['provider'] as Map<String, dynamic>),
         totalAmountCents: (json['pricing'] as Map<String, dynamic>)['total_amount_cents'] as int,
+        providerKind: json['provider_kind'] as String? ?? 'technician',
       );
 }
 

@@ -561,6 +561,8 @@ export default function ServiceDetailPage() {
       allows_date_range_booking: form.get('allows_date_range_booking') === 'on',
       allows_recurring_booking: form.get('allows_recurring_booking') === 'on',
       show_unavailable_providers: form.get('show_unavailable_providers') === 'on',
+      same_day_scheduling_enabled: form.get('same_day_scheduling_enabled') === 'on',
+      emergency_surcharge_enabled: form.get('emergency_surcharge_enabled') === 'on',
       // ADR-0060 §4 — حقل واحد بدل أربع بوليانات: مستحيل تتبعت تركيبة غلط أصلاً.
       schedule_precision: form.get('requires_start_time_only') === 'on' ? 'start_time' : 'full_day',
       // ADR-0063/0066 — سياسة تحديد السعر والمعاينة. الأوضاع نفسها في state (عشان الإظهار
@@ -1050,6 +1052,22 @@ export default function ServiceDetailPage() {
                       description="يتيح طلب وصول عاجل ويطبق سياسة الطوارئ الخاصة بالخدمة."
                       icon={Siren}
                       defaultChecked={service.allows_emergency}
+                    />
+                    {/* ADR-0118 §4 — مثال المالك: المكوجي النهارده مش طوارئ. */}
+                    <CatalogToggle
+                      name="same_day_scheduling_enabled"
+                      title="نفس اليوم كحجز عادي"
+                      description="حجز النهارده يبقى موعد عادي: العميل يختار الساعة والمنفّذ، والاقتراحات تبدأ من النهارده، من غير رسوم طوارئ. محتاج «حجز مجدول»."
+                      icon={CalendarClock}
+                      defaultChecked={service.same_day_scheduling_enabled}
+                    />
+                    {/* ADR-0118 §5 */}
+                    <CatalogToggle
+                      name="emergency_surcharge_enabled"
+                      title="رسوم الطوارئ"
+                      description="لما تتقفل، الطلب المستعجل بيتوزّع بنفس السرعة من غير الرسوم الإضافية."
+                      icon={Siren}
+                      defaultChecked={service.emergency_surcharge_enabled}
                     />
                   </div>
                 </div>

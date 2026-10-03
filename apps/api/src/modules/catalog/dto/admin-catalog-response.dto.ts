@@ -87,6 +87,10 @@ export interface AdminServiceResponseDto {
   /** ADR-0086 — قائد الطلب لازم يكون فني كامل (المساعد ماياخدش الطلب كقائد). */
   requires_technician_lead: boolean;
   show_unavailable_providers: boolean;
+  /** ADR-0118 §4 — حجز النهارده للخدمة دي موعد عادي مش طوارئ. */
+  same_day_scheduling_enabled: boolean;
+  /** ADR-0118 §5 — false = مفيش رسوم طوارئ على الخدمة دي. */
+  emergency_surcharge_enabled: boolean;
   // ADR-0063/0066 — سياسة تحديد السعر والمعاينة (migration 0247). كانت في الداتابيز والكيان
   // وما وصلتش الرد، فواجهة الأدمن ماكانتش تقدر تعرضها ولا تعدّلها.
   price_certainty_mode: string;
@@ -155,6 +159,8 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     allows_recurring_booking: service.allowsRecurringBooking,
     requires_technician_lead: service.requiresTechnicianLead,
     show_unavailable_providers: service.showUnavailableProviders,
+    same_day_scheduling_enabled: service.sameDaySchedulingEnabled,
+    emergency_surcharge_enabled: service.emergencySurchargeEnabled,
     price_certainty_mode: service.priceCertaintyMode,
     assessment_route_policy: service.assessmentRoutePolicy,
     remote_assessment_enabled: service.remoteAssessmentEnabled,

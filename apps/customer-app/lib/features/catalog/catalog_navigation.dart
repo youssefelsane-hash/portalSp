@@ -151,13 +151,17 @@ Future<void> navigateToServiceBooking(
         serviceName: service.nameAr,
         warrantyDays: service.warrantyDays,
         requiresPreciseTime: service.requiresStartTime,
-        allowsSameDay: service.allowsEmergency,
+        // ADR-0118 §4 — «نفس اليوم كحجز عادي» بيفتح النهارده حتى لو الطوارئ مقفولة.
+        allowsSameDay:
+            service.allowsEmergency || service.sameDaySchedulingEnabled,
+        sameDayIsRegular: service.sameDaySchedulingEnabled,
         serviceId: service.id,
         // العنوان الحقيقي والمدة الحقيقية — الاتنين معروفين دلوقتي، ومن غيرهم الاقتراح كان
         // بيتحسب على نطاق مفترض ومدة مفترضة (ADR-0100).
         addressId: effectiveAddress.id,
         durationMinutes: jobLoad?.durationMinutes,
         estimatedDurationDays: jobLoad?.estimatedDurationDays,
+        estimatedTotalCents: jobLoad?.estimatedTotalCents,
       ),
     ),
   );
@@ -177,7 +181,10 @@ Future<void> navigateToServiceBooking(
   // الوضع المحلي ده **للتنقّل بس** — الباك-إند بيعيد اشتقاقه من جديد بتوقيت القاهرة وهو المرجع
   // الوحيد (ADR-0048 §1). اليوم المختار هو النهارده ⇒ خدمة مستعجلة ⇒ مفيش خطوة اختيار فني
   // (أول فني يقبل هو اللي بيروح)، بالظبط زي ما الطوارئ كانت بتشتغل قبل كده.
-  final BookingMode bookingMode = _isSameDayLocal(scheduledAt)
+  //
+  // ADR-0118 §4 — خدمة «نفس اليوم كحجز عادي»: النهارده موعد عادي بمنفّذ، نفس قرار السيرفر بالحرف.
+  final BookingMode bookingMode =
+      _isSameDayLocal(scheduledAt) && !service.sameDaySchedulingEnabled
       ? BookingMode.emergency
       : (availableModes.contains(BookingMode.individual)
             ? BookingMode.individual

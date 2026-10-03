@@ -794,6 +794,24 @@ export function assistantServiceQualificationCondition(opts: TechnicianServiceQu
  * «مؤهّل بس متعارض»، واقتراح المواعيد. مسار الشركة (`listForServiceBooking` فرع الشركات،
  * والتوزيع بـ`requested_technician_company_id`) **مابيتحطش عليه** عمدًا.
  */
+/**
+ * **سقف قرار المستوى** (`technician_level_config.decision_limit_cents`) كشرط SQL — ADR-0118.
+ *
+ * نفس شكل الشرط اللي `MatchingService.findEligibleTechnicians()` بيطبّقه بالحرف (`EXISTS` على صف
+ * المستوى، و`NULL` = بلا سقف)، عشان أي سطح بيعدّ أو يقترح منفّذين (اقتراح الأيام والساعات) مايوعدش
+ * بحد المحرك هيرفضه. القايمة بتطبّق نفس القاعدة بعد التسعير (`decision-limit-gate.ts`) لأنها بتقارن
+ * بسعر كل منفّذ بمستواه هو.
+ *
+ * `amountCentsExpr` = `NULL` ⇒ الشرط ساري على الكل (عميل قديم مابيبعتش القيمة = السلوك القديم).
+ */
+export function technicianDecisionLimitCondition(opts: { technicianAlias: string; amountCentsExpr: string }): string {
+  return `(${opts.amountCentsExpr}::int IS NULL OR EXISTS (
+    SELECT 1 FROM technician_level_config dl_cap
+     WHERE dl_cap.level = ${opts.technicianAlias}.current_level
+       AND (dl_cap.decision_limit_cents IS NULL OR dl_cap.decision_limit_cents >= ${opts.amountCentsExpr}::int)
+  ))`;
+}
+
 export function technicianIndividualVisibilityCondition(opts: {
   /** alias صف الفني، مثلاً `tp` أو `member`. */
   technicianAlias: string;
