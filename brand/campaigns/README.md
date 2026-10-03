@@ -59,3 +59,10 @@
 - `sanaa-tetammen-hero.png`: الصورة النظيفة القابلة لإعادة الاستخدام.
 - `sanaa-tetammen-feed.png`: بوستر 1080×1350.
 - `sanaa-tetammen-story.png`: Story/Reel cover ‏1080×1920.
+
+---
+
+## حملات تانية
+
+- **`building-posters/`** — بوسترات العمارات (أسانسير/باب) مربوطة بكود العمارة. التفاصيل في
+  `building-posters/README.md`، والتوليد: `node scripts/export-building-posters.js`.

@@ -38,6 +38,9 @@ export interface PromoCodeResponseDto {
   attributed_gross_revenue_cents: number;
   attributed_platform_revenue_cents: number;
   accrued_partner_commission_cents: number;
+  paid_partner_commission_cents: number;
+  /** مستحق اتصرف للشريك على طلب اترد بعدها — مبلغ خرج ومحتاج متابعة يدوية مع الشريك. */
+  paid_commission_on_refunded_orders: number;
   created_at: string;
 }
 
@@ -52,6 +55,8 @@ export function toPromoCodeResponseDto(
     attributedGrossRevenueCents?: number;
     attributedPlatformRevenueCents?: number;
     accruedPartnerCommissionCents?: number;
+    paidPartnerCommissionCents?: number;
+    paidCommissionOnRefundedOrders?: number;
   } = {},
 ): PromoCodeResponseDto {
   return {
@@ -88,6 +93,8 @@ export function toPromoCodeResponseDto(
     attributed_gross_revenue_cents: options.attributedGrossRevenueCents ?? 0,
     attributed_platform_revenue_cents: options.attributedPlatformRevenueCents ?? 0,
     accrued_partner_commission_cents: options.accruedPartnerCommissionCents ?? 0,
+    paid_partner_commission_cents: options.paidPartnerCommissionCents ?? 0,
+    paid_commission_on_refunded_orders: options.paidCommissionOnRefundedOrders ?? 0,
     created_at: promoCode.createdAt.toISOString(),
   };
 }

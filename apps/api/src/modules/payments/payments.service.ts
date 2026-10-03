@@ -197,6 +197,11 @@ export interface InstaPayTransferDetails {
   confirmMaxMinutes: number;
 }
 
+interface RefundedTransition {
+  order: Order;
+  previousStatus: OrderStatus;
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -3389,7 +3394,8 @@ export class PaymentsService {
     providerRefundId: string | undefined,
     meta?: AuditActorMeta,
   ): Promise<Refund> {
-    return this.dataSource.transaction(async (manager) => {
+    let refundedTransition: RefundedTransition | null = null;
+    const reconciled = await this.dataSource.transaction(async (manager) => {
       const lockedRefund = await manager
         .createQueryBuilder(Refund, 'refund')
         .setLock('pessimistic_write')
@@ -3555,6 +3561,7 @@ export class PaymentsService {
         lockedOrder.orderStatus = OrderStatus.REFUNDED;
         lockedOrder.paymentStatus = OrderPaymentStatus.REFUNDED;
         await manager.save(lockedOrder);
+        refundedTransition = { order: lockedOrder, previousStatus };
         await manager.save(manager.create(OrderStatusHistory, {
           orderId: lockedOrder.id,
           previousStatus,
@@ -3573,6 +3580,23 @@ export class PaymentsService {
       await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
       return lockedRefund;
     });
+    this.emitRefundedTransition(refundedTransition);
+    return reconciled;
+  }
+
+  /**
+   * انتقال `REFUNDED` كان بيتكتب في الطلب والتاريخ **من غير** `ORDER_STATUS_CHANGED_EVENT` في
+   * المسارين (الاسترداد العادي والتسوية اليدوية)، فكل listener مكتوب يتصرف على الاسترداد كان ميت:
+   * مستحق شريك الكود ومستحق مصدر التسويق كانوا بيفضلوا `accrued` على طلب اترجعت فلوسه، ومكافأة
+   * ترشيح الفني ماكانتش بتتعكس (docs/08 §195). بيتطلق **بعد** الـcommit زي باقي الانتقالات هنا.
+   */
+  private emitRefundedTransition(transition: RefundedTransition | null): void {
+    if (!transition) return;
+    const { order, previousStatus } = transition;
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.REFUNDED, order.customerId, order.technicianId),
+    );
   }
 
   /**
@@ -3788,6 +3812,7 @@ export class PaymentsService {
     }
 
     // المرحلة (ج) — DB transaction قصيرة منفصلة، بعد ما نتيجة البوابة بقت معروفة فعليًا.
+    let refundedTransition: RefundedTransition | null = null;
     const finalRefund = await this.dataSource.transaction(async (manager) => {
       // Different payments of one order can finish their external calls concurrently. Serialize
       // the durable aggregation here, then reread every row used for status and ledger decisions.
@@ -4055,6 +4080,7 @@ export class PaymentsService {
           lockedOrder.orderStatus = OrderStatus.REFUNDED;
           lockedOrder.paymentStatus = OrderPaymentStatus.REFUNDED;
           await manager.save(lockedOrder);
+          refundedTransition = { order: lockedOrder, previousStatus };
           await manager.save(
             manager.create(OrderStatusHistory, {
               orderId: lockedOrder.id,
@@ -4078,6 +4104,7 @@ export class PaymentsService {
       await this.enqueueRefundNotification(manager, lockedRefund, lockedOrder);
       return lockedRefund;
     });
+    this.emitRefundedTransition(refundedTransition);
     return finalRefund;
   }
 

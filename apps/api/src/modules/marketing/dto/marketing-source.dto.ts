@@ -104,7 +104,9 @@ export class MarkCommissionsPaidDto {
   // حاجة. الرفض الصريح أوضح من رد ناجح فاضي.
   @IsArray()
   @ArrayNotEmpty()
-  @IsUUID('4', { each: true })
+  // معرّفاتنا UUIDv7 (`uuid_generate_v7()`) — `'4'` كان بيرفض كل مستحق حقيقي بـ400، فزرار
+  // «اتدفعت» في اللوحة عمره ما اشتغل (docs/08 §195).
+  @IsUUID('all', { each: true })
   @Type(() => String)
   ids: string[];
 

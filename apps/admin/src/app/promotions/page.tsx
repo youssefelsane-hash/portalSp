@@ -420,13 +420,28 @@ export default function PromotionsPage() {
                       <>
                         <span className="block">{promo.link_hit_count} مسح للرابط/QR</span>
                         <span className="block text-xs text-muted-foreground">
-                          {promo.link_signup_count} سجّل حساب من المسح ده
+                          {promo.link_signup_count} عميل جديد جه من الكود
                         </span>
                       </>
                     )}
                   </TableCell>
                   <TableCell className="tabular-nums">
-                    {promo.attributed_completed_order_count} مكتمل · {formatEgp(promo.attributed_gross_revenue_cents)}
+                    {/* «طلب» قبل «مكتمل»: العميل اللي طلب ولسه الشغل ماخلصش كان بيبان صفر هنا، فالمالك
+                        يفتكر إن الطلب ماتسجّلش (docs/08 §195). */}
+                    <span className="block">
+                      {promo.attributed_order_count} طلب · {promo.attributed_completed_order_count} مكتمل
+                    </span>
+                    <span className="block text-xs text-muted-foreground">{formatEgp(promo.attributed_gross_revenue_cents)}</span>
+                    {(promo.accrued_partner_commission_cents > 0 || promo.paid_partner_commission_cents > 0) && (
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        للشريك: {formatEgp(promo.accrued_partner_commission_cents)} مستحق · {formatEgp(promo.paid_partner_commission_cents)} اتدفع
+                      </span>
+                    )}
+                    {promo.paid_commission_on_refunded_orders > 0 && (
+                      <span className="mt-1 block text-xs text-destructive">
+                        {promo.paid_commission_on_refunded_orders} مستحق اتدفع على طلب اترد — راجعه مع الشريك
+                      </span>
+                    )}
                     {promo.marketing_channel && <span className="mt-1 block text-xs text-muted-foreground">{MARKETING_CHANNEL_LABELS_AR[promo.marketing_channel]}</span>}
                   </TableCell>
                   <TableCell>

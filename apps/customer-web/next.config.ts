@@ -22,6 +22,30 @@ const API_ORIGIN = apiOrigin();
 const WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 
 /**
+ * ### روابط الـQR القصيرة (`/p` كود خاص، `/r` حملة قديمة، `/t` ترشيح فني)
+ *
+ * الـAPI بيبني الرابط المطبوع تحت الـQR على `CUSTOMER_WEB_URL` (الدومين ده)، بس المسارات دي
+ * بيخدمها الـAPI مش الموقع — فالرابط المطبوع كان بيرجّع **404** والمسح مابيتسجّلش خالص (اتقاس حيًّا،
+ * docs/08 §195). تحويل مش proxy عن قصد: الموبايل بيروح للـAPI بنفسه، فالـAPI بيشوف جهازه الحقيقي
+ * (أندرويد/آيفون) وعنوانه الحقيقي لحد الطلبات، بدل ما كل المسحات تبان جاية من سيرفر الموقع.
+ */
+function shortLinkRedirects() {
+  let siteOrigin = "";
+  try {
+    siteOrigin = new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "").origin;
+  } catch {
+    siteOrigin = "";
+  }
+  // لو الـAPI متركّب على نفس الدومين، التحويل هيلف على نفسه للأبد — والمسارات أصلًا بتوصله.
+  if (siteOrigin && siteOrigin === API_ORIGIN) return [];
+  return ["p", "r", "t"].map((prefix) => ({
+    source: `/${prefix}/:code`,
+    destination: `${API_ORIGIN}/${prefix}/:code`,
+    permanent: false,
+  }));
+}
+
+/**
  * ### سياسة المحتوى (CSP)
  *
  * **`script-src` فيها `'unsafe-inline'` وده قيد معروف مش سهو**: App Router بيحقن سكربت داخلي
@@ -59,6 +83,9 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "i.ibb.co" },
     ],
+  },
+  async redirects() {
+    return shortLinkRedirects();
   },
   async headers() {
     return [
