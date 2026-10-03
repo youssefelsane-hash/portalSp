@@ -33,13 +33,21 @@ export interface PromoCodeResponseDto {
   share_url: string;
   /** زيارات الرابط، وليست عدد مستخدمين فريدين. */
   link_hit_count: number;
-  /** حسابات جديدة أُنشئت بعد فتح الرابط؛ لا تعني مرات استخدام الخصم. */
+  /**
+   * عملاء **جداد** اكتسبهم الكود: سجّلوا بالرابط، أو أول طلب مكتمل في عمرهم اتعمل بالكود (مسار
+   * التطبيق، docs/08 §195). مش مرات استخدام الخصم — دي `used_count`.
+   */
   link_signup_count: number;
+  /** طلبات عملاء الكود الجداد + أي طلب اتعمل بالكود نفسه (عميل قديم مسح وطلب). */
   attributed_order_count: number;
   attributed_completed_order_count: number;
   attributed_gross_revenue_cents: number;
   attributed_platform_revenue_cents: number;
   accrued_partner_commission_cents: number;
+  /** مستحق اتعلّم «اتدفع» للشريك. */
+  paid_partner_commission_cents: number;
+  /** مستحقات اتصرفت للشريك على طلبات اتردت بعدها — محتاجة متابعة يدوية. */
+  paid_commission_on_refunded_orders: number;
   created_at: string;
 }
 

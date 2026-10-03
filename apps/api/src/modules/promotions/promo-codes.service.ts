@@ -30,6 +30,8 @@ export class PromoCodesService {
   ) {}
 
   private computeDiscount(promoCode: PromoCode, ctx: PromoApplicationContext): number {
+    // كود الشريك (إسناد فقط) مابيدخلش معادلة السعر أبدًا، مهما كانت قيم الخصم المتخزّنة فيه.
+    if (!promoCode.discountEnabled) return 0;
     let discount: number;
     switch (promoCode.discountType) {
       case DiscountType.PERCENTAGE:
@@ -57,12 +59,20 @@ export class PromoCodesService {
     if (!promoCode.isActive || promoCode.deletedAt) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده مش شغال', HttpStatus.BAD_REQUEST);
     }
-    if (!promoCode.discountEnabled) {
-      throw new ApiException(ErrorCode.VAL_001, 'الكود ده للتسويق والإسناد فقط ومفيهوش خصم للحجز', HttpStatus.BAD_REQUEST);
-    }
     if (now < promoCode.validFrom || now > promoCode.validUntil) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده منتهي أو لسه مبدأش', HttpStatus.BAD_REQUEST);
     }
+    // إصلاح أمني (migration 0067) — كان فيه فجوة موثّقة: مكافآت الترشيح (referrals.service.ts)
+    // كانت بتتصدر كـpromo_codes عادي بلا أي قيد يمنع غير المُرشِّح من استخدامها لو الكود اتسرّب.
+    if (promoCode.restrictedToUserId && promoCode.restrictedToUserId !== userId) {
+      throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده مش بتاعك', HttpStatus.FORBIDDEN);
+    }
+    // **كود شريك (إسناد فقط)** — بواب/محل/مؤثّر من غير خصم. كان بيترفض هنا «للتسويق فقط»، فعميل
+    // مسح ملصق ونزّل التطبيق مكانش عنده أي مكان يكتب فيه الكود (التطبيق مابيبعتش كود الرابط وقت
+    // التسجيل)، والشريك يطلع صفر (docs/08 §195). دلوقتي بيتقبل بخصم صفر عشان يربط الطلب بالكود.
+    // باقي الشروط تحت كلها شروط **خصم** (حد أدنى، خدمات، مناطق، عملاء جداد، حدود استخدام، ميزانية)
+    // ومالهاش معنى لكود مابيخصمش — تطبيقها كان هيرفض طلب حقيقي عشان قيد على خصم مش موجود.
+    if (!promoCode.discountEnabled) return;
     if (ctx.totalBeforeDiscountCents < promoCode.minOrderAmountCents) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -78,11 +88,6 @@ export class PromoCodesService {
     }
     if (promoCode.newCustomersOnly && !ctx.isNewCustomer) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده للعملاء الجداد بس', HttpStatus.BAD_REQUEST);
-    }
-    // إصلاح أمني (migration 0067) — كان فيه فجوة موثّقة: مكافآت الترشيح (referrals.service.ts)
-    // كانت بتتصدر كـpromo_codes عادي بلا أي قيد يمنع غير المُرشِّح من استخدامها لو الكود اتسرّب.
-    if (promoCode.restrictedToUserId && promoCode.restrictedToUserId !== userId) {
-      throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده مش بتاعك', HttpStatus.FORBIDDEN);
     }
     if (promoCode.usageLimitTotal !== null && promoCode.usedCount >= promoCode.usageLimitTotal) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده خلص من الاستخدام', HttpStatus.BAD_REQUEST);

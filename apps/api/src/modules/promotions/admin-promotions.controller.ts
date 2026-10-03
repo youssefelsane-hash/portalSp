@@ -23,7 +23,9 @@ import { PromoCodeLinksService } from './promo-code-links.service';
 class MarkPromoMarketingCommissionsPaidDto {
   @IsArray()
   @ArrayNotEmpty()
-  @IsUUID('4', { each: true })
+  // معرّفاتنا UUIDv7 (`uuid_generate_v7()`) — `'4'` كان بيرفض كل مستحق حقيقي بـ400، فزرار
+  // «اتدفعت» في اللوحة عمره ما اشتغل (docs/08 §195).
+  @IsUUID('all', { each: true })
   @Type(() => String)
   ids: string[];
 
@@ -69,6 +71,8 @@ export class AdminPromotionsController {
           attributedGrossRevenueCents: link?.grossRevenueCents ?? 0,
           attributedPlatformRevenueCents: link?.platformRevenueCents ?? 0,
           accruedPartnerCommissionCents: link?.accruedCommissionCents ?? 0,
+          paidPartnerCommissionCents: link?.paidCommissionCents ?? 0,
+          paidCommissionOnRefundedOrders: link?.paidCommissionOnRefundedOrders ?? 0,
         });
       }),
       meta,

@@ -54,6 +54,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   let cache: RedisCacheService;
   let failStatusEventForOrderId: string | null = null;
   let deliveredStatusEvents = 0;
+  const refundedStatusEvents: string[] = [];
 
   const runId = Date.now().toString(36);
   const ids = {
@@ -250,8 +251,9 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       settingsService,
       { record: async () => undefined } as never,
       {
-        emit: (eventName: string, event: { orderId?: string }) => {
+        emit: (eventName: string, event: { orderId?: string; newStatus?: string }) => {
           if (eventName !== ORDER_STATUS_CHANGED_EVENT || !event.orderId) return false;
+          if (event.newStatus === OrderStatus.REFUNDED) refundedStatusEvents.push(event.orderId);
           if (event.orderId === failStatusEventForOrderId) {
             failStatusEventForOrderId = null;
             throw new Error('simulated post-commit event failure');
@@ -767,6 +769,9 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(
       await dataSource.getRepository(OrderStatusHistory).count({ where: { orderId, newStatus: OrderStatus.REFUNDED } }),
     ).toBe(1);
+    // الانتقال لازم يطلع حدث مرة واحدة بالظبط (docs/08 §195): من غيره مستحقات الشركاء ومكافأة ترشيح
+    // الفني بتفضل محسوبة على طلب اترجعت فلوسه. استردادين متزامنين = انتقال واحد = حدث واحد.
+    expect(refundedStatusEvents.filter((id) => id === orderId)).toHaveLength(1);
 
     const refundTxs = await dataSource.query(
       `SELECT wt.reference_id, wt.direction, wt.amount_cents, w.owner_type

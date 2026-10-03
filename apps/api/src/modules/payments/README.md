@@ -1159,3 +1159,16 @@ deploy. والوسم مابيظهرش خالص لو الوسيلة نفسها م
   اللي كان المفروض يمسكها كان قايمة يدوية؛ بقى مسح شامل (`auth/mfa-step-up-enforcement.spec.ts`).
 
 الاختبار: `technician-debt-settlement.spec.ts` (سدادين بـ`Promise.all` + إعادة بنفس المفتاح).
+
+## الاسترداد بيطلق `REFUNDED` على الـevent bus (docs/08 §195، 2026-10-03)
+
+`refundOrder()` و`reconcileRefund()` كانوا بيحطّوا `order_status = refunded` ويكتبوا `OrderStatusHistory`
+**من غير** `ORDER_STATUS_CHANGED_EVENT` — عكس كل انتقال تاني في الملف ده. فتلات listeners مكتوبين
+خصيصًا للاسترداد كانوا ميتين: مستحق شريك الكود (`promo-marketing-order-status`)، مستحق مصدر التسويق
+القديم، ومكافأة ترشيح الفني (`revokeBonusForOrder`: قيد عكسي مزدوج + audit + إشعار للفني). النتيجة
+المقيسة حيًّا: طلب `refunded` ومستحق الشريك عليه لسه `accrued`.
+
+الحدث بيتطلق **بعد** الـcommit (`emitRefundedTransition`) ومرة واحدة لكل انتقال فعلي — استردادين
+متوازيين لدفعتين = انتقال واحد = حدث واحد (`cash-settlement-direction.spec.ts` بيفحص ده، واتأكد إنه
+بيفشل على الكود القديم). مفيش إشعار مكرر للعميل: `CUSTOMER_MESSAGES` مالهاش رسالة لـ`REFUNDED`،
+والإشعار الأصلي لسه بيروح من `enqueueRefundNotification`. الاسترداد الجزئي مابيغيّرش الحالة، فمابيطلقش حدث.

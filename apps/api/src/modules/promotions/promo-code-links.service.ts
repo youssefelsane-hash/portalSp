@@ -44,6 +44,9 @@ export interface PromoCodeLinkStats {
   grossRevenueCents: number;
   platformRevenueCents: number;
   accruedCommissionCents: number;
+  paidCommissionCents: number;
+  /** مستحق اتصرف للشريك وبعدين الطلب اترد كامل — فلوس خرجت فعلًا ومحتاجة متابعة يدوية. */
+  paidCommissionOnRefundedOrders: number;
 }
 
 /**
@@ -128,6 +131,8 @@ export class PromoCodeLinksService {
         gross_revenue_cents: string;
         platform_revenue_cents: string;
         accrued_commission_cents: string;
+        paid_commission_cents: string;
+        paid_on_refunded: string;
       }[]
     >(
       `WITH hit_stats AS (
@@ -140,33 +145,51 @@ export class PromoCodeLinksService {
            FROM promo_code_link_attributions
           WHERE promo_code_id = ANY($1::uuid[])
           GROUP BY promo_code_id
-       ), order_stats AS (
-         SELECT a.promo_code_id,
-                COUNT(*)::int AS orders,
-                COUNT(*) FILTER (WHERE o.order_status = 'completed')::int AS completed_orders,
-                COALESCE(SUM(o.total_amount_cents) FILTER (WHERE o.order_status = 'completed'), 0)::bigint AS gross_revenue_cents,
-                COALESCE(SUM(o.platform_commission_cents) FILTER (WHERE o.order_status = 'completed'), 0)::bigint AS platform_revenue_cents
+       ),
+       -- الطلب بيتعدّ على الكود لو العميل اكتسبه الكود (إسناد) **أو** الطلب نفسه اتعمل بالكود.
+       -- قبل كده الإسناد بس: عميل قديم مسح الملصق وطلب بالكود كان بيطلع «صفر طلبات» (docs/08 §195).
+       -- UNION بيشيل التكرار لو الحالتين اتحققوا على نفس الطلب.
+       order_links AS (
+         SELECT o.promo_code_id, o.id AS order_id
+           FROM orders o
+          WHERE o.deleted_at IS NULL AND o.promo_code_id = ANY($1::uuid[])
+         UNION
+         SELECT a.promo_code_id, o.id AS order_id
            FROM orders o
            JOIN customer_profiles cp ON cp.id = o.customer_id
            JOIN promo_code_link_attributions a ON a.user_id = cp.user_id
           WHERE o.deleted_at IS NULL AND a.promo_code_id = ANY($1::uuid[])
-          GROUP BY a.promo_code_id
-       ), accrued_stats AS (
-         SELECT promo_code_id, COALESCE(SUM(amount_cents), 0)::bigint AS accrued_commission_cents
-           FROM promo_code_marketing_commissions
-          WHERE status = 'accrued' AND promo_code_id = ANY($1::uuid[])
-          GROUP BY promo_code_id
+       ), order_stats AS (
+         SELECT l.promo_code_id,
+                COUNT(*)::int AS orders,
+                COUNT(*) FILTER (WHERE o.order_status = 'completed')::int AS completed_orders,
+                COALESCE(SUM(o.total_amount_cents) FILTER (WHERE o.order_status = 'completed'), 0)::bigint AS gross_revenue_cents,
+                COALESCE(SUM(o.platform_commission_cents) FILTER (WHERE o.order_status = 'completed'), 0)::bigint AS platform_revenue_cents
+           FROM order_links l
+           JOIN orders o ON o.id = l.order_id
+          GROUP BY l.promo_code_id
+       ), commission_stats AS (
+         SELECT c.promo_code_id,
+                COALESCE(SUM(c.amount_cents) FILTER (WHERE c.status = 'accrued'), 0)::bigint AS accrued_commission_cents,
+                COALESCE(SUM(c.amount_cents) FILTER (WHERE c.status = 'paid'), 0)::bigint AS paid_commission_cents,
+                COUNT(*) FILTER (WHERE c.status = 'paid' AND o.order_status = 'refunded')::int AS paid_on_refunded
+           FROM promo_code_marketing_commissions c
+           LEFT JOIN orders o ON o.id = c.order_id
+          WHERE c.promo_code_id = ANY($1::uuid[])
+          GROUP BY c.promo_code_id
        )
        SELECT p.id AS promo_code_id, COALESCE(h.hits, 0) AS hits, COALESCE(s.signups, 0) AS signups,
               COALESCE(o.orders, 0) AS orders, COALESCE(o.completed_orders, 0) AS completed_orders,
               COALESCE(o.gross_revenue_cents, 0) AS gross_revenue_cents,
               COALESCE(o.platform_revenue_cents, 0) AS platform_revenue_cents,
-              COALESCE(c.accrued_commission_cents, 0) AS accrued_commission_cents
+              COALESCE(c.accrued_commission_cents, 0) AS accrued_commission_cents,
+              COALESCE(c.paid_commission_cents, 0) AS paid_commission_cents,
+              COALESCE(c.paid_on_refunded, 0) AS paid_on_refunded
          FROM promo_codes p
          LEFT JOIN hit_stats h ON h.promo_code_id = p.id
          LEFT JOIN signup_stats s ON s.promo_code_id = p.id
          LEFT JOIN order_stats o ON o.promo_code_id = p.id
-         LEFT JOIN accrued_stats c ON c.promo_code_id = p.id
+         LEFT JOIN commission_stats c ON c.promo_code_id = p.id
         WHERE p.id = ANY($1::uuid[])`,
       [promoCodeIds],
     );
@@ -181,13 +204,45 @@ export class PromoCodeLinksService {
           grossRevenueCents: Number(row.gross_revenue_cents),
           platformRevenueCents: Number(row.platform_revenue_cents),
           accruedCommissionCents: Number(row.accrued_commission_cents),
+          paidCommissionCents: Number(row.paid_commission_cents),
+          paidCommissionOnRefundedOrders: Number(row.paid_on_refunded),
         },
       ]),
     );
   }
 
+  /**
+   * عميل **جديد** جه من الكود ومن غير رابط التسجيل: أول طلب مكتمل ليه اتعمل بالكود.
+   *
+   * الإسناد كان بيحصل وقت التسجيل بس (`promo_link_code`)، والتطبيق مابيبعتهوش أصلًا — والموبايل هو
+   * اللي بيمسح الـQR وبيتحوّل للمتجر. فأي عميل نزّل التطبيق من ملصق وكتب الكود وقت الحجز كان بيتعدّ
+   * «استخدام» بس: مش عميل جديد للكود، والشريك صفر (docs/08 §195). نفس تعريف «عميل اكتسبه الكود»
+   * اللي المستحق ماشي عليه: أول طلب مكتمل في عمر العميل جه عن طريق الكود.
+   *
+   * الإسناد الأول بيكسب (`user_id` فريد): عميل سجّل برابط كود تاني بيفضل للكود الأولاني.
+   */
+  private async attributeFirstCompletedOrder(orderId: string): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO promo_code_link_attributions (user_id, promo_code_id)
+       SELECT cp.user_id, o.promo_code_id
+         FROM orders o
+         JOIN customer_profiles cp ON cp.id = o.customer_id
+         JOIN promo_codes p ON p.id = o.promo_code_id AND p.deleted_at IS NULL
+        WHERE o.id = $1
+          AND o.order_status = 'completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM orders prev
+             WHERE prev.customer_id = o.customer_id AND prev.id <> o.id
+               AND prev.order_status = 'completed' AND prev.deleted_at IS NULL
+          )
+       ON CONFLICT (user_id) DO NOTHING`,
+      [orderId],
+    );
+  }
+
   /** أول طلب مكتمل فقط للعميل المنسوب، وبـUNIQUE(order_id) ضد تكرار أحداث الحالة. */
   async accrueCommissionForOrder(orderId: string): Promise<void> {
+    await this.attributeFirstCompletedOrder(orderId);
     const rows = await this.dataSource.query<{ promo_code_id: string; customer_user_id: string; amount_cents: number }[]>(
       `SELECT p.id AS promo_code_id, a.user_id AS customer_user_id, p.payout_per_completed_order_cents AS amount_cents
          FROM orders o
